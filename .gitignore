@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build and package output
+dist/
+build/
+coverage/
+
+# Local runtime artifacts
+.tmp/
+tmp/
+artifacts/
+*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local environment
+.env
+.env.*
+!.env.example

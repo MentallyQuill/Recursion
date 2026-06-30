@@ -1,0 +1,222 @@
+# Recursion Implementation Plan
+
+This plan turns the design docs into a staged pre-alpha implementation path. Recursion is still pre-alpha, so implementation can update contracts in place as long as docs, schemas, and tests move together.
+
+Primary specs:
+
+- [Product Scope](../design/RECURSION_PRODUCT_SCOPE.md)
+- [Card System Spec](../design/CARD_SYSTEM_SPEC.md)
+- [Runtime Architecture](../architecture/RUNTIME_ARCHITECTURE.md)
+- [Provider and Generation Spec](../architecture/PROVIDER_AND_GENERATION_SPEC.md)
+- [Prompt Composition Spec](../architecture/PROMPT_COMPOSITION_SPEC.md)
+- [Storage and Diagnostics](../architecture/STORAGE_AND_DIAGNOSTICS.md)
+- [UI Spec](../design/UI_SPEC.md)
+
+## Stage 1: Contracts And Skeleton Runtime
+
+Goal: establish the stable seams before model calls or UI complexity.
+
+Build:
+
+- Extension lifecycle entrypoint.
+- Host adapter interface for SillyTavern context, chat snapshot, prompt injection, settings, and file storage.
+- Runtime event bus or small coordinator.
+- Core type/schema files for cards, hands, auto control plan, prompt packets, provider settings, scene cache, and run journal.
+- Minimal diagnostics channel.
+
+Tests:
+
+- Schema normalization tests.
+- Host adapter fake tests.
+- Runtime starts/stops without touching prompt injection.
+- Disabled mode performs no work.
+
+Exit criteria:
+
+- Recursion can initialize in a fake host and SillyTavern without provider calls.
+- Settings can load/save compact control-plane state.
+
+## Stage 2: Storage And Settings
+
+Goal: make cache persistence boring, bounded, and inspectable.
+
+Build:
+
+- Logical storage key mapper.
+- SillyTavern file adapter.
+- Recursion storage repository.
+- `recursion-system-index.v1.json`.
+- Scene cache read/write.
+- Bounded run journal read/write.
+- Storage diagnostics and cleanup.
+- Provider settings store with session-only secret handling.
+
+Tests:
+
+- Logical key/path validation.
+- Read/create/update cache.
+- Bounded journal pruning.
+- Missing/corrupt payload diagnostics.
+- API key never persists to settings, cache, journals, or debug export.
+
+Exit criteria:
+
+- Scene cache and journal survive reload.
+- Diagnostics can list cache status without reading every payload.
+
+## Stage 3: Provider Lanes And Structured Calls
+
+Goal: support Utility and Reasoner lanes before building the card system on top.
+
+Build:
+
+- Provider lane config.
+- Current host model route.
+- Host connection profile route if available.
+- OpenAI-compatible endpoint route.
+- Test Provider action.
+- Sanitized model-call journal.
+- JSON response parser and validator.
+
+Tests:
+
+- Provider settings normalize.
+- Role resolves to expected lane.
+- Structured output validation rejects malformed results.
+- Failure returns a safe diagnostic without blocking host generation.
+
+Exit criteria:
+
+- Utility and Reasoner can be tested independently.
+- Model-call telemetry is useful and redacted.
+
+## Stage 4: Utility Arbiter And Card Deck
+
+Goal: implement the core model-mediated card lifecycle.
+
+Build:
+
+- Turn snapshot builder.
+- Card catalog.
+- Utility Arbiter prompt and schema.
+- Arbiter auto control plan.
+- Card lifecycle application: create, stow, discard, regenerate, refresh, select.
+- Scene deck and turn hand cache updates.
+- Emphasis and detail profiles.
+
+Tests:
+
+- Arbiter output validation.
+- Lifecycle transitions.
+- Scene deck update from structured result.
+- Invalid card family/state/action rejection.
+- Character Motivation diagnostic notes never enter injection-safe fields.
+
+Exit criteria:
+
+- Given a fake Arbiter result, Recursion updates a scene deck and selects a turn hand.
+- No deterministic semantic scoring is required for card relevance.
+
+## Stage 5: Batched Card Generation
+
+Goal: fill cards from a single scene/turn snapshot without serial Stepped-Thinking behavior.
+
+Build:
+
+- Utility batch request planner.
+- Card generation workers for V1 families.
+- Shared snapshot and source refs.
+- Per-card structured output validation.
+- Cache reuse and regeneration rules.
+- Bounded fallback when batch support is unavailable.
+
+Tests:
+
+- Batch planner groups requested card jobs.
+- Workers receive the same snapshot id.
+- Failed card jobs do not poison the whole hand.
+- Cache reuse avoids unnecessary generation.
+
+Exit criteria:
+
+- A full card pass can generate or refresh the requested scene deck families.
+
+## Stage 6: Prompt Composition And Injection
+
+Goal: turn selected cards into one compact, inspectable prompt packet.
+
+Build:
+
+- Utility Composer.
+- Optional Reasoner Composer.
+- Prompt packet schema.
+- Footprint profiles: compact, normal, rich.
+- Omission reasons.
+- Prompt injection adapter.
+- Prompt clear/replace behavior.
+
+Tests:
+
+- Packet composition from selected hand.
+- Reasoner composition cannot add unsupported lore fields.
+- Injection installs, replaces, and clears by Recursion-owned key.
+- Observe mode composes diagnostics without injecting.
+
+Exit criteria:
+
+- Recursion can compile and inject a prompt packet for the next generation.
+
+## Stage 7: Recursion Bar And Viewer
+
+Goal: make Recursion visible enough to trust without turning it into a workbench.
+
+Build:
+
+- Recursion Bar.
+- Actions menu.
+- Last Hand dropdown.
+- Full viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers.
+- High-level settings controls.
+- Provider controls.
+- Graphite dark styling.
+
+Tests:
+
+- Bar renders in ready, compiling, paused, disabled, provider issue states.
+- Last Hand shows used cards from the prior run.
+- Viewer handles empty/corrupt diagnostics gracefully.
+- Mobile/narrow layout does not overlap chat controls.
+
+Exit criteria:
+
+- Users can see what Recursion did and adjust high-level behavior.
+
+## Stage 8: SillyTavern Integration Smoke
+
+Goal: prove the actual extension works in the host.
+
+Build:
+
+- Installed extension manifest/assets if not already present.
+- Host event wiring around player send/generation timing.
+- Prompt injection timing guard.
+- Stop/disable cleanup where applicable.
+
+Tests:
+
+- Live SillyTavern smoke: initialize, configure Utility, observe mode, auto mode, prompt packet install, prompt packet clear.
+- Chat change invalidates active scene cache.
+- Provider failure falls back without blocking generation.
+
+Exit criteria:
+
+- Recursion works in a real SillyTavern chat with visible UI state and prompt packet diagnostics.
+
+## Cross-Stage Rules
+
+- Keep docs and schemas updated with implementation changes.
+- Prefer fake-host deterministic tests before live smoke.
+- Do not persist provider secrets.
+- Do not store durable lore or long-term memory.
+- Do not expose low-level card editing unless the product scope changes.
+- Keep user-visible errors short and actionable.

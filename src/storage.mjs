@@ -86,6 +86,8 @@ function optionalStringValue(value) {
 
 function normalizeSceneCard(card) {
   if (!card || typeof card !== 'object' || Array.isArray(card)) return null;
+  const source = card.source && typeof card.source === 'object' && !Array.isArray(card.source) ? card.source : {};
+  const freshness = card.freshness && typeof card.freshness === 'object' && !Array.isArray(card.freshness) ? card.freshness : {};
   return {
     id: safeId(card.id || makeId('card')),
     family: String(card.family || 'unknown'),
@@ -97,7 +99,7 @@ function normalizeSceneCard(card) {
     emphasis: ['normal', 'emphasized', 'muted'].includes(card.emphasis) ? card.emphasis : 'normal',
     detailProfile: ['compact', 'standard', 'expanded'].includes(card.detailProfile) ? card.detailProfile : 'standard',
     generatedAt: timestampValue(card.generatedAt),
-    sourceFingerprint: String(card.sourceFingerprint || ''),
+    sourceFingerprint: String(card.sourceFingerprint || source.snapshotHash || source.fingerprint || freshness.sourceFingerprint || ''),
     arbiterDecisionHash: card.arbiterDecisionHash ? String(card.arbiterDecisionHash) : undefined,
     inspectorNotes: card.inspectorNotes ? String(card.inspectorNotes).slice(0, 800) : undefined
   };

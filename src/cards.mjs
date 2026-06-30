@@ -151,18 +151,18 @@ function sourceContext(input, context) {
   const source = asObject(input.source);
   const freshness = asObject(input.freshness);
   const snapshotHash = String(
-    input.snapshotHash
-      ?? context.snapshotHash
+    context.snapshotHash
+      ?? input.snapshotHash
       ?? source.snapshotHash
       ?? source.fingerprint
       ?? freshness.sourceFingerprint
       ?? ''
   );
   return {
-    sceneId: String(input.sceneId ?? context.sceneId ?? 'scene').trim() || 'scene',
-    chatId: String(source.chatId ?? input.chatId ?? context.chatId ?? '').trim(),
-    firstMesId: numberInRange(source.firstMesId ?? input.firstMesId ?? context.firstMesId, 0, 0, Number.MAX_SAFE_INTEGER),
-    lastMesId: numberInRange(source.lastMesId ?? input.lastMesId ?? context.lastMesId, 0, 0, Number.MAX_SAFE_INTEGER),
+    sceneId: String(context.sceneId ?? input.sceneId ?? 'scene').trim() || 'scene',
+    chatId: String(context.chatId ?? source.chatId ?? input.chatId ?? '').trim(),
+    firstMesId: numberInRange(context.firstMesId ?? source.firstMesId ?? input.firstMesId, 0, 0, Number.MAX_SAFE_INTEGER),
+    lastMesId: numberInRange(context.lastMesId ?? source.lastMesId ?? input.lastMesId, 0, 0, Number.MAX_SAFE_INTEGER),
     snapshotHash
   };
 }
@@ -209,7 +209,7 @@ function sortCardsForHand(a, b) {
 function normalizeDeckCard(card, { preserveId = false } = {}) {
   const normalized = normalizeCard(card, {
     sceneId: card?.sceneId,
-    snapshotHash: card?.source?.snapshotHash || card?.source?.fingerprint || card?.freshness?.sourceFingerprint
+    snapshotHash: card?.source?.snapshotHash || card?.source?.fingerprint || card?.freshness?.sourceFingerprint || card?.sourceFingerprint
   });
   if (preserveId && typeof card?.id === 'string' && card.id) normalized.id = card.id;
   return normalized;
@@ -251,7 +251,7 @@ export function normalizeCard(input = {}, context = {}) {
     emphasis: validEnum(source.emphasis, EMPHASIS, 'normal'),
     freshness: {
       generatedAt: String(freshness.generatedAt ?? source.generatedAt ?? nowIso()),
-      sourceFingerprint: String(freshness.sourceFingerprint ?? normalizedSource.snapshotHash),
+      sourceFingerprint: String(normalizedSource.snapshotHash || freshness.sourceFingerprint || ''),
       expiresAfterMesId
     },
     arbiter: {

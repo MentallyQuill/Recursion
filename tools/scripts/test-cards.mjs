@@ -135,6 +135,21 @@ const exactIdTransition = applyCardPlan([preservedIdCard], {
 assertEqual(exactIdTransition.cards[0].id, 'risk card', 'exact id remains preserved after lifecycle');
 assertEqual(exactIdTransition.cards[0].status, 'discarded', 'exact stored id lifecycle match applies');
 
+const compactCachedTransition = applyCardPlan([{
+  id: 'compact-cache-card',
+  family: 'Scene Frame',
+  status: 'active',
+  summary: 'Compact cached summary.',
+  promptText: 'Compact cached card should retain provenance.',
+  evidenceRefs: ['message:2'],
+  tokenEstimate: 20,
+  sourceFingerprint: 'cache-fp'
+}], {
+  lifecycle: [{ action: 'select', cardId: 'compact-cache-card', reason: 'still relevant' }]
+});
+assertEqual(compactCachedTransition.cards[0].source.snapshotHash, 'cache-fp', 'compact cached card source fingerprint survives deck normalization');
+assertEqual(compactCachedTransition.cards[0].freshness.sourceFingerprint, 'cache-fp', 'compact cached card freshness fingerprint survives deck normalization');
+
 const requests = buildCardRequests({ cardJobs: [{ role: 'sceneFrameCard' }, { role: 'continuityRiskCard' }] }, {
   runId: 'run',
   snapshotHash: 'hash'

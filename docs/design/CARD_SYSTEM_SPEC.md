@@ -18,7 +18,7 @@ Related design docs:
 
 ## Card Families
 
-V1 should use a small fixed catalog. The Arbiter receives this predetermined catalog as a menu and decides what is already represented, what is missing, and what should be generated for the current scene.
+V1 should use the full fixed catalog below. The Arbiter receives this predetermined catalog as a menu and decides what is already represented, what is missing, and what should be generated for the current scene. Implementation tests may use smaller fixtures, but the shipped V1 product should expose the full catalog to the Arbiter.
 
 | Family | Purpose | Prompt Use |
 | --- | --- | --- |

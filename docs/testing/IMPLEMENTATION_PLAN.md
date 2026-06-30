@@ -11,6 +11,10 @@ Primary specs:
 - [Prompt Composition Spec](../architecture/PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](../architecture/STORAGE_AND_DIAGNOSTICS.md)
 - [UI Spec](../design/UI_SPEC.md)
+- [Testing Strategy](TESTING_STRATEGY.md)
+- [SillyTavern Playwright Harness](SILLYTAVERN_PLAYWRIGHT_HARNESS.md)
+- [Live Smoke Test Plan](LIVE_SMOKE_TEST_PLAN.md)
+- [Artifact Contract](ARTIFACT_CONTRACT.md)
 
 ## Stage 1: Contracts And Skeleton Runtime
 
@@ -23,6 +27,7 @@ Build:
 - Runtime event bus or small coordinator.
 - Core type/schema files for cards, hands, auto control plan, prompt packets, provider settings, scene cache, and run journal.
 - Minimal diagnostics channel.
+- Activity event contract for the Recursion Bar, Activity Ribbon, and Full Viewer.
 
 Tests:
 
@@ -30,6 +35,7 @@ Tests:
 - Host adapter fake tests.
 - Runtime starts/stops without touching prompt injection.
 - Disabled mode performs no work.
+- Activity events normalize without raw prompts, raw responses, or transcript text.
 
 Exit criteria:
 
@@ -74,6 +80,7 @@ Build:
 - Current host model route.
 - Host connection profile route if available.
 - OpenAI-compatible endpoint route.
+- Utility Composer and Reasoner Composer role contracts.
 - Test Provider action.
 - Sanitized model-call journal.
 - JSON response parser and validator.
@@ -88,6 +95,8 @@ Tests:
 Exit criteria:
 
 - Utility and Reasoner can be tested independently.
+- Utility is the default composer path.
+- Reasoner can compose a packet and fall back to Utility on failure.
 - Model-call telemetry is useful and redacted.
 
 ## Stage 4: Utility Arbiter And Card Deck
@@ -159,6 +168,7 @@ Tests:
 
 - Packet composition from selected hand.
 - Reasoner composition cannot add unsupported lore fields.
+- Reasoner timeout, provider failure, or invalid schema falls back to Utility composition.
 - Injection installs, replaces, and clears by Recursion-owned key.
 - Observe mode composes diagnostics without injecting.
 
@@ -166,30 +176,34 @@ Exit criteria:
 
 - Recursion can compile and inject a prompt packet for the next generation.
 
-## Stage 7: Recursion Bar And Viewer
+## Stage 7: Recursion Bar, Activity Ribbon, And Viewer
 
 Goal: make Recursion visible enough to trust without turning it into a workbench.
 
 Build:
 
 - Recursion Bar.
+- Activity Ribbon with foreground, background, review, success, fallback, and error states.
 - Actions menu.
 - Last Hand dropdown.
 - Full viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers.
 - High-level settings controls.
 - Provider controls.
-- Graphite dark styling.
+- SillyTavern-native graphite styling.
 
 Tests:
 
 - Bar renders in ready, compiling, paused, disabled, provider issue states.
+- Activity Ribbon renders Arbiter, card batch, composition, prompt install, storage, fallback, and provider issue stages.
+- Quick operations do not flicker the ribbon.
+- Warning/error states persist until dismissed or superseded.
 - Last Hand shows used cards from the prior run.
 - Viewer handles empty/corrupt diagnostics gracefully.
 - Mobile/narrow layout does not overlap chat controls.
 
 Exit criteria:
 
-- Users can see what Recursion did and adjust high-level behavior.
+- Users can see what Recursion is doing, what it did, and adjust high-level behavior.
 
 ## Stage 8: SillyTavern Integration Smoke
 
@@ -201,16 +215,25 @@ Build:
 - Host event wiring around player send/generation timing.
 - Prompt injection timing guard.
 - Stop/disable cleanup where applicable.
+- Playwright live harness helpers for browser launch, auth, served-extension checks, storage probes, screenshots, traces, runtime snapshots, and redaction.
+- Offline Playwright readiness script.
+- Dedicated soak-user isolation script.
+- Focused live SillyTavern smoke script.
 
 Tests:
 
+- Offline Playwright readiness: browser launch, role-locator click, desktop/phone screenshots, trace, and report writing without contacting SillyTavern.
+- Dedicated user preflight rejects `default-user` and proves `recursion-soak-*` storage isolation.
 - Live SillyTavern smoke: initialize, configure Utility, observe mode, auto mode, prompt packet install, prompt packet clear.
 - Chat change invalidates active scene cache.
 - Provider failure falls back without blocking generation.
+- Activity Ribbon visibly reports model work, cache use, storage progress, prompt readiness, and fallbacks.
+- Live artifacts include sanitized `report.json`, `summary.md`, `live-log.jsonl`, screenshots, prompt packet metadata, storage probe results, and redaction checks.
 
 Exit criteria:
 
 - Recursion works in a real SillyTavern chat with visible UI state and prompt packet diagnostics.
+- Automated live evidence comes from dedicated `recursion-soak-*` users, never `default-user`.
 
 ## Cross-Stage Rules
 

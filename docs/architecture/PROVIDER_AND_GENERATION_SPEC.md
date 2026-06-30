@@ -69,9 +69,20 @@ Source options:
 - `host-connection-profile`: use a named SillyTavern connection profile.
 - `openai-compatible`: use a direct OpenAI-compatible endpoint with base URL, model, session API key, temperature, top-p, and max token controls.
 
+V1 should implement all three source options for Utility and Reasoner when the host exposes the required APIs. If a host cannot support connection profiles, the setting should be unavailable with a clear UI status rather than silently mapped to the current model.
+
 Utility must always have an enabled settings object. If Utility is misconfigured or unhealthy, Recursion degrades to cached/local behavior and does not block the user's normal SillyTavern generation.
 
 Reasoner may be disabled. Disabled Reasoner means all auto decisions must resolve to Utility-only composition, even when the Arbiter reports conflict or crowding.
+
+The first working loop must include:
+
+- Utility provider settings and test action;
+- Reasoner provider settings and test action;
+- Utility Arbiter structured call;
+- Utility Composer prompt-packet path;
+- Reasoner Composer prompt-packet path;
+- Utility Composer as the default and fallback composition path.
 
 ## Session Secret Boundary
 
@@ -252,6 +263,21 @@ Auto must be Utility-first. Enabling Reasoner only makes Reasoner eligible; it m
 
 Advanced job routing may expose `Default`, `Utility Provider`, and `Reasoner Provider` for internal roles, but v1 should keep that surface secondary to the main Utility and Reasoner provider cards.
 
+## First Working Loop Contract
+
+The first end-to-end loop should prove both composer paths even if the default setting is Utility-only:
+
+1. Capture a stable snapshot.
+2. Run Utility Arbiter or use a fake Arbiter fixture in tests.
+3. Generate or reuse a small accepted hand.
+4. Compose a prompt packet through Utility Composer by default.
+5. Compose through Reasoner Composer when the setting and Arbiter decision permit it.
+6. Fall back to the Utility-composed packet if Reasoner fails, times out, returns invalid schema, or is disabled during the run.
+7. Install, skip, or clear the Recursion prompt packet through the host adapter.
+8. Emit visible Activity Ribbon stages and sanitized model-call journal entries for the route taken.
+
+Reasoner must not become mandatory for normal operation. The Utility path must remain good enough to ship as the default path.
+
 ## Structured Output and Validation
 
 All provider-owned Recursion jobs must request structured JSON and validate before use.
@@ -313,6 +339,7 @@ Provider failures must degrade Recursion, not the chat.
 
 Utility failure:
 
+- retry the same Utility call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot;
 - do not block normal SillyTavern generation;
 - reuse a still-valid installed prompt packet only if its snapshot/settings hashes match;
 - otherwise clear or skip Recursion injection for the turn;
@@ -326,8 +353,9 @@ Card failure:
 
 Reasoner failure:
 
+- retry the same Reasoner call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot and the user has not disabled Reasoner;
 - fall back to Utility-only composition;
-- do not retry with Utility as a second hidden composer unless the Utility composer was already part of the normal plan;
+- do not run an additional hidden Utility model call solely to recover the Reasoner result; use the Utility composer output that is already part of the normal route, or compose locally from accepted cards if available;
 - record a compact reason such as auth failure, timeout, validation failure, or provider error.
 
 OpenAI-compatible authentication failure:
@@ -342,6 +370,21 @@ Timeouts and aborts:
 - provider calls must receive an abort signal from the runtime;
 - user disable, chat change, settings change, and host generation stop should abort in-flight Recursion calls when their output would be stale;
 - aborted calls should not install prompt packets.
+
+## Retry and Fallback Policy
+
+Recursion should borrow Directive's robustness discipline in smaller form:
+
+- every provider call has a role, lane, timeout, run id, snapshot hash, and abort signal;
+- every result is normalized into success, validation failure, provider failure, timeout, abort, or stale result;
+- transient transport failures may get one same-lane retry when the snapshot is still current;
+- schema failures do not get blind retries unless the failure is clearly recoverable, such as fenced JSON or likely truncation;
+- card failures omit only the failed card and keep valid siblings;
+- Utility Arbiter failure reuses valid cache or skips injection;
+- Reasoner failure falls back to Utility composition;
+- all fallbacks emit Activity Ribbon status and sanitized journal events.
+
+The retry policy should be conservative. Reattempts are for resilience, not for chasing better creative output.
 
 ## V1 Cuts
 

@@ -9,7 +9,7 @@ Start with [Recursion Extension Spec](RECURSION_EXTENSION_SPEC.md).
 - `design/` - Product, card system, and UI design documents.
 - `architecture/` - Implementation-facing module and data-flow notes.
 - `user/` - User-facing setup and operation guides.
-- `testing/` - Verification plans and test runbooks.
+- `testing/` - Verification strategy, Playwright harness contract, live SillyTavern smoke plans, and artifact rules.
 
 ## Current Spec Set
 
@@ -21,4 +21,8 @@ Start with [Recursion Extension Spec](RECURSION_EXTENSION_SPEC.md).
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md)
+- [Testing Strategy](testing/TESTING_STRATEGY.md)
+- [SillyTavern Playwright Harness](testing/SILLYTAVERN_PLAYWRIGHT_HARNESS.md)
+- [Live Smoke Test Plan](testing/LIVE_SMOKE_TEST_PLAN.md)
+- [Artifact Contract](testing/ARTIFACT_CONTRACT.md)
 - [Implementation Plan](testing/IMPLEMENTATION_PLAN.md)

@@ -9,6 +9,7 @@ Related specs:
 - [Runtime Architecture](RUNTIME_ARCHITECTURE.md)
 - [Provider and Generation Spec](PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md)
+- [UI Spec](../design/UI_SPEC.md)
 - [Implementation Plan](../testing/IMPLEMENTATION_PLAN.md)
 
 ## Storage Philosophy
@@ -179,6 +180,8 @@ type RecursionRunJournalEntry = {
   event:
     | "runtime.started"
     | "runtime.stopped"
+    | "activity.stage_changed"
+    | "activity.settled"
     | "cache.hit"
     | "cache.miss"
     | "cache.invalidated"
@@ -225,6 +228,37 @@ Journal entries must not record:
 
 Default `maxEntries` should be small enough that the journal stays cheap to load. V1 should start around 100 events per chat unless tests show that a smaller cap is enough for the UI and debugging workflow.
 
+## Activity Event Contract
+
+Activity events are the sanitized source for the Recursion Bar, Activity Ribbon, and Full Viewer activity surface. They are not raw logs. They translate runtime/provider/storage events into compact user-facing stages.
+
+Recommended activity details:
+
+- `runId`;
+- `phase`;
+- `mode`: foreground, background, or review;
+- `severity`;
+- visible `label`;
+- compact `detail`;
+- status `chips`;
+- provider lane and composer lane;
+- card counts;
+- fallback path when one was used.
+
+Activity events may be written to the bounded run journal when useful for recent-run inspection. They should be compact enough to render without reading raw provider payloads or large cache records.
+
+Activity events must not include:
+
+- raw provider prompts;
+- raw provider responses;
+- full prompt packets;
+- full transcript text;
+- API keys, headers, cookies, or session secrets;
+- physical file paths when a logical storage key is enough;
+- hidden reasoning or private story plans.
+
+The Activity Ribbon should prefer the latest active run state over a chronological dump. The Full Viewer may show a bounded timeline derived from the same activity events.
+
 ## Diagnostics and Redaction
 
 Diagnostics should prove what Recursion did without leaking sensitive material. The default diagnostic mode is sanitized metadata only.
@@ -254,6 +288,8 @@ Forbidden by default:
 Redaction must be centralized in the storage/diagnostics layer. It should recursively remove or replace fields with sensitive key names such as `apiKey`, `authorization`, `cookie`, `token`, `password`, `secret`, and `sessionKey`. It should cap all strings in diagnostic exports, even when the field is otherwise allowed.
 
 Bounded excerpts are opt-in and should be treated as more sensitive than hashes. If enabled, they must be short, source-labeled, and never used as a substitute for transcript storage. Debug exports should clearly mark whether excerpts are included.
+
+Raw provider prompts and raw provider responses are disabled by default for normal diagnostics and debug exports. Any future raw-capture mode would require an explicit separate product decision, clear UI warning, redaction gates, short retention, and must never capture API keys or hidden reasoning.
 
 ## Invalidation Rules
 

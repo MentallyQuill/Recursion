@@ -42,6 +42,7 @@ flowchart TD
     Hand --> Packet
     Packet --> Inject["Host Prompt Injection"]
     Inject --> Diag["Diagnostics"]
+    Diag --> Activity["Activity Reporter\nbar ribbon viewer"]
     Arbiter --> Diag
     Jobs --> Diag
     Cache --> Store["Storage"]
@@ -61,6 +62,7 @@ Primary components:
 - Reasoner: optional deeper synthesis lane that is never required for generation to continue.
 - Prompt Injector: installs, updates, and clears host prompt entries through the adapter.
 - Diagnostics Recorder: records structured, sanitized runtime events for the status and inspector surfaces.
+- Activity Reporter: aggregates runtime, provider, storage, and prompt events into concise user-visible phases for the Recursion Bar, Activity Ribbon, and Full Viewer.
 
 ## Turn Pipeline
 
@@ -73,7 +75,8 @@ The core pipeline is:
 5. Optionally run Composer or Reasoner.
 6. Build prompt packet.
 7. Install through SillyTavern injection.
-8. Record diagnostics.
+8. Emit user-visible activity updates for status, fallbacks, and prompt readiness.
+9. Record diagnostics.
 
 Mode controls change how much of the pipeline runs:
 
@@ -152,6 +155,55 @@ Expected failure behavior:
 
 No failure path should write partial prompt packets that mix old and new scene identities. Prompt packet installation should be atomic from Recursion's perspective: either the adapter confirms the current packet metadata, or runtime treats the install as failed.
 
+## Activity Reporting
+
+Recursion must make invisible work visible without turning the UI into a log console. The Runtime Coordinator should expose one Activity Reporter interface that receives normalized events from the Arbiter, card jobs, provider router, cache repository, composer, prompt injector, and storage layer.
+
+Recommended event shape:
+
+```ts
+type RecursionActivityEvent = {
+  runId: string;
+  phase: string;
+  mode: "foreground" | "background" | "review";
+  severity: "info" | "success" | "warning" | "error";
+  label: string;
+  detail?: string;
+  chips?: string[];
+  providerLane?: "utility" | "reasoner";
+  composerLane?: "utility" | "reasoner" | "local";
+  cardCounts?: {
+    requested?: number;
+    accepted?: number;
+    omitted?: number;
+    selected?: number;
+  };
+  fallbackReason?: string;
+};
+```
+
+The Activity Reporter is not a persistence boundary by itself. It is a user-facing aggregation boundary:
+
+- many internal events become one visible stage;
+- foreground, background, and review activity render differently;
+- stale run ids cannot update the current ribbon after a newer run starts;
+- slow work reveals after a short delay, while quick no-op work may only update the bar chip;
+- success settles briefly, while warning and error states persist until dismissed or superseded;
+- activity text is friendly and bounded, while detailed sanitized records belong in the run journal.
+
+Core activity phases should cover:
+
+- snapshot capture and scene-shift review;
+- Utility Arbiter planning;
+- cache reuse, scene refresh, and card batch execution;
+- hand selection;
+- Utility and Reasoner composition;
+- prompt packet build, install, skip, and clear;
+- storage save, repair, and prune stages;
+- retry, fallback, stale-result discard, and provider issue states.
+
+Activity text must not expose raw provider prompts, raw provider responses, full transcript text, hidden reasoning, private story plans, physical file paths, or unbounded error text.
+
 ## Runtime State
 
 Runtime state should be minimal, bounded, and inspectable.
@@ -215,6 +267,8 @@ Core event types:
 - `prompt.packet_built`: packet id, footprint, lanes, and token estimate.
 - `prompt.install_succeeded`: packet id, host insertion metadata, and snapshot id.
 - `prompt.install_failed`: packet id and sanitized adapter error.
+- `activity.stage_changed`: phase, mode, severity, visible label, and compact chips.
+- `activity.settled`: outcome, visible summary, and fallback path when present.
 - `provider.failed`: lane, job type, sanitized error class, and fallback path.
 - `runtime.stale_result_discarded`: job id and superseded snapshot id.
 - `storage.write_failed`: logical key and sanitized error class.
@@ -226,7 +280,7 @@ Diagnostics should support the UI's Status and Inspector surfaces, automated tes
 V1 should be built in small vertical slices that preserve the end-to-end loop.
 
 1. Host adapter skeleton and modes
-   - Implement SillyTavern lifecycle hooks, Off/Observe/Auto mode state, snapshot capture, and no-op prompt clear/install methods.
+   - Implement SillyTavern lifecycle hooks, Off/Observe/Auto mode state, snapshot capture, activity event contract, and no-op prompt clear/install methods.
 
 2. Snapshot and diagnostics foundation
    - Add stable snapshot ids, message fingerprints, bounded diagnostics events, and inspector-ready last-run summaries.
@@ -241,7 +295,7 @@ V1 should be built in small vertical slices that preserve the end-to-end loop.
    - Select compact hand candidates by focus profile, scene relevance, token caps, and omission rules.
 
 6. Prompt composition and injection
-   - Build prompt packets from the turn hand, enforce footprint budgets, install through the SillyTavern adapter, and clear stale packet metadata.
+   - Build prompt packets from the turn hand, enforce footprint budgets, install through the SillyTavern adapter, clear stale packet metadata, and report prompt-ready/install/fallback activity.
 
 7. Optional Composer/Reasoner lane
    - Add Reasoner trigger handling, timeout/failure fallback, and deterministic composer fallback.
@@ -250,6 +304,6 @@ V1 should be built in small vertical slices that preserve the end-to-end loop.
    - Persist settings, cache metadata, last packet metadata, and bounded diagnostics using logical keys and privacy-safe records.
 
 9. UI integration and smoke validation
-   - Connect status, refresh, provider health, mode controls, and inspector diagnostics. Validate Off, Observe, Auto, provider failure, scene refresh, and stale-result behavior.
+   - Connect the Recursion Bar, Activity Ribbon, status, refresh, provider health, mode controls, and inspector diagnostics. Validate Off, Observe, Auto, provider failure, scene refresh, storage activity, prompt install, and stale-result behavior.
 
 Each slice should keep generation usable if it fails. The first complete proof is not perfect card intelligence; it is a reliable loop from observe -> Arbiter -> card jobs/cache -> hand -> prompt packet -> host injection -> diagnostics.

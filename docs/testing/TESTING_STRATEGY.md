@@ -1,0 +1,154 @@
+# Testing Strategy
+
+Recursion testing should prove the extension is useful and safe without turning every verification path into a live SillyTavern run. The test framework has three layers:
+
+| Layer | What it proves | Primary evidence |
+| --- | --- | --- |
+| Fast contract suite | Runtime contracts, schemas, card lifecycle, provider routing, storage, redaction, and prompt packet rules work without a live host. | `node tools\scripts\run-alpha-gate.mjs` target command and focused `tools/scripts/test-*.mjs` scripts. |
+| Playwright readiness | The local machine can launch and control Chromium, use resilient locators, switch desktop and phone viewports, and write trace/screenshot artifacts. | `check-playwright-readiness` report, trace, and viewport screenshots. |
+| Focused live SillyTavern smoke | The installed or served Recursion extension mounts in a real SillyTavern chat, observes turns, reports invisible work, injects and clears prompt packets, persists sanitized cache data, and fails softly. | `smoke-sillytavern-live` report, Activity Ribbon evidence, screenshots, prompt packet hashes, run journal events, and storage probes. |
+
+The fast contract suite is the normal confidence gate. Playwright and live SillyTavern tests are reserved for host behavior, UI behavior, prompt injection timing, and storage behavior that cannot be proven through a fake host.
+
+## Core Invariants
+
+Highest-priority invariants:
+
+- Off mode performs no chat inspection, provider calls, card updates, or prompt injection.
+- Observe mode may capture diagnostics and preview decisions but must not install prompt packets.
+- Auto mode may install prompt packets only through Recursion-owned SillyTavern prompt keys.
+- Prompt packet installation is replace-or-clear by Recursion metadata, not blind append.
+- Stale provider results cannot update the active scene cache or active prompt packet.
+- Utility is the default provider lane for Arbiter and composition work.
+- Reasoner composition is optional and must fall back to Utility or local composition on timeout, failure, disabled state, or invalid schema.
+- Direct endpoint API keys are session-only and never written to settings, cache, journals, reports, screenshots, debug exports, or prompt packets.
+- Raw provider prompts and raw provider responses are not persisted by default.
+- Character Motivation cards may produce behavior-facing motivation guidance but must not inject private internal-thought dumps.
+- Activity Ribbon stages visibly report foreground model calls, cache reuse, card refresh, prompt install, storage progress, fallback paths, warnings, and errors.
+- Provider failure, storage failure, or injection failure must not block normal SillyTavern generation.
+- Recursion tests must not mutate World Info, Memory Books, Summaryception, VectFox, unrelated SillyTavern data, or non-Recursion extension records.
+- Automated live tests must reject `default-user`. Use dedicated test users such as `recursion-soak-a`, `recursion-soak-b`, and `recursion-soak-c`.
+
+## Fast Contract Suite
+
+The contract suite should be dependency-light and runnable before any live host work. The maintained target command is:
+
+```powershell
+node tools\scripts\run-alpha-gate.mjs
+```
+
+The gate should call focused tests rather than duplicate their logic in documentation. Coverage groups:
+
+- manifest and extension shell identity;
+- host adapter fake contracts;
+- settings normalization and session-only secret handling;
+- logical storage key safety;
+- scene cache schema validation;
+- run journal redaction and ring-buffer pruning;
+- provider lane routing and structured response parsing;
+- Utility Arbiter Auto Control Plan validation;
+- card catalog, lifecycle, emphasis, detail, and hand-selection contracts;
+- Utility and Reasoner prompt packet composition;
+- prompt budget trimming and omission reasons;
+- prompt injection metadata, replacement, and clearing through a fake host;
+- activity event normalization and user-safe status text.
+
+Focused contract tests should use deterministic fixtures and fake provider responses before live providers. If a live smoke finds a defect, add a focused contract regression where the behavior can be isolated without browser control.
+
+## Playwright Readiness
+
+The Playwright readiness probe does not contact SillyTavern. It proves that browser automation is available before any live chat, user file, prompt, or provider state is touched.
+
+The readiness probe should:
+
+- launch Chromium through Playwright;
+- drive a role or label locator click;
+- capture console errors and page errors;
+- switch between desktop and phone viewports;
+- write screenshots and a trace when artifact capture is enabled;
+- emit a concise JSON report and Markdown summary.
+
+Readiness failures are environment failures, not Recursion runtime failures.
+
+## Live SillyTavern Smoke
+
+The live smoke proves Recursion in the real host. It should be focused and repeatable, not a Directive-style campaign certification run.
+
+Live smoke must start with these gates:
+
+- `SILLYTAVERN_BASE_URL` is configured and reachable.
+- The configured SillyTavern user is a dedicated `recursion-soak-*` user.
+- `default-user` is rejected before any mutation.
+- Served extension manifest and selected source assets match the checkout under test, or the report clearly marks the run as stale/untrusted.
+- The dedicated user can write, read, verify, and delete a Recursion-owned storage probe.
+- Multi-user runs prove each configured soak user can see its own probe and cannot see another user's probe.
+- Playwright readiness has passed in the current environment.
+
+Primary live scenarios:
+
+- extension mount and Recursion Bar render;
+- mode transitions: Off, Observe, Auto;
+- provider setup display and Test Provider action for Utility and Reasoner;
+- Observe mode diagnostics without prompt injection;
+- Auto mode Utility Arbiter pass, card refresh, hand selection, prompt packet composition, and prompt installation;
+- Last Hand dropdown reflects the cards used for the last prompt packet;
+- Activity Ribbon shows model-call, cache, storage, composition, injection, fallback, and settled states;
+- full viewer opens Now, Deck, Activity, Prompt Packet, Settings, and Providers views;
+- prompt packet clear on Off mode, chat change, disable, and teardown;
+- Utility provider failure falls back without blocking host generation;
+- Reasoner failure falls back to Utility or local composition without blocking host generation;
+- storage repair and journal pruning report logical progress without leaking physical paths.
+
+Live smoke is allowed to use real model calls when explicitly enabled by environment flags. No-generation live smoke may prove mount, UI, settings, storage, and prompt-clear behavior, but it cannot claim provider or prompt-quality proof.
+
+## Dedicated Live Users
+
+Automated live tests use dedicated SillyTavern users:
+
+```text
+recursion-soak-a
+recursion-soak-b
+recursion-soak-c
+```
+
+Additional users may follow the same prefix. Scripts should normalize user handles and reject empty handles, `default-user`, and ambiguous aliases for the default profile.
+
+`default-user` is manual-only. It may be used by a human operator for exploratory checks, but it must not produce automated pass/fail evidence and must not be accepted by state-mutating scripts.
+
+## Artifact Policy
+
+Every live run writes a timestamped report folder under:
+
+```text
+artifacts/live-smoke/sillytavern/<run-id>/
+```
+
+Required artifact families are defined in [Artifact Contract](ARTIFACT_CONTRACT.md). Normal reports should store hashes, ids, counts, bounded status text, screenshots, and traces. They should not store raw provider prompts, raw provider responses, full transcript archives, API keys, cookies, authorization headers, private notes, or hidden reasoning.
+
+## Pass And Fail Semantics
+
+Use these result categories:
+
+- `pass`: required checks completed and no blocking warnings remain.
+- `fail`: Recursion behavior violates a contract.
+- `environment-fail`: browser, SillyTavern, auth, provider, filesystem, or network conditions prevented a valid run.
+- `stale-extension`: SillyTavern served code does not match the checkout under test.
+- `manual-required`: the script cannot safely proceed without a human action.
+- `skipped`: a check was intentionally not run because its opt-in flag was absent.
+
+Warnings may be acceptable for exploratory local smoke. Strict mode should promote warnings to failures.
+
+## Non-Goals
+
+V1 testing should not build:
+
+- a 50-turn campaign soak;
+- story-quality certification;
+- campaign-specific factual-grounding review;
+- cross-extension certification for Memory Books, Summaryception, VectFox, or World Info;
+- long-form transcript replay;
+- save branching proof;
+- destructive edit/delete recovery proof beyond Recursion-owned prompt/cache cleanup;
+- model-cost benchmarking beyond basic duration and token diagnostics.
+
+Those are useful for Directive because Directive owns campaign state. Recursion owns a current-scene prompt compiler. Its live proof should stay aligned to that boundary.

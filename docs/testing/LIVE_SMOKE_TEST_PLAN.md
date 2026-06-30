@@ -10,7 +10,7 @@ Before a live smoke can mutate host state:
 
 - SillyTavern is reachable at `SILLYTAVERN_BASE_URL`.
 - The configured user is a dedicated `recursion-soak-*` user.
-- `default-user` has been rejected.
+- `default-user`, default-profile aliases, empty handles, and non-dedicated handles have been rejected with `unsafe-user`.
 - Playwright readiness has passed.
 - Served Recursion manifest and selected source files match the checkout under test, or the report is marked `stale-extension`.
 - The dedicated user passed a Recursion storage probe.

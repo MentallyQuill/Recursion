@@ -38,6 +38,12 @@ Scripts should print a dry-run checklist when required live variables are missin
 
 ## Dedicated User Policy
 
+State-mutating live scripts must require a dedicated Recursion soak user. The accepted handle pattern is:
+
+```text
+recursion-soak-*
+```
+
 Automated live tests must reject these handles:
 
 ```text
@@ -55,6 +61,8 @@ recursion-soak-c
 ```
 
 The live harness should expose a `normalizeSoakUserHandle(value)` helper and a `rejectUnsafeLiveUser(value)` helper. Rejection must happen before login, browser navigation, storage probes, chat creation, prompt injection, or provider calls.
+
+This is a hard safety gate, not a warning. If the selected user is missing, empty, `default-user`, an alias for the default profile, or does not match the dedicated soak-user pattern, the script must return `unsafe-user` and stop before mutating SillyTavern state.
 
 ## Browser Readiness Flow
 

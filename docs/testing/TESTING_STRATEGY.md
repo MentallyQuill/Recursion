@@ -111,7 +111,7 @@ recursion-soak-b
 recursion-soak-c
 ```
 
-Additional users may follow the same prefix. Scripts should normalize user handles and reject empty handles, `default-user`, and ambiguous aliases for the default profile.
+Additional users may follow the same `recursion-soak-*` prefix. Scripts must normalize user handles and reject empty handles, `default-user`, ambiguous aliases for the default profile, and any non-dedicated handle before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
 
 `default-user` is manual-only. It may be used by a human operator for exploratory checks, but it must not produce automated pass/fail evidence and must not be accepted by state-mutating scripts.
 

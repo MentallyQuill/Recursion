@@ -113,6 +113,8 @@ recursion-soak-c
 
 Additional users may follow the same `recursion-soak-*` prefix. Scripts must normalize user handles and reject empty handles, `default-user`, ambiguous aliases for the default profile, and any non-dedicated handle before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
 
+Harness code must not use `default-user` as a convenience fallback when a user is missing. Missing or unsafe user configuration is either a dry-run checklist for non-mutating commands or an `unsafe-user` failure for state-mutating commands.
+
 `default-user` is manual-only. It may be used by a human operator for exploratory checks, but it must not produce automated pass/fail evidence and must not be accepted by state-mutating scripts.
 
 ## Artifact Policy

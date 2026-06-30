@@ -22,7 +22,7 @@ Common environment variables:
 | Variable | Meaning |
 | --- | --- |
 | `SILLYTAVERN_BASE_URL` | Base URL for the local SillyTavern host, such as `http://127.0.0.1:8000`. Required for live tests. |
-| `RECURSION_SILLYTAVERN_USER` | Single dedicated test user for one live smoke run. Must not be `default-user`. |
+| `RECURSION_SILLYTAVERN_USER` | Single dedicated test user for one live smoke run. Must match `recursion-soak-*`; must not be `default-user`. |
 | `RECURSION_SOAK_ST_USERS` | Comma-separated dedicated users for isolation checks, such as `recursion-soak-a,recursion-soak-b,recursion-soak-c`. |
 | `RECURSION_SILLYTAVERN_PASSWORD` | Password for account-mode SillyTavern when one shared password is enough. |
 | `RECURSION_SILLYTAVERN_PASSWORD_<USER>` | Per-user password override, where the user handle is uppercased and non-alphanumeric characters become underscores. |
@@ -34,7 +34,7 @@ Common environment variables:
 | `RECURSION_ARTIFACT_DIR` | Override artifact root for reports, traces, screenshots, and logs. |
 | `RECURSION_CONFIRM_EXTENSION_SYNCED` | Operator acknowledgement used only when the served-extension hash check cannot run. Reports must mark this as weaker than hash proof. |
 
-Scripts should print a dry-run checklist when required live variables are missing. State-mutating scripts must fail before mutation when no dedicated user is configured.
+Scripts should print a dry-run checklist when required live variables are missing. State-mutating scripts must fail before mutation when no dedicated user is configured. No live script may infer, create, or select `default-user` as a fallback.
 
 ## Dedicated User Policy
 
@@ -52,7 +52,7 @@ default
 user
 ```
 
-The accepted pattern is:
+Example accepted handles:
 
 ```text
 recursion-soak-a

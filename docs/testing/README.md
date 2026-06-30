@@ -14,12 +14,14 @@ Start with [Testing Strategy](TESTING_STRATEGY.md).
 
 ## Live User Rule
 
-Automated live tests must reject `default-user`. Use dedicated SillyTavern users such as:
+Automated, scripted, or artifact-producing live tests must reject `default-user`. Use dedicated SillyTavern users such as:
 
 ```text
 recursion-soak-a
 recursion-soak-b
 recursion-soak-c
 ```
+
+This is a hard safety gate. Harness defaults must not silently fall back to `default-user`, default-profile aliases, or any non-`recursion-soak-*` handle. State-mutating scripts must return `unsafe-user` before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
 
 `default-user` is reserved for manual human testing and must not produce automated pass/fail evidence.

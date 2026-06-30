@@ -2848,7 +2848,9 @@ Expected:
 
 - [ ] **Manual SillyTavern smoke**
 
-Copy or symlink the repo into `F:\SillyTavern\SillyTavern\data\default-user\extensions\Recursion`, then restart or reload SillyTavern.
+Use a dedicated SillyTavern test user such as `recursion-soak-a`. Copy or symlink the repo into that user's extension folder, for example `F:\SillyTavern\SillyTavern\data\recursion-soak-a\extensions\Recursion`, then restart or reload SillyTavern.
+
+Do not use `default-user` for development verification, scripted smoke checks, or artifact-producing evidence. Automated harnesses must reject `default-user`, default-profile aliases, empty handles, and non-`recursion-soak-*` handles before login, navigation, storage probes, chat mutation, prompt injection, or provider calls.
 
 Expected:
 

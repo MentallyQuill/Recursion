@@ -8,8 +8,8 @@ The first executable slice has these files:
 
 | Path | Current status |
 | --- | --- |
-| `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared guardrail helpers for argv parsing, soak-user validation, report writing, artifact paths, redaction, and first-slice status handling. Playwright, auth, storage probes, screenshots, traces, served-extension checks, and runtime snapshots are still deferred. |
-| `tools/scripts/check-playwright-readiness.mjs` | Dependency-light readiness guardrail. It does not import Playwright, contact SillyTavern, or claim browser readiness yet. |
+| `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared helpers for argv parsing, soak-user validation, offline Playwright readiness, report writing, artifact paths, redaction, and status handling. Auth, storage probes, served-extension checks, live browser smoke, and runtime snapshots are still deferred. |
+| `tools/scripts/check-playwright-readiness.mjs` | Offline browser readiness probe. It dynamically imports Playwright, launches Chromium when available, drives a local fixture, and never contacts SillyTavern. |
 | `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety preflight. It rejects unsafe users before mutation and reports storage isolation as `manual-required` when `--live` is requested. |
 | `tools/scripts/smoke-sillytavern-live.mjs` | Focused smoke guardrail. It validates the dedicated user and base URL gate, then reports browser smoke as `manual-required` until live browser work is implemented. |
 | `tools/scripts/test-live-harness.mjs` | Deterministic contract tests for the guardrail behavior. |
@@ -73,13 +73,15 @@ Multi-user checks must also reject duplicate normalized handles. `recursion-soak
 
 ## Browser Readiness Flow
 
-The current first-slice command writes a dry-run report and exits successfully without importing Playwright:
+The readiness command is safe to run before SillyTavern starts. By default it attempts an offline Playwright browser check:
 
 ```powershell
 node tools\scripts\check-playwright-readiness.mjs --write-artifacts
 ```
 
-If forced with `--live`, it returns `manual-required` because browser launch is not implemented in this slice. The target implementation should:
+If Playwright is not available, it returns a sanitized `environment-fail` report instead of a stack trace. Use `--dry-run` to write a no-op checklist without importing Playwright.
+
+The readiness implementation:
 
 1. Create a run id.
 2. Launch Playwright Chromium.
@@ -93,8 +95,6 @@ If forced with `--live`, it returns `manual-required` because browser launch is 
 10. Capture a phone screenshot.
 11. Stop a Playwright trace when artifact capture is enabled.
 12. Write `report.json` and `summary.md`.
-
-The final command must remain safe to run before SillyTavern starts.
 
 ## Live Preflight Flow
 

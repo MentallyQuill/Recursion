@@ -316,10 +316,9 @@ export function reportToSummary(report) {
 }
 
 export function writeReportArtifacts(report, { artifactRoot, family = 'live-smoke' } = {}) {
-  const root = resolve(artifactRoot || process.env.RECURSION_ARTIFACT_DIR || 'artifacts');
-  const relativeDirectory = join(family, safeId(report.runId, 'run'));
-  const dir = join(root, relativeDirectory);
+  const { dir } = artifactRunDirectory(report, { artifactRoot, family });
   const artifactRecord = {
+    ...(report.artifacts || {}),
     summary: 'summary.md',
     report: 'report.json'
   };
@@ -328,6 +327,43 @@ export function writeReportArtifacts(report, { artifactRoot, family = 'live-smok
   writeFileSync(join(dir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   writeFileSync(join(dir, 'summary.md'), reportToSummary(report), 'utf8');
   return artifactRecord;
+}
+
+export function artifactRunDirectory(report, { artifactRoot, family = 'live-smoke' } = {}) {
+  const root = resolve(artifactRoot || process.env.RECURSION_ARTIFACT_DIR || 'artifacts');
+  const relativeDirectory = join(family, safeId(report.runId, 'run'));
+  return {
+    root,
+    relativeDirectory: relativeDirectory.replace(/\\/g, '/'),
+    dir: join(root, relativeDirectory)
+  };
+}
+
+export function prepareArtifactRunDirectory(report, options = {}) {
+  try {
+    const location = artifactRunDirectory(report, options);
+    mkdirSync(location.dir, { recursive: true });
+    return {
+      ok: true,
+      ...location
+    };
+  } catch (error) {
+    addCheck(report, {
+      name: 'artifact-write',
+      status: 'environment-fail',
+      summary: 'Artifact directory could not be prepared.',
+      details: {
+        name: error?.name,
+        code: error?.code
+      }
+    });
+    setReportStatus(report, 'environment-fail', 'artifact-write-failed');
+    report.nextAction = 'Set RECURSION_ARTIFACT_DIR to a writable directory or omit --write-artifacts.';
+    return {
+      ok: false,
+      report: finalizeReport(report)
+    };
+  }
 }
 
 export function attachReportArtifacts(report, options = {}) {
@@ -355,9 +391,43 @@ export function exitCodeForReport(report) {
   return ['pass', 'skipped'].includes(report.status) ? 0 : 1;
 }
 
-export async function runPlaywrightReadiness({ argv = [], env = process.env, artifactRoot } = {}) {
+function readinessFixtureHtml() {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Recursion Playwright Readiness</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 24px; }
+      button { min-height: 44px; min-width: 160px; }
+    </style>
+  </head>
+  <body>
+    <button type="button" aria-label="readiness action">Ready</button>
+    <output data-readiness-result aria-live="polite">idle</output>
+    <script>
+      document.querySelector('button').addEventListener('click', () => {
+        document.querySelector('[data-readiness-result]').textContent = 'ready-clicked';
+      });
+    </script>
+  </body>
+</html>`;
+}
+
+function eventMessage(value) {
+  if (typeof value?.text === 'function') return value.text();
+  return String(value?.message || value || '');
+}
+
+export async function runPlaywrightReadiness({
+  argv = [],
+  env = process.env,
+  artifactRoot
+} = {}) {
   const args = parseHarnessArgs(argv);
-  let report = createBaseReport({ scriptName: 'check-playwright-readiness', args, env });
+  const readinessDryRun = args.dryRunRequested;
+  const reportArgs = { ...args, live: !readinessDryRun };
+  let report = createBaseReport({ scriptName: 'check-playwright-readiness', args: reportArgs, env });
   if (args.liveRequested && args.dryRunRequested) {
     report.warnings.push({
       name: 'dry-run-override',
@@ -365,33 +435,138 @@ export async function runPlaywrightReadiness({ argv = [], env = process.env, art
       summary: '--dry-run was provided with --live, so no live browser work will run.'
     });
   }
-  report.mode = 'readiness';
+  report.mode = readinessDryRun ? 'dry-run' : 'readiness';
+  report.dryRun = readinessDryRun;
   addCheck(report, {
     name: 'sillytavern-contact',
     status: 'pass',
     summary: 'Readiness does not contact SillyTavern or mutate host state.'
   });
 
-  if (!args.live) {
+  if (readinessDryRun) {
     addCheck(report, {
       name: 'dry-run',
       status: 'skipped',
-      summary: 'Playwright launch skipped because this first slice is dependency-light.'
+      summary: 'Playwright launch skipped by explicit dry-run.'
     });
     setReportStatus(report, 'skipped', 'dry-run');
-    report.nextAction = 'Implement the real Playwright readiness slice before treating this as browser evidence.';
+    report.nextAction = 'Run without --dry-run to attempt offline Playwright browser readiness.';
     report = finalizeReport(report);
     if (args.writeArtifacts) report = attachReportArtifacts(report, { artifactRoot, family: 'playwright-readiness' });
     return report;
   }
 
-  addCheck(report, {
-    name: 'browser-control',
-    status: 'manual-required',
-    summary: 'Real Playwright launch is deferred from this first guardrail slice.'
-  });
-  setReportStatus(report, 'manual-required', 'playwright-readiness-not-implemented');
-  report.nextAction = 'Implement browser launch, role-locator click, screenshots, and trace capture in the next harness slice.';
+  let artifactLocation = null;
+  if (args.writeArtifacts) {
+    artifactLocation = prepareArtifactRunDirectory(report, { artifactRoot, family: 'playwright-readiness' });
+    if (!artifactLocation.ok) return artifactLocation.report;
+  }
+
+  let playwright;
+  try {
+    playwright = await import('playwright');
+  } catch (error) {
+    addCheck(report, {
+      name: 'playwright-import',
+      status: 'environment-fail',
+      summary: 'Playwright is not available to this checkout.',
+      details: {
+        name: error?.name,
+        code: error?.code
+      }
+    });
+    setReportStatus(report, 'environment-fail', 'playwright-unavailable');
+    report.nextAction = 'Install Playwright for this checkout or run this command in an environment where Playwright is available.';
+    report = finalizeReport(report);
+    if (args.writeArtifacts) report = attachReportArtifacts(report, { artifactRoot, family: 'playwright-readiness' });
+    return report;
+  }
+
+  const browserErrors = [];
+  let browser = null;
+  let context = null;
+  try {
+    browser = await playwright.chromium.launch({ headless: env.RECURSION_SILLYTAVERN_HEADLESS !== '0' });
+    context = typeof browser.newContext === 'function'
+      ? await browser.newContext({ viewport: { width: 1280, height: 720 } })
+      : browser;
+    if (args.writeArtifacts && typeof context.tracing?.start === 'function') {
+      await context.tracing.start({ screenshots: true, snapshots: true });
+    }
+    const page = typeof context.newPage === 'function' ? await context.newPage() : await browser.newPage();
+    if (typeof page.on === 'function') {
+      page.on('console', (entry) => {
+        const type = typeof entry?.type === 'function' ? entry.type() : entry?.type;
+        if (type === 'error') browserErrors.push(eventMessage(entry));
+      });
+      page.on('pageerror', (entry) => browserErrors.push(eventMessage(entry)));
+    }
+    await page.setContent(readinessFixtureHtml());
+    await page.getByRole('button', { name: 'readiness action' }).click();
+    const resultText = await page.locator('[data-readiness-result]').textContent();
+    if (resultText !== 'ready-clicked') {
+      throw new Error(`Readiness fixture did not update after click: ${resultText}`);
+    }
+
+    if (args.writeArtifacts) {
+      mkdirSync(join(artifactLocation.dir, 'screenshots'), { recursive: true });
+      if (typeof page.setViewportSize === 'function') await page.setViewportSize({ width: 1280, height: 720 });
+      await page.screenshot({ path: join(artifactLocation.dir, 'screenshots', 'desktop.png') });
+      if (typeof page.setViewportSize === 'function') await page.setViewportSize({ width: 390, height: 844 });
+      await page.screenshot({ path: join(artifactLocation.dir, 'screenshots', 'phone.png') });
+      report.artifacts = {
+        ...(report.artifacts || {}),
+        desktopScreenshot: 'screenshots/desktop.png',
+        phoneScreenshot: 'screenshots/phone.png'
+      };
+      if (typeof context.tracing?.stop === 'function') {
+        mkdirSync(join(artifactLocation.dir, 'playwright'), { recursive: true });
+        await context.tracing.stop({ path: join(artifactLocation.dir, 'playwright', 'trace.zip') });
+        report.artifacts.trace = 'playwright/trace.zip';
+      }
+    }
+
+    addCheck(report, {
+      name: 'browser-control',
+      status: 'pass',
+      summary: 'Chromium launched, role locator clicked, and readiness fixture updated.'
+    });
+    if (browserErrors.length) {
+      report.warnings.push({
+        name: 'browser-console',
+        status: 'warn',
+        summary: `${browserErrors.length} browser error event(s) were observed.`
+      });
+    }
+    setReportStatus(report, 'pass', 'readiness-pass');
+    report.nextAction = browserErrors.length
+      ? 'Inspect readiness warnings before using live smoke.'
+      : 'Playwright readiness passed; dedicated-user live guardrails may be run next.';
+  } catch (error) {
+    addCheck(report, {
+      name: 'browser-control',
+      status: 'environment-fail',
+      summary: 'Playwright browser control failed.',
+      details: {
+        name: error?.name,
+        code: error?.code,
+        message: error?.message
+      }
+    });
+    setReportStatus(report, 'environment-fail', 'browser-control-failed');
+    report.nextAction = 'Repair local Playwright browser support before using live smoke.';
+  } finally {
+    if (context && context !== browser && typeof context.close === 'function') {
+      try {
+        await context.close();
+      } catch {}
+    }
+    if (browser && typeof browser.close === 'function') {
+      try {
+        await browser.close();
+      } catch {}
+    }
+  }
 
   report = finalizeReport(report);
   if (args.writeArtifacts) report = attachReportArtifacts(report, { artifactRoot, family: 'playwright-readiness' });

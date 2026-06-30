@@ -23,5 +23,8 @@
     "check:playwright": "node tools/scripts/check-playwright-readiness.mjs",
     "check:soak-users": "node tools/scripts/check-sillytavern-soak-users.mjs",
     "smoke:sillytavern": "node tools/scripts/smoke-sillytavern-live.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
   }
 }

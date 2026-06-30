@@ -157,13 +157,33 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
-  const report = await runPlaywrightReadiness({
-    argv: ['--live'],
-    env: {}
-  });
-  assertEqual(report.status, 'manual-required', 'live Playwright readiness is deferred in first slice');
-  assertEqual(report.result, 'playwright-readiness-not-implemented', 'deferred Playwright result is explicit');
-  assert(report.failures.some((failure) => failure.name === 'browser-control'), 'deferred readiness records failure-like check');
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-readiness-'));
+  try {
+    const report = await runPlaywrightReadiness({
+      argv: ['--write-artifacts'],
+      env: {},
+      artifactRoot
+    });
+    assertEqual(report.status, 'pass', 'real Playwright readiness passes');
+    assertEqual(report.result, 'readiness-pass', 'real readiness result is explicit');
+    assertDeepEqual(report.artifacts, {
+      desktopScreenshot: 'screenshots/desktop.png',
+      phoneScreenshot: 'screenshots/phone.png',
+      trace: 'playwright/trace.zip',
+      summary: 'summary.md',
+      report: 'report.json'
+    }, 'readiness artifact paths are relative to run root');
+    const runRoot = join(artifactRoot, 'playwright-readiness', report.runId);
+    const persisted = readFileSync(join(runRoot, 'report.json'), 'utf8');
+    const summary = readFileSync(join(runRoot, 'summary.md'), 'utf8');
+    assert(persisted.includes('"readiness-pass"'), 'readiness report persisted');
+    assert(summary.includes('Playwright readiness passed'), 'readiness summary includes next action');
+    assert(readFileSync(join(runRoot, 'screenshots', 'desktop.png')).length > 0, 'desktop screenshot written');
+    assert(readFileSync(join(runRoot, 'screenshots', 'phone.png')).length > 0, 'phone screenshot written');
+    assert(readFileSync(join(runRoot, 'playwright', 'trace.zip')).length > 0, 'trace written');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+  }
 }
 
 {

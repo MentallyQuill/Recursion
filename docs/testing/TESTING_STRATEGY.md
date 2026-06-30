@@ -5,10 +5,10 @@ Recursion testing should prove the extension is useful and safe without turning 
 | Layer | What it proves | Primary evidence |
 | --- | --- | --- |
 | Fast contract suite | Runtime contracts, schemas, card lifecycle, provider routing, storage, redaction, and prompt packet rules work without a live host. | Maintained deterministic gate: `node tools\scripts\run-alpha-gate.mjs`; focused scripts: `tools/scripts/test-*.mjs`. |
-| Playwright readiness | Current guardrail proves the readiness command is safe, dependency-light, and honest about deferred browser work. Target probe will prove Chromium launch/control, resilient locators, desktop/phone viewports, and trace/screenshot artifacts. | Current guardrail evidence: dependency-light `check-playwright-readiness` dry-run report. Future browser evidence: readiness report, trace, and viewport screenshots. |
+| Playwright readiness | Offline probe proves the local machine can launch/control Chromium through Playwright, use a role locator, switch desktop/phone viewports, and write trace/screenshot artifacts. If Playwright is unavailable, it returns `environment-fail` without contacting SillyTavern. | Current evidence: `check-playwright-readiness` report, trace, and viewport screenshots when Playwright is installed; otherwise a sanitized environment-fail report. |
 | Focused live SillyTavern smoke | Current guardrail proves dedicated-user rejection, dry-run behavior, report shape, and fail-closed semantics before mutation. Target smoke will prove the installed or served extension mounts, observes turns, reports invisible work, injects and clears prompt packets, persists sanitized cache data, and fails softly. | Current guardrail evidence: `check-sillytavern-soak-users` and `smoke-sillytavern-live` safety reports. Future live evidence: Activity Ribbon evidence, screenshots, prompt packet hashes, run journal events, and storage probes. |
 
-The fast contract suite is the normal maintained confidence gate in this checkout. The first live-harness scripts exist as guardrails only: they validate dedicated users, dry-run behavior, report shape, artifact paths, and fail-closed semantics. Real browser, storage, prompt-injection timing, and SillyTavern UI evidence remain future live-harness work.
+The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, and offline Playwright readiness when Playwright is available. Storage probes, prompt-injection timing, and SillyTavern UI evidence remain future live-harness work.
 
 ## Core Invariants
 
@@ -31,7 +31,7 @@ Highest-priority invariants:
 
 ## Fast Contract Suite
 
-The contract suite is dependency-light and runnable before any live host work. The maintained gate command is:
+The contract suite is runnable before any live SillyTavern host work. It uses the installed Playwright dev dependency for offline browser readiness and does not contact SillyTavern. The maintained gate command is:
 
 ```powershell
 node tools\scripts\run-alpha-gate.mjs
@@ -57,7 +57,7 @@ Focused contract tests should use deterministic fixtures and fake provider respo
 
 ## Playwright Readiness
 
-The current Playwright readiness command is a dependency-light guardrail and must not contact SillyTavern. It does not yet prove browser automation. The target readiness probe proves that browser automation is available before any live chat, user file, prompt, or provider state is touched.
+The Playwright readiness command must not contact SillyTavern. It proves browser automation is available before any live chat, user file, prompt, or provider state is touched. When Playwright is missing, it returns `environment-fail` with sanitized details.
 
 The readiness probe should:
 

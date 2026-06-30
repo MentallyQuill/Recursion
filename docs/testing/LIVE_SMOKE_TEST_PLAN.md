@@ -22,23 +22,25 @@ Manual exploratory checks may use other users, but automated pass/fail evidence 
 
 ## Current Deterministic Evidence
 
-The maintained automated gate in this checkout is the dependency-light local contract suite:
+The maintained automated gate in this checkout is the local contract suite:
 
 ```powershell
 node tools\scripts\run-alpha-gate.mjs
 ```
 
-It does not launch Playwright, contact SillyTavern, mutate chat state, or produce live-smoke artifacts. It includes deterministic coverage for the first live-harness guardrail slice.
+It launches offline Playwright readiness, but does not contact SillyTavern, mutate chat state, or produce live-smoke artifacts. It includes deterministic coverage for the live-harness guardrail slice.
 
 ## Current Guardrail Commands
 
-The commands in this section currently prove safety gates and report shape, not real browser or SillyTavern behavior. Without `--live`, they write dry-run reports and do not contact SillyTavern. With `--live`, they reject unsafe users before mutation and return `manual-required` for deferred browser/storage work.
+The commands in this section currently prove safety gates, report shape, and offline Playwright readiness when Playwright is installed. They do not contact SillyTavern unless a live script is run with `--live`. Live scripts reject unsafe users before mutation and return `manual-required` for deferred browser/storage work.
 
-Dependency-light Playwright readiness guardrail:
+Offline Playwright readiness:
 
 ```powershell
 node tools\scripts\check-playwright-readiness.mjs --write-artifacts
 ```
+
+Use `--dry-run` when you want a no-op readiness checklist without importing Playwright.
 
 Dedicated user isolation guardrail:
 

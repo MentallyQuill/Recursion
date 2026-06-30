@@ -1,0 +1,22 @@
+{
+  "display_name": "Recursion",
+  "version": "0.1.0-pre-alpha.1",
+  "author": "MentallyQuill",
+  "key": "recursion",
+  "js": "src/extension/index.js",
+  "css": "styles/recursion.css",
+  "loading_order": 101,
+  "generate_interceptor": "recursionGenerationInterceptor",
+  "homePage": "https://github.com/MentallyQuill/Recursion",
+  "minimum_client_version": "1.12.0",
+  "auto_update": false,
+  "hooks": {
+    "install": "recursionOnInstall",
+    "update": "recursionOnUpdate",
+    "delete": "recursionOnDelete",
+    "clean": "recursionOnClean",
+    "enable": "recursionOnEnable",
+    "disable": "recursionOnDisable",
+    "activate": "recursionOnActivate"
+  }
+}

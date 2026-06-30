@@ -1,0 +1,22 @@
+{
+  "name": "recursion",
+  "version": "0.1.0-pre-alpha.1",
+  "private": true,
+  "description": "Recursion pre-alpha SillyTavern extension.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node tools/scripts/run-tests.mjs",
+    "test:harness": "node tools/scripts/test-harness.mjs",
+    "test:core": "node tools/scripts/test-core.mjs",
+    "test:settings": "node tools/scripts/test-settings.mjs",
+    "test:storage": "node tools/scripts/test-storage.mjs",
+    "test:activity": "node tools/scripts/test-activity.mjs",
+    "test:providers": "node tools/scripts/test-providers.mjs",
+    "test:cards": "node tools/scripts/test-cards.mjs",
+    "test:prompt": "node tools/scripts/test-prompt.mjs",
+    "test:runtime": "node tools/scripts/test-runtime.mjs",
+    "test:ui": "node tools/scripts/test-ui.mjs",
+    "test:host": "node tools/scripts/test-host.mjs"
+  }
+}

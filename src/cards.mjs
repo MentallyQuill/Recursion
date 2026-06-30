@@ -1,0 +1,436 @@
+import { compact, hashJson, makeId, nowIso, safeId, truncate } from './core.mjs';
+import { UTILITY_ROLE_IDS } from './providers.mjs';
+
+const TEXT_LIMIT = 1000;
+const SUMMARY_LIMIT = 400;
+const EVIDENCE_LIMIT = 12;
+const EVIDENCE_TEXT_LIMIT = 120;
+const INSPECTOR_NOTES_LIMIT = 800;
+const ARBITER_REASON_LIMIT = 240;
+const MAX_TOKEN_ESTIMATE = 1000;
+
+function catalogEntry(entry) {
+  return Object.freeze(entry);
+}
+
+export const CARD_CATALOG = Object.freeze([
+  catalogEntry({
+    family: 'Scene Frame',
+    role: 'sceneFrameCard',
+    priority: 100,
+    description: 'Current location, situation, participants, and immediate dramatic direction.'
+  }),
+  catalogEntry({
+    family: 'Active Cast',
+    role: 'activeCastCard',
+    priority: 95,
+    description: 'Who is present, visible state, and current conversational or physical role.'
+  }),
+  catalogEntry({
+    family: 'Character Motivation',
+    role: 'characterMotivationCard',
+    priority: 88,
+    description: 'Observable or safely inferred motives, pressures, hesitations, and goals.'
+  }),
+  catalogEntry({
+    family: 'Dialogue/Relationship',
+    role: 'dialogueRelationshipCard',
+    priority: 84,
+    description: 'Current conversational tension, relationship texture, promises, conflicts, and voice constraints.'
+  }),
+  catalogEntry({
+    family: 'Continuity Risk',
+    role: 'continuityRiskCard',
+    priority: 98,
+    description: 'Facts likely to be contradicted if omitted from the next response.'
+  }),
+  catalogEntry({
+    family: 'Environment/Items',
+    role: 'environmentItemsCard',
+    priority: 76,
+    description: 'Spatial constraints, sensory details, relevant objects, tools, hazards, and nearby affordances.'
+  }),
+  catalogEntry({
+    family: 'Prose/Pacing',
+    role: 'prosePacingCard',
+    priority: 62,
+    description: 'Local craft guidance for density, momentum, specificity, and response shape.'
+  }),
+  catalogEntry({
+    family: 'Open Threads',
+    role: 'openThreadsCard',
+    priority: 72,
+    description: 'Unresolved questions, immediate promises, pending actions, and near-term pressures.'
+  })
+]);
+
+const CATALOG_BY_FAMILY = new Map(CARD_CATALOG.map((entry) => [entry.family, entry]));
+const CATALOG_BY_ROLE = new Map(CARD_CATALOG.map((entry) => [entry.role, entry]));
+const STATUS = new Set(['candidate', 'active', 'stowed', 'stale', 'discarded']);
+const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
+const DETAIL = new Set(['compact', 'standard', 'expanded']);
+const EMPHASIS_PRIORITY = Object.freeze({ emphasized: 0, normal: 1, muted: 2 });
+
+for (const entry of CARD_CATALOG) {
+  if (!UTILITY_ROLE_IDS.includes(entry.role)) {
+    throw new Error(`Card catalog role is not registered as a utility provider role: ${entry.role}`);
+  }
+}
+
+function asObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function cleanText(value, limit) {
+  return truncate(compact(value ?? '', limit), limit);
+}
+
+function cleanOptionalText(value, limit) {
+  const text = cleanText(value, limit);
+  return text || undefined;
+}
+
+function numberInRange(value, fallback, min, max) {
+  const number = Number(value);
+  const resolved = Number.isFinite(number) ? number : fallback;
+  return Math.min(max, Math.max(min, Math.round(resolved)));
+}
+
+function optionalNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number) : undefined;
+}
+
+function estimateTokens(text) {
+  return Math.max(1, Math.ceil(String(text || '').length / 4));
+}
+
+function normalizeEvidenceRefs(value) {
+  const list = Array.isArray(value)
+    ? value
+    : (value === undefined || value === null || value === '' ? [] : [value]);
+  return list
+    .map((entry) => cleanText(entry, EVIDENCE_TEXT_LIMIT))
+    .filter(Boolean)
+    .slice(0, EVIDENCE_LIMIT);
+}
+
+function resolveCatalog(input, { strict = true, allowDefault = false } = {}) {
+  const source = asObject(input);
+  const family = String(source.family ?? '').trim();
+  const role = String(source.role ?? source.roleId ?? '').trim();
+  const familyCatalog = CATALOG_BY_FAMILY.get(family);
+  const roleCatalog = CATALOG_BY_ROLE.get(role);
+  if (familyCatalog && roleCatalog && familyCatalog.role !== roleCatalog.role) {
+    if (!strict) return null;
+    throw new Error(`Card family and role mismatch: ${family} / ${role}`);
+  }
+  if (familyCatalog) return familyCatalog;
+  if (roleCatalog) return roleCatalog;
+  if (!family && !role) {
+    if (allowDefault) return CARD_CATALOG[0];
+    if (!strict) return null;
+    throw new Error('Card family or role is required.');
+  }
+  if (!strict) return null;
+  throw new Error(`Unknown card catalog family or role: ${family || role}`);
+}
+
+function cardIdFor(input, catalog, promptText, context) {
+  const seed = `card-${safeId(catalog.family)}-${hashJson({
+    family: catalog.family,
+    role: catalog.role,
+    promptText,
+    sceneId: context.sceneId,
+    snapshotHash: context.snapshotHash
+  })}`;
+  return safeId(input.id, seed);
+}
+
+function sourceContext(input, context) {
+  const source = asObject(input.source);
+  const freshness = asObject(input.freshness);
+  const snapshotHash = String(
+    input.snapshotHash
+      ?? context.snapshotHash
+      ?? source.snapshotHash
+      ?? source.fingerprint
+      ?? freshness.sourceFingerprint
+      ?? ''
+  );
+  return {
+    sceneId: String(input.sceneId ?? context.sceneId ?? 'scene').trim() || 'scene',
+    chatId: String(source.chatId ?? input.chatId ?? context.chatId ?? '').trim(),
+    firstMesId: numberInRange(source.firstMesId ?? input.firstMesId ?? context.firstMesId, 0, 0, Number.MAX_SAFE_INTEGER),
+    lastMesId: numberInRange(source.lastMesId ?? input.lastMesId ?? context.lastMesId, 0, 0, Number.MAX_SAFE_INTEGER),
+    snapshotHash
+  };
+}
+
+function validEnum(value, allowed, fallback) {
+  const text = String(value ?? '').trim();
+  return allowed.has(text) ? text : fallback;
+}
+
+function stringifyForPrompt(value) {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return JSON.stringify({ unavailable: true });
+  }
+}
+
+function sanitizeHandCard(card) {
+  return {
+    id: String(card.id || ''),
+    family: String(card.family || ''),
+    role: String(card.role || ''),
+    status: 'active',
+    promptText: String(card.promptText || ''),
+    tokenEstimate: numberInRange(card.tokenEstimate, estimateTokens(card.promptText), 1, MAX_TOKEN_ESTIMATE),
+    detailProfile: validEnum(card.detailProfile, DETAIL, 'standard'),
+    emphasis: validEnum(card.emphasis, EMPHASIS, 'normal'),
+    evidenceRefs: normalizeEvidenceRefs(card.evidenceRefs)
+  };
+}
+
+function catalogPriority(card) {
+  return CATALOG_BY_FAMILY.get(card.family)?.priority ?? CATALOG_BY_ROLE.get(card.role)?.priority ?? 0;
+}
+
+function sortCardsForHand(a, b) {
+  const emphasisDelta = (EMPHASIS_PRIORITY[a.emphasis] ?? 1) - (EMPHASIS_PRIORITY[b.emphasis] ?? 1);
+  if (emphasisDelta !== 0) return emphasisDelta;
+  const priorityDelta = catalogPriority(b) - catalogPriority(a);
+  if (priorityDelta !== 0) return priorityDelta;
+  return String(a.id || '').localeCompare(String(b.id || ''));
+}
+
+function normalizeDeckCard(card, { preserveId = false } = {}) {
+  const normalized = normalizeCard(card, {
+    sceneId: card?.sceneId,
+    snapshotHash: card?.source?.snapshotHash || card?.source?.fingerprint || card?.freshness?.sourceFingerprint
+  });
+  if (preserveId && typeof card?.id === 'string' && card.id) normalized.id = card.id;
+  return normalized;
+}
+
+export function normalizeCard(input = {}, context = {}) {
+  const source = asObject(input);
+  const ctx = asObject(context);
+  const catalog = resolveCatalog(source);
+  const promptText = cleanText(source.promptText ?? source.text ?? source.claim, TEXT_LIMIT);
+  if (!promptText) throw new Error('Card promptText is required.');
+
+  const normalizedSource = sourceContext(source, ctx);
+  const id = cardIdFor(source, catalog, promptText, normalizedSource);
+  const freshness = asObject(source.freshness);
+  const arbiter = asObject(source.arbiter);
+  const expiresAfterMesId = optionalNumber(freshness.expiresAfterMesId ?? source.expiresAfterMesId);
+  const inspectorNotes = cleanOptionalText(source.inspectorNotes, INSPECTOR_NOTES_LIMIT);
+  const card = {
+    id,
+    schemaVersion: 1,
+    family: catalog.family,
+    role: catalog.role,
+    sceneId: normalizedSource.sceneId,
+    catalogKey: safeId(catalog.family),
+    status: validEnum(source.status, STATUS, 'active'),
+    source: {
+      chatId: normalizedSource.chatId,
+      firstMesId: normalizedSource.firstMesId,
+      lastMesId: normalizedSource.lastMesId,
+      fingerprint: normalizedSource.snapshotHash,
+      snapshotHash: normalizedSource.snapshotHash
+    },
+    promptText,
+    summary: cleanText(source.summary || promptText, SUMMARY_LIMIT),
+    evidenceRefs: normalizeEvidenceRefs(source.evidenceRefs ?? source.evidence),
+    tokenEstimate: numberInRange(source.tokenEstimate ?? source.tokenCost, estimateTokens(promptText), 1, MAX_TOKEN_ESTIMATE),
+    detailProfile: validEnum(source.detailProfile, DETAIL, 'standard'),
+    emphasis: validEnum(source.emphasis, EMPHASIS, 'normal'),
+    freshness: {
+      generatedAt: String(freshness.generatedAt ?? source.generatedAt ?? nowIso()),
+      sourceFingerprint: String(freshness.sourceFingerprint ?? normalizedSource.snapshotHash),
+      expiresAfterMesId
+    },
+    arbiter: {
+      lastDecisionId: String(arbiter.lastDecisionId ?? source.decisionId ?? ctx.decisionId ?? ''),
+      reason: cleanText(arbiter.reason ?? source.reason ?? '', ARBITER_REASON_LIMIT)
+    }
+  };
+  if (inspectorNotes) card.inspectorNotes = inspectorNotes;
+  if (card.freshness.expiresAfterMesId === undefined) delete card.freshness.expiresAfterMesId;
+  return card;
+}
+
+export function buildCardRequests(plan = {}, context = {}) {
+  const cardJobs = Array.isArray(plan?.cardJobs) ? plan.cardJobs : [];
+  return cardJobs
+    .map((job) => {
+      const source = asObject(job);
+      const catalog = resolveCatalog({ family: source.family, role: source.role ?? source.roleId }, { strict: false });
+      if (!catalog) return null;
+      const reason = cleanText(source.reason ?? '', ARBITER_REASON_LIMIT);
+      const snapshotHash = String(context.snapshotHash ?? source.snapshotHash ?? '');
+      return {
+        roleId: catalog.role,
+        runId: String(context.runId ?? source.runId ?? ''),
+        snapshotHash,
+        prompt: [
+          `Create one compact ${catalog.family} card for the current scene.`,
+          'Return one JSON object only. Do not wrap it in markdown.',
+          'The JSON object must use schema "recursion.card.v1" and an "items" array with one card object.',
+          'The card object may contain promptText, summary, evidenceRefs, tokenEstimate, detailProfile, emphasis, and inspectorNotes.',
+          'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
+          reason ? `Arbiter request reason: ${reason}` : '',
+          `Snapshot hash: ${snapshotHash}`,
+          `Snapshot:\n${stringifyForPrompt(context.snapshot ?? {})}`
+        ].filter(Boolean).join('\n\n'),
+        metadata: {
+          family: catalog.family,
+          role: catalog.role,
+          catalogKey: safeId(catalog.family),
+          priority: catalog.priority,
+          reason
+        }
+      };
+    })
+    .filter(Boolean);
+}
+
+export function cardsFromProviderResult(result, context = {}) {
+  if (!result?.ok) return [];
+  const data = asObject(result.data);
+  const items = Array.isArray(data.items)
+    ? data.items
+    : (Array.isArray(data.cards) ? data.cards : []);
+  return items.flatMap((item) => {
+    const source = asObject(item);
+    const identity = {
+      role: source.role ?? source.roleId ?? result.roleId,
+      family: source.family ?? data.family
+    };
+    if (!resolveCatalog(identity, { strict: false })) return [];
+    try {
+      return [normalizeCard({
+        ...source,
+        ...identity,
+        promptText: source.promptText ?? source.text ?? source.claim,
+        evidenceRefs: source.evidenceRefs ?? source.evidence,
+        tokenEstimate: source.tokenEstimate ?? source.tokenCost,
+        inspectorNotes: source.inspectorNotes
+      }, context)];
+    } catch {
+      return [];
+    }
+  });
+}
+
+export function applyCardPlan(existingCards = [], plan = {}) {
+  const cards = new Map();
+  for (const card of Array.isArray(existingCards) ? existingCards : []) {
+    const normalized = normalizeDeckCard(card, { preserveId: true });
+    cards.set(normalized.id, normalized);
+  }
+  for (const card of Array.isArray(plan.acceptedCards) ? plan.acceptedCards : []) {
+    const normalized = normalizeDeckCard(card);
+    cards.set(normalized.id, normalized);
+  }
+  for (const action of Array.isArray(plan.lifecycle) ? plan.lifecycle : []) {
+    const event = asObject(action);
+    const cardId = String(event.cardId ?? event.id ?? '');
+    if (!cardId || !cards.has(cardId)) continue;
+    const card = cards.get(cardId);
+    const actionName = String(event.action ?? '').trim();
+
+    if (actionName === 'stow') {
+      card.status = 'stowed';
+    } else if (actionName === 'discard') {
+      card.status = 'discarded';
+    } else if (actionName === 'regenerate') {
+      card.status = 'stale';
+    } else if (actionName === 'select') {
+      card.status = 'active';
+    } else if (actionName === 'emphasize') {
+      card.status = 'active';
+      card.emphasis = 'emphasized';
+    } else {
+      continue;
+    }
+
+    card.arbiter = {
+      lastDecisionId: String(event.decisionId ?? plan.decisionId ?? card.arbiter?.lastDecisionId ?? ''),
+      reason: cleanText(event.reason ?? card.arbiter?.reason ?? '', ARBITER_REASON_LIMIT)
+    };
+    cards.set(card.id, card);
+  }
+  return {
+    cards: [...cards.values()],
+    updatedAt: nowIso()
+  };
+}
+
+export function selectHand(cards = [], { maxCards = 6, maxTokens = 700 } = {}) {
+  const cardLimit = numberInRange(maxCards, 6, 0, 64);
+  const tokenLimit = numberInRange(maxTokens, 700, 0, 20000);
+  const active = [];
+  const omitted = [];
+
+  for (const card of Array.isArray(cards) ? cards : []) {
+    if (card?.status === 'active') {
+      active.push(card);
+    } else if (card?.id) {
+      omitted.push({
+        cardId: card.id,
+        family: card.family || '',
+        reason: 'inactive',
+        tokenEstimate: numberInRange(card.tokenEstimate, 0, 0, MAX_TOKEN_ESTIMATE)
+      });
+    }
+  }
+
+  const selected = [];
+  let tokenEstimate = 0;
+  for (const card of active.slice().sort(sortCardsForHand)) {
+    const cardTokens = numberInRange(card.tokenEstimate, estimateTokens(card.promptText), 1, MAX_TOKEN_ESTIMATE);
+    if (selected.length >= cardLimit) {
+      omitted.push({
+        cardId: card.id,
+        family: card.family || '',
+        reason: 'max-cards',
+        tokenEstimate: cardTokens
+      });
+      continue;
+    }
+    if (tokenEstimate + cardTokens > tokenLimit) {
+      omitted.push({
+        cardId: card.id,
+        family: card.family || '',
+        reason: 'token-budget',
+        tokenEstimate: cardTokens
+      });
+      continue;
+    }
+    tokenEstimate += cardTokens;
+    selected.push(sanitizeHandCard({
+      ...card,
+      tokenEstimate: cardTokens
+    }));
+  }
+
+  return {
+    handId: makeId('hand'),
+    cards: selected,
+    omitted,
+    tokenEstimate,
+    composedAt: nowIso(),
+    metadata: {
+      maxCards: cardLimit,
+      maxTokens: tokenLimit,
+      selectedCount: selected.length,
+      omittedCount: omitted.length,
+      sourceCardCount: Array.isArray(cards) ? cards.length : 0
+    }
+  };
+}

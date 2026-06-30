@@ -8,9 +8,9 @@ The first executable slice has these files:
 
 | Path | Current status |
 | --- | --- |
-| `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared helpers for argv parsing, soak-user validation, offline Playwright readiness, report writing, artifact paths, redaction, and status handling. Auth, storage probes, served-extension checks, live browser smoke, and runtime snapshots are still deferred. |
+| `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared helpers for argv parsing, soak-user validation, offline Playwright readiness, SillyTavern HTTP auth, storage probes, report writing, artifact paths, redaction, and status handling. Served-extension checks, live browser smoke, and runtime snapshots are still deferred. |
 | `tools/scripts/check-playwright-readiness.mjs` | Offline browser readiness probe. It dynamically imports Playwright, launches Chromium when available, drives a local fixture, and never contacts SillyTavern. |
-| `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety preflight. It rejects unsafe users before mutation and reports storage isolation as `manual-required` when `--live` is requested. |
+| `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety and storage preflight. It rejects unsafe users before mutation, logs into dedicated users, writes/reads/verifies/deletes Recursion-owned probe files, and checks cross-user isolation when two or more users are configured. |
 | `tools/scripts/smoke-sillytavern-live.mjs` | Focused smoke guardrail. It validates the dedicated user and base URL gate, then reports browser smoke as `manual-required` until live browser work is implemented. |
 | `tools/scripts/test-live-harness.mjs` | Deterministic contract tests for the guardrail behavior. |
 
@@ -122,9 +122,9 @@ Reports must distinguish `served-extension-match`, `served-extension-mismatch`, 
 
 ## Multi-User Isolation Flow
 
-The current first-slice `check-sillytavern-soak-users.mjs` validates configured handles and writes guardrail reports. Without `--live`, missing users are a skipped dry-run checklist. With `--live`, unsafe users return `unsafe-user` before mutation; safe users return `manual-required` until authenticated storage probes are implemented.
+`check-sillytavern-soak-users.mjs` validates configured handles and writes guardrail reports. Without `--live`, missing users are a skipped dry-run checklist. With `--live`, unsafe users return `unsafe-user` before mutation. Safe users authenticate through SillyTavern, write/read/verify/delete Recursion-owned probe files, and report `environment-fail` if auth or host setup prevents the check.
 
-The target implementation should prove that dedicated users are isolated before broader live checks:
+The implementation proves dedicated users are isolated before broader live checks:
 
 1. Parse `RECURSION_SOAK_ST_USERS`.
 2. Require at least one user and reject any unsafe handle.
@@ -147,6 +147,8 @@ The probe payload should be small and harmless:
 ```
 
 The probe must use a Recursion-owned logical key or filename prefix and must not touch chat files, character files, World Info, Memory Books, Summaryception, VectFox, or non-Recursion extension files.
+
+When only one user is configured, the script verifies that user's storage but emits a warning because cross-user isolation cannot be evaluated.
 
 ## Live Smoke Browser Flow
 

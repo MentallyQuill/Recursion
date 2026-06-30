@@ -32,7 +32,7 @@ It launches offline Playwright readiness, but does not contact SillyTavern, muta
 
 ## Current Guardrail Commands
 
-The commands in this section currently prove safety gates, report shape, and offline Playwright readiness when Playwright is installed. They do not contact SillyTavern unless a live script is run with `--live`. Live scripts reject unsafe users before mutation and return `manual-required` for deferred browser/storage work.
+The commands in this section currently prove safety gates, report shape, offline Playwright readiness, and dedicated-user storage probes. They do not contact SillyTavern unless a live script is run with `--live`. Live scripts reject unsafe users before mutation. The focused UI smoke command still returns `manual-required` for deferred browser work.
 
 Offline Playwright readiness:
 
@@ -42,13 +42,15 @@ node tools\scripts\check-playwright-readiness.mjs --write-artifacts
 
 Use `--dry-run` when you want a no-op readiness checklist without importing Playwright.
 
-Dedicated user isolation guardrail:
+Dedicated user storage and isolation preflight:
 
 ```powershell
 $env:SILLYTAVERN_BASE_URL='http://127.0.0.1:8000'
 $env:RECURSION_SOAK_ST_USERS='recursion-soak-a,recursion-soak-b,recursion-soak-c'
 node tools\scripts\check-sillytavern-soak-users.mjs --live --write-artifacts
 ```
+
+This command logs into each dedicated user, writes one Recursion-owned probe file, verifies readback, checks that other users cannot see the probe, and deletes the probe files. If the dedicated users do not exist or credentials are wrong, it returns `environment-fail` before broader smoke runs.
 
 No-generation live UI and storage smoke target:
 

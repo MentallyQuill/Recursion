@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { redact, safeId } from '../../../src/core.mjs';
 
@@ -179,6 +179,306 @@ function redactHarnessValue(value) {
     }
   }
   return visit(keyed);
+}
+
+function encodeBase64Utf8(text) {
+  return Buffer.from(String(text ?? ''), 'utf8').toString('base64');
+}
+
+function normalizeBaseUrl(value) {
+  const source = String(value ?? '').trim();
+  if (!source) {
+    const error = new Error('SILLYTAVERN_BASE_URL is required.');
+    error.status = 'environment-fail';
+    error.result = 'missing-base-url';
+    throw error;
+  }
+  try {
+    const url = new URL(source);
+    url.hash = '';
+    url.search = '';
+    return url.href.replace(/\/+$/, '');
+  } catch {
+    const error = new Error('SILLYTAVERN_BASE_URL must be a valid URL.');
+    error.status = 'environment-fail';
+    error.result = 'invalid-base-url';
+    throw error;
+  }
+}
+
+function cookiePairsFromHeader(value) {
+  if (!value) return [];
+  return String(value)
+    .split(/,(?=\s*[^;,=\s]+=[^;,]+)/)
+    .map((entry) => entry.trim().split(';')[0])
+    .filter((entry) => entry.includes('='));
+}
+
+function responseSetCookies(response) {
+  if (typeof response?.headers?.getSetCookie === 'function') {
+    return response.headers.getSetCookie().flatMap((entry) => cookiePairsFromHeader(entry));
+  }
+  const header = typeof response?.headers?.get === 'function' ? response.headers.get('set-cookie') : null;
+  return cookiePairsFromHeader(header);
+}
+
+async function parseResponseBody(response) {
+  const text = typeof response?.text === 'function' ? await response.text() : '';
+  if (!text) return { text: '', json: null };
+  try {
+    return { text, json: JSON.parse(text) };
+  } catch {
+    return { text, json: null };
+  }
+}
+
+function passwordEnvKey(user) {
+  return `RECURSION_SILLYTAVERN_PASSWORD_${String(user).toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+}
+
+function passwordForUser(user, env) {
+  return env[passwordEnvKey(user)] ?? env.RECURSION_SILLYTAVERN_PASSWORD ?? '';
+}
+
+function storageProbeFileName(runId, user) {
+  return `recursion-live-probe-${safeId(runId, 'run')}-${safeId(user, 'user')}.json`;
+}
+
+function createProbePayload({ runId, user }) {
+  return {
+    recordType: 'recursion.liveProbe',
+    schemaVersion: 1,
+    runId,
+    owner: user,
+    createdAt: nowIso()
+  };
+}
+
+export function createSillyTavernHttpSession({ baseUrl, user, password = '', fetchImpl = globalThis.fetch } = {}) {
+  if (typeof fetchImpl !== 'function') {
+    const error = new Error('fetch is not available.');
+    error.status = 'environment-fail';
+    error.result = 'fetch-unavailable';
+    throw error;
+  }
+  const root = normalizeBaseUrl(baseUrl);
+  const cookies = new Map();
+  let csrfToken = '';
+
+  function applyCookies(response) {
+    for (const pair of responseSetCookies(response)) {
+      const [name, ...rest] = pair.split('=');
+      if (name && rest.length) cookies.set(name.trim(), rest.join('=').trim());
+    }
+  }
+
+  function cookieHeader() {
+    return [...cookies.entries()].map(([key, value]) => `${key}=${value}`).join('; ');
+  }
+
+  async function request(path, { method = 'GET', body = null, csrf = false } = {}) {
+    const headers = {};
+    const cookie = cookieHeader();
+    if (cookie) headers.Cookie = cookie;
+    if (body !== null) headers['Content-Type'] = 'application/json';
+    if (csrf && csrfToken) headers['X-CSRF-Token'] = csrfToken;
+    const response = await fetchImpl(`${root}${path}`, {
+      method,
+      headers,
+      body: body === null ? undefined : JSON.stringify(body)
+    });
+    applyCookies(response);
+    const parsed = await parseResponseBody(response);
+    return {
+      ok: Boolean(response?.ok),
+      status: Number(response?.status) || 0,
+      json: parsed.json,
+      text: parsed.text
+    };
+  }
+
+  async function assertOk(response, action, result) {
+    if (response.ok) return response;
+    const error = new Error(`${action} failed with HTTP ${response.status}`);
+    error.status = response.status === 403 || response.status === 401 ? 'environment-fail' : 'fail';
+    error.result = result;
+    error.httpStatus = response.status;
+    throw error;
+  }
+
+  return {
+    user,
+    async init() {
+      const response = await request('/csrf-token');
+      await assertOk(response, 'csrf-token', 'csrf-failed');
+      csrfToken = String(response.json?.token || '');
+      if (!csrfToken) {
+        const error = new Error('CSRF token was missing.');
+        error.status = 'environment-fail';
+        error.result = 'csrf-missing';
+        throw error;
+      }
+    },
+    async login() {
+      if (!csrfToken) await this.init();
+      const response = await request('/api/users/login', {
+        method: 'POST',
+        csrf: true,
+        body: { handle: user, password }
+      });
+      await assertOk(response, 'login', 'login-failed');
+      return response.json;
+    },
+    async uploadJson(fileName, value) {
+      const response = await request('/api/files/upload', {
+        method: 'POST',
+        csrf: true,
+        body: { name: fileName, data: encodeBase64Utf8(JSON.stringify(value)) }
+      });
+      await assertOk(response, 'file-upload', 'file-upload-failed');
+      return response.json;
+    },
+    async verify(paths) {
+      const response = await request('/api/files/verify', {
+        method: 'POST',
+        csrf: true,
+        body: { urls: paths }
+      });
+      await assertOk(response, 'file-verify', 'file-verify-failed');
+      return response.json || {};
+    },
+    async readJson(fileName) {
+      const response = await request(`/user/files/${encodeURIComponent(fileName)}`);
+      await assertOk(response, 'file-read', 'file-read-failed');
+      if (!response.json) {
+        const error = new Error('Probe file did not contain JSON.');
+        error.status = 'fail';
+        error.result = 'file-read-invalid-json';
+        throw error;
+      }
+      return response.json;
+    },
+    async deleteFile(fileName) {
+      const response = await request('/api/files/delete', {
+        method: 'POST',
+        csrf: true,
+        body: { path: `/user/files/${fileName}` }
+      });
+      if (response.status === 404) return { missing: true };
+      await assertOk(response, 'file-delete', 'file-delete-failed');
+      return { deleted: true };
+    }
+  };
+}
+
+async function runStorageProbeSuite({ baseUrl, users, env = {}, fetchImpl = globalThis.fetch, runId }) {
+  const sessions = [];
+  const probes = [];
+  const cleanup = [];
+  let outcome = null;
+
+  async function cleanupProbes() {
+    for (const probe of probes) {
+      try {
+        const result = await probe.session.deleteFile(probe.fileName);
+        cleanup.push({ user: probe.user, fileName: probe.fileName, status: result.deleted ? 'deleted' : 'missing' });
+      } catch (error) {
+        cleanup.push({ user: probe.user, fileName: probe.fileName, status: 'failed', result: error?.result || 'cleanup-failed' });
+      }
+    }
+  }
+
+  try {
+    for (const user of users) {
+      const session = createSillyTavernHttpSession({
+        baseUrl,
+        user,
+        password: passwordForUser(user, env),
+        fetchImpl
+      });
+      await session.init();
+      await session.login();
+      sessions.push(session);
+    }
+
+    for (const session of sessions) {
+      const user = session.user;
+      const fileName = storageProbeFileName(runId, user);
+      const payload = createProbePayload({ runId, user });
+      await session.uploadJson(fileName, payload);
+      probes.push({ user, fileName, path: `/user/files/${fileName}`, session, payload });
+    }
+
+    for (const probe of probes) {
+      const verified = await probe.session.verify([probe.path]);
+      if (verified[probe.path] !== true) {
+        const error = new Error('Own storage probe did not verify.');
+        error.status = 'fail';
+        error.result = 'storage-probe-own-missing';
+        throw error;
+      }
+      const readBack = await probe.session.readJson(probe.fileName);
+      if (readBack?.recordType !== 'recursion.liveProbe' || readBack?.runId !== runId || readBack?.owner !== probe.user) {
+        const error = new Error('Own storage probe readback did not match expected metadata.');
+        error.status = 'fail';
+        error.result = 'storage-probe-readback-mismatch';
+        throw error;
+      }
+    }
+
+    const isolationChecks = [];
+    if (probes.length > 1) {
+      for (const probe of probes) {
+        const otherPaths = probes.filter((entry) => entry.user !== probe.user).map((entry) => entry.path);
+        const verified = await probe.session.verify(otherPaths);
+        for (const otherPath of otherPaths) {
+          const isolated = verified[otherPath] !== true;
+          isolationChecks.push({ user: probe.user, path: otherPath, isolated });
+          if (!isolated) {
+            const error = new Error('Cross-user storage probe was visible.');
+            error.status = 'fail';
+            error.result = 'storage-probe-isolation-failed';
+            throw error;
+          }
+        }
+      }
+    }
+
+    outcome = {
+      status: 'pass',
+      result: 'storage-probe-pass',
+      users,
+      probes: probes.map((probe) => ({ user: probe.user, fileName: probe.fileName, path: probe.path })),
+      isolationChecks,
+      warnings: probes.length > 1 ? [] : [{ name: 'single-user-probe', status: 'warn', summary: 'Only one soak user was configured; cross-user isolation was not evaluated.' }]
+    };
+  } catch (error) {
+    outcome = {
+      status: error?.status || 'environment-fail',
+      result: error?.result || 'storage-probe-failed',
+      users,
+      probes: probes.map((probe) => ({ user: probe.user, fileName: probe.fileName, path: probe.path })),
+      error: {
+        name: error?.name,
+        result: error?.result,
+        httpStatus: error?.httpStatus
+      }
+    };
+  } finally {
+    await cleanupProbes();
+    if (outcome?.status === 'pass' && cleanup.some((entry) => entry.status === 'failed')) {
+      outcome.status = 'fail';
+      outcome.result = 'storage-probe-cleanup-failed';
+      outcome.error = {
+        result: 'storage-probe-cleanup-failed'
+      };
+    }
+    for (const session of sessions) {
+      if (typeof session.close === 'function') await session.close();
+    }
+    if (outcome) outcome.cleanup = cleanup;
+  }
+  return outcome;
 }
 
 export function createBaseReport({ scriptName, args = {}, env = {}, runId = createRunId(scriptName) } = {}) {
@@ -363,6 +663,29 @@ export function prepareArtifactRunDirectory(report, options = {}) {
       ok: false,
       report: finalizeReport(report)
     };
+  }
+}
+
+function writeJsonArtifact(report, artifactLocation, relativePath, value) {
+  try {
+    const safeRelativePath = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    const target = join(artifactLocation.dir, safeRelativePath);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, `${JSON.stringify(redactHarnessValue(value), null, 2)}\n`, 'utf8');
+    return safeRelativePath;
+  } catch (error) {
+    addCheck(report, {
+      name: 'artifact-write',
+      status: 'environment-fail',
+      summary: 'Artifact write failed.',
+      details: {
+        name: error?.name,
+        code: error?.code
+      }
+    });
+    setReportStatus(report, 'environment-fail', 'artifact-write-failed');
+    report.nextAction = 'Set RECURSION_ARTIFACT_DIR to a writable directory or omit --write-artifacts.';
+    return null;
   }
 }
 
@@ -573,7 +896,7 @@ export async function runPlaywrightReadiness({
   return report;
 }
 
-export async function runSoakUsersPreflight({ argv = [], env = process.env, artifactRoot } = {}) {
+export async function runSoakUsersPreflight({ argv = [], env = process.env, artifactRoot, fetchImpl = globalThis.fetch } = {}) {
   const args = parseHarnessArgs(argv);
   let report = createBaseReport({ scriptName: 'check-sillytavern-soak-users', args, env });
   if (args.liveRequested && args.dryRunRequested) {
@@ -626,13 +949,43 @@ export async function runSoakUsersPreflight({ argv = [], env = process.env, arti
     setReportStatus(report, 'environment-fail', 'missing-base-url');
     report.nextAction = 'Set SILLYTAVERN_BASE_URL before attempting guarded live checks.';
   } else {
+    const artifactLocation = args.writeArtifacts
+      ? prepareArtifactRunDirectory(report, { artifactRoot, family: 'live-smoke/sillytavern' })
+      : null;
+    if (artifactLocation && !artifactLocation.ok) return artifactLocation.report;
+
+    const probeResult = await runStorageProbeSuite({
+      baseUrl: env.SILLYTAVERN_BASE_URL,
+      users: configured.users,
+      env,
+      fetchImpl,
+      runId: report.runId
+    });
+    report.storageProbe = probeResult;
+    for (const warning of probeResult.warnings || []) report.warnings.push(warning);
     addCheck(report, {
       name: 'storage-isolation-probe',
-      status: 'manual-required',
-      summary: 'Dedicated-user storage mutation is guarded but not implemented in this slice.'
+      status: probeResult.status,
+      summary: probeResult.status === 'pass'
+        ? 'Dedicated-user storage probe completed.'
+        : 'Dedicated-user storage probe failed before live smoke.',
+      details: {
+        result: probeResult.result,
+        users: probeResult.users,
+        probeCount: probeResult.probes?.length || 0,
+        isolationChecks: probeResult.isolationChecks?.length || 0,
+        cleanup: probeResult.cleanup || [],
+        error: probeResult.error
+      }
     });
-    setReportStatus(report, 'manual-required', 'storage-probe-not-implemented');
-    report.nextAction = 'Implement authenticated user-file storage probes before claiming live isolation evidence.';
+    setReportStatus(report, probeResult.status, probeResult.result);
+    report.nextAction = probeResult.status === 'pass'
+      ? 'Storage probe passed; live UI smoke can run after served-extension checks are implemented.'
+      : 'Create dedicated recursion-soak-* users, verify credentials, and rerun the storage preflight.';
+    if (artifactLocation?.ok) {
+      const probePath = writeJsonArtifact(report, artifactLocation, 'storage/probe.json', probeResult);
+      if (probePath) report.artifacts = { ...(report.artifacts || {}), storageProbe: probePath };
+    }
   }
 
   report = finalizeReport(report);

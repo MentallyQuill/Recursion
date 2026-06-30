@@ -1,3 +1,3 @@
 # User Guides
 
-Use this folder for setup, configuration, and usage documentation once Recursion has a working runtime.
+- [Recursion V1 Operator Guide](RECURSION_V1_OPERATOR_GUIDE.md)

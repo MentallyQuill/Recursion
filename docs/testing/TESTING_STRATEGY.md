@@ -5,10 +5,10 @@ Recursion testing should prove the extension is useful and safe without turning 
 | Layer | What it proves | Primary evidence |
 | --- | --- | --- |
 | Fast contract suite | Runtime contracts, schemas, card lifecycle, provider routing, storage, redaction, and prompt packet rules work without a live host. | Maintained deterministic gate: `node tools\scripts\run-alpha-gate.mjs`; focused scripts: `tools/scripts/test-*.mjs`. |
-| Playwright readiness | The local machine can launch and control Chromium, use resilient locators, switch desktop and phone viewports, and write trace/screenshot artifacts. | Future live-harness target evidence: `check-playwright-readiness` report, trace, and viewport screenshots. |
-| Focused live SillyTavern smoke | The installed or served Recursion extension mounts in a real SillyTavern chat, observes turns, reports invisible work, injects and clears prompt packets, persists sanitized cache data, and fails softly. | Future live-harness target evidence: `smoke-sillytavern-live` report, Activity Ribbon evidence, screenshots, prompt packet hashes, run journal events, and storage probes. |
+| Playwright readiness | Current guardrail proves the readiness command is safe, dependency-light, and honest about deferred browser work. Target probe will prove Chromium launch/control, resilient locators, desktop/phone viewports, and trace/screenshot artifacts. | Current guardrail evidence: dependency-light `check-playwright-readiness` dry-run report. Future browser evidence: readiness report, trace, and viewport screenshots. |
+| Focused live SillyTavern smoke | Current guardrail proves dedicated-user rejection, dry-run behavior, report shape, and fail-closed semantics before mutation. Target smoke will prove the installed or served extension mounts, observes turns, reports invisible work, injects and clears prompt packets, persists sanitized cache data, and fails softly. | Current guardrail evidence: `check-sillytavern-soak-users` and `smoke-sillytavern-live` safety reports. Future live evidence: Activity Ribbon evidence, screenshots, prompt packet hashes, run journal events, and storage probes. |
 
-The fast contract suite is the normal maintained confidence gate in this checkout. Playwright and live SillyTavern harness commands are specified as V1 target contracts until their scripts exist; they are reserved for host behavior, UI behavior, prompt injection timing, and storage behavior that cannot be proven through a fake host.
+The fast contract suite is the normal maintained confidence gate in this checkout. The first live-harness scripts exist as guardrails only: they validate dedicated users, dry-run behavior, report shape, artifact paths, and fail-closed semantics. Real browser, storage, prompt-injection timing, and SillyTavern UI evidence remain future live-harness work.
 
 ## Core Invariants
 
@@ -57,7 +57,7 @@ Focused contract tests should use deterministic fixtures and fake provider respo
 
 ## Playwright Readiness
 
-The Playwright readiness probe is a future target command and must not contact SillyTavern. It proves that browser automation is available before any live chat, user file, prompt, or provider state is touched.
+The current Playwright readiness command is a dependency-light guardrail and must not contact SillyTavern. It does not yet prove browser automation. The target readiness probe proves that browser automation is available before any live chat, user file, prompt, or provider state is touched.
 
 The readiness probe should:
 
@@ -72,7 +72,7 @@ Readiness failures are environment failures, not Recursion runtime failures.
 
 ## Live SillyTavern Smoke
 
-The live smoke is a future target command for proving Recursion in the real host. It should be focused and repeatable, not a Directive-style campaign certification run.
+The current live smoke command is a guardrail script that validates safe user configuration and fails closed before mutation. The target live smoke proves Recursion in the real host. It should be focused and repeatable, not a Directive-style campaign certification run.
 
 Live smoke must start with these gates:
 

@@ -28,19 +28,19 @@ The maintained automated gate in this checkout is the dependency-light local con
 node tools\scripts\run-alpha-gate.mjs
 ```
 
-It does not launch Playwright, contact SillyTavern, mutate chat state, or produce live-smoke artifacts. It is the current release-review evidence until the live harness scripts named below are implemented.
+It does not launch Playwright, contact SillyTavern, mutate chat state, or produce live-smoke artifacts. It includes deterministic coverage for the first live-harness guardrail slice.
 
-## Future Live-Harness Commands
+## Current Guardrail Commands
 
-The commands in this section are V1 target contracts for the live harness. They are not current deterministic evidence unless the corresponding script exists in `tools/scripts/` in the checkout under review.
+The commands in this section currently prove safety gates and report shape, not real browser or SillyTavern behavior. Without `--live`, they write dry-run reports and do not contact SillyTavern. With `--live`, they reject unsafe users before mutation and return `manual-required` for deferred browser/storage work.
 
-Offline Playwright readiness:
+Dependency-light Playwright readiness guardrail:
 
 ```powershell
 node tools\scripts\check-playwright-readiness.mjs --write-artifacts
 ```
 
-Dedicated user isolation:
+Dedicated user isolation guardrail:
 
 ```powershell
 $env:SILLYTAVERN_BASE_URL='http://127.0.0.1:8000'
@@ -48,7 +48,7 @@ $env:RECURSION_SOAK_ST_USERS='recursion-soak-a,recursion-soak-b,recursion-soak-c
 node tools\scripts\check-sillytavern-soak-users.mjs --live --write-artifacts
 ```
 
-No-generation live UI and storage smoke:
+No-generation live UI and storage smoke target:
 
 ```powershell
 $env:SILLYTAVERN_BASE_URL='http://127.0.0.1:8000'
@@ -75,7 +75,7 @@ $env:RECURSION_LIVE_REASONER='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts --strict
 ```
 
-When implemented, these commands must keep the dedicated `recursion-soak-*` safety policy and must reject unsafe users before any state mutation.
+The current `smoke-sillytavern-live.mjs` command stops at guardrail checks. Later live-browser implementation must keep the dedicated `recursion-soak-*` safety policy and must reject unsafe users before any state mutation.
 
 ## Scenario Matrix
 

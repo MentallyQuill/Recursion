@@ -18,6 +18,10 @@
     "test:prompt": "node tools/scripts/test-prompt.mjs",
     "test:runtime": "node tools/scripts/test-runtime.mjs",
     "test:ui": "node tools/scripts/test-ui.mjs",
-    "test:host": "node tools/scripts/test-host.mjs"
+    "test:host": "node tools/scripts/test-host.mjs",
+    "test:live-harness": "node tools/scripts/test-live-harness.mjs",
+    "check:playwright": "node tools/scripts/check-playwright-readiness.mjs",
+    "check:soak-users": "node tools/scripts/check-sillytavern-soak-users.mjs",
+    "smoke:sillytavern": "node tools/scripts/smoke-sillytavern-live.mjs"
   }
 }

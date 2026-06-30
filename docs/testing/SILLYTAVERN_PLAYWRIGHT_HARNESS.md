@@ -2,16 +2,17 @@
 
 The Recursion Playwright harness is the shared test utility layer for browser readiness checks and focused live SillyTavern smoke tests. It borrows Directive's useful testing discipline while keeping Recursion's scope smaller: prove host integration, visible status, prompt injection, storage probes, and fail-soft behavior.
 
-## Future Target Files
+## Current Guardrail Files
 
-The implementation should create these files:
+The first executable slice has these files:
 
-| Path | Purpose |
+| Path | Current status |
 | --- | --- |
-| `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared Playwright, auth, artifact, storage-probe, screenshot, redaction, and served-extension helpers. |
-| `tools/scripts/check-playwright-readiness.mjs` | Offline browser-control preflight. It does not contact SillyTavern. |
-| `tools/scripts/check-sillytavern-soak-users.mjs` | Live user isolation and storage-probe preflight for dedicated `recursion-soak-*` users. |
-| `tools/scripts/smoke-sillytavern-live.mjs` | Focused live Recursion smoke runner. |
+| `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared guardrail helpers for argv parsing, soak-user validation, report writing, artifact paths, redaction, and first-slice status handling. Playwright, auth, storage probes, screenshots, traces, served-extension checks, and runtime snapshots are still deferred. |
+| `tools/scripts/check-playwright-readiness.mjs` | Dependency-light readiness guardrail. It does not import Playwright, contact SillyTavern, or claim browser readiness yet. |
+| `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety preflight. It rejects unsafe users before mutation and reports storage isolation as `manual-required` when `--live` is requested. |
+| `tools/scripts/smoke-sillytavern-live.mjs` | Focused smoke guardrail. It validates the dedicated user and base URL gate, then reports browser smoke as `manual-required` until live browser work is implemented. |
+| `tools/scripts/test-live-harness.mjs` | Deterministic contract tests for the guardrail behavior. |
 
 The harness should be a library, not a second runtime. Runtime behavior stays in `src/`; the harness drives the public host/UI surface and reads documented diagnostics.
 
@@ -35,6 +36,10 @@ Common environment variables:
 | `RECURSION_CONFIRM_EXTENSION_SYNCED` | Operator acknowledgement used only when the served-extension hash check cannot run. Reports must mark this as weaker than hash proof. |
 
 Scripts should print a dry-run checklist when required live variables are missing. State-mutating scripts must fail before mutation when no dedicated user is configured. No live script may infer, create, or select `default-user` as a fallback.
+
+If `--dry-run` is passed with `--live`, dry-run wins and the report must include a warning. This keeps an explicit safety flag from being bypassed by a broader command alias.
+
+`--strict` and `RECURSION_LIVE_STRICT=1` both enable strict mode in reports.
 
 ## Dedicated User Policy
 
@@ -64,9 +69,17 @@ The live harness should expose a `normalizeSoakUserHandle(value)` helper and a `
 
 This is a hard safety gate, not a warning. If the selected user is missing, empty, `default-user`, an alias for the default profile, or does not match the dedicated soak-user pattern, the script must return `unsafe-user` and stop before mutating SillyTavern state.
 
+Multi-user checks must also reject duplicate normalized handles. `recursion-soak-a,recursion-soak-a` is unsafe because it cannot prove cross-user isolation.
+
 ## Browser Readiness Flow
 
-`check-playwright-readiness.mjs` should:
+The current first-slice command writes a dry-run report and exits successfully without importing Playwright:
+
+```powershell
+node tools\scripts\check-playwright-readiness.mjs --write-artifacts
+```
+
+If forced with `--live`, it returns `manual-required` because browser launch is not implemented in this slice. The target implementation should:
 
 1. Create a run id.
 2. Launch Playwright Chromium.
@@ -81,11 +94,7 @@ This is a hard safety gate, not a warning. If the selected user is missing, empt
 11. Stop a Playwright trace when artifact capture is enabled.
 12. Write `report.json` and `summary.md`.
 
-When implemented, this command must be safe to run before SillyTavern starts:
-
-```powershell
-node tools\scripts\check-playwright-readiness.mjs --write-artifacts
-```
+The final command must remain safe to run before SillyTavern starts.
 
 ## Live Preflight Flow
 
@@ -113,7 +122,9 @@ Reports must distinguish `served-extension-match`, `served-extension-mismatch`, 
 
 ## Multi-User Isolation Flow
 
-`check-sillytavern-soak-users.mjs` should prove that dedicated users are isolated before broader live checks:
+The current first-slice `check-sillytavern-soak-users.mjs` validates configured handles and writes guardrail reports. Without `--live`, missing users are a skipped dry-run checklist. With `--live`, unsafe users return `unsafe-user` before mutation; safe users return `manual-required` until authenticated storage probes are implemented.
+
+The target implementation should prove that dedicated users are isolated before broader live checks:
 
 1. Parse `RECURSION_SOAK_ST_USERS`.
 2. Require at least one user and reject any unsafe handle.

@@ -333,6 +333,80 @@ async function withTimeout(operation, request, timeoutMs, externalSignal = null)
   }
 }
 
+function composeAbortSignal(signals = []) {
+  const activeSignals = signals.filter((signal) => signal && typeof signal.addEventListener === 'function');
+  if (activeSignals.length === 0) return { signal: undefined, cleanup: () => {} };
+  if (activeSignals.length === 1) return { signal: activeSignals[0], cleanup: () => {} };
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  if (!controller) return { signal: activeSignals[0], cleanup: () => {} };
+
+  const cleanupHandlers = [];
+  const abort = () => controller.abort();
+  for (const signal of activeSignals) {
+    if (signal.aborted) {
+      controller.abort();
+      continue;
+    }
+    signal.addEventListener('abort', abort, { once: true });
+    cleanupHandlers.push(() => signal.removeEventListener('abort', abort));
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      for (const cleanup of cleanupHandlers) cleanup();
+    }
+  };
+}
+
+async function withBatchTimeout(operation, requests, timeoutMs, externalSignal = null) {
+  if (externalSignal?.aborted) throw abortError();
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  let timeoutId = null;
+  let removeAbortListener = () => {};
+  const signalCleanups = [];
+
+  const timeoutPromise = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller?.abort?.();
+        reject(timeoutError(timeoutMs));
+      }, timeoutMs);
+    })
+    : null;
+
+  const abortPromise = externalSignal
+    ? new Promise((_, reject) => {
+      const onAbort = () => {
+        controller?.abort?.();
+        reject(abortError());
+      };
+      externalSignal.addEventListener('abort', onAbort, { once: true });
+      removeAbortListener = () => externalSignal.removeEventListener('abort', onAbort);
+    })
+    : null;
+
+  const requestsWithSignals = requests.map((request) => {
+    const composed = composeAbortSignal([controller?.signal, request.signal]);
+    signalCleanups.push(composed.cleanup);
+    return composed.signal ? { ...request, signal: composed.signal } : { ...request };
+  });
+
+  try {
+    const generation = operation(requestsWithSignals);
+    const racers = [generation];
+    if (timeoutPromise) racers.push(timeoutPromise);
+    if (abortPromise) racers.push(abortPromise);
+    return await Promise.race(racers);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    removeAbortListener();
+    for (const cleanup of signalCleanups) cleanup();
+  }
+}
+
 function diagnosticsBase({ roleId, lane, request, runId, startedAt }) {
   return sanitize({
     runId,
@@ -352,6 +426,17 @@ export function roleLane(roleId) {
 
 export function parseStructuredOutput(text) {
   return parseJsonObject(text);
+}
+
+function parseProviderStructuredOutput(text) {
+  try {
+    return parseStructuredOutput(text);
+  } catch (error) {
+    if (error?.code === 'RECURSION_JSON_PARSE_FAILED' || error?.code === 'RECURSION_JSON_OBJECT_REQUIRED') {
+      throw providerError(error.code, 'Provider output was not a valid JSON object.', { retryable: false, cause: error });
+    }
+    throw error;
+  }
 }
 
 export function createProviderClient({ host = null, settingsStore = null, fetchImpl = globalThis.fetch } = {}) {
@@ -535,7 +620,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
           options.timeoutMs ?? timeoutMs,
           options.signal || request.signal || null
         );
-        const data = parseStructuredOutput(raw.text);
+        const data = parseProviderStructuredOutput(raw.text);
         const latencyMs = Date.now() - started;
         const diagnostics = sanitize({
           ...lastDiagnostics,
@@ -631,11 +716,167 @@ export function createGenerationRouter({ client, activity = null, journal = null
   }
 
   async function batch(requests = [], options = {}) {
-    const results = [];
-    for (const entry of requests) {
-      const { roleId, request } = normalizeBatchRequest(entry);
-      results.push(await generate(roleId, request, options));
+    if (typeof client.batch !== 'function') {
+      const results = [];
+      for (const entry of requests) {
+        const { roleId, request } = normalizeBatchRequest(entry);
+        results.push(await generate(roleId, request, options));
+      }
+      return results;
     }
+
+    const batchRunId = String(options.runId || makeId('provider-batch'));
+    const entries = requests.map((entry, index) => {
+      const { roleId, request } = normalizeBatchRequest(entry);
+      const lane = laneName(requestLane(roleId, request));
+      const started = Date.now();
+      const startedAt = nowIso();
+      const diagnostics = diagnosticsBase({ roleId, lane, request, runId: batchRunId, startedAt });
+      activityStart(activity, {
+        runId: batchRunId,
+        phase: 'providerCallStarted',
+        mode: 'background',
+        severity: 'info',
+        providerLane: lane,
+        composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
+        label: `${lane === 'reasoner' ? 'Reasoner' : 'Utility'} provider batch call started.`,
+        detail: diagnostics
+      });
+      return { index, roleId, request, lane, started, startedAt, diagnostics };
+    });
+    const results = new Array(entries.length);
+
+    function failureResult(entry, error) {
+      const safeError = sanitizedError(error, entry.request);
+      const diagnostics = sanitize({
+        ...entry.diagnostics,
+        retryCount: 0,
+        latencyMs: Date.now() - entry.started,
+        error: safeError,
+        status: statusForError(error),
+        failedAt: nowIso()
+      }, 300);
+      journalAppend(journal, {
+        ...diagnostics,
+        status: statusForError(error),
+        recordedAt: nowIso()
+      });
+      return {
+        ok: false,
+        roleId: entry.roleId,
+        lane: entry.lane,
+        error: safeError,
+        diagnostics
+      };
+    }
+
+    function successResult(entry, raw) {
+      const data = parseProviderStructuredOutput(raw?.text);
+      const diagnostics = sanitize({
+        ...entry.diagnostics,
+        providerSource: raw?.providerSource,
+        providerId: raw?.providerId,
+        model: raw?.model,
+        responseId: raw?.responseId,
+        responseHash: responseTextHash(raw?.text),
+        schema: data.schema,
+        retryCount: 0,
+        latencyMs: Date.now() - entry.started,
+        completedAt: nowIso()
+      }, 300);
+
+      journalAppend(journal, {
+        ...diagnostics,
+        status: 'success',
+        recordedAt: nowIso()
+      });
+
+      return {
+        ok: true,
+        roleId: entry.roleId,
+        lane: entry.lane,
+        data,
+        text: String(raw?.text ?? ''),
+        diagnostics
+      };
+    }
+
+    function settleBatchActivity() {
+      if (!results.length) return;
+      const completed = results.filter(Boolean);
+      const failed = completed.filter((entry) => entry.ok === false).length;
+      const succeeded = completed.filter((entry) => entry.ok === true).length;
+      const outcome = failed === 0 ? 'success' : (succeeded > 0 ? 'warning' : 'error');
+      const representative = completed.find((entry) => entry.ok === false) || completed[0];
+      activitySettle(activity, {
+        runId: batchRunId,
+        phase: 'settled',
+        outcome,
+        providerLane: representative?.lane || null,
+        composerLane: representative?.lane === 'reasoner' ? 'reasoner' : 'utility',
+        label: failed === 0 ? 'Provider batch call completed.' : 'Provider batch completed with warnings.',
+        detail: {
+          total: completed.length,
+          succeeded,
+          failed
+        }
+      });
+    }
+
+    const pendingEntries = [];
+    for (const entry of entries) {
+      if (entry.request.signal?.aborted) {
+        results[entry.index] = failureResult(entry, abortError());
+        continue;
+      }
+      pendingEntries.push(entry);
+      activityStage(activity, {
+        runId: batchRunId,
+        phase: 'providerCallRunning',
+        severity: 'info',
+        providerLane: entry.lane,
+        composerLane: entry.lane === 'reasoner' ? 'reasoner' : 'utility',
+        label: 'Provider batch call running.',
+        detail: { roleId: entry.roleId, lane: entry.lane, batchIndex: entry.index }
+      });
+    }
+
+    if (pendingEntries.length === 0) {
+      settleBatchActivity();
+      return results;
+    }
+
+    let rawResponses;
+    try {
+      rawResponses = await withBatchTimeout(
+        (requestsWithSignals) => client.batch(requestsWithSignals),
+        pendingEntries.map((entry) => ({ roleId: entry.roleId, ...entry.request })),
+        options.timeoutMs ?? timeoutMs,
+        options.signal || null
+      );
+      if (!Array.isArray(rawResponses) || rawResponses.length !== pendingEntries.length) {
+        throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Provider batch response shape did not match request batch.', {
+          retryable: false
+        });
+      }
+    } catch (error) {
+      for (const entry of pendingEntries) {
+        results[entry.index] = failureResult(entry, error);
+      }
+      settleBatchActivity();
+      return results;
+    }
+
+    rawResponses.forEach((raw, batchIndex) => {
+      const entry = pendingEntries[batchIndex];
+      try {
+        results[entry.index] = successResult(entry, raw);
+      } catch (error) {
+        results[entry.index] = failureResult(entry, error);
+      }
+    });
+
+    settleBatchActivity();
     return results;
   }
 

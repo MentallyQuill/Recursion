@@ -106,7 +106,7 @@ function reasonerState(view, activity) {
     return 'Composing';
   }
   if (!reasoner) return 'Unavailable';
-  if (reasoner.lastTest?.status && !['ok', 'passed', 'ready', 'not-run'].includes(cleanText(reasoner.lastTest.status).toLowerCase())) {
+  if (reasoner.lastTest?.status && !['ok', 'pass', 'passed', 'ready', 'not-run'].includes(cleanText(reasoner.lastTest.status).toLowerCase())) {
     return 'Issue';
   }
   return reasoner.enabled === true ? 'Available' : 'Unavailable';

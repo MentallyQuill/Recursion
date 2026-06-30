@@ -6,6 +6,7 @@ import {
   parseStructuredOutput,
   roleLane
 } from '../../src/providers.mjs';
+import { createActivityReporter } from '../../src/activity.mjs';
 import { createSessionSecretStore, createSettingsStore } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
@@ -18,6 +19,11 @@ function assertNoSecret(value, message) {
   assert(!serialized.includes('sk-live-secret'), message);
   assert(!serialized.includes('session-key'), message);
   assert(!serialized.includes('Bearer'), message);
+}
+
+function assertNoRawBatchMarker(value, message) {
+  const serialized = JSON.stringify(value);
+  assert(!serialized.includes('RAW_BATCH'), message);
 }
 
 assertEqual(parseStructuredOutput('```json\n{"schema":"x"}\n```').schema, 'x', 'structured parser accepts fenced json');
@@ -225,6 +231,109 @@ const hostBatchResults = await hostBatchClient.batch([
 assertEqual(hostBatchResults.length, 2, 'host batch returns all responses');
 assertDeepEqual(hostBatchCalls.map((request) => request.roleId), ['utilityArbiter', 'providerTest'], 'host batch receives enriched role ids');
 assertDeepEqual(hostBatchCalls.map((request) => request.lane), ['utility', 'utility'], 'host batch receives enriched lanes');
+
+let routerHostBatchCallCount = 0;
+let routerHostGenerateCallCount = 0;
+const routerHostBatchCalls = [];
+const routerHostBatchRouter = createGenerationRouter({
+  client: createProviderClient({
+    host: {
+      generation: {
+        async generate(request) {
+          routerHostGenerateCallCount += 1;
+          return { text: `{"schema":"single.${request.roleId}","lane":"${request.lane}"}` };
+        },
+        async batch(requests) {
+          routerHostBatchCallCount += 1;
+          routerHostBatchCalls.push(requests);
+          return requests.map((request) => ({ text: `{"schema":"batch.${request.roleId}","lane":"${request.lane}"}` }));
+        }
+      }
+    },
+    settingsStore: createStore()
+  })
+});
+const routerHostBatchResults = await routerHostBatchRouter.batch([
+  { roleId: 'utilityArbiter', prompt: 'A' },
+  { roleId: 'providerTest', prompt: 'B' }
+]);
+assertEqual(routerHostBatchCallCount, 1, 'router batch calls host/client batch once when available');
+assertEqual(routerHostGenerateCallCount, 0, 'router batch does not call host/client single generate when batch is available');
+assertDeepEqual(routerHostBatchCalls[0].map((request) => request.roleId), ['utilityArbiter', 'providerTest'], 'router batch sends enriched role ids to host batch');
+assertDeepEqual(routerHostBatchResults.map((entry) => entry.ok), [true, true], 'router batch returns router-style success results');
+assertDeepEqual(routerHostBatchResults.map((entry) => entry.data.schema), ['batch.utilityArbiter', 'batch.providerTest'], 'router batch parses each response');
+
+const suppliedBatchRunId = 'provider-batch-run-test';
+const routerRunIdBatch = await routerHostBatchRouter.batch([
+  { roleId: 'utilityArbiter', prompt: 'A' },
+  { roleId: 'providerTest', prompt: 'B' }
+], { runId: suppliedBatchRunId });
+assertDeepEqual(routerRunIdBatch.map((entry) => entry.diagnostics.runId), [suppliedBatchRunId, suppliedBatchRunId], 'router batch diagnostics use supplied shared run id');
+assertDeepEqual(routerRunIdBatch.map((entry) => entry.roleId), ['utilityArbiter', 'providerTest'], 'router batch preserves role ids in parsed results');
+
+const routerMalformedSlot = await createGenerationRouter({
+  client: {
+    async generate() {
+      throw new Error('single generate should not be used for malformed batch test');
+    },
+    async batch() {
+      return [
+        { text: '{"schema":"batch.valid","ok":true}', roleId: 'utilityArbiter', lane: 'utility', providerId: 'fake-host', model: 'fake-model' },
+        { text: 'not-json', roleId: 'providerTest', lane: 'utility', providerId: 'fake-host', model: 'fake-model' }
+      ];
+    }
+  }
+}).batch([
+  { roleId: 'utilityArbiter', prompt: 'A' },
+  { roleId: 'providerTest', prompt: 'B' }
+], { runId: 'provider-batch-malformed-test' });
+assertEqual(routerMalformedSlot[0].ok, true, 'router batch keeps valid slot successful when another slot is malformed');
+assertEqual(routerMalformedSlot[1].ok, false, 'router batch returns failure result for malformed slot');
+assertEqual(routerMalformedSlot[1].error.code, 'RECURSION_JSON_PARSE_FAILED', 'router batch malformed slot exposes parse code');
+
+const routerBatchLeakActivity = createActivityReporter();
+const routerBatchLeakJournal = [];
+const routerBatchLeak = await createGenerationRouter({
+  client: {
+    async generate() {
+      throw new Error('single generate should not be used for leak batch test');
+    },
+    async batch() {
+      return [
+        { text: '{"schema":"batch.safe","ok":true}', roleId: 'utilityArbiter', lane: 'utility', providerId: 'fake-host', model: 'fake-model' },
+        { text: 'RAW_BATCH_RESPONSE_MARKER_42 not json', roleId: 'providerTest', lane: 'utility', providerId: 'fake-host', model: 'fake-model' }
+      ];
+    }
+  },
+  activity: routerBatchLeakActivity,
+  journal: { append: (entry) => routerBatchLeakJournal.push(entry) }
+}).batch([
+  { roleId: 'utilityArbiter', prompt: 'A' },
+  { roleId: 'providerTest', prompt: 'B' }
+], { runId: 'provider-batch-leak-test' });
+assertEqual(routerBatchLeak[0].ok, true, 'router batch leak regression keeps valid slot successful');
+assertEqual(routerBatchLeak[1].ok, false, 'router batch leak regression returns failure for malformed slot');
+assertNoRawBatchMarker(routerBatchLeak, 'router batch result diagnostics do not expose raw malformed provider response');
+assertNoRawBatchMarker(routerBatchLeakJournal, 'router batch journal does not expose raw malformed provider response');
+assertNoRawBatchMarker(routerBatchLeakActivity.history(), 'router batch activity does not expose raw malformed provider response');
+assertEqual(routerBatchLeakActivity.current().phase, 'settled', 'router batch activity settles after all slots');
+assertEqual(routerBatchLeakActivity.current().severity, 'warning', 'router batch activity reports mixed slot failure as warning');
+assert(routerBatchLeakActivity.current().detail.failed === 1, 'router batch activity detail records failed slot count');
+
+let routerSequentialFallbackCalls = 0;
+const routerSequentialFallback = await createGenerationRouter({
+  client: {
+    async generate(roleId, request) {
+      routerSequentialFallbackCalls += 1;
+      return { text: `{"schema":"fallback.${roleId}","lane":"${request.lane || 'utility'}"}` };
+    }
+  }
+}).batch([
+  { roleId: 'utilityArbiter', prompt: 'A' },
+  { roleId: 'providerTest', prompt: 'B' }
+]);
+assertEqual(routerSequentialFallbackCalls, 2, 'router batch falls back to sequential generate when client batch is absent');
+assertDeepEqual(routerSequentialFallback.map((entry) => entry.data.schema), ['fallback.utilityArbiter', 'fallback.providerTest'], 'router batch sequential fallback still parses results');
 
 const badHostBatchClient = createProviderClient({
   host: {

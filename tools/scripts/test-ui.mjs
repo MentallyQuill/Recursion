@@ -46,6 +46,18 @@ const reasonerAvailable = createRecursionViewModel({
 });
 assertEqual(reasonerAvailable.reasonerState, 'Available', 'available reasoner state built');
 
+const reasonerPassAvailable = createRecursionViewModel({
+  settings: { mode: 'auto', providers: { reasoner: { enabled: true, lastTest: { status: 'pass' } } } },
+  activity: { phase: 'idle' }
+});
+assertEqual(reasonerPassAvailable.reasonerState, 'Available', 'pass reasoner test status is available');
+
+const reasonerFailIssue = createRecursionViewModel({
+  settings: { mode: 'auto', providers: { reasoner: { enabled: true, lastTest: { status: 'fail' } } } },
+  activity: { phase: 'idle' }
+});
+assertEqual(reasonerFailIssue.reasonerState, 'Issue', 'fail reasoner test status is an issue');
+
 const sensitiveView = {
   settings: {
     mode: 'auto',

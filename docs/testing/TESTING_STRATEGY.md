@@ -4,11 +4,11 @@ Recursion testing should prove the extension is useful and safe without turning 
 
 | Layer | What it proves | Primary evidence |
 | --- | --- | --- |
-| Fast contract suite | Runtime contracts, schemas, card lifecycle, provider routing, storage, redaction, and prompt packet rules work without a live host. | `node tools\scripts\run-alpha-gate.mjs` target command and focused `tools/scripts/test-*.mjs` scripts. |
-| Playwright readiness | The local machine can launch and control Chromium, use resilient locators, switch desktop and phone viewports, and write trace/screenshot artifacts. | `check-playwright-readiness` report, trace, and viewport screenshots. |
-| Focused live SillyTavern smoke | The installed or served Recursion extension mounts in a real SillyTavern chat, observes turns, reports invisible work, injects and clears prompt packets, persists sanitized cache data, and fails softly. | `smoke-sillytavern-live` report, Activity Ribbon evidence, screenshots, prompt packet hashes, run journal events, and storage probes. |
+| Fast contract suite | Runtime contracts, schemas, card lifecycle, provider routing, storage, redaction, and prompt packet rules work without a live host. | Maintained deterministic gate: `node tools\scripts\run-alpha-gate.mjs`; focused scripts: `tools/scripts/test-*.mjs`. |
+| Playwright readiness | The local machine can launch and control Chromium, use resilient locators, switch desktop and phone viewports, and write trace/screenshot artifacts. | Future live-harness target evidence: `check-playwright-readiness` report, trace, and viewport screenshots. |
+| Focused live SillyTavern smoke | The installed or served Recursion extension mounts in a real SillyTavern chat, observes turns, reports invisible work, injects and clears prompt packets, persists sanitized cache data, and fails softly. | Future live-harness target evidence: `smoke-sillytavern-live` report, Activity Ribbon evidence, screenshots, prompt packet hashes, run journal events, and storage probes. |
 
-The fast contract suite is the normal confidence gate. Playwright and live SillyTavern tests are reserved for host behavior, UI behavior, prompt injection timing, and storage behavior that cannot be proven through a fake host.
+The fast contract suite is the normal maintained confidence gate in this checkout. Playwright and live SillyTavern harness commands are specified as V1 target contracts until their scripts exist; they are reserved for host behavior, UI behavior, prompt injection timing, and storage behavior that cannot be proven through a fake host.
 
 ## Core Invariants
 
@@ -31,13 +31,13 @@ Highest-priority invariants:
 
 ## Fast Contract Suite
 
-The contract suite should be dependency-light and runnable before any live host work. The maintained target command is:
+The contract suite is dependency-light and runnable before any live host work. The maintained gate command is:
 
 ```powershell
 node tools\scripts\run-alpha-gate.mjs
 ```
 
-The gate should call focused tests rather than duplicate their logic in documentation. Coverage groups:
+The gate calls the focused local suite rather than duplicating test logic. Coverage groups:
 
 - manifest and extension shell identity;
 - host adapter fake contracts;
@@ -57,7 +57,7 @@ Focused contract tests should use deterministic fixtures and fake provider respo
 
 ## Playwright Readiness
 
-The Playwright readiness probe does not contact SillyTavern. It proves that browser automation is available before any live chat, user file, prompt, or provider state is touched.
+The Playwright readiness probe is a future target command and must not contact SillyTavern. It proves that browser automation is available before any live chat, user file, prompt, or provider state is touched.
 
 The readiness probe should:
 
@@ -72,7 +72,7 @@ Readiness failures are environment failures, not Recursion runtime failures.
 
 ## Live SillyTavern Smoke
 
-The live smoke proves Recursion in the real host. It should be focused and repeatable, not a Directive-style campaign certification run.
+The live smoke is a future target command for proving Recursion in the real host. It should be focused and repeatable, not a Directive-style campaign certification run.
 
 Live smoke must start with these gates:
 

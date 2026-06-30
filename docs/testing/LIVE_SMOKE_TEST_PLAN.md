@@ -20,7 +20,19 @@ Before a live smoke can mutate host state:
 
 Manual exploratory checks may use other users, but automated pass/fail evidence must come from dedicated users.
 
-## Recommended Commands
+## Current Deterministic Evidence
+
+The maintained automated gate in this checkout is the dependency-light local contract suite:
+
+```powershell
+node tools\scripts\run-alpha-gate.mjs
+```
+
+It does not launch Playwright, contact SillyTavern, mutate chat state, or produce live-smoke artifacts. It is the current release-review evidence until the live harness scripts named below are implemented.
+
+## Future Live-Harness Commands
+
+The commands in this section are V1 target contracts for the live harness. They are not current deterministic evidence unless the corresponding script exists in `tools/scripts/` in the checkout under review.
 
 Offline Playwright readiness:
 
@@ -63,7 +75,7 @@ $env:RECURSION_LIVE_REASONER='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts --strict
 ```
 
-These commands are target contracts for the implementation phase. The docs define how the scripts should behave once they exist.
+When implemented, these commands must keep the dedicated `recursion-soak-*` safety policy and must reject unsafe users before any state mutation.
 
 ## Scenario Matrix
 

@@ -2,7 +2,7 @@
 
 The Recursion Playwright harness is the shared test utility layer for browser readiness checks and focused live SillyTavern smoke tests. It borrows Directive's useful testing discipline while keeping Recursion's scope smaller: prove host integration, visible status, prompt injection, storage probes, and fail-soft behavior.
 
-## Target Files
+## Future Target Files
 
 The implementation should create these files:
 
@@ -81,7 +81,7 @@ This is a hard safety gate, not a warning. If the selected user is missing, empt
 11. Stop a Playwright trace when artifact capture is enabled.
 12. Write `report.json` and `summary.md`.
 
-This command is safe to run before SillyTavern starts:
+When implemented, this command must be safe to run before SillyTavern starts:
 
 ```powershell
 node tools\scripts\check-playwright-readiness.mjs --write-artifacts

@@ -1,6 +1,6 @@
 import { createSillyTavernHost, promptBlocksFromPacket } from '../../src/hosts/sillytavern/host.mjs';
 import { createGenerationRouter } from '../../src/providers.mjs';
-import { assert, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
+import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
 const prompts = [];
 const context = {
@@ -95,6 +95,138 @@ await assertRejects(
   'mixed prompt packet rejects before mutation'
 );
 assert(!atomicPrompts.some((entry) => entry.key === 'recursion.turnBrief' && entry.text === 'Allowed first block.'), 'mixed unsafe packet does not partially install allowed block');
+
+const rollbackPrompts = [];
+let nonEmptyPromptWrites = 0;
+const rollbackHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'rollback-chat',
+    chat: [],
+    setExtensionPrompt(key, text, position, depth, scan, role) {
+      if (text !== '') {
+        nonEmptyPromptWrites += 1;
+        if (nonEmptyPromptWrites === 2) {
+          throw new Error('Simulated prompt write failure');
+        }
+      }
+      rollbackPrompts.push({ key, text, position, depth, scan, role });
+    },
+    extension_prompt_types: { IN_CHAT: 1, IN_PROMPT: 2, BEFORE_PROMPT: 0 },
+    extension_prompt_roles: { SYSTEM: 0 }
+  }),
+  settingsRoot: {}
+});
+await assertRejects(
+  async () => rollbackHost.prompt.install({
+    injectionPlan: {
+      blocks: [
+        { id: 'sceneBrief', promptKey: 'recursion.sceneBrief', placement: 'in_prompt', depth: 1, role: 'system' },
+        { id: 'turnBrief', promptKey: 'recursion.turnBrief', placement: 'in_chat', depth: 2, role: 'system' },
+        { id: 'guardrails', promptKey: 'recursion.guardrails', placement: 'in_prompt', depth: 1, role: 'system' }
+      ]
+    },
+    sections: {
+      sceneBrief: 'Install first block.',
+      turnBrief: 'Fail on second block.',
+      guardrails: 'Never reached block.'
+    }
+  }),
+  /simulated prompt write failure/i,
+  'prompt install rejects original write failure'
+);
+assertEqual(
+  rollbackPrompts.filter((entry) => entry.key === 'recursion.sceneBrief').at(-1)?.text,
+  '',
+  'failed prompt install rolls back prior installed prompt key'
+);
+
+const storageFetchCalls = [];
+const storageFiles = new Map();
+const storageHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'storage-chat',
+    chat: [],
+    getRequestHeaders: () => ({ 'X-CSRF-Token': 'token-from-context' })
+  }),
+  settingsRoot: {},
+  fetchImpl: async (url, options = {}) => {
+    storageFetchCalls.push({ url, options });
+    if (url === '/api/files/upload') {
+      const body = JSON.parse(options.body);
+      storageFiles.set(body.name, JSON.parse(Buffer.from(body.data, 'base64').toString('utf8')));
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    if (url.startsWith('/user/files/')) {
+      const name = decodeURIComponent(url.slice('/user/files/'.length));
+      if (!storageFiles.has(name)) return { ok: false, status: 404, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => storageFiles.get(name) };
+    }
+    if (url === '/api/files/delete') {
+      const body = JSON.parse(options.body);
+      const name = body.path.slice('/user/files/'.length);
+      storageFiles.delete(name);
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  }
+});
+await storageHost.storageAdapter.writeJson('recursion-system-index.v1.json', { ok: true });
+assertEqual(storageFetchCalls[0]?.url, '/api/files/upload', 'default storage writes through SillyTavern upload API');
+assertEqual(JSON.parse(storageFetchCalls[0].options.body).name, 'recursion-system-index.v1.json', 'default storage preserves safe json file name');
+assertEqual(storageFetchCalls[0].options.headers['X-CSRF-Token'], 'token-from-context', 'default storage uses context request headers');
+assertEqual(storageFetchCalls[0].options.headers['Content-Type'], 'application/json', 'default storage sets json content type');
+assertDeepEqual(
+  await storageHost.storageAdapter.readJson('recursion-system-index.v1.json'),
+  { ok: true },
+  'default storage reads through user file API'
+);
+assert(storageFetchCalls.some((call) => call.url === '/user/files/recursion-system-index.v1.json'), 'default storage reads from user files path');
+await storageHost.storageAdapter.deleteJson('recursion-system-index.v1.json');
+const deleteCall = storageFetchCalls.find((call) => call.url === '/api/files/delete');
+assert(deleteCall, 'default storage deletes through SillyTavern delete API');
+assertEqual(JSON.parse(deleteCall.options.body).path, '/user/files/recursion-system-index.v1.json', 'default storage deletes user file path');
+assertEqual(await storageHost.storageAdapter.readJson('recursion-system-index.v1.json'), null, 'default storage returns null for missing user files');
+const storageFetchCountBeforeRejectedKeys = storageFetchCalls.length;
+await assertRejects(
+  async () => storageHost.storageAdapter.writeJson('../recursion-escape.v1.json', { ok: false }),
+  /path traversal/i,
+  'default storage rejects traversal keys'
+);
+await assertRejects(
+  async () => storageHost.storageAdapter.writeJson('recursion-not-json.txt', { ok: false }),
+  /\.json/i,
+  'default storage rejects non-json keys'
+);
+await assertRejects(
+  async () => storageHost.storageAdapter.readJson('recursion/bad.v1.json'),
+  /path traversal/i,
+  'default storage rejects slash keys'
+);
+assertEqual(storageFetchCalls.length, storageFetchCountBeforeRejectedKeys, 'default storage rejects unsafe keys before fetch');
+
+const previousSillyTavern = globalThis.SillyTavern;
+const globalHeaderCalls = [];
+try {
+  globalThis.SillyTavern = {
+    getContext: () => ({
+      chatId: 'global-storage-chat',
+      chat: [],
+      getRequestHeaders: () => ({ 'X-CSRF-Token': 'global-token' })
+    })
+  };
+  const globalHeaderHost = createSillyTavernHost({
+    settingsRoot: {},
+    fetchImpl: async (url, options = {}) => {
+      globalHeaderCalls.push({ url, options });
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+  });
+  await globalHeaderHost.storageAdapter.writeJson('recursion-global-header.v1.json', { ok: true });
+  assertEqual(globalHeaderCalls[0].options.headers['X-CSRF-Token'], 'global-token', 'default storage uses global SillyTavern request headers');
+} finally {
+  if (previousSillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousSillyTavern;
+}
 
 const quietCalls = [];
 const quietHost = createSillyTavernHost({

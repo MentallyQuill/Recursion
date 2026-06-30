@@ -3,6 +3,7 @@ import { packetToPromptBlocks } from '../../prompt.mjs';
 import { createProviderClient } from '../../providers.mjs';
 import { createSettingsStore } from '../../settings.mjs';
 import { createMemoryStorageAdapter } from '../../storage.mjs';
+import { createSillyTavernUserFileStorageAdapter } from './storage.mjs';
 
 const KNOWN_RECURSION_PROMPT_KEYS = Object.freeze([
   'recursion.sceneBrief',
@@ -184,11 +185,16 @@ export function createSillyTavernHost({
   contextFactory = null,
   settingsRoot = globalThis.extension_settings || {},
   saveSettings = null,
-  storageAdapter = createMemoryStorageAdapter(),
+  storageAdapter = null,
   fetchImpl = globalThis.fetch
 } = {}) {
   const installedPromptKeys = new Set();
   const settingsStore = createSettingsStore({ root: settingsRoot, save: saveSettings });
+  const storage = storageAdapter || (
+    typeof fetchImpl === 'function'
+      ? createSillyTavernUserFileStorageAdapter({ contextFactory, fetchImpl })
+      : createMemoryStorageAdapter()
+  );
 
   async function snapshot() {
     const context = currentContext(contextFactory);
@@ -240,17 +246,32 @@ export function createSillyTavernHost({
       const blocks = promptBlocksFromPacket(packet);
       validatePromptBlocksForInstall(blocks);
       await this.clear();
-      for (const block of blocks) {
-        const key = stringValue(block.promptKey).trim();
-        context.setExtensionPrompt(
-          key,
-          stringValue(block.text),
-          promptPosition(context, block.placement),
-          Number(block.depth) || 0,
-          scanValue(block),
-          promptRole(context, block.role)
-        );
-        installedPromptKeys.add(key);
+      const attemptedPromptKeys = new Set();
+      try {
+        for (const block of blocks) {
+          const key = stringValue(block.promptKey).trim();
+          attemptedPromptKeys.add(key);
+          context.setExtensionPrompt(
+            key,
+            stringValue(block.text),
+            promptPosition(context, block.placement),
+            Number(block.depth) || 0,
+            scanValue(block),
+            promptRole(context, block.role)
+          );
+          installedPromptKeys.add(key);
+        }
+      } catch (error) {
+        const rollbackKeys = new Set([...KNOWN_RECURSION_PROMPT_KEYS, ...installedPromptKeys, ...attemptedPromptKeys]);
+        for (const key of rollbackKeys) {
+          try {
+            clearPromptKey(context, key);
+          } catch {
+            // Rollback is best effort; preserve the original install failure.
+          }
+        }
+        installedPromptKeys.clear();
+        throw error;
       }
       return { ok: true, installed: [...installedPromptKeys] };
     },
@@ -294,7 +315,7 @@ export function createSillyTavernHost({
   const host = {
     id: 'sillytavern',
     settingsStore,
-    storageAdapter,
+    storageAdapter: storage,
     generation,
     providerClient: null,
     prompt,

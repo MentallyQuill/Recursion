@@ -7,6 +7,7 @@
   "license": "MIT",
   "scripts": {
     "test": "node tools/scripts/run-tests.mjs",
+    "test:alpha": "node tools/scripts/run-alpha-gate.mjs",
     "test:harness": "node tools/scripts/test-harness.mjs",
     "test:core": "node tools/scripts/test-core.mjs",
     "test:settings": "node tools/scripts/test-settings.mjs",

@@ -168,6 +168,8 @@ Events should use compact, user-safe labels. The log is not a transcript and not
 
 `triggerSource` is `ui-send` when Playwright drove the visible and enabled SillyTavern input and send button, or `direct-bridge` only when no visible send controls were available and the diagnostic bridge fallback was used. Partial or disabled visible send surfaces are failures, not fallback candidates. `hostGenerationContinued` is required for `ui-send` runs and may be `null` for direct-bridge fallback runs.
 
+When Reasoner smoke is enabled, prompt metadata may include bounded `packet.diagnostics.composerLane` and `packet.diagnostics.reasonerStatus`. These fields prove Reasoner pass/fallback routing without storing provider error text, raw Reasoner output, prompt bodies, or private planning.
+
 The full prompt body is excluded by default. Diagnostic artifacts may include bounded excerpts only through an explicit user action outside the normal smoke path.
 
 ## Storage Probe

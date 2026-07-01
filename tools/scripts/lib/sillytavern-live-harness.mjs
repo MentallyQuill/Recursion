@@ -1371,7 +1371,11 @@ function generationEvidenceScript() {
         ? {
             packetId,
             handId,
-            selectedCardRefs: selectedCardRefs.map((entry) => String(entry)).filter(Boolean).slice(0, 12)
+            selectedCardRefs: selectedCardRefs.map((entry) => String(entry)).filter(Boolean).slice(0, 12),
+            diagnostics: {
+              composerLane: String(packet?.diagnostics?.composerLane || ''),
+              reasonerStatus: String(packet?.diagnostics?.reasonerStatus || '')
+            }
           }
         : null
     };
@@ -2036,6 +2040,10 @@ function promptMetadataFromBrowserResult(report, browserResult) {
       ? {
           packetId: String(packet.packetId || ''),
           handId: String(packet.handId || ''),
+          diagnostics: {
+            composerLane: sanitizeHarnessText(packet.diagnostics?.composerLane || '', 80),
+            reasonerStatus: sanitizeHarnessText(packet.diagnostics?.reasonerStatus || '', 80)
+          },
           selectedCardRefs: Array.isArray(packet.selectedCardRefs)
             ? packet.selectedCardRefs.map((entry) => String(entry)).filter(Boolean).slice(0, 24)
             : []

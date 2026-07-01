@@ -167,11 +167,18 @@ function recursionSmokeFixtureHtml({
   observeModeSave = 'sync',
   unclearedPromptOnDisable = false,
   staleModeChip = false,
+  reasonerFallback = false,
   sendSurface = 'complete'
 } = {}) {
   const disableHookScript = missingDisableHook
     ? ''
       : "globalThis.recursionOnDisable = function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.sceneBrief', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.turnBrief', '', 'IN_CHAT', 2, false, 'SYSTEM'); } return true; };";
+  const reasonerFallbackFlag = reasonerFallback ? 'true' : 'false';
+  const promptPacketMetadataExpression = omitPromptPacketMetadata
+    ? "JSON.stringify({ packetId: '', handId: '', selectedCardRefs: [] })"
+    : reasonerFallback
+      ? "JSON.stringify({ packetId: 'packet-smoke', handId: 'hand-smoke', selectedCardRefs: ['scene-frame', 'turn-brief'], diagnostics: { composerLane: 'utility', reasonerStatus: 'fallback', fallbackReason: 'reasoner raw failure text should be redacted' } })"
+      : "JSON.stringify({ packetId: 'packet-smoke', handId: 'hand-smoke', selectedCardRefs: ['scene-frame', 'turn-brief'], diagnostics: { composerLane: 'utility', reasonerStatus: 'skipped' } })";
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -242,11 +249,14 @@ function recursionSmokeFixtureHtml({
           if (!${staleModeChip ? 'true' : 'false'}) {
             document.querySelector('[data-recursion-mode]').textContent = activeMode === 'observe' ? 'Observe only' : (activeMode === 'off' ? 'Off' : 'Auto');
           }
+          if (${reasonerFallbackFlag} && activeMode === 'auto') {
+            document.querySelector('[data-recursion-reasoner]').textContent = 'Reasoner fallback';
+          }
           document.querySelector('[data-recursion-hand-count]').textContent = 'Hand 2';
-          document.querySelector('[data-recursion-ribbon-label]').textContent = activeMode === 'observe' ? 'Observe mode: hand preview ready. No prompt injected.' : 'Recursion prompt ready.';
-          document.querySelector('[data-recursion-prompt-packet]').textContent = ${omitPromptPacketMetadata
-            ? "JSON.stringify({ packetId: '', handId: '', selectedCardRefs: [] })"
-            : "JSON.stringify({ packetId: 'packet-smoke', handId: 'hand-smoke', selectedCardRefs: ['scene-frame', 'turn-brief'] })"};
+          document.querySelector('[data-recursion-ribbon-label]').textContent = activeMode === 'observe'
+            ? 'Observe mode: hand preview ready. No prompt injected.'
+            : (${reasonerFallbackFlag} ? 'Reasoner unavailable. Utility composed.' : 'Recursion prompt ready.');
+          document.querySelector('[data-recursion-prompt-packet]').textContent = ${promptPacketMetadataExpression};
         };
         if (activeMode === 'observe' && !${observeInjectsPrompt ? 'true' : 'false'}) {
           renderGenerationUi();
@@ -350,6 +360,7 @@ async function createSillyTavernSmokeFixtureServer({
   observeModeSave = 'sync',
   unclearedPromptOnDisable = false,
   staleModeChip = false,
+  reasonerFallback = false,
   sendSurface = 'complete'
 } = {}) {
   const sessions = new Map();
@@ -499,6 +510,7 @@ async function createSillyTavernSmokeFixtureServer({
         observeModeSave,
         unclearedPromptOnDisable,
         staleModeChip,
+        reasonerFallback,
         sendSurface
       }));
       return;
@@ -1213,6 +1225,35 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.status, 'pass', 'generation smoke waits for asynchronous Observe mode application');
     assertEqual(report.browser.snapshot.generation.observeProof?.observedMode, 'observe', 'async Observe proof records observed mode');
   } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ reasonerFallback: true });
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-reasoner-fallback-smoke-'));
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live', '--write-artifacts'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_REASONER: '1'
+      },
+      artifactRoot
+    });
+    assertEqual(report.status, 'pass', 'Reasoner fallback smoke still passes host generation');
+    assertEqual(report.browser.snapshot.generation.reasonerRequested, true, 'Reasoner fallback smoke records Reasoner request');
+    assertEqual(report.browser.snapshot.generation.promptPacket?.diagnostics?.reasonerStatus, 'fallback', 'Reasoner fallback smoke records fallback status');
+    assertEqual(report.browser.snapshot.generation.promptPacket?.diagnostics?.composerLane, 'utility', 'Reasoner fallback smoke records Utility composition');
+    assertEqual(report.browser.snapshot.generation.hostGenerationContinued, true, 'Reasoner fallback smoke proves host generation continued');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    const promptMetadata = readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8');
+    assert(promptMetadata.includes('"reasonerStatus": "fallback"'), 'Reasoner fallback prompt metadata records fallback');
+    assert(promptMetadata.includes('"composerLane": "utility"'), 'Reasoner fallback prompt metadata records Utility composer lane');
+    assert(!promptMetadata.includes('reasoner raw failure text'), 'Reasoner fallback metadata omits raw provider error text');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
     await server.close();
   }
 }

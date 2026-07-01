@@ -186,7 +186,7 @@ When Reasoner smoke is enabled:
 - Verify Reasoner activity appears with a bounded trigger reason.
 - Verify the final prompt packet stays within the prompt packet schema.
 - Simulate or trigger one Reasoner failure path.
-- Verify Utility or local composition fallback is visible and generation continues.
+- Verify Utility or local composition fallback is visible, generation continues, and sanitized prompt metadata records `composerLane` plus `reasonerStatus` without raw provider failure text.
 
 Reasoner output must not add unsupported lore, hidden story plans, private thoughts, or unbounded detail.
 

@@ -31,7 +31,7 @@ Common environment variables:
 | `RECURSION_PLAYWRIGHT_TIMEOUT_MS` | Browser-control timeout for readiness checks. |
 | `RECURSION_LIVE_TIMEOUT_MS` | Browser-control timeout for live host checks. |
 | `RECURSION_LIVE_GENERATION` | Set to `1` to run opt-in visible-send generation smoke after the safe preflight and UI evidence. This may call the configured Utility provider through Recursion. |
-| `RECURSION_LIVE_REASONER` | Set to `1` to request the Reasoner-capable generation path. This implies visible-send generation smoke, or the recorded direct-bridge fallback when no visible send controls are available, and may call configured Utility/Reasoner providers. Partial or disabled visible send surfaces fail instead of falling back. |
+| `RECURSION_LIVE_REASONER` | Set to `1` to request the Reasoner-capable generation path. This implies visible-send generation smoke, or the recorded direct-bridge fallback when no visible send controls are available, and may call configured Utility/Reasoner providers. Partial or disabled visible send surfaces fail instead of falling back. Prompt metadata records bounded composer/Reasoner fallback status only, never raw provider error text. |
 | `RECURSION_LIVE_STRICT` | Set to `1` to promote warnings to failures. |
 | `RECURSION_ARTIFACT_DIR` | Override artifact root for reports, traces, screenshots, and logs. |
 

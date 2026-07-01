@@ -181,10 +181,18 @@ function normalizeGenerationResponse(response) {
   return { text: stringValue(response) };
 }
 
+function requestProviderSource(request = {}) {
+  return stringValue(request.providerSource ?? request.providerConfig?.source).trim();
+}
+
+function requestHostConnectionProfileId(request = {}) {
+  return request.hostConnectionProfileId ?? request.providerConfig?.hostConnectionProfileId;
+}
+
 function profileGenerationRequested(request = {}) {
-  return request.providerSource === 'host-connection-profile'
-    || Boolean(request.hostConnectionProfileId)
-    || Boolean(request.providerConfig?.hostConnectionProfileId);
+  const source = requestProviderSource(request);
+  if (source) return source === 'host-connection-profile';
+  return Boolean(requestHostConnectionProfileId(request));
 }
 
 function requestMaxTokens(request = {}) {
@@ -222,7 +230,7 @@ function connectionProfileService(context) {
 }
 
 async function sendViaConnectionProfile(context, request = {}) {
-  const profileId = stringValue(request.hostConnectionProfileId ?? request.providerConfig?.hostConnectionProfileId).trim();
+  const profileId = stringValue(requestHostConnectionProfileId(request)).trim();
   if (!profileId) {
     const error = new Error('Host connection profile id is missing.');
     error.code = 'RECURSION_HOST_PROFILE_MISSING';
@@ -359,17 +367,20 @@ export function createSillyTavernHost({
         return sendViaConnectionProfile(context, request);
       }
       if (typeof context.generateRaw === 'function') {
-        return normalizeGenerationResponse(await context.generateRaw({
+        const rawRequest = {
           prompt: stringValue(request.prompt),
           systemPrompt: request.systemPrompt,
           responseLength: requestMaxTokens(request),
           temperature: requestTemperature(request),
           topP: requestTopP(request),
           providerSource: request.providerSource,
-          hostConnectionProfileId: request.hostConnectionProfileId ?? request.providerConfig?.hostConnectionProfileId,
           jsonSchema: request.jsonSchema,
           signal: request.signal
-        }));
+        };
+        if (profileGenerationRequested(request)) {
+          rawRequest.hostConnectionProfileId = requestHostConnectionProfileId(request);
+        }
+        return normalizeGenerationResponse(await context.generateRaw(rawRequest));
       }
       if (typeof context.generateQuietPrompt === 'function') {
         if (profileGenerationRequested(request)) {

@@ -400,6 +400,48 @@ assertEqual(connectionProfileCalls[0].parameters.top_p, 0.7, 'connection profile
 assert(typeof connectionProfileCalls[0].parameters.signal?.addEventListener === 'function', 'connection profile service receives abort-capable provider signal');
 assertEqual(connectionProfileCalls[0].parameters.signal.aborted, false, 'connection profile service receives active provider signal');
 
+const currentModelRawCalls = [];
+const currentModelProfileCalls = [];
+const currentModelHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'current-model-stale-profile-chat',
+    chat: [],
+    generateRaw: async (request) => {
+      currentModelRawCalls.push(request);
+      return { text: '{"schema":"recursion.host.currentModel","ok":true}' };
+    },
+    ConnectionManagerRequestService: {
+      async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
+        currentModelProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
+        return { text: '{"schema":"recursion.host.unexpectedProfile","ok":true}' };
+      }
+    }
+  }),
+  settingsRoot: {
+    recursion: {
+      providers: {
+        utility: {
+          source: 'host-current-model',
+          hostConnectionProfileId: 'stale-utility-profile',
+          maxTokens: 654,
+          temperature: 0.33,
+          topP: 0.8
+        }
+      }
+    }
+  }
+});
+const currentModelRouted = await createGenerationRouter({ client: currentModelHost.providerClient }).generate('utilityArbiter', { prompt: 'Use current model.' });
+assertEqual(currentModelRouted.ok, true, 'host current model routes successfully with stale profile id');
+assertEqual(currentModelProfileCalls.length, 0, 'host current model does not call connection profile service with stale profile id');
+assertEqual(currentModelRawCalls.length, 1, 'host current model uses generateRaw when available');
+assertEqual(currentModelRawCalls[0].providerSource, 'host-current-model', 'host current model source is passed to generateRaw');
+assertEqual(
+  Object.prototype.hasOwnProperty.call(currentModelRawCalls[0], 'hostConnectionProfileId'),
+  false,
+  'host current model generateRaw request omits stale profile id'
+);
+
 const stableSceneMessages = [{ mesid: 1, is_user: true, mes: 'First turn in the same scene.' }];
 const stableSceneHost = createSillyTavernHost({
   contextFactory: () => ({

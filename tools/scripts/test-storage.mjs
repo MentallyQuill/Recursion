@@ -54,6 +54,35 @@ assertEqual(sceneCacheKey('Chat One', 'Scene/One'), 'recursion-scene-Chat-One-Sc
 assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json', 'journal key sanitized');
 
 {
+  const privatePlanPayload = 'future branch plan payload must not persist';
+  const sessionIdPayload = 'session-live-payload-12345';
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  await repo.appendJournal('Payload Redaction Chat', {
+    event: 'provider.call.started',
+    summary: 'payload redaction coverage',
+    details: {
+      privatePlanPayload,
+      sessionIdPayload,
+      nestedPrivatePlan: `privatePlan: ${privatePlanPayload}`,
+      nestedSessionId: `sessionId=${sessionIdPayload}`,
+      sessionCount: 2
+    }
+  });
+  const persisted = adapter.dump();
+  const journalDetails = persisted[runJournalKey('Payload Redaction Chat')].entries[0].details;
+  const serializedStorage = JSON.stringify(persisted);
+  assertEqual(journalDetails.privatePlanPayload, '[redacted]', 'storage journal privatePlan payload key redacted');
+  assertEqual(journalDetails.sessionIdPayload, '[redacted]', 'storage journal sessionId payload key redacted');
+  assertEqual(journalDetails.nestedPrivatePlan, '[redacted]', 'storage journal privatePlan payload text redacted');
+  assertEqual(journalDetails.nestedSessionId, '[redacted]', 'storage journal sessionId payload text redacted');
+  assertEqual(journalDetails.sessionCount, 2, 'storage journal preserves safe session count');
+  assert(!serializedStorage.includes(privatePlanPayload), 'serialized storage omits raw privatePlan payload');
+  assert(!serializedStorage.includes(sessionIdPayload), 'serialized storage omits raw sessionId payload');
+  assert(serializedStorage.includes('[redacted]'), 'serialized storage includes redaction marker');
+}
+
+{
   const adapter = createMemoryStorageAdapter();
   const repo = createStorageRepository({ storage: adapter, maxJournalEntries: 3 });
 

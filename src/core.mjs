@@ -11,7 +11,7 @@ const SECRET_KEY_SUFFIXES = [
   'credentials',
   'authheader'
 ];
-const FORBIDDEN_DIAGNOSTIC_KEYS = new Set([
+const FORBIDDEN_DIAGNOSTIC_KEY_PARTS = [
   'rawprompt',
   'rawresponse',
   'providerprompt',
@@ -20,7 +20,8 @@ const FORBIDDEN_DIAGNOSTIC_KEYS = new Set([
   'privatestoryplan',
   'privateplan',
   'sessionid'
-]);
+];
+const FORBIDDEN_DIAGNOSTIC_KEY_SUFFIXES = new Set(['body', 'data', 'payload', 'text', 'value']);
 
 function normalizeKey(value) {
   return String(value ?? '').replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
@@ -29,8 +30,20 @@ function normalizeKey(value) {
 function isSecretKey(value) {
   const key = normalizeKey(value);
   if (!key || key.endsWith('count')) return false;
-  if (FORBIDDEN_DIAGNOSTIC_KEYS.has(key)) return true;
+  if (isForbiddenDiagnosticKey(key)) return true;
   return SECRET_KEY_SUFFIXES.some((suffix) => key.endsWith(suffix));
+}
+
+function isForbiddenDiagnosticKey(key) {
+  for (const part of FORBIDDEN_DIAGNOSTIC_KEY_PARTS) {
+    let index = key.indexOf(part);
+    while (index >= 0) {
+      const suffix = key.slice(index + part.length);
+      if (!suffix || FORBIDDEN_DIAGNOSTIC_KEY_SUFFIXES.has(suffix)) return true;
+      index = key.indexOf(part, index + part.length);
+    }
+  }
+  return false;
 }
 
 function sanitizeId(value) {

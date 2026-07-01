@@ -63,6 +63,52 @@ store.updateProvider('utility', { openAICompatible: { model: 'new-model' } });
 assertEqual(root.recursion.providers.utility.openAICompatible.baseUrl, 'http://localhost:1234/v1', 'partial provider update preserves baseUrl');
 assertEqual(root.recursion.providers.utility.openAICompatible.model, 'new-model', 'partial provider update changes model');
 
+function markUtilityProviderTestPass() {
+  store.updateProvider('utility', {
+    resolvedProviderLabel: 'stale-provider',
+    resolvedModelLabel: 'stale-model',
+    lastTest: {
+      status: 'pass',
+      checkedAt: '2026-07-01T00:00:00.000Z',
+      compactError: 'stale error'
+    }
+  });
+}
+
+function assertUtilityProviderTestReset(message) {
+  const provider = store.get().providers.utility;
+  assertEqual(provider.lastTest.status, 'not-run', `${message}: status reset`);
+  assertEqual(provider.lastTest.checkedAt, undefined, `${message}: checkedAt cleared`);
+  assertEqual(provider.lastTest.compactError, undefined, `${message}: compactError cleared`);
+  assertEqual(provider.resolvedProviderLabel, '', `${message}: provider label cleared`);
+  assertEqual(provider.resolvedModelLabel, '', `${message}: model label cleared`);
+}
+
+store.updateProvider('utility', { source: 'openai-compatible', apiKey: 'test-key' });
+markUtilityProviderTestPass();
+store.clearApiKey('utility');
+assertUtilityProviderTestReset('clearing provider session key');
+
+store.updateProvider('utility', { source: 'openai-compatible', apiKey: 'test-key', openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' } });
+markUtilityProviderTestPass();
+store.updateProvider('utility', { openAICompatible: { baseUrl: 'http://localhost:4321/v1' } });
+assertUtilityProviderTestReset('changing provider base URL');
+
+store.updateProvider('utility', { source: 'openai-compatible', apiKey: 'test-key', openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' } });
+markUtilityProviderTestPass();
+store.updateProvider('utility', { openAICompatible: { model: 'slower' } });
+assertUtilityProviderTestReset('changing provider model');
+
+store.updateProvider('utility', { source: 'openai-compatible', apiKey: 'test-key', openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' } });
+markUtilityProviderTestPass();
+store.updateProvider('utility', { source: 'host-current-model' });
+assertUtilityProviderTestReset('changing provider source');
+
+store.updateProvider('utility', { source: 'host-connection-profile', hostConnectionProfileId: 'profile-a' });
+markUtilityProviderTestPass();
+store.updateProvider('utility', { hostConnectionProfileId: 'profile-b' });
+assertUtilityProviderTestReset('changing host connection profile');
+
 store.update({ diagnostics: { maxJournalEntries: 321 } });
 store.update({ diagnostics: { includeExcerpts: true } });
 assertEqual(root.recursion.diagnostics.maxJournalEntries, 321, 'partial diagnostics update preserves max entries');

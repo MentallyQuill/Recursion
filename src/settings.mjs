@@ -89,6 +89,26 @@ function requireProviderLane(lane) {
   return resolvedLane;
 }
 
+function providerTestSignature(provider = {}) {
+  return JSON.stringify({
+    enabled: provider.enabled === true,
+    source: String(provider.source || ''),
+    hostConnectionProfileId: String(provider.hostConnectionProfileId || ''),
+    baseUrl: String(provider.openAICompatible?.baseUrl || ''),
+    model: String(provider.openAICompatible?.model || ''),
+    sessionApiKeyPresent: provider.openAICompatible?.sessionApiKeyPresent === true
+  });
+}
+
+function resetProviderTestState(provider) {
+  return {
+    ...provider,
+    resolvedProviderLabel: '',
+    resolvedModelLabel: '',
+    lastTest: { status: 'not-run' }
+  };
+}
+
 export function normalizeProviderSettings(lane, value = {}, secretStore = null) {
   const resolvedLane = LANES.has(lane) ? lane : 'utility';
   const defaults = DEFAULT_RECURSION_SETTINGS.providers[resolvedLane];
@@ -184,11 +204,17 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
       const resolvedLane = requireProviderLane(lane);
       const current = this.get();
       const cleanPatch = { ...patch };
+      const secretWasPatched = Object.prototype.hasOwnProperty.call(cleanPatch, 'apiKey');
       if (Object.prototype.hasOwnProperty.call(cleanPatch, 'apiKey')) {
         secretStore.set(resolvedLane, cleanPatch.apiKey);
         delete cleanPatch.apiKey;
       }
-      const nextProvider = mergePlainObjects(current.providers[resolvedLane], cleanPatch);
+      let nextProvider = mergePlainObjects(current.providers[resolvedLane], cleanPatch);
+      const normalizedNextProvider = normalizeProviderSettings(resolvedLane, nextProvider, secretStore);
+      const providerConnectionChanged = providerTestSignature(current.providers[resolvedLane]) !== providerTestSignature(normalizedNextProvider);
+      if (secretWasPatched || providerConnectionChanged) {
+        nextProvider = resetProviderTestState(nextProvider);
+      }
       return persist({
         ...current,
         providers: {
@@ -202,9 +228,16 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
     },
     clearApiKey(lane) {
       const resolvedLane = requireProviderLane(lane);
-      secretStore.clear(resolvedLane);
       const current = this.get();
-      return persist(current).providers[resolvedLane];
+      secretStore.clear(resolvedLane);
+      const nextProvider = resetProviderTestState(current.providers[resolvedLane]);
+      return persist({
+        ...current,
+        providers: {
+          ...current.providers,
+          [resolvedLane]: nextProvider
+        }
+      }).providers[resolvedLane];
     }
   };
 }

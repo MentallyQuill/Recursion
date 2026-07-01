@@ -81,7 +81,7 @@ Build:
 - Current host model route.
 - Host connection profile route if available.
 - OpenAI-compatible endpoint route.
-- Utility Composer and Reasoner Composer role contracts.
+- `briefUtilityComposer` and `reasonerComposer` role contracts.
 - Test Provider action.
 - Sanitized model-call journal.
 - JSON response parser and validator.
@@ -157,8 +157,8 @@ Goal: turn selected cards into one compact, inspectable prompt packet.
 
 Build:
 
-- Utility Composer.
-- Optional Reasoner Composer.
+- Utility composition path, with `briefUtilityComposer` reserved for model-routed Utility composition.
+- Optional Reasoner Composer through `reasonerComposer`.
 - Prompt packet schema.
 - Footprint profiles: compact, normal, rich.
 - Omission reasons.

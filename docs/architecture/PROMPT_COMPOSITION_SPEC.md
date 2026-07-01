@@ -131,6 +131,8 @@ The composer must treat cards as evidence and guidance, not as mandatory final p
 
 Recursion has two composition modes.
 
+The names in this section describe composition paths. Provider generation role IDs are `briefUtilityComposer` for Utility-routed model composition and `reasonerComposer` for Reasoner synthesis.
+
 ### Utility Composer
 
 The Utility Composer is the default. It is fast, bounded, schema-driven, and suitable for every generation attempt where Recursion is enabled. It may be implemented as deterministic runtime code, a Utility-model structured call, or a hybrid, but its output must pass the prompt packet contract.

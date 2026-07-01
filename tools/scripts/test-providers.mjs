@@ -6,6 +6,7 @@ import {
   parseStructuredOutput,
   roleLane
 } from '../../src/providers.mjs';
+import { readFileSync } from 'node:fs';
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createSessionSecretStore, createSettingsStore } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -51,6 +52,12 @@ assertDeepEqual(REASONER_ROLE_IDS, ['reasonerComposer'], 'reasoner role catalog 
 for (const utilityRole of expectedUtilityRoles) {
   assertEqual(roleLane(utilityRole), 'utility', `${utilityRole} uses utility lane`);
 }
+const providerSpec = readFileSync(new URL('../../docs/architecture/PROVIDER_AND_GENERATION_SPEC.md', import.meta.url), 'utf8');
+for (const utilityRole of expectedUtilityRoles) {
+  assert(providerSpec.includes(`\`${utilityRole}\``), `provider spec documents ${utilityRole}`);
+}
+assert(providerSpec.includes('`reasonerComposer`'), 'provider spec documents reasonerComposer');
+assert(!/characterLensCard|environmentTextureCard/.test(providerSpec), 'provider spec omits legacy card role names');
 
 const calls = [];
 const host = {

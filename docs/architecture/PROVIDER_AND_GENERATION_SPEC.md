@@ -82,9 +82,9 @@ The first working loop must include:
 - Utility provider settings and test action;
 - Reasoner provider settings and test action;
 - Utility Arbiter structured call;
-- Utility Composer prompt-packet path;
-- Reasoner Composer prompt-packet path;
-- Utility Composer as the default and fallback composition path.
+- Utility composition path, using `briefUtilityComposer` if the composition work is model-routed;
+- Reasoner composition path through `reasonerComposer`;
+- Utility-composed packet as the default and fallback composition path.
 
 ## Session Secret Boundary
 
@@ -113,9 +113,12 @@ Generation roles describe why a model call exists. They are not the same thing a
 | --- | --- | --- | --- |
 | `utilityArbiter` | Utility | Decide whether Recursion should skip, reuse cache, refresh cards, compose a brief, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema may use conservative local fallback |
 | `sceneFrameCard` | Utility | Produce compact current-scene frame data | Omit card with diagnostic |
+| `activeCastCard` | Utility | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
+| `characterMotivationCard` | Utility | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
+| `dialogueRelationshipCard` | Utility | Capture current conversational tension, relationship texture, promises, conflicts, and voice constraints | Omit card with diagnostic |
 | `continuityRiskCard` | Utility | Identify likely contradictions or fragile facts for the next generation | Omit card with diagnostic |
-| `characterLensCard` | Utility | Capture visible posture, relationship tension, and voice cues for active characters | Omit card with diagnostic |
-| `environmentTextureCard` | Utility | Capture sensory, spatial, and staging constraints | Omit card with diagnostic |
+| `environmentItemsCard` | Utility | Capture spatial constraints, sensory details, relevant objects, tools, hazards, and nearby affordances | Omit card with diagnostic |
+| `prosePacingCard` | Utility | Capture local craft guidance for density, momentum, specificity, and response shape | Omit card with diagnostic |
 | `openThreadsCard` | Utility | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
 | `briefUtilityComposer` | Utility | Compose the normal compact prompt brief from accepted cards and budgets | Compose from available cards; omit invalid cards |
 | `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility-only composition |
@@ -290,8 +293,8 @@ The first end-to-end loop should prove both composer paths even if the default s
 1. Capture a stable snapshot.
 2. Run Utility Arbiter or use a fake Arbiter fixture in tests.
 3. Generate or reuse a small accepted hand.
-4. Compose a prompt packet through Utility Composer by default.
-5. Compose through Reasoner Composer when the setting and Arbiter decision permit it.
+4. Compose a prompt packet through the Utility composition path by default, using `briefUtilityComposer` if a Utility model call is needed.
+5. Compose through `reasonerComposer` when the setting and Arbiter decision permit it.
 6. Fall back to the Utility-composed packet if Reasoner fails, times out, returns invalid schema, or is disabled during the run.
 7. Install, skip, or clear the Recursion prompt packet through the host adapter.
 8. Emit visible progress stages and sanitized model-call journal entries for the route taken.

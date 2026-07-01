@@ -16,7 +16,7 @@ Coverage includes:
 - Utility/Reasoner provider routing, batching, structured JSON parsing, retries, and redaction;
 - V1 card catalog, card lifecycle, provider-result conversion, and hand selection;
 - prompt packet composition, Reasoner fallback, validation, prompt block generation, and unsafe-content rejection;
-- runtime Off/Observe/Auto behavior, prompt install/clear, stale-run handling, storage fallback, and provider fallback;
+- runtime Off/Observe/Auto behavior, sanitized hand journal breadcrumbs, prompt install/clear, stale-run handling, storage fallback, and provider fallback;
 - SillyTavern host adapter prompt/storage/generation contracts;
 - Recursion Bar, Activity Ribbon, Actions menu, Last Hand dropdown, full viewer, settings, provider controls, and redaction;
 - Playwright-backed live harness contracts, including dedicated-user rejection and opt-in generation bridge prompt evidence.

@@ -161,6 +161,14 @@ Run journals explain recent behavior without storing private model I/O. They are
 Recommended shape:
 
 ```ts
+type JsonSafeValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonSafeValue[]
+  | { [key: string]: JsonSafeValue };
+
 type RecursionRunJournalRecord = {
   recordType: "recursion.runJournal";
   schemaVersion: 1;
@@ -197,7 +205,7 @@ type RecursionRunJournalEntry = {
     | "storage.pruned";
   severity: "debug" | "info" | "warn" | "error";
   summary: string;
-  details?: Record<string, string | number | boolean | null>;
+  details?: JsonSafeValue;
   hashes?: {
     requestHash?: string;
     responseHash?: string;
@@ -209,10 +217,21 @@ type RecursionRunJournalEntry = {
     inputTokens?: number;
     outputTokens?: number;
     cardCount?: number;
+    selectedCount?: number;
+    selectedTokenEstimate?: number;
     omittedCount?: number;
   };
 };
 ```
+
+`hand.selected` is the default V1 breadcrumb for committed Auto prompt install attempts and completed Observe previews. It stores metadata needed to explain what Recursion used without persisting prompt-facing text:
+
+- `details.handId`, `selectedCount`, `omittedCount`, `listedCount`, and `truncated`;
+- `details.cards[]` with up to 16 selected card ids, families, roles, emphasis values, detail profiles, and token estimates;
+- `hashes.promptPacketHash` and `hashes.sourceHash`;
+- `metrics.selectedTokenEstimate`, `selectedCount`, and `omittedCount`.
+
+It must not contain card `promptText`, prompt packet sections, inspector notes, raw provider prompts, raw provider responses, transcript text, API keys, bearer tokens, `sk-...` tokens, or private secrets.
 
 Journal entries may record provider name, resolved model, status code, error category, timing, token counts, schema-validity result, request hash, response hash, prompt packet hash, selected card ids, omission reasons, and invalidation reasons.
 

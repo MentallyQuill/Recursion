@@ -37,7 +37,7 @@ sequenceDiagram
     Prompt-->>Runtime: validated packet
     Runtime->>Adapter: clear and install Recursion prompt keys
     Adapter-->>Runtime: install result
-    Runtime->>Storage: append prompt journal event
+    Runtime->>Storage: append hand and prompt journal events
     Runtime->>UI: Recursion prompt ready or warning
 ```
 
@@ -80,7 +80,7 @@ The resulting hand contains sanitized card ids, families, roles, prompt text, to
 
 The prompt composer turns the hand into Scene Brief, Turn Brief, and Guardrails. Utility composition is the default path. Reasoner composition can add a validated synthesis patch when settings and the Arbiter permit it.
 
-Auto mode installs prompt blocks through the SillyTavern adapter. Observe mode composes and then clears prompt entries. Off mode clears without compilation.
+Auto mode installs prompt blocks through the SillyTavern adapter. Committed Auto prompt install attempts write a sanitized `hand.selected` journal breadcrumb for the final hand before the prompt install event. Observe only mode composes, clears prompt entries, then writes the same sanitized hand breadcrumb for the preview. Off mode clears without compilation.
 
 Current SillyTavern prompt keys:
 
@@ -94,7 +94,7 @@ Install uses a clear-then-install sequence and rolls back all known Recursion pr
 
 Activity events are emitted for reading the turn, planning, card generation or cache reuse, hand selection, prompt install, prompt clear, storage save, warnings, and settled results. The Activity Ribbon renders the latest active run state rather than a raw log.
 
-Storage writes are sequenced separately from prompt mutations. Storage failure records a warning and keeps the current generation path moving when in-memory state is sufficient.
+Storage writes are sequenced separately from prompt mutations. Storage failure records a warning and keeps the current generation path moving when in-memory state is sufficient. `hand.selected` entries store hand id, selected and omitted counts, up to 16 selected card ids/families/roles/emphasis/token estimates with `listedCount` and `truncated`, source hashes, and prompt packet hashes; they do not store card `promptText`, prompt sections, inspector notes, or provider payloads.
 
 ## Cancellation And Stale Results
 

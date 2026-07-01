@@ -1348,6 +1348,52 @@ export function createRecursionRuntime({
     }
   }
 
+  async function appendHandSelectedJournal(runId, snapshot, hand, packet) {
+    const selectedCards = Array.isArray(hand?.cards) ? hand.cards : [];
+    const omittedCards = Array.isArray(hand?.omitted) ? hand.omitted : [];
+    const selectedTokenEstimate = selectedCards.reduce((total, card) => {
+      const tokenEstimate = numberOr(card?.tokenEstimate, 0);
+      return total + Math.max(0, Math.round(tokenEstimate));
+    }, 0);
+    return appendJournalSafe(runId, snapshot.chatKey, {
+      event: 'hand.selected',
+      severity: 'info',
+      summary: 'Turn hand selected.',
+      runId,
+      sceneKey: snapshot.sceneKey,
+      details: {
+        handId: safeIdentifier(hand?.handId || '', 'hand', 160),
+        selectedCount: selectedCards.length,
+        omittedCount: omittedCards.length,
+        listedCount: Math.min(selectedCards.length, 16),
+        truncated: selectedCards.length > 16,
+        cards: selectedCards.map((card) => ({
+          id: safeIdentifier(card?.id || '', 'card', 160),
+          family: safeText(card?.family || '', 80),
+          role: safeText(card?.role || '', 80),
+          emphasis: safeText(card?.emphasis || '', 40),
+          detailProfile: safeText(card?.detailProfile || '', 40),
+          tokenEstimate: Math.max(0, Math.round(numberOr(card?.tokenEstimate, 0)))
+        })).slice(0, 16)
+      },
+      hashes: {
+        promptPacketHash: hashJson(packet),
+        sourceHash: hashJson({
+          chatKey: snapshot.chatKey,
+          sceneKey: snapshot.sceneKey,
+          sceneFingerprint: snapshot.sceneFingerprint,
+          turnFingerprint: snapshot.turnFingerprint,
+          latestMesId: snapshot.latestMesId
+        })
+      },
+      metrics: {
+        selectedTokenEstimate,
+        selectedCount: selectedCards.length,
+        omittedCount: omittedCards.length
+      }
+    });
+  }
+
   async function invalidateActiveSceneCacheBestEffort(reason, details = {}) {
     try {
       await storageSaveTail.catch(() => {});
@@ -1822,19 +1868,24 @@ export function createRecursionRuntime({
       lastPacket = packet;
 
       if (settings.mode === 'observe') {
-        const clear = await runPromptMutationSection(runId, () => clearPromptBestEffort(host));
-        if (clear?.superseded) return clear;
-        if (!isActiveRun(runId)) return supersededResult(runId);
-        if (clear?.ok === false) {
-          reportClearWarning(runId, clear);
-        } else {
-          settleRuntimeActivity({
-            runId,
-            outcome: 'success',
-            label: 'Observe mode: hand preview ready. No prompt injected.'
-          });
-        }
-        return { ok: true, observe: true, packet, hand, plan, clear };
+        const observeResult = await runPromptMutationSection(runId, async () => {
+          const clear = await clearPromptBestEffort(host);
+          if (clear?.superseded) return clear;
+          if (!isActiveRun(runId)) return supersededResult(runId);
+          await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
+          if (!isActiveRun(runId)) return supersededResult(runId);
+          if (clear?.ok === false) {
+            reportClearWarning(runId, clear);
+          } else {
+            settleRuntimeActivity({
+              runId,
+              outcome: 'success',
+              label: 'Observe mode: hand preview ready. No prompt injected.'
+            });
+          }
+          return { ok: true, observe: true, packet, hand, plan, clear };
+        });
+        return observeResult;
       }
 
       if (!isActiveRun(runId)) return supersededResult(runId);
@@ -1905,6 +1956,8 @@ export function createRecursionRuntime({
         const install = await installPrompt(host, packet);
         if (!isActiveRun(runId)) return supersededResult(runId);
         const installOk = install?.ok !== false;
+        await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
+        if (!isActiveRun(runId)) return supersededResult(runId);
         await appendJournalSafe(runId, promptSnapshot.chatKey, {
           event: installOk ? 'prompt.installed' : 'prompt.install_failed',
           severity: installOk ? 'info' : 'warn',

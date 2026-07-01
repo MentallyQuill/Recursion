@@ -196,8 +196,18 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assert(cache.latestHand.cards.length > 0, 'scene cache latest hand records selected cards');
   assert(cache.cards.some((card) => Number.isFinite(card.source?.firstMesId) && Number.isFinite(card.source?.lastMesId)), 'scene cache cards preserve source message range');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
-  assertEqual(journal.entries.length, 1, 'install journal entry persisted');
-  assertEqual(journal.entries[0].event, 'prompt.installed', 'install journal records success');
+  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.installed'], 'auto journals hand before prompt install');
+  const handSelected = journal.entries.find((entry) => entry.event === 'hand.selected');
+  const promptInstalled = journal.entries.find((entry) => entry.event === 'prompt.installed');
+  assert(handSelected, 'hand selection journal entry persisted');
+  assert(promptInstalled, 'install journal records success');
+  assertEqual(handSelected.details?.handId, view.lastHand.handId, 'hand selection journal records hand id');
+  assertEqual(handSelected.details?.selectedCount, view.lastHand.cards.length, 'hand selection journal records selected count');
+  assertEqual(handSelected.details?.cards?.length, view.lastHand.cards.length, 'hand selection journal records selected card metadata');
+  assertEqual(handSelected.details?.listedCount, view.lastHand.cards.length, 'hand selection journal records listed count');
+  assertEqual(handSelected.details?.truncated, false, 'hand selection journal records truncation state');
+  assert(handSelected.hashes?.promptPacketHash, 'hand selection journal records prompt packet hash');
+  assert(!JSON.stringify(handSelected).includes(view.lastHand.cards[0].promptText), 'hand selection journal omits prompt text');
 }
 
 {
@@ -566,7 +576,9 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const { runtime, calls, installed, storage } = createRuntimeHarness({
     settings: { mode: 'observe', reasonerUse: 'off' }
   });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Observe only.' });
+  const result = await runtime.prepareForGeneration({
+    userMessage: 'Observe only with Bearer live-token, sk-live-runtime, and private-secret.'
+  });
   const view = runtime.view();
   assertEqual(result.ok, true, 'observe mode returns ok');
   assertEqual(result.observe, true, 'observe result marked');
@@ -577,7 +589,72 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(view.activity.label, 'Observe mode: hand preview ready. No prompt injected.', 'observe activity label');
   assertEqual(view.activeRunId, null, 'active run cleared after observe');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
-  assertEqual(journal.entries.length, 0, 'observe mode does not append install journal');
+  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected'], 'observe only journals hand selection');
+  const handSelected = journal.entries.find((entry) => entry.event === 'hand.selected');
+  assert(handSelected, 'observe mode appends hand selection journal');
+  assert(!journal.entries.some((entry) => entry.event === 'prompt.installed'), 'observe mode does not append install journal');
+  assertEqual(handSelected.details?.selectedCount, view.lastHand.cards.length, 'observe hand journal records selected count');
+  assertEqual(handSelected.details?.omittedCount, view.lastHand.omitted.length, 'observe hand journal records omitted count');
+  assert(!JSON.stringify(handSelected).includes(view.lastHand.cards[0].promptText), 'observe hand journal omits prompt text');
+  assert(!JSON.stringify(handSelected).includes('inspectorNotes'), 'observe hand journal omits inspector notes');
+  assertNoSecretText(handSelected, 'observe hand journal');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repository = createStorageRepository({ storage: adapter });
+  let releaseFirstLoad;
+  let firstLoadStarted = false;
+  let snapshotReads = 0;
+  const storage = {
+    async loadSceneCache(chatKey, sceneKey) {
+      if (!firstLoadStarted) {
+        firstLoadStarted = true;
+        await new Promise((resolve) => {
+          releaseFirstLoad = resolve;
+        });
+      }
+      return repository.loadSceneCache(chatKey, sceneKey);
+    },
+    async saveSceneCache(...args) {
+      return repository.saveSceneCache(...args);
+    },
+    async appendJournal(...args) {
+      return repository.appendJournal(...args);
+    },
+    async loadRunJournal(...args) {
+      return repository.loadRunJournal(...args);
+    }
+  };
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'observe', reasonerUse: 'off' },
+    storage,
+    snapshot: () => {
+      snapshotReads += 1;
+      const run = snapshotReads === 1 ? 'a' : 'b';
+      return {
+        chatId: `observe-${run}`,
+        chatKey: `observe-${run}`,
+        sceneKey: `observe-scene-${run}`,
+        sceneFingerprint: `observe-scene-${run}`,
+        turnFingerprint: `observe-turn-${run}`,
+        latestMesId: run === 'a' ? 1 : 2,
+        messages: [{ mesid: run === 'a' ? 1 : 2, role: 'user', text: `Observe ${run}.`, visible: true }]
+      };
+    }
+  });
+  const first = runtime.prepareForGeneration({ userMessage: 'Observe a.' });
+  await waitUntil(() => firstLoadStarted, 'first observe run did not block in scene cache load');
+  const second = await runtime.prepareForGeneration({ userMessage: 'Observe b.' });
+  releaseFirstLoad();
+  const firstResult = await first;
+  assertEqual(second.ok, true, 'newer observe run completes');
+  assertEqual(second.observe, true, 'newer observe run remains observe');
+  assertEqual(firstResult.superseded, true, 'older observe run is superseded');
+  const staleJournal = await storage.loadRunJournal('observe-a');
+  const freshJournal = await storage.loadRunJournal('observe-b');
+  assertEqual(staleJournal.entries.length, 0, 'superseded observe run does not append hand journal');
+  assertDeepEqual(freshJournal.entries.map((entry) => entry.event), ['hand.selected'], 'only final observe run records one hand journal');
 }
 
 {
@@ -888,8 +965,10 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(view.activity.label, 'Prompt install failed. Generation will continue without Recursion.', 'install failure label');
   assertEqual(view.activeRunId, null, 'active run cleared after install failure');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
-  assertEqual(journal.entries[0].event, 'prompt.install_failed', 'install failure journaled');
-  assert(journal.entries[0].summary.includes('install transport failed'), 'install failure summary includes compact error');
+  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.install_failed'], 'install failure journals hand before failure');
+  const installFailed = journal.entries.find((entry) => entry.event === 'prompt.install_failed');
+  assert(installFailed, 'install failure journaled');
+  assert(installFailed.summary.includes('install transport failed'), 'install failure summary includes compact error');
 }
 
 {
@@ -928,7 +1007,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(view.activity.label, 'Prompt install failed. Generation will continue without Recursion.', 'missing installer warning label');
   assertEqual(view.activeRunId, null, 'active run cleared after missing installer');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
-  assertEqual(journal.entries[0].event, 'prompt.install_failed', 'missing installer journaled');
+  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.install_failed'], 'missing installer journals hand before failure');
 }
 
 {
@@ -1012,7 +1091,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertNoSecretText(result, 'snapshot recheck failure result');
   assertNoSecretText(view.activity, 'snapshot recheck failure activity');
   const journal = await storage.loadRunJournal(currentTurn.chatKey);
-  assertEqual(journal.entries[0].event, 'prompt.install_skipped', 'failed snapshot recheck skip is journaled');
+  assertDeepEqual(journal.entries.map((entry) => entry.event), ['prompt.install_skipped'], 'failed snapshot recheck skip is journaled without hand commit');
   assertEqual(journal.entries[0].details.reason, 'snapshot-recheck-failed', 'failed snapshot recheck journal records reason');
   assertNoSecretText(journal.entries[0], 'snapshot recheck failure journal');
 }
@@ -1068,7 +1147,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const result = await runtime.prepareForGeneration({ userMessage: 'Save cache fails.' });
   assertEqual(result.ok, true, 'throwing scene cache save does not abort runtime');
   assertEqual(installed.length, 1, 'throwing scene cache save still installs prompt');
-  assertEqual(appendCalls, 1, 'throwing scene cache save still appends install journal');
+  assertEqual(appendCalls, 2, 'throwing scene cache save still appends hand and install journals');
   const serializedHistory = JSON.stringify(activity.history());
   assert(serializedHistory.includes('"operation":"saveSceneCache"'), 'save failure warning is surfaced');
   assert(!serializedHistory.includes('Bearer save-token'), 'save failure warning redacts bearer token');

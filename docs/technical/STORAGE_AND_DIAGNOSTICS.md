@@ -47,6 +47,8 @@ The run journal is a ring buffer, not an archive. It stores compact entries with
 
 Provider journal entries are diagnostic only. A journal write failure cannot break the generation path.
 
+Committed Auto prompt install attempts and completed Observe previews write a `hand.selected` breadcrumb. The entry is metadata only: hand id, selected and omitted counts, up to 16 selected card ids/families/roles/emphasis/token estimates with `listedCount` and `truncated`, source hash, prompt packet hash, and compact metrics. It must not persist card `promptText`, prompt packet sections, inspector notes, raw provider prompts, raw provider responses, transcript text, or secrets.
+
 ## Activity Event Contract
 
 Activity events feed the Recursion Bar, Activity Ribbon, Full Viewer, and selected journal entries. Events include run id, phase, foreground/background/review mode, severity, label, compact detail, chips, provider lane, composer lane, card counts, and fallback reason.
@@ -65,6 +67,7 @@ Allowed default diagnostics:
 - status categories
 - durations and token counts
 - card ids, families, statuses, emphasis, and token estimates
+- hand selection counts and selected card identity metadata
 - source message ranges and hashes
 - prompt packet hashes and omission reasons
 - cache hit, stale, index update, and prune events

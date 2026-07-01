@@ -161,11 +161,16 @@ assertEqual(requests[0].snapshotHash, 'hash', 'snapshot hash included');
 assertEqual(requests[0].metadata.family, 'Scene Frame', 'request metadata includes family');
 assertEqual(requests[1].metadata.reason, '', 'missing request reason defaults empty');
 assert(requests[0].prompt.includes('Return one JSON object'), 'request prompt asks for JSON-only output');
+assert(requests[0].prompt.includes('Envelope role must be "sceneFrameCard"'), 'request prompt requires envelope role echo');
+assert(requests[0].prompt.includes('Envelope family must be "Scene Frame"'), 'request prompt requires envelope family echo');
 
 const providerCards = cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
   data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
     items: [
       {
         promptText: 'The scene is boxed into a damaged shuttle.',
@@ -174,20 +179,90 @@ const providerCards = cardsFromProviderResult({
       }
     ]
   }
-}, { sceneId: 'scene-provider', snapshotHash: 'hash-provider' });
+}, { sceneId: 'scene-provider', snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' });
 assertEqual(providerCards.length, 1, 'valid provider item converted');
 assertEqual(providerCards[0].family, 'Scene Frame', 'provider role maps family');
 assertEqual(providerCards[0].source.snapshotHash, 'hash-provider', 'provider cards inherit source context');
 assertEqual(cardsFromProviderResult({ ok: false, data: { items: [{ promptText: 'ignored' }] } }).length, 0, 'non-ok provider result ignored');
 assertEqual(cardsFromProviderResult({ ok: true, data: {} }).length, 0, 'provider result without items ignored');
-assertEqual(cardsFromProviderResult({ ok: true, data: { items: [{ promptText: 'orphan provider item' }] } }).length, 0, 'provider item without role or family ignored');
+assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { items: [{ promptText: 'missing schema should be ignored' }] } }).length, 0, 'provider result without card schema ignored');
+assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { schema: 'wrong.schema', items: [{ promptText: 'wrong schema should be ignored' }] } }).length, 0, 'provider result with wrong card schema ignored');
+assertEqual(cardsFromProviderResult({ ok: true, data: { schema: 'recursion.card.v1', items: [{ promptText: 'orphan provider item' }] } }).length, 0, 'provider item without role or family ignored');
+assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { schema: 'recursion.card.v1', items: [{ promptText: 'missing envelope identity' }] } }).length, 0, 'provider envelope without role and family ignored even with result role');
+assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { schema: 'recursion.card.v1', role: 'sceneFrameCard', items: [{ promptText: 'missing envelope family' }] } }).length, 0, 'provider envelope without family ignored');
+assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { schema: 'recursion.card.v1', family: 'Scene Frame', items: [{ promptText: 'missing envelope role' }] } }).length, 0, 'provider envelope without role ignored');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
   data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    items: [{ promptText: 'missing request-owned expectation' }]
+  }
+}).length, 0, 'provider envelope ignored without request-owned expected role and family');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  data: {
+    schema: 'recursion.card.v1',
+    roleId: 'sceneFrameCard',
+    family: 'Scene Frame',
+    items: [{ promptText: 'roleId alias envelope should be ignored' }]
+  }
+}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope roleId alias is ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    items: [{ promptText: 'items plus cards alias should be ignored' }],
+    cards: [{ promptText: 'legacy alias' }]
+  }
+}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with cards alias ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    items: [
+      { promptText: 'First card.' },
+      { promptText: 'Second card.' }
+    ]
+  }
+}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider result with multiple items ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
     items: [{ family: 'Continuity Risk', promptText: 'conflicting provider item' }]
   }
-}).length, 0, 'provider item with conflicting family and role ignored');
+}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider item with conflicting family and role ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'continuityRiskCard',
+    family: 'Continuity Risk',
+    items: [{ promptText: 'conflicting envelope role' }]
+  }
+}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with conflicting role ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Continuity Risk',
+    items: [{ promptText: 'conflicting envelope family' }]
+  }
+}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with conflicting family ignored');
 
 const selectedDeck = [
   deckCard('Prose/Pacing', 'Keep it brisk.', { id: 'low', tokenEstimate: 20 }),

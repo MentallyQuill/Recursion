@@ -8,6 +8,7 @@ const EVIDENCE_TEXT_LIMIT = 120;
 const INSPECTOR_NOTES_LIMIT = 800;
 const ARBITER_REASON_LIMIT = 240;
 const MAX_TOKEN_ESTIMATE = 1000;
+const CARD_RESPONSE_SCHEMA = 'recursion.card.v1';
 
 function catalogEntry(entry) {
   return Object.freeze(entry);
@@ -134,6 +135,43 @@ function resolveCatalog(input, { strict = true, allowDefault = false } = {}) {
   }
   if (!strict) return null;
   throw new Error(`Unknown card catalog family or role: ${family || role}`);
+}
+
+function hasCatalogIdentity(input) {
+  const source = asObject(input);
+  return Boolean(String(source.family ?? '').trim() || String(source.role ?? source.roleId ?? '').trim());
+}
+
+function hasCompleteCatalogIdentity(input) {
+  const source = asObject(input);
+  return Boolean(String(source.family ?? '').trim() && String(source.role ?? '').trim());
+}
+
+function resolveProviderEnvelopeCatalog(data, context) {
+  let expectedCatalog;
+  let envelopeCatalog;
+  try {
+    expectedCatalog = resolveCatalog({
+      family: context?.expectedFamily,
+      role: context?.expectedRole
+    }, { strict: true });
+    if (!hasCompleteCatalogIdentity(data)) return null;
+    envelopeCatalog = resolveCatalog(data, { strict: true });
+  } catch {
+    return null;
+  }
+  if (expectedCatalog && envelopeCatalog.role !== expectedCatalog.role) return null;
+  return envelopeCatalog;
+}
+
+function itemMatchesProviderCatalog(item, catalog) {
+  if (!hasCatalogIdentity(item)) return true;
+  try {
+    const itemCatalog = resolveCatalog(item, { strict: true });
+    return itemCatalog.role === catalog.role;
+  } catch {
+    return false;
+  }
 }
 
 function cardIdFor(input, catalog, promptText, context) {
@@ -281,6 +319,8 @@ export function buildCardRequests(plan = {}, context = {}) {
           `Create one compact ${catalog.family} card for the current scene.`,
           'Return one JSON object only. Do not wrap it in markdown.',
           'The JSON object must use schema "recursion.card.v1" and an "items" array with one card object.',
+          `Envelope role must be "${catalog.role}".`,
+          `Envelope family must be "${catalog.family}".`,
           'The card object may contain promptText, summary, evidenceRefs, tokenEstimate, detailProfile, emphasis, and inspectorNotes.',
           'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
           reason ? `Arbiter request reason: ${reason}` : '',
@@ -302,20 +342,20 @@ export function buildCardRequests(plan = {}, context = {}) {
 export function cardsFromProviderResult(result, context = {}) {
   if (!result?.ok) return [];
   const data = asObject(result.data);
-  const items = Array.isArray(data.items)
-    ? data.items
-    : (Array.isArray(data.cards) ? data.cards : []);
+  if (data.schema !== CARD_RESPONSE_SCHEMA) return [];
+  if (Object.prototype.hasOwnProperty.call(data, 'cards')) return [];
+  const items = Array.isArray(data.items) ? data.items : [];
+  if (items.length !== 1) return [];
+  const catalog = resolveProviderEnvelopeCatalog(data, context);
+  if (!catalog) return [];
   return items.flatMap((item) => {
     const source = asObject(item);
-    const identity = {
-      role: source.role ?? source.roleId ?? result.roleId,
-      family: source.family ?? data.family
-    };
-    if (!resolveCatalog(identity, { strict: false })) return [];
+    if (!itemMatchesProviderCatalog(source, catalog)) return [];
     try {
       return [normalizeCard({
         ...source,
-        ...identity,
+        role: catalog.role,
+        family: catalog.family,
         promptText: source.promptText ?? source.text ?? source.claim,
         evidenceRefs: source.evidenceRefs ?? source.evidence,
         tokenEstimate: source.tokenEstimate ?? source.tokenCost,

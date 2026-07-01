@@ -1227,11 +1227,13 @@ export function createRecursionRuntime({
         ? requests.map((request) => ({ ...request, signal }))
         : requests;
       const results = await generationRouter.batch(signalRequests, { runId, signal });
-      return results.flatMap((result) => cardsFromProviderResult(result, {
+      return results.flatMap((result, index) => cardsFromProviderResult(result, {
         sceneId: snapshot.sceneKey,
         chatId: snapshot.chatId,
         snapshotHash: plan.snapshotHash || hashJson(snapshot),
-        lastMesId: snapshot.latestMesId
+        lastMesId: snapshot.latestMesId,
+        expectedRole: requests[index]?.metadata?.role,
+        expectedFamily: requests[index]?.metadata?.family
       }));
     } catch {
       return [];

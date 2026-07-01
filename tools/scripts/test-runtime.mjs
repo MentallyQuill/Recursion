@@ -147,6 +147,9 @@ function createRuntimeHarness({
     ok: true,
     roleId: 'openThreadsCard',
     data: {
+      schema: 'recursion.card.v1',
+      role: 'openThreadsCard',
+      family: 'Open Threads',
       items: [{
         sceneId: 'provider-direct-scene',
         chatId: 'provider-direct-chat',
@@ -165,7 +168,9 @@ function createRuntimeHarness({
     chatId: 'chat-1',
     snapshotHash: 'runtime-direct-snapshot-hash',
     firstMesId: 1,
-    lastMesId: 2
+    lastMesId: 2,
+    expectedRole: 'openThreadsCard',
+    expectedFamily: 'Open Threads'
   });
   assertEqual(directProviderCards.length, 1, 'direct provider card normalizes');
   assertEqual(directProviderCards[0].sceneId, 'scene-1', 'direct provider card scene uses runtime context');
@@ -739,6 +744,9 @@ function createRuntimeHarness({
           ok: true,
           roleId: request.roleId,
           data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
             items: [{
               snapshotHash: 'hallucinated-card-snapshot-hash',
               source: { snapshotHash: 'hallucinated-source-snapshot-hash' },
@@ -937,6 +945,9 @@ function createRuntimeHarness({
           ok: true,
           roleId: request.roleId,
           data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
             items: [{
               promptText: 'Remember the signal-threaded open thread.',
               evidenceRefs: ['message:2'],
@@ -1029,6 +1040,9 @@ function createRuntimeHarness({
           ok: true,
           roleId: request.roleId,
           data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
             items: [{
               promptText: 'The unanswered signal still needs a response without Bearer live-token or sk-live-runtime.',
               summary: 'Open thread summary with Bearer live-token.',
@@ -1055,6 +1069,144 @@ function createRuntimeHarness({
   const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
   assert(!serialized.includes('Bearer live-token'), 'provider card bearer token redacted before persistence and prompt');
   assert(!serialized.includes('sk-live-runtime'), 'provider card sk token redacted before persistence and prompt');
+}
+
+{
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['identityless-provider-envelope']
+          }
+        };
+      },
+      async batch(requests) {
+        return requests.map((request) => ({
+          ok: true,
+          roleId: request.roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            items: [{
+              promptText: 'Identityless provider card must not enter cache or prompt.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 12
+            }]
+          }
+        }));
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Reject identityless card envelope.' });
+  const view = runtime.view();
+  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
+  const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
+  assertEqual(result.ok, true, 'identityless provider envelope run remains fail-soft');
+  assert(!serialized.includes('Identityless provider card'), 'identityless provider envelope is not accepted into cache, hand, or packet');
+}
+
+{
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['wrong-role-provider-envelope']
+          }
+        };
+      },
+      async batch() {
+        return [{
+          ok: true,
+          roleId: 'continuityRiskCard',
+          data: {
+            schema: 'recursion.card.v1',
+            role: 'continuityRiskCard',
+            family: 'Continuity Risk',
+            items: [{
+              promptText: 'Wrong returned role must not enter cache or prompt.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 12
+            }]
+          }
+        }];
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Reject wrong role card envelope.' });
+  const view = runtime.view();
+  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
+  const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
+  assertEqual(result.ok, true, 'wrong-role provider envelope run remains fail-soft');
+  assert(!serialized.includes('Wrong returned role'), 'provider envelope with role mismatched to request slot is not accepted');
+}
+
+{
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['extra-provider-envelope']
+          }
+        };
+      },
+      async batch(requests) {
+        return [
+          {
+            ok: true,
+            roleId: requests[0].roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: requests[0].metadata.role,
+              family: requests[0].metadata.family,
+              items: [{
+                promptText: 'Expected provider card may enter cache.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 12
+              }]
+            }
+          },
+          {
+            ok: true,
+            roleId: 'sceneFrameCard',
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneFrameCard',
+              family: 'Scene Frame',
+              items: [{
+                promptText: 'Extra provider result must not enter cache or prompt.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 12
+              }]
+            }
+          }
+        ];
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Reject extra card envelope.' });
+  const view = runtime.view();
+  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
+  const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
+  assertEqual(result.ok, true, 'extra provider result run remains fail-soft');
+  assert(serialized.includes('Expected provider card'), 'expected provider card remains accepted');
+  assert(!serialized.includes('Extra provider result'), 'extra provider result without request metadata is not accepted');
 }
 
 {
@@ -1371,6 +1523,9 @@ function createRuntimeHarness({
           ok: true,
           roleId: request.roleId,
           data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
             items: [{
               promptText: 'Keep following the visible request.',
               evidenceRefs: ['message:2'],

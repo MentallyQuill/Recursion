@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -155,7 +155,16 @@ function sendText(response, status, text, headers = {}) {
   response.end(text);
 }
 
-function recursionSmokeFixtureHtml({ missingDisableHook = false, omitPromptPacketMetadata = false, asyncUiGeneration = false, ignorePromptClear = false } = {}) {
+function recursionSmokeFixtureHtml({
+  missingDisableHook = false,
+  omitPromptPacketMetadata = false,
+  asyncUiGeneration = false,
+  ignorePromptClear = false,
+  omitVisibleSendMarker = false,
+  omitHostGenerationContinuation = false,
+  sendControlsDisabled = false,
+  sendSurface = 'complete'
+} = {}) {
   const disableHookScript = missingDisableHook
     ? ''
       : "globalThis.recursionOnDisable = function recursionOnDisable() { smokeContext.setExtensionPrompt('recursion.sceneBrief', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.turnBrief', '', 'IN_CHAT', 2, false, 'SYSTEM'); return true; };";
@@ -201,6 +210,10 @@ function recursionSmokeFixtureHtml({ missingDisableHook = false, omitPromptPacke
           <pre data-recursion-prompt-packet>{}</pre>
         </dialog>
       </section>
+      ${sendSurface === 'none' ? '' : `<section id="chat-input-area">
+        ${sendSurface === 'button-only' ? '' : `<label for="send_textarea">Send message</label><textarea id="send_textarea" aria-label="Send a message"${sendControlsDisabled ? ' disabled' : ''}></textarea>`}
+        ${sendSurface === 'input-only' ? '' : `<button id="send_but" type="button" aria-label="Send message"${sendControlsDisabled ? ' disabled' : ''}>Send</button>`}
+      </section>`}
     </main>
     <script>
       const smokeContext = {
@@ -230,6 +243,36 @@ function recursionSmokeFixtureHtml({ missingDisableHook = false, omitPromptPacke
       };
       globalThis.recursionOnEnable = function recursionOnEnable() { return true; };
       ${disableHookScript}
+      document.querySelector('#send_but')?.addEventListener('click', async () => {
+        const input = document.querySelector('#send_textarea');
+        const message = {
+          mesid: smokeContext.chat.length,
+          is_user: true,
+          name: 'Recursion Smoke',
+          mes: String(input?.value || '')
+        };
+        smokeContext.chat.push(message);
+        await globalThis.recursionGenerationInterceptor(smokeContext.chat);
+        if (!${omitHostGenerationContinuation ? 'true' : 'false'}) {
+          smokeContext.chat.push({
+            mesid: smokeContext.chat.length,
+            is_user: false,
+            name: 'Recursion Smoke Host',
+            mes: 'Recursion smoke host generation continued.'
+          });
+          globalThis.__recursionSmokeHostGeneration = {
+            ok: true,
+            chatLength: smokeContext.chat.length
+          };
+        }
+        if (!${omitVisibleSendMarker ? 'true' : 'false'}) {
+          globalThis.__recursionSmokeVisibleSend = {
+            ok: true,
+            chatLength: smokeContext.chat.length,
+            messageLength: message.mes.length
+          };
+        }
+      });
       document.querySelector('[data-recursion-actions]').addEventListener('click', () => {
         const panel = document.querySelector('[data-recursion-action-menu]');
         panel.hidden = !panel.hidden;
@@ -250,6 +293,11 @@ function recursionSmokeFixtureHtml({ missingDisableHook = false, omitPromptPacke
         if (viewer.showModal) viewer.showModal();
         else viewer.hidden = false;
       });
+      document.querySelector('[data-recursion-viewer-close]').addEventListener('click', () => {
+        const viewer = document.querySelector('[data-recursion-viewer]');
+        if (viewer.close) viewer.close();
+        else viewer.hidden = true;
+      });
     </script>
   </body>
 </html>`;
@@ -262,7 +310,11 @@ async function createSillyTavernSmokeFixtureServer({
   missingDisableHook = false,
   omitPromptPacketMetadata = false,
   asyncUiGeneration = false,
-  ignorePromptClear = false
+  ignorePromptClear = false,
+  omitVisibleSendMarker = false,
+  omitHostGenerationContinuation = false,
+  sendControlsDisabled = false,
+  sendSurface = 'complete'
 } = {}) {
   const sessions = new Map();
   let nextSession = 1;
@@ -398,7 +450,16 @@ async function createSillyTavernSmokeFixtureServer({
         sendText(response, 403, '<!doctype html><title>login required</title>');
         return;
       }
-      sendText(response, 200, recursionSmokeFixtureHtml({ missingDisableHook, omitPromptPacketMetadata, asyncUiGeneration, ignorePromptClear }));
+      sendText(response, 200, recursionSmokeFixtureHtml({
+        missingDisableHook,
+        omitPromptPacketMetadata,
+        asyncUiGeneration,
+        ignorePromptClear,
+        omitVisibleSendMarker,
+        omitHostGenerationContinuation,
+        sendControlsDisabled,
+        sendSurface
+      }));
       return;
     }
 
@@ -760,6 +821,127 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
+  const server = await createSillyTavernSmokeFixtureServer({ omitVisibleSendMarker: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      }
+    });
+    assertEqual(report.status, 'pass', 'visible send smoke passes from prompt evidence without fixture-only completion marker');
+    assertEqual(report.browser.snapshot.generation.triggerSource, 'ui-send', 'markerless visible send still records ui-send trigger');
+    assertEqual(report.browser.snapshot.generation.visibleSend.ok, true, 'markerless visible send is inferred from prompt evidence');
+    assertEqual(report.browser.snapshot.generation.hostGenerationContinued, true, 'markerless visible send proves host generation continued');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ sendSurface: 'input-only' });
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-partial-send-smoke-'));
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live', '--write-artifacts'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      },
+      artifactRoot
+    });
+    assertEqual(report.status, 'fail', 'partial visible send surface fails instead of falling back to direct bridge');
+    assertEqual(report.result, 'generation-visible-send-unavailable', 'partial visible send reports explicit result');
+    assertEqual(report.browser.snapshot.generation.triggerSource, 'ui-send', 'partial visible send failure records attempted trigger source');
+    assertEqual(report.browser.snapshot.generation.visibleSend.inputFound, true, 'partial visible send records input presence');
+    assertEqual(report.browser.snapshot.generation.visibleSend.buttonFound, false, 'partial visible send records missing button');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    const promptMetadata = readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8');
+    assert(promptMetadata.includes('"triggerSource": "ui-send"'), 'partial send failure prompt metadata keeps trigger source');
+    assert(promptMetadata.includes('"generationRequested": true'), 'partial send failure prompt metadata records requested generation');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ sendControlsDisabled: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      }
+    });
+    assertEqual(report.status, 'fail', 'disabled visible send controls fail instead of falling back to direct bridge');
+    assertEqual(report.result, 'generation-visible-send-unavailable', 'disabled visible send controls report explicit result');
+    assertEqual(report.browser.snapshot.generation.triggerSource, 'ui-send', 'disabled visible send failure records ui-send trigger');
+    assertEqual(report.browser.snapshot.generation.visibleSend.inputFound, true, 'disabled visible send records input presence');
+    assertEqual(report.browser.snapshot.generation.visibleSend.buttonFound, true, 'disabled visible send records button presence');
+    assertEqual(report.browser.snapshot.generation.visibleSend.inputUsable, false, 'disabled visible send records unusable input');
+    assertEqual(report.browser.snapshot.generation.visibleSend.buttonUsable, false, 'disabled visible send records unusable button');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ sendSurface: 'none' });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      }
+    });
+    assertEqual(report.status, 'pass', 'no visible send controls use the recorded direct bridge fallback');
+    assertEqual(report.browser.snapshot.generation.triggerSource, 'direct-bridge', 'no-control fallback records direct bridge trigger');
+    assertEqual(report.browser.snapshot.generation.chatMutationSource, 'context-chat', 'no-control fallback records context chat mutation');
+    assertEqual(report.browser.snapshot.generation.hostGenerationContinued, null, 'direct bridge fallback does not claim host continuation');
+    assertEqual(report.browser.snapshot.generation.visibleSend.inputFound, false, 'direct bridge fallback records missing input');
+    assertEqual(report.browser.snapshot.generation.visibleSend.buttonFound, false, 'direct bridge fallback records missing button');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ omitHostGenerationContinuation: true });
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-host-continuation-smoke-'));
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live', '--write-artifacts'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      },
+      artifactRoot
+    });
+    assertEqual(report.status, 'fail', 'visible send fails when host generation does not continue after prompt install');
+    assertEqual(report.result, 'generation-host-continuation-failed', 'missing host continuation reports explicit result');
+    assertEqual(/screenshot/i.test(report.nextAction || ''), false, 'generation failure guidance does not ask for suppressed screenshots');
+    assertEqual(report.browser.snapshot.generation.triggerSource, 'ui-send', 'host continuation failure records visible trigger source');
+    assertEqual(report.browser.snapshot.generation.hostGenerationContinued, false, 'host continuation failure records missing continuation');
+    assertEqual(report.browser.snapshot.generation.promptInstalled, true, 'host continuation failure keeps prompt-install evidence');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    const promptMetadata = readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8');
+    assert(promptMetadata.includes('"hostGenerationContinued": false'), 'host continuation failure prompt metadata records missing continuation');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
   const server = await createSillyTavernSmokeFixtureServer({ ignorePromptClear: true });
   const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-clear-fail-smoke-'));
   try {
@@ -803,6 +985,10 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.status, 'pass', 'generation-enabled smoke passes when prompt bridge proof succeeds');
     assertEqual(report.result, 'generation-smoke-pass', 'generation-enabled smoke result is explicit');
     assertEqual(report.browser.status, 'pass', 'generation smoke still proves browser UI preflight');
+    assertEqual(report.browser.snapshot.generation.triggerSource, 'ui-send', 'generation smoke uses visible send controls when available');
+    assertEqual(report.browser.snapshot.generation.chatMutationSource, 'visible-control', 'generation smoke records visible chat mutation source');
+    assertEqual(report.browser.snapshot.generation.hostGenerationContinued, true, 'generation smoke proves host generation continued after visible send');
+    assertEqual(/screenshot/i.test(report.nextAction || ''), false, 'generation success guidance does not ask for suppressed screenshots');
     assertEqual(report.browser.snapshot.generation.promptInstalled, true, 'generation smoke records Recursion prompt install');
     assertEqual(report.browser.cleanup?.promptCleared, true, 'generation smoke records Recursion prompt clear');
     assertEqual(report.browser.snapshot.generation.handReady, true, 'generation smoke records a composed hand');
@@ -811,14 +997,22 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.artifacts.promptMetadata, 'prompt/latest-packet-metadata.json', 'generation smoke writes prompt metadata artifact path');
     assertEqual(report.artifacts.activityLatestRun, 'activity/latest-run.json', 'generation smoke writes activity artifact path');
     assertEqual(report.artifacts.redactionCheck, 'diagnostics/redaction-check.json', 'generation smoke writes redaction check artifact path');
+    assertEqual(Boolean(report.artifacts.desktopScreenshot), false, 'generation smoke does not write desktop screenshot artifacts');
+    assertEqual(Boolean(report.artifacts.phoneScreenshot), false, 'generation smoke does not write phone screenshot artifacts');
+    assertEqual(Boolean(report.artifacts.trace), false, 'generation smoke does not write Playwright trace artifacts');
     const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
     const promptMetadata = readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8');
     const activityRun = readFileSync(join(runRoot, 'activity', 'latest-run.json'), 'utf8');
     const redactionCheck = readFileSync(join(runRoot, 'diagnostics', 'redaction-check.json'), 'utf8');
+    assertEqual(existsSync(join(runRoot, 'screenshots', 'desktop.png')), false, 'generation smoke omits desktop screenshot file');
+    assertEqual(existsSync(join(runRoot, 'screenshots', 'phone.png')), false, 'generation smoke omits phone screenshot file');
+    assertEqual(existsSync(join(runRoot, 'playwright', 'trace.zip')), false, 'generation smoke omits Playwright trace file');
     assert(promptMetadata.includes('"available": true'), 'generation prompt metadata records availability');
     assert(promptMetadata.includes('"packet-smoke"'), 'generation prompt metadata records packet id');
     assert(promptMetadata.includes('"installStatus": "installed"'), 'generation prompt metadata records install status');
     assert(promptMetadata.includes('"clearStatus": "cleared"'), 'generation prompt metadata records clear status');
+    assert(promptMetadata.includes('"triggerSource": "ui-send"'), 'generation prompt metadata records visible trigger source');
+    assert(promptMetadata.includes('"hostGenerationContinued": true'), 'generation prompt metadata records host continuation');
     assert(promptMetadata.includes('"promptKeys"'), 'generation prompt metadata records prompt keys');
     assert(activityRun.includes('"generation-smoke-pass"'), 'generation activity latest-run records generation result');
     assert(redactionCheck.includes('"status": "pass"'), 'generation redaction check passes');

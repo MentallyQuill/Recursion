@@ -6,7 +6,7 @@ Recursion testing should prove the extension is useful and safe without turning 
 | --- | --- | --- |
 | Fast contract suite | Runtime contracts, schemas, card lifecycle, provider routing, storage, redaction, and prompt packet rules work without a live host. | Maintained deterministic gate: `node tools\scripts\run-alpha-gate.mjs`; focused scripts: `tools/scripts/test-*.mjs`. |
 | Playwright readiness | Offline probe proves the local machine can launch/control Chromium through Playwright, use a role locator, switch desktop/phone viewports, and write trace/screenshot artifacts. If Playwright is unavailable, it returns `environment-fail` without contacting SillyTavern. | Current evidence: `check-playwright-readiness` report, trace, and viewport screenshots when Playwright is installed; otherwise a sanitized environment-fail report. |
-| Focused live SillyTavern smoke | Current preflight proves dedicated-user rejection, dry-run behavior, report shape, fail-closed semantics, Recursion-owned storage probes, served-extension freshness, no-generation UI mount/open behavior, and opt-in generation bridge prompt-install evidence. | Current evidence: `check-sillytavern-soak-users` storage-probe reports and `smoke-sillytavern-live` reports, screenshots, trace, live log, served-extension comparison, storage probe artifact, browser snapshot, prompt-key hashes, hand readiness, and prompt-packet metadata. |
+| Focused live SillyTavern smoke | Current preflight proves dedicated-user rejection, dry-run behavior, report shape, fail-closed semantics, Recursion-owned storage probes, served-extension freshness, no-generation UI mount/open behavior, and opt-in generation bridge prompt-install evidence. | Current evidence: `check-sillytavern-soak-users` storage-probe reports and `smoke-sillytavern-live` reports, no-generation screenshots/trace, live log, served-extension comparison, storage probe artifact, browser snapshot, prompt-key hashes, hand readiness, and prompt-packet metadata. |
 
 The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, offline Playwright readiness, SillyTavern storage probes when dedicated users are available, no-generation SillyTavern UI evidence, and opt-in generation bridge evidence when Recursion is installed for a dedicated user.
 
@@ -99,7 +99,7 @@ Primary live scenarios:
 - Reasoner failure falls back to Utility or local composition without blocking host generation;
 - storage repair and journal pruning report logical progress without leaking physical paths.
 
-Generation-enabled smoke may use real model calls only when explicitly enabled by `RECURSION_LIVE_GENERATION=1` or `RECURSION_LIVE_REASONER=1`. The runner first completes the same dedicated-user, served-extension, storage, and UI checks as no-generation smoke, then switches Recursion to Auto, wraps `setExtensionPrompt` to record only Recursion prompt keys, hashes, lengths, and placement metadata, calls the public `recursionGenerationInterceptor`, and asserts visible hand readiness plus prompt-packet metadata. It does not score writing quality or store raw provider prompts/responses.
+Generation-enabled smoke may use real model calls only when explicitly enabled by `RECURSION_LIVE_GENERATION=1` or `RECURSION_LIVE_REASONER=1`. The runner first completes the same dedicated-user, served-extension, storage, and UI checks as no-generation smoke, then switches Recursion to Auto, wraps `setExtensionPrompt` to record only Recursion prompt keys, hashes, lengths, and placement metadata, drives the visible SillyTavern send controls when both input and send button are available and enabled, and asserts visible hand readiness plus prompt-packet metadata. If no visible send controls exist, the harness may use the public `recursionGenerationInterceptor` as a diagnostic direct-bridge fallback and must record that trigger source. If only one visible send control exists, or controls are visible but disabled, the run fails instead of falling back. UI-send runs must also prove host generation continued after the user message. Generation-enabled runs suppress screenshots and Playwright traces because those binary artifacts can capture chat/model text. The smoke does not score writing quality or store raw provider prompts/responses.
 
 ## Dedicated Live Users
 
@@ -125,7 +125,7 @@ Every live run writes a timestamped report folder under:
 artifacts/live-smoke/sillytavern/<run-id>/
 ```
 
-Required artifact families are defined in [Artifact Contract](ARTIFACT_CONTRACT.md). Normal reports should store hashes, ids, counts, bounded status text, screenshots, and traces. They should not store raw provider prompts, raw provider responses, full transcript archives, API keys, cookies, authorization headers, private notes, or hidden reasoning.
+Required artifact families are defined in [Artifact Contract](ARTIFACT_CONTRACT.md). Normal no-generation UI reports should store hashes, ids, counts, bounded status text, screenshots, and traces. Generation-enabled reports should store text/JSON evidence only. They should not store raw provider prompts, raw provider responses, full transcript archives, API keys, cookies, authorization headers, private notes, or hidden reasoning.
 
 ## Pass And Fail Semantics
 

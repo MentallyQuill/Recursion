@@ -215,7 +215,7 @@ Build:
 - Host event wiring around player send/generation timing.
 - Prompt injection timing guard.
 - Stop/disable cleanup where applicable.
-- Playwright live harness helpers for browser launch, auth, served-extension checks, storage probes, screenshots, traces, runtime snapshots, and redaction.
+- Playwright live harness helpers for browser launch, auth, served-extension checks, storage probes, no-generation screenshots/traces, runtime snapshots, and redaction.
 - Offline Playwright readiness script.
 - Dedicated soak-user isolation script.
 - Focused live SillyTavern smoke script.
@@ -228,7 +228,7 @@ Tests:
 - Chat change invalidates active scene cache.
 - Provider failure falls back without blocking generation.
 - Activity Ribbon visibly reports model work, cache use, storage progress, prompt readiness, and fallbacks.
-- Live artifacts include sanitized `report.json`, `summary.md`, `live-log.jsonl`, screenshots, prompt packet metadata, storage probe results, and redaction checks.
+- Live artifacts include sanitized `report.json`, `summary.md`, `live-log.jsonl`, no-generation screenshots/traces, prompt packet metadata, storage probe results, and redaction checks.
 
 Exit criteria:
 

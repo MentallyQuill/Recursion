@@ -81,7 +81,7 @@ $env:RECURSION_LIVE_REASONER='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts --strict
 ```
 
-Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIVE_GENERATION=1` or `RECURSION_LIVE_REASONER=1` runs the safe preflight and UI evidence, switches Recursion to Auto, wraps `setExtensionPrompt` to record only prompt-key metadata, calls the public generation bridge, and verifies prompt install, hand readiness, and prompt-packet metadata. The default browser smoke stays no-generation. Both paths must stay dedicated-user-only and must reject unsafe users before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
+Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIVE_GENERATION=1` or `RECURSION_LIVE_REASONER=1` runs the safe preflight and UI evidence, switches Recursion to Auto, wraps `setExtensionPrompt` to record only prompt-key metadata, sends the safe smoke message through visible SillyTavern send controls when both input and send button are available and enabled, and verifies prompt install, hand readiness, host generation continuation, prompt cleanup, and prompt-packet metadata. If no visible send controls are available, the harness may use the public generation bridge as a diagnostic fallback, but it must record the trigger source. Partial or disabled visible send surfaces fail instead of falling back. Generation-enabled runs suppress screenshots and Playwright traces because binary artifacts can capture chat or provider text. The default browser smoke stays no-generation. Both paths must stay dedicated-user-only and must reject unsafe users before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
 
 ## Scenario Matrix
 
@@ -162,7 +162,9 @@ Observe mode may record hashes, counts, ids, and bounded labels. It must not cre
 With live generation enabled:
 
 - Set Auto mode.
-- Trigger the public `recursionGenerationInterceptor` with a safe, short smoke message or, when the host UI path is stable, send the same message through the SillyTavern chat UI.
+- Send a safe, short smoke message through visible SillyTavern chat controls when they are present.
+- If no visible send controls are available, record that the run used the public generation bridge diagnostic fallback instead of user-visible send evidence.
+- If only one visible send control is available, or visible controls are disabled, fail the run instead of masking a broken chat surface with the direct bridge.
 - Wait for Recursion foreground activity to start.
 - Verify Utility Arbiter, card refresh, hand selection, composition, and prompt install stages appear.
 - Verify the prompt packet metadata references the active snapshot id.
@@ -170,6 +172,7 @@ With live generation enabled:
 - Verify prompt-install evidence through Recursion-owned prompt keys, hashes, lengths, and placement metadata. Do not store raw prompt text.
 - Wait for host generation to continue or complete when using the full chat UI path.
 - Verify the prompt packet can be cleared after the run.
+- Do not write screenshots or Playwright trace artifacts for generation-enabled runs.
 
 The smoke should fail if Recursion blocks generation indefinitely, injects stale packet metadata, stores raw model I/O, or leaves prompt keys active after cleanup.
 
@@ -270,11 +273,11 @@ After a live smoke, the reviewer should inspect:
 
 - `summary.md` for final status and warnings;
 - `report.json` for scenario results and environment classification;
-- Activity screenshots for visible progress and no UI overlap;
+- no-generation Activity screenshots for visible progress and no UI overlap;
 - prompt packet metadata for current snapshot and clear status;
 - run journal excerpt for redaction and useful diagnostics;
 - storage probe evidence for dedicated-user isolation;
-- Playwright trace when an interaction failed.
+- Playwright trace for readiness and no-generation interaction failures only.
 
 Manual review should not be required for every local iteration. It is most useful before release checkpoints or after a smoke failure that cannot be reproduced through a contract test.
 

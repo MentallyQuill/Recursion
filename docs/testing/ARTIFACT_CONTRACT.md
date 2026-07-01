@@ -16,16 +16,16 @@ Live runs should keep all output under one run root. Paths stored inside reports
 
 ## Required Live Files
 
-Every live smoke run should write:
+Every live smoke run should write text and JSON evidence. No-generation UI smoke can also write binary viewport and trace artifacts. Generation-enabled smoke must not write screenshots or Playwright traces because those binary artifacts can capture chat or provider output that the text redaction scan cannot inspect.
 
 | File | Purpose |
 | --- | --- |
 | `report.json` | Structured machine-readable result. |
 | `summary.md` | Human-readable result and next action. |
 | `live-log.jsonl` | Bounded chronological stage log for the run. |
-| `screenshots/desktop.png` | Desktop viewport proof. |
-| `screenshots/phone.png` | Phone viewport proof. |
-| `playwright/trace.zip` | Playwright trace when trace capture is enabled. |
+| `screenshots/desktop.png` | Desktop viewport proof for readiness and no-generation UI runs only. |
+| `screenshots/phone.png` | Phone viewport proof for readiness and no-generation UI runs only. |
+| `playwright/trace.zip` | Playwright trace for readiness and no-generation UI runs only. |
 | `storage/probe.json` | Sanitized storage probe result. |
 | `prompt/latest-packet-metadata.json` | Prompt packet metadata, hashes, selected cards, install status, and clear status. |
 | `activity/latest-run.json` | Last visible Activity Ribbon state and compact stage timeline. |
@@ -127,8 +127,14 @@ Events should use compact, user-safe labels. The log is not a transcript and not
 {
   "recordType": "recursion.promptPacketMetadata",
   "schemaVersion": 1,
-  "packetId": "packet-example",
   "runId": "20260630-000000",
+  "status": "pass",
+  "result": "generation-smoke-pass",
+  "generationRequested": true,
+  "triggerSource": "ui-send",
+  "chatMutationSource": "visible-control",
+  "hostGenerationContinued": true,
+  "packetId": "packet-example",
   "snapshotId": "snapshot-example",
   "sceneKeyHash": "sha256-example",
   "footprint": "normal",
@@ -159,6 +165,8 @@ Events should use compact, user-safe labels. The log is not a transcript and not
   ]
 }
 ```
+
+`triggerSource` is `ui-send` when Playwright drove the visible and enabled SillyTavern input and send button, or `direct-bridge` only when no visible send controls were available and the diagnostic bridge fallback was used. Partial or disabled visible send surfaces are failures, not fallback candidates. `hostGenerationContinued` is required for `ui-send` runs and may be `null` for direct-bridge fallback runs.
 
 The full prompt body is excluded by default. Debug exports may include bounded excerpts only through an explicit user action outside the normal smoke path.
 
@@ -215,7 +223,7 @@ Artifacts may contain:
 - source message ids or hashes;
 - card ids, families, emphasis, and token estimates;
 - bounded user-facing status labels;
-- screenshots of visible Recursion UI with secret fields hidden or empty.
+- screenshots of visible Recursion UI with secret fields hidden or empty, only for readiness and no-generation UI runs.
 
 ## Redaction Check
 
@@ -263,8 +271,8 @@ Strict: true
 
 ## Artifacts
 
-- Desktop screenshot: screenshots/desktop.png
-- Phone screenshot: screenshots/phone.png
+- Desktop screenshot: screenshots/desktop.png (no-generation only)
+- Phone screenshot: screenshots/phone.png (no-generation only)
 - Prompt metadata: prompt/latest-packet-metadata.json
 - Live log: live-log.jsonl
 

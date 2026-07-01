@@ -810,7 +810,13 @@ async function compareServedRecursionExtension({
 function compactBrowserIssue(error) {
   return {
     name: error?.name || 'Error',
-    message: sanitizeHarnessText(error?.message || String(error || ''), 240)
+    message: sanitizeHarnessText(error?.message || String(error || ''), 240),
+    cause: error?.cause
+      ? {
+          name: error.cause?.name || 'Error',
+          message: sanitizeHarnessText(error.cause?.message || String(error.cause || ''), 240)
+        }
+      : null
   };
 }
 
@@ -924,8 +930,71 @@ function generationRecorderInstallScript() {
   };
 }
 
-function generationTriggerScript({ reasonerRequested = false } = {}) {
-  return async ({ reasonerRequested: pageReasonerRequested }) => {
+const VISIBLE_SEND_INPUT_SELECTORS = Object.freeze([
+  '#send_textarea',
+  'textarea#send_textarea',
+  'textarea[name="send_textarea"]',
+  'textarea[aria-label*="message" i]',
+  'textarea[placeholder*="message" i]',
+  '[contenteditable="true"][aria-label*="message" i]',
+  '[contenteditable="true"]'
+]);
+
+const VISIBLE_SEND_BUTTON_SELECTORS = Object.freeze([
+  '#send_but',
+  'button#send_but',
+  'button[aria-label*="send" i]',
+  'button[title*="send" i]',
+  '[role="button"][aria-label*="send" i]'
+]);
+
+async function findFirstVisibleLocator(page, selectors) {
+  for (const selector of selectors) {
+    const locator = page.locator(selector);
+    const count = await locator.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const candidate = locator.nth(index);
+      const visible = await candidate.isVisible().catch(() => false);
+      if (visible) {
+        const enabled = await candidate.isEnabled().catch(() => false);
+        return { locator: candidate, selector, index, enabled };
+      }
+    }
+  }
+  return null;
+}
+
+async function resolveVisibleSendSurface(page) {
+  const input = await findFirstVisibleLocator(page, VISIBLE_SEND_INPUT_SELECTORS);
+  const button = await findFirstVisibleLocator(page, VISIBLE_SEND_BUTTON_SELECTORS);
+  return {
+    input,
+    button,
+    evidence: {
+      inputFound: Boolean(input),
+      buttonFound: Boolean(button),
+      inputUsable: input?.enabled === true,
+      buttonUsable: button?.enabled === true,
+      inputSelector: input?.selector || '',
+      buttonSelector: button?.selector || '',
+      ok: false
+    }
+  };
+}
+
+async function fillVisibleSendInput(page, locator, text, timeoutMs) {
+  try {
+    await locator.fill(text, { timeout: timeoutMs });
+    return 'fill';
+  } catch (fillError) {
+    await locator.click({ timeout: timeoutMs });
+    await page.keyboard.insertText(text);
+    return `keyboard-after-fill-error:${fillError?.name || 'Error'}`;
+  }
+}
+
+function generationBaseSetupScript() {
+  return ({ reasonerRequested: pageReasonerRequested, triggerSource, chatMutationSource, visibleSend }) => {
     const context = (() => {
       try {
         return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
@@ -933,36 +1002,103 @@ function generationTriggerScript({ reasonerRequested = false } = {}) {
         return null;
       }
     })();
-    const startedAt = new Date().toISOString();
+    const chatLengthBefore = Array.isArray(context?.chat) ? context.chat.length : null;
     const smokeMessage = {
-      mesid: Array.isArray(context?.chat) ? context.chat.length : 0,
+      mesid: typeof chatLengthBefore === 'number' ? chatLengthBefore : 0,
       is_user: true,
       name: 'Recursion Smoke',
       mes: pageReasonerRequested
         ? 'Recursion live smoke: exercise the Reasoner-capable prompt bridge safely.'
         : 'Recursion live smoke: exercise the Utility prompt bridge safely.'
     };
-    if (Array.isArray(context?.chat)) context.chat.push(smokeMessage);
-    let interceptorOk = false;
-    let interceptorError = '';
+    const normalizedVisibleSend = {
+      inputFound: visibleSend?.inputFound === true,
+      buttonFound: visibleSend?.buttonFound === true,
+      inputUsable: visibleSend?.inputUsable === true,
+      buttonUsable: visibleSend?.buttonUsable === true,
+      inputSelector: String(visibleSend?.inputSelector || ''),
+      buttonSelector: String(visibleSend?.buttonSelector || ''),
+      ok: false,
+      chatLength: chatLengthBefore,
+      messageLength: smokeMessage.mes.length
+    };
+    const hostGenerationEvidence = {
+      chatLengthBefore,
+      chatLengthAfter: chatLengthBefore,
+      assistantMessageObserved: false,
+      markerOk: false
+    };
+    const base = {
+      requested: true,
+      reasonerRequested: Boolean(pageReasonerRequested),
+      startedAt: new Date().toISOString(),
+      triggerSource,
+      chatMutationSource,
+      visibleSend: normalizedVisibleSend,
+      interceptorOk: false,
+      interceptorError: '',
+      promptRecorderOk: globalThis.__recursionSmokePromptRecorder?.ok === true,
+      hostGenerationRequired: triggerSource === 'ui-send',
+      hostGenerationContinued: triggerSource === 'ui-send' ? false : null,
+      hostGenerationEvidence
+    };
+    globalThis.__recursionSmokeVisibleSend = null;
+    globalThis.__recursionSmokeHostGeneration = null;
+    globalThis.__recursionSmokeGenerationSmokeMessage = smokeMessage;
+    globalThis.__recursionSmokeGenerationBase = base;
+    globalThis.__recursionSmokeGeneration = base;
+    return {
+      base,
+      smokeMessageText: smokeMessage.mes
+    };
+  };
+}
+
+function generationDirectBridgeScript() {
+  return async () => {
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const base = globalThis.__recursionSmokeGenerationBase || {};
+    const smokeMessage = globalThis.__recursionSmokeGenerationSmokeMessage || {
+      mesid: Array.isArray(context?.chat) ? context.chat.length : 0,
+      is_user: true,
+      name: 'Recursion Smoke',
+      mes: base.reasonerRequested
+        ? 'Recursion live smoke: exercise the Reasoner-capable prompt bridge safely.'
+        : 'Recursion live smoke: exercise the Utility prompt bridge safely.'
+    };
     try {
+      if (Array.isArray(context?.chat)) context.chat.push(smokeMessage);
       if (typeof globalThis.recursionGenerationInterceptor !== 'function') {
         throw new Error('recursionGenerationInterceptor unavailable');
       }
       await globalThis.recursionGenerationInterceptor(context?.chat || [smokeMessage]);
-      interceptorOk = true;
+      base.interceptorOk = true;
     } catch (error) {
-      interceptorError = String(error?.message || error || 'Generation interceptor failed.');
+      base.interceptorError = String(error?.message || error || 'Generation interceptor failed.');
     }
-    globalThis.__recursionSmokeGenerationBase = {
-      requested: true,
-      reasonerRequested: Boolean(pageReasonerRequested),
-      startedAt,
-      interceptorOk,
-      interceptorError,
-      promptRecorderOk: globalThis.__recursionSmokePromptRecorder?.ok === true
+    const chatLengthAfter = Array.isArray(context?.chat) ? context.chat.length : null;
+    base.visibleSend = {
+      ...(base.visibleSend || {}),
+      ok: false,
+      chatLength: chatLengthAfter
     };
-    return globalThis.__recursionSmokeGenerationBase;
+    base.hostGenerationRequired = false;
+    base.hostGenerationContinued = null;
+    base.hostGenerationEvidence = {
+      ...(base.hostGenerationEvidence || {}),
+      chatLengthAfter,
+      assistantMessageObserved: false,
+      markerOk: false
+    };
+    globalThis.__recursionSmokeGenerationBase = base;
+    globalThis.__recursionSmokeGeneration = base;
+    return base;
   };
 }
 
@@ -996,13 +1132,42 @@ function generationEvidenceScript() {
     const packetId = String(packet?.packetId || '').trim();
     const handId = String(packet?.handId || '').trim();
     const selectedCardRefs = Array.isArray(packet?.selectedCardRefs) ? packet.selectedCardRefs : [];
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    const chatLengthBefore = typeof base.hostGenerationEvidence?.chatLengthBefore === 'number'
+      ? base.hostGenerationEvidence.chatLengthBefore
+      : (typeof base.visibleSend?.chatLength === 'number' ? base.visibleSend.chatLength : null);
+    const chatLengthAfter = Array.isArray(context?.chat) ? context.chat.length : null;
+    const newMessages = typeof chatLengthBefore === 'number' ? chat.slice(Math.max(0, chatLengthBefore)) : [];
+    const assistantMessageObserved = newMessages.some((message) => message && message.is_user === false);
+    const markerOk = globalThis.__recursionSmokeHostGeneration?.ok === true;
+    const hostGenerationRequired = base.triggerSource === 'ui-send';
+    const hostGenerationContinued = hostGenerationRequired
+      ? Boolean(markerOk || assistantMessageObserved || (typeof chatLengthAfter === 'number' && typeof chatLengthBefore === 'number' && chatLengthAfter > chatLengthBefore + 1))
+      : null;
+    const promptPacketVisible = Boolean(packetId && handId && selectedCardRefs.length > 0);
+    const visibleSend = {
+      ...(base.visibleSend || {}),
+      ok: base.triggerSource === 'ui-send'
+        ? Boolean(base.visibleSend?.ok === true || (promptInstalled && typeof chatLengthAfter === 'number' && typeof chatLengthBefore === 'number' && chatLengthAfter > chatLengthBefore))
+        : false,
+      chatLength: typeof chatLengthAfter === 'number' ? chatLengthAfter : base.visibleSend?.chatLength ?? null
+    };
     const generation = {
       ...base,
       requested: true,
       completedAt: new Date().toISOString(),
-      interceptorOk: base.interceptorOk === true,
+      interceptorOk: base.interceptorOk === true || promptInstalled || promptPacketVisible,
       interceptorError: String(base.interceptorError || ''),
       promptRecorderOk: base.promptRecorderOk === true,
+      visibleSend,
+      hostGenerationRequired,
+      hostGenerationContinued,
+      hostGenerationEvidence: {
+        chatLengthBefore,
+        chatLengthAfter,
+        assistantMessageObserved,
+        markerOk
+      },
       promptInstalled,
       promptKeys,
       promptEventCount: promptEvents.length,
@@ -1011,7 +1176,7 @@ function generationEvidenceScript() {
       handReady: /\bHand\s+[1-9]\d*/i.test(handText),
       statusText,
       ready: /Ready/i.test(statusText),
-      promptPacketVisible: Boolean(packetId && handId && selectedCardRefs.length > 0),
+      promptPacketVisible,
       promptPacket: packet
         ? {
             packetId,
@@ -1022,6 +1187,48 @@ function generationEvidenceScript() {
     };
     globalThis.__recursionSmokeGeneration = generation;
     return generation;
+  };
+}
+
+function generationHostContinuationReadyScript() {
+  return () => {
+    const base = globalThis.__recursionSmokeGenerationBase || {};
+    if (base.triggerSource !== 'ui-send') return true;
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    const chatLengthBefore = typeof base.hostGenerationEvidence?.chatLengthBefore === 'number'
+      ? base.hostGenerationEvidence.chatLengthBefore
+      : (typeof base.visibleSend?.chatLength === 'number' ? base.visibleSend.chatLength : null);
+    const chatLengthAfter = Array.isArray(context?.chat) ? context.chat.length : null;
+    const newMessages = typeof chatLengthBefore === 'number' ? chat.slice(Math.max(0, chatLengthBefore)) : [];
+    const assistantMessageObserved = newMessages.some((message) => message && message.is_user === false);
+    const markerOk = globalThis.__recursionSmokeHostGeneration?.ok === true;
+    const hostGenerationContinued = Boolean(markerOk || assistantMessageObserved || (typeof chatLengthAfter === 'number' && typeof chatLengthBefore === 'number' && chatLengthAfter > chatLengthBefore + 1));
+    const hostGenerationEvidence = {
+      chatLengthBefore,
+      chatLengthAfter,
+      assistantMessageObserved,
+      markerOk
+    };
+    globalThis.__recursionSmokeGenerationBase = {
+      ...base,
+      hostGenerationRequired: true,
+      hostGenerationContinued,
+      hostGenerationEvidence
+    };
+    globalThis.__recursionSmokeGeneration = {
+      ...(globalThis.__recursionSmokeGeneration || {}),
+      hostGenerationRequired: true,
+      hostGenerationContinued,
+      hostGenerationEvidence
+    };
+    return hostGenerationContinued;
   };
 }
 
@@ -1105,9 +1312,10 @@ async function runBrowserUiSmoke({
   let page = null;
   let traceStarted = false;
   const artifacts = {};
+  const binaryArtifactsAllowed = generationRequested !== true;
 
   async function captureFailureArtifacts() {
-    if (!artifactLocation || !page) return;
+    if (!binaryArtifactsAllowed || !artifactLocation || !page) return;
     if (!artifacts.failureScreenshot) {
       try {
         const failure = artifactTarget(artifactLocation, 'screenshots/failure.png');
@@ -1141,7 +1349,7 @@ async function runBrowserUiSmoke({
       viewport: { width: 1366, height: 900 }
     });
     if (cookies.length) await context.addCookies(cookies);
-    if (artifactLocation) {
+    if (artifactLocation && binaryArtifactsAllowed) {
       await context.tracing.start({ screenshots: true, snapshots: true });
       traceStarted = true;
     }
@@ -1200,11 +1408,72 @@ async function runBrowserUiSmoke({
       const viewer = document.querySelector('[data-recursion-viewer]');
       return Boolean(viewer && (viewer.open || viewer.hidden === false));
     }, null, { timeout: timeoutMs });
+    if (generationRequested) {
+      const viewerClosed = () => {
+        const viewer = document.querySelector('[data-recursion-viewer]');
+        return !viewer || (!viewer.open && (viewer.tagName === 'DIALOG' || viewer.hidden !== false));
+      };
+      await page.locator('[data-recursion-viewer-close]').first().click({ timeout: Math.min(timeoutMs, 5000) }).catch(() => {});
+      const closed = await page.waitForFunction(viewerClosed, null, { timeout: Math.min(timeoutMs, 5000) })
+        .then(() => true)
+        .catch(() => false);
+      if (!closed) {
+        await page.keyboard.press('Escape').catch(() => {});
+        await page.waitForFunction(viewerClosed, null, { timeout: Math.min(timeoutMs, 5000) }).catch(() => {});
+      }
+    }
 
     let generation = null;
     let cleanup = null;
     if (generationRequested) {
-      generation = await page.evaluate(generationTriggerScript({ reasonerRequested }), { reasonerRequested });
+      const surface = await resolveVisibleSendSurface(page);
+      const triggerSource = surface.evidence.inputFound || surface.evidence.buttonFound ? 'ui-send' : 'direct-bridge';
+      const chatMutationSource = triggerSource === 'ui-send' ? 'visible-control' : 'context-chat';
+      const visibleSendUsable = surface.evidence.inputUsable === true && surface.evidence.buttonUsable === true;
+      const visibleSendUnavailable = triggerSource === 'ui-send' && !visibleSendUsable;
+      const setup = await page.evaluate(generationBaseSetupScript(), {
+        reasonerRequested,
+        triggerSource,
+        chatMutationSource,
+        visibleSend: surface.evidence
+      });
+      generation = setup?.base || null;
+      if (visibleSendUnavailable) {
+        generation = await page.evaluate(generationEvidenceScript()).catch(() => generation);
+        const failed = new Error('Recursion visible send surface is incomplete.');
+        failed.status = 'fail';
+        failed.result = 'generation-visible-send-unavailable';
+        failed.generation = generation;
+        failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation }));
+        throw failed;
+      }
+      if (triggerSource === 'ui-send') {
+        try {
+          const inputMethod = await fillVisibleSendInput(page, surface.input.locator, setup.smokeMessageText || '', timeoutMs);
+          await surface.button.locator.click({ timeout: timeoutMs });
+          generation = await page.evaluate((inputMethod) => {
+            const base = globalThis.__recursionSmokeGenerationBase || {};
+            base.visibleSend = {
+              ...(base.visibleSend || {}),
+              inputMethod: String(inputMethod || '')
+            };
+            globalThis.__recursionSmokeGenerationBase = base;
+            globalThis.__recursionSmokeGeneration = { ...(globalThis.__recursionSmokeGeneration || {}), visibleSend: base.visibleSend };
+            return base;
+          }, inputMethod).catch(() => generation);
+        } catch (error) {
+          generation = await page.evaluate(generationEvidenceScript()).catch(() => generation);
+          const failed = new Error('Recursion visible send action failed.');
+          failed.status = 'fail';
+          failed.result = 'generation-visible-send-failed';
+          failed.cause = error;
+          failed.generation = generation;
+          failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation }));
+          throw failed;
+        }
+      } else {
+        generation = await page.evaluate(generationDirectBridgeScript());
+      }
       try {
         await page.waitForFunction(() => {
           const generation = (() => {
@@ -1231,11 +1500,40 @@ async function runBrowserUiSmoke({
             const packetId = String(packet?.packetId || '').trim();
             const handId = String(packet?.handId || '').trim();
             const selectedCardRefs = Array.isArray(packet?.selectedCardRefs) ? packet.selectedCardRefs : [];
+            const chat = Array.isArray(context?.chat) ? context.chat : [];
+            const chatLengthBefore = typeof base.hostGenerationEvidence?.chatLengthBefore === 'number'
+              ? base.hostGenerationEvidence.chatLengthBefore
+              : (typeof base.visibleSend?.chatLength === 'number' ? base.visibleSend.chatLength : null);
+            const chatLengthAfter = Array.isArray(context?.chat) ? context.chat.length : null;
+            const newMessages = typeof chatLengthBefore === 'number' ? chat.slice(Math.max(0, chatLengthBefore)) : [];
+            const assistantMessageObserved = newMessages.some((message) => message && message.is_user === false);
+            const markerOk = globalThis.__recursionSmokeHostGeneration?.ok === true;
+            const promptPacketVisible = Boolean(packetId && handId && selectedCardRefs.length > 0);
+            const visibleSend = {
+              ...(base.visibleSend || {}),
+              ok: base.triggerSource === 'ui-send'
+                ? Boolean(base.visibleSend?.ok === true || (promptInstalled && typeof chatLengthAfter === 'number' && typeof chatLengthBefore === 'number' && chatLengthAfter > chatLengthBefore))
+                : false,
+              chatLength: typeof chatLengthAfter === 'number' ? chatLengthAfter : base.visibleSend?.chatLength ?? null
+            };
+            const hostGenerationRequired = base.triggerSource === 'ui-send';
+            const hostGenerationContinued = hostGenerationRequired
+              ? Boolean(markerOk || assistantMessageObserved || (typeof chatLengthAfter === 'number' && typeof chatLengthBefore === 'number' && chatLengthAfter > chatLengthBefore + 1))
+              : null;
             const current = {
-              interceptorOk: base.interceptorOk === true,
+              interceptorOk: base.interceptorOk === true || promptInstalled || promptPacketVisible,
+              visibleSend,
+              hostGenerationRequired,
+              hostGenerationContinued,
+              hostGenerationEvidence: {
+                chatLengthBefore,
+                chatLengthAfter,
+                assistantMessageObserved,
+                markerOk
+              },
               promptInstalled,
               handReady: /\bHand\s+[1-9]\d*/i.test(handText),
-              promptPacketVisible: Boolean(packetId && handId && selectedCardRefs.length > 0)
+              promptPacketVisible
             };
             globalThis.__recursionSmokeGeneration = { ...(globalThis.__recursionSmokeGeneration || {}), ...current };
             return current;
@@ -1254,6 +1552,21 @@ async function runBrowserUiSmoke({
         throw failed;
       }
       generation = await page.evaluate(generationEvidenceScript());
+      if (generation?.triggerSource === 'ui-send') {
+        try {
+          await page.waitForFunction(generationHostContinuationReadyScript(), null, { timeout: timeoutMs });
+        } catch (error) {
+          generation = await page.evaluate(generationEvidenceScript()).catch(() => generation);
+          const failed = new Error('Recursion host generation did not continue after visible send.');
+          failed.status = 'fail';
+          failed.result = 'generation-host-continuation-failed';
+          failed.cause = error;
+          failed.generation = generation;
+          failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation }));
+          throw failed;
+        }
+        generation = await page.evaluate(generationEvidenceScript());
+      }
     }
 
     const snapshot = await page.evaluate(browserSnapshotScript());
@@ -1270,7 +1583,7 @@ async function runBrowserUiSmoke({
       error.generation = generation || snapshot.generation;
       throw error;
     }
-    if (artifactLocation) {
+    if (artifactLocation && binaryArtifactsAllowed) {
       const desktop = artifactTarget(artifactLocation, 'screenshots/desktop.png');
       await page.screenshot({ path: desktop.target, fullPage: true });
       artifacts.desktopScreenshot = desktop.relativePath;
@@ -1308,11 +1621,14 @@ async function runBrowserUiSmoke({
   } catch (error) {
     await captureFailureArtifacts();
     await stopTraceArtifact();
+    const errorGeneration = error?.generation || null;
+    const errorSnapshot = error?.snapshot || (errorGeneration ? { generation: errorGeneration } : null);
     return {
       status: error?.status || (error?.name === 'TimeoutError' ? 'fail' : 'environment-fail'),
       result: error?.result || (error?.name === 'TimeoutError' ? 'browser-smoke-timeout' : 'browser-smoke-failed'),
       error: compactBrowserIssue(error),
-      snapshot: error?.snapshot || null,
+      snapshot: errorSnapshot,
+      generation: errorGeneration,
       cleanup: error?.cleanup || null,
       consoleMessages: consoleMessages.slice(-20),
       pageErrors: pageErrors.slice(-20),
@@ -1329,7 +1645,7 @@ async function runBrowserUiSmoke({
 }
 
 function promptMetadataFromBrowserResult(report, browserResult) {
-  const generation = browserResult?.snapshot?.generation || null;
+  const generation = browserResult?.snapshot?.generation || browserResult?.generation || null;
   const packet = generation?.promptPacket || null;
   const cleanup = browserResult?.cleanup || null;
   const available = Boolean(packet?.packetId && packet?.handId);
@@ -1343,6 +1659,9 @@ function promptMetadataFromBrowserResult(report, browserResult) {
     status: report.status,
     result: report.result,
     generationRequested: Boolean(generation?.requested),
+    triggerSource: String(generation?.triggerSource || ''),
+    chatMutationSource: String(generation?.chatMutationSource || ''),
+    hostGenerationContinued: generation?.hostGenerationContinued === null ? null : generation?.hostGenerationContinued === true,
     available,
     packetHash: available ? sha256Text(JSON.stringify(packet)) : '',
     installStatus: installed ? 'installed' : 'not-installed',
@@ -1385,6 +1704,7 @@ function promptMetadataFromBrowserResult(report, browserResult) {
 
 function activityLatestRunFromReport(report, liveLog, browserResult) {
   const checks = Array.isArray(report.checks) ? report.checks : [];
+  const browserGeneration = browserResult?.snapshot?.generation || browserResult?.generation || null;
   return {
     recordType: 'recursion.activityLatestRun',
     schemaVersion: 1,
@@ -1410,17 +1730,20 @@ function activityLatestRunFromReport(report, liveLog, browserResult) {
             statusText: browserResult.snapshot?.statusText || '',
             handText: browserResult.snapshot?.handText || '',
             ribbonText: browserResult.snapshot?.ribbonText || '',
-            generation: browserResult.snapshot?.generation
+            generation: browserGeneration
               ? {
-                  requested: browserResult.snapshot.generation.requested === true,
-                  reasonerRequested: browserResult.snapshot.generation.reasonerRequested === true,
-                  interceptorOk: browserResult.snapshot.generation.interceptorOk === true,
-                  promptInstalled: browserResult.snapshot.generation.promptInstalled === true,
-                  promptCleared: browserResult.cleanup?.promptCleared === true || browserResult.snapshot.generation.promptCleared === true,
-                  handReady: browserResult.snapshot.generation.handReady === true,
-                  promptPacketVisible: browserResult.snapshot.generation.promptPacketVisible === true,
-                  promptKeys: browserResult.snapshot.generation.promptKeys || [],
-                  promptEventCount: browserResult.snapshot.generation.promptEventCount || 0
+                  requested: browserGeneration.requested === true,
+                  reasonerRequested: browserGeneration.reasonerRequested === true,
+                  triggerSource: browserGeneration.triggerSource || '',
+                  chatMutationSource: browserGeneration.chatMutationSource || '',
+                  hostGenerationContinued: browserGeneration.hostGenerationContinued === null ? null : browserGeneration.hostGenerationContinued === true,
+                  interceptorOk: browserGeneration.interceptorOk === true,
+                  promptInstalled: browserGeneration.promptInstalled === true,
+                  promptCleared: browserResult.cleanup?.promptCleared === true || browserGeneration.promptCleared === true,
+                  handReady: browserGeneration.handReady === true,
+                  promptPacketVisible: browserGeneration.promptPacketVisible === true,
+                  promptKeys: browserGeneration.promptKeys || [],
+                  promptEventCount: browserGeneration.promptEventCount || 0
                 }
               : null
           }
@@ -2463,6 +2786,9 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
                 ? {
                     requested: browserResult.snapshot.generation.requested,
                     reasonerRequested: browserResult.snapshot.generation.reasonerRequested,
+                    triggerSource: browserResult.snapshot.generation.triggerSource,
+                    chatMutationSource: browserResult.snapshot.generation.chatMutationSource,
+                    hostGenerationContinued: browserResult.snapshot.generation.hostGenerationContinued,
                     interceptorOk: browserResult.snapshot.generation.interceptorOk,
                     promptRecorderOk: browserResult.snapshot.generation.promptRecorderOk,
                     promptInstalled: browserResult.snapshot.generation.promptInstalled,
@@ -2490,6 +2816,9 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
               ? {
                   requested: browserResult.snapshot.generation.requested,
                   reasonerRequested: browserResult.snapshot.generation.reasonerRequested,
+                  triggerSource: browserResult.snapshot.generation.triggerSource,
+                  chatMutationSource: browserResult.snapshot.generation.chatMutationSource,
+                  hostGenerationContinued: browserResult.snapshot.generation.hostGenerationContinued,
                   promptInstalled: browserResult.snapshot.generation.promptInstalled,
                   handReady: browserResult.snapshot.generation.handReady,
                   promptPacketVisible: browserResult.snapshot.generation.promptPacketVisible
@@ -2518,13 +2847,17 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
             });
             setReportStatus(report, browserResult.snapshot?.generation?.promptInstalled ? 'pass' : 'fail', browserResult.result);
             report.nextAction = browserResult.snapshot?.generation?.promptInstalled
-              ? 'Generation-enabled Recursion bridge smoke passed. Inspect sanitized prompt-key evidence and screenshots before treating this as host-quality proof.'
-              : 'Inspect generation bridge evidence, prompt recorder status, screenshots, and console/page errors.';
+              ? 'Generation-enabled Recursion bridge smoke passed. Inspect sanitized prompt-key, host-continuation, prompt-metadata, and activity evidence before treating this as host-quality proof.'
+              : 'Inspect generation bridge evidence, prompt recorder status, prompt metadata, activity latest-run, and console/page errors.';
           } else {
             setReportStatus(report, browserResult.status, browserResult.result);
-            report.nextAction = browserResult.status === 'pass'
-              ? 'No-generation Recursion UI smoke passed; generation-enabled smoke remains a separate opt-in gate.'
-              : 'Inspect browser snapshot, screenshots, and console/page errors before running generation-enabled smoke.';
+            if (generationRequested) {
+              report.nextAction = 'Inspect browser snapshot, generation evidence, prompt metadata, activity latest-run, and console/page errors.';
+            } else {
+              report.nextAction = browserResult.status === 'pass'
+                ? 'No-generation Recursion UI smoke passed; generation-enabled smoke remains a separate opt-in gate.'
+                : 'Inspect browser snapshot, screenshots, and console/page errors before running generation-enabled smoke.';
+            }
           }
         }
       }

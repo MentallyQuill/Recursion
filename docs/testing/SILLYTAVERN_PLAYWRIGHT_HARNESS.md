@@ -8,10 +8,10 @@ The first executable slice has these files:
 
 | Path | Current status |
 | --- | --- |
-| `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared helpers for argv parsing, soak-user validation, offline Playwright readiness, SillyTavern HTTP auth, storage probes, served-extension comparison, browser UI smoke, opt-in generation bridge smoke, report writing, artifact paths, redaction, and status handling. |
+| `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared helpers for argv parsing, soak-user validation, offline Playwright readiness, SillyTavern HTTP auth, storage probes, served-extension comparison, browser UI smoke, opt-in visible-send generation smoke, prompt-key metadata capture, report writing, artifact paths, redaction, and status handling. |
 | `tools/scripts/check-playwright-readiness.mjs` | Offline browser readiness probe. It dynamically imports Playwright, launches Chromium when available, drives a local fixture, and never contacts SillyTavern. |
 | `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety and storage preflight. It rejects unsafe users before mutation, logs into dedicated users, writes/reads/verifies/deletes Recursion-owned probe files, and checks cross-user isolation when two or more users are configured. |
-| `tools/scripts/smoke-sillytavern-live.mjs` | Focused live smoke. It validates the dedicated user and base URL gate, authenticates, compares served Recursion files, verifies the Recursion Bar, Actions menu, settings panel, provider controls, Last Hand dropdown, full viewer, and bridge hooks with Playwright, and writes screenshots/trace when artifacts are enabled. With generation flags, it also proves the public generation bridge can install Recursion-owned prompt keys without storing raw prompt text. |
+| `tools/scripts/smoke-sillytavern-live.mjs` | Focused live smoke. It validates the dedicated user and base URL gate, authenticates, compares served Recursion files, verifies the Recursion Bar, Actions menu, settings panel, provider controls, Last Hand dropdown, full viewer, and bridge hooks with Playwright, and writes screenshots/trace for no-generation UI runs when artifacts are enabled. With generation flags, it drives visible send controls when available, records the trigger source, proves host generation continued for UI sends, suppresses binary artifacts, and proves Recursion-owned prompt keys can install and clear without storing raw prompt text. |
 | `tools/scripts/test-live-harness.mjs` | Deterministic contract tests for the guardrail behavior. |
 
 The harness should be a library, not a second runtime. Runtime behavior stays in `src/`; the harness drives the public host/UI surface and reads documented diagnostics.
@@ -30,8 +30,8 @@ Common environment variables:
 | `RECURSION_PLAYWRIGHT_HEADFUL` | Set to `1` for visible browser debugging. Default is headless. |
 | `RECURSION_PLAYWRIGHT_TIMEOUT_MS` | Browser-control timeout for readiness checks. |
 | `RECURSION_LIVE_TIMEOUT_MS` | Browser-control timeout for live host checks. |
-| `RECURSION_LIVE_GENERATION` | Set to `1` to run opt-in generation bridge smoke after the safe preflight and UI evidence. This may call the configured Utility provider through Recursion. |
-| `RECURSION_LIVE_REASONER` | Set to `1` to request the Reasoner-capable bridge path. This implies generation bridge smoke and may call configured Utility/Reasoner providers. |
+| `RECURSION_LIVE_GENERATION` | Set to `1` to run opt-in visible-send generation smoke after the safe preflight and UI evidence. This may call the configured Utility provider through Recursion. |
+| `RECURSION_LIVE_REASONER` | Set to `1` to request the Reasoner-capable generation path. This implies visible-send generation smoke, or the recorded direct-bridge fallback when no visible send controls are available, and may call configured Utility/Reasoner providers. Partial or disabled visible send surfaces fail instead of falling back. |
 | `RECURSION_LIVE_STRICT` | Set to `1` to promote warnings to failures. |
 | `RECURSION_ARTIFACT_DIR` | Override artifact root for reports, traces, screenshots, and logs. |
 
@@ -162,7 +162,7 @@ When only one user is configured, the script verifies that user's storage but em
 - send a safe test message only when the live run explicitly allows chat mutation;
 - wait for Recursion Activity Ribbon states instead of sleeping blindly;
 - open Last Hand and Full Viewer;
-- capture screenshots for desktop and phone viewports;
+- capture screenshots for desktop and phone viewports during no-generation UI runs;
 - clear prompt injection through Off mode or teardown.
 
 `page.evaluate()` is acceptable for:
@@ -198,7 +198,7 @@ data-recursion-provider-test
 data-recursion-prompt-packet
 ```
 
-If a click times out while an element exists, the harness should capture bounding boxes, computed visibility, overlap hints, and a screenshot before retrying. Coordinate clicks are diagnostic fallbacks and must be labeled in the report.
+If a click times out while an element exists, the harness should capture bounding boxes, computed visibility, and overlap hints before retrying. Screenshots are allowed only when the run is not generation-enabled. Coordinate clicks are diagnostic fallbacks and must be labeled in the report.
 
 ## Artifacts
 

@@ -135,6 +135,91 @@ assertEqual(retried.ok, true, 'transient retry succeeds');
 assertEqual(retryAttempts, 2, 'transient failure retries exactly once');
 assertEqual(retried.diagnostics.retryCount, 1, 'retry count recorded');
 
+let staleRetryAttempts = 0;
+const staleRetryGuardContexts = [];
+const staleRetryRouter = createGenerationRouter({
+  client: createProviderClient({
+    host: {
+      generation: {
+        async generate() {
+          staleRetryAttempts += 1;
+          const error = new Error('temporary network failure after superseded run');
+          error.code = 'ECONNRESET';
+          error.retryable = true;
+          throw error;
+        }
+      }
+    },
+    settingsStore: createStore()
+  })
+});
+const staleRetry = await staleRetryRouter.generate('utilityArbiter', { prompt: 'Do not retry stale run' }, {
+  runId: 'stale-single-run',
+  async isCurrent(context) {
+    staleRetryGuardContexts.push(context);
+    return false;
+  }
+});
+assertEqual(staleRetry.ok, false, 'stale single retry returns failure result');
+assertEqual(staleRetryAttempts, 1, 'stale single retry guard prevents second attempt');
+assertEqual(staleRetry.error.code, 'ECONNRESET', 'stale single retry keeps sanitized provider failure code');
+assertEqual(staleRetry.diagnostics.retryCount, 0, 'stale single retry does not count a skipped retry');
+assertEqual(staleRetry.diagnostics.retrySkippedReason, 'stale-current-guard', 'stale single retry records skipped retry reason');
+assertEqual(staleRetryGuardContexts.length, 1, 'stale single retry checks freshness once');
+assertEqual(staleRetryGuardContexts[0].roleId, 'utilityArbiter', 'stale single retry guard receives role id');
+assertEqual(staleRetryGuardContexts[0].lane, 'utility', 'stale single retry guard receives lane');
+assertEqual(staleRetryGuardContexts[0].runId, 'stale-single-run', 'stale single retry guard receives run id');
+assertEqual(staleRetryGuardContexts[0].attempt, 1, 'stale single retry guard receives next attempt number');
+
+let requestSignalRetryAttempts = 0;
+const requestSignalRetryController = new AbortController();
+const requestSignalOptionsController = new AbortController();
+const requestSignalRetry = await createGenerationRouter({
+  client: {
+    async generate() {
+      requestSignalRetryAttempts += 1;
+      if (requestSignalRetryAttempts === 1) {
+        requestSignalRetryController.abort();
+        const error = new Error('temporary failure after request was aborted');
+        error.code = 'ECONNRESET';
+        error.retryable = true;
+        throw error;
+      }
+      return { text: '{"schema":"request.signal.retry","ok":true}' };
+    }
+  }
+}).generate('utilityArbiter', {
+  prompt: 'Request signal should block retry.',
+  signal: requestSignalRetryController.signal
+}, {
+  runId: 'request-signal-retry-guard',
+  signal: requestSignalOptionsController.signal
+});
+assertEqual(requestSignalRetry.ok, false, 'aborted request signal blocks single retry even when options signal is open');
+assertEqual(requestSignalRetryAttempts, 1, 'aborted request signal prevents second single attempt');
+assertEqual(requestSignalRetry.diagnostics.retrySkippedReason, 'aborted', 'aborted request signal records skipped retry reason');
+
+let throwingGuardAttempts = 0;
+const throwingGuard = await createGenerationRouter({
+  client: {
+    async generate() {
+      throwingGuardAttempts += 1;
+      const error = new Error('temporary failure before throwing guard');
+      error.code = 'ECONNRESET';
+      error.retryable = true;
+      throw error;
+    }
+  }
+}).generate('utilityArbiter', { prompt: 'Throwing retry guard.' }, {
+  runId: 'throwing-guard-single-run',
+  isRetryCurrent() {
+    throw new Error('guard unavailable');
+  }
+});
+assertEqual(throwingGuard.ok, false, 'throwing retry guard returns failure result');
+assertEqual(throwingGuardAttempts, 1, 'throwing retry guard prevents second attempt');
+assertEqual(throwingGuard.diagnostics.retrySkippedReason, 'current-guard-failed', 'throwing retry guard records current-guard-failed reason');
+
 let nonTransientAttempts = 0;
 const nonTransientHost = {
   generation: {
@@ -298,6 +383,50 @@ const transientBatch = await createGenerationRouter({
 assertEqual(transientBatchCalls, 2, 'router batch retries one transient transport failure');
 assertDeepEqual(transientBatch.map((entry) => entry.ok), [true, true], 'transient retry returns successful batch entries');
 assertDeepEqual(transientBatch.map((entry) => entry.diagnostics.retryCount), [1, 1], 'retried batch entries record retry count');
+
+let staleBatchCalls = 0;
+const staleBatchGuardContexts = [];
+const staleBatch = await createGenerationRouter({
+  client: {
+    async generate() {
+      throw new Error('single generate should not be used for stale batch retry');
+    },
+    async batch() {
+      staleBatchCalls += 1;
+      const error = new Error('temporary batch reset after superseded run');
+      error.code = 'ECONNRESET';
+      error.retryable = true;
+      throw error;
+    }
+  }
+}).batch([
+  { roleId: 'utilityArbiter', prompt: 'A' },
+  { roleId: 'providerTest', prompt: 'B' }
+], {
+  runId: 'stale-batch-run',
+  async isCurrent(context) {
+    staleBatchGuardContexts.push(context);
+    return false;
+  }
+});
+assertEqual(staleBatchCalls, 1, 'stale batch retry guard prevents second batch call');
+assertDeepEqual(staleBatch.map((entry) => entry.ok), [false, false], 'stale batch retry returns failure entries');
+assertDeepEqual(staleBatch.map((entry) => entry.error.code), ['ECONNRESET', 'ECONNRESET'], 'stale batch retry keeps sanitized provider failure codes');
+assertDeepEqual(staleBatch.map((entry) => entry.diagnostics.retryCount), [0, 0], 'stale batch retry does not count skipped retry');
+assertDeepEqual(
+  staleBatch.map((entry) => entry.diagnostics.retrySkippedReason),
+  ['stale-current-guard', 'stale-current-guard'],
+  'stale batch retry records skipped retry reason for pending entries'
+);
+assertEqual(staleBatchGuardContexts.length, 1, 'stale batch retry checks freshness once');
+assertEqual(staleBatchGuardContexts[0].runId, 'stale-batch-run', 'stale batch retry guard receives run id');
+assertEqual(staleBatchGuardContexts[0].attempt, 1, 'stale batch retry guard receives next attempt number');
+assertEqual(staleBatchGuardContexts[0].batch, true, 'stale batch retry guard identifies batch retry');
+assertDeepEqual(
+  staleBatchGuardContexts[0].entries.map((entry) => entry.roleId),
+  ['utilityArbiter', 'providerTest'],
+  'stale batch retry guard receives pending batch entries'
+);
 
 const routerMalformedSlot = await createGenerationRouter({
   client: {
@@ -777,7 +906,27 @@ const timeoutRouter = createGenerationRouter({
 const timedOut = await timeoutRouter.generate('utilityArbiter', { prompt: 'Never resolves' });
 assertEqual(timedOut.ok, false, 'timeout returns failure result');
 assertEqual(timedOut.error.code, 'RECURSION_PROVIDER_TIMEOUT', 'timeout exposes stable code');
-assertEqual(timeoutAttempts, 1, 'timeout does not start overlapping retry');
+assertEqual(timeoutAttempts, 2, 'timeout retries once before returning failure');
+assertEqual(timedOut.diagnostics.retryCount, 1, 'failed timeout retry records retry count');
 assertEqual(timeoutSignalAborted, true, 'timeout aborts in-flight provider signal');
+
+let retryableTimeoutAttempts = 0;
+const retryableTimeoutRouter = createGenerationRouter({
+  client: {
+    async generate(request) {
+      retryableTimeoutAttempts += 1;
+      if (retryableTimeoutAttempts === 1) {
+        request.signal?.addEventListener('abort', () => {});
+        return new Promise(() => {});
+      }
+      return { text: '{"schema":"recursion.timeoutRetry.v1","ok":true}' };
+    }
+  },
+  timeoutMs: 5
+});
+const retryableTimeout = await retryableTimeoutRouter.generate('utilityArbiter', { prompt: 'Retry timeout once' });
+assertEqual(retryableTimeout.ok, true, 'router timeout retries once while current');
+assertEqual(retryableTimeoutAttempts, 2, 'router timeout makes one retry attempt');
+assertEqual(retryableTimeout.diagnostics.retryCount, 1, 'router timeout retry records retry count');
 
 console.log('[pass] providers');

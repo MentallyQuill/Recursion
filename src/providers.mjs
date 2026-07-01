@@ -284,6 +284,15 @@ function sanitizedError(error, request = {}) {
   }, 300);
 }
 
+function sanitizedBatchError(error, entries = []) {
+  const safeError = { ...sanitizedError(error) };
+  for (const entry of entries) {
+    safeError.code = scrubKnownRequestText(safeError.code, entry.request);
+    safeError.message = scrubKnownRequestText(safeError.message, entry.request);
+  }
+  return sanitize(safeError, 300);
+}
+
 function statusForError(error) {
   if (error?.code === 'RECURSION_JSON_PARSE_FAILED' || error?.code === 'RECURSION_JSON_OBJECT_REQUIRED') {
     return 'validation-failed';
@@ -357,7 +366,7 @@ function abortError() {
 
 function timeoutError(timeoutMs) {
   return providerError('RECURSION_PROVIDER_TIMEOUT', `Provider generation timed out after ${timeoutMs}ms.`, {
-    retryable: false
+    retryable: true
   });
 }
 
@@ -645,7 +654,7 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
   return { generate, batch };
 }
 
-export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = 45000 } = {}) {
+export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = 45000, isCurrent = null } = {}) {
   if (!client || typeof client.generate !== 'function') {
     throw new Error('createGenerationRouter requires a client with generate(roleId, request).');
   }
@@ -655,6 +664,25 @@ export function createGenerationRouter({ client, activity = null, journal = null
     const write = journalQueue.then(() => journalAppend(journal, entry));
     journalQueue = write.catch(() => {});
     return write;
+  }
+
+  function retryFreshnessGuard(options = {}) {
+    return options.isRetryCurrent || options.isCurrent || isCurrent;
+  }
+
+  async function checkRetryFreshness(context, options = {}, signals = []) {
+    if (signals.some((signal) => signal?.aborted === true)) {
+      return { ok: false, reason: 'aborted' };
+    }
+    const guard = retryFreshnessGuard(options);
+    if (typeof guard !== 'function') return { ok: true };
+    try {
+      const current = await guard(sanitize(context, 300));
+      if (current === false) return { ok: false, reason: 'stale-current-guard' };
+      return { ok: true };
+    } catch {
+      return { ok: false, reason: 'current-guard-failed' };
+    }
   }
 
   async function generate(roleId, request = {}, options = {}) {
@@ -682,108 +710,127 @@ export function createGenerationRouter({ client, activity = null, journal = null
       recordedAt: nowIso()
     });
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      activityStage(activity, {
-        runId,
-        phase: attempt === 0 ? 'providerCallRunning' : 'providerCallRetrying',
-        severity: attempt === 0 ? 'info' : 'warning',
-        providerLane: lane,
-        composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
-        label: attempt === 0 ? 'Provider call running.' : 'Retrying provider call.',
-        detail: { roleId, lane, attempt }
-      });
-
-      try {
-        const raw = await withTimeout(
-          (requestWithSignal) => client.generate(roleId, requestWithSignal),
-          request,
-          options.timeoutMs ?? timeoutMs,
-          options.signal || request.signal || null
-        );
-        const data = parseProviderStructuredOutput(raw.text);
-        const latencyMs = Date.now() - started;
-        const diagnostics = sanitize({
-          ...lastDiagnostics,
-          providerSource: raw.providerSource,
-          providerId: raw.providerId,
-          model: raw.model,
-          responseId: raw.responseId,
-          responseHash: responseTextHash(raw.text),
-          schema: data.schema,
-          retryCount,
-          latencyMs,
-          completedAt: nowIso()
-        }, 300);
-
-        await queueJournalAppend({
-          ...diagnostics,
-          status: 'success',
-          recordedAt: nowIso()
-        });
-        activitySettle(activity, {
+    const composedExternalSignal = composeAbortSignal([options.signal, request.signal]);
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        activityStage(activity, {
           runId,
-          phase: 'settled',
-          outcome: 'success',
+          phase: attempt === 0 ? 'providerCallRunning' : 'providerCallRetrying',
+          severity: attempt === 0 ? 'info' : 'warning',
           providerLane: lane,
           composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
-          label: 'Provider call completed.',
-          detail: diagnostics
+          label: attempt === 0 ? 'Provider call running.' : 'Retrying provider call.',
+          detail: { roleId, lane, attempt }
         });
 
-        return {
-          ok: true,
-          roleId,
-          lane,
-          data,
-          text: String(raw.text ?? ''),
-          diagnostics
-        };
-      } catch (error) {
-        const canRetry = attempt === 0 && retryableError(error);
-        const latencyMs = Date.now() - started;
-        lastDiagnostics = sanitize({
-          ...lastDiagnostics,
-          retryCount,
-          latencyMs,
-          error: sanitizedError(error, request),
-          failedAt: nowIso()
-        }, 300);
+        try {
+          const raw = await withTimeout(
+            (requestWithSignal) => client.generate(roleId, requestWithSignal),
+            request,
+            options.timeoutMs ?? timeoutMs,
+            composedExternalSignal.signal || null
+          );
+          const data = parseProviderStructuredOutput(raw.text);
+          const latencyMs = Date.now() - started;
+          const diagnostics = sanitize({
+            ...lastDiagnostics,
+            providerSource: raw.providerSource,
+            providerId: raw.providerId,
+            model: raw.model,
+            responseId: raw.responseId,
+            responseHash: responseTextHash(raw.text),
+            schema: data.schema,
+            retryCount,
+            latencyMs,
+            completedAt: nowIso()
+          }, 300);
 
-        if (canRetry) {
-          retryCount = 1;
-          continue;
+          await queueJournalAppend({
+            ...diagnostics,
+            status: 'success',
+            recordedAt: nowIso()
+          });
+          activitySettle(activity, {
+            runId,
+            phase: 'settled',
+            outcome: 'success',
+            providerLane: lane,
+            composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
+            label: 'Provider call completed.',
+            detail: diagnostics
+          });
+
+          return {
+            ok: true,
+            roleId,
+            lane,
+            data,
+            text: String(raw.text ?? ''),
+            diagnostics
+          };
+        } catch (error) {
+          const canRetry = attempt === 0 && retryableError(error);
+          let retrySkippedReason = '';
+          const latencyMs = Date.now() - started;
+          if (canRetry) {
+            const retryFreshness = await checkRetryFreshness({
+              roleId,
+              lane,
+              runId,
+              attempt: attempt + 1,
+              batch: false,
+              retryCount: retryCount + 1,
+              error: sanitizedError(error, request),
+              request: cleanRequestForDiagnostics(request)
+            }, options, [options.signal, request.signal]);
+            if (retryFreshness.ok) {
+              retryCount = 1;
+              continue;
+            }
+            retrySkippedReason = retryFreshness.reason;
+          }
+          lastDiagnostics = sanitize({
+            ...lastDiagnostics,
+            retryCount,
+            latencyMs,
+            error: sanitizedError(error, request),
+            failedAt: nowIso(),
+            ...(retrySkippedReason ? { retrySkippedReason } : {})
+          }, 300);
+
+          const safeError = sanitizedError(error, request);
+          const diagnostics = sanitize({
+            ...lastDiagnostics,
+            retryCount,
+            error: safeError,
+            status: statusForError(error)
+          }, 300);
+          await queueJournalAppend({
+            ...diagnostics,
+            status: statusForError(error),
+            recordedAt: nowIso()
+          });
+          activitySettle(activity, {
+            runId,
+            phase: 'settled',
+            outcome: 'error',
+            providerLane: lane,
+            composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
+            label: 'Provider call failed.',
+            detail: diagnostics
+          });
+
+          return {
+            ok: false,
+            roleId,
+            lane,
+            error: safeError,
+            diagnostics
+          };
         }
-
-        const safeError = sanitizedError(error, request);
-        const diagnostics = sanitize({
-          ...lastDiagnostics,
-          retryCount,
-          error: safeError,
-          status: statusForError(error)
-        }, 300);
-        await queueJournalAppend({
-          ...diagnostics,
-          status: statusForError(error),
-          recordedAt: nowIso()
-        });
-        activitySettle(activity, {
-          runId,
-          phase: 'settled',
-          outcome: 'error',
-          providerLane: lane,
-          composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
-          label: 'Provider call failed.',
-          detail: diagnostics
-        });
-
-        return {
-          ok: false,
-          roleId,
-          lane,
-          error: safeError,
-          diagnostics
-        };
       }
+    } finally {
+      composedExternalSignal.cleanup();
     }
 
     return {
@@ -826,7 +873,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
     });
     const results = new Array(entries.length);
 
-    async function failureResult(entry, error, retryCount = 0) {
+    async function failureResult(entry, error, retryCount = 0, extraDiagnostics = {}) {
       const safeError = sanitizedError(error, entry.request);
       const diagnostics = sanitize({
         ...entry.diagnostics,
@@ -834,7 +881,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
         latencyMs: Date.now() - entry.started,
         error: safeError,
         status: statusForError(error),
-        failedAt: nowIso()
+        failedAt: nowIso(),
+        ...extraDiagnostics
       }, 300);
       await queueJournalAppend({
         ...diagnostics,
@@ -948,8 +996,27 @@ export function createGenerationRouter({ client, activity = null, journal = null
         }
         break;
       } catch (error) {
-        const canRetry = attempt === 0 && retryableError(error) && options.signal?.aborted !== true;
+        const canRetry = attempt === 0 && retryableError(error);
+        let retrySkippedReason = '';
         if (canRetry) {
+          const retryFreshness = await checkRetryFreshness({
+            runId: batchRunId,
+            attempt: attempt + 1,
+            batch: true,
+            retryCount: batchRetryCount + 1,
+            error: sanitizedBatchError(error, pendingEntries),
+            entries: pendingEntries.map((entry) => ({
+              index: entry.index,
+              roleId: entry.roleId,
+              lane: entry.lane,
+              request: cleanRequestForDiagnostics(entry.request)
+            }))
+          }, options, [options.signal, ...pendingEntries.map((entry) => entry.request.signal)]);
+          if (!retryFreshness.ok) {
+            retrySkippedReason = retryFreshness.reason;
+          }
+        }
+        if (canRetry && !retrySkippedReason) {
           batchRetryCount = 1;
           activityStage(activity, {
             runId: batchRunId,
@@ -963,7 +1030,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
           continue;
         }
         for (const entry of pendingEntries) {
-          results[entry.index] = await failureResult(entry, error, batchRetryCount);
+          results[entry.index] = await failureResult(entry, error, batchRetryCount, retrySkippedReason ? { retrySkippedReason } : {});
         }
         settleBatchActivity();
         return results;

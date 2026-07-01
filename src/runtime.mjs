@@ -794,6 +794,26 @@ function localCards(snapshot) {
   return [scene, continuity];
 }
 
+function catalogForCard(card) {
+  const role = safeText(card?.role || card?.roleId || '', 120);
+  const family = safeText(card?.family || '', 120);
+  return CARD_CATALOG.find((entry) => entry.role === role || entry.family === family) || null;
+}
+
+function cardProgressDetail(card, source, state) {
+  const catalog = catalogForCard(card);
+  const roleId = safeText(catalog?.role || card?.role || card?.roleId || '', 120);
+  const family = safeText(catalog?.family || card?.family || '', 120);
+  return {
+    parentStepId: 'utility-card-batch',
+    roleId,
+    family,
+    source,
+    state,
+    cardId: safeIdentifier(card?.id || '', 'card', 160)
+  };
+}
+
 function sanitizeGeneratedCard(card) {
   const rawId = String(card?.id ?? '').trim();
   const safeId = rawId && !hasSecretText(rawId) ? safeText(rawId, 160) : undefined;
@@ -997,13 +1017,31 @@ function promptClearJournalCode(clear) {
   return 'RECURSION_PROMPT_CLEAR_FAILED';
 }
 
-function signalAwareGenerationRouter(router, signal, runId) {
+function signalAwareGenerationRouter(router, signal, runId, isCurrent = null) {
   if (!router || !signal) return router;
+  function retryCurrentGuard(options = {}) {
+    const callerGuard = options.isRetryCurrent || options.isCurrent;
+    return async (context) => {
+      if (signal?.aborted === true) return false;
+      if (typeof isCurrent === 'function' && (await isCurrent(runId, context)) === false) return false;
+      if (typeof callerGuard === 'function') {
+        return (await callerGuard(context)) !== false;
+      }
+      return true;
+    };
+  }
   return {
     ...router,
     generate(roleId, request = {}, options = {}) {
       const nextRequest = { ...asObject(request), signal };
-      const nextOptions = { ...asObject(options), runId: options.runId ?? runId, signal: options.signal ?? signal };
+      const retryGuard = retryCurrentGuard(options);
+      const nextOptions = {
+        ...asObject(options),
+        runId: options.runId ?? runId,
+        signal: options.signal ?? signal,
+        isCurrent: retryGuard,
+        isRetryCurrent: retryGuard
+      };
       return router.generate(roleId, nextRequest, nextOptions);
     },
     batch(requests = [], options = {}) {
@@ -1011,7 +1049,14 @@ function signalAwareGenerationRouter(router, signal, runId) {
       const nextRequests = Array.isArray(requests)
         ? requests.map((request) => ({ ...asObject(request), signal: request?.signal ?? signal }))
         : requests;
-      const nextOptions = { ...asObject(options), runId: options.runId ?? runId, signal: options.signal ?? signal };
+      const retryGuard = retryCurrentGuard(options);
+      const nextOptions = {
+        ...asObject(options),
+        runId: options.runId ?? runId,
+        signal: options.signal ?? signal,
+        isCurrent: retryGuard,
+        isRetryCurrent: retryGuard
+      };
       return router.batch(nextRequests, nextOptions);
     }
   };
@@ -1088,6 +1133,25 @@ export function createRecursionRuntime({
       return safeActivity(activity, 'start', event);
     }
     return result;
+  }
+
+  function stageCardProgress(runId, cards, { source, state }) {
+    const list = Array.isArray(cards) ? cards : [];
+    const severity = state === 'failed' ? 'error' : (state === 'warning' ? 'warning' : 'success');
+    for (const card of list) {
+      const detail = cardProgressDetail(card, source, state);
+      if (!detail.roleId && !detail.family) continue;
+      stageRuntimeActivity({
+        runId,
+        phase: 'cardProgress',
+        severity,
+        providerLane: 'utility',
+        composerLane: 'utility',
+        label: `${detail.family || 'Card'} ${source === 'cache' ? 'reused from cache' : (source === 'fallback' ? 'fell back locally' : 'generated')}.`,
+        detail,
+        chips: ['Cards', source]
+      });
+    }
   }
 
   function settleRuntimeActivity(event) {
@@ -1785,7 +1849,7 @@ export function createRecursionRuntime({
           `Scene cache: ${JSON.stringify(cacheView)}`,
           `Snapshot: ${JSON.stringify(providerSafeSnapshot(snapshot))}`
         ].join('\n\n')
-      }, { runId, signal });
+      }, { runId, signal, isCurrent: () => isActiveRun(runId) });
       if (result?.ok) return mergePlan(fallbackPlan, result.data);
       return markArbiterFallback(fallbackPlan, result?.error?.message || result?.error?.code || 'utility arbiter returned non-ok result');
     } catch (error) {
@@ -1813,7 +1877,7 @@ export function createRecursionRuntime({
       const signalRequests = signal
         ? requests.map((request) => ({ ...request, signal }))
         : requests;
-      const results = await generationRouter.batch(signalRequests, { runId, signal });
+      const results = await generationRouter.batch(signalRequests, { runId, signal, isCurrent: () => isActiveRun(runId) });
       return results.flatMap((result, index) => cardsFromProviderResult(result, {
         ...cardSourceContext(snapshot),
         expectedRole: requests[index]?.metadata?.role,
@@ -1933,6 +1997,9 @@ export function createRecursionRuntime({
       if (!isActiveRun(runId)) return supersededResult(runId);
       const useLocalFallbackCards = !reuseCacheOnly && !cacheCards.length && !providerCards.length;
       const generatedCards = useLocalFallbackCards ? localCards(sceneSnapshot).map(sanitizeGeneratedCard) : [];
+      stageCardProgress(runId, cacheCards, { source: 'cache', state: 'cached' });
+      stageCardProgress(runId, providerCards, { source: 'generated', state: 'done' });
+      stageCardProgress(runId, generatedCards, { source: 'fallback', state: 'warning' });
       if (action === 'reuse-cache' && !cacheCards.length) {
         const clear = await runPromptMutationSection(runId, async () => {
           const result = await clearPromptBestEffort(host);
@@ -2020,7 +2087,7 @@ export function createRecursionRuntime({
         hand,
         snapshot: promptSnapshot,
         settings: settingsForPlan(settings, plan),
-        generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId),
+        generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRun),
         activity,
         runId,
         signal
@@ -2113,7 +2180,7 @@ export function createRecursionRuntime({
             hand,
             snapshot: promptSnapshot,
             settings: settingsForPlan(settings, plan),
-            generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId),
+            generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRun),
             activity,
             runId,
             signal

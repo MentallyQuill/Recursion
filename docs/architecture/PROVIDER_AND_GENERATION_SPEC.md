@@ -401,7 +401,7 @@ Recursion should borrow Directive's robustness discipline in smaller form:
 
 - every provider call has a role, lane, timeout, run id, snapshot hash, and abort signal;
 - every result is normalized into success, validation failure, provider failure, timeout, abort, or stale result;
-- transient transport failures may get one same-lane retry when the snapshot is still current;
+- transient transport failures may get one same-lane retry only while the abort signal is still open and the current-run or current-snapshot guard passes;
 - schema failures do not get blind retries unless the failure is clearly recoverable, such as fenced JSON or likely truncation;
 - card failures omit only the failed card and keep valid siblings;
 - Utility Arbiter failure reuses valid cache or skips injection;

@@ -68,7 +68,7 @@ Validation failures do not become successful model calls. Prompt composition con
 
 ## Retries And Fallbacks
 
-Transient transport and server failures can receive one same-lane retry when the snapshot is still current. Schema failures do not receive blind retries. Provider results normalize to statuses such as success, validation failed, provider failed, timeout, aborted, or stale.
+Transient transport and server failures can receive one same-lane retry only while the abort signal has not fired and the current-run or current-snapshot guard still passes. Schema failures do not receive blind retries. Provider results normalize to statuses such as success, validation failed, provider failed, timeout, aborted, or stale.
 
 Fallback behavior:
 
@@ -103,7 +103,7 @@ OpenAI-compatible requests read the key only at call time. Error text and diagno
 
 ## Abort And Stale Handling
 
-Provider calls receive abort signals from runtime. Timeouts use an internal abort controller. Batch calls combine the runtime signal with per-request signals.
+Provider calls receive abort signals from runtime. Timeouts use an internal abort controller. Batch calls combine the runtime signal with per-request signals. Retry guards may be synchronous or asynchronous; when they report that the run is no longer current, the router skips the transient retry and returns sanitized failure results for the pending call or batch entries.
 
 If a run is no longer active, runtime returns a superseded result and refuses to apply late cache, prompt, or activity updates. Aborted calls are recorded as aborted rather than installed.
 

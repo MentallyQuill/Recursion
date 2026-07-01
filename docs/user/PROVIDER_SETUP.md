@@ -97,7 +97,7 @@ Fallbacks should be visible in the Recursion Bar, Activity Ribbon, and Full View
 Expected fallback behavior:
 
 - Utility auth failure: mark Utility unhealthy and skip or reuse safe cache.
-- Utility timeout: retry once for transient transport failure when the snapshot is still current, then skip or reuse safe cache.
+- Utility timeout: retry once for transient transport failure only if the request is not aborted and the current snapshot is still current, then skip or reuse safe cache.
 - Utility invalid structured output: reject the output and use conservative local behavior.
 - Card job failure: omit failed card and keep valid sibling cards.
 - Reasoner off: Utility composes.

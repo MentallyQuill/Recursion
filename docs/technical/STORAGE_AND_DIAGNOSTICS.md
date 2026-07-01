@@ -105,6 +105,23 @@ Hard invalidation retires scene cache records when chat identity, scene fingerpr
 
 Soft invalidation asks the Arbiter to review when the user refreshes, provider settings change, freshness caps expire, the source window advances, token budgets change, or cards fail validation.
 
+The storage repository exposes `invalidateSceneCache(chatKey, sceneKey, options)` for soft invalidation. When the scene cache exists, the repository preserves `cards`, `latestHand`, `source`, and `versions`, sets `cacheState: 'stale'` by default, writes sanitized `invalidation` metadata, keeps the scene cache index entry current, and appends a run journal entry:
+
+```ts
+{
+  cacheState: 'stale';
+  invalidation: {
+    reason: string;      // bounded, defaults to "runtime-change"
+    detectedAt: string;  // valid timestamp
+    details?: object;    // JSON-safe and redacted
+  };
+}
+```
+
+The journal entry uses `event: 'cache.invalidated'`, `severity: 'info'`, the sanitized `sceneKey`, optional `runId`, and redacted reason/details. If no cache file exists, `invalidateSceneCache` returns `{ ok: false, reason: 'missing-cache', key }` and does not create a stale cache.
+
+Runtime V1 reasons are `settings-changed`, `provider-changed`, and `provider-key-cleared`. Details must not persist API keys, bearer tokens, `sk-...` tokens, private secrets, raw provider payloads, or hidden reasoning.
+
 Pre-alpha records can be invalidated and rebuilt instead of migrated through compatibility shims.
 
 ## Cleanup And Index Maintenance

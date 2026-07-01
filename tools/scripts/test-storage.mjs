@@ -11,6 +11,14 @@ function assertNoSecret(value, message) {
   assert(!JSON.stringify(value).includes('secret'), message);
 }
 
+function assertNoRawSecretText(value, message) {
+  const serialized = JSON.stringify(value);
+  assert(!/\bapiKey\b[^"]*"[^"]*secret/i.test(serialized), `${message}: apiKey value redacted`);
+  assert(!/\bAuthorization\s+Bearer\s+[a-z0-9._-]+/i.test(serialized), `${message}: bearer text redacted`);
+  assert(!/\bsk-[a-z0-9_-]+/i.test(serialized), `${message}: sk text redacted`);
+  assert(!/\bprivate[-_\s]*secret\b/i.test(serialized), `${message}: secret text redacted`);
+}
+
 function assertNoOwnField(value, field, message) {
   assert(!Object.prototype.hasOwnProperty.call(value, field), message);
 }
@@ -52,6 +60,59 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertEqual(journal.entries[0].summary, 'one', 'oldest entry pruned');
   assertEqual(journal.entries[0].details.apiKey, '[redacted]', 'journal redacts retained secrets');
   assertNoSecret(journal.entries, 'journal redacts secrets');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  const key = sceneCacheKey('Invalidate Chat', 'Scene One');
+  await repo.saveSceneCache('Invalidate Chat', 'Scene One', {
+    cacheState: 'active',
+    cards: [{ id: 'preserved-card', family: 'Scene Frame', promptText: 'Preserve this card.' }],
+    latestHand: { handId: 'hand-1', cards: [{ id: 'preserved-card' }] },
+    source: { sceneFingerprint: 'scene-fp' },
+    versions: { prompt: 'v1' }
+  });
+
+  const result = await repo.invalidateSceneCache('Invalidate Chat', 'Scene One', {
+    reason: 'provider-changed',
+    runId: 'run-1',
+    details: {
+      model: 'new-model',
+      apiKey: 'secret',
+      authorizationHeader: 'Authorization Bearer live-token',
+      providerNote: 'contains sk-live-runtime and private-secret text'
+    }
+  });
+
+  assertEqual(result.ok, true, 'invalidateSceneCache returns ok when cache exists');
+  assertEqual(result.key, key, 'invalidateSceneCache returns scene cache key');
+  const cache = await repo.loadSceneCache('Invalidate Chat', 'Scene One');
+  assertEqual(cache.cacheState, 'stale', 'invalidateSceneCache marks cache stale');
+  assertEqual(cache.cards[0].id, 'preserved-card', 'invalidateSceneCache preserves cards');
+  assertEqual(cache.latestHand.handId, 'hand-1', 'invalidateSceneCache preserves latestHand');
+  assertEqual(cache.source.sceneFingerprint, 'scene-fp', 'invalidateSceneCache preserves source');
+  assertEqual(cache.versions.prompt, 'v1', 'invalidateSceneCache preserves versions');
+  assertEqual(cache.invalidation.reason, 'provider-changed', 'invalidateSceneCache records reason');
+  assertParseableTimestamp(cache.invalidation.detectedAt, 'invalidateSceneCache records detectedAt');
+  assertEqual(cache.invalidation.details.model, 'new-model', 'invalidateSceneCache keeps safe details');
+  assertNoRawSecretText(cache.invalidation, 'scene cache invalidation metadata');
+
+  const index = await repo.readIndex();
+  assert(index.records[key], 'invalidateSceneCache keeps scene cache index entry');
+  const journal = await repo.loadRunJournal('Invalidate Chat');
+  const entry = journal.entries.at(-1);
+  assertEqual(entry.event, 'cache.invalidated', 'invalidateSceneCache appends journal event');
+  assertEqual(entry.severity, 'info', 'invalidateSceneCache journal severity is info');
+  assertEqual(entry.runId, 'run-1', 'invalidateSceneCache journal records run id');
+  assertEqual(entry.sceneKey, 'Scene-One', 'invalidateSceneCache journal records scene key');
+  assertEqual(entry.details.reason, 'provider-changed', 'invalidateSceneCache journal records reason');
+  assertNoRawSecretText(entry, 'cache invalidated journal entry');
+
+  const missing = await repo.invalidateSceneCache('Invalidate Chat', 'Missing Scene', { reason: 'settings-changed' });
+  assertEqual(missing.ok, false, 'invalidateSceneCache missing cache returns fail-soft');
+  assertEqual(missing.reason, 'missing-cache', 'invalidateSceneCache missing cache reason');
+  assert(!adapter.dump()[sceneCacheKey('Invalidate Chat', 'Missing Scene')], 'invalidateSceneCache does not create missing cache');
 }
 
 {

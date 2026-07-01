@@ -201,6 +201,284 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 }
 
 {
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' }
+  });
+  const run = await runtime.prepareForGeneration({ userMessage: 'The lamp breaks.' });
+  assertEqual(run.ok, true, 'cache invalidation setup run installs');
+  const snapshot = runtime.view().lastSnapshot;
+
+  const providerUpdate = await runtime.updateProvider('utility', {
+    source: 'openai-compatible',
+    apiKey: 'sk-live-runtime',
+    openAICompatible: {
+      baseUrl: 'https://provider-change.test/v1',
+      model: 'provider-change-model'
+    }
+  });
+  assertEqual(providerUpdate.ok, true, 'provider update still succeeds after cache invalidation');
+  let cache = await storage.loadSceneCache(snapshot.chatKey, snapshot.sceneKey);
+  assertEqual(cache.cacheState, 'stale', 'provider update marks active scene cache stale');
+  assertEqual(cache.invalidation.reason, 'provider-changed', 'provider update records invalidation reason');
+  assertDeepEqual(cache.invalidation.details.changedKeys, ['source', 'apiKey', 'openAICompatible'], 'provider invalidation records changed keys');
+  assert(!JSON.stringify(cache.invalidation).includes('provider-change-model'), 'provider invalidation does not persist raw model patch');
+  assert(!JSON.stringify(cache.invalidation).includes('provider-change.test'), 'provider invalidation does not persist raw endpoint patch');
+  assertNoSecretText(cache.invalidation, 'provider cache invalidation');
+  let journal = await storage.loadRunJournal(snapshot.chatKey);
+  assert(journal.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'provider-changed'), 'provider update records cache invalidation journal');
+  assert(!JSON.stringify(journal).includes('provider-change-model'), 'provider invalidation journal does not persist raw model patch');
+  assert(!JSON.stringify(journal).includes('provider-change.test'), 'provider invalidation journal does not persist raw endpoint patch');
+  assertNoSecretText(journal, 'provider cache invalidation journal');
+
+  const settingsUpdate = await runtime.updateSettings({ reasonerUse: 'always' });
+  assertEqual(settingsUpdate.ok, true, 'settings update still succeeds after cache invalidation');
+  cache = await storage.loadSceneCache(snapshot.chatKey, snapshot.sceneKey);
+  assertEqual(cache.cacheState, 'stale', 'settings update keeps scene cache stale');
+  assertEqual(cache.invalidation.reason, 'settings-changed', 'settings update records invalidation reason');
+  assertNoSecretText(cache.invalidation, 'settings cache invalidation');
+  journal = await storage.loadRunJournal(snapshot.chatKey);
+  assert(journal.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'settings-changed'), 'settings update records cache invalidation journal');
+}
+
+{
+  let arbiterPrompts = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'stale cache arbiter metadata test only calls arbiter');
+        arbiterPrompts.push(request.prompt);
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            budgets: { targetBriefTokens: 500, maxCards: 4 }
+          }
+        };
+      }
+    }
+  });
+  const first = await runtime.prepareForGeneration({ userMessage: 'Build cache before invalidation.' });
+  assertEqual(first.ok, true, 'stale cache metadata setup run installs');
+  const providerUpdate = await runtime.updateProvider('utility', { source: 'host-current-model' });
+  assertEqual(providerUpdate.ok, true, 'provider update invalidates cache before next arbiter pass');
+  arbiterPrompts = [];
+  const second = await runtime.prepareForGeneration({ userMessage: 'Arbiter should see stale cache.' });
+  assertEqual(second.ok, true, 'stale cache metadata followup run installs');
+  assert(arbiterPrompts[0].includes('"cacheState":"stale"'), 'arbiter prompt includes stale cache state');
+  assert(arbiterPrompts[0].includes('"reason":"provider-changed"'), 'arbiter prompt includes invalidation reason');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const baseStorage = createStorageRepository({ storage: adapter });
+  let releaseInvalidation;
+  let invalidationStarted = false;
+  let invalidationCompleted = false;
+  const storage = {
+    ...baseStorage,
+    async invalidateSceneCache(chatKey, sceneKey, options) {
+      invalidationStarted = true;
+      await new Promise((resolve) => {
+        releaseInvalidation = resolve;
+      });
+      const result = await baseStorage.invalidateSceneCache(chatKey, sceneKey, options);
+      invalidationCompleted = true;
+      return result;
+    }
+  };
+  const arbiterPrompts = [];
+  let arbiterCalls = 0;
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'concurrent invalidation wait test only calls arbiter');
+        arbiterCalls += 1;
+        if (arbiterCalls > 1) {
+          assertEqual(invalidationCompleted, true, 'prepare waits for cache invalidation before asking Arbiter');
+        }
+        arbiterPrompts.push(request.prompt);
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            budgets: { targetBriefTokens: 500, maxCards: 4 }
+          }
+        };
+      }
+    }
+  });
+  const first = await runtime.prepareForGeneration({ userMessage: 'Build cache before delayed invalidation.' });
+  assertEqual(first.ok, true, 'delayed invalidation setup run installs');
+  const providerUpdate = runtime.updateProvider('utility', { source: 'host-current-model' });
+  await waitUntil(() => invalidationStarted, 'provider update did not start invalidation');
+  const second = runtime.prepareForGeneration({ userMessage: 'Wait for invalidation before reading cache.' });
+  releaseInvalidation();
+  const updateResult = await providerUpdate;
+  assertEqual(updateResult.ok, true, 'provider update succeeds after delayed invalidation');
+  const secondResult = await second;
+  assertEqual(secondResult.ok, true, 'prepare after delayed invalidation succeeds');
+  assert(arbiterPrompts[1].includes('"cacheState":"stale"'), 'concurrent prepare Arbiter prompt includes stale cache state');
+  assert(arbiterPrompts[1].includes('"reason":"provider-changed"'), 'concurrent prepare Arbiter prompt includes invalidation reason');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const baseStorage = createStorageRepository({ storage: adapter });
+  let releaseSave;
+  let saveStarted = false;
+  const storage = {
+    ...baseStorage,
+    async saveSceneCache(chatKey, sceneKey, value) {
+      saveStarted = true;
+      await new Promise((resolve) => {
+        releaseSave = resolve;
+      });
+      return baseStorage.saveSceneCache(chatKey, sceneKey, value);
+    }
+  };
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage
+  });
+  const run = runtime.prepareForGeneration({ userMessage: 'Save is still in flight.' });
+  await waitUntil(() => saveStarted, 'in-flight save did not start before provider update');
+  const providerUpdatePromise = runtime.updateProvider('utility', { source: 'host-current-model' });
+  releaseSave();
+  const providerUpdate = await providerUpdatePromise;
+  assertEqual(providerUpdate.ok, true, 'provider update succeeds while save is in flight');
+  const runResult = await run;
+  assertEqual(runResult.superseded, true, 'in-flight save run is superseded by provider update');
+  const snapshot = runtime.view().lastSnapshot;
+  const cache = await baseStorage.loadSceneCache(snapshot.chatKey, snapshot.sceneKey);
+  assertEqual(cache.cacheState, 'stale', 'provider update leaves in-flight saved cache stale');
+  assertEqual(cache.invalidation.reason, 'provider-changed', 'in-flight saved cache records provider invalidation');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const baseStorage = createStorageRepository({ storage: adapter });
+  let saveCalls = 0;
+  let delayedSaveStarted = false;
+  let releaseDelayedSave;
+  let invalidationCompleted = false;
+  const storage = {
+    ...baseStorage,
+    async saveSceneCache(chatKey, sceneKey, value) {
+      saveCalls += 1;
+      if (saveCalls === 2) {
+        delayedSaveStarted = true;
+        await new Promise((resolve) => {
+          releaseDelayedSave = resolve;
+        });
+      }
+      return baseStorage.saveSceneCache(chatKey, sceneKey, value);
+    },
+    async invalidateSceneCache(chatKey, sceneKey, options) {
+      const result = await baseStorage.invalidateSceneCache(chatKey, sceneKey, options);
+      invalidationCompleted = true;
+      return result;
+    }
+  };
+  let arbiterCalls = 0;
+  const arbiterPrompts = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'storage-tail mutation wait test only calls arbiter');
+        arbiterCalls += 1;
+        if (arbiterCalls === 3) {
+          assertEqual(invalidationCompleted, true, 'prepare waiting on storage tail also waits for provider invalidation added later');
+        }
+        arbiterPrompts.push(request.prompt);
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            budgets: { targetBriefTokens: 500, maxCards: 4 }
+          }
+        };
+      }
+    }
+  });
+  const first = await runtime.prepareForGeneration({ userMessage: 'Save first cache before storage wait.' });
+  assertEqual(first.ok, true, 'storage-tail wait setup run installs');
+  const delayedRun = runtime.prepareForGeneration({ userMessage: 'Delay second save.' });
+  await waitUntil(() => delayedSaveStarted, 'second save did not enter delayed storage write');
+  const waitingRun = runtime.prepareForGeneration({ userMessage: 'Wait through storage and provider mutation.' });
+  const providerUpdate = runtime.updateProvider('utility', { source: 'host-current-model' });
+  releaseDelayedSave();
+  const updateResult = await providerUpdate;
+  assertEqual(updateResult.ok, true, 'provider update succeeds after delayed storage save');
+  const delayedResult = await delayedRun;
+  assertEqual(delayedResult.superseded, true, 'delayed run is superseded by provider update');
+  const waitingResult = await waitingRun;
+  assertEqual(waitingResult.ok, true, 'waiting run succeeds after provider invalidation');
+  assert(arbiterPrompts[2].includes('"cacheState":"stale"'), 'storage-tail waiting Arbiter prompt includes stale cache state');
+  assert(arbiterPrompts[2].includes('"reason":"provider-changed"'), 'storage-tail waiting Arbiter prompt includes invalidation reason');
+}
+
+{
+  let sceneId = 'saved-scene';
+  let releaseSecondArbiter;
+  let secondArbiterStarted = false;
+  let arbiterCalls = 0;
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => ({
+      chatId: 'cache-target-chat',
+      chatKey: 'cache-target-chat',
+      sceneKey: sceneId,
+      sceneFingerprint: `${sceneId}-fp`,
+      turnFingerprint: `${sceneId}-turn-fp`,
+      latestMesId: 2,
+      messages: [
+        { mesid: 2, role: 'user', text: `Message in ${sceneId}.`, visible: true }
+      ]
+    }),
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'last saved cache invalidation test only calls arbiter');
+        arbiterCalls += 1;
+        if (arbiterCalls === 2) {
+          secondArbiterStarted = true;
+          await new Promise((resolve) => {
+            releaseSecondArbiter = resolve;
+          });
+        }
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            budgets: { targetBriefTokens: 500, maxCards: 4 },
+            diagnostics: [`arbiter-${arbiterCalls}`]
+          }
+        };
+      }
+    }
+  });
+  const first = await runtime.prepareForGeneration({ userMessage: 'Save first cache.' });
+  assertEqual(first.ok, true, 'last saved cache setup run installs');
+  const savedSnapshot = runtime.view().lastSnapshot;
+  sceneId = 'unsaved-scene';
+  const second = runtime.prepareForGeneration({ userMessage: 'Start unsaved second cache.' });
+  await waitUntil(() => secondArbiterStarted, 'second arbiter did not start before provider update');
+  const providerUpdate = await runtime.updateProvider('utility', { source: 'host-current-model' });
+  assertEqual(providerUpdate.ok, true, 'provider update succeeds while newer run is superseded');
+  releaseSecondArbiter();
+  const secondResult = await second;
+  assertEqual(secondResult.superseded, true, 'second run is superseded before saving cache');
+  const savedCache = await storage.loadSceneCache(savedSnapshot.chatKey, savedSnapshot.sceneKey);
+  assertEqual(savedCache.cacheState, 'stale', 'provider update invalidates last successfully saved cache');
+  const unsavedCache = await storage.loadSceneCache('cache-target-chat', 'unsaved-scene');
+  assertEqual(unsavedCache, null, 'provider update does not create or target unsaved cache');
+}
+
+{
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     snapshot: {

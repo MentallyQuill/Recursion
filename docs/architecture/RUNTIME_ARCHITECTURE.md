@@ -250,7 +250,7 @@ The SillyTavern adapter may use host-specific prompt APIs, extension settings, a
 
 ## Settings, Provider, And Mode Mutations
 
-Runtime settings changes are prompt-safety operations, not plain preference writes. `runtime.updateSettings(patch)` applies the normalized settings immediately, supersedes active work, then awaits a Recursion prompt clear through the host adapter before resolving.
+Runtime settings changes are prompt-safety operations, not plain preference writes. `runtime.updateSettings(patch)` applies the normalized settings immediately, supersedes active work, best-effort soft-invalidates the last successful scene cache with reason `settings-changed` when the patch has meaningful keys, then awaits a Recursion prompt clear through the host adapter before resolving.
 
 The operation result shape is:
 
@@ -264,7 +264,7 @@ The operation result shape is:
 
 When the resulting mode is `off`, the Activity Ribbon must show prompt-clearing work and then settle to either `Recursion Off. Prompt cleared.` or a sanitized prompt-clear warning. A clear failure does not roll back the Off setting, but the operation returns `ok: false` and the UI keeps the warning visible. This makes Off mode a real emergency brake while still exposing host prompt cleanup failures.
 
-Provider setting and session-key mutations follow the same prompt-safety rule. `runtime.updateProvider(lane, patch)` and `runtime.clearProviderKey(lane)` apply the provider change immediately, supersede active work, then await host prompt clear before resolving:
+Provider setting and session-key mutations follow the same prompt-safety rule. `runtime.updateProvider(lane, patch)` and `runtime.clearProviderKey(lane)` apply the provider change immediately, supersede active work, best-effort soft-invalidates the last successful scene cache, then await host prompt clear before resolving. Provider updates use reason `provider-changed`; session-key clears use `provider-key-cleared`.
 
 ```ts
 {
@@ -274,7 +274,7 @@ Provider setting and session-key mutations follow the same prompt-safety rule. `
 }
 ```
 
-Clear failure or a missing host clear API does not roll back the provider change, but the operation returns `ok: false`, includes the sanitized prompt-clear result, and leaves the existing prompt-clear warning visible.
+Clear failure, missing host clear API, missing scene cache, or invalidation storage failure does not roll back the provider change. Prompt-clear failures return `ok: false`, include the sanitized prompt-clear result, and leave the existing prompt-clear warning visible. Invalidation failures are fail-soft and do not change the mutation result contract.
 
 ## Diagnostics Events
 
@@ -295,6 +295,7 @@ Core event types:
 - `prompt.packet_built`: packet id, footprint, lanes, and token estimate.
 - `prompt.install_succeeded`: packet id, host insertion metadata, and snapshot id.
 - `prompt.install_failed`: packet id and sanitized adapter error.
+- `cache.invalidated`: scene key, reason, optional run id, and redacted details for a soft scene-cache invalidation.
 - `activity.stage_changed`: phase, mode, severity, visible label, and compact chips.
 - `activity.settled`: outcome, visible summary, and fallback path when present.
 - `provider.failed`: lane, job type, sanitized error class, and fallback path.

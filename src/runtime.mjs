@@ -695,6 +695,10 @@ function compactCacheCardForArbiter(card, snapshot) {
 
 function compactSceneCacheForArbiter(cache, snapshot) {
   const source = asObject(cache);
+  const cacheState = ['active', 'stale', 'retired', 'invalid'].includes(source.cacheState) ? source.cacheState : 'active';
+  const invalidation = asObject(source.invalidation);
+  const invalidationReason = safeText(invalidation.reason || '', 120);
+  const invalidationDetectedAt = safeText(invalidation.detectedAt || '', 80);
   const cards = (Array.isArray(source.cards) ? source.cards : [])
     .map((card) => compactCacheCardForArbiter(card, snapshot))
     .filter(Boolean)
@@ -708,6 +712,15 @@ function compactSceneCacheForArbiter(cache, snapshot) {
     available: cards.length > 0,
     sceneKey: safeText(snapshot?.sceneKey || DEFAULT_SCENE_KEY, 160) || DEFAULT_SCENE_KEY,
     sceneFingerprint: safeText(snapshot?.sceneFingerprint || '', 180),
+    cacheState,
+    ...(invalidationReason
+      ? {
+          invalidation: {
+            reason: invalidationReason,
+            ...(invalidationDetectedAt ? { detectedAt: invalidationDetectedAt } : {})
+          }
+        }
+      : {}),
     cardCount: cards.length,
     latestHand: handId
       ? {
@@ -952,8 +965,10 @@ export function createRecursionRuntime({
   let lastHand = { cards: [], omitted: [] };
   let lastPlan = null;
   let lastSnapshot = null;
+  let lastSavedSceneCacheRef = null;
   let promptInstallTail = Promise.resolve();
   let storageSaveTail = Promise.resolve();
+  const activeRuntimeMutations = new Set();
   let activePromptMutationId = null;
 
   async function readSnapshot() {
@@ -1062,32 +1077,50 @@ export function createRecursionRuntime({
     const next = settingsStore.update(cleanPatch);
     if (Object.keys(cleanPatch).length > 0) {
       supersedeActiveRun();
-      const clear = await clearPromptAfterSupersede({
-        successLabel: next.mode === 'off'
-          ? 'Recursion Off. Prompt cleared.'
-          : 'Recursion prompt cleared after settings change.'
+      return trackRuntimeMutation(async () => {
+        await invalidateActiveSceneCacheBestEffort('settings-changed', {
+          changedKeys: Object.keys(cleanPatch)
+        });
+        const clear = await clearPromptAfterSupersede({
+          successLabel: next.mode === 'off'
+            ? 'Recursion Off. Prompt cleared.'
+            : 'Recursion prompt cleared after settings change.'
+        });
+        return { ok: clear?.ok !== false, settings: next, clear };
       });
-      return { ok: clear?.ok !== false, settings: next, clear };
     }
     return { ok: true, settings: next, clear: null };
   }
 
   async function updateProvider(lane, patch = {}) {
-    const provider = settingsStore.updateProvider(providerLane(lane), patch);
+    const resolvedLane = providerLane(lane);
+    const provider = settingsStore.updateProvider(resolvedLane, patch);
     supersedeActiveRun();
-    const clear = await clearPromptAfterSupersede({
-      successLabel: 'Recursion prompt cleared after provider change.'
+    return trackRuntimeMutation(async () => {
+      await invalidateActiveSceneCacheBestEffort('provider-changed', {
+        lane: resolvedLane,
+        changedKeys: Object.keys(asObject(patch))
+      });
+      const clear = await clearPromptAfterSupersede({
+        successLabel: 'Recursion prompt cleared after provider change.'
+      });
+      return { ok: clear?.ok !== false, provider, clear };
     });
-    return { ok: clear?.ok !== false, provider, clear };
   }
 
   async function clearProviderKey(lane) {
-    const provider = settingsStore.clearApiKey(providerLane(lane));
+    const resolvedLane = providerLane(lane);
+    const provider = settingsStore.clearApiKey(resolvedLane);
     supersedeActiveRun();
-    const clear = await clearPromptAfterSupersede({
-      successLabel: 'Recursion prompt cleared after provider key change.'
+    return trackRuntimeMutation(async () => {
+      await invalidateActiveSceneCacheBestEffort('provider-key-cleared', {
+        lane: resolvedLane
+      });
+      const clear = await clearPromptAfterSupersede({
+        successLabel: 'Recursion prompt cleared after provider key change.'
+      });
+      return { ok: clear?.ok !== false, provider, clear };
     });
-    return { ok: clear?.ok !== false, provider, clear };
   }
 
   function providerTestPrompt(lane) {
@@ -1224,11 +1257,28 @@ export function createRecursionRuntime({
   }
 
   async function waitForExternalMutations() {
-    try {
-      await Promise.all([promptInstallTail, storageSaveTail]);
-    } catch {
-      // Mutation failures are normalized at their source; tails are only sequencing gates.
+    while (true) {
+      const promptTail = promptInstallTail;
+      const storageTail = storageSaveTail;
+      const mutations = [...activeRuntimeMutations];
+      try {
+        await Promise.all([promptTail, storageTail, ...mutations]);
+      } catch {
+        // Mutation failures are normalized at their source; tails are only sequencing gates.
+      }
+      if (promptTail === promptInstallTail && storageTail === storageSaveTail && activeRuntimeMutations.size === 0) {
+        return;
+      }
     }
+  }
+
+  function trackRuntimeMutation(mutationWork) {
+    const current = Promise.resolve().then(mutationWork);
+    activeRuntimeMutations.add(current);
+    current.finally(() => {
+      activeRuntimeMutations.delete(current);
+    }).catch(() => {});
+    return current;
   }
 
   async function runPromptMutationSection(runId, mutationWork) {
@@ -1277,7 +1327,12 @@ export function createRecursionRuntime({
 
   async function saveSceneCacheSafe(runId, snapshot, value) {
     try {
-      return await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, value);
+      const result = await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, value);
+      lastSavedSceneCacheRef = {
+        chatKey: snapshot.chatKey,
+        sceneKey: snapshot.sceneKey
+      };
+      return result;
     } catch (error) {
       reportStorageWarning(runId, 'saveSceneCache', error);
       return null;
@@ -1289,6 +1344,23 @@ export function createRecursionRuntime({
       return await storage.appendJournal(chatKey, entry);
     } catch (error) {
       reportStorageWarning(runId, 'appendJournal', error);
+      return null;
+    }
+  }
+
+  async function invalidateActiveSceneCacheBestEffort(reason, details = {}) {
+    try {
+      await storageSaveTail.catch(() => {});
+    } catch {
+      // Storage save failures are already normalized by their source.
+    }
+    if (!lastSavedSceneCacheRef || typeof storage.invalidateSceneCache !== 'function') return null;
+    try {
+      return await storage.invalidateSceneCache(lastSavedSceneCacheRef.chatKey, lastSavedSceneCacheRef.sceneKey, {
+        reason,
+        details
+      });
+    } catch {
       return null;
     }
   }

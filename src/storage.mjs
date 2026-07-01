@@ -65,7 +65,7 @@ function cloneJsonValue(value, fallback) {
 }
 
 function sanitizedJsonValue(value, fallback) {
-  return redact(cloneJsonValue(value, fallback));
+  return redactSecretText(redact(cloneJsonValue(value, fallback)));
 }
 
 function stringValue(value, fallback = '') {
@@ -78,10 +78,33 @@ function stringValue(value, fallback = '') {
   return fallback;
 }
 
+function redactSecretText(value) {
+  if (typeof value === 'string') {
+    return value
+      .replace(/\bAuthorization\s+Bearer\s+[A-Za-z0-9._-]+/g, 'Authorization Bearer [redacted]')
+      .replace(/\bBearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]')
+      .replace(/\bsk-[A-Za-z0-9_-]+/g, 'sk-[redacted]')
+      .replace(/\bprivate[-_\s]*secret\b/gi, '[redacted]');
+  }
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((entry) => redactSecretText(entry));
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactSecretText(entry)]));
+}
+
 function optionalStringValue(value) {
   if (value === undefined || value === null) return undefined;
   const text = stringValue(value, '');
   return text || undefined;
+}
+
+function normalizeInvalidation(value = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const details = source.details === undefined ? undefined : sanitizedJsonValue(source.details, undefined);
+  return redactSecretText(redact({
+    reason: stringValue(source.reason, 'runtime-change').slice(0, 120) || 'runtime-change',
+    detectedAt: timestampValue(source.detectedAt),
+    ...(details === undefined ? {} : { details })
+  }));
 }
 
 function normalizeSceneCard(card) {
@@ -139,7 +162,8 @@ function normalizeSceneCache(chatKey, sceneKey, value = {}) {
     cards: Array.isArray(source.cards) ? source.cards.map(normalizeSceneCard).filter(Boolean) : [],
     latestHand: sanitizedJsonValue(source.latestHand, null),
     source: sanitizedJsonValue(source.source, null),
-    versions: sanitizedJsonValue(source.versions, {})
+    versions: sanitizedJsonValue(source.versions, {}),
+    ...(source.invalidation === undefined ? {} : { invalidation: normalizeInvalidation(source.invalidation) })
   });
 }
 
@@ -262,6 +286,19 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
     return normalizeJournal(chatKey, await storage.readJson(key), journalEntryLimit);
   }
 
+  async function appendJournal(chatKey, entry) {
+    const key = runJournalKey(chatKey);
+    const journal = await loadRunJournal(chatKey);
+    const clean = normalizeJournalEntry(entry);
+    journal.entries.push(clean);
+    journal.entries = journal.entries.slice(-journal.maxEntries);
+    journal.nextIndex += 1;
+    journal.updatedAt = nowIso();
+    await storage.writeJson(key, journal);
+    await writeIndexEntry(key, 'runJournal', safeId(chatKey, 'chat'));
+    return clean;
+  }
+
   return {
     loadSceneCache,
     async saveSceneCache(chatKey, sceneKey, value) {
@@ -273,19 +310,41 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
       reportActivity(activity, { phase: 'storageComplete', mode: 'background', severity: 'success', label: 'Scene cache saved.' });
       return record;
     },
-    loadRunJournal,
-    async appendJournal(chatKey, entry) {
-      const key = runJournalKey(chatKey);
-      const journal = await loadRunJournal(chatKey);
-      const clean = normalizeJournalEntry(entry);
-      journal.entries.push(clean);
-      journal.entries = journal.entries.slice(-journal.maxEntries);
-      journal.nextIndex += 1;
-      journal.updatedAt = nowIso();
-      await storage.writeJson(key, journal);
-      await writeIndexEntry(key, 'runJournal', safeId(chatKey, 'chat'));
-      return clean;
+    async invalidateSceneCache(chatKey, sceneKey, options = {}) {
+      const key = sceneCacheKey(chatKey, sceneKey);
+      const existing = await storage.readJson(key);
+      if (!existing) return { ok: false, reason: 'missing-cache', key };
+      const source = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
+      const reason = stringValue(source.reason, 'runtime-change').slice(0, 120) || 'runtime-change';
+      const cacheState = ['active', 'stale', 'retired', 'invalid'].includes(source.cacheState) ? source.cacheState : 'stale';
+      const invalidation = normalizeInvalidation({
+        reason,
+        detectedAt: source.detectedAt,
+        details: source.details
+      });
+      const record = normalizeSceneCache(chatKey, sceneKey, {
+        ...existing,
+        cacheState,
+        invalidation
+      });
+      await storage.writeJson(key, record);
+      await writeIndexEntry(key, 'sceneCache', safeId(chatKey, 'chat'));
+      const journalEntry = await appendJournal(chatKey, {
+        event: 'cache.invalidated',
+        severity: 'info',
+        summary: `Scene cache marked ${record.cacheState}: ${invalidation.reason}`,
+        runId: optionalStringValue(source.runId),
+        sceneKey: safeId(sceneKey, 'scene'),
+        details: {
+          reason: invalidation.reason,
+          cacheState: record.cacheState,
+          ...(invalidation.details === undefined ? {} : { details: invalidation.details })
+        }
+      });
+      return { ok: true, key, record, journalEntry };
     },
+    loadRunJournal,
+    appendJournal,
     async clearSceneCache(chatKey, sceneKey) {
       const key = sceneCacheKey(chatKey, sceneKey);
       await storage.deleteJson(key);

@@ -249,6 +249,10 @@ function mergeSource(fallbackSource) {
 
 function mergePlan(fallbackPlan, arbiterData) {
   const data = asObject(arbiterData);
+  const schema = safeText(data.schema, 120);
+  if (schema !== UTILITY_ARBITER_SCHEMA) {
+    throw new Error(`Invalid Utility Arbiter schema: ${schema || 'missing'}`);
+  }
   const budgets = {
     targetBriefTokens: normalizeBudget(
       asObject(data.budgets).targetBriefTokens,
@@ -260,7 +264,7 @@ function mergePlan(fallbackPlan, arbiterData) {
     )
   };
   return {
-    schema: safeText(data.schema || fallbackPlan.schema || UTILITY_ARBITER_SCHEMA, 120) || UTILITY_ARBITER_SCHEMA,
+    schema: UTILITY_ARBITER_SCHEMA,
     snapshotHash: fallbackPlan.snapshotHash,
     action: normalizePlanAction(data.action, fallbackPlan.action),
     sceneStatus: safeText(data.sceneStatus || fallbackPlan.sceneStatus, 80) || fallbackPlan.sceneStatus,
@@ -323,6 +327,8 @@ function snapshotForPlan(snapshot, plan) {
 
 function lifecycleForDeck(cards, plan, defaultReason) {
   const explicit = normalizePlanLifecycle(plan?.lifecycle);
+  const cardIds = new Set((Array.isArray(cards) ? cards : []).map((card) => card?.id).filter(Boolean));
+  const relevantExplicit = explicit.filter((entry) => cardIds.has(entry.cardId));
   if (!explicit.length) {
     return cards.map((card) => ({
       action: 'select',
@@ -330,9 +336,16 @@ function lifecycleForDeck(cards, plan, defaultReason) {
       reason: defaultReason(card)
     }));
   }
-  const hasSelection = explicit.some((entry) => entry.action === 'select' || entry.action === 'emphasize');
-  if (!hasSelection) return explicit;
-  const touched = new Set(explicit.map((entry) => entry.cardId));
+  if (!relevantExplicit.length) {
+    return cards.map((card) => ({
+      action: 'select',
+      cardId: card.id,
+      reason: defaultReason(card)
+    }));
+  }
+  const hasSelection = relevantExplicit.some((entry) => entry.action === 'select' || entry.action === 'emphasize');
+  if (!hasSelection) return relevantExplicit;
+  const touched = new Set(relevantExplicit.map((entry) => entry.cardId));
   const implicitStows = cards
     .filter((card) => card?.id && !touched.has(card.id))
     .map((card) => ({
@@ -340,7 +353,7 @@ function lifecycleForDeck(cards, plan, defaultReason) {
       cardId: card.id,
       reason: 'not selected by Utility Arbiter'
     }));
-  return [...implicitStows, ...explicit];
+  return [...implicitStows, ...relevantExplicit];
 }
 
 function budgetOr(value, fallback) {
@@ -421,6 +434,118 @@ function safeSettingsView(settings) {
     ui: {
       viewerOpen: source.ui?.viewerOpen === true
     }
+  };
+}
+
+function providerHealthForArbiter(settings) {
+  const source = asObject(settings);
+  const provider = (lane) => {
+    const config = asObject(source.providers?.[lane]);
+    return {
+      enabled: config.enabled === true,
+      source: safeText(config.source || '', 80),
+      status: safeProviderLastTest(config.lastTest).status
+    };
+  };
+  return {
+    utility: provider('utility'),
+    reasoner: provider('reasoner')
+  };
+}
+
+function arbiterSafeRef(value, prefix = 'ref', limit = 160) {
+  const text = safeText(value || '', limit);
+  if (!text) return '';
+  if (hasSecretText(text)) return `${prefix}:${hashJson(text)}`;
+  if (/\s/.test(text) || text.length > 96) return `${prefix}:${hashJson(text)}`;
+  const hyphenParts = text.split('-').filter(Boolean);
+  if (!text.startsWith('card-') && hyphenParts.length > 4) return `${prefix}:${hashJson(text)}`;
+  return text;
+}
+
+function arbiterFingerprintRef(value) {
+  const text = safeText(value || '', 180);
+  if (!text) return '';
+  if (/^hash:[a-f0-9]{8}$/i.test(text)) return text;
+  return `hash:${hashJson(text)}`;
+}
+
+function arbiterEvidenceRef(value) {
+  const text = safeText(value || '', 80);
+  if (!text) return '';
+  if (/^message:\d+$/i.test(text)) return text;
+  return `ref:${hashJson(text)}`;
+}
+
+function compactCacheCardForArbiter(card, snapshot) {
+  const source = asObject(card);
+  let normalized;
+  try {
+    normalized = normalizeCard(sanitizeGeneratedCard(source), {
+      sceneId: snapshot?.sceneKey,
+      chatId: snapshot?.chatId,
+      snapshotHash: hashJson(snapshot || {}),
+      lastMesId: snapshot?.latestMesId
+    });
+  } catch {
+    return null;
+  }
+  const cardSource = asObject(normalized.source);
+  const freshness = asObject(normalized.freshness);
+  const id = arbiterSafeRef(normalized.id, 'card');
+  const family = safeText(normalized.family || '', 120);
+  if (!id || !family) return null;
+  const output = {
+    id,
+    family,
+    role: safeText(normalized.role || '', 120),
+    status: safeText(normalized.status || 'active', 40),
+    emphasis: safeText(normalized.emphasis || 'normal', 40),
+    detailProfile: safeText(normalized.detailProfile || 'standard', 40),
+    tokenEstimate: normalizeBudget(normalized.tokenEstimate, 0),
+    evidenceRefs: safeStringList(normalized.evidenceRefs, 80).map(arbiterEvidenceRef).filter(Boolean).slice(0, 8),
+    source: {
+      firstMesId: numberOr(cardSource.firstMesId, 0),
+      lastMesId: numberOr(cardSource.lastMesId, 0),
+      fingerprint: arbiterFingerprintRef(cardSource.fingerprint || cardSource.snapshotHash || freshness.sourceFingerprint)
+    },
+    freshness: {
+      sourceFingerprint: arbiterFingerprintRef(freshness.sourceFingerprint),
+      ...(freshness.expiresAfterMesId !== undefined
+        ? { expiresAfterMesId: normalizeBudget(freshness.expiresAfterMesId, 0) }
+        : {})
+    }
+  };
+  const summary = safeText(source.summary || '', 280);
+  if (summary) output.summary = summary;
+  return output;
+}
+
+function compactSceneCacheForArbiter(cache, snapshot) {
+  const source = asObject(cache);
+  const cards = (Array.isArray(source.cards) ? source.cards : [])
+    .map((card) => compactCacheCardForArbiter(card, snapshot))
+    .filter(Boolean)
+    .slice(0, 32);
+  const latestHand = asObject(source.latestHand);
+  const handCards = Array.isArray(latestHand.cards)
+    ? latestHand.cards.map((card) => arbiterSafeRef(card?.id || card?.cardId || '', 'card')).filter(Boolean).slice(0, 16)
+    : [];
+  const handId = arbiterSafeRef(latestHand.handId || '', 'hand');
+  return {
+    available: cards.length > 0,
+    sceneKey: safeText(snapshot?.sceneKey || DEFAULT_SCENE_KEY, 160) || DEFAULT_SCENE_KEY,
+    sceneFingerprint: safeText(snapshot?.sceneFingerprint || '', 180),
+    cardCount: cards.length,
+    latestHand: handId
+      ? {
+          handId,
+          cardIds: handCards,
+          tokenEstimate: normalizeBudget(latestHand.tokenEstimate, 0),
+          selectedCount: handCards.length
+        }
+      : null,
+    cards
   };
 }
 
@@ -1000,7 +1125,7 @@ export function createRecursionRuntime({
     });
   }
 
-  async function askUtilityArbiter({ runId, snapshot, settings, fallbackPlan, signal }) {
+  async function askUtilityArbiter({ runId, snapshot, settings, fallbackPlan, sceneCache, userMessage, signal }) {
     if (!generationRouter || typeof generationRouter.generate !== 'function') return fallbackPlan;
     stageRuntimeActivity({
       runId,
@@ -1010,6 +1135,7 @@ export function createRecursionRuntime({
       chips: ['Utility']
     });
     try {
+      const cacheView = compactSceneCacheForArbiter(sceneCache, snapshot);
       const result = await generationRouter.generate('utilityArbiter', {
         runId,
         signal,
@@ -1017,7 +1143,12 @@ export function createRecursionRuntime({
           'Return a Recursion Utility Arbiter plan as strict JSON.',
           `Schema: ${UTILITY_ARBITER_SCHEMA}`,
           `Settings: ${JSON.stringify(arbiterSafeSettings(settings))}`,
+          `Provider health: ${JSON.stringify(providerHealthForArbiter(settings))}`,
           `Catalog: ${JSON.stringify(CARD_CATALOG)}`,
+          `Catalog hash: ${hashJson(CARD_CATALOG)}`,
+          `Snapshot hash: ${fallbackPlan.snapshotHash}`,
+          `User message hash: ${hashJson(userMessage)}`,
+          `Scene cache: ${JSON.stringify(cacheView)}`,
           `Snapshot: ${JSON.stringify(providerSafeSnapshot(snapshot))}`
         ].join('\n\n')
       }, { runId, signal });
@@ -1092,7 +1223,17 @@ export function createRecursionRuntime({
         userMessageHash: hashJson(userMessage),
         catalogHash: hashJson(CARD_CATALOG)
       };
-      const plan = await askUtilityArbiter({ runId, snapshot, settings, fallbackPlan, signal });
+      const initialCache = await loadSceneCacheSafe(runId, snapshot);
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      const plan = await askUtilityArbiter({
+        runId,
+        snapshot,
+        settings,
+        fallbackPlan,
+        sceneCache: initialCache,
+        userMessage,
+        signal
+      });
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastPlan = plan;
       const sceneSnapshot = snapshotForPlan(snapshot, plan);
@@ -1123,13 +1264,16 @@ export function createRecursionRuntime({
         cardCounts: { requested: plan.cardJobs?.length || 0 },
         chips: ['Cards']
       });
-      const cache = await loadSceneCacheSafe(runId, sceneSnapshot);
+      const cache = sceneSnapshot.chatKey === snapshot.chatKey && sceneSnapshot.sceneKey === snapshot.sceneKey
+        ? initialCache
+        : await loadSceneCacheSafe(runId, sceneSnapshot);
       if (!isActiveRun(runId)) return supersededResult(runId);
       const cacheCards = sanitizedCacheCards(runId, sceneSnapshot, cache?.cards);
       const reuseCacheOnly = action === 'reuse-cache' && cacheCards.length > 0;
       const providerCards = reuseCacheOnly ? [] : (await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, signal })).map(sanitizeGeneratedCard);
       if (!isActiveRun(runId)) return supersededResult(runId);
-      const generatedCards = reuseCacheOnly ? [] : localCards(sceneSnapshot).map(sanitizeGeneratedCard);
+      const useLocalFallbackCards = !reuseCacheOnly && !cacheCards.length && !providerCards.length;
+      const generatedCards = useLocalFallbackCards ? localCards(sceneSnapshot).map(sanitizeGeneratedCard) : [];
       if (action === 'reuse-cache' && !cacheCards.length) {
         const clear = await runPromptMutationSection(runId, () => clearPromptBestEffort(host));
         if (clear?.superseded) return clear;
@@ -1145,14 +1289,17 @@ export function createRecursionRuntime({
         }
         return { ok: true, skipped: true, reason: 'cache-unavailable', plan, clear };
       }
+      const candidateCards = reuseCacheOnly ? cacheCards : [...cacheCards, ...providerCards, ...generatedCards];
       const deck = applyCardPlan(cacheCards, {
         acceptedCards: [...generatedCards, ...providerCards],
         lifecycle: lifecycleForDeck(
-          reuseCacheOnly ? cacheCards : [...cacheCards, ...generatedCards, ...providerCards],
+          candidateCards,
           plan,
           (card) => (reuseCacheOnly
             ? 'reused scene cache'
-            : (providerCards.some((entry) => entry.id === card.id) ? 'utility generated card' : 'current fallback hand'))
+            : (providerCards.some((entry) => entry.id === card.id)
+                ? 'utility generated card'
+                : (generatedCards.some((entry) => entry.id === card.id) ? 'current fallback hand' : 'scene cache')))
         )
       });
       if (!isActiveRun(runId)) return supersededResult(runId);

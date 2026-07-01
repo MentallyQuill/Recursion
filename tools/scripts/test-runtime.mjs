@@ -7,6 +7,8 @@ import { CARD_CATALOG, cardsFromProviderResult } from '../../src/cards.mjs';
 import { hashJson } from '../../src/core.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
+const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
+
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
@@ -25,6 +27,13 @@ function assertNoSecretText(value, label) {
   assert(!/\bsk-[a-z0-9_-]+/i.test(serialized), `${label} redacts sk text`);
   assert(!/private[-_\s]*secret/i.test(serialized), `${label} redacts private secret text`);
   return serialized;
+}
+
+function parsePromptJsonSection(prompt, label) {
+  const prefix = `${label}: `;
+  const section = String(prompt || '').split('\n\n').find((entry) => entry.startsWith(prefix));
+  assert(section, `arbiter prompt includes ${label}`);
+  return JSON.parse(section.slice(prefix.length));
 }
 
 function isAbortSignal(value) {
@@ -439,6 +448,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             cardJobs: [{ family: 'Open Threads', reason: 'Need one open thread card.' }],
             budgets: { targetBriefTokens: 60, maxCards: 1 },
             reasonerDecision: { mode: 'use', reason: 'arbiter requested reasoner', signals: ['test'] },
@@ -468,14 +478,14 @@ function createRuntimeHarness({
       promptFootprint: 'normal',
       reasonerUse: 'auto',
       providers: {
-        utility: { enabled: true, source: 'host-current-model', lastTest: { compactError: 'Bearer settings-token sk-live-settings private-secret' } },
-        reasoner: { enabled: true, source: 'openai-compatible', openAICompatible: { apiKey: 'sk-settings-key' }, lastTest: { compactError: 'Bearer reasoner-settings' } }
+        utility: { enabled: true, source: 'host-current-model', lastTest: { status: 'fail', checkedAt: '2026-06-30T00:00:00.000Z', compactError: 'Bearer settings-token sk-live-settings private-secret' } },
+        reasoner: { enabled: true, source: 'openai-compatible', openAICompatible: { apiKey: 'sk-settings-key' }, lastTest: { status: 'pass', compactError: 'Bearer reasoner-settings' } }
       }
     },
     generationRouter: {
       async generate(roleId, request) {
         if (roleId === 'utilityArbiter') arbiterPrompts.push(request.prompt);
-        return { ok: true, data: { action: 'skip', diagnostics: ['settings-projection'] } };
+        return { ok: true, data: { schema: UTILITY_ARBITER_SCHEMA, action: 'skip', diagnostics: ['settings-projection'] } };
       }
     }
   });
@@ -486,6 +496,13 @@ function createRuntimeHarness({
   assert(arbiterPrompts[0].includes('"promptFootprint":"normal"'), 'arbiter prompt includes prompt footprint');
   assert(!arbiterPrompts[0].includes('lastTest'), 'arbiter prompt omits provider test diagnostics');
   assert(!arbiterPrompts[0].includes('openAICompatible'), 'arbiter prompt omits endpoint settings');
+  assert(!arbiterPrompts[0].includes('compactError'), 'arbiter prompt omits provider compact errors');
+  assert(!arbiterPrompts[0].includes('checkedAt'), 'arbiter prompt omits provider test timestamps');
+  const providerHealth = parsePromptJsonSection(arbiterPrompts[0], 'Provider health');
+  assertDeepEqual(providerHealth, {
+    utility: { enabled: true, source: 'host-current-model', status: 'fail' },
+    reasoner: { enabled: true, source: 'openai-compatible', status: 'pass' }
+  }, 'arbiter provider health prompt exposes only lane, source, and status');
   assertNoSecretText(arbiterPrompts[0], 'arbiter settings prompt');
   assertNoSecretText(runtime.view().settings, 'runtime view settings');
   assertEqual(runtime.view().settings.providers.utility.enabled, true, 'view keeps utility provider enabled flag');
@@ -505,6 +522,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             action: 'compose-brief',
             sceneStatus: 'same-scene',
             cardJobs: [{
@@ -551,6 +569,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             snapshotHash: 'hallucinated-provider-hash',
             budgets: { targetBriefTokens: 500, maxCards: 4 },
             diagnostics: ['bogus-snapshot-hash']
@@ -574,6 +593,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             budgets: { targetBriefTokens: 0, maxCards: 0 },
             diagnostics: ['zero-budget']
           }
@@ -598,6 +618,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             cardJobs: [{ family: 'Open Threads', reason: 'Need a provider provenance card.' }],
             budgets: { targetBriefTokens: 900, maxCards: 6 }
           }
@@ -644,6 +665,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             action: 'skip',
             diagnostics: ['arbiter-skip-test'],
             budgets: { targetBriefTokens: 500, maxCards: 4 }
@@ -669,6 +691,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             action: 'skip',
             diagnostics: ['arbiter-skip-missing-clear']
           }
@@ -699,6 +722,7 @@ function createRuntimeHarness({
           return {
             ok: true,
             data: {
+              schema: UTILITY_ARBITER_SCHEMA,
               reasonerDecision: { mode: 'use', reason: 'crowded hand', signals: ['test'] },
               budgets: { targetBriefTokens: 900, maxCards: 6 }
             }
@@ -736,6 +760,7 @@ function createRuntimeHarness({
           return {
             ok: true,
             data: {
+              schema: UTILITY_ARBITER_SCHEMA,
               reasonerDecision: { mode: 'skip', reason: 'rich prompt does not need reasoner', signals: ['explicit-skip'] },
               budgets: { targetBriefTokens: 900, maxCards: 6 }
             }
@@ -775,6 +800,7 @@ function createRuntimeHarness({
           return {
             ok: true,
             data: {
+              schema: UTILITY_ARBITER_SCHEMA,
               cardJobs: [{ family: 'Open Threads', reason: 'Need one open thread card.' }],
               budgets: { targetBriefTokens: 900, maxCards: 6 },
               reasonerDecision: { mode: 'use', reason: 'signal propagation test', signals: ['signal-test'] }
@@ -880,6 +906,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
             budgets: { targetBriefTokens: 500, maxCards: 6 },
             diagnostics: ['provider-card-plan']
@@ -913,9 +940,187 @@ function createRuntimeHarness({
   assert(cache.cards.some((card) => card.family === 'Open Threads'), 'provider card persisted in scene cache');
   assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'provider card selected into hand');
   assert(view.lastPacket.sections.turnBrief.includes('unanswered signal'), 'provider card reaches prompt packet');
+  assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'successful provider card pass does not add local Scene Frame fallback card');
+  assert(!cache.cards.some((card) => card.family === 'Continuity Risk'), 'successful provider card pass does not add local Continuity Risk fallback card');
   const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
   assert(!serialized.includes('Bearer live-token'), 'provider card bearer token redacted before persistence and prompt');
   assert(!serialized.includes('sk-live-runtime'), 'provider card sk token redacted before persistence and prompt');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache('cache-aware-chat', 'cache-aware-scene', {
+    cards: [{
+      id: 'cache-aware-card',
+      family: 'Scene Frame',
+      status: 'active',
+      promptText: 'Cached scene card the Arbiter should be able to inspect.',
+      summary: 'Cached scene summary',
+      tokenEstimate: 12,
+      source: { chatId: 'cache-aware-chat', firstMesId: 1, lastMesId: 2, snapshotHash: 'cache-aware-source' }
+    }],
+    latestHand: {
+      handId: 'cache-aware-hand',
+      cards: [{ id: 'cache-aware-card', family: 'Scene Frame' }]
+    }
+  });
+  let arbiterPrompt = '';
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: {
+      chatId: 'cache-aware-chat',
+      chatKey: 'cache-aware-chat',
+      sceneKey: 'cache-aware-scene',
+      sceneFingerprint: 'cache-aware-scene-fp',
+      turnFingerprint: 'cache-aware-turn-fp',
+      latestMesId: 3,
+      messages: [{ mesid: 3, role: 'user', text: 'Check cached card relevance.', visible: true }]
+    },
+    generationRouter: {
+      async generate(roleId, request) {
+        assertEqual(roleId, 'utilityArbiter', 'cache-aware test only calls utility arbiter');
+        arbiterPrompt = request.prompt;
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'reuse-cache',
+            lifecycle: [{ action: 'select', cardId: 'cache-aware-card', reason: 'still relevant' }],
+            budgets: { targetBriefTokens: 500, maxCards: 4 },
+            diagnostics: ['cache-aware-plan']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Cache-aware Arbiter.' });
+  assertEqual(result.ok, true, 'cache-aware arbiter run installs');
+  assert(arbiterPrompt.includes('cache-aware-card'), 'arbiter prompt includes compact scene cache card metadata');
+  assert(arbiterPrompt.includes('cache-aware-hand'), 'arbiter prompt includes latest hand metadata');
+  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['cache-aware-card'], 'cache-aware plan reuses selected cached card');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache('hostile-cache-chat', 'hostile-cache-scene', {
+    cards: [{
+      id: 'Bearer cache-card-token',
+      family: 'Scene Frame',
+      status: 'active',
+      promptText: 'Prompt text raw-host-metadata-should-not-leak with Bearer cache-prompt-token.',
+      evidenceRefs: ['message:2 raw-evidence-metadata-should-not-leak Bearer cache-evidence-token'],
+      source: {
+        chatId: 'hostile-cache-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        snapshotHash: 'raw-source-metadata-should-not-leak'
+      },
+      freshness: {
+        sourceFingerprint: 'raw-freshness-metadata-should-not-leak'
+      }
+    }],
+    latestHand: {
+      handId: 'Bearer cache-hand-token',
+      cards: [{ id: 'Bearer cache-card-token' }]
+    }
+  });
+  let arbiterPrompt = '';
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: {
+      chatId: 'hostile-cache-chat',
+      chatKey: 'hostile-cache-chat',
+      sceneKey: 'hostile-cache-scene',
+      sceneFingerprint: 'hostile-cache-scene-fp',
+      turnFingerprint: 'hostile-cache-turn-fp',
+      latestMesId: 3,
+      messages: [{ mesid: 3, role: 'user', text: 'Do not leak hostile cache metadata.', visible: true }]
+    },
+    generationRouter: {
+      async generate(roleId, request) {
+        assertEqual(roleId, 'utilityArbiter', 'hostile cache safety test only calls utility arbiter');
+        arbiterPrompt = request.prompt;
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'skip',
+            diagnostics: ['hostile-cache-safety']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Hostile cache safety.' });
+  assertEqual(result.ok, true, 'hostile cache safety run skips safely');
+  const sceneCache = parsePromptJsonSection(arbiterPrompt, 'Scene cache');
+  const serializedPrompt = JSON.stringify({ prompt: arbiterPrompt, sceneCache });
+  assert(!serializedPrompt.includes('raw-host-metadata-should-not-leak'), 'arbiter cache view omits raw cached prompt text');
+  assert(!serializedPrompt.includes('raw-evidence-metadata-should-not-leak'), 'arbiter cache view omits raw cached evidence metadata');
+  assert(!serializedPrompt.includes('raw-source-metadata-should-not-leak'), 'arbiter cache view omits raw cached source fingerprint text');
+  assert(!serializedPrompt.includes('raw-freshness-metadata-should-not-leak'), 'arbiter cache view omits raw cached freshness fingerprint text');
+  assertNoSecretText(serializedPrompt, 'arbiter hostile cache prompt');
+  assert(sceneCache.cards.length === 1, 'arbiter cache view keeps valid sanitized card metadata');
+  assert(sceneCache.cards[0].source.fingerprint.startsWith('hash:'), 'arbiter cache view hashes source fingerprints');
+}
+
+{
+  let batchCalled = false;
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'invalid schema test only asks Utility Arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: 'wrong.schema.v1',
+            cardJobs: [{ family: 'Open Threads', reason: 'This invalid plan must not run.' }],
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['invalid-schema-plan']
+          }
+        };
+      },
+      async batch() {
+        batchCalled = true;
+        return [];
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Invalid schema fallback.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'invalid arbiter schema falls back fail-soft');
+  assertEqual(batchCalled, false, 'invalid arbiter schema does not execute provider card jobs');
+  assert(view.lastPlan.diagnostics.includes('utility-arbiter-fallback'), 'invalid arbiter schema records fallback diagnostic');
+  assert(view.lastHand.cards.some((card) => card.family === 'Scene Frame'), 'invalid arbiter schema uses local fallback scene card');
+  assert(!view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'invalid arbiter schema ignores untrusted provider card jobs');
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          data: {
+            diagnostics: ['missing-schema-plan'],
+            authorization: 'Bearer missing-schema-token'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Missing schema fallback.' });
+  const serialized = JSON.stringify({ result, view: runtime.view() });
+  assertEqual(result.ok, true, 'missing arbiter schema falls back fail-soft');
+  assert(runtime.view().lastPlan.diagnostics.includes('utility-arbiter-fallback'), 'missing arbiter schema records fallback diagnostic');
+  assert(!serialized.includes('Bearer missing-schema-token'), 'missing schema fallback does not leak rejected provider fields');
+  assertNoSecretText(serialized, 'missing schema fallback');
 }
 
 {
@@ -948,6 +1153,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             action: 'reuse-cache',
             budgets: { targetBriefTokens: 500, maxCards: 4 },
             diagnostics: ['reuse-cache-redaction']
@@ -983,6 +1189,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             action: 'reuse-cache',
             budgets: { targetBriefTokens: 500, maxCards: 4 },
             diagnostics: ['malformed-cache']
@@ -1041,6 +1248,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             cardJobs: [{ family: 'Open Threads', reason: 'Check the current thread.' }],
             budgets: { targetBriefTokens: 500, maxCards: 4 },
             diagnostics: ['provider-safe-snapshot']
@@ -1355,6 +1563,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             action: 'reuse-cache',
             lifecycle: [
               { action: 'select', cardId: 'arbiter-keep', reason: 'still important' },
@@ -1372,6 +1581,129 @@ function createRuntimeHarness({
   assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['arbiter-keep'], 'turn hand honors Arbiter select/stow lifecycle');
   const updated = await storage.loadSceneCache('arbiter-chat', 'arbiter-scene');
   assertEqual(updated.cards.find((card) => card.id === 'arbiter-stow')?.status, 'stowed', 'scene deck persists Arbiter stow decision');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache('hard-shift-chat', 'hard-shift-original', {
+    cards: [{
+      id: 'old-scene-card',
+      family: 'Scene Frame',
+      status: 'active',
+      promptText: 'Original scene cache should only inform planning.',
+      summary: 'Original scene',
+      source: { chatId: 'hard-shift-chat', firstMesId: 1, lastMesId: 2, snapshotHash: 'old-source' }
+    }]
+  });
+  const snapshot = {
+    chatId: 'hard-shift-chat',
+    chatKey: 'hard-shift-chat',
+    sceneKey: 'hard-shift-original',
+    sceneFingerprint: 'hard-shift-original-fp',
+    turnFingerprint: 'hard-shift-turn-fp',
+    latestMesId: 3,
+    messages: [{ mesid: 3, role: 'user', text: 'A new scene begins elsewhere.', visible: true }]
+  };
+  const shiftedFingerprint = hashJson({
+    previousSceneFingerprint: snapshot.sceneFingerprint,
+    hardShiftAtMesId: snapshot.latestMesId,
+    turnFingerprint: snapshot.turnFingerprint
+  });
+  const shiftedSceneKey = `${snapshot.chatKey}-${shiftedFingerprint}`;
+  await storage.saveSceneCache('hard-shift-chat', shiftedSceneKey, {
+    cards: [{
+      id: 'new-scene-card',
+      family: 'Continuity Risk',
+      status: 'active',
+      promptText: 'New scene cache should remain available after hard shift.',
+      summary: 'New scene continuity',
+      source: { chatId: 'hard-shift-chat', firstMesId: 3, lastMesId: 3, snapshotHash: 'new-source' }
+    }]
+  });
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot,
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'hard-shift lifecycle regression only calls utility arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'compose-brief',
+            sceneStatus: 'hard-shift',
+            lifecycle: [{ action: 'select', cardId: 'old-scene-card', reason: 'selected from original cache before hard shift' }],
+            budgets: { targetBriefTokens: 700, maxCards: 6 },
+            diagnostics: ['hard-shift-lifecycle-regression']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'hard shift lifecycle' });
+  assertEqual(result.ok, true, 'hard-shift lifecycle run installs');
+  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['new-scene-card'], 'hard-shift cache survives stale pre-shift lifecycle selection');
+  const updated = await storage.loadSceneCache('hard-shift-chat', shiftedSceneKey);
+  assertEqual(updated.cards.find((card) => card.id === 'new-scene-card')?.status, 'active', 'hard-shift target cache card remains active');
+}
+
+{
+  const storage = {
+    async loadSceneCache() {
+      return {
+        cards: [
+          { id: 'rejected-selected', family: 'Bogus Family', promptText: 'invalid selected card' },
+          {
+            id: 'valid-cache-card',
+            family: 'Scene Frame',
+            status: 'active',
+            promptText: 'Valid cache card should not be stowed by rejected-card lifecycle.',
+            summary: 'Valid cache card',
+            source: { chatId: 'mixed-cache-chat', firstMesId: 1, lastMesId: 1, snapshotHash: 'valid-source' }
+          }
+        ]
+      };
+    },
+    async saveSceneCache() {
+      return {};
+    },
+    async appendJournal() {
+      return {};
+    }
+  };
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: {
+      chatId: 'mixed-cache-chat',
+      chatKey: 'mixed-cache-chat',
+      sceneKey: 'mixed-cache-scene',
+      sceneFingerprint: 'mixed-cache-scene-fp',
+      turnFingerprint: 'mixed-cache-turn-fp',
+      latestMesId: 2,
+      messages: [{ mesid: 2, role: 'user', text: 'Use valid cache despite rejected selection.', visible: true }]
+    },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'mixed cache lifecycle regression only calls utility arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'compose-brief',
+            lifecycle: [{ action: 'select', cardId: 'rejected-selected', reason: 'malformed card was selected before validation' }],
+            budgets: { targetBriefTokens: 700, maxCards: 6 },
+            diagnostics: ['mixed-cache-lifecycle-regression']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'mixed cache lifecycle' });
+  assertEqual(result.ok, true, 'mixed cache lifecycle run installs');
+  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['valid-cache-card'], 'valid cache card survives lifecycle for rejected card id');
 }
 
 {
@@ -1400,6 +1732,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             action: 'skip',
             diagnostics: ['newer-run-superseded-provider']
           }
@@ -1430,6 +1763,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             action: 'compose-brief',
             diagnostics: ['dispose-regression']
           }
@@ -1462,6 +1796,7 @@ function createRuntimeHarness({
         return {
           ok: true,
           data: {
+            schema: UTILITY_ARBITER_SCHEMA,
             action: 'compose-brief',
             diagnostics: ['off-mode-regression']
           }
@@ -1521,9 +1856,9 @@ function createRuntimeHarness({
     generationRouter: {
       async generate() {
         if (snapshotCalls === 1) {
-          return { ok: true, data: { action: 'skip', diagnostics: ['older-clear'] } };
+          return { ok: true, data: { schema: UTILITY_ARBITER_SCHEMA, action: 'skip', diagnostics: ['older-clear'] } };
         }
-        return { ok: true, data: { action: 'compose-brief', diagnostics: ['newer-install'] } };
+        return { ok: true, data: { schema: UTILITY_ARBITER_SCHEMA, action: 'compose-brief', diagnostics: ['newer-install'] } };
       }
     }
   });

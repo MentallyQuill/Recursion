@@ -18,7 +18,7 @@ Coverage includes:
 - prompt packet composition, Reasoner fallback, validation, prompt block generation, and unsafe-content rejection;
 - runtime Off/Observe/Auto behavior, sanitized hand journal breadcrumbs, prompt install/clear, stale-run handling, storage fallback, and provider fallback;
 - SillyTavern host adapter prompt/storage/generation contracts;
-- Recursion Bar, Activity Ribbon, Actions menu, Last Hand dropdown, full viewer, settings, provider controls, and redaction;
-- Playwright-backed live harness contracts, including dedicated-user rejection and opt-in generation bridge prompt evidence.
+- Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, full viewer, settings, provider controls, and redaction;
+- Playwright readiness plus live harness contracts, including dedicated-user rejection and opt-in generation bridge prompt evidence.
 
 Automated live tests must use dedicated `recursion-soak-*` users and must reject `default-user` before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.

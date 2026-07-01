@@ -371,6 +371,176 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 }
 
 {
+  let releaseClear;
+  let updateResolved = false;
+  const { runtime, calls, settingsStore } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    hostPrompt: {
+      async clear() {
+        await new Promise((resolve) => {
+          releaseClear = resolve;
+        });
+        return { ok: true, cleared: true };
+      }
+    }
+  });
+  const update = Promise.resolve(runtime.updateProvider('utility', {
+    source: 'openai-compatible',
+    apiKey: 'sk-runtime-secret',
+    openAICompatible: { baseUrl: 'https://provider-change.test/v1', model: 'provider-change-model' }
+  }));
+  update.then(() => {
+    updateResolved = true;
+  });
+  await waitUntil(() => typeof releaseClear === 'function', 'provider settings change did not start prompt clear');
+  assertEqual(updateResolved, false, 'provider settings change waits for prompt clear before resolving');
+  assertEqual(settingsStore.getApiKey('utility'), 'sk-runtime-secret', 'provider settings change stores key immediately');
+  assertEqual(runtime.view().settings.providers.utility.openAICompatible.model, 'provider-change-model', 'provider settings change updates provider immediately');
+  assertEqual(runtime.view().activity.phase, 'promptClearing', 'provider settings change surfaces prompt clear activity');
+  releaseClear();
+  const result = await update;
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'provider settings change returns success when prompt clear succeeds');
+  assertEqual(result.provider.openAICompatible.sessionApiKeyPresent, true, 'provider settings change returns updated provider');
+  assertEqual(result.clear.ok, true, 'provider settings change returns clear result');
+  assertEqual(calls.clear, 1, 'provider settings change clears host prompt');
+  assertEqual(view.activity.severity, 'success', 'provider settings change surfaces success activity');
+  assertEqual(view.activity.label, 'Recursion prompt cleared after provider change.', 'provider settings change has visible success label');
+  assertNoSecretText(result, 'provider settings change result');
+}
+
+{
+  let releaseFirstClear;
+  let releaseSecondClear;
+  let clearCalls = 0;
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    hostPrompt: {
+      async clear() {
+        clearCalls += 1;
+        if (clearCalls === 1) {
+          await new Promise((resolve) => {
+            releaseFirstClear = resolve;
+          });
+          return { ok: true, cleared: true, call: 1 };
+        }
+        await new Promise((resolve) => {
+          releaseSecondClear = resolve;
+        });
+        return { ok: true, cleared: true, call: 2 };
+      }
+    }
+  });
+  const first = runtime.updateProvider('utility', {
+    openAICompatible: { baseUrl: 'https://first-provider.test/v1', model: 'first-provider-model' }
+  });
+  await waitUntil(() => typeof releaseFirstClear === 'function', 'first provider clear did not start');
+  const second = runtime.updateProvider('utility', {
+    openAICompatible: { baseUrl: 'https://second-provider.test/v1', model: 'second-provider-model' }
+  });
+  assertEqual(runtime.view().activity.label, 'Clearing Recursion prompt...', 'newer provider change owns visible prompt clear activity');
+  releaseFirstClear();
+  await first;
+  assertEqual(runtime.view().activity.label, 'Clearing Recursion prompt...', 'older provider clear cannot settle while newer clear is pending');
+  await waitUntil(() => typeof releaseSecondClear === 'function', 'second provider clear did not start');
+  releaseSecondClear();
+  const secondResult = await second;
+  assertEqual(secondResult.ok, true, 'newer provider clear resolves successfully');
+  assertEqual(runtime.view().activity.label, 'Recursion prompt cleared after provider change.', 'newer provider clear settles activity');
+}
+
+{
+  const { runtime, calls, settingsStore } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    hostPrompt: {
+      async clear() {
+        throw new Error('clear failed with Bearer provider-clear-token, sk-provider-clear, and private-secret');
+      }
+    }
+  });
+  const result = await runtime.updateProvider('utility', {
+    source: 'openai-compatible',
+    apiKey: 'sk-runtime-secret',
+    openAICompatible: { baseUrl: 'https://provider-fail.test/v1', model: 'provider-fail-model' }
+  });
+  const view = runtime.view();
+  assertEqual(result.ok, false, 'provider settings change returns non-ok when prompt clear fails');
+  assertEqual(result.provider.openAICompatible.model, 'provider-fail-model', 'provider settings still applies when prompt clear fails');
+  assertEqual(settingsStore.getApiKey('utility'), 'sk-runtime-secret', 'provider key still applies when prompt clear fails');
+  assertEqual(result.clear.ok, false, 'provider settings change returns failed clear result');
+  assertEqual(calls.clear, 1, 'provider settings clear failure still calls host prompt clear');
+  assertEqual(view.activity.severity, 'warning', 'provider settings clear failure surfaces warning activity');
+  assert(view.activity.label.includes('Prompt clear failed'), 'provider settings clear failure has visible warning label');
+  assertNoSecretText(result, 'provider settings clear failure result');
+  assertNoSecretText(view.activity, 'provider settings clear failure activity');
+}
+
+{
+  let releaseClear;
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    hostPrompt: {
+      async clear() {
+        await new Promise((resolve) => {
+          releaseClear = resolve;
+        });
+        return { ok: true, cleared: true };
+      }
+    }
+  });
+  const update = runtime.updateProvider('utility', {
+    openAICompatible: { baseUrl: 'https://provider-test-race.test/v1', model: 'provider-test-race-model' }
+  });
+  await waitUntil(() => typeof releaseClear === 'function', 'provider test race clear did not start');
+  const providerTest = await runtime.testProvider('utility');
+  assertEqual(providerTest.ok, false, 'provider test without router fails for activity ownership regression');
+  assertEqual(runtime.view().activity.label, 'Utility provider test failed.', 'newer provider test owns visible activity before older clear resolves');
+  releaseClear();
+  await update;
+  assertEqual(runtime.view().activity.label, 'Utility provider test failed.', 'older provider clear cannot overwrite newer provider test activity');
+}
+
+{
+  let releaseClear;
+  let clearResolved = false;
+  const { runtime, calls, settingsStore } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    hostPrompt: {
+      async clear() {
+        await new Promise((resolve) => {
+          releaseClear = resolve;
+        });
+        return { ok: true, cleared: true };
+      }
+    }
+  });
+  settingsStore.updateProvider('utility', {
+    source: 'openai-compatible',
+    apiKey: 'sk-runtime-secret',
+    openAICompatible: { baseUrl: 'https://provider-key.test/v1', model: 'provider-key-model' }
+  });
+  const clear = Promise.resolve(runtime.clearProviderKey('utility'));
+  clear.then(() => {
+    clearResolved = true;
+  });
+  await waitUntil(() => typeof releaseClear === 'function', 'provider key clear did not start prompt clear');
+  assertEqual(clearResolved, false, 'provider key clear waits for prompt clear before resolving');
+  assertEqual(settingsStore.getApiKey('utility'), '', 'provider key clear removes session secret immediately');
+  assertEqual(runtime.view().settings.providers.utility.openAICompatible.sessionApiKeyPresent, false, 'provider key clear updates provider immediately');
+  assertEqual(runtime.view().activity.phase, 'promptClearing', 'provider key clear surfaces prompt clear activity');
+  releaseClear();
+  const result = await clear;
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'provider key clear returns success when prompt clear succeeds');
+  assertEqual(result.provider.openAICompatible.sessionApiKeyPresent, false, 'provider key clear returns updated provider');
+  assertEqual(result.clear.ok, true, 'provider key clear returns clear result');
+  assertEqual(calls.clear, 1, 'provider key clear clears host prompt');
+  assertEqual(view.activity.severity, 'success', 'provider key clear surfaces success activity');
+  assertEqual(view.activity.label, 'Recursion prompt cleared after provider key change.', 'provider key clear has visible success label');
+  assertNoSecretText(result, 'provider key clear result');
+}
+
+{
   const { runtime, calls, installed, cleared } = createRuntimeHarness({
     settings: { mode: 'off', reasonerUse: 'off' }
   });
@@ -3355,7 +3525,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(updated.settings.strength, 'strong', 'runtime settings update preserves strength');
   assertEqual(runtime.view().settings.focus, 'character', 'settings update is visible in runtime view');
 
-  const utility = runtime.updateProvider('utility', {
+  const utilityResult = await runtime.updateProvider('utility', {
     source: 'openai-compatible',
     apiKey: 'sk-runtime-secret',
     openAICompatible: { baseUrl: 'https://example.test/v1', model: 'utility-model' },
@@ -3363,6 +3533,9 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
     topP: 0.8,
     maxTokens: 2048
   });
+  assertEqual(utilityResult.ok, true, 'runtime provider update returns success result');
+  assertEqual(utilityResult.clear.ok, true, 'runtime provider update returns prompt clear result');
+  const utility = utilityResult.provider;
   assertEqual(utility.openAICompatible.sessionApiKeyPresent, true, 'runtime provider update accepts session key');
   assertEqual(settingsStore.getApiKey('utility'), 'sk-runtime-secret', 'runtime provider update stores key in session store');
   assert(!JSON.stringify(settingsStore.get()).includes('sk-runtime-secret'), 'runtime provider update does not persist api key');
@@ -3382,8 +3555,10 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(settingsStore.get().providers.utility.lastTest.status, 'pass', 'runtime provider test records passing provider status');
   assertEqual(settingsStore.get().providers.utility.resolvedModelLabel, 'utility-test-model', 'runtime provider test records resolved model');
 
-  const cleared = runtime.clearProviderKey('utility');
-  assertEqual(cleared.openAICompatible.sessionApiKeyPresent, false, 'runtime can clear provider session key');
+  const cleared = await runtime.clearProviderKey('utility');
+  assertEqual(cleared.ok, true, 'runtime provider key clear returns success result');
+  assertEqual(cleared.clear.ok, true, 'runtime provider key clear returns prompt clear result');
+  assertEqual(cleared.provider.openAICompatible.sessionApiKeyPresent, false, 'runtime can clear provider session key');
   assertEqual(settingsStore.getApiKey('utility'), '', 'runtime provider key clear removes session secret');
 }
 

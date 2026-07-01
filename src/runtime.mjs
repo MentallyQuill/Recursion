@@ -943,6 +943,7 @@ export function createRecursionRuntime({
   let lastSnapshot = null;
   let promptInstallTail = Promise.resolve();
   let storageSaveTail = Promise.resolve();
+  let activePromptMutationId = null;
 
   async function readSnapshot() {
     if (typeof host?.snapshot !== 'function') {
@@ -1011,8 +1012,13 @@ export function createRecursionRuntime({
     return cleanString(value).toLowerCase() === 'reasoner' ? 'reasoner' : 'utility';
   }
 
+  function ownsPromptMutationActivity(runId) {
+    return activePromptMutationId === runId && safeCurrentActivity(activity)?.runId === runId;
+  }
+
   async function clearPromptAfterSupersede({ successLabel = 'Recursion prompt cleared after settings change.' } = {}) {
     const runId = makeId('settings');
+    activePromptMutationId = runId;
     startRuntimeActivity({
       runId,
       phase: 'promptClearing',
@@ -1020,8 +1026,13 @@ export function createRecursionRuntime({
       chips: ['Prompt']
     });
     const clear = await runPromptMutationSection(null, () => clearPromptBestEffort(host));
+    if (!ownsPromptMutationActivity(runId)) {
+      if (activePromptMutationId === runId) activePromptMutationId = null;
+      return clear;
+    }
     if (clear?.ok === false) {
       reportClearWarning(runId, clear);
+      if (activePromptMutationId === runId) activePromptMutationId = null;
       return clear;
     }
     settleRuntimeActivity({
@@ -1031,11 +1042,8 @@ export function createRecursionRuntime({
       label: successLabel,
       chips: ['Prompt']
     });
+    if (activePromptMutationId === runId) activePromptMutationId = null;
     return clear;
-  }
-
-  function queuePromptClearAfterSupersede() {
-    clearPromptAfterSupersede().catch(() => {});
   }
 
   async function updateSettings(patch = {}) {
@@ -1053,16 +1061,22 @@ export function createRecursionRuntime({
     return { ok: true, settings: next, clear: null };
   }
 
-  function updateProvider(lane, patch = {}) {
+  async function updateProvider(lane, patch = {}) {
+    const provider = settingsStore.updateProvider(providerLane(lane), patch);
     supersedeActiveRun();
-    queuePromptClearAfterSupersede();
-    return settingsStore.updateProvider(providerLane(lane), patch);
+    const clear = await clearPromptAfterSupersede({
+      successLabel: 'Recursion prompt cleared after provider change.'
+    });
+    return { ok: clear?.ok !== false, provider, clear };
   }
 
-  function clearProviderKey(lane) {
+  async function clearProviderKey(lane) {
+    const provider = settingsStore.clearApiKey(providerLane(lane));
     supersedeActiveRun();
-    queuePromptClearAfterSupersede();
-    return settingsStore.clearApiKey(providerLane(lane));
+    const clear = await clearPromptAfterSupersede({
+      successLabel: 'Recursion prompt cleared after provider key change.'
+    });
+    return { ok: clear?.ok !== false, provider, clear };
   }
 
   function providerTestPrompt(lane) {

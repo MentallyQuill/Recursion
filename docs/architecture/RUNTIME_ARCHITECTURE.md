@@ -248,7 +248,7 @@ Responsibilities:
 
 The SillyTavern adapter may use host-specific prompt APIs, extension settings, and event hooks. The rest of Recursion should depend on adapter contracts rather than importing SillyTavern globals directly.
 
-## Settings And Mode Mutations
+## Settings, Provider, And Mode Mutations
 
 Runtime settings changes are prompt-safety operations, not plain preference writes. `runtime.updateSettings(patch)` applies the normalized settings immediately, supersedes active work, then awaits a Recursion prompt clear through the host adapter before resolving.
 
@@ -263,6 +263,18 @@ The operation result shape is:
 ```
 
 When the resulting mode is `off`, the Activity Ribbon must show prompt-clearing work and then settle to either `Recursion Off. Prompt cleared.` or a sanitized prompt-clear warning. A clear failure does not roll back the Off setting, but the operation returns `ok: false` and the UI keeps the warning visible. This makes Off mode a real emergency brake while still exposing host prompt cleanup failures.
+
+Provider setting and session-key mutations follow the same prompt-safety rule. `runtime.updateProvider(lane, patch)` and `runtime.clearProviderKey(lane)` apply the provider change immediately, supersede active work, then await host prompt clear before resolving:
+
+```ts
+{
+  ok: boolean;
+  provider: ProviderSettings;
+  clear: PromptClearResult;
+}
+```
+
+Clear failure or a missing host clear API does not roll back the provider change, but the operation returns `ok: false`, includes the sanitized prompt-clear result, and leaves the existing prompt-clear warning visible.
 
 ## Diagnostics Events
 

@@ -55,7 +55,7 @@ Observe mode captures the current turn, runs safe runtime work, composes a previ
 
 Auto mode runs the full pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the Utility Arbiter or local fallback path produces useful guidance.
 
-Settings and provider changes supersede the active run, abort stale provider work where possible, and queue prompt cleanup so old packets do not survive across incompatible settings.
+Settings and provider changes supersede the active run, abort stale provider work where possible, and await prompt cleanup before their operation results resolve. `updateSettings` returns updated settings plus the prompt-clear result; `updateProvider` and `clearProviderKey` return updated provider settings plus the prompt-clear result. Clear failure leaves the setting or provider change applied, returns `ok: false`, and surfaces the sanitized prompt-clear warning.
 
 ## Provider Lanes
 

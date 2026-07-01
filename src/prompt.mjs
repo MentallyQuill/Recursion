@@ -1,6 +1,7 @@
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 
-const PACKET_VERSION = 1;
+export const PROMPT_PACKET_VERSION = 1;
+const PACKET_VERSION = PROMPT_PACKET_VERSION;
 const REASONER_SCHEMA = 'recursion.reasonerComposer.v1';
 const VALID_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const VALID_REASONER_USE = new Set(['off', 'auto', 'always']);

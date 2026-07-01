@@ -1,4 +1,4 @@
-import { createRecursionRuntime } from '../../src/runtime.mjs';
+import { cacheContractVersions, createRecursionRuntime } from '../../src/runtime.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
@@ -157,7 +157,10 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, label }) {
   const storage = {
     async loadSceneCache() {
-      return { cards: [card] };
+      return {
+        versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
+        cards: [card]
+      };
     },
     async saveSceneCache() {
       return {};
@@ -224,6 +227,39 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(view.activeRunId, null, 'active run cleared after auto success');
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assert(cache.cards.length >= 2, 'scene cache persists fallback cards');
+  assertEqual(cache.versions.cardCatalogHash, hashJson(CARD_CATALOG), 'scene cache records card catalog hash');
+  assertEqual(cache.versions.promptPacketVersion, 1, 'scene cache records prompt packet contract version');
+  assertEqual(cache.versions.runtimeCacheContractVersion, 1, 'scene cache records runtime cache contract version');
+  assertEqual(cache.versions.settingsHash, cacheContractVersions(view.settings).settingsHash, 'scene cache records current settings hash');
+  assertEqual(cache.versions.providerContractHash, cacheContractVersions(view.settings).providerContractHash, 'scene cache records provider contract hash');
+  const baselineVersions = cacheContractVersions(view.settings);
+  const noisyVersions = cacheContractVersions({
+    ...view.settings,
+    diagnostics: { maxJournalEntries: 500, includeExcerpts: true },
+    ui: { viewerOpen: true, progressChildVisibleLimit: 20, progressListVisibleLimit: 80 },
+    providers: {
+      ...view.settings.providers,
+      utility: {
+        ...view.settings.providers.utility,
+        apiKey: 'sk-version-helper-secret',
+        resolvedProviderLabel: 'Noisy utility label',
+        resolvedModelLabel: 'Noisy utility model',
+        lastTest: { status: 'fail', compactError: 'Bearer version-helper-token' }
+      }
+    }
+  });
+  assertEqual(noisyVersions.settingsHash, baselineVersions.settingsHash, 'cache settings hash ignores UI, diagnostics, test labels, and secrets');
+  const changedProviderVersions = cacheContractVersions({
+    ...view.settings,
+    providers: {
+      ...view.settings.providers,
+      utility: {
+        ...view.settings.providers.utility,
+        maxTokens: view.settings.providers.utility.maxTokens + 1
+      }
+    }
+  });
+  assert(changedProviderVersions.settingsHash !== baselineVersions.settingsHash, 'cache settings hash changes for cache-relevant provider settings');
   assert(cache.latestHand?.handId, 'scene cache persists latest hand metadata');
   assert(cache.latestHand.cardIds.length > 0, 'scene cache latest hand records selected card ids');
   assert(cache.latestHand.promptPacketHash, 'scene cache latest hand records prompt packet hash');
@@ -296,6 +332,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const storage = {
     async loadSceneCache() {
       return {
+        versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
         cards: [{
           id: 'utility-down-cache-card',
           family: 'Scene Frame',
@@ -2735,6 +2772,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   ];
   const cacheAwareSourceHash = sourceWindowHash(cacheAwareMessages, 1, 2);
   await storage.saveSceneCache('cache-aware-chat', 'cache-aware-scene', {
+    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
     cards: [{
       id: 'cache-aware-card',
       family: 'Scene Frame',
@@ -2797,12 +2835,228 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 {
   const adapter = createMemoryStorageAdapter();
   const storage = createStorageRepository({ storage: adapter });
+  const contractMessages = [
+    { mesid: 1, role: 'assistant', text: 'The cache contract should be current.', visible: true },
+    { mesid: 2, role: 'user', text: 'Try to reuse a stale contract cache card.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(contractMessages, 1, 2);
+  await storage.saveSceneCache('contract-stale-chat', 'contract-stale-scene', {
+    versions: {
+      ...cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
+      cardCatalogHash: 'old-catalog-contract'
+    },
+    cards: [{
+      id: 'contract-stale-card',
+      family: 'Scene Frame',
+      status: 'active',
+      promptText: 'Stale contract cache card must not reach the prompt.',
+      summary: 'Stale contract card',
+      tokenEstimate: 12,
+      evidenceRefs: ['message:2'],
+      source: {
+        chatId: 'contract-stale-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash }
+    }],
+    latestHand: {
+      handId: 'contract-stale-hand',
+      cards: [{ id: 'contract-stale-card', family: 'Scene Frame' }]
+    }
+  });
+  let arbiterPrompt = '';
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: {
+      chatId: 'contract-stale-chat',
+      chatKey: 'contract-stale-chat',
+      sceneKey: 'contract-stale-scene',
+      sceneFingerprint: 'contract-stale-scene-fp',
+      turnFingerprint: 'contract-stale-turn-fp',
+      latestMesId: 2,
+      messages: contractMessages
+    },
+    generationRouter: {
+      async generate(roleId, request) {
+        assertEqual(roleId, 'utilityArbiter', 'contract mismatch test only calls utility arbiter');
+        arbiterPrompt = request.prompt;
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'reuse-cache',
+            lifecycle: [{ action: 'select', cardId: 'contract-stale-card', reason: 'stale contract should be ignored' }],
+            budgets: { targetBriefTokens: 500, maxCards: 4 },
+            diagnostics: ['contract-stale-reuse']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Try to reuse a stale contract cache card.' });
+  const serialized = JSON.stringify({ result, view: runtime.view() });
+  assertEqual(result.ok, true, 'contract-mismatched reuse-cache remains fail-soft');
+  assertEqual(result.skipped, true, 'contract-mismatched cache is treated as unavailable');
+  assertEqual(result.reason, 'cache-unavailable', 'contract-mismatched cache returns unavailable reason');
+  assertEqual(installed.length, 0, 'contract-mismatched cache card does not install prompt');
+  assert(!arbiterPrompt.includes('contract-stale-card'), 'contract-mismatched cache is hidden from Arbiter prompt');
+  assert(!arbiterPrompt.includes('Stale contract card'), 'contract-mismatched cache summary is hidden from Arbiter prompt');
+  assert(!serialized.includes('Stale contract cache card must not reach the prompt'), 'contract-mismatched cache prompt text is not exposed');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  const missingVersionMessages = [
+    { mesid: 1, role: 'assistant', text: 'The old pre-version cache exists.', visible: true },
+    { mesid: 2, role: 'user', text: 'Try to reuse a missing-version cache card.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(missingVersionMessages, 1, 2);
+  await storage.saveSceneCache('missing-version-chat', 'missing-version-scene', {
+    cards: [{
+      id: 'missing-version-card',
+      family: 'Scene Frame',
+      status: 'active',
+      promptText: 'Missing-version cache card must not reach the prompt.',
+      summary: 'Missing version card',
+      tokenEstimate: 12,
+      evidenceRefs: ['message:2'],
+      source: {
+        chatId: 'missing-version-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash }
+    }]
+  });
+  let arbiterPrompt = '';
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: {
+      chatId: 'missing-version-chat',
+      chatKey: 'missing-version-chat',
+      sceneKey: 'missing-version-scene',
+      sceneFingerprint: 'missing-version-scene-fp',
+      turnFingerprint: 'missing-version-turn-fp',
+      latestMesId: 2,
+      messages: missingVersionMessages
+    },
+    generationRouter: {
+      async generate(roleId, request) {
+        assertEqual(roleId, 'utilityArbiter', 'missing-version contract test only calls utility arbiter');
+        arbiterPrompt = request.prompt;
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'reuse-cache',
+            lifecycle: [{ action: 'select', cardId: 'missing-version-card', reason: 'missing versions should be ignored' }],
+            budgets: { targetBriefTokens: 500, maxCards: 4 },
+            diagnostics: ['missing-version-reuse']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Try to reuse a missing-version cache card.' });
+  const serialized = JSON.stringify({ result, view: runtime.view() });
+  assertEqual(result.ok, true, 'missing-version cache remains fail-soft');
+  assertEqual(result.skipped, true, 'missing-version cache is treated as unavailable');
+  assertEqual(result.reason, 'cache-unavailable', 'missing-version cache returns unavailable reason');
+  assertEqual(installed.length, 0, 'missing-version cache does not install prompt');
+  assert(!arbiterPrompt.includes('missing-version-card'), 'missing-version cache is hidden from Arbiter prompt');
+  assert(!serialized.includes('Missing-version cache card must not reach the prompt'), 'missing-version prompt text is not exposed');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  const softSettingsMessages = [
+    { mesid: 1, role: 'assistant', text: 'The cache is still relevant after preference changes.', visible: true },
+    { mesid: 2, role: 'user', text: 'Reuse the settings-drift cache card.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(softSettingsMessages, 1, 2);
+  await storage.saveSceneCache('settings-drift-chat', 'settings-drift-scene', {
+    versions: cacheContractVersions({ mode: 'observe' }),
+    cards: [{
+      id: 'settings-drift-card',
+      family: 'Scene Frame',
+      status: 'active',
+      promptText: 'Settings drift cache card remains reviewable.',
+      summary: 'Settings drift card',
+      tokenEstimate: 12,
+      evidenceRefs: ['message:2'],
+      source: {
+        chatId: 'settings-drift-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash }
+    }],
+    latestHand: {
+      handId: 'settings-drift-hand',
+      cards: [{ id: 'settings-drift-card', family: 'Scene Frame' }]
+    }
+  });
+  let arbiterPrompt = '';
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: {
+      chatId: 'settings-drift-chat',
+      chatKey: 'settings-drift-chat',
+      sceneKey: 'settings-drift-scene',
+      sceneFingerprint: 'settings-drift-scene-fp',
+      turnFingerprint: 'settings-drift-turn-fp',
+      latestMesId: 2,
+      messages: softSettingsMessages
+    },
+    generationRouter: {
+      async generate(roleId, request) {
+        assertEqual(roleId, 'utilityArbiter', 'settings drift test only calls utility arbiter');
+        arbiterPrompt = request.prompt;
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'reuse-cache',
+            lifecycle: [{ action: 'select', cardId: 'settings-drift-card', reason: 'still relevant after settings drift' }],
+            budgets: { targetBriefTokens: 500, maxCards: 4 },
+            diagnostics: ['settings-drift-reuse']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Reuse the settings-drift cache card.' });
+  const sceneCacheView = parsePromptJsonSection(arbiterPrompt, 'Scene cache');
+  assertEqual(result.ok, true, 'settings-drift reuse-cache installs');
+  assertEqual(installed.length, 1, 'settings-drift cache remains usable');
+  assert(arbiterPrompt.includes('settings-drift-card'), 'settings-drift cache remains visible to Arbiter');
+  assertEqual(sceneCacheView.cacheState, 'stale', 'settings-drift cache is marked stale for Arbiter review');
+  assertEqual(sceneCacheView.invalidation?.reason, 'settings-changed', 'settings-drift cache tells Arbiter why it is stale');
+  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['settings-drift-card'], 'settings-drift selected cache card is reused');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
   const staleMessages = [
     { mesid: 1, role: 'assistant', text: 'The old corridor is no longer reliable.', visible: true },
     { mesid: 2, role: 'user', text: 'The player changed what happened here.', visible: true },
     { mesid: 3, role: 'user', text: 'Try to reuse a stale cache card.', visible: true }
   ];
   await storage.saveSceneCache('stale-cache-chat', 'stale-cache-scene', {
+    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
     cards: [{
       id: 'stale-cache-card',
       family: 'Continuity Risk',
@@ -3227,6 +3481,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const adapter = createMemoryStorageAdapter();
   const storage = createStorageRepository({ storage: adapter });
   await storage.saveSceneCache('hostile-cache-chat', 'hostile-cache-scene', {
+    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
     cards: [{
       id: 'Bearer cache-card-token',
       family: 'Scene Frame',
@@ -3352,6 +3607,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const storage = {
     async loadSceneCache() {
       return {
+        versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
         cards: [{
           id: 'sk-live-card-id',
           family: 'Scene Frame',
@@ -3422,6 +3678,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const storage = {
     async loadSceneCache() {
       return {
+        versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
         cards: [{ family: 'Bogus Family', promptText: 'bad cached card' }]
       };
     },
@@ -3794,6 +4051,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   ];
   const arbiterSourceHash = sourceWindowHash(arbiterMessages, 1, 2);
   await storage.saveSceneCache('arbiter-chat', 'arbiter-scene', {
+    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
     cards: [
       {
         id: 'arbiter-keep',
@@ -3873,6 +4131,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const adapter = createMemoryStorageAdapter();
   const storage = createStorageRepository({ storage: adapter });
   await storage.saveSceneCache('hard-shift-chat', 'hard-shift-original', {
+    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
     cards: [{
       id: 'old-scene-card',
       family: 'Scene Frame',
@@ -3899,6 +4158,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const shiftedSceneKey = `${snapshot.chatKey}-${shiftedFingerprint}`;
   const shiftedSourceHash = sourceWindowHash(snapshot.messages, 3, 3);
   await storage.saveSceneCache('hard-shift-chat', shiftedSceneKey, {
+    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
     cards: [{
       id: 'new-scene-card',
       family: 'Continuity Risk',
@@ -3952,6 +4212,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const storage = {
     async loadSceneCache() {
       return {
+        versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
         cards: [
           { id: 'rejected-selected', family: 'Bogus Family', promptText: 'invalid selected card' },
           {

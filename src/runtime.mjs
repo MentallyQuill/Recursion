@@ -1,12 +1,15 @@
 import { createActivityReporter } from './activity.mjs';
 import { CARD_CATALOG, applyCardPlan, buildCardRequests, cardsFromProviderResult, normalizeCard, selectHand } from './cards.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
-import { composePromptPacket } from './prompt.mjs';
-import { createSettingsStore } from './settings.mjs';
+import { composePromptPacket, PROMPT_PACKET_VERSION } from './prompt.mjs';
+import { PROVIDER_CONTRACT_HASH } from './providers.mjs';
+import { createSettingsStore, normalizeSettings } from './settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
+const STORAGE_SCHEMA_VERSION = 1;
+const RUNTIME_CACHE_CONTRACT_VERSION = 1;
 const DEFAULT_CHAT_ID = 'chat';
 const DEFAULT_SCENE_KEY = 'scene';
 const INSTALL_FAILURE_LABEL = 'Prompt install failed. Generation will continue without Recursion.';
@@ -19,6 +22,13 @@ const PLAN_ACTIONS = new Set(['skip', 'reuse-cache', 'refresh-cards', 'compose-b
 const REASONER_DECISION_MODES = new Set(['use', 'skip']);
 const PROMPT_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const SCENE_STATUSES = new Set(['same-scene', 'soft-shift', 'hard-shift', 'unknown']);
+const HARD_CACHE_VERSION_FIELDS = Object.freeze([
+  'storageSchemaVersion',
+  'runtimeCacheContractVersion',
+  'cardCatalogHash',
+  'promptPacketVersion',
+  'providerContractHash'
+]);
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -56,6 +66,86 @@ function finiteNumberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function cacheProviderSettingsSignature(provider = {}) {
+  const source = asObject(provider);
+  const openAICompatible = asObject(source.openAICompatible);
+  return {
+    enabled: source.enabled === true,
+    source: String(source.source || ''),
+    hostConnectionProfileId: String(source.hostConnectionProfileId || ''),
+    openAICompatible: {
+      baseUrl: String(openAICompatible.baseUrl || ''),
+      model: String(openAICompatible.model || ''),
+      sessionApiKeyPresent: openAICompatible.sessionApiKeyPresent === true
+    },
+    temperature: numberOr(source.temperature, 0),
+    topP: numberOr(source.topP, 0),
+    maxTokens: numberOr(source.maxTokens, 0)
+  };
+}
+
+function cacheSettingsSignature(settings = {}) {
+  const normalized = normalizeSettings(settings);
+  return {
+    mode: normalized.mode,
+    strength: normalized.strength,
+    reasoningLevel: normalized.reasoningLevel,
+    promptFootprint: normalized.promptFootprint,
+    focus: normalized.focus,
+    reasonerUse: normalized.reasonerUse,
+    providers: {
+      utility: cacheProviderSettingsSignature(normalized.providers?.utility),
+      reasoner: cacheProviderSettingsSignature(normalized.providers?.reasoner)
+    }
+  };
+}
+
+export function cacheContractVersions(settings = {}) {
+  return {
+    storageSchemaVersion: STORAGE_SCHEMA_VERSION,
+    runtimeCacheContractVersion: RUNTIME_CACHE_CONTRACT_VERSION,
+    cardCatalogHash: hashJson(CARD_CATALOG),
+    promptPacketVersion: PROMPT_PACKET_VERSION,
+    providerContractHash: PROVIDER_CONTRACT_HASH,
+    settingsHash: hashJson(cacheSettingsSignature(settings))
+  };
+}
+
+function cacheContractStatus(cache, settings) {
+  const versions = asObject(cache?.versions);
+  const expected = cacheContractVersions(settings);
+  const missing = [];
+  const mismatches = [];
+  for (const field of HARD_CACHE_VERSION_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(versions, field)) {
+      missing.push(field);
+      continue;
+    }
+    if (versions[field] !== expected[field]) mismatches.push(field);
+  }
+  if (missing.length || mismatches.length) {
+    return {
+      ok: false,
+      hard: true,
+      reason: 'contract-mismatch',
+      missing,
+      mismatches
+    };
+  }
+  const settingsMissing = !Object.prototype.hasOwnProperty.call(versions, 'settingsHash');
+  const settingsMismatched = !settingsMissing && versions.settingsHash !== expected.settingsHash;
+  if (settingsMissing || settingsMismatched) {
+    return {
+      ok: true,
+      soft: true,
+      reason: 'settings-changed',
+      missing: settingsMissing ? ['settingsHash'] : [],
+      mismatches: settingsMismatched ? ['settingsHash'] : []
+    };
+  }
+  return { ok: true, reason: 'current', missing: [], mismatches: [] };
 }
 
 function normalizeMessage(message, index) {
@@ -527,9 +617,10 @@ function sceneCacheLatestHand(hand, packet = null) {
   };
 }
 
-function sceneCachePayload(snapshot, deck, hand, plan, packet = null) {
+function sceneCachePayload(snapshot, deck, hand, plan, packet = null, settings = {}) {
   return {
     cacheState: 'active',
+    versions: cacheContractVersions(settings),
     source: {
       chatIdHash: hashJson(snapshot.chatId),
       latestMesId: snapshot.latestMesId,
@@ -1504,9 +1595,74 @@ export function createRecursionRuntime({
     });
   }
 
-  async function loadSceneCacheSafe(runId, snapshot) {
+  function reportCacheContractStatus(runId, status) {
+    if (!isActiveRun(runId)) return;
+    stageRuntimeActivity({
+      runId,
+      phase: 'cacheWarning',
+      severity: 'warning',
+      label: status.hard
+        ? 'Scene cache contract changed; rebuilding cache.'
+        : 'Scene cache settings changed; reviewing cached cards.',
+      chips: ['Cache'],
+      detail: {
+        reason: status.reason,
+        ...(status.missing?.length ? { missing: status.missing.slice(0, 12) } : {}),
+        ...(status.mismatches?.length ? { mismatches: status.mismatches.slice(0, 12) } : {})
+      }
+    });
+  }
+
+  async function invalidateLoadedSceneCache(runId, snapshot, status, cacheState) {
+    if (typeof storage.invalidateSceneCache !== 'function') return null;
     try {
-      return await storage.loadSceneCache(snapshot.chatKey, snapshot.sceneKey);
+      return await storage.invalidateSceneCache(snapshot.chatKey, snapshot.sceneKey, {
+        reason: status.reason,
+        cacheState,
+        runId,
+        details: {
+          ...(status.missing?.length ? { missing: status.missing.slice(0, 12) } : {}),
+          ...(status.mismatches?.length ? { mismatches: status.mismatches.slice(0, 12) } : {})
+        }
+      });
+    } catch (error) {
+      reportStorageWarning(runId, 'invalidateSceneCache', error);
+      return null;
+    }
+  }
+
+  async function loadSceneCacheSafe(runId, snapshot, settings) {
+    try {
+      const cache = await storage.loadSceneCache(snapshot.chatKey, snapshot.sceneKey);
+      if (!cache) return null;
+      const cacheState = cleanString(cache.cacheState, 'active');
+      if (cacheState === 'invalid' || cacheState === 'retired') {
+        return null;
+      }
+      const status = cacheContractStatus(cache, settings);
+      if (status.hard) {
+        reportCacheContractStatus(runId, status);
+        await invalidateLoadedSceneCache(runId, snapshot, status, 'invalid');
+        return null;
+      }
+      if (status.soft) {
+        reportCacheContractStatus(runId, status);
+        const invalidation = {
+          reason: status.reason,
+          detectedAt: nowIso(),
+          details: {
+            ...(status.missing?.length ? { missing: status.missing.slice(0, 12) } : {}),
+            ...(status.mismatches?.length ? { mismatches: status.mismatches.slice(0, 12) } : {})
+          }
+        };
+        await invalidateLoadedSceneCache(runId, snapshot, status, 'stale');
+        return {
+          ...cache,
+          cacheState: 'stale',
+          invalidation
+        };
+      }
+      return cache;
     } catch (error) {
       reportStorageWarning(runId, 'loadSceneCache', error);
       return null;
@@ -1970,7 +2126,7 @@ export function createRecursionRuntime({
         userMessageHash: hashJson(pendingUserMessage.text),
         catalogHash: hashJson(CARD_CATALOG)
       };
-      const initialCache = await loadSceneCacheSafe(runId, snapshot);
+      const initialCache = await loadSceneCacheSafe(runId, snapshot, settings);
       if (!isActiveRun(runId)) return supersededResult(runId);
       const plan = await askUtilityArbiter({
         runId,
@@ -2019,7 +2175,7 @@ export function createRecursionRuntime({
       });
       const cache = sceneSnapshot.chatKey === snapshot.chatKey && sceneSnapshot.sceneKey === snapshot.sceneKey
         ? initialCache
-        : await loadSceneCacheSafe(runId, sceneSnapshot);
+        : await loadSceneCacheSafe(runId, sceneSnapshot, settings);
       if (!isActiveRun(runId)) return supersededResult(runId);
       const cacheCards = sanitizedCacheCards(runId, sceneSnapshot, cache?.cards);
       const reuseCacheOnly = action === 'reuse-cache' && cacheCards.length > 0;
@@ -2111,7 +2267,7 @@ export function createRecursionRuntime({
       await runStorageSaveSection(runId, () => saveSceneCacheSafe(
         runId,
         promptSnapshot,
-        sceneCachePayload(promptSnapshot, promptDeck, hand, plan)
+        sceneCachePayload(promptSnapshot, promptDeck, hand, plan, null, settings)
       ));
       if (!isActiveRun(runId)) return supersededResult(runId);
 
@@ -2132,7 +2288,7 @@ export function createRecursionRuntime({
         await runStorageSaveSection(runId, () => saveSceneCacheSafe(
           runId,
           promptSnapshot,
-          sceneCachePayload(promptSnapshot, promptDeck, hand, plan, packet)
+          sceneCachePayload(promptSnapshot, promptDeck, hand, plan, packet, settings)
         ));
         if (!isActiveRun(runId)) return supersededResult(runId);
         const observeResult = await runPromptMutationSection(runId, async () => {
@@ -2205,7 +2361,7 @@ export function createRecursionRuntime({
           await runStorageSaveSection(runId, () => saveSceneCacheSafe(
             runId,
             promptSnapshot,
-            sceneCachePayload(promptSnapshot, promptDeck, hand, plan)
+            sceneCachePayload(promptSnapshot, promptDeck, hand, plan, null, settings)
           ));
           if (!isActiveRun(runId)) return supersededResult(runId);
           packet = await composePromptPacket({
@@ -2237,7 +2393,7 @@ export function createRecursionRuntime({
         await runStorageSaveSection(runId, () => saveSceneCacheSafe(
           runId,
           promptSnapshot,
-          sceneCachePayload(promptSnapshot, promptDeck, hand, plan, packet)
+          sceneCachePayload(promptSnapshot, promptDeck, hand, plan, packet, settings)
         ));
         if (!isActiveRun(runId)) return supersededResult(runId);
         settleRuntimeActivity({

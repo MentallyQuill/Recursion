@@ -108,6 +108,23 @@ flowchart TD
 
 Hard invalidation retires scene cache records when chat identity, scene fingerprint, source hashes, schema version, card catalog version, provider contract, prompt composition contract, or record validation no longer matches.
 
+Runtime V1 writes this scene-cache contract metadata on every cache save:
+
+```ts
+versions: {
+  storageSchemaVersion: 1;
+  runtimeCacheContractVersion: 1;
+  cardCatalogHash: string;
+  promptPacketVersion: 1;
+  providerContractHash: string;
+  settingsHash: string;
+}
+```
+
+`cardCatalogHash` is derived from the full V1 card catalog. `promptPacketVersion` is the prompt packet contract used by the composer. `providerContractHash` is derived from provider role ids and expected provider response schemas. `settingsHash` is derived from cache-relevant normalized settings, excluding UI state, diagnostics, provider test results, resolved display labels, and raw secrets.
+
+When `storageSchemaVersion`, `runtimeCacheContractVersion`, `cardCatalogHash`, `promptPacketVersion`, or `providerContractHash` is missing or mismatched, runtime treats the record as a hard contract mismatch: cached cards are hidden from the Utility Arbiter prompt, the cache is best-effort marked `invalid` with reason `contract-mismatch`, and the scene rebuilds. When only `settingsHash` is missing or mismatched, runtime treats the record as soft settings drift: the cache is best-effort marked `stale` with reason `settings-changed`, but compact cached-card metadata remains visible to the Arbiter so it can decide whether reuse is still valid.
+
 Soft invalidation asks the Arbiter to review when the user refreshes, provider settings change, freshness caps expire, the source window advances, token budgets change, or cards fail validation.
 
 The storage repository exposes `invalidateSceneCache(chatKey, sceneKey, options)` for soft invalidation. When the scene cache exists, the repository preserves `cards`, `latestHand`, `source`, and `versions`, sets `cacheState: 'stale'` by default, writes sanitized `invalidation` metadata, keeps the scene cache index entry current, and appends a run journal entry:

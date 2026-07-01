@@ -83,9 +83,11 @@ type RecursionSceneCacheRecord = {
   updatedAt: string;
   cacheState: "active" | "stale" | "retired" | "invalid";
   versions: {
-    cardCatalogVersion: string;
-    promptCompositionVersion: string;
-    providerContractVersion: string;
+    storageSchemaVersion: number;
+    runtimeCacheContractVersion: number;
+    cardCatalogHash: string;
+    promptPacketVersion: number;
+    providerContractHash: string;
     settingsHash: string;
   };
   source: {
@@ -152,6 +154,8 @@ Contract rules:
 - `sourceRefs`, card ids, families, roles, catalog keys, source fingerprints, chat ids, and arbiter metadata must pass through the same unsafe-text screening used by diagnostics. Unsafe metadata is dropped or replaced with a neutral fallback before write.
 - `excerpt` is optional, disabled by default for normal journals, and always bounded when present. Use excerpts only when they materially improve user-visible inspection or diagnostic artifacts.
 - Scene cache records must reject or truncate over-large cards before write.
+- Missing or mismatched `storageSchemaVersion`, `runtimeCacheContractVersion`, `cardCatalogHash`, `promptPacketVersion`, or `providerContractHash` is a hard cache contract mismatch. Runtime must hide those cards from the Arbiter, mark the cache `invalid` when storage supports invalidation, and rebuild.
+- Missing or mismatched `settingsHash` is a soft settings drift. Runtime may mark the cache `stale`, but should still show compact cached-card metadata to the Arbiter so it can decide whether reuse is appropriate.
 - A scene cache cannot be promoted into cross-scene memory. A new scene gets a new cache.
 - `latestHand` is an allowlisted metadata snapshot only: `handId`, `composedAt`, `cardIds`, `promptPacketHash`, and bounded `omitted[]` card id/reason pairs. It must not persist card `promptText`, prompt packet sections, inspector notes, provider payloads, arbitrary composer metadata, or raw hand objects.
 

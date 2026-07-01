@@ -36,6 +36,19 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
+export const PROVIDER_CONTRACT_VERSION = 1;
+export const PROVIDER_CONTRACT_HASH = hashJson({
+  providerContractVersion: PROVIDER_CONTRACT_VERSION,
+  utilityRoles: UTILITY_ROLE_IDS,
+  reasonerRoles: REASONER_ROLE_IDS,
+  responseSchemas: {
+    card: 'recursion.card.v1',
+    utilityArbiter: 'recursion.utilityArbiter.v1',
+    briefUtilityComposer: 'recursion.briefUtilityComposer.v1',
+    reasonerComposer: 'recursion.reasonerComposer.v1',
+    providerTest: 'recursion.providerTest.v1'
+  }
+});
 const UTILITY_ROLES = new Set(UTILITY_ROLE_IDS);
 const REASONER_ROLES = new Set(REASONER_ROLE_IDS);
 const SECRET_TEXT_PATTERN = /(sk-[a-z0-9_-]+|bearer\s+[a-z0-9._-]+|session-key|secret[-_\s]*value|private[-_\s]*key[-_\s]*material)/ig;

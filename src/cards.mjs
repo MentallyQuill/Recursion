@@ -71,6 +71,12 @@ const STATUS = new Set(['candidate', 'active', 'stowed', 'stale', 'discarded']);
 const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
 const DETAIL = new Set(['compact', 'standard', 'expanded']);
 const EMPHASIS_PRIORITY = Object.freeze({ emphasized: 0, normal: 1, muted: 2 });
+const CARD_FORBIDDEN_PATTERNS = Object.freeze([
+  /\bhidden\s+chain[-\s]of[-\s]thought\b/i,
+  /\bchain[-\s]of[-\s]thought\b/i,
+  /\bprivate\s+chain[-\s]of[-\s]thought\b/i,
+  /\b(hidden|private|secret|undisclosed)\s+future\s+(plans?|plot|story)\b/i
+]);
 const CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS = Object.freeze([
   /\b(?:thinks?|thoughts?|inner\s+monologue|internal\s+monologue)\s*:/i,
   /\b(?:secret|hidden|private|undisclosed)\s+(?:thoughts?|motives?|motivations?|plans?|intentions?)\b/i,
@@ -123,13 +129,30 @@ function normalizeEvidenceRefs(value) {
     .slice(0, EVIDENCE_LIMIT);
 }
 
+function hasMessageEvidenceRef(value) {
+  return normalizeEvidenceRefs(value).some((entry) => /\bmessage:\d+\b/i.test(entry));
+}
+
 function assertCardPromptTextSafe(catalog, promptText) {
+  for (const pattern of CARD_FORBIDDEN_PATTERNS) {
+    if (pattern.test(promptText)) {
+      throw new Error('Card promptText contains unsafe hidden-reasoning wording.');
+    }
+  }
   if (catalog.family !== 'Character Motivation') return;
   for (const pattern of CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS) {
     if (pattern.test(promptText)) {
       throw new Error('Character Motivation promptText contains unsafe internal-thought wording.');
     }
   }
+}
+
+function providerSnapshotMatches(data, context) {
+  const expected = String(context?.snapshotHash ?? '').trim();
+  const actual = String(data?.snapshotHash ?? '').trim();
+  if (!expected) return true;
+  if (!actual) return context?.requireSnapshotHash !== true;
+  return actual === expected;
 }
 
 function cardPromptSafetyInstruction(catalog) {
@@ -343,7 +366,9 @@ export function buildCardRequests(plan = {}, context = {}) {
           'The JSON object must use schema "recursion.card.v1" and an "items" array with one card object.',
           `Envelope role must be "${catalog.role}".`,
           `Envelope family must be "${catalog.family}".`,
+          snapshotHash ? `Envelope snapshotHash must be "${snapshotHash}".` : '',
           'The card object may contain promptText, summary, evidenceRefs, tokenEstimate, detailProfile, emphasis, and inspectorNotes.',
+          'The card object must include at least one evidenceRefs entry containing a message:N reference.',
           'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
           cardPromptSafetyInstruction(catalog),
           reason ? `Arbiter request reason: ${reason}` : '',
@@ -371,9 +396,11 @@ export function cardsFromProviderResult(result, context = {}) {
   if (items.length !== 1) return [];
   const catalog = resolveProviderEnvelopeCatalog(data, context);
   if (!catalog) return [];
+  if (!providerSnapshotMatches(data, context)) return [];
   return items.flatMap((item) => {
     const source = asObject(item);
     if (!itemMatchesProviderCatalog(source, catalog)) return [];
+    if (!hasMessageEvidenceRef(source.evidenceRefs ?? source.evidence)) return [];
     try {
       return [normalizeCard({
         ...source,

@@ -180,7 +180,7 @@ The preferred execution shape is:
 2. Runtime freezes a `snapshotHash`.
 3. Utility card jobs are submitted as one batch when the host/provider supports batching.
 4. If batching is unavailable, jobs may run sequentially, but they must still use the same frozen snapshot and shared run id.
-5. Each card returns structured JSON with its own schema id and compact evidence references.
+5. Each card returns structured JSON with its own schema id, frozen snapshot hash, and compact evidence references.
 6. Runtime validates and accepts, repairs locally where safe, or omits each card independently.
 
 Card calls must not depend on sibling card outputs from the same batch. Fusion happens later in the Utility composer or Reasoner composer.
@@ -205,7 +205,7 @@ Common card output envelope:
 }
 ```
 
-Cards should be concise, observable, and player-message-adjacent. They must not include hidden character thoughts, private chain-of-thought, or broad plot plans.
+Cards should be concise, observable, and player-message-adjacent. Provider cards are omitted independently when the envelope role/family does not match the requested catalog slot, an envelope `snapshotHash` is present but does not match the frozen request hash, the card lacks parseable `message:N` evidence, or prompt-facing text contains hidden-reasoning wording. They must not include hidden character thoughts, private chain-of-thought, or broad plot plans.
 
 ## Cached Card Freshness
 

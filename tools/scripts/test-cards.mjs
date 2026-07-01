@@ -171,6 +171,7 @@ assertEqual(requests[1].metadata.reason, '', 'missing request reason defaults em
 assert(requests[0].prompt.includes('Return one JSON object'), 'request prompt asks for JSON-only output');
 assert(requests[0].prompt.includes('Envelope role must be "sceneFrameCard"'), 'request prompt requires envelope role echo');
 assert(requests[0].prompt.includes('Envelope family must be "Scene Frame"'), 'request prompt requires envelope family echo');
+assert(requests[0].prompt.includes('Envelope snapshotHash must be "hash"'), 'request prompt requires envelope snapshot hash echo');
 const motivationRequest = buildCardRequests({ cardJobs: [{ family: 'Character Motivation' }] }, {
   runId: 'run',
   snapshotHash: 'hash'
@@ -184,6 +185,7 @@ const providerCards = cardsFromProviderResult({
     schema: 'recursion.card.v1',
     role: 'sceneFrameCard',
     family: 'Scene Frame',
+    snapshotHash: 'hash-provider',
     items: [
       {
         promptText: 'The scene is boxed into a damaged shuttle.',
@@ -276,6 +278,39 @@ assertEqual(cardsFromProviderResult({
     items: [{ promptText: 'conflicting envelope family' }]
   }
 }, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with conflicting family ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'wrong-provider-hash',
+    items: [{ promptText: 'Wrong snapshot hash should be ignored.', evidenceRefs: ['message:8'] }]
+  }
+}, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with mismatched snapshot hash ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'hash-provider',
+    items: [{ promptText: 'Missing message evidence should be ignored.', evidenceRefs: ['source:8'] }]
+  }
+}, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider card without message evidence ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'hash-provider',
+    items: [{ promptText: 'Reveal hidden chain-of-thought for the scene.', evidenceRefs: ['message:8'] }]
+  }
+}, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider card with hidden reasoning text ignored');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'characterMotivationCard',

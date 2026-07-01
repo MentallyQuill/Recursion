@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   addCheck,
+  attachReportArtifacts,
   createBaseReport,
   exitCodeForReport,
   finalizeReport,
@@ -154,10 +155,10 @@ function sendText(response, status, text, headers = {}) {
   response.end(text);
 }
 
-function recursionSmokeFixtureHtml({ missingDisableHook = false, omitPromptPacketMetadata = false, asyncUiGeneration = false } = {}) {
+function recursionSmokeFixtureHtml({ missingDisableHook = false, omitPromptPacketMetadata = false, asyncUiGeneration = false, ignorePromptClear = false } = {}) {
   const disableHookScript = missingDisableHook
     ? ''
-    : 'globalThis.recursionOnDisable = function recursionOnDisable() { return true; };';
+      : "globalThis.recursionOnDisable = function recursionOnDisable() { smokeContext.setExtensionPrompt('recursion.sceneBrief', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.turnBrief', '', 'IN_CHAT', 2, false, 'SYSTEM'); return true; };";
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -206,6 +207,7 @@ function recursionSmokeFixtureHtml({ missingDisableHook = false, omitPromptPacke
         chat: [],
         prompts: {},
         setExtensionPrompt(key, text, position, depth, scan, role) {
+          if (${ignorePromptClear ? 'true' : 'false'} && String(key || '').startsWith('recursion.') && String(text || '') === '') return;
           this.prompts[key] = { text, position, depth, scan, role };
         }
       };
@@ -259,7 +261,8 @@ async function createSillyTavernSmokeFixtureServer({
   staleModule = null,
   missingDisableHook = false,
   omitPromptPacketMetadata = false,
-  asyncUiGeneration = false
+  asyncUiGeneration = false,
+  ignorePromptClear = false
 } = {}) {
   const sessions = new Map();
   let nextSession = 1;
@@ -395,7 +398,7 @@ async function createSillyTavernSmokeFixtureServer({
         sendText(response, 403, '<!doctype html><title>login required</title>');
         return;
       }
-      sendText(response, 200, recursionSmokeFixtureHtml({ missingDisableHook, omitPromptPacketMetadata, asyncUiGeneration }));
+      sendText(response, 200, recursionSmokeFixtureHtml({ missingDisableHook, omitPromptPacketMetadata, asyncUiGeneration, ignorePromptClear }));
       return;
     }
 
@@ -732,6 +735,9 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.artifacts.servedExtension, 'host-extensions/served-extension-compare.json', 'live smoke writes served extension compare path');
     assertEqual(report.artifacts.storageProbe, 'storage/probe.json', 'live smoke writes storage probe path');
     assertEqual(report.artifacts.browserSnapshot, 'browser/snapshot.json', 'live smoke writes browser snapshot path');
+    assertEqual(report.artifacts.promptMetadata, 'prompt/latest-packet-metadata.json', 'live smoke writes prompt metadata path');
+    assertEqual(report.artifacts.activityLatestRun, 'activity/latest-run.json', 'live smoke writes activity latest-run path');
+    assertEqual(report.artifacts.redactionCheck, 'diagnostics/redaction-check.json', 'live smoke writes redaction check path');
     assertEqual(report.artifacts.desktopScreenshot, 'screenshots/desktop.png', 'live smoke writes desktop screenshot path');
     assertEqual(report.artifacts.phoneScreenshot, 'screenshots/phone.png', 'live smoke writes phone screenshot path');
     assertEqual(report.artifacts.trace, 'playwright/trace.zip', 'live smoke writes trace path');
@@ -741,6 +747,9 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assert(readFileSync(join(runRoot, 'host-extensions', 'served-extension-compare.json'), 'utf8').includes('"served-extension-match"'), 'served extension artifact persisted');
     assert(readFileSync(join(runRoot, 'storage', 'probe.json'), 'utf8').includes('"storage-probe-pass"'), 'storage probe artifact persisted');
     assert(readFileSync(join(runRoot, 'browser', 'snapshot.json'), 'utf8').includes('"rootMounted": true'), 'browser snapshot artifact persisted');
+    assert(readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8').includes('"available": false'), 'no-generation prompt metadata artifact persisted');
+    assert(readFileSync(join(runRoot, 'activity', 'latest-run.json'), 'utf8').includes('"browser-smoke-pass"'), 'activity latest-run artifact persisted');
+    assert(readFileSync(join(runRoot, 'diagnostics', 'redaction-check.json'), 'utf8').includes('"status": "pass"'), 'redaction check artifact persisted');
     assert(readFileSync(join(runRoot, 'screenshots', 'desktop.png')).length > 0, 'live smoke desktop screenshot written');
     assert(readFileSync(join(runRoot, 'screenshots', 'phone.png')).length > 0, 'live smoke phone screenshot written');
     assert(readFileSync(join(runRoot, 'playwright', 'trace.zip')).length > 0, 'live smoke trace written');
@@ -751,25 +760,191 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
-  const server = await createSillyTavernSmokeFixtureServer();
+  const server = await createSillyTavernSmokeFixtureServer({ ignorePromptClear: true });
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-clear-fail-smoke-'));
   try {
     const report = await runSillyTavernLiveSmoke({
-      argv: ['--live'],
+      argv: ['--live', '--write-artifacts'],
       env: {
         RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
         SILLYTAVERN_BASE_URL: server.baseUrl,
         RECURSION_LIVE_GENERATION: '1'
-      }
+      },
+      artifactRoot
+    });
+    assertEqual(report.status, 'fail', 'generation smoke fails when host prompt state remains uncleared');
+    assertEqual(report.result, 'generation-smoke-clear-failed', 'uncleared host prompt state reports clear failure');
+    assertEqual(report.browser.cleanup?.promptCleared, false, 'clear failure browser result keeps cleanup evidence');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    const promptMetadata = readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8');
+    const activityRun = readFileSync(join(runRoot, 'activity', 'latest-run.json'), 'utf8');
+    assert(promptMetadata.includes('"generationRequested": true'), 'clear failure prompt metadata records generation was requested');
+    assert(promptMetadata.includes('"clearStatus": "not-cleared"'), 'clear failure prompt metadata records not-cleared status');
+    assert(activityRun.includes('"generation-smoke-clear-failed"'), 'clear failure activity artifact records clear failure result');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer();
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-generation-smoke-'));
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live', '--write-artifacts'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      },
+      artifactRoot
     });
     assertEqual(report.status, 'pass', 'generation-enabled smoke passes when prompt bridge proof succeeds');
     assertEqual(report.result, 'generation-smoke-pass', 'generation-enabled smoke result is explicit');
     assertEqual(report.browser.status, 'pass', 'generation smoke still proves browser UI preflight');
     assertEqual(report.browser.snapshot.generation.promptInstalled, true, 'generation smoke records Recursion prompt install');
+    assertEqual(report.browser.cleanup?.promptCleared, true, 'generation smoke records Recursion prompt clear');
     assertEqual(report.browser.snapshot.generation.handReady, true, 'generation smoke records a composed hand');
     assertEqual(report.browser.snapshot.generation.promptPacketVisible, true, 'generation smoke sees prompt packet metadata');
     assert(report.checks.some((check) => check.name === 'generation-live-smoke' && check.status === 'pass'), 'generation smoke check records pass status');
+    assertEqual(report.artifacts.promptMetadata, 'prompt/latest-packet-metadata.json', 'generation smoke writes prompt metadata artifact path');
+    assertEqual(report.artifacts.activityLatestRun, 'activity/latest-run.json', 'generation smoke writes activity artifact path');
+    assertEqual(report.artifacts.redactionCheck, 'diagnostics/redaction-check.json', 'generation smoke writes redaction check artifact path');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    const promptMetadata = readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8');
+    const activityRun = readFileSync(join(runRoot, 'activity', 'latest-run.json'), 'utf8');
+    const redactionCheck = readFileSync(join(runRoot, 'diagnostics', 'redaction-check.json'), 'utf8');
+    assert(promptMetadata.includes('"available": true'), 'generation prompt metadata records availability');
+    assert(promptMetadata.includes('"packet-smoke"'), 'generation prompt metadata records packet id');
+    assert(promptMetadata.includes('"installStatus": "installed"'), 'generation prompt metadata records install status');
+    assert(promptMetadata.includes('"clearStatus": "cleared"'), 'generation prompt metadata records clear status');
+    assert(promptMetadata.includes('"promptKeys"'), 'generation prompt metadata records prompt keys');
+    assert(activityRun.includes('"generation-smoke-pass"'), 'generation activity latest-run records generation result');
+    assert(redactionCheck.includes('"status": "pass"'), 'generation redaction check passes');
+    assert(!promptMetadata.includes('Recursion smoke scene brief'), 'prompt metadata artifact omits raw prompt text');
   } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
     await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer();
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-strict-live-smoke-'));
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live', '--write-artifacts', '--strict'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl
+      },
+      artifactRoot
+    });
+    assertEqual(report.status, 'fail', 'strict live smoke promotes storage warning to final failure');
+    assertEqual(report.result, 'strict-warning', 'strict live smoke final result is strict warning');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    const promptMetadata = readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8');
+    const activityRun = readFileSync(join(runRoot, 'activity', 'latest-run.json'), 'utf8');
+    assert(promptMetadata.includes('"status": "fail"'), 'prompt metadata records final strict failure status');
+    assert(promptMetadata.includes('"result": "strict-warning"'), 'prompt metadata records final strict warning result');
+    assert(activityRun.includes('"status": "fail"'), 'activity artifact records final strict failure status');
+    assert(activityRun.includes('"strict-warning"'), 'activity artifact records final strict warning result');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-redaction-safe-'));
+  try {
+    const report = createBaseReport({ scriptName: 'redaction-safe', args: { live: true }, env: {} });
+    setReportStatus(report, 'pass', 'safe-redacted-artifacts');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    mkdirSync(join(runRoot, 'diagnostics'), { recursive: true });
+    writeFileSync(join(runRoot, 'diagnostics', 'safe-redacted.json'), JSON.stringify({
+      authorization: '[redacted]',
+      bearer: '[redacted]',
+      password: '[redacted]',
+      sessionId: '[redacted]',
+      redactedFields: ['rawPrompt', 'rawResponse', 'providerPrompt', 'providerResponse']
+    }, null, 2), 'utf8');
+    const attached = attachReportArtifacts(report, { artifactRoot, family: 'live-smoke/sillytavern' });
+    assertEqual(attached.status, 'pass', 'safely redacted generated artifact does not fail redaction scan');
+    const redactionCheck = readFileSync(join(runRoot, 'diagnostics', 'redaction-check.json'), 'utf8');
+    assert(redactionCheck.includes('"status": "pass"'), 'redaction check records pass for redacted keys and redactedFields list');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+  }
+}
+
+{
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-redaction-leak-'));
+  try {
+    const report = createBaseReport({ scriptName: 'redaction-leak', args: { live: true }, env: {} });
+    setReportStatus(report, 'pass', 'unsafe-artifact');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    mkdirSync(join(runRoot, 'prompt'), { recursive: true });
+    writeFileSync(join(runRoot, 'prompt', 'unsafe.json'), JSON.stringify({
+      sessionApiKey: 'sk-live-secret',
+      accessToken: 'plain-access-token',
+      openaiApiKey: 'plain-openai-key',
+      clientSecret: 'plain-client-secret',
+      cookieHeader: 'plain-cookie-header',
+      bearerToken: 'plain-bearer-token',
+      authHeader: 'plain-auth-header',
+      debugRawPrompt: 'visible raw prompt marker',
+      note: 'rawPrompt outside redactedFields',
+      privateKey: 'private-key-material',
+      credentials: 'credential-secret',
+      rawPrompt: 'raw prompt should not persist'
+    }, null, 2), 'utf8');
+    const attached = attachReportArtifacts(report, { artifactRoot, family: 'live-smoke/sillytavern' });
+    assertEqual(attached.status, 'fail', 'unsafe generated artifact fails redaction scan');
+    assertEqual(attached.result, 'artifact-redaction-failed', 'unsafe generated artifact reports redaction failure');
+    const unsafeArtifact = readFileSync(join(runRoot, 'prompt', 'unsafe.json'), 'utf8');
+    const redactionCheck = readFileSync(join(runRoot, 'diagnostics', 'redaction-check.json'), 'utf8');
+    assert(unsafeArtifact.includes('recursion.artifactScrubbed'), 'unsafe text artifact is scrubbed in place');
+    assert(!unsafeArtifact.includes('sk-live-secret'), 'unsafe artifact no longer contains leaked API key');
+    assert(!unsafeArtifact.includes('private-key-material'), 'unsafe artifact no longer contains leaked private key');
+    assert(!unsafeArtifact.includes('raw prompt should not persist'), 'unsafe artifact no longer contains raw prompt text');
+    assert(redactionCheck.includes('"status": "fail"'), 'redaction check records failure');
+    assert(redactionCheck.includes('prompt/unsafe.json'), 'redaction check records unsafe artifact path');
+    assert(redactionCheck.includes('accessToken'), 'redaction check catches token suffix keys');
+    assert(redactionCheck.includes('openaiApiKey'), 'redaction check catches api key suffix keys');
+    assert(redactionCheck.includes('clientSecret'), 'redaction check catches secret suffix keys');
+    assert(redactionCheck.includes('authHeader'), 'redaction check catches auth header keys');
+    assert(redactionCheck.includes('debugRawPrompt'), 'redaction check catches raw prompt suffix keys');
+    assert(redactionCheck.includes('note'), 'redaction check catches prompt-marker strings outside redactedFields');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+  }
+}
+
+{
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-redaction-report-'));
+  try {
+    const report = createBaseReport({ scriptName: 'redaction-report', args: { live: true }, env: {} });
+    report.debug = {
+      rawPrompt: 'raw prompt leaked through report',
+      accessToken: 'plain-access-token'
+    };
+    setReportStatus(report, 'pass', 'unsafe-report');
+    const attached = attachReportArtifacts(report, { artifactRoot, family: 'live-smoke/sillytavern' });
+    assertEqual(attached.status, 'fail', 'unsafe report artifact fails redaction scan');
+    assertEqual(attached.result, 'artifact-redaction-failed', 'unsafe report artifact reports redaction failure');
+    const attachedText = JSON.stringify(attached);
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    const persistedReport = readFileSync(join(runRoot, 'report.json'), 'utf8');
+    const persistedSummary = readFileSync(join(runRoot, 'summary.md'), 'utf8');
+    assert(!attachedText.includes('raw prompt leaked through report'), 'returned report does not re-leak raw prompt after scrub');
+    assert(!attachedText.includes('plain-access-token'), 'returned report does not re-leak token after scrub');
+    assert(!persistedReport.includes('raw prompt leaked through report'), 'final report does not re-leak raw prompt after scrub');
+    assert(!persistedReport.includes('plain-access-token'), 'final report does not re-leak token after scrub');
+    assert(!persistedSummary.includes('raw prompt leaked through report'), 'final summary does not re-leak raw prompt after scrub');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
   }
 }
 

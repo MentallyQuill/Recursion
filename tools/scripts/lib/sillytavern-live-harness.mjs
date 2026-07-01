@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { redact, safeId } from '../../../src/core.mjs';
@@ -138,6 +138,64 @@ const SENSITIVE_TEXT_PATTERNS = Object.freeze([
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]'],
   [/\bsk-[A-Za-z0-9][A-Za-z0-9._-]{5,}/gi, '[redacted]'],
   [/\b(api[-_ ]?key|password|secret|token|cookie|csrf|session[-_ ]?id|session|sid)\s*[:=]\s*['"]?[^'",;\s]+['"]?/gi, '$1=[redacted]']
+]);
+
+const ARTIFACT_TEXT_FILE_PATTERN = /\.(?:json|jsonl|md|txt)$/i;
+const REDACTION_SCAN_SKIP_PATHS = new Set(['diagnostics/redaction-check.json']);
+const FORBIDDEN_ARTIFACT_KEYS = new Set([
+  'apikey',
+  'authorization',
+  'authheader',
+  'bearer',
+  'cookie',
+  'credentials',
+  'csrf',
+  'password',
+  'privatekey',
+  'providerprompt',
+  'providerresponse',
+  'rawprompt',
+  'rawresponse',
+  'secret',
+  'session',
+  'sessionapikey',
+  'sessionid',
+  'sessionkey',
+  'sid',
+  'token'
+]);
+const FORBIDDEN_ARTIFACT_KEY_SUFFIXES = Object.freeze([
+  'apikey',
+  'authorization',
+  'authheader',
+  'bearer',
+  'credentials',
+  'csrf',
+  'password',
+  'privatekey',
+  'providerprompt',
+  'providerresponse',
+  'rawprompt',
+  'rawresponse',
+  'secret',
+  'session',
+  'sessionapikey',
+  'sessionid',
+  'sessionkey',
+  'sid',
+  'token'
+]);
+const FORBIDDEN_ARTIFACT_KEY_CONTAINS = Object.freeze([
+  'authorization',
+  'bearer',
+  'cookie'
+]);
+const FORBIDDEN_ARTIFACT_TEXT_PATTERNS = Object.freeze([
+  /\bAuthorization\s*:\s*Bearer\s+(?!\[redacted\])[A-Za-z0-9._~+/=-]+/i,
+  /\bBearer\s+(?!\[redacted\])[A-Za-z0-9._~+/=-]+/i,
+  /\bsk-[A-Za-z0-9][A-Za-z0-9._-]{5,}/i,
+  /\b(?:api[-_ ]?key|password|secret|token|cookie|csrf|session[-_ ]?id|sid)\s*[:=]\s*(?!\[redacted\])['"]?[^'",;\s]+['"]?/i,
+  /\b(?:rawPrompt|rawResponse|providerPrompt|providerResponse)\b/i
 ]);
 
 const HARNESS_SECRET_KEY_SUFFIXES = Object.freeze([
@@ -967,6 +1025,70 @@ function generationEvidenceScript() {
   };
 }
 
+function generationPromptClearScript() {
+  return async () => {
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const beforeEvents = Array.isArray(context?.__recursionSmokePromptEvents)
+      ? context.__recursionSmokePromptEvents.slice()
+      : [];
+    const installedKeys = [...new Set(beforeEvents
+      .filter((entry) => entry && entry.cleared === false && String(entry.key || '').startsWith('recursion.'))
+      .map((entry) => String(entry.key)))];
+    let disableHookOk = false;
+    let disableHookError = '';
+    try {
+      if (typeof globalThis.recursionOnDisable !== 'function') {
+        throw new Error('recursionOnDisable unavailable');
+      }
+      await globalThis.recursionOnDisable();
+      disableHookOk = true;
+    } catch (error) {
+      disableHookError = String(error?.message || error || 'Recursion disable hook failed.');
+    }
+    const afterEvents = Array.isArray(context?.__recursionSmokePromptEvents)
+      ? context.__recursionSmokePromptEvents.slice()
+      : [];
+    const clearedPromptKeys = [...new Set(afterEvents
+      .filter((entry) => entry && entry.cleared === true && String(entry.key || '').startsWith('recursion.'))
+      .map((entry) => String(entry.key)))];
+    const promptStateAvailable = Boolean(context?.prompts && typeof context.prompts === 'object');
+    const remainingPromptKeys = promptStateAvailable
+      ? Object.entries(context.prompts)
+        .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
+        .map(([key]) => String(key))
+      : [];
+    const recorderCleared = installedKeys.length > 0 && installedKeys.every((key) => clearedPromptKeys.includes(key));
+    const hostPromptCleared = !promptStateAvailable || remainingPromptKeys.length === 0;
+    const promptCleared = disableHookOk && recorderCleared && hostPromptCleared;
+    const cleanup = {
+      clearRequested: true,
+      disableHookOk,
+      disableHookError,
+      installedPromptKeys: installedKeys,
+      clearedPromptKeys,
+      promptStateAvailable,
+      remainingPromptKeys,
+      recorderCleared,
+      hostPromptCleared,
+      promptCleared,
+      promptEventCount: afterEvents.length
+    };
+    globalThis.__recursionSmokeGenerationCleanup = cleanup;
+    globalThis.__recursionSmokeGeneration = {
+      ...(globalThis.__recursionSmokeGeneration || {}),
+      promptCleared,
+      cleanup
+    };
+    return cleanup;
+  };
+}
+
 async function runBrowserUiSmoke({
   baseUrl,
   cookies = [],
@@ -1080,6 +1202,7 @@ async function runBrowserUiSmoke({
     }, null, { timeout: timeoutMs });
 
     let generation = null;
+    let cleanup = null;
     if (generationRequested) {
       generation = await page.evaluate(generationTriggerScript({ reasonerRequested }), { reasonerRequested });
       try {
@@ -1159,11 +1282,25 @@ async function runBrowserUiSmoke({
       await stopTraceArtifact();
     }
 
+    if (generationRequested) {
+      cleanup = await page.evaluate(generationPromptClearScript());
+      if (!cleanup?.promptCleared) {
+        const error = new Error('Recursion generation bridge cleanup assertion failed.');
+        error.status = 'fail';
+        error.result = 'generation-smoke-clear-failed';
+        error.cleanup = cleanup;
+        error.snapshot = snapshot;
+        error.generation = generation || snapshot.generation;
+        throw error;
+      }
+    }
+
     await context.close();
     return {
       status: 'pass',
       result: generationRequested ? 'generation-smoke-pass' : 'browser-smoke-pass',
       snapshot,
+      cleanup,
       consoleMessages: consoleMessages.slice(-20),
       pageErrors: pageErrors.slice(-20),
       artifacts
@@ -1175,6 +1312,8 @@ async function runBrowserUiSmoke({
       status: error?.status || (error?.name === 'TimeoutError' ? 'fail' : 'environment-fail'),
       result: error?.result || (error?.name === 'TimeoutError' ? 'browser-smoke-timeout' : 'browser-smoke-failed'),
       error: compactBrowserIssue(error),
+      snapshot: error?.snapshot || null,
+      cleanup: error?.cleanup || null,
       consoleMessages: consoleMessages.slice(-20),
       pageErrors: pageErrors.slice(-20),
       artifacts
@@ -1187,6 +1326,108 @@ async function runBrowserUiSmoke({
     }
     if (browser) await browser.close().catch(() => {});
   }
+}
+
+function promptMetadataFromBrowserResult(report, browserResult) {
+  const generation = browserResult?.snapshot?.generation || null;
+  const packet = generation?.promptPacket || null;
+  const cleanup = browserResult?.cleanup || null;
+  const available = Boolean(packet?.packetId && packet?.handId);
+  const installed = generation?.promptInstalled === true;
+  const cleared = cleanup?.promptCleared === true || generation?.promptCleared === true;
+  return {
+    recordType: 'recursion.promptPacketMetadata',
+    schemaVersion: 1,
+    runId: report.runId,
+    generatedAt: nowIso(),
+    status: report.status,
+    result: report.result,
+    generationRequested: Boolean(generation?.requested),
+    available,
+    packetHash: available ? sha256Text(JSON.stringify(packet)) : '',
+    installStatus: installed ? 'installed' : 'not-installed',
+    clearStatus: cleared ? 'cleared' : cleanup?.clearRequested ? 'not-cleared' : 'not-requested',
+    packet: available
+      ? {
+          packetId: String(packet.packetId || ''),
+          handId: String(packet.handId || ''),
+          selectedCardRefs: Array.isArray(packet.selectedCardRefs)
+            ? packet.selectedCardRefs.map((entry) => String(entry)).filter(Boolean).slice(0, 24)
+            : []
+        }
+      : null,
+    promptKeys: Array.isArray(generation?.promptKeys)
+      ? generation.promptKeys.map((entry) => String(entry)).filter(Boolean).slice(0, 24)
+      : [],
+    promptEventCount: Number(generation?.promptEventCount) || 0,
+    promptEvents: Array.isArray(generation?.promptEvents)
+      ? generation.promptEvents.map((entry) => ({
+          key: String(entry?.key || ''),
+          textHash: String(entry?.textHash || ''),
+          textLength: Number(entry?.textLength) || 0,
+          cleared: entry?.cleared === true,
+          position: String(entry?.position || ''),
+          depth: Number(entry?.depth) || 0,
+          role: String(entry?.role || '')
+        })).slice(-12)
+      : [],
+    cleanup: cleanup
+      ? {
+          clearRequested: cleanup.clearRequested === true,
+          disableHookOk: cleanup.disableHookOk === true,
+          promptCleared: cleanup.promptCleared === true,
+          installedPromptKeys: Array.isArray(cleanup.installedPromptKeys) ? cleanup.installedPromptKeys.slice(0, 24) : [],
+          clearedPromptKeys: Array.isArray(cleanup.clearedPromptKeys) ? cleanup.clearedPromptKeys.slice(0, 24) : []
+        }
+      : null
+  };
+}
+
+function activityLatestRunFromReport(report, liveLog, browserResult) {
+  const checks = Array.isArray(report.checks) ? report.checks : [];
+  return {
+    recordType: 'recursion.activityLatestRun',
+    schemaVersion: 1,
+    runId: report.runId,
+    generatedAt: nowIso(),
+    status: report.status,
+    result: report.result,
+    strict: report.strict === true,
+    checks: checks.map((check) => ({
+      name: String(check?.name || ''),
+      status: String(check?.status || ''),
+      summary: String(check?.summary || '')
+    })),
+    warnings: Array.isArray(report.warnings) ? report.warnings : [],
+    failures: Array.isArray(report.failures) ? report.failures : [],
+    browser: browserResult
+      ? {
+          status: browserResult.status,
+          result: browserResult.result,
+          snapshot: {
+            rootMounted: browserResult.snapshot?.rootMounted === true,
+            barVisible: browserResult.snapshot?.barVisible === true,
+            statusText: browserResult.snapshot?.statusText || '',
+            handText: browserResult.snapshot?.handText || '',
+            ribbonText: browserResult.snapshot?.ribbonText || '',
+            generation: browserResult.snapshot?.generation
+              ? {
+                  requested: browserResult.snapshot.generation.requested === true,
+                  reasonerRequested: browserResult.snapshot.generation.reasonerRequested === true,
+                  interceptorOk: browserResult.snapshot.generation.interceptorOk === true,
+                  promptInstalled: browserResult.snapshot.generation.promptInstalled === true,
+                  promptCleared: browserResult.cleanup?.promptCleared === true || browserResult.snapshot.generation.promptCleared === true,
+                  handReady: browserResult.snapshot.generation.handReady === true,
+                  promptPacketVisible: browserResult.snapshot.generation.promptPacketVisible === true,
+                  promptKeys: browserResult.snapshot.generation.promptKeys || [],
+                  promptEventCount: browserResult.snapshot.generation.promptEventCount || 0
+                }
+              : null
+          }
+        }
+      : null,
+    events: Array.isArray(liveLog) ? liveLog.map((entry) => redactHarnessValue(entry)) : []
+  };
 }
 
 export function createBaseReport({ scriptName, args = {}, env = {}, runId = createRunId(scriptName) } = {}) {
@@ -1416,9 +1657,285 @@ function writeTextArtifact(report, artifactLocation, relativePath, value) {
   }
 }
 
+function artifactTextFiles(artifactLocation) {
+  const files = [];
+  const root = artifactLocation?.dir;
+  if (!root) return files;
+  function walk(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const absolutePath = join(directory, entry.name);
+      const relativePath = relative(root, absolutePath).replace(/\\/g, '/');
+      if (entry.isDirectory()) {
+        walk(absolutePath);
+      } else if (entry.isFile() && ARTIFACT_TEXT_FILE_PATTERN.test(entry.name) && !REDACTION_SCAN_SKIP_PATHS.has(relativePath)) {
+        files.push({ absolutePath, relativePath });
+      }
+    }
+  }
+  try {
+    walk(root);
+  } catch {
+    return files;
+  }
+  return files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+}
+
+function safeRedactedArtifactValue(value) {
+  if (value === null || value === undefined || value === '' || value === false) return true;
+  if (typeof value === 'string') return value.trim().toLowerCase() === '[redacted]';
+  if (Array.isArray(value)) return value.every((entry) => safeRedactedArtifactValue(entry));
+  return false;
+}
+
+function isForbiddenArtifactKey(normalizedKey) {
+  if (!normalizedKey || normalizedKey.endsWith('count')) return false;
+  if (FORBIDDEN_ARTIFACT_KEYS.has(normalizedKey)) return true;
+  if (FORBIDDEN_ARTIFACT_KEY_SUFFIXES.some((suffix) => normalizedKey.endsWith(suffix))) return true;
+  return FORBIDDEN_ARTIFACT_KEY_CONTAINS.some((fragment) => normalizedKey.includes(fragment));
+}
+
+function artifactJsonFindings(value, relativePath) {
+  const findings = [];
+  const visiting = new WeakSet();
+  const valueSecretPatterns = FORBIDDEN_ARTIFACT_TEXT_PATTERNS;
+
+  function addFinding(reason, path) {
+    findings.push({
+      file: relativePath,
+      reason,
+      path: path.join('.')
+    });
+  }
+
+  function visit(input, path = [], key = '') {
+    const normalizedKey = normalizeHarnessKey(key);
+    if (normalizedKey === 'redactedfields') return;
+    if (isForbiddenArtifactKey(normalizedKey) && !safeRedactedArtifactValue(input)) {
+      addFinding('sensitive-json-key', path);
+    }
+    if (typeof input === 'string') {
+      if (valueSecretPatterns.some((pattern) => pattern.test(input))) {
+        addFinding('sensitive-text', path);
+      }
+      return;
+    }
+    if (!input || typeof input !== 'object') return;
+    if (visiting.has(input)) return;
+    visiting.add(input);
+    try {
+      if (Array.isArray(input)) {
+        input.forEach((entry, index) => visit(entry, [...path, String(index)]));
+        return;
+      }
+      for (const [childKey, child] of Object.entries(input)) {
+        visit(child, [...path, childKey], childKey);
+      }
+    } finally {
+      visiting.delete(input);
+    }
+  }
+
+  visit(value);
+  return findings;
+}
+
+function artifactRedactionFindings(text, relativePath) {
+  try {
+    return artifactJsonFindings(JSON.parse(text), relativePath);
+  } catch {
+    // Non-JSON text artifacts use conservative string scanning.
+  }
+  const findings = [];
+  for (const pattern of FORBIDDEN_ARTIFACT_TEXT_PATTERNS) {
+    if (pattern.test(text)) {
+      findings.push({
+        file: relativePath,
+        reason: 'sensitive-text'
+      });
+      break;
+    }
+  }
+  return findings;
+}
+
+function scrubRedactionFindings(report, artifactLocation, findings = []) {
+  const root = resolve(artifactLocation?.dir || '');
+  const scrubbed = [];
+  for (const file of [...new Set(findings.map((finding) => finding.file).filter(Boolean))]) {
+    if (REDACTION_SCAN_SKIP_PATHS.has(file)) continue;
+    const target = resolve(root, file);
+    const inside = relative(root, target).replace(/\\/g, '/');
+    if (!inside || inside === '..' || inside.startsWith('../') || isAbsolute(inside)) continue;
+    try {
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, `${JSON.stringify({
+        recordType: 'recursion.artifactScrubbed',
+        schemaVersion: 1,
+        runId: report.runId,
+        scrubbedAt: nowIso(),
+        originalPath: file,
+        status: 'scrubbed',
+        reason: 'artifact-redaction-failed'
+      }, null, 2)}\n`, 'utf8');
+      scrubbed.push(file);
+    } catch {
+      // Scrub failures are still represented by the redaction failure status.
+    }
+  }
+  return scrubbed;
+}
+
+function rewriteStatusJsonArtifact(report, artifactLocation, relativePath) {
+  try {
+    const target = resolve(artifactLocation.dir, normalizeRelativeFilePath(relativePath));
+    const inside = relative(artifactLocation.dir, target).replace(/\\/g, '/');
+    if (!inside || inside === '..' || inside.startsWith('../') || isAbsolute(inside)) return null;
+    const parsed = JSON.parse(readFileSync(target, 'utf8'));
+    parsed.status = report.status;
+    parsed.result = report.result;
+    parsed.generatedAt = nowIso();
+    return writeJsonArtifact(report, artifactLocation, relativePath, parsed);
+  } catch {
+    return null;
+  }
+}
+
+function rewriteStatusArtifacts(report, artifactLocation) {
+  rewriteStatusJsonArtifact(report, artifactLocation, 'prompt/latest-packet-metadata.json');
+  rewriteStatusJsonArtifact(report, artifactLocation, 'activity/latest-run.json');
+}
+
+function safeFailureCheckList(checks = []) {
+  return checks.map((check) => ({
+    name: sanitizeHarnessText(check?.name || '', 120),
+    status: sanitizeHarnessText(check?.status || '', 80),
+    summary: sanitizeHarnessText(check?.summary || '', 300)
+  }));
+}
+
+function minimalRedactionFailureReport(report) {
+  return {
+    recordType: report.recordType || 'recursion.liveHarnessReport',
+    schemaVersion: report.schemaVersion || 1,
+    runId: report.runId,
+    scriptName: sanitizeHarnessText(report.scriptName || 'recursion-live-harness', 120),
+    status: 'fail',
+    result: 'artifact-redaction-failed',
+    startedAt: report.startedAt || null,
+    generatedAt: nowIso(),
+    finishedAt: nowIso(),
+    durationMs: elapsedMs(report.startedAt),
+    mode: report.mode || 'live',
+    dryRun: report.dryRun === true,
+    strict: report.strict === true,
+    checks: safeFailureCheckList(report.checks),
+    environment: redactHarnessValue(report.environment || {}),
+    warnings: Array.isArray(report.warnings) ? report.warnings.map((warning) => redactHarnessValue(warning)) : [],
+    failures: safeFailureCheckList(report.failures),
+    nextAction: sanitizeHarnessText(report.nextAction || 'Inspect diagnostics/redaction-check.json and rerun after artifact redaction is fixed.', 500),
+    artifacts: {
+      ...(report.artifacts || {}),
+      summary: 'summary.md',
+      report: 'report.json',
+      redactionCheck: 'diagnostics/redaction-check.json'
+    }
+  };
+}
+
+function writeMinimalRedactionFailureArtifacts(report, options = {}) {
+  const safeReport = minimalRedactionFailureReport(report);
+  const { dir } = artifactRunDirectory(safeReport, options);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'report.json'), `${JSON.stringify(safeReport, null, 2)}\n`, 'utf8');
+  writeFileSync(join(dir, 'summary.md'), reportToSummary(safeReport), 'utf8');
+  report.artifacts = safeReport.artifacts;
+  return safeReport;
+}
+
+function scanGeneratedArtifacts(report, artifactLocation) {
+  const files = artifactTextFiles(artifactLocation);
+  const findings = [];
+  for (const file of files) {
+    let text = '';
+    try {
+      text = readFileSync(file.absolutePath, 'utf8');
+    } catch {
+      findings.push({
+        file: file.relativePath,
+        reason: 'artifact-read-failed'
+      });
+      continue;
+    }
+    findings.push(...artifactRedactionFindings(text, file.relativePath));
+  }
+  return {
+    recordType: 'recursion.redactionCheck',
+    schemaVersion: 1,
+    runId: report.runId,
+    generatedAt: nowIso(),
+    status: findings.length ? 'fail' : 'pass',
+    scannedFileCount: files.length,
+    scannedFiles: files.map((file) => file.relativePath),
+    findings
+  };
+}
+
 export function attachReportArtifacts(report, options = {}) {
   try {
+    if (options.family !== 'live-smoke/sillytavern' || report.dryRun === true) {
+      writeReportArtifacts(report, options);
+      return report;
+    }
+    report.artifacts = {
+      ...(report.artifacts || {}),
+      redactionCheck: 'diagnostics/redaction-check.json'
+    };
     writeReportArtifacts(report, options);
+    const artifactLocation = artifactRunDirectory(report, options);
+    const redactionCheck = scanGeneratedArtifacts(report, artifactLocation);
+    const redactionPath = writeJsonArtifact(report, artifactLocation, 'diagnostics/redaction-check.json', redactionCheck);
+    if (redactionPath) {
+      report.artifacts = {
+        ...(report.artifacts || {}),
+        redactionCheck: redactionPath
+      };
+    }
+    if (redactionCheck.status !== 'pass') {
+      const scrubbedFiles = scrubRedactionFindings(report, artifactLocation, redactionCheck.findings);
+      addCheck(report, {
+        name: 'artifact-redaction-check',
+        status: 'fail',
+        summary: 'Generated artifacts contain unredacted sensitive material.',
+        details: {
+          findingCount: redactionCheck.findings.length,
+          scrubbedFiles,
+          findings: redactionCheck.findings.map((finding) => ({
+            file: finding.file,
+            reason: finding.reason
+          }))
+        }
+      });
+      setReportStatus(report, 'fail', 'artifact-redaction-failed');
+    }
+    rewriteStatusArtifacts(report, artifactLocation);
+    writeReportArtifacts(report, options);
+    const finalRedactionCheck = scanGeneratedArtifacts(report, artifactLocation);
+    if (finalRedactionCheck.status !== 'pass') {
+      scrubRedactionFindings(report, artifactLocation, finalRedactionCheck.findings);
+      const safeReport = writeMinimalRedactionFailureArtifacts(report, options);
+      const finalCheckPath = writeJsonArtifact(safeReport, artifactLocation, 'diagnostics/redaction-check.json', {
+        ...finalRedactionCheck,
+        status: 'fail',
+        generatedAt: nowIso()
+      });
+      if (finalCheckPath) {
+        safeReport.artifacts = {
+          ...(safeReport.artifacts || {}),
+          redactionCheck: finalCheckPath
+        };
+      }
+      return safeReport;
+    }
     return report;
   } catch (error) {
     delete report.artifacts;
@@ -1778,6 +2295,7 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
     if (artifactLocation && !artifactLocation.ok) return artifactLocation.report;
 
     const liveLog = [];
+    let lastBrowserResult = null;
     const event = (phase, status, label, details = {}) => {
       liveLog.push({
         recordType: 'recursion.liveSmokeEvent',
@@ -1913,6 +2431,7 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
             generationRequested,
             reasonerRequested
           });
+          lastBrowserResult = browserResult;
           report.browser = browserResult;
           if (browserResult.artifacts && Object.keys(browserResult.artifacts).length > 0) {
             report.artifacts = { ...(report.artifacts || {}), ...browserResult.artifacts };
@@ -2029,6 +2548,23 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
         : 'Inspect the live smoke runtime failure and rerun after the environment issue is corrected.';
     } finally {
       if (artifactLocation?.ok) {
+        if (lastBrowserResult) {
+          const artifactStatusReport = finalizeReport(report);
+          const promptMetadataPath = writeJsonArtifact(
+            artifactStatusReport,
+            artifactLocation,
+            'prompt/latest-packet-metadata.json',
+            promptMetadataFromBrowserResult(artifactStatusReport, lastBrowserResult)
+          );
+          if (promptMetadataPath) report.artifacts = { ...(report.artifacts || {}), promptMetadata: promptMetadataPath };
+          const activityPath = writeJsonArtifact(
+            artifactStatusReport,
+            artifactLocation,
+            'activity/latest-run.json',
+            activityLatestRunFromReport(artifactStatusReport, liveLog, lastBrowserResult)
+          );
+          if (activityPath) report.artifacts = { ...(report.artifacts || {}), activityLatestRun: activityPath };
+        }
         const liveLogPath = writeTextArtifact(
           report,
           artifactLocation,

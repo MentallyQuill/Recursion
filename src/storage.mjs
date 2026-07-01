@@ -2,6 +2,8 @@ import { cloneJson, makeId, nowIso, redact, safeId } from './core.mjs';
 
 const RECURSION_VERSION = '0.1.0-pre-alpha.1';
 const MAX_JOURNAL_ENTRIES = 500;
+const DEFAULT_MAX_SCENE_CACHES_PER_CHAT = 3;
+const DEFAULT_MAX_SCENE_CACHES_TOTAL = 24;
 const SCENE_CACHE_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
 const RUN_JOURNAL_KEY_PATTERN = /^recursion-run-journal-[A-Za-z0-9_.-]+\.v1\.json$/;
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
@@ -301,6 +303,12 @@ function normalizeMaxEntries(value) {
   return Number.isFinite(numeric) ? Math.max(1, Math.min(MAX_JOURNAL_ENTRIES, numeric)) : 1;
 }
 
+function normalizeRetentionLimit(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const numeric = Math.floor(Number(value));
+  return Number.isFinite(numeric) && numeric >= 0 ? Math.min(500, numeric) : fallback;
+}
+
 function normalizeNextIndex(value, fallback) {
   const numeric = Math.floor(Number(value));
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
@@ -579,6 +587,70 @@ function cleanupJournalEvents(repaired, pruned) {
   return events;
 }
 
+function protectedSceneKeySet(options = {}) {
+  const protectedKeys = new Set();
+  const source = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
+  for (const key of Array.isArray(source.protectedKeys) ? source.protectedKeys : []) {
+    if (typeof key === 'string' && SCENE_CACHE_KEY_PATTERN.test(key)) protectedKeys.add(key);
+  }
+  for (const scene of Array.isArray(source.protectedScenes) ? source.protectedScenes : []) {
+    if (!scene || typeof scene !== 'object' || Array.isArray(scene)) continue;
+    protectedKeys.add(sceneCacheKey(scene.chatKey, scene.sceneKey));
+  }
+  if (source.activeScene && typeof source.activeScene === 'object' && !Array.isArray(source.activeScene)) {
+    protectedKeys.add(sceneCacheKey(source.activeScene.chatKey, source.activeScene.sceneKey));
+  }
+  return protectedKeys;
+}
+
+function sortSceneRecordsNewestFirst(left, right) {
+  const rightTime = Date.parse(right.updatedAt) || 0;
+  const leftTime = Date.parse(left.updatedAt) || 0;
+  if (rightTime !== leftTime) return rightTime - leftTime;
+  return String(left.key).localeCompare(String(right.key));
+}
+
+function plannedSceneCachePrunes(records, { maxPerChat, maxTotal, protectedKeys }) {
+  const pruned = new Map();
+  const sceneRecords = records.filter((record) => record?.kind === 'sceneCache' && SCENE_CACHE_KEY_PATTERN.test(record.key));
+  const byChat = new Map();
+  for (const record of sceneRecords) {
+    const chatKey = safeIdentifier(record.chatKey || 'chat', 'chat');
+    if (!byChat.has(chatKey)) byChat.set(chatKey, []);
+    byChat.get(chatKey).push(record);
+  }
+
+  for (const group of byChat.values()) {
+    group.sort(sortSceneRecordsNewestFirst);
+    const protectedInGroup = group.filter((record) => protectedKeys.has(record.key)).length;
+    let remainingUnprotected = Math.max(0, maxPerChat - protectedInGroup);
+    for (const record of group) {
+      if (protectedKeys.has(record.key)) continue;
+      if (remainingUnprotected > 0) {
+        remainingUnprotected -= 1;
+        continue;
+      }
+      pruned.set(record.key, { record, reason: 'per-chat-retention-limit' });
+    }
+  }
+
+  const kept = sceneRecords
+    .filter((record) => !pruned.has(record.key))
+    .sort(sortSceneRecordsNewestFirst);
+  const protectedTotal = kept.filter((record) => protectedKeys.has(record.key)).length;
+  let remainingUnprotectedTotal = Math.max(0, maxTotal - protectedTotal);
+  for (const record of kept) {
+    if (protectedKeys.has(record.key)) continue;
+    if (remainingUnprotectedTotal > 0) {
+      remainingUnprotectedTotal -= 1;
+      continue;
+    }
+    pruned.set(record.key, { record, reason: 'total-retention-limit' });
+  }
+
+  return [...pruned.values()];
+}
+
 function reportActivity(activity, event) {
   try {
     const result = activity?.stage?.(event);
@@ -702,6 +774,76 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
     };
   }
 
+  async function pruneSceneCaches(options = {}) {
+    const source = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
+    const repair = await repairIndex();
+    const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
+    const protectedKeys = protectedSceneKeySet(source);
+    const plannedPrunes = plannedSceneCachePrunes(Object.values(index.records), {
+      maxPerChat: normalizeRetentionLimit(source.maxPerChat, DEFAULT_MAX_SCENE_CACHES_PER_CHAT),
+      maxTotal: normalizeRetentionLimit(source.maxTotal, DEFAULT_MAX_SCENE_CACHES_TOTAL),
+      protectedKeys
+    });
+    const pruned = [];
+    const skipped = [];
+    for (const { record, reason } of plannedPrunes) {
+      const read = await readRepairRecord(record.key);
+      if (!read.ok) {
+        skipped.push(repairDiagnostic('scene-cache-retained', {
+          kind: 'sceneCache',
+          chatKey: record.chatKey,
+          reason: 'read-failed'
+        }));
+        continue;
+      }
+      const validRecord = indexRecordFromStoredRecord(record.key, read.value);
+      if (!validRecord || validRecord.kind !== 'sceneCache') {
+        skipped.push(repairDiagnostic('scene-cache-retained', {
+          kind: 'sceneCache',
+          chatKey: record.chatKey,
+          reason: 'invalid-record'
+        }));
+        continue;
+      }
+      try {
+        const deleted = await storage.deleteJson(record.key);
+        if (deleted?.ok === false) {
+          skipped.push(repairDiagnostic('scene-cache-retained', {
+            kind: 'sceneCache',
+            chatKey: record.chatKey,
+            reason: 'delete-failed'
+          }));
+          continue;
+        }
+        delete index.records[record.key];
+        pruned.push(repairDiagnostic('scene-cache-deleted', {
+          kind: 'sceneCache',
+          chatKey: record.chatKey,
+          reason
+        }));
+      } catch {
+        skipped.push(repairDiagnostic('scene-cache-retained', {
+          kind: 'sceneCache',
+          chatKey: record.chatKey,
+          reason: 'delete-failed'
+        }));
+      }
+    }
+    if (pruned.length > 0) {
+      index.updatedAt = nowIso();
+      await storage.writeJson(SYSTEM_INDEX_KEY, index);
+    }
+    return {
+      ok: true,
+      repaired: repair.repaired,
+      pruned,
+      skipped: [...repair.skipped, ...skipped],
+      keptCount: Object.values(index.records).filter((record) => record.kind === 'sceneCache').length,
+      deletedCount: pruned.length,
+      journalEvents: [...repair.journalEvents, ...cleanupJournalEvents([], pruned)]
+    };
+  }
+
   async function loadSceneCache(chatKey, sceneKey) {
     const key = sceneCacheKey(chatKey, sceneKey);
     const existing = await storage.readJson(key);
@@ -799,6 +941,7 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
     loadRunJournal,
     appendJournal,
     repairIndex,
+    pruneSceneCaches,
     async clearSceneCache(chatKey, sceneKey) {
       const key = sceneCacheKey(chatKey, sceneKey);
       await storage.deleteJson(key);

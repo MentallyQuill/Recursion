@@ -351,7 +351,7 @@ Cleanup responsibilities:
 - remove index entries for missing records;
 - add index entries for valid orphaned Recursion records;
 - mark corrupt records invalid and exclude them from runtime use;
-- prune scene caches beyond the configured per-chat and total caps;
+- prune scene caches beyond the configured per-chat and total caps through an explicit retention pass that protects the active scene;
 - prune run journals beyond count and age caps;
 - remove records with unsupported schema versions during pre-alpha resets;
 - report cleanup actions through sanitized journal events and UI status.

@@ -876,6 +876,256 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
 
 {
   const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  const writeSceneCache = async (chatKey, sceneKey, updatedAt) => {
+    const key = sceneCacheKey(chatKey, sceneKey);
+    await adapter.writeJson(key, {
+      recordType: 'recursion.sceneCache',
+      schemaVersion: 1,
+      createdAt: updatedAt,
+      updatedAt,
+      recursionVersion: '0.1.0-pre-alpha.1',
+      chatKey: chatKey.replace(/\s+/g, '-'),
+      sceneKey: sceneKey.replace(/\s+/g, '-'),
+      cacheState: 'active',
+      cards: []
+    });
+    return key;
+  };
+  const protectedOld = await writeSceneCache('Prune Chat A', 'Scene 1', '2026-06-30T00:00:00.000Z');
+  const prunedMiddle = await writeSceneCache('Prune Chat A', 'Scene 2', '2026-06-30T01:00:00.000Z');
+  const keptNewest = await writeSceneCache('Prune Chat A', 'Scene 3', '2026-06-30T02:00:00.000Z');
+  const prunedTotal = await writeSceneCache('Prune Chat B', 'Scene 1', '2026-06-30T00:30:00.000Z');
+  const keptB = await writeSceneCache('Prune Chat B', 'Scene 2', '2026-06-30T03:00:00.000Z');
+  const keptC = await writeSceneCache('Prune Chat C', 'Scene 1', '2026-06-30T04:00:00.000Z');
+  const nonRecursionKey = 'other-extension-prune-state.v1.json';
+  await adapter.writeJson(nonRecursionKey, {
+    owner: 'other-extension',
+    apiKey: 'other-extension-secret'
+  });
+
+  const result = await repo.pruneSceneCaches({
+    maxPerChat: 2,
+    maxTotal: 4,
+    protectedScenes: [{ chatKey: 'Prune Chat A', sceneKey: 'Scene 1' }]
+  });
+  const dump = adapter.dump();
+  const index = await repo.readIndex();
+  const serializedResult = JSON.stringify(result);
+
+  assertEqual(result.ok, true, 'pruneSceneCaches returns ok');
+  assert(dump[protectedOld], 'pruneSceneCaches keeps protected active scene even when old');
+  assert(!dump[prunedMiddle], 'pruneSceneCaches deletes extra per-chat scene cache');
+  assert(dump[keptNewest], 'pruneSceneCaches keeps newest scene for protected chat');
+  assert(!dump[prunedTotal], 'pruneSceneCaches deletes oldest unprotected scene for total cap');
+  assert(dump[keptB], 'pruneSceneCaches keeps newer cache in second chat');
+  assert(dump[keptC], 'pruneSceneCaches keeps newest total cache');
+  assertEqual(dump[nonRecursionKey].owner, 'other-extension', 'pruneSceneCaches never touches non-Recursion records');
+  assert(!index.records[prunedMiddle], 'pruneSceneCaches removes per-chat pruned key from index');
+  assert(!index.records[prunedTotal], 'pruneSceneCaches removes total-pruned key from index');
+  assert(index.records[protectedOld], 'pruneSceneCaches keeps protected key indexed');
+  assertEqual(result.pruned.length, 2, 'pruneSceneCaches reports each deleted scene cache');
+  assert(result.pruned.every((entry) => entry.kind === 'sceneCache'), 'pruneSceneCaches reports scene cache kind');
+  assert(result.pruned.some((entry) => entry.reason === 'per-chat-retention-limit'), 'pruneSceneCaches reports per-chat limit');
+  assert(result.pruned.some((entry) => entry.reason === 'total-retention-limit'), 'pruneSceneCaches reports total limit');
+  assert(result.journalEvents.some((entry) => entry.event === 'storage.pruned'), 'pruneSceneCaches returns storage.pruned diagnostic');
+  assertNoSecret(result, 'pruneSceneCaches diagnostics redact secrets');
+  assert(!serializedResult.includes(nonRecursionKey), 'pruneSceneCaches diagnostics omit non-Recursion record keys');
+}
+
+{
+  const files = new Map();
+  const deleted = [];
+  const unreadableKey = sceneCacheKey('Unreadable Prune Chat', 'Old Scene');
+  const storage = {
+    async readJson(key) {
+      if (key === unreadableKey) throw new Error('read failed with sk-unreadable-secret');
+      return files.has(key) ? files.get(key) : null;
+    },
+    async writeJson(key, value) {
+      files.set(key, value);
+      return { ok: true, key };
+    },
+    async deleteJson(key) {
+      deleted.push(key);
+      files.delete(key);
+      return { ok: true, key };
+    }
+  };
+  await storage.writeJson(SYSTEM_INDEX_KEY, {
+    records: {
+      [unreadableKey]: {
+        key: unreadableKey,
+        kind: 'sceneCache',
+        chatKey: 'Unreadable Prune Chat',
+        updatedAt: '2026-06-30T00:00:00.000Z'
+      }
+    }
+  });
+  const repo = createStorageRepository({ storage });
+  const result = await repo.pruneSceneCaches({ maxPerChat: 0, maxTotal: 0 });
+  const index = await repo.readIndex();
+  const serializedResult = JSON.stringify(result);
+
+  assert(!deleted.includes(unreadableKey), 'pruneSceneCaches does not delete unreadable indexed scene cache');
+  assert(index.records[unreadableKey], 'pruneSceneCaches preserves unreadable index entry');
+  assert(result.skipped.some((entry) => entry.reason === 'read-failed'), 'pruneSceneCaches reports unreadable record as skipped');
+  assert(!serializedResult.includes('sk-unreadable-secret'), 'pruneSceneCaches unreadable diagnostics redact read failure secrets');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  const activeOld = sceneCacheKey('Active Prune Chat', 'Old Active');
+  const newer = sceneCacheKey('Active Prune Chat', 'Newer Scene');
+  await adapter.writeJson(activeOld, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 1,
+    createdAt: '2026-06-30T00:00:00.000Z',
+    updatedAt: '2026-06-30T00:00:00.000Z',
+    recursionVersion: '0.1.0-pre-alpha.1',
+    chatKey: 'Active-Prune-Chat',
+    sceneKey: 'Old-Active',
+    cacheState: 'active',
+    cards: []
+  });
+  await adapter.writeJson(newer, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 1,
+    createdAt: '2026-06-30T01:00:00.000Z',
+    updatedAt: '2026-06-30T01:00:00.000Z',
+    recursionVersion: '0.1.0-pre-alpha.1',
+    chatKey: 'Active-Prune-Chat',
+    sceneKey: 'Newer-Scene',
+    cacheState: 'active',
+    cards: []
+  });
+  const result = await repo.pruneSceneCaches({
+    maxPerChat: 1,
+    maxTotal: 1,
+    activeScene: { chatKey: 'Active Prune Chat', sceneKey: 'Old Active' }
+  });
+  const dump = adapter.dump();
+  const index = await repo.readIndex();
+
+  assert(dump[activeOld], 'pruneSceneCaches keeps activeScene even when older than alternatives');
+  assert(!dump[newer], 'pruneSceneCaches prunes unprotected newer scene when activeScene consumes cap');
+  assert(index.records[activeOld], 'pruneSceneCaches keeps activeScene indexed');
+  assert(!index.records[newer], 'pruneSceneCaches removes pruned activeScene sibling from index');
+  assertEqual(result.pruned.length, 1, 'activeScene prune reports one deleted sibling');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  const safeOne = sceneCacheKey('Malformed Limit Chat', 'Safe One');
+  const safeTwo = sceneCacheKey('Malformed Limit Chat', 'Safe Two');
+  await adapter.writeJson(safeOne, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 1,
+    createdAt: '2026-06-30T00:00:00.000Z',
+    updatedAt: '2026-06-30T00:00:00.000Z',
+    recursionVersion: '0.1.0-pre-alpha.1',
+    chatKey: 'Malformed-Limit-Chat',
+    sceneKey: 'Safe-One',
+    cacheState: 'active',
+    cards: []
+  });
+  await adapter.writeJson(safeTwo, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 1,
+    createdAt: '2026-06-30T01:00:00.000Z',
+    updatedAt: '2026-06-30T01:00:00.000Z',
+    recursionVersion: '0.1.0-pre-alpha.1',
+    chatKey: 'Malformed-Limit-Chat',
+    sceneKey: 'Safe-Two',
+    cacheState: 'active',
+    cards: []
+  });
+  const nullEmpty = await repo.pruneSceneCaches({ maxPerChat: null, maxTotal: '' });
+  const negative = await repo.pruneSceneCaches({ maxPerChat: -1, maxTotal: -5 });
+  const dump = adapter.dump();
+  const index = await repo.readIndex();
+
+  assertEqual(nullEmpty.pruned.length, 0, 'null and empty retention limits fall back instead of pruning');
+  assertEqual(negative.pruned.length, 0, 'negative retention limits fall back instead of pruning');
+  assert(dump[safeOne], 'malformed limits keep first scene cache');
+  assert(dump[safeTwo], 'malformed limits keep second scene cache');
+  assert(index.records[safeOne], 'malformed limits keep first index entry');
+  assert(index.records[safeTwo], 'malformed limits keep second index entry');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  const pruned = sceneCacheKey('Explicit Zero Chat', 'Only Scene');
+  await adapter.writeJson(pruned, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 1,
+    createdAt: '2026-06-30T00:00:00.000Z',
+    updatedAt: '2026-06-30T00:00:00.000Z',
+    recursionVersion: '0.1.0-pre-alpha.1',
+    chatKey: 'Explicit-Zero-Chat',
+    sceneKey: 'Only-Scene',
+    cacheState: 'active',
+    cards: []
+  });
+  const result = await repo.pruneSceneCaches({ maxPerChat: 0, maxTotal: 0 });
+  const dump = adapter.dump();
+
+  assertEqual(result.pruned.length, 1, 'explicit zero retention limit prunes unprotected scene cache');
+  assert(!dump[pruned], 'explicit zero retention limit deletes unprotected scene cache');
+}
+
+{
+  const files = new Map();
+  const failedDeleteKey = sceneCacheKey('Delete Fail Chat', 'Old Scene');
+  const storage = {
+    async readJson(key) {
+      return files.has(key) ? files.get(key) : null;
+    },
+    async writeJson(key, value) {
+      files.set(key, value);
+      return { ok: true, key };
+    },
+    async deleteJson(key) {
+      return { ok: false, key, error: { message: 'delete failed with sk-delete-secret' } };
+    }
+  };
+  await storage.writeJson(failedDeleteKey, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 1,
+    createdAt: '2026-06-30T00:00:00.000Z',
+    updatedAt: '2026-06-30T00:00:00.000Z',
+    recursionVersion: '0.1.0-pre-alpha.1',
+    chatKey: 'Delete-Fail-Chat',
+    sceneKey: 'Old-Scene',
+    cacheState: 'active',
+    cards: []
+  });
+  await storage.writeJson(SYSTEM_INDEX_KEY, {
+    records: {
+      [failedDeleteKey]: {
+        key: failedDeleteKey,
+        kind: 'sceneCache',
+        chatKey: 'Delete Fail Chat',
+        updatedAt: '2026-06-30T00:00:00.000Z'
+      }
+    }
+  });
+  const repo = createStorageRepository({ storage });
+  const result = await repo.pruneSceneCaches({ maxPerChat: 0, maxTotal: 0 });
+  const index = await repo.readIndex();
+  const serializedResult = JSON.stringify(result);
+
+  assertEqual(result.pruned.length, 0, 'failed delete is not reported as pruned');
+  assert(result.skipped.some((entry) => entry.reason === 'delete-failed'), 'failed delete is reported as skipped');
+  assert(index.records[failedDeleteKey], 'failed delete keeps index entry');
+  assert(!serializedResult.includes('sk-delete-secret'), 'failed delete diagnostics redact adapter error text');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
   const repo = createStorageRepository({ storage: adapter, maxJournalEntries: 999999 });
   await adapter.writeJson(runJournalKey('Upper Bound Chat'), {
     entries: Array.from({ length: 510 }, (_, index) => ({ id: `entry-${index}`, summary: `entry ${index}` }))

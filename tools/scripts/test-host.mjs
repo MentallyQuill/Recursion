@@ -265,6 +265,56 @@ const quietProfileResult = await createGenerationRouter({ client: quietProfileHo
 assertEqual(quietProfileResult.ok, false, 'host profile route fails when only quiet generation is available');
 assertEqual(quietProfileResult.error.code, 'RECURSION_HOST_PROFILE_UNSUPPORTED', 'host profile route reports unsupported API instead of current-model fallback');
 
+const connectionProfileCalls = [];
+const connectionProfileSignal = new AbortController().signal;
+const connectionProfileHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'connection-profile-chat',
+    chat: [],
+    ConnectionManagerRequestService: {
+      async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
+        connectionProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
+        return { text: '{"schema":"recursion.host.connectionProfile","ok":true}' };
+      }
+    }
+  }),
+  settingsRoot: {
+    recursion: {
+      providers: {
+        utility: {
+          source: 'host-connection-profile',
+          hostConnectionProfileId: 'utility-profile-service',
+          maxTokens: 512,
+          temperature: 0.15,
+          topP: 0.7
+        }
+      }
+    }
+  }
+});
+const connectionProfileResult = await createGenerationRouter({ client: connectionProfileHost.providerClient }).generate('utilityArbiter', {
+  prompt: 'Use profile service.',
+  systemPrompt: 'System profile service.',
+  signal: connectionProfileSignal
+});
+assertEqual(connectionProfileResult.ok, true, 'host connection profile routes through ConnectionManagerRequestService when available');
+assertEqual(connectionProfileCalls[0].profileId, 'utility-profile-service', 'connection profile service receives profile id');
+assertDeepEqual(
+  connectionProfileCalls[0].messages,
+  [
+    { role: 'system', content: 'System profile service.' },
+    { role: 'user', content: 'Use profile service.' }
+  ],
+  'connection profile service receives system and user messages'
+);
+assertEqual(connectionProfileCalls[0].maxTokens, 512, 'connection profile service receives configured max tokens');
+assertEqual(connectionProfileCalls[0].requestOptions.stream, false, 'connection profile service disables streaming for structured calls');
+assertEqual(connectionProfileCalls[0].requestOptions.extractData, true, 'connection profile service requests extracted data');
+assertEqual(connectionProfileCalls[0].parameters.temperature, 0.15, 'connection profile service receives configured temperature');
+assertEqual(connectionProfileCalls[0].parameters.top_p, 0.7, 'connection profile service receives configured top p');
+assert(typeof connectionProfileCalls[0].parameters.signal?.addEventListener === 'function', 'connection profile service receives abort-capable provider signal');
+assertEqual(connectionProfileCalls[0].parameters.signal.aborted, false, 'connection profile service receives active provider signal');
+
 const stableSceneMessages = [{ mesid: 1, is_user: true, mes: 'First turn in the same scene.' }];
 const stableSceneHost = createSillyTavernHost({
   contextFactory: () => ({

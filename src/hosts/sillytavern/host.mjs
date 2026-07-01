@@ -181,6 +181,74 @@ function normalizeGenerationResponse(response) {
   return { text: stringValue(response) };
 }
 
+function profileGenerationRequested(request = {}) {
+  return request.providerSource === 'host-connection-profile'
+    || Boolean(request.hostConnectionProfileId)
+    || Boolean(request.providerConfig?.hostConnectionProfileId);
+}
+
+function requestMaxTokens(request = {}) {
+  return request.responseLength ?? request.maxTokens ?? request.providerConfig?.maxTokens;
+}
+
+function requestTemperature(request = {}) {
+  return request.temperature ?? request.providerConfig?.temperature;
+}
+
+function requestTopP(request = {}) {
+  return request.topP ?? request.providerConfig?.topP;
+}
+
+function requestMessages(request = {}) {
+  if (Array.isArray(request.messages) && request.messages.length > 0) {
+    return request.messages
+      .map((message) => ({
+        role: ['system', 'assistant', 'user'].includes(stringValue(message?.role).trim())
+          ? stringValue(message.role).trim()
+          : 'user',
+        content: stringValue(message?.content ?? message?.text ?? message?.value)
+      }))
+      .filter((message) => message.content.trim());
+  }
+  return [
+    ...(stringValue(request.systemPrompt).trim() ? [{ role: 'system', content: stringValue(request.systemPrompt) }] : []),
+    { role: 'user', content: stringValue(request.prompt) }
+  ];
+}
+
+function connectionProfileService(context) {
+  const service = context.ConnectionManagerRequestService || globalThis.ConnectionManagerRequestService;
+  return typeof service?.sendRequest === 'function' ? service : null;
+}
+
+async function sendViaConnectionProfile(context, request = {}) {
+  const profileId = stringValue(request.hostConnectionProfileId ?? request.providerConfig?.hostConnectionProfileId).trim();
+  if (!profileId) {
+    const error = new Error('Host connection profile id is missing.');
+    error.code = 'RECURSION_HOST_PROFILE_MISSING';
+    error.retryable = false;
+    throw error;
+  }
+  const service = connectionProfileService(context);
+  if (!service) throw hostProfileUnsupportedError();
+  return normalizeGenerationResponse(await service.sendRequest(
+    profileId,
+    requestMessages(request),
+    requestMaxTokens(request),
+    {
+      stream: false,
+      extractData: true,
+      includePreset: true,
+      includeInstruct: true
+    },
+    {
+      temperature: requestTemperature(request),
+      top_p: requestTopP(request),
+      signal: request.signal
+    }
+  ));
+}
+
 function hostProfileUnsupportedError() {
   const error = new Error('Host connection profile generation requires the SillyTavern raw generation API.');
   error.code = 'RECURSION_HOST_PROFILE_UNSUPPORTED';
@@ -287,13 +355,16 @@ export function createSillyTavernHost({
   const generation = {
     async generate(request = {}) {
       const context = currentContext(contextFactory);
+      if (profileGenerationRequested(request) && connectionProfileService(context)) {
+        return sendViaConnectionProfile(context, request);
+      }
       if (typeof context.generateRaw === 'function') {
         return normalizeGenerationResponse(await context.generateRaw({
           prompt: stringValue(request.prompt),
           systemPrompt: request.systemPrompt,
-          responseLength: request.responseLength ?? request.maxTokens ?? request.providerConfig?.maxTokens,
-          temperature: request.temperature ?? request.providerConfig?.temperature,
-          topP: request.topP ?? request.providerConfig?.topP,
+          responseLength: requestMaxTokens(request),
+          temperature: requestTemperature(request),
+          topP: requestTopP(request),
           providerSource: request.providerSource,
           hostConnectionProfileId: request.hostConnectionProfileId ?? request.providerConfig?.hostConnectionProfileId,
           jsonSchema: request.jsonSchema,
@@ -301,7 +372,7 @@ export function createSillyTavernHost({
         }));
       }
       if (typeof context.generateQuietPrompt === 'function') {
-        if (request.providerSource === 'host-connection-profile' || request.hostConnectionProfileId || request.providerConfig?.hostConnectionProfileId) {
+        if (profileGenerationRequested(request)) {
           throw hostProfileUnsupportedError();
         }
         return normalizeGenerationResponse(await context.generateQuietPrompt(stringValue(request.prompt)));

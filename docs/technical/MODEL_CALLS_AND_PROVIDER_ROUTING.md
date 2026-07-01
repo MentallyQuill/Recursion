@@ -19,7 +19,7 @@ Each lane can resolve to:
 - `host-connection-profile`
 - `openai-compatible`
 
-Host current model and host connection profiles route through SillyTavern generation APIs. OpenAI-compatible endpoints use `fetch` against `/chat/completions` with JSON-object response format.
+Host current model routes through SillyTavern raw generation when available, with quiet prompt as a current-model fallback. Host connection profiles route through `ConnectionManagerRequestService.sendRequest` when that SillyTavern service is available. If a profile is selected but only quiet prompt generation is available, Recursion reports the profile route as unsupported instead of silently falling back to the current model. OpenAI-compatible endpoints use `fetch` against `/chat/completions` with JSON-object response format.
 
 Direct endpoint API keys are session-only secrets kept in the in-memory secret store. Settings store only `sessionApiKeyPresent`.
 

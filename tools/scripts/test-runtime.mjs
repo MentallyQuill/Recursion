@@ -239,6 +239,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assert(!JSON.stringify(journal).includes('provider-change-model'), 'provider invalidation journal does not persist raw model patch');
   assert(!JSON.stringify(journal).includes('provider-change.test'), 'provider invalidation journal does not persist raw endpoint patch');
   assertNoSecretText(journal, 'provider cache invalidation journal');
+  assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'provider-changed'), 'provider update records prompt clear journal');
+  assertNoSecretText(journal.entries.find((entry) => entry.event === 'prompt.cleared'), 'provider prompt clear journal');
 
   const settingsUpdate = await runtime.updateSettings({ reasonerUse: 'always' });
   assertEqual(settingsUpdate.ok, true, 'settings update still succeeds after cache invalidation');
@@ -589,15 +591,52 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(view.activity.label, 'Observe mode: hand preview ready. No prompt injected.', 'observe activity label');
   assertEqual(view.activeRunId, null, 'active run cleared after observe');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
-  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected'], 'observe only journals hand selection');
+  assertDeepEqual(journal.entries.map((entry) => entry.event), ['prompt.cleared', 'hand.selected'], 'observe only journals prompt clear before hand selection');
+  const promptCleared = journal.entries.find((entry) => entry.event === 'prompt.cleared');
   const handSelected = journal.entries.find((entry) => entry.event === 'hand.selected');
+  assert(promptCleared, 'observe mode appends prompt clear journal');
   assert(handSelected, 'observe mode appends hand selection journal');
   assert(!journal.entries.some((entry) => entry.event === 'prompt.installed'), 'observe mode does not append install journal');
+  assertEqual(promptCleared.severity, 'info', 'observe prompt clear journal is informational on success');
+  assertEqual(promptCleared.details?.status, 'cleared', 'observe prompt clear journal records cleared status');
+  assertEqual(promptCleared.sceneKey, view.lastSnapshot.sceneKey, 'observe prompt clear journal records scene key');
   assertEqual(handSelected.details?.selectedCount, view.lastHand.cards.length, 'observe hand journal records selected count');
   assertEqual(handSelected.details?.omittedCount, view.lastHand.omitted.length, 'observe hand journal records omitted count');
+  assert(!JSON.stringify(promptCleared).includes(view.lastPacket.sections.sceneBrief), 'observe prompt clear journal omits prompt sections');
   assert(!JSON.stringify(handSelected).includes(view.lastHand.cards[0].promptText), 'observe hand journal omits prompt text');
   assert(!JSON.stringify(handSelected).includes('inspectorNotes'), 'observe hand journal omits inspector notes');
+  assertNoSecretText(promptCleared, 'observe prompt clear journal');
   assertNoSecretText(handSelected, 'observe hand journal');
+}
+
+{
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'observe', reasonerUse: 'off' },
+    hostPrompt: {
+      async clear() {
+        const error = new Error('clear failed near Scene brief: do not persist this prompt section or transcript text with Bearer clear-token and sk-clear-runtime');
+        error.code = 'SCENE_BRIEF_CODE_DO_NOT_PERSIST_TRANSCRIPT_TEXT';
+        throw error;
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({
+    userMessage: 'Failed observe clear should keep journal terse.'
+  });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'observe clear failure remains fail-soft');
+  const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
+  const promptCleared = journal.entries.find((entry) => entry.event === 'prompt.cleared');
+  assert(promptCleared, 'observe clear failure appends prompt clear journal');
+  assertEqual(promptCleared.severity, 'warn', 'failed prompt clear journal is warning severity');
+  assertEqual(promptCleared.summary, 'Prompt clear failed', 'failed prompt clear journal uses stable summary');
+  assertEqual(promptCleared.details?.status, 'failed', 'failed prompt clear journal records failed status');
+  assertEqual(promptCleared.details?.code, 'RECURSION_PROMPT_CLEAR_FAILED', 'failed prompt clear journal records stable code');
+  assertEqual(promptCleared.details?.message, undefined, 'failed prompt clear journal omits host error text');
+  assert(!JSON.stringify(promptCleared).includes('do not persist this prompt section'), 'failed prompt clear journal omits prompt-adjacent error text');
+  assert(!JSON.stringify(promptCleared).includes('transcript text'), 'failed prompt clear journal omits transcript-like error text');
+  assert(!JSON.stringify(promptCleared).includes('SCENE_BRIEF_CODE'), 'failed prompt clear journal omits host-controlled error code text');
+  assertNoSecretText(promptCleared, 'failed prompt clear journal');
 }
 
 {
@@ -654,7 +693,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const staleJournal = await storage.loadRunJournal('observe-a');
   const freshJournal = await storage.loadRunJournal('observe-b');
   assertEqual(staleJournal.entries.length, 0, 'superseded observe run does not append hand journal');
-  assertDeepEqual(freshJournal.entries.map((entry) => entry.event), ['hand.selected'], 'only final observe run records one hand journal');
+  assertDeepEqual(freshJournal.entries.map((entry) => entry.event), ['prompt.cleared', 'hand.selected'], 'only final observe run records one prompt clear and hand journal');
 }
 
 {

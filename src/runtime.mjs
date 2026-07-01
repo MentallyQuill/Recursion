@@ -933,6 +933,31 @@ function clearWarningDetails(clear) {
   };
 }
 
+function clearJournalSummary(clear) {
+  if (clear?.ok !== false) return 'Prompt cleared';
+  return 'Prompt clear failed';
+}
+
+function clearJournalDetails(clear, reason) {
+  const ok = clear?.ok !== false;
+  const details = {
+    status: ok ? 'cleared' : 'failed'
+  };
+  const safeReason = safeText(reason || '', 120);
+  if (safeReason) details.reason = safeReason;
+  if (clear?.cleared !== undefined) details.cleared = Boolean(clear.cleared);
+  if (!ok) {
+    details.code = promptClearJournalCode(clear);
+  }
+  return details;
+}
+
+function promptClearJournalCode(clear) {
+  const code = safeText(clear?.error?.code || '', 120);
+  if (code === 'RECURSION_PROMPT_CLEAR_UNAVAILABLE') return code;
+  return 'RECURSION_PROMPT_CLEAR_FAILED';
+}
+
 function signalAwareGenerationRouter(router, signal, runId) {
   if (!router || !signal) return router;
   return {
@@ -1043,7 +1068,10 @@ export function createRecursionRuntime({
     return activePromptMutationId === runId && safeCurrentActivity(activity)?.runId === runId;
   }
 
-  async function clearPromptAfterSupersede({ successLabel = 'Recursion prompt cleared after settings change.' } = {}) {
+  async function clearPromptAfterSupersede({
+    successLabel = 'Recursion prompt cleared after settings change.',
+    journalReason = 'settings-changed'
+  } = {}) {
     const runId = makeId('settings');
     activePromptMutationId = runId;
     startRuntimeActivity({
@@ -1052,7 +1080,11 @@ export function createRecursionRuntime({
       label: 'Clearing Recursion prompt...',
       chips: ['Prompt']
     });
-    const clear = await runPromptMutationSection(null, () => clearPromptBestEffort(host));
+    const clear = await runPromptMutationSection(null, async () => {
+      const result = await clearPromptBestEffort(host);
+      await appendPromptClearedJournal(runId, promptClearContext(), result, journalReason);
+      return result;
+    });
     if (!ownsPromptMutationActivity(runId)) {
       if (activePromptMutationId === runId) activePromptMutationId = null;
       return clear;
@@ -1085,7 +1117,8 @@ export function createRecursionRuntime({
         const clear = await clearPromptAfterSupersede({
           successLabel: next.mode === 'off'
             ? 'Recursion Off. Prompt cleared.'
-            : 'Recursion prompt cleared after settings change.'
+            : 'Recursion prompt cleared after settings change.',
+          journalReason: 'settings-changed'
         });
         return { ok: clear?.ok !== false, settings: next, clear };
       });
@@ -1103,7 +1136,8 @@ export function createRecursionRuntime({
         changedKeys: Object.keys(asObject(patch))
       });
       const clear = await clearPromptAfterSupersede({
-        successLabel: 'Recursion prompt cleared after provider change.'
+        successLabel: 'Recursion prompt cleared after provider change.',
+        journalReason: 'provider-changed'
       });
       return { ok: clear?.ok !== false, provider, clear };
     });
@@ -1118,7 +1152,8 @@ export function createRecursionRuntime({
         lane: resolvedLane
       });
       const clear = await clearPromptAfterSupersede({
-        successLabel: 'Recursion prompt cleared after provider key change.'
+        successLabel: 'Recursion prompt cleared after provider key change.',
+        journalReason: 'provider-key-cleared'
       });
       return { ok: clear?.ok !== false, provider, clear };
     });
@@ -1375,6 +1410,34 @@ export function createRecursionRuntime({
       reportStorageWarning(runId, 'appendJournal', error);
       return null;
     }
+  }
+
+  function promptClearContext(snapshot = null) {
+    if (snapshot?.chatKey) {
+      return {
+        chatKey: snapshot.chatKey,
+        sceneKey: snapshot.sceneKey
+      };
+    }
+    if (lastSavedSceneCacheRef?.chatKey) {
+      return {
+        chatKey: lastSavedSceneCacheRef.chatKey,
+        sceneKey: lastSavedSceneCacheRef.sceneKey
+      };
+    }
+    return null;
+  }
+
+  async function appendPromptClearedJournal(runId, context, clear, reason) {
+    if (!context?.chatKey) return null;
+    return appendJournalSafe(runId, context.chatKey, {
+      event: 'prompt.cleared',
+      severity: clear?.ok === false ? 'warn' : 'info',
+      summary: clearJournalSummary(clear),
+      runId,
+      sceneKey: context.sceneKey,
+      details: clearJournalDetails(clear, reason)
+    });
   }
 
   async function appendHandSelectedJournal(runId, snapshot, hand, packet) {
@@ -1734,7 +1797,11 @@ export function createRecursionRuntime({
         label: 'Clearing Recursion prompt...',
         chips: ['Prompt']
       });
-      const clear = await runPromptMutationSection(null, () => clearPromptBestEffort(host));
+      const clear = await runPromptMutationSection(null, async () => {
+        const result = await clearPromptBestEffort(host);
+        await appendPromptClearedJournal(clearRunId, promptClearContext(), result, 'off');
+        return result;
+      });
       if (clear?.ok === false) reportClearWarning(clearRunId, clear);
       else safeActivity(activity, 'clear');
       return { ok: true, skipped: true, reason: 'off', clear };
@@ -1789,7 +1856,13 @@ export function createRecursionRuntime({
       }
       const action = planAction(plan);
       if (action === 'skip') {
-        const clear = await runPromptMutationSection(runId, () => clearPromptBestEffort(host));
+        const clear = await runPromptMutationSection(runId, async () => {
+          const result = await clearPromptBestEffort(host);
+          if (result?.superseded) return result;
+          if (!isActiveRun(runId)) return supersededResult(runId);
+          await appendPromptClearedJournal(runId, promptClearContext(sceneSnapshot), result, 'arbiter-skip');
+          return result;
+        });
         if (clear?.superseded) return clear;
         if (!isActiveRun(runId)) return supersededResult(runId);
         if (clear?.ok === false) {
@@ -1822,7 +1895,13 @@ export function createRecursionRuntime({
       const useLocalFallbackCards = !reuseCacheOnly && !cacheCards.length && !providerCards.length;
       const generatedCards = useLocalFallbackCards ? localCards(sceneSnapshot).map(sanitizeGeneratedCard) : [];
       if (action === 'reuse-cache' && !cacheCards.length) {
-        const clear = await runPromptMutationSection(runId, () => clearPromptBestEffort(host));
+        const clear = await runPromptMutationSection(runId, async () => {
+          const result = await clearPromptBestEffort(host);
+          if (result?.superseded) return result;
+          if (!isActiveRun(runId)) return supersededResult(runId);
+          await appendPromptClearedJournal(runId, promptClearContext(sceneSnapshot), result, 'cache-unavailable');
+          return result;
+        });
         if (clear?.superseded) return clear;
         if (!isActiveRun(runId)) return supersededResult(runId);
         if (clear?.ok === false) {
@@ -1915,6 +1994,8 @@ export function createRecursionRuntime({
         const observeResult = await runPromptMutationSection(runId, async () => {
           const clear = await clearPromptBestEffort(host);
           if (clear?.superseded) return clear;
+          if (!isActiveRun(runId)) return supersededResult(runId);
+          await appendPromptClearedJournal(runId, promptClearContext(promptSnapshot), clear, 'observe-preview');
           if (!isActiveRun(runId)) return supersededResult(runId);
           await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
           if (!isActiveRun(runId)) return supersededResult(runId);

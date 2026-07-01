@@ -368,6 +368,23 @@ function markArbiterFallback(plan, reason) {
   };
 }
 
+function markUtilityUnavailable(plan, reason) {
+  return {
+    ...plan,
+    action: 'reuse-cache',
+    cardJobs: [],
+    lifecycle: [],
+    reasonerDecision: {
+      mode: 'skip',
+      reason: 'Utility unavailable',
+      signals: []
+    },
+    diagnostics: mergeDiagnostics(['utility-unavailable']),
+    utilityUnavailable: true,
+    utilityUnavailableReason: safeText(reason || 'utility unavailable', 240)
+  };
+}
+
 function planAction(plan) {
   const action = cleanString(plan?.action, 'compose-brief');
   return PLAN_ACTIONS.has(action) ? action : 'compose-brief';
@@ -1828,7 +1845,9 @@ export function createRecursionRuntime({
   }
 
   async function askUtilityArbiter({ runId, snapshot, settings, fallbackPlan, sceneCache, userMessage, signal }) {
-    if (!generationRouter || typeof generationRouter.generate !== 'function') return fallbackPlan;
+    if (!generationRouter || typeof generationRouter.generate !== 'function') {
+      return markUtilityUnavailable(fallbackPlan, 'utility provider unavailable');
+    }
     stageRuntimeActivity({
       runId,
       phase: 'arbiterPlanning',
@@ -1854,10 +1873,16 @@ export function createRecursionRuntime({
           `Snapshot: ${JSON.stringify(providerSafeSnapshot(snapshot))}`
         ].join('\n\n')
       }, { runId, signal, isCurrent: () => isActiveRun(runId) });
-      if (result?.ok) return mergePlan(fallbackPlan, result.data);
-      return markArbiterFallback(fallbackPlan, result?.error?.message || result?.error?.code || 'utility arbiter returned non-ok result');
+      if (result?.ok) {
+        try {
+          return mergePlan(fallbackPlan, result.data);
+        } catch (error) {
+          return markArbiterFallback(fallbackPlan, error?.message || error);
+        }
+      }
+      return markUtilityUnavailable(fallbackPlan, result?.error?.message || result?.error?.code || 'utility arbiter returned non-ok result');
     } catch (error) {
-      return markArbiterFallback(fallbackPlan, error?.message || error);
+      return markUtilityUnavailable(fallbackPlan, error?.message || error);
     }
   }
 
@@ -2021,10 +2046,12 @@ export function createRecursionRuntime({
           settleRuntimeActivity({
             runId,
             outcome: 'warning',
-            label: 'Recursion skipped: no reusable scene hand.'
+            label: plan.utilityUnavailable
+              ? 'Utility unavailable. Recursion skipped.'
+              : 'Recursion skipped: no reusable scene hand.'
           });
         }
-        return { ok: true, skipped: true, reason: 'cache-unavailable', plan, clear };
+        return { ok: true, skipped: true, reason: plan.utilityUnavailable ? 'utility-unavailable' : 'cache-unavailable', plan, clear };
       }
       const candidateCards = reuseCacheOnly ? cacheCards : [...cacheCards, ...providerCards, ...generatedCards];
       const deck = applyCardPlan(cacheCards, {

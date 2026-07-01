@@ -82,7 +82,7 @@ function createRuntimeHarness({
   settings = {},
   snapshot = null,
   hostPrompt = {},
-  generationRouter = null,
+  generationRouter = undefined,
   activity = createActivityReporter(),
   storage: providedStorage = null
 } = {}) {
@@ -97,6 +97,7 @@ function createRuntimeHarness({
   const storage = providedStorage || createStorageRepository({ storage: adapter });
   const settingsStore = createSettingsStore({ root: {} });
   settingsStore.update(settings);
+  const resolvedGenerationRouter = generationRouter === undefined ? localFallbackCardRouter() : generationRouter;
   const host = {
     async snapshot() {
       calls.snapshot += 1;
@@ -130,8 +131,27 @@ function createRuntimeHarness({
       ...hostPrompt.methods
     }
   };
-  const runtime = createRecursionRuntime({ host, settingsStore, storage, activity, generationRouter });
+  const runtime = createRecursionRuntime({ host, settingsStore, storage, activity, generationRouter: resolvedGenerationRouter });
   return { runtime, calls, installed, cleared, storage, settingsStore, activity, adapter };
+}
+
+function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
+  return {
+    async generate(roleId) {
+      assertEqual(roleId, 'utilityArbiter', 'local fallback card router only handles Utility Arbiter');
+      return {
+        ok: true,
+        data: {
+          schema: UTILITY_ARBITER_SCHEMA,
+          action: 'compose-brief',
+          cardJobs: [],
+          budgets: { targetBriefTokens: 500, maxCards: 6 },
+          reasonerDecision: { mode: 'skip', reason: 'unit local fallback cards' },
+          diagnostics
+        }
+      };
+    }
+  };
 }
 
 async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, label }) {
@@ -177,7 +197,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 
 {
   const { runtime, calls, installed, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' }
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: localFallbackCardRouter()
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'The lamp breaks.' });
   const view = runtime.view();
@@ -225,6 +246,119 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 }
 
 {
+  const { runtime, installed, cleared } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: null
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Utility router missing.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'missing Utility router remains fail-soft');
+  assertEqual(result.skipped, true, 'missing Utility router skips prompt injection');
+  assertEqual(result.reason, 'utility-unavailable', 'missing Utility router returns Utility unavailable reason');
+  assertEqual(installed.length, 0, 'missing Utility router does not install prompt');
+  assertEqual(cleared.length, 1, 'missing Utility router clears stale prompt lanes');
+  assert(view.lastPlan.diagnostics.includes('utility-unavailable'), 'missing Utility router diagnostic recorded');
+}
+
+{
+  const { runtime, installed, cleared } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'Utility unavailable test only asks Arbiter');
+        return { ok: false, error: { code: 'timeout', message: 'Utility timeout with Bearer utility-token and sk-utility-runtime' } };
+      },
+      async batch() {
+        throw new Error('utility unavailable should not request card batch');
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Utility is unavailable.' });
+  const view = runtime.view();
+  const serialized = JSON.stringify({ result, view });
+  assertEqual(result.ok, true, 'Utility unavailable remains fail-soft');
+  assertEqual(result.skipped, true, 'Utility unavailable skips prompt injection without cache');
+  assertEqual(result.reason, 'utility-unavailable', 'Utility unavailable returns explicit reason');
+  assertEqual(installed.length, 0, 'Utility unavailable without cache does not install prompt');
+  assertEqual(cleared.length, 1, 'Utility unavailable clears any stale Recursion prompt');
+  assert(view.lastPlan.diagnostics.includes('utility-unavailable'), 'Utility unavailable diagnostic recorded');
+  assert(!view.lastPlan.diagnostics.includes('local-fallback-plan'), 'Utility unavailable does not use local fallback plan');
+  assertEqual(view.activity.label, 'Utility unavailable. Recursion skipped.', 'Utility unavailable shows clear fallback label');
+  assert(!serialized.includes('Bearer utility-token'), 'Utility unavailable reason redacts bearer token');
+  assert(!serialized.includes('sk-utility-runtime'), 'Utility unavailable reason redacts sk token');
+}
+
+{
+  const cachedMessages = [
+    { mesid: 2, role: 'user', text: 'Use cache while Utility is down.', visible: true }
+  ];
+  const cachedSourceHash = sourceWindowHash(cachedMessages, 2, 2);
+  const storage = {
+    async loadSceneCache() {
+      return {
+        cards: [{
+          id: 'utility-down-cache-card',
+          family: 'Scene Frame',
+          promptText: 'Use the safe cached scene frame while Utility is unavailable.',
+          summary: 'Safe cached scene frame',
+          evidenceRefs: ['message:2'],
+          emphasis: 'normal',
+          source: {
+            chatId: 'utility-down-chat',
+            firstMesId: 2,
+            lastMesId: 2,
+            fingerprint: cachedSourceHash,
+            snapshotHash: cachedSourceHash
+          },
+          freshness: { sourceFingerprint: cachedSourceHash }
+        }]
+      };
+    },
+    async saveSceneCache() {
+      return {};
+    },
+    async appendJournal() {
+      return {};
+    }
+  };
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: {
+      chatId: 'utility-down-chat',
+      chatKey: 'utility-down-chat',
+      sceneKey: 'utility-down-scene',
+      sceneFingerprint: 'utility-down-scene-fp',
+      turnFingerprint: 'utility-down-turn-fp',
+      latestMesId: 2,
+      messages: cachedMessages
+    },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'Utility unavailable cache test only asks Arbiter');
+        throw new Error('Utility transport unavailable');
+      },
+      async batch() {
+        throw new Error('Utility unavailable cache test should not request card batch');
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Use cache while Utility is down.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'Utility unavailable can reuse valid cache');
+  assertEqual(result.skipped, undefined, 'Utility unavailable with valid cache does not skip');
+  assertEqual(installed.length, 1, 'Utility unavailable with valid cache installs prompt');
+  assert(view.lastPlan.diagnostics.includes('utility-unavailable'), 'Utility unavailable cache diagnostic recorded');
+  assertDeepEqual(view.lastHand.cards.map((card) => card.id), ['utility-down-cache-card'], 'Utility unavailable uses cached hand only');
+  assert(
+    view.activityHistory.some((event) => event.phase === 'cardProgress'
+      && event.detail?.source === 'cache'
+      && event.detail?.state === 'cached'),
+    'Utility unavailable cache path emits cached card progress'
+  );
+}
+
+{
   const adapter = createMemoryStorageAdapter();
   const baseStorage = createStorageRepository({ storage: adapter });
   let saveCalls = 0;
@@ -245,7 +379,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   };
   const { runtime, installed } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
-    storage
+    storage,
+    generationRouter: localFallbackCardRouter(['final-hash-save-test'])
   });
   const pending = runtime.prepareForGeneration({ userMessage: 'Install before final cache hash save.' });
   await waitUntil(() => finalHashSaveStarted, 'final prompt-packet hash cache save did not start');
@@ -276,7 +411,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   };
   const { runtime, installed } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
-    storage
+    storage,
+    generationRouter: localFallbackCardRouter(['journal-final-hash-save-test'])
   });
   const pending = runtime.prepareForGeneration({ userMessage: 'Journal install before superseded final cache save.' });
   await waitUntil(() => finalHashSaveStarted, 'journal regression final cache save did not start');
@@ -292,7 +428,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 
 {
   const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' }
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: localFallbackCardRouter(['cache-invalidation-setup'])
   });
   const run = await runtime.prepareForGeneration({ userMessage: 'The lamp breaks.' });
   assertEqual(run.ok, true, 'cache invalidation setup run installs');
@@ -2342,8 +2479,9 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Arbiter secret fallback.' });
   const serialized = JSON.stringify({ result, view: runtime.view() });
-  assertEqual(result.ok, true, 'secret-bearing arbiter error falls back');
-  assert(serialized.includes('utility-arbiter-fallback'), 'arbiter fallback diagnostic retained');
+  assertEqual(result.ok, true, 'secret-bearing arbiter error fails soft');
+  assertEqual(result.skipped, true, 'secret-bearing arbiter error skips injection');
+  assert(serialized.includes('utility-unavailable'), 'arbiter unavailable diagnostic retained');
   assert(!serialized.includes('Bearer arbiter-token'), 'arbiter fallback reason redacts bearer token');
   assert(!serialized.includes('sk-arbiter-runtime'), 'arbiter fallback reason redacts sk token');
   assert(!serialized.includes('private-secret'), 'arbiter fallback reason redacts private secret');
@@ -3404,15 +3542,17 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
       textHash: hashJson(message.text)
     }))
   });
-  assertEqual(result.ok, true, 'arbiter exception falls back without throwing');
+  assertEqual(result.ok, true, 'arbiter exception fails soft without throwing');
+  assertEqual(result.skipped, true, 'arbiter exception skips injection without valid cache');
+  assertEqual(result.reason, 'utility-unavailable', 'arbiter exception returns Utility unavailable reason');
   assertEqual(routerCalls.length, 1, 'arbiter attempted once');
-  assert(view.lastPlan.diagnostics.includes('local-fallback-plan'), 'local fallback diagnostic retained');
-  assert(view.lastPlan.diagnostics.includes('utility-arbiter-fallback'), 'arbiter fallback diagnostic recorded');
+  assert(view.lastPlan.diagnostics.includes('utility-unavailable'), 'Utility unavailable diagnostic recorded');
+  assert(!view.lastPlan.diagnostics.includes('local-fallback-plan'), 'transport failure does not use local fallback diagnostic');
   assertEqual(view.lastPlan.snapshotHash, expectedSnapshotHash, 'fallback plan uses normalized snapshot hash');
   assertEqual(view.lastPlan.source.snapshotHash, expectedSnapshotHash, 'fallback source stores normalized snapshot hash');
   assertEqual(view.lastPlan.source.userMessageHash, hashJson('Fallback plan.'), 'fallback source stores user message hash separately');
   assertEqual(view.lastPlan.source.catalogHash, hashJson(CARD_CATALOG), 'fallback source stores catalog hash separately');
-  assert(view.lastHand.cards.length > 0, 'fallback still selects hand');
+  assertEqual(view.lastHand.cards.length, 0, 'transport failure without cache selects no hand');
 }
 
 {

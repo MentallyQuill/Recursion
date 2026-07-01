@@ -111,7 +111,7 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 | Role | Default lane | Purpose | Failure behavior |
 | --- | --- | --- | --- |
-| `utilityArbiter` | Utility | Decide whether Recursion should skip, reuse cache, refresh cards, compose a brief, and optionally invoke Reasoner | Conservative local fallback: reuse valid cache or skip Recursion injection |
+| `utilityArbiter` | Utility | Decide whether Recursion should skip, reuse cache, refresh cards, compose a brief, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema may use conservative local fallback |
 | `sceneFrameCard` | Utility | Produce compact current-scene frame data | Omit card with diagnostic |
 | `continuityRiskCard` | Utility | Identify likely contradictions or fragile facts for the next generation | Omit card with diagnostic |
 | `characterLensCard` | Utility | Capture visible posture, relationship tension, and voice cues for active characters | Omit card with diagnostic |
@@ -312,7 +312,7 @@ Validation requirements:
 - clamp confidence and token estimates to valid ranges;
 - mark each accepted card or composer patch with schema version and source role.
 
-Invalid Utility Arbiter output should fall back to conservative local behavior: reuse valid cache or skip Recursion injection for the turn.
+Invalid Utility Arbiter output should fall back to conservative local behavior: reuse valid cache, use the local fallback plan when safe, or skip Recursion injection for the turn. A missing, timed-out, or transport-failing Utility provider should not create fresh local cards; it should reuse valid cache or skip.
 
 Invalid card output should omit only that card. One bad card must not poison the whole batch.
 

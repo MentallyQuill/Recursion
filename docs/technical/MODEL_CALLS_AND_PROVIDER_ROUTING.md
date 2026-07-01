@@ -72,7 +72,8 @@ Transient transport and server failures can receive one same-lane retry only whi
 
 Fallback behavior:
 
-- Utility Arbiter failure uses local fallback plan.
+- Utility provider unavailable, timed out, or transport-failed reuses valid cache when safe; otherwise runtime clears Recursion injection and skips new guidance.
+- Invalid Utility Arbiter schema can use a conservative local fallback plan because a provider result existed but failed structured validation.
 - Card call failure omits failed cards and keeps valid siblings.
 - Reasoner failure falls back to Utility composition.
 - Provider test failure updates lane status with compact error text.

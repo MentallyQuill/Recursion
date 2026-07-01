@@ -60,13 +60,13 @@ The Utility Arbiter receives safe settings, the fixed card catalog, and the boun
 - `budgets`: target brief tokens and max cards
 - `diagnostics`: compact labels
 
-Runtime validates and normalizes the plan. If the Arbiter is unavailable or invalid, runtime uses a local fallback plan that composes from safe local cards when possible.
+Runtime validates and normalizes the plan. If the Utility provider is unavailable, runtime reuses a valid cache when safe or clears Recursion injection and continues the turn without new guidance. If the Arbiter returns invalid structured output, runtime may use the conservative local fallback plan because the provider responded but the plan was unsafe.
 
 ## Card Jobs And Deck Update
 
 Card requests are built from the Arbiter plan and the frozen snapshot. Utility card calls are batched when the provider router supports batching. Each accepted provider result is converted into a normalized V1 card, then sanitized before entering the deck.
 
-Runtime also creates local fallback Scene Frame and Continuity Risk cards from the latest visible messages. These local cards keep the first loop useful when provider card generation is unavailable.
+Runtime can create local fallback Scene Frame and Continuity Risk cards from the latest visible messages after a valid or locally recoverable plan exists. These local cards keep the first loop useful when card generation is unavailable, but they are not used to mask a missing or transport-failing Utility provider.
 
 After cache, provider, and fallback cards are known, runtime emits sanitized `cardProgress` activity events for the Hero Pixel Array progress menu. These events are child rows under `utility-card-batch`: generated provider cards use `state: done` and `source: generated`, cache-reused cards use `state: cached` and `source: cache`, and local fallback cards use `state: warning` and `source: fallback`. The event detail is limited to parent step id, role/family, source, state, and safe card id; it must not include card prompt text, raw provider output, transcript text, or secrets.
 
@@ -117,9 +117,9 @@ flowchart TD
 
 | Failure | Runtime branch |
 | --- | --- |
-| Utility provider unavailable | Use local fallback plan, reuse valid cache, or skip/clear Recursion injection. |
-| Invalid Arbiter schema | Merge into fallback plan and record Utility fallback diagnostics. |
-| Card batch failure | Continue with accepted siblings and local fallback cards. |
+| Utility provider unavailable | Reuse valid cache when safe; otherwise clear Recursion prompt and skip Recursion injection. |
+| Invalid Arbiter schema | Use conservative local fallback plan and record Utility fallback diagnostics. |
+| Card batch failure | Continue with accepted siblings and local fallback cards after a valid or locally recoverable plan. |
 | Invalid cached card | Ignore the card and show a cache warning. |
 | No reusable cache for `reuse-cache` | Clear Recursion prompt and return a warning skip. |
 | Reasoner off or failed | Compose with Utility and record Reasoner fallback metadata. |

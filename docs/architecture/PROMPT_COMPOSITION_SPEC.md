@@ -187,7 +187,7 @@ The runtime architecture owns the exact SillyTavern API calls, prompt identifier
 
 ## Footprint Profiles
 
-Prompt footprint is an automatic state chosen by the Utility Arbiter based on next-turn need. The user may influence intensity, but normal operation should not require manual token tuning.
+Prompt footprint is an automatic current-turn state chosen by the Utility Arbiter based on next-turn need. The user setting is the fallback when the Arbiter omits `promptFootprint` or returns an invalid value; a valid Arbiter value controls the packet being composed without mutating the stored setting.
 
 ### Compact
 

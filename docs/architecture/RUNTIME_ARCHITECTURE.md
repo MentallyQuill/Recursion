@@ -54,7 +54,7 @@ Primary components:
 - Host Adapter: translates host-specific chat, generation, prompt, storage, and UI events into Recursion interfaces.
 - Runtime Coordinator: owns extension mode, lifecycle hooks, turn processing locks, cancellation, and sequencing.
 - Snapshot Builder: captures a stable observe-time view of the active chat and pending turn.
-- Utility Arbiter: returns an Auto Control Plan for cadence, scene sensitivity, prompt footprint, focus profile, lane selection, and Reasoner trigger reasons.
+- Utility Arbiter: returns an Auto Control Plan for action, scene status, prompt footprint, card jobs, Reasoner decision, and budgets.
 - Card Job Runner: executes the plan by creating, refreshing, stowing, discarding, and selecting scene cards according to Arbiter decisions.
 - Scene Cache: stores bounded, per-chat and per-scene card state plus fingerprints and prompt-plan metadata.
 - Hand Selector: selects the small card set that should influence the next generation.
@@ -92,51 +92,51 @@ The injection point should be as close as practical to host generation start, af
 
 The Utility Arbiter returns an Auto Control Plan. Runtime code treats this as advice that must pass schema validation and safety limits before use.
 
-Required control fields:
+Primary control fields:
 
-- `cadence`: one of `skip`, `light_pass`, `full_card_pass`, or `scene_refresh`.
-- `sceneSensitivity`: one of `same_scene`, `soft_shift`, `hard_shift`, or `uncertain`.
-- `promptFootprint`: requested size class and token budget for the next prompt packet.
-- `focusProfile`: prioritized focus areas such as continuity risk, active cast, emotional posture, prose texture, dialogue cues, or open threads.
-- `preprocessorLane`: provider lane or local path for card extraction and refresh jobs.
-- `composerLane`: deterministic composer, Utility synthesis, or Reasoner synthesis.
-- `reasonerTriggerReasons`: bounded reasons that justify an optional Reasoner pass.
+- `action`: one of `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`.
+- `sceneStatus`: one of `same-scene`, `soft-shift`, `hard-shift`, or `unknown`.
+- `promptFootprint`: `compact`, `normal`, or `rich` size class for the next prompt packet.
+- `cardJobs`: bounded Utility card requests using the fixed V1 catalog.
+- `reasonerDecision`: `skip` or `use`, with compact trigger reasons and signals.
+- `budgets`: runtime-limited target brief tokens and maximum selected cards.
 
-The plan may also include omission priorities, cache invalidation hints, card lifecycle suggestions, and diagnostics labels. It must not include hidden plot plans, chain-of-thought, durable canon updates, or host-specific prompt instructions that bypass the Prompt Composer.
+The plan may also include card lifecycle suggestions and diagnostics labels. It must not include hidden plot plans, chain-of-thought, durable canon updates, arbitrary provider endpoints, or host-specific prompt instructions that bypass the Prompt Composer.
 
 Runtime enforcement:
 
-- Invalid plans fall back to `light_pass` or `skip`, depending on mode and cache state.
+- Invalid plans fall back to local `compose-brief`, cache reuse, or `skip`, depending on mode and cache state.
 - Token and card count caps are enforced after the Arbiter returns.
+- `promptFootprint` is sanitized to `compact`, `normal`, or `rich`; invalid or missing Arbiter values fall back to the stored setting. A valid Arbiter footprint overrides only the current turn's Prompt Composition settings and does not mutate the stored user setting.
 - Provider lane choices are resolved through the provider spec, not trusted as raw endpoints.
 - Reasoner triggers are advisory. If Reasoner is off, unavailable, too slow, or over budget, generation continues through the deterministic or Utility composer path.
 
-## Job Cadence
+## Plan Actions
 
-Cadence controls runtime cost and cache churn.
+Plan action controls runtime cost and cache churn.
 
-`skip` means no new provider work for this turn. Auto mode may still install a valid existing packet if it is current for the scene and settings.
+`skip` means no new provider or prompt work for this turn. Runtime clears or avoids installing Recursion prompt entries for the generation.
 
-`light_pass` means update volatile turn-level facts and ask the Arbiter to review existing cards for the current hand. It should be the common path during a stable scene. It may add small cards for newly introduced immediate facts, but it should avoid broad scene reconstruction.
+`reuse-cache` means use the existing scene cache and lifecycle selection when the cache is current enough for the next turn. It avoids new card generation and fails soft if no reusable hand is available.
 
-`full_card_pass` means run the full scene card job set against the current snapshot. It can create, refresh, stow, discard, and select cards, then build a new hand. It is appropriate when the cache is missing, stale, or materially incomplete.
+`refresh-cards` means execute the Arbiter's card jobs against the current snapshot, merge accepted cards into the scene cache, apply lifecycle decisions, then select a fresh hand.
 
-`scene_refresh` means the current scene identity or frame is no longer trustworthy. The runtime should start a new scene cache segment or hard-invalidate the old one, depending on storage policy. A refresh should rebuild scene frame, active cast, continuity risks, open threads, and prompt plan metadata from the current snapshot.
+`compose-brief` means compose a packet from the current hand after any requested cache/card work. Local fallback also uses this action when the Arbiter is unavailable and safe fallback cards can be built from the snapshot.
 
-Cadence should be automatic by default. User controls should stay high level, such as Off/Observe/Auto, refresh, intensity, provider setup, and optional Reasoner enablement.
+Action choice should be automatic by default. User controls should stay high level, such as Off/Observe/Auto, refresh, intensity, provider setup, prompt footprint fallback, and optional Reasoner enablement.
 
 ## Scene Shift Handling
 
-Scene sensitivity is the Arbiter's view of how much the active scene changed:
+Scene status is the Arbiter's view of how much the active scene changed:
 
-- `same_scene`: continue using the existing scene cache. Prefer `skip` or `light_pass`.
-- `soft_shift`: keep the scene lineage but refresh affected cards. Examples include a new immediate objective, changed emotional posture, or a character entering the scene.
-- `hard_shift`: begin a new scene cache segment and avoid carrying stale scene-frame cards forward. Examples include a location jump, time jump, cast reset, or clear narrative break.
-- `uncertain`: use conservative behavior. Prefer a bounded validation pass, lower prompt footprint, and visible diagnostics rather than aggressive cache reuse or hard deletion.
+- `same-scene`: continue using the existing scene cache when the hand still matches the visible moment.
+- `soft-shift`: keep the scene lineage but refresh affected cards. Examples include a new immediate objective, changed emotional posture, or a character entering the scene.
+- `hard-shift`: begin a new scene cache segment and avoid carrying stale scene-frame cards forward. Examples include a location jump, time jump, cast reset, or clear narrative break.
+- `unknown`: use conservative behavior when the Arbiter cannot classify the shift. Prefer a bounded validation pass, lower prompt footprint, and visible diagnostics rather than aggressive cache reuse or hard deletion.
 
 Hard shifts should not erase useful diagnostics or previous bounded cache history, but they should prevent stale cards from entering the next turn hand. Soft shifts should preserve continuity risks and open threads only when they still apply to the visible scene.
 
-When local heuristics and model judgment disagree, runtime safety wins. The runtime may ask the Utility Arbiter for a scene validation pass, but it should not install contradictory scene guidance while uncertainty is unresolved.
+When local heuristics and model judgment disagree, runtime safety wins. The runtime may ask the Utility Arbiter for a scene validation pass, but it should not install contradictory scene guidance while scene status is unresolved.
 
 ## Failure Modes
 
@@ -145,7 +145,7 @@ Recursion must be fail-soft. Provider, schema, storage, and injection failures s
 Expected failure behavior:
 
 - Utility provider unavailable: skip new Arbiter work, reuse a valid packet if safe, or clear Recursion injection and continue.
-- Arbiter schema invalid: reject the plan, record diagnostics, and fall back to a conservative local cadence.
+- Arbiter schema invalid: reject the plan, record diagnostics, and fall back to a conservative local action.
 - Card job failure: keep the last valid cache segment, omit failed cards from the hand, and record omission reasons.
 - Reasoner failure: continue with deterministic or Utility-composed prompt packets.
 - Prompt composition over budget: trim by lane priority and record budget omissions.
@@ -213,7 +213,7 @@ In memory:
 - active mode: Off, Observe, or Auto;
 - active host and chat identifiers;
 - current turn snapshot id and message fingerprint;
-- scene fingerprint and scene sensitivity;
+- scene fingerprint and scene status;
 - active Auto Control Plan;
 - pending run lock and cancellation marker;
 - provider health and resolved lane status;
@@ -285,13 +285,13 @@ Core event types:
 - `runtime.mode_changed`: Off, Observe, or Auto changed.
 - `turn.snapshot_captured`: chat id, snapshot id, message fingerprint, and size metadata.
 - `arbiter.plan_requested`: provider lane, snapshot id, and cache fingerprint.
-- `arbiter.plan_received`: cadence, scene sensitivity, prompt footprint, focus profile, and trigger labels.
+- `arbiter.plan_received`: action, scene status, prompt footprint, card job count, Reasoner decision, and budgets.
 - `arbiter.plan_rejected`: schema or safety reason.
-- `scene.shift_detected`: previous and next scene fingerprints plus sensitivity.
-- `card.job_started`: job type, cadence, and target cache segment.
+- `scene.shift_detected`: previous and next scene fingerprints plus scene status.
+- `card.job_started`: card role, requested action, and target cache segment.
 - `card.job_completed`: created, refreshed, stowed, discarded, selected, and omitted counts.
 - `hand.selected`: card ids, lanes, token estimate, and omission counts.
-- `composer.completed`: composer lane, token estimate, and reasoner trigger labels.
+- `composer.completed`: composer lane, token estimate, and Reasoner decision signals.
 - `prompt.packet_built`: packet id, footprint, lanes, and token estimate.
 - `prompt.install_succeeded`: packet id, host insertion metadata, and snapshot id.
 - `prompt.install_failed`: packet id and sanitized adapter error.
@@ -317,10 +317,10 @@ V1 should be built in small vertical slices that preserve the end-to-end loop.
    - Implement Utility provider routing, structured Auto Control Plan schema validation, provider failure fallback, and sanitized call diagnostics.
 
 4. Scene cache and card job runner
-   - Add bounded scene card cache, card create/refresh/stow/discard/select jobs, cache invalidation, and cadence enforcement.
+   - Add bounded scene card cache, card create/refresh/stow/discard/select jobs, cache invalidation, and action enforcement.
 
 5. Turn hand selection
-   - Select compact hand candidates by focus profile, scene relevance, token caps, and omission rules.
+   - Select compact hand candidates by settings focus, scene relevance, token caps, and omission rules.
 
 6. Prompt composition and injection
    - Build prompt packets from the turn hand, enforce footprint budgets, install through the SillyTavern adapter, clear stale packet metadata, and report prompt-ready/install/fallback activity.

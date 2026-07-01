@@ -16,6 +16,8 @@ const PROVIDER_VISIBLE_MESSAGE_LIMIT = 12;
 const PROVIDER_MESSAGE_TEXT_LIMIT = 900;
 const PLAN_ACTIONS = new Set(['skip', 'reuse-cache', 'refresh-cards', 'compose-brief']);
 const REASONER_DECISION_MODES = new Set(['use', 'skip']);
+const PROMPT_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
+const SCENE_STATUSES = new Set(['same-scene', 'soft-shift', 'hard-shift', 'unknown']);
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -218,6 +220,7 @@ function localFallbackPlan(snapshot, settings) {
     snapshotHash,
     action: 'compose-brief',
     sceneStatus: 'same-scene',
+    promptFootprint: normalizePromptFootprint(settings.promptFootprint, 'normal'),
     cardJobs: [],
     reasonerDecision: {
       mode: settings.reasonerUse === 'always' ? 'use' : 'skip',
@@ -256,6 +259,11 @@ function safeStringList(value, limit = 120) {
 function normalizePlanAction(value, fallback) {
   const action = cleanString(value, fallback);
   return PLAN_ACTIONS.has(action) ? action : fallback;
+}
+
+function normalizePromptFootprint(value, fallback = 'normal') {
+  const footprint = cleanString(value, fallback);
+  return PROMPT_FOOTPRINTS.has(footprint) ? footprint : fallback;
 }
 
 function normalizeReasonerDecision(fallbackDecision, value) {
@@ -332,7 +340,8 @@ function mergePlan(fallbackPlan, arbiterData) {
     schema: UTILITY_ARBITER_SCHEMA,
     snapshotHash: fallbackPlan.snapshotHash,
     action: normalizePlanAction(data.action, fallbackPlan.action),
-    sceneStatus: safeText(data.sceneStatus || fallbackPlan.sceneStatus, 80) || fallbackPlan.sceneStatus,
+    sceneStatus: normalizeSceneStatus(data.sceneStatus, fallbackPlan.sceneStatus),
+    promptFootprint: normalizePromptFootprint(data.promptFootprint, fallbackPlan.promptFootprint || 'normal'),
     cardJobs: normalizePlanCardJobs(data.cardJobs) ?? fallbackPlan.cardJobs,
     lifecycle: normalizePlanLifecycle(data.lifecycle ?? data.cardLifecycle ?? data.cardDecisions),
     reasonerDecision: normalizeReasonerDecision(fallbackPlan.reasonerDecision, data.reasonerDecision),
@@ -359,19 +368,21 @@ function planAction(plan) {
 }
 
 function settingsForPlan(settings, plan) {
+  const promptFootprint = normalizePromptFootprint(plan?.promptFootprint, settings.promptFootprint);
   if (settings.reasonerUse === 'auto' && plan?.reasonerDecision?.mode === 'skip') {
-    return { ...settings, reasonerUse: 'off' };
+    return { ...settings, promptFootprint, reasonerUse: 'off' };
   }
   if (settings.reasonerUse !== 'off' && plan?.reasonerDecision?.mode === 'use') {
-    return { ...settings, reasonerUse: 'always' };
+    return { ...settings, promptFootprint, reasonerUse: 'always' };
   }
-  return settings;
+  return { ...settings, promptFootprint };
 }
 
-function normalizeSceneStatus(value) {
-  const text = cleanString(value, 'same-scene').toLowerCase().replace(/_/g, '-');
-  if (['hard-shift', 'hard-shifted'].includes(text)) return 'hard-shift';
-  if (['soft-shift', 'same-scene', 'unknown', 'uncertain'].includes(text)) return text;
+function normalizeSceneStatus(value, fallback = 'same-scene') {
+  const text = cleanString(value, fallback);
+  if (SCENE_STATUSES.has(text)) return text;
+  const fallbackText = cleanString(fallback, 'same-scene');
+  if (SCENE_STATUSES.has(fallbackText)) return fallbackText;
   return 'same-scene';
 }
 

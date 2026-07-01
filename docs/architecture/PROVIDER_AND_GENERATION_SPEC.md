@@ -145,6 +145,7 @@ Required output shape:
   "snapshotHash": "string",
   "action": "skip | reuse-cache | refresh-cards | compose-brief",
   "sceneStatus": "same-scene | soft-shift | hard-shift | unknown",
+  "promptFootprint": "compact | normal | rich",
   "cardJobs": [
     {
       "role": "sceneFrameCard",
@@ -166,6 +167,8 @@ Required output shape:
 ```
 
 The Arbiter is allowed to choose `reasonerDecision.mode: "use"` only when Reasoner is enabled and healthy. If Reasoner is disabled, unhealthy, or missing a provider secret, the Arbiter must select `skip` and explain the reason compactly.
+
+`promptFootprint` is a current-turn override only. Runtime accepts only `compact`, `normal`, or `rich`; invalid or missing values fall back to the stored user setting and must not appear in the sanitized plan. The override is passed to Prompt Composition for the packet being installed, but it does not mutate the stored setting.
 
 ## Batched Card Calls
 

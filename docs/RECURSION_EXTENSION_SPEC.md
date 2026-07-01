@@ -73,7 +73,7 @@ Recursion does not own:
 
 1. The SillyTavern host adapter captures a stable turn snapshot.
 2. The Utility Arbiter receives the snapshot, current scene cache metadata, fixed V1 card catalog, provider status, and prompt budget context.
-3. The Arbiter returns an Auto Control Plan: cadence, scene sensitivity, prompt footprint, focus profile, card lifecycle decisions, composer lane, and Reasoner trigger reasons.
+3. The Arbiter returns an Auto Control Plan: action, scene status, prompt footprint, card jobs, card lifecycle decisions, Reasoner decision, and budgets.
 4. Runtime validates the plan, enforces schema and budget caps, and executes requested card jobs from one frozen snapshot.
 5. The scene deck is updated with generated, refreshed, stowed, discarded, or stale cards.
 6. The Arbiter-selected turn hand is passed to prompt composition.
@@ -87,8 +87,8 @@ If any optional step fails, Recursion should degrade gracefully. Normal SillyTav
 
 The Utility Arbiter is the semantic decision point. It decides meaning-heavy questions such as:
 
-- whether the current scene is the same scene, a soft shift, a hard shift, or uncertain;
-- whether to skip, run a light pass, run a full card pass, or refresh the scene;
+- whether the current scene is the same scene, a soft shift, a hard shift, or unknown;
+- whether to skip, reuse cache, refresh cards, or compose a brief;
 - which card families are already represented, missing, stale, or no longer relevant;
 - which cards belong in the next turn hand;
 - which cards deserve more emphasis or detail;

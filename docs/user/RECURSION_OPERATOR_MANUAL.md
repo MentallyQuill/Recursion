@@ -122,7 +122,7 @@ Operator settings should stay broad:
 - Focus: Balanced, Character, Continuity, Prose, Plot.
 - Utility and Reasoner provider setup in the settings panel.
 
-Users should not need to manage cadence, card families, relevance rules, or prompt depths turn by turn.
+Users should not need to manage per-turn action, card families, relevance rules, or prompt depths turn by turn.
 
 ## Provider Controls
 

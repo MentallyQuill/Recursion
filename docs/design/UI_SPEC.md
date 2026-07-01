@@ -220,7 +220,7 @@ Primary controls:
 - Prompt Footprint: Compact, Normal, Rich.
 - Focus: Balanced, Character, Continuity, Prose, Plot.
 
-Most internal Auto settings should not be exposed as controls. The UI can display Auto decisions for inspection, but users should not have to manage cadence, scene sensitivity, reasoner trigger rules, or individual card families.
+Most internal Auto settings should not be exposed as controls. The UI can display Auto decisions for inspection, but users should not have to manage per-turn action, scene status, Reasoner decision rules, or individual card families.
 
 Advanced controls can exist behind a compact disclosure if needed:
 

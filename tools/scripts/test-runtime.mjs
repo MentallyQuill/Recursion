@@ -862,6 +862,129 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 }
 
 {
+  const { runtime, installed, settingsStore } = createRuntimeHarness({
+    settings: { mode: 'auto', promptFootprint: 'normal', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'compact footprint override only calls utility arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            promptFootprint: 'compact',
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['compact-footprint-override']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Use compact footprint this turn.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'arbiter compact footprint run installs');
+  assertEqual(result.plan.promptFootprint, 'compact', 'result plan exposes sanitized arbiter compact footprint');
+  assertEqual(view.lastPlan.promptFootprint, 'compact', 'view plan exposes sanitized arbiter compact footprint');
+  assertEqual(view.lastPacket.footprint, 'compact', 'last packet uses arbiter compact footprint');
+  assertEqual(installed[0].footprint, 'compact', 'installed packet uses arbiter compact footprint');
+  assertEqual(settingsStore.get().promptFootprint, 'normal', 'arbiter footprint does not mutate stored setting');
+}
+
+{
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', promptFootprint: 'compact', reasonerUse: 'auto' },
+    generationRouter: {
+      async generate(roleId) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              promptFootprint: 'rich',
+              reasonerDecision: { mode: 'use', reason: 'rich turn needs synthesis', signals: ['rich-footprint'] },
+              budgets: { targetBriefTokens: 900, maxCards: 6 }
+            }
+          };
+        }
+        if (roleId === 'reasonerComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.reasonerComposer.v1',
+              instructionPatch: 'Use the richer synthesis for this turn.',
+              keptCardIds: [],
+              droppedCardIds: []
+            }
+          };
+        }
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Use rich footprint with reasoner.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'arbiter rich footprint run installs');
+  assertEqual(view.lastPlan.promptFootprint, 'rich', 'view plan exposes sanitized arbiter rich footprint');
+  assertEqual(view.lastPacket.footprint, 'rich', 'last packet uses arbiter rich footprint');
+  assert(routerCalls.includes('reasonerComposer'), 'rich arbiter footprint with auto reasoner invokes reasoner composer');
+  assertEqual(view.lastPacket.diagnostics.composerLane, 'reasoner', 'rich arbiter footprint records reasoner composer lane');
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', promptFootprint: 'compact', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'invalid footprint fallback only calls utility arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            promptFootprint: 'oversized-secret-mode',
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['invalid-footprint-fallback']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Reject invalid footprint.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'invalid arbiter footprint falls back and installs');
+  assertEqual(result.plan.promptFootprint, 'compact', 'result plan falls back to stored compact footprint');
+  assertEqual(view.lastPlan.promptFootprint, 'compact', 'view plan falls back to stored compact footprint');
+  assertEqual(view.lastPacket.footprint, 'compact', 'last packet uses stored compact footprint fallback');
+  assert(!JSON.stringify(result.plan).includes('oversized-secret-mode'), 'invalid arbiter footprint is not exposed in result plan');
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'invalid scene status fallback only calls utility arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            sceneStatus: 'hard_shift',
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['invalid-scene-status-fallback']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Reject old scene status.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'invalid arbiter scene status falls back and installs');
+  assertEqual(result.plan.sceneStatus, 'same-scene', 'result plan falls back to V1 scene status');
+  assertEqual(view.lastPlan.sceneStatus, 'same-scene', 'view plan falls back to V1 scene status');
+  assert(!JSON.stringify(result.plan).includes('hard_shift'), 'invalid arbiter scene status is not exposed in result plan');
+}
+
+{
   let arbiterPrompt = '';
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
@@ -1392,7 +1515,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(result.plan.nested, undefined, 'result plan drops arbitrary top-level nested object');
   assertEqual(result.plan.cardJobs[0].extraJobField, undefined, 'result plan drops arbitrary card job fields');
   assertEqual(result.plan.reasonerDecision.extraDecisionField, undefined, 'result plan drops arbitrary reasoner decision fields');
-  assertDeepEqual(Object.keys(result.plan).sort(), ['action', 'budgets', 'cardJobs', 'diagnostics', 'lifecycle', 'reasonerDecision', 'sceneStatus', 'schema', 'snapshotHash', 'source'].sort(), 'result plan only exposes whitelisted fields');
+  assertDeepEqual(Object.keys(result.plan).sort(), ['action', 'budgets', 'cardJobs', 'diagnostics', 'lifecycle', 'promptFootprint', 'reasonerDecision', 'sceneStatus', 'schema', 'snapshotHash', 'source'].sort(), 'result plan only exposes whitelisted fields');
   assert(result.plan.diagnostics.includes('safe-diagnostic'), 'safe diagnostics survive plan scrub');
   assert(result.plan.reasonerDecision.signals.includes('safe-signal'), 'safe reasoner signals survive plan scrub');
   assert(result.plan.reasonerDecision.signals.every((signal) => typeof signal === 'string'), 'reasoner signals normalize to strings');

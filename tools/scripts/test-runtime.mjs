@@ -1414,6 +1414,41 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 
 {
   const activity = createActivityReporter();
+  const files = new Map();
+  const fallbackRepository = createStorageRepository({
+    storage: {
+      async readJson(key) {
+        return files.has(key) ? files.get(key) : null;
+      },
+      async writeJson(key, value) {
+        files.set(key, value);
+        return { ok: true, key, fallback: 'memory', detail: 'Bearer fallback-token sk-fallback-runtime private-secret' };
+      },
+      async deleteJson(key) {
+        files.delete(key);
+        return { ok: true, key, fallback: 'memory' };
+      }
+    },
+    activity
+  });
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage: fallbackRepository,
+    activity
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Storage fallback is visible.' });
+  const serializedHistory = JSON.stringify(activity.history());
+  assertEqual(result.ok, true, 'memory fallback storage does not abort runtime');
+  assertEqual(installed.length, 1, 'memory fallback storage still allows prompt install');
+  assert(serializedHistory.includes('"phase":"storageWarning"'), 'memory fallback storage warning is surfaced');
+  assert(serializedHistory.includes('"fallback":"memory"'), 'memory fallback storage warning records fallback type');
+  assert(!serializedHistory.includes('Bearer fallback-token'), 'memory fallback warning redacts bearer token');
+  assert(!serializedHistory.includes('sk-fallback-runtime'), 'memory fallback warning redacts sk token');
+  assert(!serializedHistory.includes('private-secret'), 'memory fallback warning redacts private secret');
+}
+
+{
+  const activity = createActivityReporter();
   const storage = {
     async loadSceneCache() {
       return null;

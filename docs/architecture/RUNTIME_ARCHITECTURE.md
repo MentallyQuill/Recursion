@@ -150,7 +150,7 @@ Expected failure behavior:
 - Reasoner failure: continue with deterministic or Utility-composed prompt packets.
 - Prompt composition over budget: trim by lane priority and record budget omissions.
 - Injection failure: clear or leave untouched according to host adapter safety rules, then record the failed install attempt.
-- Storage failure: keep in-memory runtime state for the current turn if possible, disable persistence-dependent reuse, and continue generation.
+- Storage failure or host-storage memory fallback: keep in-memory runtime state for the current turn if possible, show a storage warning, disable persistence-dependent reuse, and continue generation.
 - Stale async result: record as stale and do not apply it to cache or prompt injection.
 
 No failure path should write partial prompt packets that mix old and new scene identities. Prompt packet installation should be atomic from Recursion's perspective: either the adapter confirms the current packet metadata, or runtime treats the install as failed.

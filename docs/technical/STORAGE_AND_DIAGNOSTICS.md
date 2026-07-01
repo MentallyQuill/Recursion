@@ -137,6 +137,8 @@ The repository also exposes `repairIndex()` for bounded cleanup. It rebuilds the
 
 `pruneSceneCaches(options)` is the explicit retention pass for cache files. It first repairs the index, then deletes old unprotected Recursion scene caches beyond `maxPerChat` and `maxTotal`, updates the system index, and returns sanitized `storage.pruned` diagnostics. `protectedScenes`, `protectedKeys`, or `activeScene` keep the active scene even when it is older than other caches. The prune pass revalidates each deletion candidate, preserves unreadable entries instead of guessing, deletes only confirmed `recursion-scene-*.v1.json` records, and never touches run journals, SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or non-Recursion extension records.
 
+If the host storage adapter downgrades a scene-cache or system-index write to memory fallback, the repository returns `storageStatus: { persisted: false, fallback: "memory" }` on the saved record and emits a `storageWarning` activity event instead of `Storage ready`. Generation remains fail-soft, but the UI and diagnostics must not imply durable persistence.
+
 Cleanup never deletes SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or non-Recursion extension records.
 
 ## Artifact Relationship

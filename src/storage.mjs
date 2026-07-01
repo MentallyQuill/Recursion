@@ -660,6 +660,71 @@ function reportActivity(activity, event) {
   }
 }
 
+function storageWriteStatus(result) {
+  const source = result && typeof result === 'object' && !Array.isArray(result) ? result : {};
+  if (source.ok === false) {
+    return {
+      persisted: false,
+      reason: 'write-failed'
+    };
+  }
+  if (Object.prototype.hasOwnProperty.call(source, 'fallback')
+    && source.fallback !== undefined
+    && source.fallback !== null
+    && source.fallback !== '') {
+    const fallback = safeOptionalMetadataText(source.fallback, 80) || 'unknown';
+    return {
+      persisted: false,
+      fallback
+    };
+  }
+  return { persisted: true };
+}
+
+function combineStorageStatuses(...statuses) {
+  return statuses.find((status) => status?.persisted === false) || { persisted: true };
+}
+
+function attachStorageStatus(record, status) {
+  if (status?.persisted === false) {
+    return {
+      ...record,
+      storageStatus: status
+    };
+  }
+  return record;
+}
+
+function reportStorageWriteStatus(activity, operationId, status, detail = {}) {
+  if (status?.persisted !== false) {
+    reportActivity(activity, {
+      operationId,
+      phase: 'storageProgress',
+      logicalStage: 'Storage ready',
+      mode: 'background',
+      severity: 'success',
+      label: 'Storage ready.',
+      detail
+    });
+    return;
+  }
+  reportActivity(activity, {
+    operationId,
+    phase: 'storageWarning',
+    logicalStage: 'Storage fallback',
+    mode: 'background',
+    severity: 'warning',
+    label: 'Recursion storage warning; continuing in memory.',
+    chips: ['Storage'],
+    detail: {
+      ...detail,
+      persisted: false,
+      fallback: status.fallback,
+      reason: status.reason
+    }
+  });
+}
+
 export function createStorageRepository({ storage = createMemoryStorageAdapter(), maxJournalEntries = 100, activity = null } = {}) {
   const journalEntryLimit = normalizeMaxEntries(maxJournalEntries);
 
@@ -667,7 +732,7 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
     const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
     index.records[key] = { key, kind, chatKey, updatedAt: nowIso() };
     index.updatedAt = nowIso();
-    await storage.writeJson(SYSTEM_INDEX_KEY, index);
+    return storage.writeJson(SYSTEM_INDEX_KEY, index);
   }
 
   async function removeIndexEntry(key) {
@@ -887,23 +952,20 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
         }
       });
       const record = normalizeSceneCache(chatKey, sceneKey, value);
-      await storage.writeJson(key, record);
-      await writeIndexEntry(key, 'sceneCache', safeId(chatKey, 'chat'));
-      reportActivity(activity, {
-        operationId,
-        phase: 'storageProgress',
-        logicalStage: 'Storage ready',
-        mode: 'background',
-        severity: 'success',
-        label: 'Storage ready.',
-        detail: {
-          kind: 'sceneCache',
-          chatKey: safeId(chatKey, 'chat'),
-          sceneKey: safeId(sceneKey, 'scene'),
-          cardCount: record.cards.length
-        }
+      const writeResult = await storage.writeJson(key, record);
+      const sceneWriteStatus = storageWriteStatus(writeResult);
+      let indexWriteStatus = { persisted: true };
+      if (sceneWriteStatus.persisted || sceneWriteStatus.fallback) {
+        indexWriteStatus = storageWriteStatus(await writeIndexEntry(key, 'sceneCache', safeId(chatKey, 'chat')));
+      }
+      const storageStatus = combineStorageStatuses(sceneWriteStatus, indexWriteStatus);
+      reportStorageWriteStatus(activity, operationId, storageStatus, {
+        kind: 'sceneCache',
+        chatKey: safeId(chatKey, 'chat'),
+        sceneKey: safeId(sceneKey, 'scene'),
+        cardCount: record.cards.length
       });
-      return record;
+      return attachStorageStatus(record, storageStatus);
     },
     async invalidateSceneCache(chatKey, sceneKey, options = {}) {
       const key = sceneCacheKey(chatKey, sceneKey);

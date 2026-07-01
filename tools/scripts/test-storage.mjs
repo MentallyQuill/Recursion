@@ -368,6 +368,115 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertEqual(activityEvents[1].operationId, activityEvents[0].operationId, 'save progress reuses operation id');
   assert(!JSON.stringify(activityEvents).includes('recursion-scene-Unsafe-Chat-Unsafe-Scene.v1.json'), 'save progress does not expose scene cache filename');
 
+  const fallbackWrites = new Map();
+  const fallbackActivityEvents = [];
+  const fallbackRepo = createStorageRepository({
+    storage: {
+      async readJson(key) {
+        return fallbackWrites.has(key) ? fallbackWrites.get(key) : null;
+      },
+      async writeJson(key, value) {
+        fallbackWrites.set(key, value);
+        return { ok: true, key, fallback: 'memory', detail: 'sk-storage-secret' };
+      },
+      async deleteJson(key) {
+        fallbackWrites.delete(key);
+        return { ok: true, key, fallback: 'memory' };
+      }
+    },
+    activity: {
+      stage(event) {
+        fallbackActivityEvents.push(event);
+      }
+    }
+  });
+  const fallbackSaved = await fallbackRepo.saveSceneCache('Fallback Storage Chat', 'Scene', {});
+  const serializedFallbackEvents = JSON.stringify(fallbackActivityEvents);
+  assertEqual(fallbackSaved.storageStatus.persisted, false, 'fallback save returns non-durable storage status');
+  assertEqual(fallbackSaved.storageStatus.fallback, 'memory', 'fallback save records memory fallback status');
+  assert(fallbackActivityEvents.some((event) => event.phase === 'storageWarning' && event.severity === 'warning'), 'fallback save emits storage warning activity');
+  assert(fallbackActivityEvents.some((event) => event.logicalStage === 'Storage fallback'), 'fallback save reports fallback logical stage');
+  assert(!fallbackActivityEvents.some((event) => event.logicalStage === 'Storage ready'), 'fallback save does not report durable storage ready');
+  assert(!serializedFallbackEvents.includes('sk-storage-secret'), 'fallback storage warning omits adapter secret details');
+
+  const indexFallbackActivityEvents = [];
+  const indexFallbackRepo = createStorageRepository({
+    storage: {
+      async readJson() {
+        return null;
+      },
+      async writeJson(key) {
+        if (key === SYSTEM_INDEX_KEY) return { ok: true, key, fallback: 'memory' };
+        return { ok: true, key };
+      },
+      async deleteJson(key) {
+        return { ok: true, key };
+      }
+    },
+    activity: {
+      stage(event) {
+        indexFallbackActivityEvents.push(event);
+      }
+    }
+  });
+  const indexFallbackSaved = await indexFallbackRepo.saveSceneCache('Index Fallback Chat', 'Scene', {});
+  assertEqual(indexFallbackSaved.storageStatus.persisted, false, 'index fallback save returns non-durable storage status');
+  assertEqual(indexFallbackSaved.storageStatus.fallback, 'memory', 'index fallback save records memory fallback status');
+  assert(indexFallbackActivityEvents.some((event) => event.phase === 'storageWarning'), 'index fallback save emits storage warning');
+  assert(!indexFallbackActivityEvents.some((event) => event.logicalStage === 'Storage ready'), 'index fallback save does not report durable ready');
+
+  let failedSceneIndexWriteAttempted = false;
+  const failedSceneRepo = createStorageRepository({
+    storage: {
+      async readJson() {
+        return null;
+      },
+      async writeJson(key) {
+        if (key === SYSTEM_INDEX_KEY) {
+          failedSceneIndexWriteAttempted = true;
+          return { ok: true, key };
+        }
+        return { ok: false, key, fallback: 'memory', detail: 'sk-write-failed-secret' };
+      },
+      async deleteJson(key) {
+        return { ok: true, key };
+      }
+    },
+    activity: { stage() {} }
+  });
+  const failedSceneSaved = await failedSceneRepo.saveSceneCache('Failed Scene Write Chat', 'Scene', {});
+  assertEqual(failedSceneSaved.storageStatus.persisted, false, 'ok false scene write returns non-durable storage status');
+  assertEqual(failedSceneSaved.storageStatus.reason, 'write-failed', 'ok false scene write takes precedence over fallback label');
+  assertEqual(failedSceneSaved.storageStatus.fallback, undefined, 'ok false scene write does not masquerade as fallback');
+  assertEqual(failedSceneIndexWriteAttempted, false, 'ok false scene write does not update index');
+
+  const unsafeFallbackEvents = [];
+  const unsafeFallbackRepo = createStorageRepository({
+    storage: {
+      async readJson() {
+        return null;
+      },
+      async writeJson(key) {
+        return { ok: true, key, fallback: 'Bearer unsafe-fallback-token sk-unsafe-fallback' };
+      },
+      async deleteJson(key) {
+        return { ok: true, key };
+      }
+    },
+    activity: {
+      stage(event) {
+        unsafeFallbackEvents.push(event);
+      }
+    }
+  });
+  const unsafeFallbackSaved = await unsafeFallbackRepo.saveSceneCache('Unsafe Fallback Chat', 'Scene', {});
+  const serializedUnsafeFallback = JSON.stringify({ saved: unsafeFallbackSaved, events: unsafeFallbackEvents });
+  assertEqual(unsafeFallbackSaved.storageStatus.persisted, false, 'unsafe fallback label still returns non-durable storage status');
+  assertEqual(unsafeFallbackSaved.storageStatus.fallback, 'unknown', 'unsafe fallback label defaults to unknown');
+  assert(serializedUnsafeFallback.includes('"fallback":"unknown"'), 'unsafe fallback warning records unknown fallback label');
+  assert(!serializedUnsafeFallback.includes('unsafe-fallback-token'), 'unsafe fallback warning redacts bearer token');
+  assert(!serializedUnsafeFallback.includes('sk-unsafe-fallback'), 'unsafe fallback warning redacts sk token');
+
   const reporterEvents = [];
   const reporter = createActivityReporter({ onEvent: (event) => reporterEvents.push(event) });
   const reporterRun = reporter.start({ runId: 'storage-reporter-run', label: 'Storage reporter run' });

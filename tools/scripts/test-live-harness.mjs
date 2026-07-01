@@ -163,11 +163,14 @@ function recursionSmokeFixtureHtml({
   omitVisibleSendMarker = false,
   omitHostGenerationContinuation = false,
   sendControlsDisabled = false,
+  observeInjectsPrompt = false,
+  observeModeSave = 'sync',
+  unclearedPromptOnDisable = false,
   sendSurface = 'complete'
 } = {}) {
   const disableHookScript = missingDisableHook
     ? ''
-      : "globalThis.recursionOnDisable = function recursionOnDisable() { smokeContext.setExtensionPrompt('recursion.sceneBrief', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.turnBrief', '', 'IN_CHAT', 2, false, 'SYSTEM'); return true; };";
+      : "globalThis.recursionOnDisable = function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.sceneBrief', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.turnBrief', '', 'IN_CHAT', 2, false, 'SYSTEM'); } return true; };";
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -197,7 +200,7 @@ function recursionSmokeFixtureHtml({
         </div>
         <div data-recursion-hand-dropdown hidden>No hand has been composed for this chat.</div>
         <div data-recursion-settings-panel hidden>
-          <select data-recursion-setting-mode aria-label="Mode"><option value="observe">Observe</option><option value="auto">Auto</option></select>
+          <select data-recursion-setting-mode aria-label="Mode"><option value="observe">Observe</option><option value="auto" selected>Auto</option></select>
           <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
           <input type="checkbox" data-recursion-provider-enabled-reasoner aria-label="Reasoner enabled">
           <button type="button" data-recursion-settings-save>Save Settings</button>
@@ -219,24 +222,34 @@ function recursionSmokeFixtureHtml({
       const smokeContext = {
         chat: [],
         prompts: {},
+        mode: 'auto',
+        unclearedPromptOnDisable: ${unclearedPromptOnDisable ? 'true' : 'false'},
         setExtensionPrompt(key, text, position, depth, scan, role) {
           if (${ignorePromptClear ? 'true' : 'false'} && String(key || '').startsWith('recursion.') && String(text || '') === '') return;
           this.prompts[key] = { text, position, depth, scan, role };
         }
       };
       globalThis.SillyTavern = { getContext: () => smokeContext };
+      if (smokeContext.unclearedPromptOnDisable) {
+        smokeContext.setExtensionPrompt('recursion.sceneBrief', 'Recursion stale observe baseline prompt.', 'IN_PROMPT', 4, false, 'SYSTEM');
+      }
       globalThis.recursionGenerationInterceptor = async function recursionGenerationInterceptor(chat) {
         const sourceChat = Array.isArray(chat) ? chat : smokeContext.chat;
-        smokeContext.setExtensionPrompt('recursion.sceneBrief', 'Recursion smoke scene brief.', 'IN_PROMPT', 4, false, 'SYSTEM');
-        smokeContext.setExtensionPrompt('recursion.turnBrief', 'Recursion smoke turn brief.', 'IN_CHAT', 2, false, 'SYSTEM');
+        const activeMode = smokeContext.mode || document.querySelector('[data-recursion-setting-mode]')?.value || 'auto';
         const renderGenerationUi = () => {
-          document.querySelector('[data-recursion-status]').textContent = 'Ready - Auto';
+          document.querySelector('[data-recursion-status]').textContent = activeMode === 'observe' ? 'Ready - Observe' : 'Ready - Auto';
           document.querySelector('[data-recursion-hand-count]').textContent = 'Hand 2';
-          document.querySelector('[data-recursion-ribbon-label]').textContent = 'Recursion prompt ready.';
+          document.querySelector('[data-recursion-ribbon-label]').textContent = activeMode === 'observe' ? 'Observe mode: hand preview ready. No prompt injected.' : 'Recursion prompt ready.';
           document.querySelector('[data-recursion-prompt-packet]').textContent = ${omitPromptPacketMetadata
             ? "JSON.stringify({ packetId: '', handId: '', selectedCardRefs: [] })"
             : "JSON.stringify({ packetId: 'packet-smoke', handId: 'hand-smoke', selectedCardRefs: ['scene-frame', 'turn-brief'] })"};
         };
+        if (activeMode === 'observe' && !${observeInjectsPrompt ? 'true' : 'false'}) {
+          renderGenerationUi();
+          return sourceChat;
+        }
+        smokeContext.setExtensionPrompt('recursion.sceneBrief', 'Recursion smoke scene brief.', 'IN_PROMPT', 4, false, 'SYSTEM');
+        smokeContext.setExtensionPrompt('recursion.turnBrief', 'Recursion smoke turn brief.', 'IN_CHAT', 2, false, 'SYSTEM');
         if (${asyncUiGeneration ? 'true' : 'false'}) setTimeout(renderGenerationUi, 650);
         else renderGenerationUi();
         return sourceChat;
@@ -282,7 +295,14 @@ function recursionSmokeFixtureHtml({
         document.querySelector('[data-recursion-settings-panel]').hidden = false;
       });
       document.querySelector('[data-recursion-settings-save]').addEventListener('click', () => {
-        document.querySelector('[data-recursion-status]').textContent = 'Ready - Auto';
+        const mode = document.querySelector('[data-recursion-setting-mode]')?.value || 'auto';
+        const applyMode = () => {
+          smokeContext.mode = mode;
+          document.querySelector('[data-recursion-status]').textContent = mode === 'observe' ? 'Ready - Observe' : 'Ready - Auto';
+        };
+        if ('${observeModeSave}' === 'noop' && mode === 'observe') return;
+        if ('${observeModeSave}' === 'async' && mode === 'observe') setTimeout(applyMode, 150);
+        else applyMode();
       });
       document.querySelector('[data-recursion-hand-toggle]').addEventListener('click', () => {
         const panel = document.querySelector('[data-recursion-hand-dropdown]');
@@ -314,6 +334,9 @@ async function createSillyTavernSmokeFixtureServer({
   omitVisibleSendMarker = false,
   omitHostGenerationContinuation = false,
   sendControlsDisabled = false,
+  observeInjectsPrompt = false,
+  observeModeSave = 'sync',
+  unclearedPromptOnDisable = false,
   sendSurface = 'complete'
 } = {}) {
   const sessions = new Map();
@@ -458,6 +481,9 @@ async function createSillyTavernSmokeFixtureServer({
         omitVisibleSendMarker,
         omitHostGenerationContinuation,
         sendControlsDisabled,
+        observeInjectsPrompt,
+        observeModeSave,
+        unclearedPromptOnDisable,
         sendSurface
       }));
       return;
@@ -988,6 +1014,8 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.browser.snapshot.generation.triggerSource, 'ui-send', 'generation smoke uses visible send controls when available');
     assertEqual(report.browser.snapshot.generation.chatMutationSource, 'visible-control', 'generation smoke records visible chat mutation source');
     assertEqual(report.browser.snapshot.generation.hostGenerationContinued, true, 'generation smoke proves host generation continued after visible send');
+    assertEqual(report.browser.snapshot.generation.observeProof?.ok, true, 'generation smoke proves Observe mode before Auto');
+    assertEqual(report.browser.snapshot.generation.observeProof?.promptInstalled, false, 'Observe proof records no prompt install');
     assertEqual(/screenshot/i.test(report.nextAction || ''), false, 'generation success guidance does not ask for suppressed screenshots');
     assertEqual(report.browser.snapshot.generation.promptInstalled, true, 'generation smoke records Recursion prompt install');
     assertEqual(report.browser.cleanup?.promptCleared, true, 'generation smoke records Recursion prompt clear');
@@ -1013,12 +1041,109 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assert(promptMetadata.includes('"clearStatus": "cleared"'), 'generation prompt metadata records clear status');
     assert(promptMetadata.includes('"triggerSource": "ui-send"'), 'generation prompt metadata records visible trigger source');
     assert(promptMetadata.includes('"hostGenerationContinued": true'), 'generation prompt metadata records host continuation');
+    assert(promptMetadata.includes('"observeProof"'), 'generation prompt metadata records observe proof');
+    assert(promptMetadata.includes('"mode": "observe"'), 'generation prompt metadata records observe mode');
+    assert(promptMetadata.includes('"promptInstalled": false'), 'generation prompt metadata records observe no-injection');
     assert(promptMetadata.includes('"promptKeys"'), 'generation prompt metadata records prompt keys');
     assert(activityRun.includes('"generation-smoke-pass"'), 'generation activity latest-run records generation result');
     assert(redactionCheck.includes('"status": "pass"'), 'generation redaction check passes');
     assert(!promptMetadata.includes('Recursion smoke scene brief'), 'prompt metadata artifact omits raw prompt text');
   } finally {
     rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ observeInjectsPrompt: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1',
+        RECURSION_LIVE_TIMEOUT_MS: '1000'
+      }
+    });
+    assertEqual(report.status, 'fail', 'generation smoke fails if Observe mode installs prompt text before Auto');
+    assertEqual(report.result, 'generation-observe-injection-failed', 'Observe injection failure result is explicit');
+    assertEqual(report.browser.snapshot.generation.observeProof?.ok, false, 'Observe failure records failed proof');
+    assertEqual(report.browser.snapshot.generation.observeProof?.promptInstalled, true, 'Observe failure records prompt install');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ unclearedPromptOnDisable: true });
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-observe-baseline-fail-'));
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live', '--write-artifacts'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1',
+        RECURSION_LIVE_TIMEOUT_MS: '1000'
+      },
+      artifactRoot
+    });
+    assertEqual(report.status, 'fail', 'generation smoke fails if Observe baseline prompt remains installed');
+    assertEqual(report.result, 'generation-observe-injection-failed', 'uncleared Observe baseline uses explicit failure result');
+    assertEqual(report.browser.snapshot.generation.observeProof?.baselineClearOk, false, 'Observe proof records failed baseline clear');
+    assertEqual(report.browser.snapshot.generation.observeProof?.promptInstalled, true, 'Observe proof records remaining prompt install');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    const promptMetadata = readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8');
+    const activityRun = readFileSync(join(runRoot, 'activity', 'latest-run.json'), 'utf8');
+    const redactionCheck = readFileSync(join(runRoot, 'diagnostics', 'redaction-check.json'), 'utf8');
+    assert(promptMetadata.includes('"observeProof"'), 'Observe baseline failure writes proof metadata');
+    assert(promptMetadata.includes('"baselineClearOk": false'), 'Observe baseline failure metadata records failed clear');
+    assert(activityRun.includes('"generation-observe-injection-failed"'), 'Observe baseline failure activity records result');
+    assert(redactionCheck.includes('"status": "pass"'), 'Observe baseline failure artifacts pass redaction');
+    assertEqual(existsSync(join(runRoot, 'screenshots', 'desktop.png')), false, 'Observe baseline failure omits desktop screenshot');
+    assertEqual(existsSync(join(runRoot, 'playwright', 'trace.zip')), false, 'Observe baseline failure omits trace');
+    assert(!promptMetadata.includes('Recursion stale observe baseline prompt'), 'Observe baseline failure omits raw prompt text');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ observeModeSave: 'noop' });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1',
+        RECURSION_LIVE_TIMEOUT_MS: '1000'
+      }
+    });
+    assertEqual(report.status, 'fail', 'generation smoke fails when Observe mode does not apply');
+    assertEqual(report.result, 'generation-observe-mode-unavailable', 'Observe mode no-op save failure result is explicit');
+    assertEqual(report.browser.snapshot.generation.observeProof?.ok, false, 'Observe mode no-op records failed proof');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ observeModeSave: 'async' });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      }
+    });
+    assertEqual(report.status, 'pass', 'generation smoke waits for asynchronous Observe mode application');
+    assertEqual(report.browser.snapshot.generation.observeProof?.observedMode, 'observe', 'async Observe proof records observed mode');
+  } finally {
     await server.close();
   }
 }

@@ -139,6 +139,23 @@ assertDeepEqual(packet.omissions, [
   { cardId: 'omitted-1', family: 'Prose/Pacing', reason: 'token-budget', tokenEstimate: 99 }
 ], 'omissions preserve safe omission metadata');
 
+const unsafeSnapshotPacket = await composePromptPacket({
+  hand: baseHand(),
+  snapshot: {
+    chatId: 'chat-sk-prompt-secret',
+    sceneFingerprint: 'scene Bearer prompt-token',
+    turnFingerprint: 'turn private-secret'
+  },
+  settings: { promptFootprint: 'normal', reasonerUse: 'off' }
+});
+const unsafeSnapshotSerialized = JSON.stringify(unsafeSnapshotPacket);
+assert(unsafeSnapshotPacket.chatId, 'unsafe snapshot chat id remains populated');
+assert(unsafeSnapshotPacket.sceneFingerprint, 'unsafe snapshot scene fingerprint remains populated');
+assert(unsafeSnapshotPacket.turnFingerprint, 'unsafe snapshot turn fingerprint remains populated');
+assert(!unsafeSnapshotSerialized.includes('sk-prompt-secret'), 'unsafe snapshot chat id redacts sk marker');
+assert(!unsafeSnapshotSerialized.includes('Bearer prompt-token'), 'unsafe snapshot scene fingerprint redacts bearer marker');
+assert(!unsafeSnapshotSerialized.includes('private-secret'), 'unsafe snapshot turn fingerprint redacts private-secret marker');
+
 const blocks = packetToPromptBlocks(packet);
 assertEqual(blocks.length, 3, 'three prompt blocks produced');
 assertDeepEqual(

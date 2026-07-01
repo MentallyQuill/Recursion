@@ -320,7 +320,7 @@ function buildInjectionPlan(sectionSources, budgets) {
 }
 
 function snapshotField(snapshot, key) {
-  return cleanText(asObject(snapshot)[key], 200);
+  return safeText(asObject(snapshot)[key], 200);
 }
 
 function baseDiagnostics({ runId, footprint, budgets, cards, omissions, composerLane = 'utility', reasonerStatus = 'skipped' }) {

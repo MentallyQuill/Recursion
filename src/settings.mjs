@@ -7,6 +7,10 @@ const FOCUS = new Set(['balanced', 'character', 'continuity', 'prose', 'plot']);
 const REASONER_USE = new Set(['off', 'auto', 'always']);
 const SOURCES = new Set(['host-current-model', 'host-connection-profile', 'openai-compatible']);
 const LANES = new Set(['utility', 'reasoner']);
+const UI_PROGRESS_CHILD_MIN = 1;
+const UI_PROGRESS_CHILD_MAX = 20;
+const UI_PROGRESS_LIST_MIN = 5;
+const UI_PROGRESS_LIST_MAX = 80;
 
 function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -49,7 +53,9 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
     }
   },
   ui: {
-    viewerOpen: false
+    viewerOpen: false,
+    progressChildVisibleLimit: 5,
+    progressListVisibleLimit: 15
   }
 });
 
@@ -158,7 +164,19 @@ export function normalizeSettings(value = {}, secretStore = null) {
       reasoner: normalizeProviderSettings('reasoner', source.providers?.reasoner, secretStore)
     },
     ui: {
-      viewerOpen: source.ui?.viewerOpen === true
+      viewerOpen: source.ui?.viewerOpen === true,
+      progressChildVisibleLimit: Math.round(numberInRange(
+        source.ui?.progressChildVisibleLimit,
+        DEFAULT_RECURSION_SETTINGS.ui.progressChildVisibleLimit,
+        UI_PROGRESS_CHILD_MIN,
+        UI_PROGRESS_CHILD_MAX
+      )),
+      progressListVisibleLimit: Math.round(numberInRange(
+        source.ui?.progressListVisibleLimit,
+        DEFAULT_RECURSION_SETTINGS.ui.progressListVisibleLimit,
+        UI_PROGRESS_LIST_MIN,
+        UI_PROGRESS_LIST_MAX
+      ))
     }
   };
 }

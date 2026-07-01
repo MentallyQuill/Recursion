@@ -68,6 +68,8 @@ Card requests are built from the Arbiter plan and the frozen snapshot. Utility c
 
 Runtime also creates local fallback Scene Frame and Continuity Risk cards from the latest visible messages. These local cards keep the first loop useful when provider card generation is unavailable.
 
+After cache, provider, and fallback cards are known, runtime emits sanitized `cardProgress` activity events for the Hero Pixel Array progress menu. These events are child rows under `utility-card-batch`: generated provider cards use `state: done` and `source: generated`, cache-reused cards use `state: cached` and `source: cache`, and local fallback cards use `state: warning` and `source: fallback`. The event detail is limited to parent step id, role/family, source, state, and safe card id; it must not include card prompt text, raw provider output, transcript text, or secrets.
+
 Lifecycle actions from the plan can select, emphasize, stow, discard, or mark cards stale. If a selection exists, untouched cards are stowed for the current hand. The updated deck is saved as a scene cache record.
 
 ## Hand Selection
@@ -92,7 +94,7 @@ Install uses a clear-then-install sequence and rolls back all known Recursion pr
 
 ## Activity And Storage
 
-Activity events are emitted for reading the turn, planning, card generation or cache reuse, hand selection, prompt install, prompt clear, storage save, warnings, and settled results. The Activity Ribbon renders the latest active run state rather than a raw log.
+Activity events are emitted for reading the turn, planning, card generation or cache reuse, nested card progress, hand selection, prompt install, prompt clear, storage save, warnings, and settled results. The compact progress model renders the latest active run state rather than a raw log.
 
 Storage writes are sequenced separately from prompt mutations. Storage failure records a warning and keeps the current generation path moving when in-memory state is sufficient. `hand.selected` entries store hand id, selected and omitted counts, up to 16 selected card ids/families/roles/emphasis/token estimates with `listedCount` and `truncated`, source hashes, and prompt packet hashes; they do not store card `promptText`, prompt sections, inspector notes, or provider payloads.
 

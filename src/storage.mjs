@@ -442,6 +442,130 @@ function normalizeIndexKey(kind, value) {
   return null;
 }
 
+function indexKindForKey(key) {
+  if (SCENE_CACHE_KEY_PATTERN.test(key)) return 'sceneCache';
+  if (RUN_JOURNAL_KEY_PATTERN.test(key)) return 'runJournal';
+  return null;
+}
+
+function isStorageObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function indexRecordFromStoredRecord(key, value) {
+  const kind = indexKindForKey(key);
+  if (!kind || !isStorageObject(value) || value.schemaVersion !== 1) return null;
+  if (kind === 'sceneCache') {
+    if (value.recordType !== 'recursion.sceneCache' || !Array.isArray(value.cards)) return null;
+    const chatKey = safeIdentifier(value.chatKey, '');
+    const sceneKey = safeIdentifier(value.sceneKey, '');
+    if (!chatKey || !sceneKey) return null;
+    return {
+      key,
+      kind,
+      chatKey,
+      updatedAt: timestampValue(value.updatedAt)
+    };
+  }
+  if (kind === 'runJournal') {
+    if (value.recordType !== 'recursion.runJournal' || !Array.isArray(value.entries)) return null;
+    const chatKey = safeIdentifier(value.chatKey, '');
+    if (!chatKey) return null;
+    return {
+      key,
+      kind,
+      chatKey,
+      updatedAt: timestampValue(value.updatedAt)
+    };
+  }
+  return null;
+}
+
+function sameIndexRecord(left, right) {
+  return left?.key === right?.key
+    && left?.kind === right?.kind
+    && left?.chatKey === right?.chatKey
+    && left?.updatedAt === right?.updatedAt;
+}
+
+function rawIndexRequiresRewrite(rawIndex, normalizedIndex) {
+  if (rawIndex === null) return false;
+  if (!isStorageObject(rawIndex)) return true;
+  if (rawIndex.recordType !== 'recursion.systemIndex' || rawIndex.schemaVersion !== 1) return true;
+  if (!isValidTimestampString(rawIndex.createdAt) || !isValidTimestampString(rawIndex.updatedAt)) return true;
+  if (!isStorageObject(rawIndex.records)) return true;
+  if (Object.keys(rawIndex.records).length !== Object.keys(normalizedIndex.records).length) return true;
+  for (const [key, record] of Object.entries(normalizedIndex.records)) {
+    const rawRecord = rawIndex.records[key];
+    if (!rawRecord || !sameIndexRecord(rawRecord, record)) return true;
+    if (Object.keys(rawRecord).length !== 4) return true;
+  }
+  return false;
+}
+
+function normalizeStorageKeyList(value) {
+  return Array.isArray(value) ? value.filter((key) => typeof key === 'string') : null;
+}
+
+async function discoverStorageKeys(storage) {
+  if (typeof storage.listJsonKeys === 'function') {
+    return normalizeStorageKeyList(await storage.listJsonKeys());
+  }
+  if (typeof storage.listKeys === 'function') {
+    return normalizeStorageKeyList(await storage.listKeys());
+  }
+  if (typeof storage.dump === 'function') {
+    const dumped = storage.dump();
+    return dumped && typeof dumped === 'object' && !Array.isArray(dumped) ? Object.keys(dumped) : null;
+  }
+  return null;
+}
+
+function repairDiagnostic(action, entry) {
+  return redactSecretText(redact({
+    action,
+    kind: ['sceneCache', 'runJournal'].includes(entry?.kind) ? entry.kind : 'unknown',
+    chatKey: safeOptionalMetadataText(entry?.chatKey, 160),
+    reason: safeOptionalMetadataText(entry?.reason, 80)
+  }));
+}
+
+function summarizeByField(entries, field) {
+  return entries.reduce((counts, entry) => {
+    const key = safeMetadataText(entry?.[field], 80, 'unknown');
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function cleanupJournalEvents(repaired, pruned) {
+  const events = [];
+  if (repaired.length > 0) {
+    events.push(normalizeJournalEntry({
+      event: 'storage.repaired',
+      severity: 'info',
+      summary: 'Storage index repaired.',
+      details: {
+        repairedCount: repaired.length,
+        kinds: summarizeByField(repaired, 'kind')
+      }
+    }));
+  }
+  if (pruned.length > 0) {
+    events.push(normalizeJournalEntry({
+      event: 'storage.pruned',
+      severity: 'info',
+      summary: 'Storage index pruned.',
+      details: {
+        prunedCount: pruned.length,
+        kinds: summarizeByField(pruned, 'kind'),
+        reasons: summarizeByField(pruned, 'reason')
+      }
+    }));
+  }
+  return events;
+}
+
 function reportActivity(activity, event) {
   try {
     const result = activity?.stage?.(event);
@@ -467,6 +591,102 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
     delete index.records[key];
     index.updatedAt = nowIso();
     await storage.writeJson(SYSTEM_INDEX_KEY, index);
+  }
+
+  async function readRepairRecord(key) {
+    try {
+      return { ok: true, value: await storage.readJson(key) };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  async function repairIndex() {
+    const rawIndex = await storage.readJson(SYSTEM_INDEX_KEY);
+    const existingIndex = normalizeIndex(rawIndex);
+    const desiredRecords = {};
+    const repaired = [];
+    const pruned = [];
+    const skipped = [];
+    const discoveredKeys = await discoverStorageKeys(storage);
+    const discoveredKeySet = discoveredKeys ? new Set(discoveredKeys) : null;
+    const unreadableKeys = new Set();
+
+    if (discoveredKeySet) {
+      for (const key of [...discoveredKeySet].sort()) {
+        const kind = indexKindForKey(key);
+        if (!kind) continue;
+        const read = await readRepairRecord(key);
+        if (!read.ok) {
+          unreadableKeys.add(key);
+          skipped.push(repairDiagnostic('index-skipped', { kind, reason: 'read-failed' }));
+          continue;
+        }
+        const record = indexRecordFromStoredRecord(key, read.value);
+        if (record) desiredRecords[key] = record;
+      }
+
+      for (const [key, record] of Object.entries(existingIndex.records)) {
+        if (desiredRecords[key]) continue;
+        if (unreadableKeys.has(key)) {
+          desiredRecords[key] = record;
+          continue;
+        }
+        pruned.push(repairDiagnostic('index-removed', {
+          ...record,
+          reason: discoveredKeySet.has(key) ? 'invalid-record' : 'missing-record'
+        }));
+      }
+
+      for (const [key, record] of Object.entries(desiredRecords)) {
+        if (!sameIndexRecord(existingIndex.records[key], record)) {
+          repaired.push(repairDiagnostic(existingIndex.records[key] ? 'index-updated' : 'index-added', record));
+        }
+      }
+    } else {
+      for (const [key, record] of Object.entries(existingIndex.records)) {
+        const read = await readRepairRecord(key);
+        if (!read.ok) {
+          desiredRecords[key] = record;
+          skipped.push(repairDiagnostic('index-skipped', { ...record, reason: 'read-failed' }));
+          continue;
+        }
+        if (!read.value) {
+          pruned.push(repairDiagnostic('index-removed', { ...record, reason: 'missing-record' }));
+          continue;
+        }
+        const validRecord = indexRecordFromStoredRecord(key, read.value);
+        if (!validRecord) {
+          pruned.push(repairDiagnostic('index-removed', { ...record, reason: 'invalid-record' }));
+          continue;
+        }
+        desiredRecords[key] = validRecord;
+        if (!sameIndexRecord(record, validRecord)) {
+          repaired.push(repairDiagnostic('index-updated', validRecord));
+        }
+      }
+    }
+
+    if (rawIndex === null || rawIndexRequiresRewrite(rawIndex, existingIndex) || repaired.length > 0 || pruned.length > 0) {
+      const nextIndex = normalizeIndex({
+        createdAt: existingIndex.createdAt,
+        records: desiredRecords
+      });
+      nextIndex.updatedAt = nowIso();
+      await storage.writeJson(SYSTEM_INDEX_KEY, nextIndex);
+    }
+
+    return {
+      ok: true,
+      repaired,
+      pruned,
+      skipped,
+      journalEvents: cleanupJournalEvents(repaired, pruned),
+      discovery: {
+        available: Boolean(discoveredKeySet),
+        recordCount: Object.keys(desiredRecords).length
+      }
+    };
   }
 
   async function loadSceneCache(chatKey, sceneKey) {
@@ -565,6 +785,7 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
     },
     loadRunJournal,
     appendJournal,
+    repairIndex,
     async clearSceneCache(chatKey, sceneKey) {
       const key = sceneCacheKey(chatKey, sceneKey);
       await storage.deleteJson(key);

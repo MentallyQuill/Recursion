@@ -179,12 +179,48 @@ The Hero Pixel Array and progress menu must render from the same normalized `pro
   subtitle: "2 model calls running",
   steps: [
     { id: "read-turn", label: "Reading current turn", providerLane: "utility", state: "done" },
-    { id: "utility-card-batch", label: "Utility card batch", providerLane: "utility", state: "running" },
+    {
+      id: "utility-card-batch",
+      label: "Utility card batch",
+      providerLane: "utility",
+      state: "warning",
+      children: [
+        { id: "scene-frame-card", label: "Scene Frame", providerLane: "utility", state: "running", meta: "running", sourceRoleId: "sceneFrameCard" },
+        { id: "continuity-risk-card", label: "Continuity Risk", providerLane: "utility", state: "cached", meta: "cached", source: "cache", sourceRoleId: "continuityRiskCard" },
+        { id: "character-motivation-card", label: "Character Motivation", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "characterMotivationCard" },
+        { id: "open-threads-card", label: "Open Threads", providerLane: "utility", state: "warning", meta: "fallback", source: "fallback", sourceRoleId: "openThreadsCard" }
+      ]
+    },
     { id: "reasoner-brief", label: "Reasoner brief", providerLane: "reasoner", state: "running" },
     { id: "composing-prompt-packet", label: "Composing prompt packet", providerLane: "utility", state: "pending" }
-  ]
+  ],
+  settings: {
+    ui: {
+      progressChildVisibleLimit: 5,
+      progressListVisibleLimit: 15
+    }
+  }
 }
 ```
+
+Nested child rows are the intended shape for grouped work. `Utility card batch` should show one child row for each generated card, cache-reused card, or local fallback card involved in the batch. `Reasoner brief` may show child rows for `Reasoner synthesis`, validation, and `Utility fallback` when those sub-steps matter. Keep `Composing prompt packet`, prompt install, and storage rows flat unless they later contain real sub-model calls.
+
+Nested child rows are persistent once they appear during a run. They should not auto-collapse while the progress menu is open. The user setting `ui.progressChildVisibleLimit` controls how many child rows are visible inside a single parent group before that child group becomes scrollable; default `progressChildVisibleLimit: 5`, allowed range 1-20. Child group scrollbars stay hidden. When more child rows exist below the visible area, show a subtle bottom fade over the child group; when the user scrolls to the final child row, remove the bottom fade.
+
+The user setting `ui.progressListVisibleLimit` controls how many combined progress items are visible before the whole progress list becomes scrollable; default `progressListVisibleLimit: 15`, allowed range 5-80. Count top-level rows and visible child rows together, using each capped child group as part of the same progress surface. This keeps the menu compact when a turn has many top-level rows and many card subcalls.
+
+Parent row aggregation:
+
+- Any failed child makes the parent failed/red.
+- Otherwise any warning child makes the parent warning/amber.
+- Otherwise any running child makes the parent running/blue.
+- Otherwise any pending child keeps the parent pending.
+- Otherwise all cached children make the parent cached/purple.
+- Otherwise mixed generated and cached successes make the parent done/green.
+
+The Hero Pixel Array continues to allocate blocks only for top-level rows. A grouped parent's block uses the aggregated parent state; child rows never create additional Hero Pixel Array blocks unless they are intentionally promoted into top-level rows.
+
+Runtime card child rows come from sanitized `cardProgress` activity events. Event detail may include only `parentStepId`, `roleId`, `family`, `source`, `state`, and a safe card id. It must not include card prompt text, raw provider output, transcript text, stack traces, hidden reasoning, or secrets.
 
 On each new `runId`, the Hero Pixel Array clears the previous turn's blocks, creates empty blocks for the known visible rows, and fills each block as its paired row settles. If Utility Arbiter reveals additional planned work, append new empty blocks with the same short entry animation used for initial blocks.
 
@@ -206,6 +242,7 @@ The array layout is deterministic:
 - The renderer sets `--columns` from `columnCount`, `grid-row` from `row + 1`, `grid-column` from `column + 1`, and `--block-index` from the block index.
 - Entry delay is slight, roughly 24ms per block, so a 12-step run visibly builds without feeling slow.
 - The brand stage remains fixed width; the brand text, fade layer, and pixel array are absolute layers inside that stage.
+- The pixel array and brand fade start at the same `--brand-offset` as the `RECURSION` word, so the left-side visual content has the same inset as the brand text and balances the right-side controls.
 - The renderer sets `--columns` and `--block-count` on `.brand-stage` so both the pixel grid and fade width can derive from the same run state.
 
 The list is not always sequential. Several model calls may launch at once or start a few moments apart, so multiple rows can be active at the same time.
@@ -234,7 +271,11 @@ Generating                         2 model calls running
 
 [done] Reading current turn         done
 [done] Checking scene shift         done
-[run]  Utility card batch           running
+[warn] Utility card batch           caution
+       [run]  Scene Frame           running
+       [cache] Continuity Risk      cached
+       [done]  Motivation           generated
+       [warn]  Open Threads         fallback
 [run]  Reasoner brief               running
 [wait] Composing prompt packet      waiting
 [wait] Installing Recursion prompt  waiting
@@ -593,7 +634,7 @@ Reference CSS contract:
 .recursion-status-popover {
   position: absolute;
   top: 34px;
-  left: 0;
+  left: -3px;
   width: 352px;
   z-index: 80;
   border: 1px solid var(--SmartThemeBorderColor);
@@ -603,8 +644,8 @@ Reference CSS contract:
   backdrop-filter: blur(var(--SmartThemeBlurStrength));
 }
 
-/* If nested under the brand cluster, offset by the bar's left padding.
-   The visible panel must still start at the bar's left border. */
+/* When nested under the brand cluster, offset by the bar border plus left
+   padding so the visible panel starts at the bar's left edge. */
 
 .recursion-step {
   display: grid;
@@ -1045,6 +1086,8 @@ Primary controls:
 - Strength: Light, Balanced, Strong.
 - Prompt Footprint: Compact, Normal, Rich.
 - Focus: Balanced, Character, Continuity, Prose, Plot.
+- Sub-tier Rows: numeric control for `ui.progressChildVisibleLimit`; default 5, minimum 1, maximum 20.
+- Progress Rows: numeric control for `ui.progressListVisibleLimit`; default 15, minimum 5, maximum 80.
 
 Most internal Auto settings should not be exposed as controls. The UI can display Auto decisions for inspection, but users should not have to manage per-turn action, scene status, Reasoner decision rules, or individual card families.
 

@@ -79,6 +79,68 @@ assertEqual(cachedProgress.steps[0].meta, 'cached', 'cached progress rows use ca
 assertEqual(cachedProgress.heroPixelState, 'cached', 'cached progress can own the compact hero state');
 assertEqual(createHeroPixelBlocks(cachedProgress)[0].className, 'hero-block cached', 'cached hero pixel block class is stable');
 
+const nestedChildProgress = createProgressRunModel({
+  progressRun: {
+    runId: 'nested-child-progress',
+    steps: [
+      {
+        id: 'utility-card-batch',
+        label: 'Utility card batch',
+        providerLane: 'utility',
+        state: 'running',
+        children: [
+          { id: 'scene-frame-card', label: 'Scene Frame', providerLane: 'utility', state: 'done', source: 'generated', sourceRoleId: 'sceneFrameCard' },
+          { id: 'continuity-risk-card', label: 'Continuity Risk', providerLane: 'utility', state: 'cached', source: 'cache', sourceRoleId: 'continuityRiskCard' }
+        ]
+      },
+      {
+        id: 'reasoner-brief',
+        label: 'Reasoner brief',
+        providerLane: 'reasoner',
+        state: 'running',
+        children: [
+          { id: 'reasoner-synthesis', label: 'Reasoner synthesis', providerLane: 'reasoner', state: 'failed', sourceRoleId: 'reasonerComposer' },
+          { id: 'utility-fallback', label: 'Utility fallback', providerLane: 'utility', state: 'warning', source: 'fallback' }
+        ]
+      },
+      {
+        id: 'reusing-scene-deck',
+        label: 'Reusing scene deck',
+        providerLane: 'utility',
+        state: 'running',
+        children: [
+          { id: 'active-cast-card', label: 'Active Cast', providerLane: 'utility', state: 'cached', source: 'cache', sourceRoleId: 'activeCastCard' },
+          { id: 'open-threads-card', label: 'Open Threads', providerLane: 'utility', state: 'cached', source: 'cache', sourceRoleId: 'openThreadsCard' }
+        ]
+      }
+    ]
+  }
+});
+const nestedUtilityBatch = nestedChildProgress.steps.find((step) => step.id === 'utility-card-batch');
+const nestedReasonerBrief = nestedChildProgress.steps.find((step) => step.id === 'reasoner-brief');
+const nestedCacheDeck = nestedChildProgress.steps.find((step) => step.id === 'reusing-scene-deck');
+assertEqual(nestedUtilityBatch.state, 'done', 'mixed generated and cached child success makes the card batch successful');
+assertEqual(nestedReasonerBrief.state, 'failed', 'failed child dominates reasoner brief parent state');
+assertEqual(nestedCacheDeck.state, 'cached', 'all-cached children make the parent cached');
+assertDeepEqual(
+  nestedUtilityBatch.children.map((child) => [child.id, child.label, child.state, child.meta, child.sourceRoleId]),
+  [
+    ['scene-frame-card', 'Scene Frame', 'done', 'generated', 'sceneFrameCard'],
+    ['continuity-risk-card', 'Continuity Risk', 'cached', 'cached', 'continuityRiskCard']
+  ],
+  'nested progress normalizes card child rows with source-aware meta text'
+);
+assertEqual(createHeroPixelBlocks(nestedChildProgress).length, 3, 'hero pixel array renders parent rows only, not nested child rows');
+assertDeepEqual(
+  createHeroPixelBlocks(nestedChildProgress).map((block) => [block.id, block.state]),
+  [
+    ['utility-card-batch', 'done'],
+    ['reasoner-brief', 'failed'],
+    ['reusing-scene-deck', 'cached']
+  ],
+  'hero pixel blocks use aggregated parent states for nested progress'
+);
+
 const overflowingProgress = createProgressRunModel({
   progressRun: {
     runId: 'overflow-progress',
@@ -172,6 +234,38 @@ assertEqual(
   'cache reuse activity derives a cached progress row'
 );
 
+const derivedNestedProgress = createProgressRunModel({
+  settings: { mode: 'auto' },
+  activityHistory: [
+    { runId: 'run-nested-derived', phase: 'cardBatchRunning', label: 'Generating scene cards...', providerLane: 'utility', cardCounts: { requested: 4 } },
+    { runId: 'run-nested-derived', phase: 'providerCallRunning', label: 'Provider batch call running.', providerLane: 'utility', detail: { roleId: 'sceneFrameCard', batchIndex: 0 } },
+    { runId: 'run-nested-derived', phase: 'cardProgress', label: 'Continuity Risk reused from cache.', providerLane: 'utility', severity: 'success', detail: { parentStepId: 'utility-card-batch', roleId: 'continuityRiskCard', family: 'Continuity Risk', source: 'cache', state: 'cached' } },
+    { runId: 'run-nested-derived', phase: 'cardProgress', label: 'Character Motivation generated.', providerLane: 'utility', severity: 'success', detail: { parentStepId: 'utility-card-batch', roleId: 'characterMotivationCard', family: 'Character Motivation', source: 'generated', state: 'done' } },
+    { runId: 'run-nested-derived', phase: 'cardProgress', label: 'Open Threads fell back locally.', providerLane: 'utility', severity: 'warning', detail: { parentStepId: 'utility-card-batch', roleId: 'openThreadsCard', family: 'Open Threads', source: 'fallback', state: 'warning' } }
+  ],
+  activity: { runId: 'run-nested-derived', phase: 'providerCallRunning', label: 'Provider batch call running.', providerLane: 'utility', detail: { roleId: 'sceneFrameCard', batchIndex: 0 } },
+  lastPlan: {
+    cardJobs: [
+      { family: 'Scene Frame', role: 'sceneFrameCard' },
+      { family: 'Continuity Risk', role: 'continuityRiskCard' },
+      { family: 'Character Motivation', role: 'characterMotivationCard' },
+      { family: 'Open Threads', role: 'openThreadsCard' }
+    ]
+  }
+});
+const derivedNestedBatch = derivedNestedProgress.steps.find((step) => step.id === 'utility-card-batch');
+assertEqual(derivedNestedBatch.state, 'warning', 'derived card batch parent turns yellow when any child has a repairable caution and no child failed');
+assertDeepEqual(
+  derivedNestedBatch.children.map((child) => [child.label, child.state, child.meta]),
+  [
+    ['Scene Frame', 'running', 'running'],
+    ['Continuity Risk', 'cached', 'cached'],
+    ['Character Motivation', 'done', 'generated'],
+    ['Open Threads', 'warning', 'fallback']
+  ],
+  'derived card batch has pending/running/generated/cached/fallback child rows'
+);
+
 const unsafeExplicitProgress = createProgressRunModel({
   progressRun: {
     runId: 'unsafe-progress',
@@ -210,8 +304,21 @@ assertEqual(progressViewModel.progressRun.currentStepText, 'Utility card batch..
 assertEqual(progressViewModel.heroPixelBlocks.length, 2, 'view model exposes hero pixel blocks for renderers');
 assertEqual(progressViewModel.heroPixelBlocks[1].state, 'running', 'view model keeps active hero pixel block state');
 assertEqual(progressViewModel.heroPixelColumnCount, 1, 'view model exposes pixel column count for moving brand layout');
+assertEqual(progressViewModel.progressChildVisibleLimit, 5, 'view model defaults to five visible sub-tier rows');
+assertEqual(progressViewModel.progressListVisibleLimit, 15, 'view model defaults to fifteen visible progress items');
+
+const customProgressCapsViewModel = createRecursionViewModel({
+  settings: { ui: { progressChildVisibleLimit: 8, progressListVisibleLimit: 24 } }
+});
+assertEqual(customProgressCapsViewModel.progressChildVisibleLimit, 8, 'view model exposes custom sub-tier row limit');
+assertEqual(customProgressCapsViewModel.progressListVisibleLimit, 24, 'view model exposes custom whole-list row limit');
 
 const barImplementationReference = readFileSync(new URL('../../docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md', import.meta.url), 'utf8');
+const uiSpec = readFileSync(new URL('../../docs/design/UI_SPEC.md', import.meta.url), 'utf8');
+const activityTriggerCss = barImplementationReference.match(/\.activity-trigger\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const heroBlockCss = barImplementationReference.match(/\.hero-block\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const heroBlockEnterCss = barImplementationReference.match(/@keyframes hero-block-enter\s*\{([\s\S]*?)\n\}\n\n@keyframes hero-block-active/)?.[1] ?? '';
+const heroBlockActiveCss = barImplementationReference.match(/@keyframes hero-block-active\s*\{([\s\S]*?)\n\}\n\n@keyframes hero-block-wipe/)?.[1] ?? '';
 assert(/padding:\s*0 8px 0 2px;/.test(barImplementationReference), 'recursion bar uses a tighter left inset than right controls');
 assert(/--hero-running:\s*var\(--cyan\);/.test(barImplementationReference), 'hero pixel running blocks use the active blue token');
 assert(/--hero-done:\s*var\(--green\);/.test(barImplementationReference), 'hero pixel done blocks use the success green token');
@@ -220,14 +327,36 @@ assert(/--hero-warning:\s*var\(--amber\);/.test(barImplementationReference), 'he
 assert(/--hero-failed:\s*var\(--red\);/.test(barImplementationReference), 'hero pixel failed blocks use the failure red token');
 assert(/--hero-block-gap:\s*2px;/.test(barImplementationReference), 'hero pixel blocks use a 2px row and column gap');
 assert(/grid-template-rows:\s*repeat\(3,\s*var\(--hero-block-size\)\);/.test(barImplementationReference), 'hero pixel array uses three rows per column');
-assert(/class="brand-stage status-array-button"/.test(barImplementationReference), 'hero pixel array and brand share a fixed overlay stage');
-assert(/class="brand-fade"/.test(barImplementationReference), 'brand stage includes a growing background fade layer');
+assert(/class="brand-stage brand-button"/.test(barImplementationReference), 'brand stage is a dedicated brand-only control');
+assert(/class="activity-trigger status-array-button"/.test(barImplementationReference), 'hero pixel array and current status share one activity trigger after mode');
+assert(!/class="brand-stage status-array-button"/.test(barImplementationReference), 'hero pixel array is no longer mounted inside the brand stage');
+assert(!/class="brand-fade"/.test(barImplementationReference), 'brand stage does not render a gradient over Recursion');
 assert(/\.brand-stage\s*\{[\s\S]*?position:\s*relative;[\s\S]*?overflow:\s*hidden;/.test(barImplementationReference), 'brand stage clips overlay animation without shifting the bar');
 assert(/\.brand\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?z-index:\s*1;/.test(barImplementationReference), 'brand text stays fixed behind the overlay layers');
-assert(/\.brand-fade\s*\{[\s\S]*?z-index:\s*2;[\s\S]*?width:\s*min\(100%,\s*var\(--brand-cover-width\)\);/.test(barImplementationReference), 'brand fade grows over the fixed brand text');
-assert(/\.hero-pixel-array\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?z-index:\s*3;/.test(barImplementationReference), 'hero pixel blocks render above the brand fade');
-assert(/\.brand-block\.is-resetting \.brand-fade/.test(barImplementationReference), 'brand reset state wipes the fade layer');
-assert(/\.brand-block\.is-resetting \.hero-block/.test(barImplementationReference), 'brand reset state wipes old pixel blocks');
+assert(/--brand-stage-width:\s*calc\(var\(--brand-offset\) \+ var\(--brand-text-width\)\);/.test(barImplementationReference), 'brand stage ends at the Recursion word for even separator spacing');
+assert(!/--brand-cover-width:/.test(barImplementationReference), 'brand gradient sizing is removed with the fade layer');
+assert(!/--brand-cover-width:\s*calc\(\(var\(--columns/.test(barImplementationReference), 'brand fade does not grow with Hero Pixel Array columns');
+assert(!/\.brand-fade\s*\{/.test(barImplementationReference), 'brand fade CSS is removed');
+assert(/\.hero-pixel-array\s*\{[\s\S]*?position:\s*relative;[\s\S]*?width:\s*max\(0px,/.test(barImplementationReference), 'hero pixel blocks render inline after mode with a zero-width reset state');
+assert(/\.activity-trigger\s*\{[\s\S]*?gap:\s*7px;[\s\S]*?transition:\s*color \.14s ease;/.test(barImplementationReference), 'activity trigger keeps a stable visual gap between blocks and status');
+assert(/text-align:\s*left;/.test(activityTriggerCss), 'activity trigger keeps status text visually attached to the pixel blocks');
+assert(!/\.brand-block\.is-resetting \.brand-fade/.test(barImplementationReference), 'fixed brand fade is not wiped by turn reset');
+assert(/\.activity-trigger\.is-resetting \.hero-block/.test(barImplementationReference), 'activity reset state wipes old pixel blocks outside the brand stage');
+assert(!/transform:\s*scale/.test(heroBlockCss), 'hero blocks do not scale inside grid cells');
+assert(!/transform:\s*scale/.test(heroBlockEnterCss), 'hero block entry animation does not change visual grid gaps');
+assert(!/transform:\s*scale/.test(heroBlockActiveCss), 'hero block running animation does not change visual grid gaps');
+assert(/display:\s*block;/.test(heroBlockCss), 'hero pixel blocks render as block boxes, not inline spans');
+assert(/aspect-ratio:\s*1\s*\/\s*1;/.test(heroBlockCss), 'hero pixel blocks explicitly preserve a square aspect ratio');
+assert(/border-radius:\s*0;/.test(heroBlockCss), 'hero pixel blocks use sharp square corners');
+assert(/\.status-popover\s*\{[\s\S]*?left:\s*-3px;/.test(barImplementationReference), 'status popover aligns to the visible left edge of the bar');
+assert(/const PROGRESS_CHILD_VISIBLE_LIMIT = 5;/.test(barImplementationReference), 'turn animation preview defaults to five visible sub-tier rows');
+assert(/const PROGRESS_LIST_VISIBLE_LIMIT = 15;/.test(barImplementationReference), 'turn animation preview defaults to fifteen visible progress items');
+assert(/--child-visible-limit:\s*5;/.test(barImplementationReference), 'child row groups define the default visible sub-tier cap');
+assert(/--progress-list-visible-limit:\s*15;/.test(barImplementationReference), 'status list defines the default whole-list cap');
+assert(/\.step-children\[data-overflow="true"\]:not\(\[data-at-end="true"\]\)::after/.test(barImplementationReference), 'overflowing child groups show a bottom fade until scrolled to the end');
+assert(/\.step-children::?-webkit-scrollbar|\.step-children::-webkit-scrollbar/.test(barImplementationReference), 'child row groups hide webkit scrollbars');
+assert(/function updateChildGroupScrollState/.test(barImplementationReference), 'turn animation preview updates child group scroll fade state');
+assert(/function updateStatusListScrollState/.test(barImplementationReference), 'turn animation preview updates whole progress list scroll state');
 assert(/\.step-row\.is-entering/.test(barImplementationReference), 'progress rows have an insertion animation class');
 assert(/@keyframes step-row-enter/.test(barImplementationReference), 'progress row insertion animation is defined');
 assert(/## Turn Animation Preview Script/.test(barImplementationReference), 'implementation reference includes a turn animation preview script');
@@ -239,8 +368,26 @@ assert(/function visibleHeroSteps/.test(barImplementationReference), 'turn anima
 assert(/overflow-progress/.test(barImplementationReference), 'turn animation preview uses an overflow aggregate block');
 assert(/function renderHeroBlocks/.test(barImplementationReference), 'turn animation preview renders hero blocks from step state');
 assert(/function renderProgressRows/.test(barImplementationReference), 'turn animation preview renders progress rows from step state');
+assert(/class="step-children"/.test(barImplementationReference), 'implementation reference includes nested progress child row markup');
+assert(/\.step-row\.child-row/.test(barImplementationReference), 'implementation reference includes nested child row styling');
+assert(/function aggregateChildState/.test(barImplementationReference), 'turn animation preview aggregates child progress states');
+assert(/function syncChildGroup/.test(barImplementationReference), 'turn animation preview renders child progress groups in place');
+assert(/child-add/.test(barImplementationReference), 'turn animation preview animates child progress row insertion');
+assert(/function preserveScrollPosition/.test(barImplementationReference), 'turn animation preview preserves scroll offsets across progress refreshes');
+assert(/function placeAfter/.test(barImplementationReference), 'turn animation preview reorders rows without unconditional append moves');
+assert(/preserveScrollPosition\(group,/.test(barImplementationReference), 'turn animation preview preserves sub-tier scroll position during child updates');
+assert(/preserveScrollPosition\(list,/.test(barImplementationReference), 'turn animation preview preserves whole-list scroll position during row updates');
+assert(/children:\s*\[/.test(uiSpec), 'UI spec documents progress child rows in the normalized view model');
+assert(/Parent row aggregation:/.test(uiSpec), 'UI spec documents nested parent aggregation rules');
+assert(/cardProgress/.test(uiSpec), 'UI spec documents sanitized card progress activity events');
+assert(/\.recursion-status-popover\s*\{[\s\S]*?left:\s*-3px;/.test(uiSpec), 'UI spec anchors the status popover to the visible bar edge');
+assert(/progressChildVisibleLimit:\s*5/.test(uiSpec), 'UI spec documents the sub-tier visible row default');
+assert(/progressListVisibleLimit:\s*15/.test(uiSpec), 'UI spec documents the whole progress list visible row default');
+assert(/bottom fade/.test(uiSpec), 'UI spec documents the sub-tier overflow fade affordance');
 assert(!/array\.innerHTML\s*=\s*steps\.map/.test(barImplementationReference), 'turn animation preview does not recreate all hero blocks on every tick');
 assert(!/list\.innerHTML\s*=\s*rows\.map/.test(barImplementationReference), 'turn animation preview does not recreate all progress rows on every tick');
+assert(!/list\.appendChild\(parentRow\);/.test(barImplementationReference), 'turn animation preview does not unconditionally move parent rows on every refresh');
+assert(!/const before = list\.children\[index\];[\s\S]*?list\.insertBefore\(row, before \|\| null\);/.test(barImplementationReference), 'turn animation preview does not index parent rows against child group siblings');
 assert(/dataset\.stepId/.test(barImplementationReference), 'turn animation preview keys hero blocks and progress rows by stable step id');
 assert(/function syncHeroBlock/.test(barImplementationReference), 'turn animation preview updates hero blocks in place');
 assert(/function syncProgressRow/.test(barImplementationReference), 'turn animation preview updates progress rows in place');
@@ -536,6 +683,11 @@ try {
       promptFootprint: 'normal',
       focus: 'balanced',
       reasonerUse: 'auto',
+      ui: {
+        viewerOpen: false,
+        progressChildVisibleLimit: 5,
+        progressListVisibleLimit: 15
+      },
       providers: {
         utility: {
           lane: 'utility',
@@ -698,13 +850,19 @@ try {
   root.querySelector('[data-recursion-setting-footprint]').value = 'rich';
   root.querySelector('[data-recursion-setting-focus]').value = 'character';
   root.querySelector('[data-recursion-setting-reasoner]').value = 'always';
+  root.querySelector('[data-recursion-setting-progress-child-limit]').value = '7';
+  root.querySelector('[data-recursion-setting-progress-list-limit]').value = '22';
   root.querySelector('[data-recursion-settings-save]').click();
   assertDeepEqual(settingsUpdates.at(-1), {
     mode: 'auto',
     strength: 'strong',
     promptFootprint: 'rich',
     focus: 'character',
-    reasonerUse: 'always'
+    reasonerUse: 'always',
+    ui: {
+      progressChildVisibleLimit: 7,
+      progressListVisibleLimit: 22
+    }
   }, 'settings panel saves broad behavior controls');
   root.querySelector('[data-recursion-setting-mode]').value = 'off';
   root.querySelector('[data-recursion-settings-save]').click();
@@ -713,7 +871,11 @@ try {
     strength: 'strong',
     promptFootprint: 'rich',
     focus: 'character',
-    reasonerUse: 'always'
+    reasonerUse: 'always',
+    ui: {
+      progressChildVisibleLimit: 7,
+      progressListVisibleLimit: 22
+    }
   }, 'settings panel can switch Recursion Off');
   assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working', 'Off settings save shows cleanup work');
   assertEqual(root.querySelector('[data-recursion-mode]').textContent, 'Off', 'Off settings save shows mode separately');

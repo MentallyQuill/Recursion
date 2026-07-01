@@ -44,6 +44,14 @@ assertEqual(blankNumbers.maxTokens, DEFAULT_RECURSION_SETTINGS.providers.utility
 const blankDiagnostics = normalizeSettings({ diagnostics: { maxJournalEntries: '' } });
 assertEqual(blankDiagnostics.diagnostics.maxJournalEntries, DEFAULT_RECURSION_SETTINGS.diagnostics.maxJournalEntries, 'blank diagnostics max falls back');
 
+const defaultUi = normalizeSettings({});
+assertEqual(defaultUi.ui.progressChildVisibleLimit, 5, 'sub-tier visible item default is five');
+assertEqual(defaultUi.ui.progressListVisibleLimit, 15, 'whole progress list visible item default is fifteen');
+
+const clampedUi = normalizeSettings({ ui: { progressChildVisibleLimit: 99, progressListVisibleLimit: -10 } });
+assertEqual(clampedUi.ui.progressChildVisibleLimit, 20, 'sub-tier visible item limit clamps high');
+assertEqual(clampedUi.ui.progressListVisibleLimit, 5, 'whole progress list visible item limit clamps low');
+
 const root = {};
 const secrets = createSessionSecretStore();
 const store = createSettingsStore({ root, secretStore: secrets });
@@ -118,6 +126,11 @@ store.update({ diagnostics: { maxJournalEntries: 321 } });
 store.update({ diagnostics: { includeExcerpts: true } });
 assertEqual(root.recursion.diagnostics.maxJournalEntries, 321, 'partial diagnostics update preserves max entries');
 assertEqual(root.recursion.diagnostics.includeExcerpts, true, 'partial diagnostics update changes includeExcerpts');
+
+store.update({ ui: { progressChildVisibleLimit: 7 } });
+store.update({ ui: { progressListVisibleLimit: 22 } });
+assertEqual(root.recursion.ui.progressChildVisibleLimit, 7, 'partial UI update preserves sub-tier limit');
+assertEqual(root.recursion.ui.progressListVisibleLimit, 22, 'partial UI update changes progress list limit');
 
 assertThrows(
   () => store.updateProvider('bad-lane', { apiKey: 'x' }),

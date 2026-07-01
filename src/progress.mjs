@@ -3,6 +3,7 @@ const VALID_PROVIDER_LANES = new Set(['utility', 'reasoner']);
 const SAFE_PROGRESS_TITLES = new Set(['Generating', 'Ready', 'Idle', 'Issue', 'Needs attention']);
 const DEFAULT_HERO_PIXEL_ROWS = 3;
 const DEFAULT_HERO_PIXEL_MAX_COLUMNS = 12;
+const VALID_CHILD_SOURCES = new Set(['generated', 'cache', 'fallback', 'provider', 'local']);
 const MODEL_CALL_ROLE_IDS = new Set([
   'sceneFrameCard',
   'activeCastCard',
@@ -13,6 +14,16 @@ const MODEL_CALL_ROLE_IDS = new Set([
   'prosePacingCard',
   'openThreadsCard'
 ]);
+const CARD_ROLE_LABELS = Object.freeze({
+  sceneFrameCard: 'Scene Frame',
+  activeCastCard: 'Active Cast',
+  characterMotivationCard: 'Character Motivation',
+  dialogueRelationshipCard: 'Dialogue/Relationship',
+  continuityRiskCard: 'Continuity Risk',
+  environmentItemsCard: 'Environment/Items',
+  prosePacingCard: 'Prose/Pacing',
+  openThreadsCard: 'Open Threads'
+});
 
 const STEP_ORDER = [
   'read-turn',
@@ -118,10 +129,21 @@ function normalizeState(value, fallback = 'pending') {
   return VALID_STATES.has(state) ? state : fallback;
 }
 
-function metaForState(state) {
+function normalizeChildSource(value) {
+  const source = cleanText(value).toLowerCase();
+  if (source === 'cached') return 'cache';
+  if (source === 'provider') return 'generated';
+  if (source === 'local' || source === 'local-fallback') return 'fallback';
+  return VALID_CHILD_SOURCES.has(source) ? source : '';
+}
+
+function metaForState(state, source = '') {
+  const normalizedSource = normalizeChildSource(source);
+  if (state === 'done' && normalizedSource === 'generated') return 'generated';
   if (state === 'done') return 'done';
   if (state === 'cached') return 'cached';
   if (state === 'running') return 'running';
+  if (state === 'warning' && normalizedSource === 'fallback') return 'fallback';
   if (state === 'warning') return 'caution';
   if (state === 'failed') return 'failed';
   if (state === 'skipped') return 'skipped';
@@ -154,21 +176,89 @@ function roleStepId(event) {
   return null;
 }
 
+function roleLabel(roleId, fallback = '') {
+  const id = cleanText(roleId);
+  if (CARD_ROLE_LABELS[id]) return CARD_ROLE_LABELS[id];
+  if (id === 'reasonerComposer') return 'Reasoner synthesis';
+  if (id === 'utilityArbiter') return 'Utility Arbiter';
+  if (id === 'briefUtilityComposer') return 'Utility composer';
+  return fallback;
+}
+
+function isProviderSettledEvent(event) {
+  const phase = cleanText(event.phase);
+  if (phase !== 'settled' && phase !== 'providerCallSettled') return false;
+  return Boolean(roleStepId(event));
+}
+
 function eventStepId(event) {
   const phase = cleanText(event.phase);
+  const detail = asObject(event.detail);
+  if (phase === 'cardProgress') return cleanText(detail.parentStepId, 'utility-card-batch');
   if (phase.startsWith('providerCall')) return roleStepId(event) || 'utility-card-batch';
+  if (isProviderSettledEvent(event)) return roleStepId(event);
   return PHASE_STEP_IDS[phase] || null;
 }
 
 function eventState(event, isCurrent) {
   const phase = cleanText(event.phase);
   const severity = cleanText(event.severity, 'info').toLowerCase();
+  const detail = asObject(event.detail);
+  if (phase === 'cardProgress' && detail.state) return normalizeState(detail.state);
+  if (phase === 'providerCallSettled' || isProviderSettledEvent(event)) {
+    if (cleanText(event.outcome).toLowerCase() === 'error' || severity === 'error') return 'failed';
+    if (cleanText(event.outcome).toLowerCase() === 'warning' || severity === 'warning') return 'warning';
+    return 'done';
+  }
   if (severity === 'error') return 'failed';
   if (severity === 'warning' || phase === 'providerCallRetrying' || phase === 'promptReasonerFallback') return 'warning';
   if (phase === 'cacheReusing') return 'cached';
   if (severity === 'success' || phase === 'storageComplete' || phase === 'promptPacketBuilt' || phase === 'settled') return 'done';
   if (isCurrent) return 'running';
   return 'done';
+}
+
+function childStepFromEvent(event, state, order = 0) {
+  const phase = cleanText(event.phase);
+  const detail = asObject(event.detail);
+  if (phase === 'promptReasonerFallback') {
+    return normalizeChildStep({
+      id: 'utility-fallback',
+      label: 'Utility fallback',
+      providerLane: 'utility',
+      state: 'warning',
+      source: 'fallback',
+      sourcePhase: phase,
+      order
+    }, order);
+  }
+  if (phase === 'cardProgress') {
+    const roleId = cleanText(detail.roleId || detail.role);
+    return normalizeChildStep({
+      id: detail.id,
+      label: detail.family || roleLabel(roleId, activityLabelText(event)),
+      providerLane: event.providerLane || detail.lane || 'utility',
+      state,
+      source: detail.source || detail.sourceType,
+      sourcePhase: phase,
+      sourceRoleId: roleId,
+      order
+    }, order);
+  }
+  if (phase.startsWith('providerCall') || isProviderSettledEvent(event)) {
+    const roleId = cleanText(detail.roleId || event.roleId);
+    if (!roleId) return null;
+    return normalizeChildStep({
+      label: roleLabel(roleId, activityLabelText(event)),
+      providerLane: event.providerLane || detail.lane,
+      state,
+      source: state === 'done' && MODEL_CALL_ROLE_IDS.has(roleId) ? 'generated' : '',
+      sourcePhase: phase,
+      sourceRoleId: roleId,
+      order
+    }, order);
+  }
+  return null;
 }
 
 function compareStepOrder(left, right) {
@@ -182,24 +272,122 @@ function compareStepOrder(left, right) {
   return left.order - right.order;
 }
 
+function compareChildOrder(left, right) {
+  return left.order - right.order;
+}
+
 function upsertStep(map, step) {
   const existing = map.get(step.id);
   if (!existing) {
     map.set(step.id, step);
     return;
   }
-  const next = { ...existing, ...step, order: existing.order };
-  if (stateRank(step.state) < stateRank(existing.state)) next.state = existing.state;
+  const next = {
+    ...existing,
+    ...step,
+    children: mergeChildren(existing.children, step.children),
+    order: existing.order
+  };
+  next.state = next.children?.length
+    ? aggregateParentState(mergeState(existing.state, step.state), next.children)
+    : mergeState(existing.state, step.state);
+  next.meta = metaForState(next.state);
   map.set(step.id, next);
 }
 
-function stateRank(state) {
-  if (state === 'failed') return 5;
-  if (state === 'warning') return 4;
-  if (state === 'running') return 3;
-  if (state === 'done' || state === 'cached') return 2;
-  if (state === 'skipped') return 1;
-  return 0;
+function mergeState(existingState, nextState) {
+  const existing = normalizeState(existingState);
+  const next = normalizeState(nextState);
+  if (existing === 'failed' || next === 'failed') return 'failed';
+  if (existing === 'warning' || next === 'warning') return 'warning';
+  if (next === 'pending' && existing !== 'pending') return existing;
+  return next;
+}
+
+function mergeChildren(existingChildren = [], nextChildren = []) {
+  const children = new Map();
+  for (const child of Array.isArray(existingChildren) ? existingChildren : []) {
+    children.set(child.id, child);
+  }
+  for (const child of Array.isArray(nextChildren) ? nextChildren : []) {
+    const existing = children.get(child.id);
+    if (!existing) {
+      children.set(child.id, child);
+      continue;
+    }
+    const merged = {
+      ...existing,
+      ...child,
+      order: existing.order,
+      source: child.source || existing.source,
+      sourceRoleId: child.sourceRoleId || existing.sourceRoleId,
+      sourcePhase: child.sourcePhase || existing.sourcePhase,
+      state: mergeState(existing.state, child.state)
+    };
+    merged.meta = metaForState(merged.state, merged.source);
+    children.set(child.id, merged);
+  }
+  return [...children.values()].sort(compareChildOrder);
+}
+
+function childAggregateState(children = []) {
+  const list = Array.isArray(children) ? children : [];
+  if (!list.length) return null;
+  if (list.some((child) => child.state === 'failed')) return 'failed';
+  if (list.some((child) => child.state === 'warning')) return 'warning';
+  if (list.some((child) => child.state === 'running')) return 'running';
+  if (list.some((child) => child.state === 'pending')) return 'pending';
+  if (list.every((child) => child.state === 'cached')) return 'cached';
+  if (list.every((child) => child.state === 'skipped')) return 'skipped';
+  return 'done';
+}
+
+function aggregateParentState(parentState, children = []) {
+  const childState = childAggregateState(children);
+  if (!childState) return normalizeState(parentState);
+  if (parentState === 'failed' || childState === 'failed') return 'failed';
+  if (parentState === 'warning' || childState === 'warning') return 'warning';
+  if (childState === 'running') return 'running';
+  if (parentState === 'running' && childState === 'pending') return 'running';
+  return childState;
+}
+
+function childIdFromRole(roleId, fallback) {
+  const role = cleanText(roleId);
+  if (role === 'sceneFrameCard') return 'scene-frame-card';
+  if (role === 'activeCastCard') return 'active-cast-card';
+  if (role === 'characterMotivationCard') return 'character-motivation-card';
+  if (role === 'dialogueRelationshipCard') return 'dialogue-relationship-card';
+  if (role === 'continuityRiskCard') return 'continuity-risk-card';
+  if (role === 'environmentItemsCard') return 'environment-items-card';
+  if (role === 'prosePacingCard') return 'prose-pacing-card';
+  if (role === 'openThreadsCard') return 'open-threads-card';
+  if (role === 'reasonerComposer') return 'reasoner-synthesis';
+  if (role === 'briefUtilityComposer') return 'utility-composer';
+  return idFromText(role, fallback);
+}
+
+function normalizeChildStep(input, index = 0) {
+  const source = asObject(input);
+  const roleId = safeDisplayText(source.sourceRoleId || source.roleId || source.role, '', 80);
+  const label = roleLabel(roleId, safeDisplayText(source.label, `Item ${index + 1}`, 80));
+  const rawId = source.id || roleId || label;
+  const id = roleId && !source.id
+    ? childIdFromRole(roleId, `child-${index + 1}`)
+    : idFromText(rawId, `child-${index + 1}`);
+  const state = normalizeState(source.state);
+  const childSource = normalizeChildSource(source.source || source.sourceType || (state === 'cached' ? 'cache' : ''));
+  return {
+    id,
+    label,
+    providerLane: normalizeProviderLane(source.providerLane, roleId === 'reasonerComposer' ? 'reasoner' : 'utility'),
+    state,
+    meta: metaForState(state, childSource),
+    source: childSource || null,
+    sourcePhase: cleanText(source.sourcePhase || source.phase) || null,
+    sourceRoleId: roleId || null,
+    order: Number.isFinite(Number(source.order)) ? Number(source.order) : index
+  };
 }
 
 function normalizeStep(input, index = 0) {
@@ -209,8 +397,13 @@ function normalizeStep(input, index = 0) {
     ? `step-${index + 1}`
     : idFromText(rawId, `step-${index + 1}`);
   const definition = STEP_DEFINITIONS[id] || {};
-  const state = normalizeState(source.state);
-  return {
+  const children = Array.isArray(source.children)
+    ? source.children.map((child, childIndex) => normalizeChildStep(child, childIndex)).sort(compareChildOrder)
+    : [];
+  const state = children.length
+    ? aggregateParentState(normalizeState(source.state), children)
+    : normalizeState(source.state);
+  const step = {
     id,
     label: definition.label || safeDisplayText(source.label, `Step ${index + 1}`, 80),
     providerLane: normalizeProviderLane(source.providerLane, definition.providerLane || 'utility'),
@@ -220,6 +413,8 @@ function normalizeStep(input, index = 0) {
     sourceRoleId: safeDisplayText(source.sourceRoleId || source.roleId, '', 80) || null,
     order: Number.isFinite(Number(source.order)) ? Number(source.order) : index
   };
+  if (children.length) step.children = children;
+  return step;
 }
 
 function pendingStep(id, order) {
@@ -268,6 +463,34 @@ function appendPendingPlanSteps(map, view, orderStart = 0) {
   if (!map.has(promptStepId)) upsertStep(map, pendingStep(promptStepId, order++));
 }
 
+function appendPendingChildSteps(map, view, orderStart = 0) {
+  const source = asObject(view);
+  const jobs = Array.isArray(source.lastPlan?.cardJobs) ? source.lastPlan.cardJobs : [];
+  if (jobs.length && map.has('utility-card-batch')) {
+    let order = orderStart;
+    for (const job of jobs) {
+      const roleId = cleanText(job?.role || job?.roleId);
+      const family = cleanText(job?.family);
+      upsertStep(map, normalizeStep({
+        id: 'utility-card-batch',
+        label: STEP_DEFINITIONS['utility-card-batch'].label,
+        providerLane: 'utility',
+        state: map.get('utility-card-batch')?.state || 'pending',
+        order: map.get('utility-card-batch')?.order ?? order,
+        children: [
+          {
+            label: family || roleLabel(roleId, 'Card'),
+            providerLane: 'utility',
+            state: 'pending',
+            sourceRoleId: roleId,
+            order: order++
+          }
+        ]
+      }, map.get('utility-card-batch')?.order ?? order));
+    }
+  }
+}
+
 function normalizeExplicitProgress(progressRun) {
   const source = asObject(progressRun);
   const steps = Array.isArray(source.steps)
@@ -297,17 +520,22 @@ function deriveProgressRun(view) {
     const providerConcurrent = cleanText(event.phase).startsWith('providerCall')
       && cleanText(current.phase).startsWith('providerCall')
       && (!runId || cleanText(current.runId) === runId);
+    const eventOrder = order++;
+    const state = eventState(event, eventKey === currentKey || providerConcurrent);
+    const child = childStepFromEvent(event, state, eventOrder);
     upsertStep(steps, normalizeStep({
       id,
       label: definition.label || activityLabelText(event),
       providerLane: event.providerLane || event.composerLane || definition.providerLane,
-      state: eventState(event, eventKey === currentKey || providerConcurrent),
+      state,
       sourcePhase: event.phase,
       sourceRoleId: asObject(event.detail).roleId,
-      order: order++
-    }, order));
+      children: child ? [child] : [],
+      order: eventOrder
+    }, eventOrder));
   }
   appendPendingPlanSteps(steps, view, order);
+  appendPendingChildSteps(steps, view, order);
   return finalizeProgress({
     runId,
     title: progressTitle([...steps.values()]),

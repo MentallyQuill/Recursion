@@ -4,9 +4,12 @@ This is the copyable HTML/CSS snapshot for the V1 Recursion top bar mock. It pre
 
 Use this as the SillyTavern implementation reference. The preview-specific host wrapper can be replaced by the extension mount point, but the `.recursion-bar`, `.status-popover`, `.mode-menu`, and `.brief-menu` structure should remain intact unless the implementation updates this reference at the same time.
 
+Regenerate the standalone mockup with `node tools/scripts/build-recursion-bar-preview.mjs`, then serve it with `node tools/scripts/serve-recursion-bar-preview.mjs .tmp/recursion-bar-preview.html 63494`. The generated page extracts the HTML, CSS, and turn animation script from this document so the preview and implementation reference stay aligned.
+
 Runtime toggles:
 
 - `.brand-block.is-open` opens the progress menu.
+- `.activity-trigger` opens the progress menu from either the Hero Pixel Array or current status text.
 - `.hero-pixel-array[data-state="pending|running|done|cached|warning|failed"]` controls the compact Hero Pixel Array state.
 - `.hero-block.pending`, `.hero-block.running`, `.hero-block.done`, `.hero-block.cached`, `.hero-block.warning`, and `.hero-block.failed` control each Hero Pixel Array block.
 - `.mode-menu.is-open` opens the mode menu.
@@ -14,6 +17,7 @@ Runtime toggles:
 - `.prompt-packet-panel.is-open` opens the injected prompt packet panel.
 - `.brief-card[aria-expanded="true"]` expands a card row.
 - `.step-row.done`, `.step-row.running`, `.step-row.cached`, `.step-row.queued`, `.step-row.warn`, and `.step-row.fail` control progress-row state.
+- `.step-children` groups nested child rows below a parent step; `.step-row.child-row` uses the same state colors while rendering as an indented sub-tier.
 - `data-provider="utility"` and `data-provider="reasoner"` control the U/R provider marker tint.
 
 ## HTML
@@ -22,18 +26,8 @@ Runtime toggles:
 <div class="recursion-topbar-host">
   <section class="recursion-bar">
     <div class="brand-block is-open" id="status-control" title="Recursion is composing context">
-      <button class="brand-stage status-array-button" id="array-button" aria-label="Open Recursion generation status" aria-expanded="true" data-state="running" style="--columns: 3; --block-count: 7">
+      <button class="brand-stage brand-button" id="brand-stage" aria-label="Recursion status">
         <span class="brand">RECURSION</span>
-        <span class="brand-fade" aria-hidden="true"></span>
-        <span class="hero-pixel-array" aria-hidden="true" data-state="running" data-run-id="run-preview-42">
-          <span class="hero-block done" style="grid-row: 1; grid-column: 1; --block-index: 0"></span>
-          <span class="hero-block done" style="grid-row: 2; grid-column: 1; --block-index: 1"></span>
-          <span class="hero-block running" style="grid-row: 3; grid-column: 1; --block-index: 2"></span>
-          <span class="hero-block running" style="grid-row: 1; grid-column: 2; --block-index: 3"></span>
-          <span class="hero-block pending" style="grid-row: 2; grid-column: 2; --block-index: 4"></span>
-          <span class="hero-block pending" style="grid-row: 3; grid-column: 2; --block-index: 5"></span>
-          <span class="hero-block pending" style="grid-row: 1; grid-column: 3; --block-index: 6"></span>
-        </span>
       </button>
 
       <section class="status-popover" aria-label="Generation status steps">
@@ -63,6 +57,29 @@ Runtime toggles:
             <span class="step-icon"></span>
             <span class="step-label">Utility card batch</span>
             <span class="step-meta">running</span>
+          </div>
+          <div class="step-children" data-parent-step="utility-card-batch">
+            <div class="step-row child-row running" data-step="2-0" data-provider="utility">
+              <span class="provider-mark">U</span>
+              <span class="step-sep"></span>
+              <span class="step-icon"></span>
+              <span class="step-label">Scene Frame</span>
+              <span class="step-meta">running</span>
+            </div>
+            <div class="step-row child-row cached" data-step="2-1" data-provider="utility">
+              <span class="provider-mark">U</span>
+              <span class="step-sep"></span>
+              <span class="step-icon"></span>
+              <span class="step-label">Continuity Risk</span>
+              <span class="step-meta">cached</span>
+            </div>
+            <div class="step-row child-row done" data-step="2-2" data-provider="utility">
+              <span class="provider-mark">U</span>
+              <span class="step-sep"></span>
+              <span class="step-icon"></span>
+              <span class="step-label">Character Motivation</span>
+              <span class="step-meta">generated</span>
+            </div>
           </div>
           <div class="step-row running" data-step="3" data-provider="reasoner">
             <span class="provider-mark">R</span>
@@ -155,8 +172,18 @@ Runtime toggles:
       </div>
     </div>
 
-    <span class="current-step" id="current-step" role="status">2 model calls running...</span>
-    <div class="bar-spacer"></div>
+    <button class="activity-trigger status-array-button" id="array-button" aria-label="Open Recursion generation status" aria-expanded="true" data-state="running" style="--columns: 3; --block-count: 7">
+      <span class="hero-pixel-array" aria-hidden="true" data-state="running" data-run-id="run-preview-42">
+        <span class="hero-block done" style="grid-row: 1; grid-column: 1; --block-index: 0"></span>
+        <span class="hero-block done" style="grid-row: 2; grid-column: 1; --block-index: 1"></span>
+        <span class="hero-block running" style="grid-row: 3; grid-column: 1; --block-index: 2"></span>
+        <span class="hero-block running" style="grid-row: 1; grid-column: 2; --block-index: 3"></span>
+        <span class="hero-block pending" style="grid-row: 2; grid-column: 2; --block-index: 4"></span>
+        <span class="hero-block pending" style="grid-row: 3; grid-column: 2; --block-index: 5"></span>
+        <span class="hero-block pending" style="grid-row: 1; grid-column: 3; --block-index: 6"></span>
+      </span>
+      <span class="current-step" id="current-step" role="status">2 model calls running...</span>
+    </button>
 
     <div class="right-tools">
       <button class="icon-button brief-arrow" id="brief-arrow" aria-label="Open last brief preview" aria-expanded="false">
@@ -340,6 +367,8 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   const ROWS_PER_COLUMN = 3;
   const MAX_COLUMNS = 12;
   const MAX_BLOCKS = ROWS_PER_COLUMN * MAX_COLUMNS;
+  const PROGRESS_CHILD_VISIBLE_LIMIT = 5;
+  const PROGRESS_LIST_VISIBLE_LIMIT = 15;
   const STEP_DELAY_MS = 24;
   const stateClass = {
     pending: 'queued',
@@ -360,8 +389,33 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   const TURN_ANIMATION_STEPS = [
     { id: 'read-turn', label: 'Reading current turn', provider: 'utility', state: 'pending' },
     { id: 'scene-shift', label: 'Checking scene shift', provider: 'utility', state: 'pending' },
-    { id: 'utility-card-batch', label: 'Utility card batch', provider: 'utility', state: 'pending' },
-    { id: 'reasoner-brief', label: 'Reasoner brief', provider: 'reasoner', state: 'pending' },
+    {
+      id: 'utility-card-batch',
+      label: 'Utility card batch',
+      provider: 'utility',
+      state: 'pending',
+      children: [
+        { id: 'scene-frame-card', label: 'Scene Frame', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'continuity-risk-card', label: 'Continuity Risk', provider: 'utility', state: 'pending', source: 'cache' },
+        { id: 'character-motivation-card', label: 'Character Motivation', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'open-threads-card', label: 'Open Threads', provider: 'utility', state: 'pending', source: 'fallback' },
+        { id: 'active-cast-card', label: 'Active Cast', provider: 'utility', state: 'pending', source: 'cache' },
+        { id: 'dialogue-relationship-card', label: 'Dialogue/Relationship', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'environment-items-card', label: 'Environment/Items', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'prose-pacing-card', label: 'Prose/Pacing', provider: 'utility', state: 'pending', source: 'generated' }
+      ]
+    },
+    {
+      id: 'reasoner-brief',
+      label: 'Reasoner brief',
+      provider: 'reasoner',
+      state: 'pending',
+      children: [
+        { id: 'reasoner-synthesis', label: 'Reasoner synthesis', provider: 'reasoner', state: 'pending' },
+        { id: 'utility-fallback', label: 'Utility fallback', provider: 'utility', state: 'pending', source: 'fallback' }
+      ]
+    },
+    { id: 'validate-cards', label: 'Validating cards', provider: 'utility', state: 'pending' },
     { id: 'repair-json', label: 'Repairing card JSON', provider: 'utility', state: 'pending' },
     { id: 'compose-packet', label: 'Composing prompt packet', provider: 'utility', state: 'pending' },
     { id: 'install-prompt', label: 'Installing Recursion prompt', provider: 'utility', state: 'pending' },
@@ -373,35 +427,85 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     [1000, 'set', 'read-turn', 'done', 'Checking scene shift...'],
     [1220, 'set', 'scene-shift', 'done', 'Planning card pass...'],
     [1420, 'add', 'utility-card-batch', 'running', '2 model calls running...'],
+    [1480, 'child-add', 'utility-card-batch:scene-frame-card', 'running', '2 model calls running...'],
     [1520, 'add', 'reasoner-brief', 'running', '2 model calls running...'],
-    [2040, 'set', 'utility-card-batch', 'cached', 'Reasoner brief...'],
-    [2360, 'set', 'reasoner-brief', 'failed', 'Reasoner failed; Utility fallback running...'],
-    [2600, 'add', 'repair-json', 'running', 'Repairing card JSON...'],
-    [3060, 'set', 'repair-json', 'warning', 'Composing prompt packet...'],
-    [3260, 'add', 'compose-packet', 'running', 'Composing prompt packet...'],
-    [3820, 'set', 'compose-packet', 'done', 'Installing prompt...'],
-    [4040, 'add', 'install-prompt', 'running', 'Installing prompt...'],
-    [4520, 'set', 'install-prompt', 'done', 'Saving cache...'],
-    [4720, 'add', 'save-cache', 'running', 'Saving cache...'],
-    [5180, 'set', 'save-cache', 'done', 'Recursion prompt ready.']
+    [1560, 'child-add', 'reasoner-brief:reasoner-synthesis', 'running', '2 model calls running...'],
+    [1740, 'child-add', 'utility-card-batch:continuity-risk-card', 'cached', 'Scene Frame card running...'],
+    [1980, 'child-add', 'utility-card-batch:character-motivation-card', 'done', 'Scene Frame card running...'],
+    [2140, 'child-set', 'utility-card-batch:scene-frame-card', 'done', 'Reasoner brief...'],
+    [2220, 'child-add', 'utility-card-batch:open-threads-card', 'warning', 'Reasoner brief...'],
+    [2260, 'child-add', 'utility-card-batch:active-cast-card', 'cached', 'Reasoner brief...'],
+    [2300, 'child-add', 'utility-card-batch:dialogue-relationship-card', 'done', 'Reasoner brief...'],
+    [2340, 'child-add', 'utility-card-batch:environment-items-card', 'running', 'Reasoner brief...'],
+    [2360, 'child-set', 'reasoner-brief:reasoner-synthesis', 'failed', 'Reasoner failed; Utility fallback running...'],
+    [2440, 'child-add', 'reasoner-brief:utility-fallback', 'warning', 'Repairing card JSON...'],
+    [2500, 'child-set', 'utility-card-batch:environment-items-card', 'done', 'Repairing card JSON...'],
+    [2540, 'child-add', 'utility-card-batch:prose-pacing-card', 'running', 'Repairing card JSON...'],
+    [2580, 'child-set', 'utility-card-batch:prose-pacing-card', 'done', 'Repairing card JSON...'],
+    [2620, 'add', 'validate-cards', 'running', 'Validating cards...'],
+    [2920, 'set', 'validate-cards', 'done', 'Repairing card JSON...'],
+    [3000, 'add', 'repair-json', 'running', 'Repairing card JSON...'],
+    [3340, 'set', 'repair-json', 'warning', 'Composing prompt packet...'],
+    [3540, 'add', 'compose-packet', 'running', 'Composing prompt packet...'],
+    [4100, 'set', 'compose-packet', 'done', 'Installing prompt...'],
+    [4320, 'add', 'install-prompt', 'running', 'Installing prompt...'],
+    [4800, 'set', 'install-prompt', 'done', 'Saving cache...'],
+    [5000, 'add', 'save-cache', 'running', 'Saving cache...'],
+    [5460, 'set', 'save-cache', 'done', 'Recursion prompt ready.']
   ];
 
   let animationToken = 0;
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const byId = (id) => TURN_ANIMATION_STEPS.find((step) => step.id === id);
+  const childById = (compoundId) => {
+    const [parentId, childId] = String(compoundId || '').split(':');
+    const parent = byId(parentId);
+    const child = parent?.children?.find((entry) => entry.id === childId);
+    return { parent, child };
+  };
   const cleanLabel = (text) => String(text || '').replace(/\.+$/g, '');
 
   function visibleSteps() {
     return TURN_ANIMATION_STEPS.filter((step) => step.visible);
   }
 
+  function visibleChildren(step) {
+    return Array.isArray(step.children) ? step.children.filter((child) => child.visible) : [];
+  }
+
+  function aggregateChildState(children) {
+    if (!children.length) return null;
+    if (children.some((child) => child.state === 'failed')) return 'failed';
+    if (children.some((child) => child.state === 'warning')) return 'warning';
+    if (children.some((child) => child.state === 'running')) return 'running';
+    if (children.some((child) => child.state === 'pending')) return 'pending';
+    if (children.every((child) => child.state === 'cached')) return 'cached';
+    return 'done';
+  }
+
+  function aggregateStepState(step) {
+    const childState = aggregateChildState(visibleChildren(step));
+    if (!childState) return step.state;
+    if (step.state === 'failed' || childState === 'failed') return 'failed';
+    if (step.state === 'warning' || childState === 'warning') return 'warning';
+    if (childState === 'running') return 'running';
+    if (step.state === 'running' && childState === 'pending') return 'running';
+    return childState;
+  }
+
+  function stateMetaForStep(step) {
+    if (step.state === 'done' && step.source === 'generated') return 'generated';
+    if (step.state === 'warning' && step.source === 'fallback') return 'fallback';
+    return stateMeta[step.state];
+  }
+
   function overflowState(steps) {
-    if (steps.some((step) => step.state === 'running')) return 'running';
-    if (steps.some((step) => step.state === 'failed')) return 'failed';
-    if (steps.some((step) => step.state === 'warning')) return 'warning';
-    if (steps.some((step) => step.state === 'pending')) return 'pending';
-    if (steps.some((step) => step.state === 'cached')) return 'cached';
-    if (steps.some((step) => step.state === 'done')) return 'done';
+    if (steps.some((step) => aggregateStepState(step) === 'running')) return 'running';
+    if (steps.some((step) => aggregateStepState(step) === 'failed')) return 'failed';
+    if (steps.some((step) => aggregateStepState(step) === 'warning')) return 'warning';
+    if (steps.some((step) => aggregateStepState(step) === 'pending')) return 'pending';
+    if (steps.some((step) => aggregateStepState(step) === 'cached')) return 'cached';
+    if (steps.some((step) => aggregateStepState(step) === 'done')) return 'done';
     return 'pending';
   }
 
@@ -410,7 +514,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   }
 
   function visibleHeroSteps() {
-    const steps = visibleSteps();
+    const steps = visibleSteps().map((step) => ({ ...step, state: aggregateStepState(step) }));
     if (steps.length <= MAX_BLOCKS) return steps;
     const overflowSteps = steps.slice(MAX_BLOCKS - 1);
     return [
@@ -425,20 +529,22 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   }
 
   function progressSummary(steps) {
-    const running = steps.filter((step) => step.state === 'running');
+    const projected = steps.map((step) => ({ ...step, state: aggregateStepState(step) }));
+    const running = projected.filter((step) => step.state === 'running');
     if (running.length > 1) return `${running.length} model calls running`;
-    if (steps.some((step) => step.state === 'failed')) return 'Utility fallback active';
-    if (steps.some((step) => step.state === 'warning')) return 'Repair completed with caution';
-    if (steps.length && steps.every((step) => step.state === 'done' || step.state === 'cached' || step.state === 'warning' || step.state === 'failed')) return 'Turn context ready';
+    if (projected.some((step) => step.state === 'failed')) return 'Utility fallback active';
+    if (projected.some((step) => step.state === 'warning')) return 'Repair completed with caution';
+    if (projected.length && projected.every((step) => step.state === 'done' || step.state === 'cached' || step.state === 'warning' || step.state === 'failed')) return 'Turn context ready';
     return running[0] ? `${cleanLabel(running[0].label)} running` : 'Preparing';
   }
 
   function heroState(steps) {
-    if (steps.some((step) => step.state === 'failed')) return 'failed';
-    if (steps.some((step) => step.state === 'warning')) return 'warning';
-    if (steps.some((step) => step.state === 'running')) return 'running';
-    if (steps.some((step) => step.state === 'cached')) return 'cached';
-    if (steps.some((step) => step.state === 'done')) return 'done';
+    const projected = steps.map((step) => ({ ...step, state: aggregateStepState(step) }));
+    if (projected.some((step) => step.state === 'failed')) return 'failed';
+    if (projected.some((step) => step.state === 'warning')) return 'warning';
+    if (projected.some((step) => step.state === 'running')) return 'running';
+    if (projected.some((step) => step.state === 'cached')) return 'cached';
+    if (projected.some((step) => step.state === 'done')) return 'done';
     return 'pending';
   }
 
@@ -478,8 +584,58 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     setTimeout(() => element.classList.remove(className), 260);
   }
 
+  function bindScrollState(element, key, updater) {
+    if (element.dataset[key] === 'true') return;
+    element.dataset[key] = 'true';
+    element.addEventListener('scroll', () => updater(element), { passive: true });
+  }
+
+  function updateScrollableState(element) {
+    const overflowing = element.scrollHeight > element.clientHeight + 1;
+    const atEnd = !overflowing || element.scrollTop + element.clientHeight >= element.scrollHeight - 1;
+    element.dataset.overflow = overflowing ? 'true' : 'false';
+    element.dataset.atEnd = atEnd ? 'true' : 'false';
+  }
+
+  function updateChildGroupScrollState(group) {
+    updateScrollableState(group);
+  }
+
+  function updateStatusListScrollState(list) {
+    updateScrollableState(list);
+  }
+
+  function preserveScrollPosition(element, mutate) {
+    const wasScrollable = element.scrollHeight > element.clientHeight + 1;
+    const wasAtEnd = wasScrollable && element.scrollTop + element.clientHeight >= element.scrollHeight - 1;
+    const previousTop = element.scrollTop;
+    const previousBottomOffset = element.scrollHeight - element.scrollTop;
+
+    mutate();
+
+    const restore = () => {
+      if (!wasScrollable) {
+        element.scrollTop = 0;
+      } else if (wasAtEnd) {
+        element.scrollTop = Math.max(0, element.scrollHeight - previousBottomOffset);
+      } else {
+        element.scrollTop = previousTop;
+      }
+      updateScrollableState(element);
+    };
+
+    restore();
+    setTimeout(restore, 0);
+  }
+
+  function placeAfter(container, node, previousNode = null) {
+    const target = previousNode ? previousNode.nextSibling : container.firstChild;
+    if (node !== target) container.insertBefore(node, target || null);
+    return node;
+  }
+
   function syncProgressRow(list, step, index, changedId) {
-    let row = findStepElement(list, '.step-row', step.id);
+    let row = findStepElement(list, '.step-row:not(.child-row)', step.id);
     const isNew = !row;
     if (!row) {
       row = document.createElement('div');
@@ -491,19 +647,73 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
         <span class="step-meta"></span>`;
     }
 
-    row.className = `step-row ${stateClass[step.state]}`;
+    const rowState = aggregateStepState(step);
+    row.className = `step-row ${stateClass[rowState]}`;
     row.dataset.step = String(index);
     row.dataset.provider = step.provider;
     row.querySelector('.provider-mark').textContent = step.provider === 'reasoner' ? 'R' : 'U';
     row.querySelector('.step-label').textContent = step.label;
-    row.querySelector('.step-meta').textContent = stateMeta[step.state];
-
-    const before = list.children[index];
-    if (before !== row) list.insertBefore(row, before || null);
+    row.querySelector('.step-meta').textContent = stateMeta[rowState];
 
     if (step.id === changedId) {
       applyTransientClass(row, step.justAdded || isNew ? 'is-entering' : 'is-updating');
     }
+    return row;
+  }
+
+  function syncChildRow(group, parent, child, index, changedId) {
+    const childKey = `${parent.id}:${child.id}`;
+    let row = findStepElement(group, '.child-row', childKey);
+    const isNew = !row;
+    if (!row) {
+      row = document.createElement('div');
+      row.dataset.stepId = childKey;
+      row.innerHTML = `<span class="provider-mark"></span>
+        <span class="step-sep"></span>
+        <span class="step-icon"></span>
+        <span class="step-label"></span>
+        <span class="step-meta"></span>`;
+    }
+
+    row.className = `step-row child-row ${stateClass[child.state]}`;
+    row.dataset.step = `${parent.id}-${index}`;
+    row.dataset.provider = child.provider;
+    row.querySelector('.provider-mark').textContent = child.provider === 'reasoner' ? 'R' : 'U';
+    row.querySelector('.step-label').textContent = child.label;
+    row.querySelector('.step-meta').textContent = stateMetaForStep(child);
+
+    const before = group.children[index];
+    if (before !== row) group.insertBefore(row, before || null);
+
+    if (childKey === changedId) {
+      applyTransientClass(row, child.justAdded || isNew ? 'is-entering' : 'is-updating');
+    }
+  }
+
+  function syncChildGroup(list, parent, parentRow, changedId) {
+    const children = visibleChildren(parent);
+    const groupId = `${parent.id}:children`;
+    let group = findStepElement(list, '.step-children', groupId);
+    if (!children.length) {
+      group?.remove();
+      return;
+    }
+    if (!group) {
+      group = document.createElement('div');
+      group.className = 'step-children';
+      group.dataset.stepId = groupId;
+      group.dataset.parentStep = parent.id;
+      group.dataset.atEnd = 'true';
+      bindScrollState(group, 'childScrollBound', updateChildGroupScrollState);
+    }
+    group.style.setProperty('--child-visible-limit', String(PROGRESS_CHILD_VISIBLE_LIMIT));
+    placeAfter(list, group, parentRow);
+    preserveScrollPosition(group, () => {
+      const visibleIds = new Set(children.map((child) => `${parent.id}:${child.id}`));
+      removeStaleStepElements(group, '.child-row', visibleIds);
+      children.forEach((child, index) => syncChildRow(group, parent, child, index, changedId));
+    });
+    return group;
   }
 
   function renderHeroBlocks(root) {
@@ -525,9 +735,27 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     const list = root.querySelector('#status-list');
     const rows = visibleSteps();
     const visibleIds = new Set(rows.map((step) => step.id));
-    removeStaleStepElements(list, '.step-row', visibleIds);
-    rows.forEach((step, index) => syncProgressRow(list, step, index, changedId));
-    rows.forEach((step) => { step.justAdded = false; });
+    const visibleChildGroupIds = new Set(rows.filter((step) => visibleChildren(step).length).map((step) => `${step.id}:children`));
+    list.style.setProperty('--progress-list-visible-limit', String(PROGRESS_LIST_VISIBLE_LIMIT));
+    bindScrollState(list, 'listScrollBound', updateStatusListScrollState);
+    preserveScrollPosition(list, () => {
+      removeStaleStepElements(list, '.step-row:not(.child-row)', visibleIds);
+      removeStaleStepElements(list, '.step-children', visibleChildGroupIds);
+      let cursor = null;
+      rows.forEach((step, index) => {
+        const parentRow = syncProgressRow(list, step, index, changedId);
+        cursor = placeAfter(list, parentRow, cursor);
+        cursor = syncChildGroup(list, step, parentRow, changedId) || parentRow;
+      });
+    });
+    const visibleItemCount = rows.reduce((count, step) => (
+      count + 1 + Math.min(visibleChildren(step).length, PROGRESS_CHILD_VISIBLE_LIMIT)
+    ), 0);
+    list.dataset.visibleItemCount = String(visibleItemCount);
+    rows.forEach((step) => {
+      step.justAdded = false;
+      visibleChildren(step).forEach((child) => { child.justAdded = false; });
+    });
   }
 
   function renderFrame(root, changedId, currentText) {
@@ -541,7 +769,9 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
   async function resetTurn(root, token) {
     const brandBlock = root.querySelector('#status-control');
+    const arrayButton = root.querySelector('#array-button');
     brandBlock.classList.add('is-resetting');
+    arrayButton.classList.add('is-resetting');
     root.querySelector('#current-step').textContent = 'Ready';
     await wait(260);
     if (token !== animationToken) return false;
@@ -549,14 +779,27 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
       step.visible = false;
       step.state = 'pending';
       step.justAdded = false;
+      visibleChildren(step).forEach((child) => {
+        child.visible = false;
+        child.state = 'pending';
+        child.justAdded = false;
+      });
+      if (Array.isArray(step.children)) {
+        step.children.forEach((child) => {
+          child.visible = false;
+          child.state = 'pending';
+          child.justAdded = false;
+        });
+      }
     });
     root.querySelector('#status-list').innerHTML = '';
     root.querySelector('.hero-pixel-array').innerHTML = '';
-    root.querySelector('#array-button').dataset.state = 'pending';
-    root.querySelector('#array-button').style.setProperty('--columns', '0');
-    root.querySelector('#array-button').style.setProperty('--block-count', '0');
+    arrayButton.dataset.state = 'pending';
+    arrayButton.style.setProperty('--columns', '0');
+    arrayButton.style.setProperty('--block-count', '0');
     root.querySelector('#status-subtitle').textContent = 'Waiting for next turn';
     brandBlock.classList.remove('is-resetting');
+    arrayButton.classList.remove('is-resetting');
     return true;
   }
 
@@ -567,6 +810,18 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
       await wait(Math.max(0, time - cursor));
       cursor = time;
       if (token !== animationToken) return false;
+      if (action === 'child-add' || action === 'child-set') {
+        const { parent, child } = childById(id);
+        if (!parent || !child) continue;
+        parent.visible = true;
+        if (action === 'child-add') {
+          child.visible = true;
+          child.justAdded = true;
+        }
+        child.state = state;
+        renderFrame(root, id, currentText);
+        continue;
+      }
       const step = byId(id);
       if (!step) continue;
       if (action === 'add') {
@@ -595,7 +850,10 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
   window.playRecursionTurnAnimation = playRecursionTurnAnimation;
   window.addEventListener('DOMContentLoaded', () => {
-    document.querySelector('#array-button')?.addEventListener('click', () => playRecursionTurnAnimation({ loop: false }));
+    document.querySelector('#array-button')?.addEventListener('click', () => {
+      document.querySelector('#status-control')?.classList.add('is-open');
+      playRecursionTurnAnimation({ loop: false });
+    });
     setTimeout(() => playRecursionTurnAnimation({ loop: true }), 450);
   });
 })();
@@ -672,9 +930,8 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   height: 30px;
 }
 
-.status-array-button {
+.brand-button {
   width: auto;
-  min-width: var(--hero-block-size);
   height: 20px;
   padding: 0;
   border: 0;
@@ -683,7 +940,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   box-shadow: none;
   display: inline-grid;
   place-items: center;
-  color: var(--cyan);
+  color: inherit;
   cursor: default;
 }
 
@@ -691,9 +948,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   position: relative;
   --brand-offset: calc(var(--hero-block-size) + 7px);
   --brand-text-width: 66px;
-  --brand-stage-width: calc(var(--hero-max-width) + 7px);
-  --brand-cover-tail: 16px;
-  --brand-cover-width: 0px;
+  --brand-stage-width: calc(var(--brand-offset) + var(--brand-text-width));
   width: var(--brand-stage-width);
   min-width: var(--brand-stage-width);
   height: 24px;
@@ -702,20 +957,40 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   cursor: default;
 }
 
-.brand-stage[data-state="running"],
-.brand-stage[data-state="done"],
-.brand-stage[data-state="cached"],
-.brand-stage[data-state="warning"],
-.brand-stage[data-state="failed"] {
-  --brand-cover-width: calc((var(--columns, 0) * (var(--hero-block-size) + var(--hero-block-gap))) + var(--brand-cover-tail));
-}
-
-.status-array-button:hover,
-.status-array-button:focus-visible,
-.brand-block.is-open .status-array-button {
+.brand-button:hover,
+.brand-button:focus-visible {
   background: transparent;
   box-shadow: none;
   outline: none;
+}
+
+.activity-trigger {
+  width: auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  flex: 1 1 auto;
+  color: rgba(224, 224, 224, .62);
+  cursor: default;
+  overflow: hidden;
+  text-align: left;
+  transition: color .14s ease;
+}
+
+.status-array-button:hover,
+.status-array-button:focus-visible {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  color: rgba(245, 245, 245, .84);
 }
 
 .status-array-button:hover .hero-pixel-array,
@@ -724,11 +999,9 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 }
 
 .hero-pixel-array {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  z-index: 3;
-  width: calc((var(--columns, 1) * var(--hero-block-size)) + ((var(--columns, 1) - 1) * var(--hero-block-gap)));
+  position: relative;
+  z-index: 1;
+  width: max(0px, calc((var(--columns, 0) * var(--hero-block-size)) + ((var(--columns, 0) - 1) * var(--hero-block-gap))));
   height: calc((3 * var(--hero-block-size)) + (2 * var(--hero-block-gap)));
   display: grid;
   grid-template-rows: repeat(3, var(--hero-block-size));
@@ -737,19 +1010,20 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   align-content: start;
   justify-content: start;
   flex: 0 0 auto;
-  transform: translateY(-50%);
   filter: drop-shadow(0 0 5px rgba(101, 216, 232, .12));
-  transition: width .16s ease;
+  transition: width .18s ease, filter .14s ease;
+  overflow: visible;
 }
 
 .hero-block {
+  display: block;
   width: var(--hero-block-size);
   height: var(--hero-block-size);
+  aspect-ratio: 1 / 1;
   border: 1px solid var(--hero-pending);
-  border-radius: 1px;
+  border-radius: 0;
   background: transparent;
   opacity: 0;
-  transform: scale(.62);
   animation: hero-block-enter .18s ease-out forwards;
   animation-delay: calc(var(--block-index, 0) * 24ms);
   transition: background .14s ease, border-color .14s ease, box-shadow .14s ease, opacity .14s ease;
@@ -809,29 +1083,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   pointer-events: none;
 }
 
-.brand-fade {
-  position: absolute;
-  inset: 0 auto 0 0;
-  z-index: 2;
-  width: min(100%, var(--brand-cover-width));
-  background: linear-gradient(
-    90deg,
-    var(--surface) 0%,
-    var(--surface) calc(100% - 12px),
-    rgba(33, 34, 37, 0) 100%
-  );
-  opacity: .96;
-  pointer-events: none;
-  transition: width .16s ease, opacity .16s ease;
-}
-
-.brand-block.is-resetting .brand-fade {
-  width: 0;
-  opacity: 0;
-  transition: width .22s ease, opacity .14s ease;
-}
-
-.brand-block.is-resetting .hero-block {
+.activity-trigger.is-resetting .hero-block {
   animation: hero-block-wipe .20s ease-in forwards;
   animation-delay: calc((var(--block-count, 0) - var(--block-index, 0)) * 16ms);
 }
@@ -884,6 +1136,8 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transform: translateX(0);
+  transition: color .14s ease, transform .18s ease;
 }
 
 .bar-spacer {
@@ -933,7 +1187,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 .status-popover {
   position: absolute;
   top: 34px;
-  left: -8px;
+  left: -3px;
   width: 352px;
   z-index: 90;
   border: 1px solid var(--border);
@@ -990,7 +1244,18 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 }
 
 .status-list {
+  --progress-list-visible-limit: 15;
+  --progress-row-height: 30px;
+  max-height: calc(var(--progress-list-visible-limit) * var(--progress-row-height));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
   padding: 4px 0;
+}
+
+.status-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .step-row {
@@ -1015,6 +1280,57 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
 .step-row:first-child {
   border-top: 0;
+}
+
+.step-children {
+  --child-visible-limit: 5;
+  --child-row-height: 25px;
+  position: relative;
+  max-height: calc(var(--child-visible-limit) * var(--child-row-height));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  padding: 0 0 3px 22px;
+  border-top: 1px solid rgba(255, 255, 255, .025);
+}
+
+.step-children::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.step-children::after {
+  content: "";
+  position: sticky;
+  bottom: 0;
+  display: block;
+  height: 22px;
+  margin-top: -22px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(42, 43, 47, 0), var(--surface-2));
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+
+.step-children[data-overflow="true"]:not([data-at-end="true"])::after {
+  opacity: 1;
+}
+
+.step-row.child-row {
+  height: var(--child-row-height);
+  min-height: var(--child-row-height);
+  padding: 4px 9px 4px 7px;
+  border-top: 0;
+  color: rgba(224, 224, 224, .62);
+  font-size: 11px;
+}
+
+.step-row.child-row .step-label {
+  opacity: .92;
+}
+
+.step-row.child-row .provider-mark {
+  opacity: .78;
 }
 
 .provider-mark {
@@ -1509,22 +1825,20 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 @keyframes hero-block-enter {
   from {
     opacity: 0;
-    transform: scale(.62);
   }
   to {
     opacity: 1;
-    transform: scale(1);
   }
 }
 
 @keyframes hero-block-active {
   0%, 100% {
     opacity: .62;
-    transform: scale(.92);
+    box-shadow: 0 0 3px rgba(101, 216, 232, .20);
   }
   50% {
     opacity: 1;
-    transform: scale(1);
+    box-shadow: 0 0 7px rgba(101, 216, 232, .42);
   }
 }
 
@@ -1561,7 +1875,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
 @media (prefers-reduced-motion: reduce) {
   .hero-block,
-  .brand-block.is-resetting .hero-block,
+  .activity-trigger.is-resetting .hero-block,
   .step-row.is-entering,
   .step-row.is-updating,
   .step-row.running .step-icon {
@@ -1570,8 +1884,6 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     transform: none;
   }
 
-  .brand-fade,
-  .brand-block.is-resetting .brand-fade,
   .hero-pixel-array {
     transition: none;
   }

@@ -1,5 +1,6 @@
 import { redact } from './core.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from './progress.mjs';
+import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 
 const PHASE_LABELS = Object.freeze({
   idle: '',
@@ -170,6 +171,9 @@ export function createRecursionViewModel(view = {}) {
   const ready = READY_PHASES.has(activity.phase);
   const progressRun = createProgressRunModel(source);
   const heroPixelBlocks = createHeroPixelBlocks(progressRun);
+  const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
+  const progressChildVisibleLimit = integerInRange(settings.ui?.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20);
+  const progressListVisibleLimit = integerInRange(settings.ui?.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80);
   const activityChips = normalizeChips([
     ...(Array.isArray(activity.chips) ? activity.chips : []),
     activity.providerLane ? laneLabel(activity.providerLane) : '',
@@ -188,6 +192,8 @@ export function createRecursionViewModel(view = {}) {
     currentStepText: progressRun.currentStepText,
     heroPixelBlocks,
     heroPixelColumnCount: heroPixelBlocks.at(-1)?.columnCount || 0,
+    progressChildVisibleLimit,
+    progressListVisibleLimit,
     composerLabel: laneLabel(composerLane, 'Utility'),
     reasonerState: reasonerState(source, activity),
     reasonerLabel: `Reasoner ${reasonerState(source, activity).toLowerCase()}`,
@@ -293,6 +299,12 @@ function controlNumber(root, selector, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function integerInRange(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(number)));
+}
+
 function controlChecked(root, selector) {
   return root.querySelector(selector)?.checked === true;
 }
@@ -376,12 +388,32 @@ function settingsSelectRow(label, datasetName, value, options) {
 
 function renderHighLevelSettings(panel, settings) {
   const group = el('section', { className: 'recursion-settings-group' });
+  const ui = asObject(settings.ui);
+  const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
   group.appendChild(el('h3', { text: 'Behavior' }));
   group.appendChild(settingsSelectRow('Mode', 'recursionSettingMode', cleanText(settings.mode, 'observe'), MODE_OPTIONS));
   group.appendChild(settingsSelectRow('Strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS));
   group.appendChild(settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS));
   group.appendChild(settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS));
   group.appendChild(settingsSelectRow('Reasoner Use', 'recursionSettingReasoner', cleanText(settings.reasonerUse, 'auto'), REASONER_OPTIONS));
+  group.appendChild(controlRow('Sub-tier Rows', inputControl({
+    value: integerInRange(ui.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20),
+    type: 'number',
+    min: 1,
+    max: 20,
+    step: 1,
+    dataset: { recursionSettingProgressChildLimit: '' },
+    ariaLabel: 'Visible sub-tier progress rows'
+  })));
+  group.appendChild(controlRow('Progress Rows', inputControl({
+    value: integerInRange(ui.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80),
+    type: 'number',
+    min: 5,
+    max: 80,
+    step: 1,
+    dataset: { recursionSettingProgressListLimit: '' },
+    ariaLabel: 'Visible progress rows before scrolling'
+  })));
   group.appendChild(button('Save Settings', 'recursionSettingsSave', 'Save Recursion settings'));
   panel.appendChild(group);
 }
@@ -888,12 +920,27 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function readSettingsPatch(sourceRoot) {
+    const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
     return {
       mode: controlValue(sourceRoot, '[data-recursion-setting-mode]'),
       strength: controlValue(sourceRoot, '[data-recursion-setting-strength]'),
       promptFootprint: controlValue(sourceRoot, '[data-recursion-setting-footprint]'),
       focus: controlValue(sourceRoot, '[data-recursion-setting-focus]'),
-      reasonerUse: controlValue(sourceRoot, '[data-recursion-setting-reasoner]')
+      reasonerUse: controlValue(sourceRoot, '[data-recursion-setting-reasoner]'),
+      ui: {
+        progressChildVisibleLimit: integerInRange(
+          controlNumber(sourceRoot, '[data-recursion-setting-progress-child-limit]', defaultUi.progressChildVisibleLimit),
+          defaultUi.progressChildVisibleLimit,
+          1,
+          20
+        ),
+        progressListVisibleLimit: integerInRange(
+          controlNumber(sourceRoot, '[data-recursion-setting-progress-list-limit]', defaultUi.progressListVisibleLimit),
+          defaultUi.progressListVisibleLimit,
+          5,
+          80
+        )
+      }
     };
   }
 

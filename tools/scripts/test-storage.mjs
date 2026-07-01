@@ -532,6 +532,186 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
 {
   const adapter = createMemoryStorageAdapter();
   const repo = createStorageRepository({ storage: adapter });
+  const orphanSceneKey = sceneCacheKey('Repair Chat', 'Scene One');
+  const orphanJournalKey = runJournalKey('Repair Chat');
+  const missingSceneKey = sceneCacheKey('Repair Chat', 'Missing Scene');
+  const invalidSceneKey = sceneCacheKey('Repair Chat', 'Invalid Scene');
+  const nonRecursionKey = 'other-extension-state.v1.json';
+
+  await adapter.writeJson(orphanSceneKey, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 1,
+    createdAt: '2026-06-30T00:00:00.000Z',
+    updatedAt: '2026-06-30T00:00:00.000Z',
+    recursionVersion: '0.1.0-pre-alpha.1',
+    chatKey: 'Repair-Chat',
+    sceneKey: 'Scene-One',
+    cacheState: 'active',
+    cards: []
+  });
+  await adapter.writeJson(orphanJournalKey, {
+    recordType: 'recursion.runJournal',
+    schemaVersion: 1,
+    createdAt: '2026-06-30T00:00:00.000Z',
+    updatedAt: '2026-06-30T00:00:00.000Z',
+    recursionVersion: '0.1.0-pre-alpha.1',
+    chatKey: 'Repair-Chat',
+    maxEntries: 100,
+    nextIndex: 0,
+    entries: []
+  });
+  await adapter.writeJson(invalidSceneKey, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 999,
+    chatKey: 'Repair-Chat',
+    sceneKey: 'Invalid-Scene',
+    apiKey: 'index-repair-secret'
+  });
+  await adapter.writeJson(nonRecursionKey, {
+    owner: 'other-extension',
+    apiKey: 'other-extension-secret'
+  });
+  await adapter.writeJson(SYSTEM_INDEX_KEY, {
+    records: {
+      [missingSceneKey]: {
+        key: missingSceneKey,
+        kind: 'sceneCache',
+        chatKey: 'Repair Chat',
+        updatedAt: '2026-06-30T00:00:00.000Z'
+      },
+      [invalidSceneKey]: {
+        key: invalidSceneKey,
+        kind: 'sceneCache',
+        chatKey: 'Repair Chat',
+        updatedAt: '2026-06-30T00:00:00.000Z',
+        apiKey: 'stale-index-secret'
+      }
+    }
+  });
+
+  const result = await repo.repairIndex();
+  const index = await repo.readIndex();
+  const dump = adapter.dump();
+  const serializedResult = JSON.stringify(result);
+
+  assertEqual(result.ok, true, 'repairIndex returns ok');
+  assert(index.records[orphanSceneKey], 'repairIndex adds valid orphaned scene cache');
+  assertEqual(index.records[orphanSceneKey].kind, 'sceneCache', 'repairIndex records orphaned scene cache kind');
+  assertEqual(index.records[orphanSceneKey].chatKey, 'Repair-Chat', 'repairIndex records orphaned scene cache chatKey');
+  assert(index.records[orphanJournalKey], 'repairIndex adds valid orphaned run journal');
+  assertEqual(index.records[orphanJournalKey].kind, 'runJournal', 'repairIndex records orphaned run journal kind');
+  assert(!index.records[missingSceneKey], 'repairIndex removes missing index record');
+  assert(!index.records[invalidSceneKey], 'repairIndex removes invalid index record');
+  assert(dump[invalidSceneKey], 'repairIndex does not delete invalid Recursion records');
+  assertEqual(dump[nonRecursionKey].owner, 'other-extension', 'repairIndex does not touch non-Recursion records');
+  assert(result.repaired.some((entry) => entry.kind === 'sceneCache'), 'repairIndex reports repaired scene cache index entry');
+  assert(result.repaired.some((entry) => entry.kind === 'runJournal'), 'repairIndex reports repaired run journal index entry');
+  assert(result.pruned.some((entry) => entry.reason === 'missing-record'), 'repairIndex reports missing record prune');
+  assert(result.pruned.some((entry) => entry.reason === 'invalid-record'), 'repairIndex reports invalid record prune');
+  assert(result.journalEvents.some((entry) => entry.event === 'storage.repaired'), 'repairIndex reports storage.repaired diagnostic');
+  assert(result.journalEvents.some((entry) => entry.event === 'storage.pruned'), 'repairIndex reports storage.pruned diagnostic');
+  assert(!serializedResult.includes('secret'), 'repairIndex diagnostics omit secret text');
+  assert(!serializedResult.includes(nonRecursionKey), 'repairIndex diagnostics omit non-Recursion record keys');
+}
+
+{
+  const files = new Map();
+  const validSceneKey = sceneCacheKey('No Discovery Chat', 'Scene One');
+  const missingSceneKey = sceneCacheKey('No Discovery Chat', 'Missing Scene');
+  const invalidSceneKey = sceneCacheKey('No Discovery Chat', 'Invalid Scene');
+  const unreadableRunKey = runJournalKey('Unreadable Chat');
+  const orphanSceneKey = sceneCacheKey('No Discovery Chat', 'Orphan Scene');
+  const storage = {
+    async readJson(key) {
+      if (key === unreadableRunKey) throw new Error('read failed with sk-storage-secret');
+      return files.has(key) ? files.get(key) : null;
+    },
+    async writeJson(key, value) {
+      files.set(key, value);
+      return { ok: true, key };
+    },
+    async deleteJson(key) {
+      files.delete(key);
+      return { ok: true, key };
+    }
+  };
+  await storage.writeJson(validSceneKey, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 1,
+    createdAt: '2026-06-30T00:00:00.000Z',
+    updatedAt: '2026-06-30T00:00:00.000Z',
+    recursionVersion: '0.1.0-pre-alpha.1',
+    chatKey: 'No-Discovery-Chat',
+    sceneKey: 'Scene-One',
+    cacheState: 'active',
+    cards: []
+  });
+  await storage.writeJson(invalidSceneKey, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 999,
+    chatKey: 'No-Discovery-Chat',
+    sceneKey: 'Invalid-Scene'
+  });
+  await storage.writeJson(orphanSceneKey, {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 1,
+    createdAt: '2026-06-30T00:00:00.000Z',
+    updatedAt: '2026-06-30T00:00:00.000Z',
+    recursionVersion: '0.1.0-pre-alpha.1',
+    chatKey: 'No-Discovery-Chat',
+    sceneKey: 'Orphan-Scene',
+    cacheState: 'active',
+    cards: []
+  });
+  await storage.writeJson(SYSTEM_INDEX_KEY, {
+    records: {
+      [validSceneKey]: {
+        key: validSceneKey,
+        kind: 'sceneCache',
+        chatKey: 'No Discovery Chat',
+        updatedAt: 'not-a-date'
+      },
+      [missingSceneKey]: {
+        key: missingSceneKey,
+        kind: 'sceneCache',
+        chatKey: 'No Discovery Chat',
+        updatedAt: '2026-06-30T00:00:00.000Z'
+      },
+      [invalidSceneKey]: {
+        key: invalidSceneKey,
+        kind: 'sceneCache',
+        chatKey: 'No Discovery Chat',
+        updatedAt: '2026-06-30T00:00:00.000Z'
+      },
+      [unreadableRunKey]: {
+        key: unreadableRunKey,
+        kind: 'runJournal',
+        chatKey: 'Unreadable Chat',
+        updatedAt: '2026-06-30T00:00:00.000Z'
+      }
+    }
+  });
+
+  const repo = createStorageRepository({ storage });
+  const result = await repo.repairIndex();
+  const index = await repo.readIndex();
+  const serializedResult = JSON.stringify(result);
+  assertEqual(result.discovery.available, false, 'repairIndex records missing discovery support');
+  assert(index.records[validSceneKey], 'repairIndex keeps indexed valid record without discovery');
+  assertEqual(index.records[validSceneKey].chatKey, 'No-Discovery-Chat', 'repairIndex repairs indexed valid record metadata without discovery');
+  assert(!index.records[missingSceneKey], 'repairIndex prunes indexed missing record without discovery');
+  assert(!index.records[invalidSceneKey], 'repairIndex prunes indexed invalid record without discovery');
+  assert(index.records[unreadableRunKey], 'repairIndex preserves unreadable indexed record without discovery');
+  assert(!index.records[orphanSceneKey], 'repairIndex cannot add orphan records without discovery');
+  assert(result.pruned.some((entry) => entry.reason === 'missing-record'), 'repairIndex reports no-discovery missing prune');
+  assert(result.pruned.some((entry) => entry.reason === 'invalid-record'), 'repairIndex reports no-discovery invalid prune');
+  assert(result.skipped.some((entry) => entry.reason === 'read-failed'), 'repairIndex reports no-discovery read failure skip');
+  assert(!serializedResult.includes('sk-storage-secret'), 'repairIndex no-discovery diagnostics redact read failure secrets');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
   const saved = await repo.saveSceneCache('Corrupt Chat', 'Cards', {
     cards: [null, { id: 'card-2', promptText: 'safe' }]
   });

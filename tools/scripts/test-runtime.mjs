@@ -192,6 +192,13 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assert(Array.isArray(view.activityHistory), 'runtime view exposes bounded activity history');
   assert(view.activityHistory.some((event) => event.phase === 'started'), 'activity history includes turn start');
   assert(view.activityHistory.some((event) => event.phase === 'handSelected'), 'activity history includes hand selection');
+  assert(
+    view.activityHistory.some((event) => event.phase === 'cardProgress'
+      && event.detail?.parentStepId === 'utility-card-batch'
+      && event.detail?.source === 'fallback'
+      && event.detail?.state === 'warning'),
+    'activity history includes local fallback card child progress'
+  );
   assertNoSecretText(view.activityHistory, 'runtime view activity history');
   assertEqual(view.activeRunId, null, 'active run cleared after auto success');
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
@@ -2386,6 +2393,14 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assert(routerCalls.includes('openThreadsCard'), 'card job routed through batch');
   assert(cache.cards.some((card) => card.family === 'Open Threads'), 'provider card persisted in scene cache');
   assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'provider card selected into hand');
+  assert(
+    view.activityHistory.some((event) => event.phase === 'cardProgress'
+      && event.detail?.parentStepId === 'utility-card-batch'
+      && event.detail?.roleId === 'openThreadsCard'
+      && event.detail?.source === 'generated'
+      && event.detail?.state === 'done'),
+    'provider-generated card emits generated child progress'
+  );
   assert(view.lastPacket.sections.turnBrief.includes('unanswered signal'), 'provider card reaches prompt packet');
   assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'successful provider card pass does not add local Scene Frame fallback card');
   assert(!cache.cards.some((card) => card.family === 'Continuity Risk'), 'successful provider card pass does not add local Continuity Risk fallback card');
@@ -3214,8 +3229,17 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
     }
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Reuse cached card.' });
+  const view = runtime.view();
   assertEqual(result.ok, true, 'reuse-cache card run installs');
-  assertNoSecretText({ resultHand: result.hand, viewHand: runtime.view().lastHand }, 'cached hand cards');
+  assert(
+    view.activityHistory.some((event) => event.phase === 'cardProgress'
+      && event.detail?.parentStepId === 'utility-card-batch'
+      && event.detail?.roleId === 'sceneFrameCard'
+      && event.detail?.source === 'cache'
+      && event.detail?.state === 'cached'),
+    'cache-reused card emits cached child progress'
+  );
+  assertNoSecretText({ resultHand: result.hand, viewHand: view.lastHand }, 'cached hand cards');
 }
 
 {

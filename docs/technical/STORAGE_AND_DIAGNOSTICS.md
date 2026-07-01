@@ -133,6 +133,8 @@ Pre-alpha records can be invalidated and rebuilt instead of migrated through com
 
 Current storage behavior normalizes records whenever they are loaded or written. Scene cache saves and run journal appends update `recursion-system-index.v1.json` with the logical key, record kind, chat key, and update time. Scene cache clears remove the corresponding index entry. Run journals are bounded to the configured entry limit during normalization.
 
+The repository also exposes `repairIndex()` for bounded cleanup. It rebuilds the system index from valid discoverable Recursion scene caches and run journals when the adapter supports key discovery, prunes missing or invalid index entries, preserves unreadable entries instead of guessing, and returns sanitized `storage.repaired` / `storage.pruned` diagnostics. It does not delete scene cache files, run journal files, SillyTavern data, or non-Recursion extension records.
+
 Cleanup never deletes SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or non-Recursion extension records.
 
 ## Artifact Relationship

@@ -90,6 +90,8 @@ Journal entries are sanitized and bounded. They can include:
 - schema id
 - latency
 - retry count
+- effective timeout
+- frozen snapshot hash when the request carries one
 - request hash
 - response hash
 - compact error code and message

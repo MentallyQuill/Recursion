@@ -497,11 +497,24 @@ async function withBatchTimeout(operation, requests, timeoutMs, externalSignal =
   }
 }
 
-function diagnosticsBase({ roleId, lane, request, runId, startedAt }) {
+function diagnosticsTimeout(timeoutMs) {
+  const number = Number(timeoutMs);
+  return Number.isFinite(number) ? Math.max(0, Math.round(number)) : null;
+}
+
+function diagnosticsSnapshotHash(request = {}) {
+  const snapshotHash = compact(String(request.snapshotHash || ''));
+  return snapshotHash ? truncate(snapshotHash, 180) : undefined;
+}
+
+function diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs }) {
+  const snapshotHash = diagnosticsSnapshotHash(request);
   return sanitize({
     runId,
     roleId,
     lane,
+    timeoutMs: diagnosticsTimeout(timeoutMs),
+    ...(snapshotHash ? { snapshotHash } : {}),
     requestHash: hashJson({ roleId, lane, request: cleanRequestForDiagnostics(request) }),
     startedAt
   }, 300);
@@ -702,9 +715,10 @@ export function createGenerationRouter({ client, activity = null, journal = null
     const lane = laneName(requestLane(roleId, request));
     const started = Date.now();
     const startedAt = nowIso();
+    const effectiveTimeoutMs = options.timeoutMs ?? timeoutMs;
     let runId = String(options.runId || request.runId || makeId('provider'));
     let retryCount = 0;
-    let lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt });
+    let lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
 
     runId = activityStart(activity, {
       runId,
@@ -716,7 +730,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       label: `${lane === 'reasoner' ? 'Reasoner' : 'Utility'} provider call started.`,
       detail: lastDiagnostics
     }) || runId;
-    lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt });
+    lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
     queueJournalAppend({
       ...lastDiagnostics,
       status: 'started',
@@ -740,7 +754,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
           const raw = await withTimeout(
             (requestWithSignal) => client.generate(roleId, requestWithSignal),
             request,
-            options.timeoutMs ?? timeoutMs,
+            effectiveTimeoutMs,
             composedExternalSignal.signal || null
           );
           const data = parseProviderStructuredOutput(raw.text);
@@ -866,12 +880,13 @@ export function createGenerationRouter({ client, activity = null, journal = null
     }
 
     const batchRunId = String(options.runId || makeId('provider-batch'));
+    const effectiveTimeoutMs = options.timeoutMs ?? timeoutMs;
     const entries = requests.map((entry, index) => {
       const { roleId, request } = normalizeBatchRequest(entry);
       const lane = laneName(requestLane(roleId, request));
       const started = Date.now();
       const startedAt = nowIso();
-      const diagnostics = diagnosticsBase({ roleId, lane, request, runId: batchRunId, startedAt });
+      const diagnostics = diagnosticsBase({ roleId, lane, request, runId: batchRunId, startedAt, timeoutMs: effectiveTimeoutMs });
       activityStart(activity, {
         runId: batchRunId,
         phase: 'providerCallStarted',
@@ -999,7 +1014,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         rawResponses = await withBatchTimeout(
           (requestsWithSignals) => client.batch(requestsWithSignals),
           pendingEntries.map((entry) => ({ roleId: entry.roleId, ...entry.request })),
-          options.timeoutMs ?? timeoutMs,
+          effectiveTimeoutMs,
           options.signal || null
         );
         if (!Array.isArray(rawResponses) || rawResponses.length !== pendingEntries.length) {

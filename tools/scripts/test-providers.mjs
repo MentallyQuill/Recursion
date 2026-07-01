@@ -472,9 +472,9 @@ const routerBatchLeak = await createGenerationRouter({
   activity: routerBatchLeakActivity,
   journal: { append: (entry) => routerBatchLeakJournal.push(entry) }
 }).batch([
-  { roleId: 'utilityArbiter', prompt: 'A' },
-  { roleId: 'providerTest', prompt: 'B' }
-], { runId: 'provider-batch-leak-test' });
+  { roleId: 'utilityArbiter', prompt: 'A', snapshotHash: 'batch-snapshot-a' },
+  { roleId: 'providerTest', prompt: 'B', snapshotHash: 'batch-snapshot-b' }
+], { runId: 'provider-batch-leak-test', timeoutMs: 3456 });
 assertEqual(routerBatchLeak[0].ok, true, 'router batch leak regression keeps valid slot successful');
 assertEqual(routerBatchLeak[1].ok, false, 'router batch leak regression returns failure for malformed slot');
 assertDeepEqual(
@@ -486,6 +486,16 @@ assertDeepEqual(
   routerBatchLeakJournal.slice(0, 2).map((entry) => entry.roleId),
   ['utilityArbiter', 'providerTest'],
   'router batch started journal records each role'
+);
+assertDeepEqual(
+  routerBatchLeakJournal.slice(0, 2).map((entry) => entry.snapshotHash),
+  ['batch-snapshot-a', 'batch-snapshot-b'],
+  'router batch started journal records each request snapshot hash'
+);
+assertDeepEqual(
+  routerBatchLeakJournal.map((entry) => entry.timeoutMs),
+  [3456, 3456, 3456, 3456],
+  'router batch journal records effective timeout on every entry'
 );
 assertNoRawBatchMarker(routerBatchLeak, 'router batch result diagnostics do not expose raw malformed provider response');
 assertNoRawBatchMarker(routerBatchLeakJournal, 'router batch journal does not expose raw malformed provider response');
@@ -747,9 +757,11 @@ const redactionRouter = createGenerationRouter({
     }
   }
 });
-const redacted = await redactionRouter.generate('utilityArbiter', { prompt: 'Do not log sk-live-secret' });
+const redacted = await redactionRouter.generate('utilityArbiter', { prompt: 'Do not log sk-live-secret', snapshotHash: 'single-snapshot-hash' }, { timeoutMs: 2345 });
 assertEqual(redacted.ok, true, 'redaction route succeeds');
 assertEqual(redacted.diagnostics.runId, 'activity-assigned-run', 'returned diagnostics use activity-assigned run id');
+assertEqual(redacted.diagnostics.snapshotHash, 'single-snapshot-hash', 'single provider diagnostics record request snapshot hash');
+assertEqual(redacted.diagnostics.timeoutMs, 2345, 'single provider diagnostics record effective timeout');
 assertDeepEqual(
   redactionJournalEntries.map((entry) => entry.status),
   ['started', 'success'],
@@ -759,7 +771,11 @@ assertEqual(redactionJournalEntries[0].roleId, 'utilityArbiter', 'started journa
 assertEqual(redactionJournalEntries[0].lane, 'utility', 'started journal records lane');
 assertEqual(redactionJournalEntries[0].runId, 'activity-assigned-run', 'started journal uses activity-assigned run id');
 assertEqual(redactionJournalEntries[0].requestHash, redacted.diagnostics.requestHash, 'started journal records request hash');
+assertEqual(redactionJournalEntries[0].snapshotHash, 'single-snapshot-hash', 'started journal records request snapshot hash');
+assertEqual(redactionJournalEntries[0].timeoutMs, 2345, 'started journal records effective timeout');
 assertEqual(redactionJournalEntries.at(-1).runId, 'activity-assigned-run', 'journal uses activity-assigned run id');
+assertEqual(redactionJournalEntries.at(-1).snapshotHash, 'single-snapshot-hash', 'success journal records request snapshot hash');
+assertEqual(redactionJournalEntries.at(-1).timeoutMs, 2345, 'success journal records effective timeout');
 assertEqual(redactionActivityEvents.at(-1).runId, 'activity-assigned-run', 'settle activity uses activity-assigned run id');
 assertNoSecret(redacted.diagnostics, 'diagnostics do not leak API keys');
 assertNoSecret(redactionActivityEvents, 'activity events do not leak API keys');

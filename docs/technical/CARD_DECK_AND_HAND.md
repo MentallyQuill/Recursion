@@ -103,6 +103,8 @@ Character Motivation cards may include visible goals, established pressures, obs
 
 They must not include first-person internal monologue, secret thoughts as truth, hidden plans, spoilers, instructions to reveal inner thoughts, or diagnostic speculation copied into prompt text.
 
+The card runner enforces this twice: Motivation card requests include the safety instruction, and normalized Motivation cards with obvious internal-thought wording are rejected before they can enter the scene deck or prompt hand.
+
 ## Inspector Visibility
 
 The UI can show:

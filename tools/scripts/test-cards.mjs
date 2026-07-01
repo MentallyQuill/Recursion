@@ -51,6 +51,14 @@ assertEqual(card.role, 'characterMotivationCard', 'role derived from family');
 assertEqual(card.catalogKey, 'Character-Motivation', 'catalog key derived from family');
 assertEqual(card.source.snapshotHash, 'hash', 'snapshot hash preserved in source');
 assertEqual(card.freshness.sourceFingerprint, 'hash', 'snapshot hash preserved in freshness');
+await assertRejects(
+  async () => normalizeCard({
+    family: 'Character Motivation',
+    promptText: 'I secretly want the player to trust me, but I will never reveal it.'
+  }, { sceneId: 'scene-1' }),
+  /Character Motivation/,
+  'character motivation rejects first-person hidden thought text'
+);
 
 const roleMapped = normalizeCard({
   role: 'continuityRiskCard',
@@ -163,6 +171,11 @@ assertEqual(requests[1].metadata.reason, '', 'missing request reason defaults em
 assert(requests[0].prompt.includes('Return one JSON object'), 'request prompt asks for JSON-only output');
 assert(requests[0].prompt.includes('Envelope role must be "sceneFrameCard"'), 'request prompt requires envelope role echo');
 assert(requests[0].prompt.includes('Envelope family must be "Scene Frame"'), 'request prompt requires envelope family echo');
+const motivationRequest = buildCardRequests({ cardJobs: [{ family: 'Character Motivation' }] }, {
+  runId: 'run',
+  snapshotHash: 'hash'
+})[0];
+assert(motivationRequest.prompt.includes('Do not include first-person internal monologue'), 'motivation request includes internal-thought safety instruction');
 
 const providerCards = cardsFromProviderResult({
   ok: true,
@@ -263,6 +276,16 @@ assertEqual(cardsFromProviderResult({
     items: [{ promptText: 'conflicting envelope family' }]
   }
 }, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with conflicting family ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'characterMotivationCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'characterMotivationCard',
+    family: 'Character Motivation',
+    items: [{ promptText: 'She thinks: I secretly plan to betray them.' }]
+  }
+}, { expectedRole: 'characterMotivationCard', expectedFamily: 'Character Motivation' }).length, 0, 'provider motivation card with private thought text ignored');
 
 const selectedDeck = [
   deckCard('Prose/Pacing', 'Keep it brisk.', { id: 'low', tokenEstimate: 20 }),

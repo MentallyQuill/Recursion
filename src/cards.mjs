@@ -71,6 +71,13 @@ const STATUS = new Set(['candidate', 'active', 'stowed', 'stale', 'discarded']);
 const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
 const DETAIL = new Set(['compact', 'standard', 'expanded']);
 const EMPHASIS_PRIORITY = Object.freeze({ emphasized: 0, normal: 1, muted: 2 });
+const CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS = Object.freeze([
+  /\b(?:thinks?|thoughts?|inner\s+monologue|internal\s+monologue)\s*:/i,
+  /\b(?:secret|hidden|private|undisclosed)\s+(?:thoughts?|motives?|motivations?|plans?|intentions?)\b/i,
+  /\breveal\s+(?:their\s+|his\s+|her\s+|my\s+|our\s+)?(?:inner|private|hidden|secret)\s+thoughts?\b/i,
+  /(?:^|[\s"'])I\s+(?:secretly|privately|silently|really|actually)\s+(?:want|wants|plan|plans|intend|intends|hope|hopes|fear|fears|feel|feels|know|knows|believe|believes)\b/i,
+  /(?:^|[\s"'])I\s+(?:will|would|can|could|should)\s+never\s+reveal\b/i
+]);
 
 for (const entry of CARD_CATALOG) {
   if (!UTILITY_ROLE_IDS.includes(entry.role)) {
@@ -114,6 +121,20 @@ function normalizeEvidenceRefs(value) {
     .map((entry) => cleanText(entry, EVIDENCE_TEXT_LIMIT))
     .filter(Boolean)
     .slice(0, EVIDENCE_LIMIT);
+}
+
+function assertCardPromptTextSafe(catalog, promptText) {
+  if (catalog.family !== 'Character Motivation') return;
+  for (const pattern of CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS) {
+    if (pattern.test(promptText)) {
+      throw new Error('Character Motivation promptText contains unsafe internal-thought wording.');
+    }
+  }
+}
+
+function cardPromptSafetyInstruction(catalog) {
+  if (catalog.family !== 'Character Motivation') return '';
+  return 'Do not include first-person internal monologue, secret thoughts as truth, or instructions to reveal inner thoughts. Keep motives behavior-facing and observable or explicitly inferred.';
 }
 
 function resolveCatalog(input, { strict = true, allowDefault = false } = {}) {
@@ -259,6 +280,7 @@ export function normalizeCard(input = {}, context = {}) {
   const catalog = resolveCatalog(source);
   const promptText = cleanText(source.promptText ?? source.text ?? source.claim, TEXT_LIMIT);
   if (!promptText) throw new Error('Card promptText is required.');
+  assertCardPromptTextSafe(catalog, promptText);
 
   const normalizedSource = sourceContext(source, ctx);
   const id = cardIdFor(source, catalog, promptText, normalizedSource);
@@ -323,6 +345,7 @@ export function buildCardRequests(plan = {}, context = {}) {
           `Envelope family must be "${catalog.family}".`,
           'The card object may contain promptText, summary, evidenceRefs, tokenEstimate, detailProfile, emphasis, and inspectorNotes.',
           'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
+          cardPromptSafetyInstruction(catalog),
           reason ? `Arbiter request reason: ${reason}` : '',
           `Snapshot hash: ${snapshotHash}`,
           `Snapshot:\n${stringifyForPrompt(context.snapshot ?? {})}`

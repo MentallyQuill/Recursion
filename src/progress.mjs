@@ -1,4 +1,4 @@
-const VALID_STATES = new Set(['pending', 'running', 'done', 'warning', 'failed', 'skipped']);
+const VALID_STATES = new Set(['pending', 'running', 'done', 'cached', 'warning', 'failed', 'skipped']);
 const VALID_PROVIDER_LANES = new Set(['utility', 'reasoner']);
 const SAFE_PROGRESS_TITLES = new Set(['Generating', 'Ready', 'Idle', 'Issue', 'Needs attention']);
 const DEFAULT_HERO_PIXEL_ROWS = 3;
@@ -120,6 +120,7 @@ function normalizeState(value, fallback = 'pending') {
 
 function metaForState(state) {
   if (state === 'done') return 'done';
+  if (state === 'cached') return 'cached';
   if (state === 'running') return 'running';
   if (state === 'warning') return 'caution';
   if (state === 'failed') return 'failed';
@@ -164,6 +165,7 @@ function eventState(event, isCurrent) {
   const severity = cleanText(event.severity, 'info').toLowerCase();
   if (severity === 'error') return 'failed';
   if (severity === 'warning' || phase === 'providerCallRetrying' || phase === 'promptReasonerFallback') return 'warning';
+  if (phase === 'cacheReusing') return 'cached';
   if (severity === 'success' || phase === 'storageComplete' || phase === 'promptPacketBuilt' || phase === 'settled') return 'done';
   if (isCurrent) return 'running';
   return 'done';
@@ -195,7 +197,7 @@ function stateRank(state) {
   if (state === 'failed') return 5;
   if (state === 'warning') return 4;
   if (state === 'running') return 3;
-  if (state === 'done') return 2;
+  if (state === 'done' || state === 'cached') return 2;
   if (state === 'skipped') return 1;
   return 0;
 }
@@ -342,6 +344,7 @@ function heroPixelState(steps) {
   if (steps.some((step) => step.state === 'failed')) return 'failed';
   if (steps.some((step) => step.state === 'warning')) return 'warning';
   if (steps.some((step) => step.state === 'running')) return 'running';
+  if (steps.some((step) => step.state === 'cached')) return 'cached';
   if (steps.some((step) => step.state === 'done')) return 'done';
   return 'pending';
 }
@@ -351,6 +354,7 @@ function overflowPixelState(steps) {
   if (steps.some((step) => step.state === 'failed')) return 'failed';
   if (steps.some((step) => step.state === 'warning')) return 'warning';
   if (steps.some((step) => step.state === 'pending')) return 'pending';
+  if (steps.some((step) => step.state === 'cached')) return 'cached';
   if (steps.some((step) => step.state === 'done')) return 'done';
   return steps[0]?.state || 'pending';
 }

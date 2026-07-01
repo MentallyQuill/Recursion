@@ -66,6 +66,19 @@ assertDeepEqual(
 );
 assertEqual(heroBlocks.at(-1).columnCount, 2, 'hero pixel array reports the visible column count for brand movement');
 
+const cachedProgress = createProgressRunModel({
+  progressRun: {
+    runId: 'cached-progress',
+    steps: [
+      { id: 'reusing-scene-deck', label: 'Reusing scene deck', providerLane: 'utility', state: 'cached' }
+    ]
+  }
+});
+assertEqual(cachedProgress.steps[0].state, 'cached', 'progress model preserves cached state for reused cards');
+assertEqual(cachedProgress.steps[0].meta, 'cached', 'cached progress rows use cached meta text');
+assertEqual(cachedProgress.heroPixelState, 'cached', 'cached progress can own the compact hero state');
+assertEqual(createHeroPixelBlocks(cachedProgress)[0].className, 'hero-block cached', 'cached hero pixel block class is stable');
+
 const overflowingProgress = createProgressRunModel({
   progressRun: {
     runId: 'overflow-progress',
@@ -84,6 +97,19 @@ assertEqual(overflowingBlocks.at(-1).id, 'overflow-progress', 'hero pixel array 
 assertEqual(overflowingBlocks.at(-1).state, 'running', 'overflow aggregate prioritizes running hidden work');
 assertEqual(overflowingBlocks.at(-1).hiddenStepCount, 5, 'overflow aggregate counts the represented overflow steps');
 assertEqual(overflowingBlocks.at(-1).columnCount, 12, 'overflow aggregate keeps the compact array within twelve columns');
+
+const overflowingCachedProgress = createProgressRunModel({
+  progressRun: {
+    runId: 'overflow-cached-progress',
+    steps: Array.from({ length: 38 }, (_, index) => ({
+      id: `overflow-cached-step-${index + 1}`,
+      label: `Overflow cached step ${index + 1}`,
+      providerLane: 'utility',
+      state: index === 36 ? 'cached' : 'done'
+    }))
+  }
+});
+assertEqual(createHeroPixelBlocks(overflowingCachedProgress).at(-1).state, 'cached', 'overflow aggregate preserves cached hidden work when no higher priority state is hidden');
 
 const derivedProgress = createProgressRunModel({
   settings: { mode: 'auto' },
@@ -133,6 +159,19 @@ assertDeepEqual(
 );
 assertEqual(concurrentDerivedProgress.currentStepText, '2 model calls running...', 'derived concurrent progress gets compact bar text');
 
+const derivedCachedProgress = createProgressRunModel({
+  settings: { mode: 'auto' },
+  activityHistory: [
+    { runId: 'run-cache', phase: 'cacheReusing', label: 'Reusing scene deck...', providerLane: 'utility' }
+  ],
+  activity: { runId: 'run-cache', phase: 'cacheReusing', label: 'Reusing scene deck...', providerLane: 'utility' }
+});
+assertEqual(
+  derivedCachedProgress.steps.find((step) => step.id === 'reusing-scene-deck')?.state,
+  'cached',
+  'cache reuse activity derives a cached progress row'
+);
+
 const unsafeExplicitProgress = createProgressRunModel({
   progressRun: {
     runId: 'unsafe-progress',
@@ -176,6 +215,7 @@ const barImplementationReference = readFileSync(new URL('../../docs/design/RECUR
 assert(/padding:\s*0 8px 0 2px;/.test(barImplementationReference), 'recursion bar uses a tighter left inset than right controls');
 assert(/--hero-running:\s*var\(--cyan\);/.test(barImplementationReference), 'hero pixel running blocks use the active blue token');
 assert(/--hero-done:\s*var\(--green\);/.test(barImplementationReference), 'hero pixel done blocks use the success green token');
+assert(/--hero-cached:\s*var\(--purple\);/.test(barImplementationReference), 'hero pixel cached blocks use the cache purple token');
 assert(/--hero-warning:\s*var\(--amber\);/.test(barImplementationReference), 'hero pixel warning blocks use the caution yellow token');
 assert(/--hero-failed:\s*var\(--red\);/.test(barImplementationReference), 'hero pixel failed blocks use the failure red token');
 assert(/--hero-block-gap:\s*2px;/.test(barImplementationReference), 'hero pixel blocks use a 2px row and column gap');
@@ -192,6 +232,7 @@ assert(/\.step-row\.is-entering/.test(barImplementationReference), 'progress row
 assert(/@keyframes step-row-enter/.test(barImplementationReference), 'progress row insertion animation is defined');
 assert(/## Turn Animation Preview Script/.test(barImplementationReference), 'implementation reference includes a turn animation preview script');
 assert(/const TURN_ANIMATION_STEPS = \[/.test(barImplementationReference), 'turn animation preview declares deterministic step data');
+assert(/cached:\s*'cached'/.test(barImplementationReference), 'turn animation preview supports cached progress state');
 assert(/const MAX_COLUMNS = 12;/.test(barImplementationReference), 'turn animation preview caps the Hero Pixel Array at twelve columns');
 assert(/const MAX_BLOCKS = ROWS_PER_COLUMN \* MAX_COLUMNS;/.test(barImplementationReference), 'turn animation preview derives the block cap from rows and columns');
 assert(/function visibleHeroSteps/.test(barImplementationReference), 'turn animation preview has a capped Hero Pixel Array projection');
@@ -206,6 +247,7 @@ assert(/function syncProgressRow/.test(barImplementationReference), 'turn animat
 assert(/window\.playRecursionTurnAnimation/.test(barImplementationReference), 'turn animation preview exposes a replay hook');
 assert(/\.step-row\.done \.step-icon\s*\{[\s\S]*?background:\s*var\(--green\);[\s\S]*?border-color:\s*var\(--green\);/.test(barImplementationReference), 'progress menu done dots use the same success green token');
 assert(/\.step-row\.running \.step-icon\s*\{[\s\S]*?var\(--cyan\) 0 82deg/.test(barImplementationReference), 'progress menu running spinners use the same active blue token');
+assert(/\.step-row\.cached \.step-icon\s*\{[\s\S]*?background:\s*var\(--purple\);[\s\S]*?border-color:\s*var\(--purple\);/.test(barImplementationReference), 'progress menu cached dots use the cache purple token');
 assert(/\.step-row\.warn \.step-icon\s*\{[\s\S]*?background:\s*var\(--amber\);[\s\S]*?border-color:\s*var\(--amber\);/.test(barImplementationReference), 'progress menu warning dots use the same caution yellow token');
 assert(/\.step-row\.fail \.step-icon\s*\{[\s\S]*?background:\s*var\(--red\);[\s\S]*?border-color:\s*var\(--red\);/.test(barImplementationReference), 'progress menu failed dots use the same failure red token');
 

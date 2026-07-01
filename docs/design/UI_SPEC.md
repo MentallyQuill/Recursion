@@ -131,6 +131,7 @@ The Hero Pixel Array sits immediately before `RECURSION`. It shows runtime state
 - Empty muted blocks: queued or not-yet-started progress items.
 - Green filled blocks: completed progress items.
 - Blue animated blocks: currently running model calls, prompt work, or cache writes.
+- Purple filled blocks: cards or deck rows read from cache instead of generated this turn.
 - Yellow filled blocks: finished with errors, fallback, JSON repair, or other repairable caution.
 - Red filled blocks: blocked or failed progress items.
 
@@ -201,7 +202,7 @@ The array layout is deterministic:
 - Blocks build top-to-bottom through three rows, then begin the next column to the right.
 - Each block carries `row`, `column`, `columnCount`, `delayMs`, `state`, and a stable state class.
 - The compact Hero Pixel Array caps at 12 columns, for 36 represented blocks at three rows.
-- If a run has more than 36 top-level progress rows, the progress menu still shows every row, but the Hero Pixel Array uses its final block as an overflow aggregate. The aggregate state is selected from represented overflow rows in this priority order: running, failed, warning, pending, done, skipped.
+- If a run has more than 36 top-level progress rows, the progress menu still shows every row, but the Hero Pixel Array uses its final block as an overflow aggregate. The aggregate state is selected from represented overflow rows in this priority order: running, failed, warning, pending, cached, done, skipped.
 - The renderer sets `--columns` from `columnCount`, `grid-row` from `row + 1`, `grid-column` from `column + 1`, and `--block-index` from the block index.
 - Entry delay is slight, roughly 24ms per block, so a 12-step run visibly builds without feeling slow.
 - The brand stage remains fixed width; the brand text, fade layer, and pixel array are absolute layers inside that stage.
@@ -265,6 +266,7 @@ Step states:
 - Queued/pending: empty circle.
 - Running/active: animated ring using the same state-ring visual language, scaled slightly larger than the small progress dots so the hollow spinner has comparable visual weight.
 - Done: green filled circle.
+- Cached: purple filled circle for cards or deck rows read from cache instead of generated this turn.
 - Finished with errors/repairable caution: amber filled circle.
 - Failed/blocked: red filled circle.
 - Provider lane marker: `U` for Utility or `R` for Reasoner appears first, then a subtle separator bar, then the status indicator.
@@ -276,12 +278,13 @@ Hero Pixel Array block states:
 - Pending: empty muted block.
 - Running: animated blue block.
 - Done: filled green block.
+- Cached: filled purple block.
 - Finished with errors: filled yellow block.
 - Failed: filled red block.
 
 The Hero Pixel Array should use real block elements rather than a single canvas, SVG, or conic-gradient spinner so each progress row can be represented independently. Use CSS grid with three fixed rows, 4px blocks, 2px gaps, and generated block metadata from `createHeroPixelBlocks(progressRun)`.
 
-Every active progress-row ring must continue to use the same small spinner visual contract: same conic-gradient stops, same dark cutout treatment, same pseudo-element box sizing, same animation name, and same duration. Inside the progress menu, static done/pending/warning/failed dots use a 10px footprint, while active hollow spinner rings use a 12px footprint centered in the same indicator column. Implement this with shared CSS variables instead of separately hand-tuning spinner styles.
+Every active progress-row ring must continue to use the same small spinner visual contract: same conic-gradient stops, same dark cutout treatment, same pseudo-element box sizing, same animation name, and same duration. Inside the progress menu, static done/cached/pending/warning/failed dots use a 10px footprint, while active hollow spinner rings use a 12px footprint centered in the same indicator column. Implement this with shared CSS variables instead of separately hand-tuning spinner styles.
 
 The inner cutout must not be transparent. It should use the same dark cutout fill and subtle inner border for every active row ring; otherwise active progress rows read as colored dots instead of rings.
 
@@ -436,6 +439,7 @@ Reference CSS contract:
 
 .brand-stage[data-state="running"],
 .brand-stage[data-state="done"],
+.brand-stage[data-state="cached"],
 .brand-stage[data-state="warning"],
 .brand-stage[data-state="failed"] {
   --brand-cover-width: calc((var(--columns, 0) * (var(--hero-block-size, 4px) + var(--hero-block-gap, 2px))) + var(--brand-cover-tail));
@@ -512,6 +516,12 @@ Reference CSS contract:
   border-color: #7bd88f;
   background: #7bd88f;
   box-shadow: 0 0 4px rgba(123, 216, 143, .22);
+}
+
+.hero-block.cached {
+  border-color: #a78bfa;
+  background: #a78bfa;
+  box-shadow: 0 0 5px rgba(167, 139, 250, .24);
 }
 
 .hero-block.running {

@@ -7,13 +7,13 @@ Use this as the SillyTavern implementation reference. The preview-specific host 
 Runtime toggles:
 
 - `.brand-block.is-open` opens the progress menu.
-- `.hero-pixel-array[data-state="pending|running|done|warning|failed"]` controls the compact Hero Pixel Array state.
-- `.hero-block.pending`, `.hero-block.running`, `.hero-block.done`, `.hero-block.warning`, and `.hero-block.failed` control each Hero Pixel Array block.
+- `.hero-pixel-array[data-state="pending|running|done|cached|warning|failed"]` controls the compact Hero Pixel Array state.
+- `.hero-block.pending`, `.hero-block.running`, `.hero-block.done`, `.hero-block.cached`, `.hero-block.warning`, and `.hero-block.failed` control each Hero Pixel Array block.
 - `.mode-menu.is-open` opens the mode menu.
 - `.brief-menu.is-open` opens the Last Brief menu.
 - `.prompt-packet-panel.is-open` opens the injected prompt packet panel.
 - `.brief-card[aria-expanded="true"]` expands a card row.
-- `.step-row.done`, `.step-row.running`, `.step-row.queued`, `.step-row.warn`, and `.step-row.fail` control progress-row state.
+- `.step-row.done`, `.step-row.running`, `.step-row.cached`, `.step-row.queued`, `.step-row.warn`, and `.step-row.fail` control progress-row state.
 - `data-provider="utility"` and `data-provider="reasoner"` control the U/R provider marker tint.
 
 ## HTML
@@ -345,6 +345,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     pending: 'queued',
     running: 'running',
     done: 'done',
+    cached: 'cached',
     warning: 'warn',
     failed: 'fail'
   };
@@ -352,6 +353,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     pending: 'waiting',
     running: 'running',
     done: 'done',
+    cached: 'cached',
     warning: 'caution',
     failed: 'failed'
   };
@@ -372,7 +374,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     [1220, 'set', 'scene-shift', 'done', 'Planning card pass...'],
     [1420, 'add', 'utility-card-batch', 'running', '2 model calls running...'],
     [1520, 'add', 'reasoner-brief', 'running', '2 model calls running...'],
-    [2040, 'set', 'utility-card-batch', 'done', 'Reasoner brief...'],
+    [2040, 'set', 'utility-card-batch', 'cached', 'Reasoner brief...'],
     [2360, 'set', 'reasoner-brief', 'failed', 'Reasoner failed; Utility fallback running...'],
     [2600, 'add', 'repair-json', 'running', 'Repairing card JSON...'],
     [3060, 'set', 'repair-json', 'warning', 'Composing prompt packet...'],
@@ -398,6 +400,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     if (steps.some((step) => step.state === 'failed')) return 'failed';
     if (steps.some((step) => step.state === 'warning')) return 'warning';
     if (steps.some((step) => step.state === 'pending')) return 'pending';
+    if (steps.some((step) => step.state === 'cached')) return 'cached';
     if (steps.some((step) => step.state === 'done')) return 'done';
     return 'pending';
   }
@@ -426,7 +429,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     if (running.length > 1) return `${running.length} model calls running`;
     if (steps.some((step) => step.state === 'failed')) return 'Utility fallback active';
     if (steps.some((step) => step.state === 'warning')) return 'Repair completed with caution';
-    if (steps.length && steps.every((step) => step.state === 'done' || step.state === 'warning' || step.state === 'failed')) return 'Turn context ready';
+    if (steps.length && steps.every((step) => step.state === 'done' || step.state === 'cached' || step.state === 'warning' || step.state === 'failed')) return 'Turn context ready';
     return running[0] ? `${cleanLabel(running[0].label)} running` : 'Preparing';
   }
 
@@ -434,6 +437,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     if (steps.some((step) => step.state === 'failed')) return 'failed';
     if (steps.some((step) => step.state === 'warning')) return 'warning';
     if (steps.some((step) => step.state === 'running')) return 'running';
+    if (steps.some((step) => step.state === 'cached')) return 'cached';
     if (steps.some((step) => step.state === 'done')) return 'done';
     return 'pending';
   }
@@ -611,6 +615,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   --dim: rgba(224, 224, 224, .36);
   --cyan: #65d6e8;
   --green: #7bd88f;
+  --purple: #a78bfa;
   --amber: #e4bc63;
   --red: #e06767;
   --ring-cutout: #202124;
@@ -621,6 +626,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   --hero-pending: rgba(224, 224, 224, .28);
   --hero-running: var(--cyan);
   --hero-done: var(--green);
+  --hero-cached: var(--purple);
   --hero-warning: var(--amber);
   --hero-failed: var(--red);
 }
@@ -698,6 +704,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
 .brand-stage[data-state="running"],
 .brand-stage[data-state="done"],
+.brand-stage[data-state="cached"],
 .brand-stage[data-state="warning"],
 .brand-stage[data-state="failed"] {
   --brand-cover-width: calc((var(--columns, 0) * (var(--hero-block-size) + var(--hero-block-gap))) + var(--brand-cover-tail));
@@ -757,6 +764,12 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   border-color: var(--hero-done);
   background: var(--hero-done);
   box-shadow: 0 0 4px rgba(101, 216, 232, .22);
+}
+
+.hero-block.cached {
+  border-color: var(--hero-cached);
+  background: var(--hero-cached);
+  box-shadow: 0 0 5px rgba(167, 139, 250, .24);
 }
 
 .hero-block.running {
@@ -1041,6 +1054,11 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   border-color: var(--green);
 }
 
+.step-row.cached .step-icon {
+  background: var(--purple);
+  border-color: var(--purple);
+}
+
 .step-row.queued .step-icon,
 .step-row.waiting .step-icon {
   background: transparent;
@@ -1083,6 +1101,10 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
 .step-row.running .step-meta {
   color: rgba(101, 216, 232, .78);
+}
+
+.step-row.cached .step-meta {
+  color: rgba(199, 181, 255, .80);
 }
 
 .step-row.warn .step-meta {

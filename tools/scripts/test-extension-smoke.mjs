@@ -372,8 +372,13 @@ if (lifecycleFailures.length) {
     'provider model-call journal was not persisted by extension bootstrap'
   );
   const journal = [...files.values()].find((file) => Array.isArray(file.entries) && file.entries.some((entry) => entry.event === 'provider.call.completed'));
+  const startedEntry = journal.entries.find((entry) => entry.event === 'provider.call.started');
   const providerEntry = journal.entries.find((entry) => entry.event === 'provider.call.completed');
+  assert(startedEntry, 'provider journal records started event');
+  assert(journal.entries.findIndex((entry) => entry.event === 'provider.call.started') < journal.entries.findIndex((entry) => entry.event === 'provider.call.completed'), 'provider started journal precedes completed event');
   assert(!journal.entries.some((entry) => entry.event === 'provider.call'), 'provider journal does not use obsolete generic event');
+  assertEqual(startedEntry.details.roleId, 'utilityArbiter', 'provider started journal records role id');
+  assert(!startedEntry.hashes.responseHash, 'provider started journal has no response hash');
   assertEqual(providerEntry.details.roleId, 'utilityArbiter', 'provider journal records role id');
   assert(providerEntry.hashes.responseHash, 'provider journal records response hash');
   assert(!JSON.stringify(providerEntry).includes('Journal smoke user message.'), 'provider journal does not persist raw transcript text');
@@ -433,8 +438,13 @@ if (lifecycleFailures.length) {
     'provider failed-call journal was not persisted by extension bootstrap'
   );
   const journal = [...files.values()].find((file) => Array.isArray(file.entries) && file.entries.some((entry) => entry.event === 'provider.call.failed'));
+  const startedEntry = journal.entries.find((entry) => entry.event === 'provider.call.started');
   const providerEntry = journal.entries.find((entry) => entry.event === 'provider.call.failed');
+  assert(startedEntry, 'failed provider journal records started event');
+  assert(journal.entries.findIndex((entry) => entry.event === 'provider.call.started') < journal.entries.findIndex((entry) => entry.event === 'provider.call.failed'), 'provider started journal precedes failed event');
   assert(!journal.entries.some((entry) => entry.event === 'provider.call'), 'failed provider journal does not use obsolete generic event');
+  assertEqual(startedEntry.details.roleId, 'utilityArbiter', 'failed provider started journal records role id');
+  assert(!startedEntry.hashes.responseHash, 'failed provider started journal has no response hash');
   assertEqual(providerEntry.details.roleId, 'utilityArbiter', 'failed provider journal records role id');
   assert(!JSON.stringify(providerEntry).includes('provider failure raw text should not persist'), 'failed provider journal does not persist raw provider text');
   assert(!JSON.stringify(providerEntry).includes('Journal failure smoke user message.'), 'failed provider journal does not persist raw transcript text');

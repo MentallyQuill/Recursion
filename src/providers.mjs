@@ -304,17 +304,27 @@ function safeInvoke(fn) {
   }
 }
 
-function journalAppend(journal, entry) {
+async function journalAppend(journal, entry) {
   if (!journal) return;
   const safeEntry = sanitize(entry, 300);
   const methods = ['append', 'record', 'write', 'push'];
   for (const method of methods) {
     if (typeof journal?.[method] === 'function') {
-      safeInvoke(() => journal[method](cloneSafe(safeEntry, safeEntry)));
+      try {
+        await journal[method](cloneSafe(safeEntry, safeEntry));
+      } catch {
+        // Journal writes are diagnostic only.
+      }
       return;
     }
   }
-  if (typeof journal === 'function') safeInvoke(() => journal(cloneSafe(safeEntry, safeEntry)));
+  if (typeof journal === 'function') {
+    try {
+      await journal(cloneSafe(safeEntry, safeEntry));
+    } catch {
+      // Journal writes are diagnostic only.
+    }
+  }
 }
 
 function activityStart(activity, event) {
@@ -640,6 +650,13 @@ export function createGenerationRouter({ client, activity = null, journal = null
     throw new Error('createGenerationRouter requires a client with generate(roleId, request).');
   }
 
+  let journalQueue = Promise.resolve();
+  function queueJournalAppend(entry) {
+    const write = journalQueue.then(() => journalAppend(journal, entry));
+    journalQueue = write.catch(() => {});
+    return write;
+  }
+
   async function generate(roleId, request = {}, options = {}) {
     const lane = laneName(requestLane(roleId, request));
     const started = Date.now();
@@ -659,6 +676,11 @@ export function createGenerationRouter({ client, activity = null, journal = null
       detail: lastDiagnostics
     }) || runId;
     lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt });
+    queueJournalAppend({
+      ...lastDiagnostics,
+      status: 'started',
+      recordedAt: nowIso()
+    });
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       activityStage(activity, {
@@ -693,7 +715,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
           completedAt: nowIso()
         }, 300);
 
-        journalAppend(journal, {
+        await queueJournalAppend({
           ...diagnostics,
           status: 'success',
           recordedAt: nowIso()
@@ -739,7 +761,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
           error: safeError,
           status: statusForError(error)
         }, 300);
-        journalAppend(journal, {
+        await queueJournalAppend({
           ...diagnostics,
           status: statusForError(error),
           recordedAt: nowIso()
@@ -804,7 +826,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
     });
     const results = new Array(entries.length);
 
-    function failureResult(entry, error, retryCount = 0) {
+    async function failureResult(entry, error, retryCount = 0) {
       const safeError = sanitizedError(error, entry.request);
       const diagnostics = sanitize({
         ...entry.diagnostics,
@@ -814,7 +836,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         status: statusForError(error),
         failedAt: nowIso()
       }, 300);
-      journalAppend(journal, {
+      await queueJournalAppend({
         ...diagnostics,
         status: statusForError(error),
         recordedAt: nowIso()
@@ -828,7 +850,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       };
     }
 
-    function successResult(entry, raw, retryCount = 0) {
+    async function successResult(entry, raw, retryCount = 0) {
       const data = parseProviderStructuredOutput(raw?.text);
       const diagnostics = sanitize({
         ...entry.diagnostics,
@@ -843,7 +865,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         completedAt: nowIso()
       }, 300);
 
-      journalAppend(journal, {
+      await queueJournalAppend({
         ...diagnostics,
         status: 'success',
         recordedAt: nowIso()
@@ -884,10 +906,15 @@ export function createGenerationRouter({ client, activity = null, journal = null
     const pendingEntries = [];
     for (const entry of entries) {
       if (entry.request.signal?.aborted) {
-        results[entry.index] = failureResult(entry, abortError());
+        results[entry.index] = await failureResult(entry, abortError());
         continue;
       }
       pendingEntries.push(entry);
+      queueJournalAppend({
+        ...entry.diagnostics,
+        status: 'started',
+        recordedAt: nowIso()
+      });
       activityStage(activity, {
         runId: batchRunId,
         phase: 'providerCallRunning',
@@ -936,21 +963,22 @@ export function createGenerationRouter({ client, activity = null, journal = null
           continue;
         }
         for (const entry of pendingEntries) {
-          results[entry.index] = failureResult(entry, error, batchRetryCount);
+          results[entry.index] = await failureResult(entry, error, batchRetryCount);
         }
         settleBatchActivity();
         return results;
       }
     }
 
-    rawResponses.forEach((raw, batchIndex) => {
+    for (let batchIndex = 0; batchIndex < rawResponses.length; batchIndex += 1) {
+      const raw = rawResponses[batchIndex];
       const entry = pendingEntries[batchIndex];
       try {
-        results[entry.index] = successResult(entry, raw, batchRetryCount);
+        results[entry.index] = await successResult(entry, raw, batchRetryCount);
       } catch (error) {
-        results[entry.index] = failureResult(entry, error, batchRetryCount);
+        results[entry.index] = await failureResult(entry, error, batchRetryCount);
       }
-    });
+    }
 
     settleBatchActivity();
     return results;

@@ -341,12 +341,45 @@ const routerBatchLeak = await createGenerationRouter({
 ], { runId: 'provider-batch-leak-test' });
 assertEqual(routerBatchLeak[0].ok, true, 'router batch leak regression keeps valid slot successful');
 assertEqual(routerBatchLeak[1].ok, false, 'router batch leak regression returns failure for malformed slot');
+assertDeepEqual(
+  routerBatchLeakJournal.map((entry) => entry.status),
+  ['started', 'started', 'success', 'validation-failed'],
+  'router batch journal records started events before slot outcomes'
+);
+assertDeepEqual(
+  routerBatchLeakJournal.slice(0, 2).map((entry) => entry.roleId),
+  ['utilityArbiter', 'providerTest'],
+  'router batch started journal records each role'
+);
 assertNoRawBatchMarker(routerBatchLeak, 'router batch result diagnostics do not expose raw malformed provider response');
 assertNoRawBatchMarker(routerBatchLeakJournal, 'router batch journal does not expose raw malformed provider response');
 assertNoRawBatchMarker(routerBatchLeakActivity.history(), 'router batch activity does not expose raw malformed provider response');
 assertEqual(routerBatchLeakActivity.current().phase, 'settled', 'router batch activity settles after all slots');
 assertEqual(routerBatchLeakActivity.current().severity, 'warning', 'router batch activity reports mixed slot failure as warning');
 assert(routerBatchLeakActivity.current().detail.failed === 1, 'router batch activity detail records failed slot count');
+
+const abortedBatchController = new AbortController();
+abortedBatchController.abort();
+const abortedBatchJournal = [];
+const abortedBatch = await createGenerationRouter({
+  client: {
+    async generate() {
+      throw new Error('single generate should not be used for aborted batch slot');
+    },
+    async batch() {
+      throw new Error('provider batch should not run aborted slot');
+    }
+  },
+  journal: { append: (entry) => abortedBatchJournal.push(entry) }
+}).batch([
+  { roleId: 'utilityArbiter', prompt: 'Aborted before batch.', signal: abortedBatchController.signal }
+], { runId: 'provider-batch-aborted-slot' });
+assertEqual(abortedBatch[0].ok, false, 'aborted batch slot returns failure result');
+assertDeepEqual(
+  abortedBatchJournal.map((entry) => entry.status),
+  ['aborted'],
+  'aborted batch slot does not record a provider-call started event'
+);
 
 let routerSequentialFallbackCalls = 0;
 const routerSequentialFallback = await createGenerationRouter({
@@ -581,12 +614,50 @@ const redactionRouter = createGenerationRouter({
 const redacted = await redactionRouter.generate('utilityArbiter', { prompt: 'Do not log sk-live-secret' });
 assertEqual(redacted.ok, true, 'redaction route succeeds');
 assertEqual(redacted.diagnostics.runId, 'activity-assigned-run', 'returned diagnostics use activity-assigned run id');
+assertDeepEqual(
+  redactionJournalEntries.map((entry) => entry.status),
+  ['started', 'success'],
+  'provider journal records started before completion'
+);
+assertEqual(redactionJournalEntries[0].roleId, 'utilityArbiter', 'started journal records role id');
+assertEqual(redactionJournalEntries[0].lane, 'utility', 'started journal records lane');
+assertEqual(redactionJournalEntries[0].runId, 'activity-assigned-run', 'started journal uses activity-assigned run id');
+assertEqual(redactionJournalEntries[0].requestHash, redacted.diagnostics.requestHash, 'started journal records request hash');
 assertEqual(redactionJournalEntries.at(-1).runId, 'activity-assigned-run', 'journal uses activity-assigned run id');
 assertEqual(redactionActivityEvents.at(-1).runId, 'activity-assigned-run', 'settle activity uses activity-assigned run id');
 assertNoSecret(redacted.diagnostics, 'diagnostics do not leak API keys');
 assertNoSecret(redactionActivityEvents, 'activity events do not leak API keys');
 assertNoSecret(redactionJournalEntries, 'journal entries do not leak API keys');
 assert(!JSON.stringify(redactionJournalEntries).includes('Do not log'), 'journal does not include raw prompts');
+
+let asyncOrderJournal = [];
+const asyncOrderRouter = createGenerationRouter({
+  client: createProviderClient({
+    host: {
+      generation: {
+        async generate() {
+          return { text: '{"schema":"recursion.asyncJournal.v1","ok":true}' };
+        }
+      }
+    },
+    settingsStore: createStore()
+  }),
+  journal: {
+    async append(entry) {
+      const snapshot = asyncOrderJournal.slice();
+      await new Promise((resolve) => setTimeout(resolve, entry.status === 'started' ? 10 : 0));
+      asyncOrderJournal = [...snapshot, entry];
+    }
+  }
+});
+const asyncOrder = await asyncOrderRouter.generate('utilityArbiter', { prompt: 'Async journal ordering.' });
+assertEqual(asyncOrder.ok, true, 'async journal ordering route succeeds');
+await new Promise((resolve) => setTimeout(resolve, 20));
+assertDeepEqual(
+  asyncOrderJournal.map((entry) => entry.status),
+  ['started', 'success'],
+  'async provider journal preserves started before completion without lost writes'
+);
 
 const failurePrompt = 'Provider should not echo this prompt';
 const failureRouter = createGenerationRouter({

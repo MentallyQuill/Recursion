@@ -276,6 +276,8 @@ Provider setting and session-key mutations follow the same prompt-safety rule. `
 
 Clear failure, missing host clear API, missing scene cache, or invalidation storage failure does not roll back the provider change. Prompt-clear failures return `ok: false`, include the sanitized prompt-clear result, and leave the existing prompt-clear warning visible. Invalidation failures are fail-soft and do not change the mutation result contract.
 
+`runtime.refreshScene()` is a first-class refresh operation. It waits for prior mutations, captures the current host snapshot without adding synthetic chat text, best-effort soft-invalidates that snapshot's scene cache with reason `user-refresh`, then runs the normal preparation loop so the Utility Arbiter can review the stale cache before the new active cache is saved.
+
 ## Diagnostics Events
 
 Diagnostics should explain what Recursion did without storing sensitive provider payloads or hidden reasoning.

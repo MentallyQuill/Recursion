@@ -3969,13 +3969,107 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 }
 
 {
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' }
+  const arbiterPrompts = [];
+  const { runtime, installed, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'manual refresh only calls utility arbiter');
+        arbiterPrompts.push(request.prompt);
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            budgets: { targetBriefTokens: 500, maxCards: 4 }
+          }
+        };
+      }
+    }
   });
+  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare cache before manual refresh.' });
+  assertEqual(setup.ok, true, 'manual refresh setup prepares generation');
+  const setupSnapshot = runtime.view().lastSnapshot;
   const result = await runtime.refreshScene();
   assertEqual(result.ok, true, 'manual refresh prepares generation');
-  assertEqual(installed.length, 1, 'manual refresh installs prompt in auto mode');
+  assertEqual(installed.length, 2, 'manual refresh installs prompt in auto mode');
+  assert(arbiterPrompts[1].includes('"cacheState":"stale"'), 'manual refresh Arbiter prompt sees stale prior cache');
+  assert(arbiterPrompts[1].includes('"reason":"user-refresh"'), 'manual refresh Arbiter prompt sees invalidation reason');
+  const refreshedSnapshot = parsePromptJsonSection(arbiterPrompts[1], 'Snapshot');
+  assert(!refreshedSnapshot.messages.some((message) => message.text === 'manual refresh'), 'manual refresh does not inject synthetic chat text');
+  const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
+  assert(journal.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'user-refresh'), 'manual refresh records cache invalidation journal');
   assertEqual(runtime.view().activeRunId, null, 'active run cleared after refresh');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repository = createStorageRepository({ storage: adapter });
+  let releaseRefreshInvalidation;
+  let refreshInvalidationStarted = false;
+  let snapshotReads = 0;
+  const storage = {
+    async loadSceneCache(...args) {
+      return repository.loadSceneCache(...args);
+    },
+    async saveSceneCache(...args) {
+      return repository.saveSceneCache(...args);
+    },
+    async appendJournal(...args) {
+      return repository.appendJournal(...args);
+    },
+    async loadRunJournal(...args) {
+      return repository.loadRunJournal(...args);
+    },
+    async invalidateSceneCache(...args) {
+      refreshInvalidationStarted = true;
+      await new Promise((resolve) => {
+        releaseRefreshInvalidation = resolve;
+      });
+      return repository.invalidateSceneCache(...args);
+    }
+  };
+  let currentTurn = {
+    chatId: 'refresh-race-chat',
+    chatKey: 'refresh-race-chat',
+    sceneKey: 'refresh-race-scene',
+    sceneFingerprint: 'refresh-race-scene',
+    turnFingerprint: 'refresh-race-turn-initial',
+    latestMesId: 1,
+    messages: [{ mesid: 1, role: 'user', text: 'Refresh race initial.', visible: true }]
+  };
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: () => {
+      snapshotReads += 1;
+      return currentTurn;
+    }
+  });
+  const setup = await runtime.prepareForGeneration({ userMessage: 'Create cache before refresh race.' });
+  assertEqual(setup.ok, true, 'refresh race setup installs');
+  const refresh = runtime.refreshScene();
+  await waitUntil(() => refreshInvalidationStarted, 'refresh invalidation did not start');
+  const snapshotReadsBeforeFollowup = snapshotReads;
+  currentTurn = {
+    chatId: 'refresh-race-chat',
+    chatKey: 'refresh-race-chat',
+    sceneKey: 'refresh-race-scene',
+    sceneFingerprint: 'refresh-race-scene',
+    turnFingerprint: 'refresh-race-turn-followup',
+    latestMesId: 10,
+    messages: [{ mesid: 10, role: 'user', text: 'Refresh race followup base.', visible: true }]
+  };
+  const followup = runtime.prepareForGeneration({ userMessage: 'Newer turn after refresh.' });
+  await Promise.resolve();
+  assertEqual(snapshotReads, snapshotReadsBeforeFollowup, 'newer run waits for refresh invalidation storage tail before snapshot');
+  releaseRefreshInvalidation();
+  const [refreshResult, followupResult] = await Promise.all([refresh, followup]);
+  assert(refreshResult.ok || refreshResult.superseded, 'refresh race run resolves');
+  assertEqual(followupResult.ok, true, 'newer run completes after refresh invalidation');
+  assertEqual(followupResult.skipped, undefined, 'newer run does not skip after refresh invalidation');
+  const finalSnapshot = runtime.view().lastSnapshot;
+  const cache = await repository.loadSceneCache(finalSnapshot.chatKey, finalSnapshot.sceneKey);
+  assertEqual(cache.cacheState, 'active', 'newer run active cache survives delayed refresh invalidation');
 }
 
 {

@@ -328,7 +328,7 @@ Hard invalidation retires or deletes the current scene cache:
 
 Soft invalidation marks the cache stale and asks the Utility Arbiter to review:
 
-- user requests Refresh Scene;
+- user requests Refresh Scene, recorded as reason `user-refresh`;
 - provider settings, model, route, strength, focus, prompt footprint, or Reasoner mode changes;
 - freshness cap is reached;
 - source window advances beyond the card evidence range;

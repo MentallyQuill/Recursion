@@ -1693,7 +1693,7 @@ export function createRecursionRuntime({
     }
   }
 
-  async function prepareForGeneration({ userMessage = '' } = {}) {
+  async function prepareForGeneration({ userMessage = '', refreshReason = '' } = {}) {
     const settings = settingsStore.get();
     if (settings.mode === 'off') {
       await waitForExternalMutations();
@@ -1720,6 +1720,21 @@ export function createRecursionRuntime({
       const snapshot = snapshotWithPendingUserMessage(await readSnapshot(), pendingUserMessage);
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastSnapshot = snapshot;
+      if (refreshReason && typeof storage.invalidateSceneCache === 'function') {
+        await runStorageSaveSection(runId, async () => {
+          try {
+            return await storage.invalidateSceneCache(snapshot.chatKey, snapshot.sceneKey, {
+              reason: refreshReason,
+              runId,
+              details: { latestMesId: snapshot.latestMesId }
+            });
+          } catch {
+            // Refresh invalidation is best-effort; missing caches and storage failures should not block preparation.
+            return null;
+          }
+        });
+        if (!isActiveRun(runId)) return supersededResult(runId);
+      }
       const fallbackPlan = localFallbackPlan(snapshot, settings);
       fallbackPlan.source = {
         ...fallbackPlan.source,
@@ -1999,7 +2014,7 @@ export function createRecursionRuntime({
       await waitForExternalMutations();
     },
     async refreshScene() {
-      return prepareForGeneration({ userMessage: 'manual refresh' });
+      return prepareForGeneration({ refreshReason: 'user-refresh' });
     },
     updateSettings,
     updateProvider,

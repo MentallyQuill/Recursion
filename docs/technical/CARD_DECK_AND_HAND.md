@@ -93,7 +93,7 @@ flowchart LR
 
 Hard invalidation retires or replaces the deck when chat identity, scene fingerprint, source hashes, schema versions, catalog versions, or prompt composition contracts no longer match.
 
-Soft invalidation marks the deck stale for Arbiter review when the user refreshes, provider settings change, the source window advances, the prompt budget changes, or runtime rejects cards for schema, size, freshness, or safety reasons.
+Soft invalidation marks the deck stale for Arbiter review when the user refreshes, provider settings change, the source window advances, the prompt budget changes, or runtime rejects cards for schema, size, freshness, or safety reasons. Refresh Scene uses reason `user-refresh` and rechecks the current host snapshot without adding synthetic chat content.
 
 Pre-alpha storage can invalidate old experimental records instead of carrying compatibility layers.
 
@@ -118,4 +118,3 @@ The UI can show:
 The inspector is read-oriented. V1 actions stay broad: refresh scene, copy prompt packet metadata, open settings, test providers, clear session keys, and inspect diagnostics.
 
 <Render Needed>: assets/documentation/renders/recursion-card-family-matrix.png - Card family matrix showing the eight fixed families, prompt use, lifecycle state, emphasis, and inspector visibility.
-

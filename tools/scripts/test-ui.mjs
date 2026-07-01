@@ -111,6 +111,9 @@ function createFakeDocument() {
       this.role = '';
       this.ariaLabel = '';
       this.open = false;
+      this.value = '';
+      this.checked = false;
+      this.disabled = false;
     }
 
     appendChild(child) {
@@ -145,6 +148,10 @@ function createFakeDocument() {
       if (name === 'class') this.className = String(value);
       if (name === 'role') this.role = String(value);
       if (name === 'aria-label') this.ariaLabel = String(value);
+      if (name === 'value') this.value = String(value);
+      if (name === 'type') this.type = String(value);
+      if (name === 'disabled') this.disabled = true;
+      if (name === 'checked') this.checked = true;
       if (name.startsWith('data-')) {
         const key = name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
         this.dataset[key] = String(value);
@@ -219,14 +226,60 @@ function createFakeDocument() {
 
 const previousDocument = globalThis.document;
 const previousWindow = globalThis.window;
+const previousNavigator = globalThis.navigator;
 try {
   const fakeDocument = createFakeDocument();
   globalThis.document = fakeDocument;
   globalThis.window = { setInterval, clearInterval };
+  const copied = [];
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      clipboard: {
+        writeText: async (text) => {
+          copied.push(String(text));
+        }
+      }
+    }
+  });
   let refreshed = 0;
   let closeCount = 0;
+  const settingsUpdates = [];
+  const providerUpdates = [];
+  const providerTests = [];
+  const providerClears = [];
   let view = {
-    settings: { mode: 'auto', providers: { reasoner: { enabled: true } } },
+    settings: {
+      mode: 'auto',
+      strength: 'balanced',
+      promptFootprint: 'normal',
+      focus: 'balanced',
+      reasonerUse: 'auto',
+      providers: {
+        utility: {
+          lane: 'utility',
+          enabled: true,
+          source: 'host-current-model',
+          hostConnectionProfileId: '',
+          openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
+          temperature: 0.1,
+          topP: 0.95,
+          maxTokens: 4096,
+          lastTest: { status: 'not-run' }
+        },
+        reasoner: {
+          lane: 'reasoner',
+          enabled: true,
+          source: 'host-current-model',
+          hostConnectionProfileId: '',
+          openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
+          temperature: 0.4,
+          topP: 0.95,
+          maxTokens: 4096,
+          lastTest: { status: 'not-run' }
+        }
+      }
+    },
     lastHand: { cards: [{ id: 'card-a', family: 'Scene Frame', summary: 'Door stays blocked.', emphasis: 'critical' }] },
     activity: { phase: 'cardBatchRunning', severity: 'info', chips: ['Utility', 'Cards'] },
     lastPacket: { diagnostics: { composerLane: 'utility' } }
@@ -236,6 +289,57 @@ try {
       view: () => view,
       refreshScene: () => {
         refreshed += 1;
+      },
+      updateSettings: (patch) => {
+        settingsUpdates.push(patch);
+        view = { ...view, settings: { ...view.settings, ...patch } };
+        return view.settings;
+      },
+      updateProvider: (lane, patch) => {
+        providerUpdates.push({ lane, patch });
+        view = {
+          ...view,
+          settings: {
+            ...view.settings,
+            providers: {
+              ...view.settings.providers,
+              [lane]: {
+                ...view.settings.providers[lane],
+                ...patch,
+                openAICompatible: {
+                  ...view.settings.providers[lane].openAICompatible,
+                  ...(patch.openAICompatible || {}),
+                  sessionApiKeyPresent: Boolean(patch.apiKey) || view.settings.providers[lane].openAICompatible.sessionApiKeyPresent
+                }
+              }
+            }
+          }
+        };
+        return view.settings.providers[lane];
+      },
+      testProvider: async (lane) => {
+        providerTests.push(lane);
+        return { ok: true };
+      },
+      clearProviderKey: (lane) => {
+        providerClears.push(lane);
+        view = {
+          ...view,
+          settings: {
+            ...view.settings,
+            providers: {
+              ...view.settings.providers,
+              [lane]: {
+                ...view.settings.providers[lane],
+                openAICompatible: {
+                  ...view.settings.providers[lane].openAICompatible,
+                  sessionApiKeyPresent: false
+                }
+              }
+            }
+          }
+        };
+        return view.settings.providers[lane];
       }
     },
     mountPoint: fakeDocument.body
@@ -245,16 +349,71 @@ try {
   assert(root, 'root is rendered');
   assert(root.querySelector('[data-recursion-bar]'), 'bar selector is rendered');
   assert(root.querySelector('[data-recursion-activity-ribbon]'), 'activity ribbon selector is rendered');
+  assert(root.querySelector('[data-recursion-action-menu]'), 'actions menu selector is rendered');
   assert(root.querySelector('[data-recursion-hand-dropdown]'), 'hand dropdown selector is rendered');
+  assert(root.querySelector('[data-recursion-settings-panel]'), 'settings panel selector is rendered');
   assert(root.querySelector('[data-recursion-viewer]'), 'viewer selector is rendered');
   assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working - Auto', 'rendered status text');
   assertEqual(root.querySelector('[data-recursion-hand-count]').textContent, 'Hand 1', 'rendered hand count');
   assertEqual(root.querySelector('[data-recursion-composer]').textContent, 'Utility', 'rendered composer');
 
   root.querySelector('[data-recursion-actions]').click();
+  assertEqual(root.querySelector('[data-recursion-action-menu]').hidden, false, 'actions button opens action menu');
+  root.querySelector('[data-recursion-action-refresh]').click();
   assertEqual(refreshed, 1, 'actions button calls refresh scene');
+  root.querySelector('[data-recursion-action-mode-toggle]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { mode: 'observe' }, 'mode toggle updates high-level settings');
+  root.querySelector('[data-recursion-settings-toggle]').click();
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings action opens settings panel');
+
+  root.querySelector('[data-recursion-setting-mode]').value = 'auto';
+  root.querySelector('[data-recursion-setting-strength]').value = 'strong';
+  root.querySelector('[data-recursion-setting-footprint]').value = 'rich';
+  root.querySelector('[data-recursion-setting-focus]').value = 'character';
+  root.querySelector('[data-recursion-setting-reasoner]').value = 'always';
+  root.querySelector('[data-recursion-settings-save]').click();
+  assertDeepEqual(settingsUpdates.at(-1), {
+    mode: 'auto',
+    strength: 'strong',
+    promptFootprint: 'rich',
+    focus: 'character',
+    reasonerUse: 'always'
+  }, 'settings panel saves broad behavior controls');
+
+  root.querySelector('[data-recursion-provider-source-utility]').value = 'openai-compatible';
+  root.querySelector('[data-recursion-provider-profile-utility]').value = 'utility-profile';
+  root.querySelector('[data-recursion-provider-base-url-utility]').value = 'https://utility.example/v1';
+  root.querySelector('[data-recursion-provider-model-utility]').value = 'utility-model';
+  root.querySelector('[data-recursion-provider-api-key-utility]').value = 'sk-ui-secret';
+  root.querySelector('[data-recursion-provider-temperature-utility]').value = '0.2';
+  root.querySelector('[data-recursion-provider-top-p-utility]').value = '0.8';
+  root.querySelector('[data-recursion-provider-max-tokens-utility]').value = '2048';
+  root.querySelector('[data-recursion-utility-provider-save]').click();
+  assertEqual(providerUpdates.at(-1).lane, 'utility', 'utility provider save targets utility lane');
+  assertEqual(providerUpdates.at(-1).patch.source, 'openai-compatible', 'provider save records source');
+  assertEqual(providerUpdates.at(-1).patch.openAICompatible.model, 'utility-model', 'provider save records model');
+  assertEqual(providerUpdates.at(-1).patch.apiKey, 'sk-ui-secret', 'provider save forwards session key without writing it into text');
+  assert(!fakeDocument.textTree(root).includes('sk-ui-secret'), 'provider controls do not render session api key text');
+
+  root.querySelector('[data-recursion-utility-provider-test]').click();
+  await Promise.resolve();
+  assertDeepEqual(providerTests, ['utility'], 'utility provider test action calls runtime');
+  root.querySelector('[data-recursion-utility-provider-clear-key]').click();
+  assertDeepEqual(providerClears, ['utility'], 'utility clear session key action calls runtime');
+  root.querySelector('[data-recursion-actions]').click();
+  root.querySelector('[data-recursion-copy-prompt-packet]').click();
+  await Promise.resolve();
+  assert(copied[0].includes('composerLane'), 'copy prompt packet writes sanitized packet preview');
 
   const viewer = root.querySelector('[data-recursion-viewer]');
+  let showModalCount = 0;
+  viewer.showModal = () => {
+    showModalCount += 1;
+    if (viewer.open) throw new Error('showModal called while viewer already open');
+    viewer.open = true;
+  };
+  root.querySelector('[data-recursion-viewer-toggle]').click();
+  assertEqual(showModalCount, 1, 'viewer toggle opens dialog once per click');
   viewer.close = () => {
     closeCount += 1;
     viewer.open = false;
@@ -293,6 +452,8 @@ try {
   else globalThis.document = previousDocument;
   if (previousWindow === undefined) delete globalThis.window;
   else globalThis.window = previousWindow;
+  if (previousNavigator === undefined) delete globalThis.navigator;
+  else Object.defineProperty(globalThis, 'navigator', { configurable: true, value: previousNavigator });
 }
 
 console.log('[pass] ui');

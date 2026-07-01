@@ -783,7 +783,10 @@ function browserSnapshotScript() {
       composerText: text('[data-recursion-composer]'),
       reasonerText: text('[data-recursion-reasoner]'),
       ribbonText: text('[data-recursion-ribbon-label]'),
+      actionMenuOpen: document.querySelector('[data-recursion-action-menu]')?.hidden === false,
       handOpen: document.querySelector('[data-recursion-hand-dropdown]')?.hidden === false,
+      settingsPanelOpen: document.querySelector('[data-recursion-settings-panel]')?.hidden === false,
+      providerTestVisible: visible('[data-recursion-provider-test]'),
       viewerOpen: Boolean(document.querySelector('[data-recursion-viewer]')?.open) || document.querySelector('[data-recursion-viewer]')?.hidden === false,
       bridge: {
         interceptor: typeof globalThis.recursionGenerationInterceptor === 'function',
@@ -878,6 +881,20 @@ async function runBrowserUiSmoke({
         && typeof globalThis.recursionOnEnable === 'function'
         && typeof globalThis.recursionOnDisable === 'function';
     }, null, { timeout: timeoutMs });
+
+    const actionsButton = page.locator('[data-recursion-actions]').first();
+    await actionsButton.click({ timeout: timeoutMs });
+    await page.waitForFunction(() => document.querySelector('[data-recursion-action-menu]')?.hidden === false, null, { timeout: timeoutMs });
+
+    const settingsButton = page.locator('[data-recursion-settings-toggle]').first();
+    await settingsButton.click({ timeout: timeoutMs });
+    await page.waitForFunction(() => {
+      return document.querySelector('[data-recursion-settings-panel]')?.hidden === false
+        && Boolean(document.querySelector('[data-recursion-provider-test]'));
+    }, null, { timeout: timeoutMs });
+
+    await actionsButton.click({ timeout: timeoutMs });
+    await page.waitForFunction(() => document.querySelector('[data-recursion-action-menu]')?.hidden === false, null, { timeout: timeoutMs });
 
     const handButton = page.locator('[data-recursion-hand-toggle]').first();
     await handButton.click({ timeout: timeoutMs });
@@ -1683,6 +1700,9 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
               result: browserResult.result,
               rootMounted: browserResult.snapshot?.rootMounted,
               barVisible: browserResult.snapshot?.barVisible,
+              actionMenuOpen: browserResult.snapshot?.actionMenuOpen,
+              settingsPanelOpen: browserResult.snapshot?.settingsPanelOpen,
+              providerTestVisible: browserResult.snapshot?.providerTestVisible,
               handOpen: browserResult.snapshot?.handOpen,
               viewerOpen: browserResult.snapshot?.viewerOpen,
               bridge: browserResult.snapshot?.bridge,
@@ -1694,6 +1714,9 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
           event('browser-ui', browserResult.status, browserResult.result, {
             rootMounted: browserResult.snapshot?.rootMounted,
             barVisible: browserResult.snapshot?.barVisible,
+            actionMenuOpen: browserResult.snapshot?.actionMenuOpen,
+            settingsPanelOpen: browserResult.snapshot?.settingsPanelOpen,
+            providerTestVisible: browserResult.snapshot?.providerTestVisible,
             handOpen: browserResult.snapshot?.handOpen,
             viewerOpen: browserResult.snapshot?.viewerOpen
           });

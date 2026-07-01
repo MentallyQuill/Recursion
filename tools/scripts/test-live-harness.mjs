@@ -182,7 +182,14 @@ function recursionSmokeFixtureHtml({ missingDisableHook = false } = {}) {
         <div data-recursion-activity-ribbon role="status">
           <span data-recursion-ribbon-label>Ready</span>
         </div>
+        <div data-recursion-action-menu hidden>
+          <button type="button" data-recursion-settings-toggle>Open Settings</button>
+        </div>
         <div data-recursion-hand-dropdown hidden>No hand has been composed for this chat.</div>
+        <div data-recursion-settings-panel hidden>
+          <select data-recursion-setting-mode aria-label="Mode"><option value="auto">Auto</option></select>
+          <button type="button" data-recursion-provider-test data-recursion-provider-lane="utility">Test Provider</button>
+        </div>
         <dialog data-recursion-viewer aria-label="Recursion Viewer">
           <button type="button" data-recursion-viewer-close>Close</button>
           <h2>Recursion Viewer</h2>
@@ -194,6 +201,14 @@ function recursionSmokeFixtureHtml({ missingDisableHook = false } = {}) {
       globalThis.recursionGenerationInterceptor = function recursionGenerationInterceptor(chat) { return chat; };
       globalThis.recursionOnEnable = function recursionOnEnable() { return true; };
       ${disableHookScript}
+      document.querySelector('[data-recursion-actions]').addEventListener('click', () => {
+        const panel = document.querySelector('[data-recursion-action-menu]');
+        panel.hidden = !panel.hidden;
+      });
+      document.querySelector('[data-recursion-settings-toggle]').addEventListener('click', () => {
+        document.querySelector('[data-recursion-action-menu]').hidden = true;
+        document.querySelector('[data-recursion-settings-panel]').hidden = false;
+      });
       document.querySelector('[data-recursion-hand-toggle]').addEventListener('click', () => {
         const panel = document.querySelector('[data-recursion-hand-dropdown]');
         panel.hidden = !panel.hidden;
@@ -669,6 +684,9 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.browser.status, 'pass', 'browser result is pass');
     assertEqual(report.browser.snapshot.rootMounted, true, 'browser smoke sees Recursion root');
     assertEqual(report.browser.snapshot.handOpen, true, 'browser smoke opens hand dropdown');
+    assertEqual(report.browser.snapshot.actionMenuOpen, true, 'browser smoke opens actions menu');
+    assertEqual(report.browser.snapshot.settingsPanelOpen, true, 'browser smoke opens settings panel');
+    assertEqual(report.browser.snapshot.providerTestVisible, true, 'browser smoke sees provider test control');
     assertEqual(report.browser.snapshot.viewerOpen, true, 'browser smoke opens full viewer');
     assertEqual(report.browser.snapshot.bridge.interceptor, true, 'browser smoke sees Recursion generation bridge');
     assertEqual(report.browser.snapshot.bridge.enableHook, true, 'browser smoke sees Recursion enable hook');

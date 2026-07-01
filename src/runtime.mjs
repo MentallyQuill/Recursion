@@ -325,6 +325,15 @@ function safeProviderSettingsView(provider) {
     lane: safeText(source.lane || '', 40),
     enabled: source.enabled === true,
     source: safeText(source.source || '', 80),
+    hostConnectionProfileId: safeText(source.hostConnectionProfileId || '', 160),
+    openAICompatible: {
+      baseUrl: safeText(source.openAICompatible?.baseUrl || '', 300),
+      model: safeText(source.openAICompatible?.model || '', 160),
+      sessionApiKeyPresent: source.openAICompatible?.sessionApiKeyPresent === true
+    },
+    temperature: numberOr(source.temperature, 0),
+    topP: numberOr(source.topP, 0),
+    maxTokens: numberOr(source.maxTokens, 0),
     resolvedProviderLabel: safeText(source.resolvedProviderLabel || '', 120),
     resolvedModelLabel: safeText(source.resolvedModelLabel || '', 120),
     lastTest: safeProviderLastTest(source.lastTest)
@@ -648,6 +657,154 @@ export function createRecursionRuntime({
       return safeActivity(activity, 'settle', event);
     }
     return result;
+  }
+
+  function providerLane(value) {
+    return cleanString(value).toLowerCase() === 'reasoner' ? 'reasoner' : 'utility';
+  }
+
+  function updateSettings(patch = {}) {
+    return settingsStore.update(patch);
+  }
+
+  function updateProvider(lane, patch = {}) {
+    return settingsStore.updateProvider(providerLane(lane), patch);
+  }
+
+  function clearProviderKey(lane) {
+    return settingsStore.clearApiKey(providerLane(lane));
+  }
+
+  function providerTestPrompt(lane) {
+    return [
+      'Return strict JSON for a Recursion provider connectivity test.',
+      'Do not include prose outside JSON.',
+      `Lane: ${lane}.`,
+      '{"schema":"recursion.providerTest.v1","ok":true}'
+    ].join('\n');
+  }
+
+  function providerTestFailure(lane, checkedAt, error) {
+    const compactError = safeText(error?.message || error?.code || error || 'Provider test failed.', 300);
+    return settingsStore.updateProvider(lane, {
+      lastTest: {
+        status: 'fail',
+        checkedAt,
+        compactError
+      }
+    });
+  }
+
+  async function testProvider(lane = 'utility') {
+    const resolvedLane = providerLane(lane);
+    const checkedAt = nowIso();
+    const runId = makeId(`provider-test-${resolvedLane}`);
+    startRuntimeActivity({
+      runId,
+      phase: 'providerCallStarted',
+      mode: 'review',
+      severity: 'info',
+      providerLane: resolvedLane,
+      label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test started.`,
+      chips: [resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility', 'Provider']
+    });
+
+    if (!generationRouter || typeof generationRouter.generate !== 'function') {
+      const provider = providerTestFailure(resolvedLane, checkedAt, {
+        code: 'RECURSION_PROVIDER_ROUTER_UNAVAILABLE',
+        message: 'Provider test is unavailable because the generation router is not configured.'
+      });
+      settleRuntimeActivity({
+        runId,
+        outcome: 'warning',
+        phase: 'providerTestFailed',
+        severity: 'warning',
+        providerLane: resolvedLane,
+        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
+        chips: ['Provider'],
+        detail: provider.lastTest
+      });
+      return {
+        ok: false,
+        error: {
+          code: 'RECURSION_PROVIDER_ROUTER_UNAVAILABLE',
+          message: 'Provider test is unavailable.'
+        }
+      };
+    }
+
+    try {
+      stageRuntimeActivity({
+        runId,
+        phase: 'providerCallRunning',
+        mode: 'review',
+        severity: 'info',
+        providerLane: resolvedLane,
+        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test running.`,
+        chips: ['Provider']
+      });
+      const result = await generationRouter.generate('providerTest', {
+        runId,
+        lane: resolvedLane,
+        prompt: providerTestPrompt(resolvedLane)
+      });
+      if (result?.ok) {
+        const provider = settingsStore.updateProvider(resolvedLane, {
+          resolvedProviderLabel: safeText(result.diagnostics?.providerId || result.providerId || '', 120),
+          resolvedModelLabel: safeText(result.diagnostics?.model || result.model || '', 120),
+          lastTest: {
+            status: 'pass',
+            checkedAt
+          }
+        });
+        settleRuntimeActivity({
+          runId,
+          outcome: 'success',
+          phase: 'settled',
+          severity: 'success',
+          providerLane: resolvedLane,
+          label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test passed.`,
+          chips: ['Provider'],
+          detail: {
+            provider: provider.resolvedProviderLabel,
+            model: provider.resolvedModelLabel
+          }
+        });
+        return result;
+      }
+
+      const provider = providerTestFailure(resolvedLane, checkedAt, result?.error || 'Provider test failed.');
+      settleRuntimeActivity({
+        runId,
+        outcome: 'warning',
+        phase: 'providerTestFailed',
+        severity: 'warning',
+        providerLane: resolvedLane,
+        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
+        chips: ['Provider'],
+        detail: provider.lastTest
+      });
+      return result || { ok: false, error: { code: 'RECURSION_PROVIDER_TEST_FAILED', message: 'Provider test failed.' } };
+    } catch (error) {
+      const provider = providerTestFailure(resolvedLane, checkedAt, error);
+      settleRuntimeActivity({
+        runId,
+        outcome: 'warning',
+        phase: 'providerTestFailed',
+        severity: 'warning',
+        providerLane: resolvedLane,
+        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
+        chips: ['Provider'],
+        detail: provider.lastTest
+      });
+      return {
+        ok: false,
+        error: {
+          code: safeText(error?.code || 'RECURSION_PROVIDER_TEST_FAILED', 120),
+          message: safeText(error?.message || 'Provider test failed.', 300)
+        }
+      };
+    }
   }
 
   async function waitForExternalMutations() {
@@ -1019,6 +1176,10 @@ export function createRecursionRuntime({
     async refreshScene() {
       return prepareForGeneration({ userMessage: 'manual refresh' });
     },
+    updateSettings,
+    updateProvider,
+    clearProviderKey,
+    testProvider,
     view() {
       return {
         activeRunId,

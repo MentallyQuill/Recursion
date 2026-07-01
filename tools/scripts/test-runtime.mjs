@@ -487,7 +487,11 @@ function createRuntimeHarness({
   assertNoSecretText(runtime.view().settings, 'runtime view settings');
   assertEqual(runtime.view().settings.providers.utility.enabled, true, 'view keeps utility provider enabled flag');
   assertEqual(runtime.view().settings.providers.utility.source, 'host-current-model', 'view keeps utility provider source');
-  assertEqual(runtime.view().settings.providers.reasoner.openAICompatible, undefined, 'view omits endpoint settings');
+  assertDeepEqual(
+    runtime.view().settings.providers.reasoner.openAICompatible,
+    { baseUrl: '', model: '', sessionApiKeyPresent: false },
+    'view keeps safe endpoint settings without secrets'
+  );
 }
 
 {
@@ -1520,6 +1524,87 @@ function createRuntimeHarness({
   assertEqual(result.ok, true, 'manual refresh prepares generation');
   assertEqual(installed.length, 1, 'manual refresh installs prompt in auto mode');
   assertEqual(runtime.view().activeRunId, null, 'active run cleared after refresh');
+}
+
+{
+  const routerCalls = [];
+  const { runtime, settingsStore } = createRuntimeHarness({
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
+        return {
+          ok: true,
+          diagnostics: { providerId: 'host-current-model', model: 'utility-test-model' },
+          data: { schema: 'recursion.providerTest.v1', ok: true }
+        };
+      }
+    }
+  });
+
+  const updated = runtime.updateSettings({
+    mode: 'auto',
+    strength: 'strong',
+    promptFootprint: 'rich',
+    focus: 'character',
+    reasonerUse: 'always'
+  });
+  assertEqual(updated.mode, 'auto', 'runtime exposes high-level settings update');
+  assertEqual(updated.strength, 'strong', 'runtime settings update preserves strength');
+  assertEqual(runtime.view().settings.focus, 'character', 'settings update is visible in runtime view');
+
+  const utility = runtime.updateProvider('utility', {
+    source: 'openai-compatible',
+    apiKey: 'sk-runtime-secret',
+    openAICompatible: { baseUrl: 'https://example.test/v1', model: 'utility-model' },
+    temperature: 0.2,
+    topP: 0.8,
+    maxTokens: 2048
+  });
+  assertEqual(utility.openAICompatible.sessionApiKeyPresent, true, 'runtime provider update accepts session key');
+  assertEqual(settingsStore.getApiKey('utility'), 'sk-runtime-secret', 'runtime provider update stores key in session store');
+  assert(!JSON.stringify(settingsStore.get()).includes('sk-runtime-secret'), 'runtime provider update does not persist api key');
+  const viewProvider = runtime.view().settings.providers.utility;
+  assertEqual(viewProvider.openAICompatible.baseUrl, 'https://example.test/v1', 'runtime view exposes safe provider base URL for UI round-trip');
+  assertEqual(viewProvider.openAICompatible.model, 'utility-model', 'runtime view exposes safe provider model for UI round-trip');
+  assertEqual(viewProvider.openAICompatible.sessionApiKeyPresent, true, 'runtime view exposes safe session key presence flag');
+  assertEqual(viewProvider.temperature, 0.2, 'runtime view exposes provider temperature for UI round-trip');
+  assertEqual(viewProvider.topP, 0.8, 'runtime view exposes provider topP for UI round-trip');
+  assertEqual(viewProvider.maxTokens, 2048, 'runtime view exposes provider maxTokens for UI round-trip');
+  assertNoSecretText(runtime.view().settings, 'runtime provider settings view');
+
+  const providerTest = await runtime.testProvider('utility');
+  assertEqual(providerTest.ok, true, 'runtime provider test returns success result');
+  assertEqual(routerCalls[0].roleId, 'providerTest', 'runtime provider test uses providerTest role');
+  assertEqual(routerCalls[0].request.lane, 'utility', 'runtime provider test targets selected lane');
+  assertEqual(settingsStore.get().providers.utility.lastTest.status, 'pass', 'runtime provider test records passing provider status');
+  assertEqual(settingsStore.get().providers.utility.resolvedModelLabel, 'utility-test-model', 'runtime provider test records resolved model');
+
+  const cleared = runtime.clearProviderKey('utility');
+  assertEqual(cleared.openAICompatible.sessionApiKeyPresent, false, 'runtime can clear provider session key');
+  assertEqual(settingsStore.getApiKey('utility'), '', 'runtime provider key clear removes session secret');
+}
+
+{
+  const { runtime, settingsStore } = createRuntimeHarness({
+    settings: { reasonerUse: 'always', providers: { reasoner: { enabled: true } } },
+    generationRouter: {
+      async generate() {
+        return {
+          ok: false,
+          error: {
+            code: 'RECURSION_PROVIDER_KEY_MISSING',
+            message: 'Bearer sk-runtime-secret should not leak'
+          }
+        };
+      }
+    }
+  });
+
+  const failed = await runtime.testProvider('reasoner');
+  assertEqual(failed.ok, false, 'runtime provider test returns failure result');
+  const reasoner = settingsStore.get().providers.reasoner;
+  assertEqual(reasoner.lastTest.status, 'fail', 'runtime provider test records failing provider status');
+  assertNoSecretText(reasoner.lastTest, 'provider test failure status');
 }
 
 console.log('[pass] runtime');

@@ -190,7 +190,9 @@ UI implementation should provide testable attributes for Recursion-owned surface
 data-recursion-bar
 data-recursion-activity-ribbon
 data-recursion-action
+data-recursion-action-menu
 data-recursion-hand-dropdown
+data-recursion-settings-panel
 data-recursion-viewer
 data-recursion-provider-test
 data-recursion-prompt-packet

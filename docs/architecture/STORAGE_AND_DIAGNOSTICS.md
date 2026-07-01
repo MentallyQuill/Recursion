@@ -304,7 +304,7 @@ Forbidden by default:
 - inspector-only notes copied into prompt logs;
 - filesystem paths that expose private usernames when a logical key is enough.
 
-Redaction must be centralized in the storage/diagnostics layer. It should recursively remove or replace fields with sensitive key names such as `apiKey`, `authorization`, `cookie`, `token`, `password`, `secret`, and `sessionKey`. It should cap all strings in diagnostic artifacts, even when the field is otherwise allowed.
+Redaction must be centralized in the storage/diagnostics layer. It should recursively remove or replace fields with sensitive key names such as `apiKey`, `authorization`, `cookie`, `token`, `password`, `secret`, and `sessionKey`, plus forbidden diagnostic payload keys such as `rawPrompt`, `rawResponse`, `providerPrompt`, `providerResponse`, `hiddenReasoning`, `privateStoryPlan`, `privatePlan`, and `sessionId`. It should cap all strings in diagnostic artifacts, even when the field is otherwise allowed, while preserving safe counters such as `tokenCount` and `sessionCount`.
 
 Bounded excerpts are opt-in and should be treated as more sensitive than hashes. If enabled, they must be short, source-labeled, and never used as a substitute for transcript storage. Diagnostic artifacts should clearly mark whether excerpts are included.
 

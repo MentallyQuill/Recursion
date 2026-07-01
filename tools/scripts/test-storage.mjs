@@ -19,6 +19,18 @@ function assertNoRawSecretText(value, message) {
   assert(!/\bprivate[-_\s]*secret\b/i.test(serialized), `${message}: secret text redacted`);
 }
 
+function assertNoForbiddenDiagnosticText(value, message) {
+  const serialized = JSON.stringify(value);
+  assert(!serialized.includes('raw prompt body'), `${message}: raw prompt redacted`);
+  assert(!serialized.includes('raw response body'), `${message}: raw response redacted`);
+  assert(!serialized.includes('provider prompt body'), `${message}: provider prompt redacted`);
+  assert(!serialized.includes('provider response body'), `${message}: provider response redacted`);
+  assert(!serialized.includes('hidden reasoning body'), `${message}: hidden reasoning redacted`);
+  assert(!serialized.includes('private story plan'), `${message}: private story plan redacted`);
+  assert(!serialized.includes('private plan body'), `${message}: private plan redacted`);
+  assert(!serialized.includes('session-id-value'), `${message}: session id redacted`);
+}
+
 function assertNoOwnField(value, field, message) {
   assert(!Object.prototype.hasOwnProperty.call(value, field), message);
 }
@@ -52,14 +64,33 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertEqual(cache.cards[0].id, 'card-1', 'scene cache persisted');
 
   await repo.appendJournal('Chat One', { event: 'runtime.event', summary: 'zero' });
-  await repo.appendJournal('Chat One', { event: 'provider.call.started', summary: 'one', details: { apiKey: 'secret' } });
+  await repo.appendJournal('Chat One', {
+    event: 'provider.call.started',
+    summary: 'one',
+    details: {
+      apiKey: 'secret',
+      rawPrompt: 'raw prompt body',
+      providerResponse: 'provider response body',
+      hiddenReasoning: 'hidden reasoning body',
+      privatePlan: 'private plan body',
+      sessionId: 'session-id-value',
+      sessionCount: 2
+    }
+  });
   await repo.appendJournal('Chat One', { event: 'provider.call.completed', summary: 'two' });
   await repo.appendJournal('Chat One', { event: 'prompt.installed', summary: 'three' });
   const journal = await repo.loadRunJournal('Chat One');
   assertEqual(journal.entries.length, 3, 'journal pruned to max');
   assertEqual(journal.entries[0].summary, 'one', 'oldest entry pruned');
   assertEqual(journal.entries[0].details.apiKey, '[redacted]', 'journal redacts retained secrets');
+  assertEqual(journal.entries[0].details.rawPrompt, '[redacted]', 'journal redacts raw prompt fields');
+  assertEqual(journal.entries[0].details.providerResponse, '[redacted]', 'journal redacts provider response fields');
+  assertEqual(journal.entries[0].details.hiddenReasoning, '[redacted]', 'journal redacts hidden reasoning fields');
+  assertEqual(journal.entries[0].details.privatePlan, '[redacted]', 'journal redacts private plan fields');
+  assertEqual(journal.entries[0].details.sessionId, '[redacted]', 'journal redacts session id fields');
+  assertEqual(journal.entries[0].details.sessionCount, 2, 'journal preserves safe session count');
   assertNoSecret(journal.entries, 'journal redacts secrets');
+  assertNoForbiddenDiagnosticText(journal.entries, 'journal redacts forbidden diagnostics');
 }
 
 {
@@ -81,7 +112,15 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
       model: 'new-model',
       apiKey: 'secret',
       authorizationHeader: 'Authorization Bearer live-token',
-      providerNote: 'contains sk-live-runtime and private-secret text'
+      providerNote: 'contains sk-live-runtime and private-secret text',
+      rawPrompt: 'raw prompt body',
+      rawResponse: 'raw response body',
+      providerPrompt: 'provider prompt body',
+      providerResponse: 'provider response body',
+      hiddenReasoning: 'hidden reasoning body',
+      privateStoryPlan: 'private story plan',
+      privatePlan: 'private plan body',
+      sessionId: 'session-id-value'
     }
   });
 
@@ -97,6 +136,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertParseableTimestamp(cache.invalidation.detectedAt, 'invalidateSceneCache records detectedAt');
   assertEqual(cache.invalidation.details.model, 'new-model', 'invalidateSceneCache keeps safe details');
   assertNoRawSecretText(cache.invalidation, 'scene cache invalidation metadata');
+  assertNoForbiddenDiagnosticText(cache.invalidation, 'scene cache invalidation metadata');
 
   const index = await repo.readIndex();
   assert(index.records[key], 'invalidateSceneCache keeps scene cache index entry');
@@ -108,6 +148,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertEqual(entry.sceneKey, 'Scene-One', 'invalidateSceneCache journal records scene key');
   assertEqual(entry.details.reason, 'provider-changed', 'invalidateSceneCache journal records reason');
   assertNoRawSecretText(entry, 'cache invalidated journal entry');
+  assertNoForbiddenDiagnosticText(entry, 'cache invalidated journal entry');
 
   const missing = await repo.invalidateSceneCache('Invalidate Chat', 'Missing Scene', { reason: 'settings-changed' });
   assertEqual(missing.ok, false, 'invalidateSceneCache missing cache returns fail-soft');

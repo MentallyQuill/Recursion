@@ -111,7 +111,7 @@ Forbidden by default:
 - private notes copied into prompt logs;
 - absolute local paths when a logical key is enough.
 
-Redaction should remove sensitive field names such as `apiKey`, `authorization`, `cookie`, `token`, `password`, `secret`, and `sessionKey`. It should also cap strings in diagnostics and artifacts.
+Redaction should remove sensitive field names such as `apiKey`, `authorization`, `cookie`, `token`, `password`, `secret`, and `sessionKey`, plus forbidden diagnostic payload fields such as `rawPrompt`, `rawResponse`, `providerPrompt`, `providerResponse`, `hiddenReasoning`, `privateStoryPlan`, `privatePlan`, and `sessionId`. It should also cap strings in diagnostics and artifacts while preserving safe counters such as `tokenCount` and `sessionCount`.
 
 <Render Needed>: assets/documentation/renders/recursion-redaction-boundary.png - Redaction boundary diagram showing allowed hashes and metadata versus forbidden secrets, raw provider payloads, hidden reasoning, and transcript text.
 

@@ -60,7 +60,16 @@ const redacted = redact({
   privateKey: 'private',
   credentials: 'creds',
   authHeader: 'auth',
-  tokenCount: 4
+  tokenCount: 4,
+  rawPrompt: 'raw prompt body',
+  rawResponse: 'raw response body',
+  providerPrompt: 'provider prompt body',
+  providerResponse: 'provider response body',
+  hiddenReasoning: 'hidden reasoning body',
+  privateStoryPlan: 'private story plan',
+  privatePlan: 'private plan',
+  sessionId: 'session-id-value',
+  sessionCount: 2
 });
 assertEqual(redacted.apiKey, '[redacted]', 'apiKey redacted');
 assertEqual(redacted.nested.authorization, '[redacted]', 'authorization redacted');
@@ -70,6 +79,15 @@ assertEqual(redacted.privateKey, '[redacted]', 'privateKey redacted');
 assertEqual(redacted.credentials, '[redacted]', 'credentials redacted');
 assertEqual(redacted.authHeader, '[redacted]', 'authHeader redacted');
 assertEqual(redacted.tokenCount, 4, 'tokenCount is preserved');
+assertEqual(redacted.rawPrompt, '[redacted]', 'rawPrompt redacted');
+assertEqual(redacted.rawResponse, '[redacted]', 'rawResponse redacted');
+assertEqual(redacted.providerPrompt, '[redacted]', 'providerPrompt redacted');
+assertEqual(redacted.providerResponse, '[redacted]', 'providerResponse redacted');
+assertEqual(redacted.hiddenReasoning, '[redacted]', 'hiddenReasoning redacted');
+assertEqual(redacted.privateStoryPlan, '[redacted]', 'privateStoryPlan redacted');
+assertEqual(redacted.privatePlan, '[redacted]', 'privatePlan redacted');
+assertEqual(redacted.sessionId, '[redacted]', 'sessionId redacted');
+assertEqual(redacted.sessionCount, 2, 'sessionCount is preserved');
 
 const cyclicSecret = { keep: 'visible', apiKey: 'secret' };
 cyclicSecret.self = cyclicSecret;

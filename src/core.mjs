@@ -11,6 +11,16 @@ const SECRET_KEY_SUFFIXES = [
   'credentials',
   'authheader'
 ];
+const FORBIDDEN_DIAGNOSTIC_KEYS = new Set([
+  'rawprompt',
+  'rawresponse',
+  'providerprompt',
+  'providerresponse',
+  'hiddenreasoning',
+  'privatestoryplan',
+  'privateplan',
+  'sessionid'
+]);
 
 function normalizeKey(value) {
   return String(value ?? '').replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
@@ -19,6 +29,7 @@ function normalizeKey(value) {
 function isSecretKey(value) {
   const key = normalizeKey(value);
   if (!key || key.endsWith('count')) return false;
+  if (FORBIDDEN_DIAGNOSTIC_KEYS.has(key)) return true;
   return SECRET_KEY_SUFFIXES.some((suffix) => key.endsWith(suffix));
 }
 

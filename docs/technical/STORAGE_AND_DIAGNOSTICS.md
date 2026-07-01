@@ -57,7 +57,7 @@ The Activity Ribbon renders the latest active run state. The Full Viewer can sho
 
 ## Redaction
 
-Redaction is centralized in core, activity, provider, storage, prompt, runtime, and UI boundaries. Sensitive key names and secret-looking text are replaced or truncated before diagnostics persist or render.
+Redaction is centralized in core, activity, provider, storage, prompt, runtime, and UI boundaries. Sensitive key names, forbidden diagnostic payload keys, and secret-looking text are replaced or truncated before diagnostics persist or render.
 
 Allowed default diagnostics:
 
@@ -85,6 +85,8 @@ Forbidden default diagnostics:
 - inspector-only notes in prompt logs
 - raw World Info, Memory Book, Summaryception, or VectFox data
 - full local paths when a logical key is enough
+
+Shared redaction treats `rawPrompt`, `rawResponse`, `providerPrompt`, `providerResponse`, `hiddenReasoning`, `privateStoryPlan`, `privatePlan`, and `sessionId` as forbidden diagnostic keys. Safe counters such as `tokenCount` and `sessionCount` remain allowed.
 
 ```mermaid
 flowchart TD

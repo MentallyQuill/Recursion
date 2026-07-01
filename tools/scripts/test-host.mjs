@@ -186,6 +186,8 @@ const deleteCall = storageFetchCalls.find((call) => call.url === '/api/files/del
 assert(deleteCall, 'default storage deletes through SillyTavern delete API');
 assertEqual(JSON.parse(deleteCall.options.body).path, '/user/files/recursion-system-index.v1.json', 'default storage deletes user file path');
 assertEqual(await storageHost.storageAdapter.readJson('recursion-system-index.v1.json'), null, 'default storage returns null for missing user files');
+await storageHost.storageAdapter.writeJson('recursion-after-404.v1.json', { ok: 'host' });
+assert(storageFetchCalls.some((call) => call.url === '/api/files/upload' && JSON.parse(call.options.body).name === 'recursion-after-404.v1.json'), 'missing user file reads do not force memory fallback');
 const storageFetchCountBeforeRejectedKeys = storageFetchCalls.length;
 await assertRejects(
   async () => storageHost.storageAdapter.writeJson('../recursion-escape.v1.json', { ok: false }),
@@ -203,6 +205,89 @@ await assertRejects(
   'default storage rejects slash keys'
 );
 assertEqual(storageFetchCalls.length, storageFetchCountBeforeRejectedKeys, 'default storage rejects unsafe keys before fetch');
+
+const fallbackUploadCalls = [];
+const fallbackUploadHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'fallback-upload-chat',
+    chat: [],
+    getRequestHeaders: () => ({ 'X-CSRF-Token': 'fallback-token' })
+  }),
+  settingsRoot: {},
+  fetchImpl: async (url, options = {}) => {
+    fallbackUploadCalls.push({ url, options });
+    if (url === '/api/files/upload') return { ok: false, status: 500, json: async () => ({ error: 'disk unavailable' }) };
+    if (url.startsWith('/user/files/')) throw new Error('read should stay in memory after fallback');
+    throw new Error(`Unexpected fallback fetch URL: ${url}`);
+  }
+});
+assertDeepEqual(
+  await fallbackUploadHost.storageAdapter.writeJson('recursion-fallback-upload.v1.json', { fallback: true }),
+  { ok: true, key: 'recursion-fallback-upload.v1.json', fallback: 'memory' },
+  'default storage downgrades failed uploads to memory storage'
+);
+assertDeepEqual(
+  await fallbackUploadHost.storageAdapter.readJson('recursion-fallback-upload.v1.json'),
+  { fallback: true },
+  'default storage reads fallback writes from memory without user-file API'
+);
+assert(!fallbackUploadCalls.some((call) => call.url.startsWith('/user/files/')), 'fallback storage skips user-file reads after upload failure');
+const fallbackUploadCallCountBeforeRejectedKeys = fallbackUploadCalls.length;
+await assertRejects(
+  async () => fallbackUploadHost.storageAdapter.writeJson('../recursion-fallback-escape.v1.json', { ok: false }),
+  /path traversal/i,
+  'fallback storage rejects traversal keys before memory fallback'
+);
+await assertRejects(
+  async () => fallbackUploadHost.storageAdapter.readJson('recursion-fallback-not-json.txt'),
+  /\.json/i,
+  'fallback storage rejects non-json keys before memory fallback'
+);
+assertEqual(fallbackUploadCalls.length, fallbackUploadCallCountBeforeRejectedKeys, 'fallback storage rejects unsafe keys without extra fetch');
+
+const fallbackThrownUploadCalls = [];
+const fallbackThrownUploadHost = createSillyTavernHost({
+  contextFactory: () => ({ chatId: 'fallback-thrown-upload-chat', chat: [] }),
+  settingsRoot: {},
+  fetchImpl: async (url, options = {}) => {
+    fallbackThrownUploadCalls.push({ url, options });
+    throw new Error('simulated user-file API outage');
+  }
+});
+const circularStorageValue = {};
+circularStorageValue.self = circularStorageValue;
+await assertRejects(
+  async () => fallbackThrownUploadHost.storageAdapter.writeJson('recursion-unserializable.v1.json', circularStorageValue),
+  /circular|converting/i,
+  'default storage rejects JSON serialization errors before user-file fallback'
+);
+await assertRejects(
+  async () => fallbackThrownUploadHost.storageAdapter.writeJson('recursion-undefined-value.v1.json', undefined),
+  /json-serializable/i,
+  'default storage rejects top-level undefined before user-file fallback'
+);
+await assertRejects(
+  async () => fallbackThrownUploadHost.storageAdapter.writeJson('recursion-function-value.v1.json', () => {}),
+  /json-serializable/i,
+  'default storage rejects top-level functions before user-file fallback'
+);
+await assertRejects(
+  async () => fallbackThrownUploadHost.storageAdapter.writeJson('recursion-symbol-value.v1.json', Symbol('storage')),
+  /json-serializable/i,
+  'default storage rejects top-level symbols before user-file fallback'
+);
+assertEqual(fallbackThrownUploadCalls.length, 0, 'default storage does not fetch when JSON serialization fails');
+assertDeepEqual(
+  await fallbackThrownUploadHost.storageAdapter.writeJson('recursion-fallback-thrown-upload.v1.json', { outage: true }),
+  { ok: true, key: 'recursion-fallback-thrown-upload.v1.json', fallback: 'memory' },
+  'default storage downgrades thrown upload failures to memory storage'
+);
+assertDeepEqual(
+  await fallbackThrownUploadHost.storageAdapter.readJson('recursion-fallback-thrown-upload.v1.json'),
+  { outage: true },
+  'default storage reads memory value after thrown upload fallback'
+);
+assertEqual(fallbackThrownUploadCalls.length, 1, 'default storage avoids failing user-file API after thrown upload fallback');
 
 const previousSillyTavern = globalThis.SillyTavern;
 const globalHeaderCalls = [];

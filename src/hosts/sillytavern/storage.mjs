@@ -68,39 +68,86 @@ function assertOk(response, action, fileName) {
   }
 }
 
+function serializeStorageJson(value) {
+  const jsonText = JSON.stringify(value);
+  if (typeof jsonText !== 'string') {
+    throw new Error('Recursion storage values must be JSON-serializable.');
+  }
+  return jsonText;
+}
+
 export function createSillyTavernUserFileStorageAdapter({ contextFactory = null, fetchImpl } = {}) {
   if (typeof fetchImpl !== 'function') return createMemoryStorageAdapter();
+
+  const memoryStorage = createMemoryStorageAdapter();
+  let fallbackStorage = false;
+
+  async function readMemory(fileName) {
+    return memoryStorage.readJson(fileName);
+  }
+
+  async function writeMemory(key, fileName, value) {
+    await memoryStorage.writeJson(fileName, value);
+    return { ok: true, key, fallback: 'memory' };
+  }
+
+  async function deleteMemory(key, fileName) {
+    await memoryStorage.deleteJson(fileName);
+    return { ok: true, key, fallback: 'memory' };
+  }
+
+  function downgradeToMemory() {
+    fallbackStorage = true;
+  }
 
   return {
     async readJson(key) {
       const fileName = validateStorageFileName(key);
-      const response = await fetchImpl(`/user/files/${encodeURIComponent(fileName)}`, { method: 'GET' });
-      if (response?.status === 404) return null;
-      assertOk(response, 'read', fileName);
-      return parseJsonResponse(response);
+      if (fallbackStorage) return readMemory(fileName);
+      try {
+        const response = await fetchImpl(`/user/files/${encodeURIComponent(fileName)}`, { method: 'GET' });
+        if (response?.status === 404) return null;
+        assertOk(response, 'read', fileName);
+        return parseJsonResponse(response);
+      } catch {
+        downgradeToMemory();
+        return readMemory(fileName);
+      }
     },
     async writeJson(key, value) {
       const fileName = validateStorageFileName(key);
+      const jsonText = serializeStorageJson(value);
+      if (fallbackStorage) return writeMemory(key, fileName, value);
       const context = currentContext(contextFactory);
-      const jsonText = JSON.stringify(value);
-      const response = await fetchImpl('/api/files/upload', {
-        method: 'POST',
-        headers: await requestHeaders(context),
-        body: JSON.stringify({ name: fileName, data: encodeBase64Utf8(jsonText) })
-      });
-      assertOk(response, 'write', fileName);
-      return { ok: true, key };
+      try {
+        const response = await fetchImpl('/api/files/upload', {
+          method: 'POST',
+          headers: await requestHeaders(context),
+          body: JSON.stringify({ name: fileName, data: encodeBase64Utf8(jsonText) })
+        });
+        assertOk(response, 'write', fileName);
+        return { ok: true, key };
+      } catch {
+        downgradeToMemory();
+        return writeMemory(key, fileName, value);
+      }
     },
     async deleteJson(key) {
       const fileName = validateStorageFileName(key);
+      if (fallbackStorage) return deleteMemory(key, fileName);
       const context = currentContext(contextFactory);
-      const response = await fetchImpl('/api/files/delete', {
-        method: 'POST',
-        headers: await requestHeaders(context),
-        body: JSON.stringify({ path: `/user/files/${fileName}` })
-      });
-      assertOk(response, 'delete', fileName);
-      return { ok: true, key };
+      try {
+        const response = await fetchImpl('/api/files/delete', {
+          method: 'POST',
+          headers: await requestHeaders(context),
+          body: JSON.stringify({ path: `/user/files/${fileName}` })
+        });
+        assertOk(response, 'delete', fileName);
+        return { ok: true, key };
+      } catch {
+        downgradeToMemory();
+        return deleteMemory(key, fileName);
+      }
     }
   };
 }

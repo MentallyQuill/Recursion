@@ -32,7 +32,7 @@ It launches offline Playwright readiness, but does not contact SillyTavern, muta
 
 ## Current Guardrail Commands
 
-The commands in this section currently prove safety gates, report shape, offline Playwright readiness, and dedicated-user storage probes. They do not contact SillyTavern unless a live script is run with `--live`. Live scripts reject unsafe users before mutation. The focused UI smoke command still returns `manual-required` for deferred browser work.
+The commands in this section currently prove safety gates, report shape, offline Playwright readiness, dedicated-user storage probes, served-extension freshness, and no-generation Recursion UI smoke. They do not contact SillyTavern unless a live script is run with `--live`. Live scripts reject unsafe users before mutation.
 
 Offline Playwright readiness:
 
@@ -52,13 +52,15 @@ node tools\scripts\check-sillytavern-soak-users.mjs --live --write-artifacts
 
 This command logs into each dedicated user, writes one Recursion-owned probe file, verifies readback, checks that other users cannot see the probe, and deletes the probe files. If the dedicated users do not exist or credentials are wrong, it returns `environment-fail` before broader smoke runs.
 
-No-generation live UI and storage smoke target:
+No-generation live UI smoke:
 
 ```powershell
 $env:SILLYTAVERN_BASE_URL='http://127.0.0.1:8000'
 $env:RECURSION_SILLYTAVERN_USER='recursion-soak-a'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts
 ```
+
+This command authenticates the dedicated user, compares the served Recursion manifest/entry files against the checkout, runs the Recursion-owned storage probe, opens SillyTavern with Playwright, verifies the Recursion Bar, Last Hand dropdown, full viewer, and bridge hooks, then writes screenshots, trace, live log, served-extension comparison, storage probe, browser snapshot, summary, and report artifacts. It does not send chat messages or call providers.
 
 Generation-enabled Utility smoke:
 
@@ -79,7 +81,7 @@ $env:RECURSION_LIVE_REASONER='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts --strict
 ```
 
-The current `smoke-sillytavern-live.mjs` command stops at guardrail checks. Later live-browser implementation must keep the dedicated `recursion-soak-*` safety policy and must reject unsafe users before any state mutation.
+Generation-enabled Utility and Reasoner smoke remain separate opt-in work. The current no-generation browser smoke must stay dedicated-user-only and must reject unsafe users before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
 
 ## Scenario Matrix
 
@@ -105,7 +107,6 @@ The live runner should execute these stages in order.
 - Reject unsafe users.
 - Authenticate when needed.
 - Compare served extension files to the checkout.
-- Confirm extension enablement.
 - Run storage probe.
 - Open SillyTavern with Playwright.
 - Capture baseline console and page-error state.
@@ -253,14 +254,14 @@ The runner should stop immediately on:
 - unsafe user;
 - missing or unreachable SillyTavern host;
 - failed authentication;
+- served-extension mismatch or unavailable served Recursion files;
 - failed storage isolation;
-- served-extension mismatch in strict mode;
 - Recursion Bar not found;
 - prompt cleanup failure after a prompt was installed;
 - raw secret detected in any report payload;
 - raw provider prompt or response detected in a normal artifact.
 
-In non-strict mode, stale extension and optional provider unavailability may produce warnings, but the report must not call those checks passed.
+In non-strict mode, optional provider unavailability may produce warnings, but stale or unavailable served Recursion files remain blocking and must not run the storage probe or browser smoke.
 
 ## Manual Review
 

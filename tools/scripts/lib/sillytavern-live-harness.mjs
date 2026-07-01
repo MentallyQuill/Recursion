@@ -1,7 +1,10 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { redact, safeId } from '../../../src/core.mjs';
+
+const DEFAULT_RECURSION_EXTENSION_PATH = '/scripts/extensions/third-party/Recursion';
 
 const DEFAULT_USER_ALIASES = new Set([
   'default',
@@ -206,12 +209,79 @@ function normalizeBaseUrl(value) {
   }
 }
 
+function normalizeExtensionPath(value = DEFAULT_RECURSION_EXTENSION_PATH) {
+  const source = String(value || DEFAULT_RECURSION_EXTENSION_PATH).trim().replace(/\\/g, '/');
+  const withSlash = source.startsWith('/') ? source : `/${source}`;
+  return withSlash.replace(/\/+$/, '') || DEFAULT_RECURSION_EXTENSION_PATH;
+}
+
+function sha256Text(text) {
+  return createHash('sha256').update(String(text ?? ''), 'utf8').digest('hex');
+}
+
+function fileSha256(filePath) {
+  return sha256Text(readFileSync(filePath, 'utf8'));
+}
+
+function artifactTarget(artifactLocation, relativePath) {
+  const safeRelativePath = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  const target = join(artifactLocation.dir, safeRelativePath);
+  mkdirSync(dirname(target), { recursive: true });
+  return { relativePath: safeRelativePath, target };
+}
+
 function cookiePairsFromHeader(value) {
   if (!value) return [];
   return String(value)
     .split(/,(?=\s*[^;,=\s]+=[^;,]+)/)
     .map((entry) => entry.trim().split(';')[0])
     .filter((entry) => entry.includes('='));
+}
+
+function playwrightCookiesFromMap(cookieMap, baseUrl) {
+  return [...cookieMap.entries()].map(([name, value]) => ({
+    name,
+    value,
+    url: normalizeBaseUrl(baseUrl)
+  }));
+}
+
+async function fetchHarnessText({
+  baseUrl,
+  requestPath,
+  headers = {},
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 15000
+} = {}) {
+  if (typeof fetchImpl !== 'function') {
+    const error = new Error('fetch is not available.');
+    error.status = 'environment-fail';
+    error.result = 'fetch-unavailable';
+    throw error;
+  }
+  const root = normalizeBaseUrl(baseUrl);
+  const path = String(requestPath || '').startsWith('/') ? String(requestPath || '') : `/${String(requestPath || '')}`;
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller && Number(timeoutMs) > 0
+    ? setTimeout(() => controller.abort(), Number(timeoutMs))
+    : null;
+  try {
+    const response = await fetchImpl(`${root}${path}`, {
+      method: 'GET',
+      headers,
+      signal: controller?.signal
+    });
+    const parsed = await parseResponseBody(response);
+    return {
+      ok: Boolean(response?.ok),
+      status: Number(response?.status) || 0,
+      text: parsed.text,
+      json: parsed.json,
+      byteLength: Buffer.byteLength(parsed.text || '', 'utf8')
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function responseSetCookies(response) {
@@ -272,13 +342,13 @@ export function createSillyTavernHttpSession({ baseUrl, user, password = '', fet
     }
   }
 
-  function cookieHeader() {
+  function currentCookieHeader() {
     return [...cookies.entries()].map(([key, value]) => `${key}=${value}`).join('; ');
   }
 
   async function request(path, { method = 'GET', body = null, csrf = false } = {}) {
     const headers = {};
-    const cookie = cookieHeader();
+    const cookie = currentCookieHeader();
     if (cookie) headers.Cookie = cookie;
     if (body !== null) headers['Content-Type'] = 'application/json';
     if (csrf && csrfToken) headers['X-CSRF-Token'] = csrfToken;
@@ -308,6 +378,19 @@ export function createSillyTavernHttpSession({ baseUrl, user, password = '', fet
 
   return {
     user,
+    authHeaders() {
+      const headers = {};
+      const cookie = currentCookieHeader();
+      if (cookie) headers.Cookie = cookie;
+      if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+      return headers;
+    },
+    cookieHeader() {
+      return currentCookieHeader();
+    },
+    playwrightCookies() {
+      return playwrightCookiesFromMap(cookies, root);
+    },
     async init() {
       const response = await request('/csrf-token');
       await assertOk(response, 'csrf-token', 'csrf-failed');
@@ -479,6 +562,293 @@ async function runStorageProbeSuite({ baseUrl, users, env = {}, fetchImpl = glob
     if (outcome) outcome.cleanup = cleanup;
   }
   return outcome;
+}
+
+async function compareServedRecursionExtension({
+  baseUrl,
+  extensionPath = DEFAULT_RECURSION_EXTENSION_PATH,
+  localRoot = process.cwd(),
+  headers = {},
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 15000
+} = {}) {
+  const normalizedExtensionPath = normalizeExtensionPath(extensionPath);
+  const manifestPath = `${normalizedExtensionPath}/manifest.json`;
+  const manifest = await fetchHarnessText({ baseUrl, requestPath: manifestPath, headers, fetchImpl, timeoutMs });
+  const manifestFiles = [];
+  if (manifest.ok && manifest.json && typeof manifest.json === 'object') {
+    if (manifest.json.js) manifestFiles.push(String(manifest.json.js));
+    if (manifest.json.css) manifestFiles.push(String(manifest.json.css));
+  }
+  const files = [...new Set([
+    'manifest.json',
+    ...manifestFiles,
+    'src/extension/index.js',
+    'styles/recursion.css'
+  ])];
+
+  const compared = [];
+  for (const relativePath of files) {
+    const localPath = resolve(localRoot, relativePath);
+    const servedPath = `${normalizedExtensionPath}/${relativePath.replace(/\\/g, '/')}`;
+    const record = {
+      relativePath,
+      servedPath,
+      localExists: false,
+      servedOk: false,
+      status: null,
+      localSha256: null,
+      servedSha256: null,
+      matches: null,
+      byteLength: 0,
+      error: null
+    };
+
+    try {
+      record.localSha256 = fileSha256(localPath);
+      record.localExists = true;
+    } catch (error) {
+      record.error = `local:${error?.code || error?.name || 'read-failed'}`;
+    }
+
+    try {
+      const served = relativePath === 'manifest.json'
+        ? manifest
+        : await fetchHarnessText({ baseUrl, requestPath: servedPath, headers, fetchImpl, timeoutMs });
+      record.status = served.status;
+      record.servedOk = served.ok;
+      record.byteLength = served.byteLength;
+      if (served.ok) {
+        record.servedSha256 = sha256Text(served.text || '');
+        record.matches = record.localSha256 ? record.localSha256 === record.servedSha256 : null;
+      } else {
+        record.error = record.error || `served:HTTP ${served.status}`;
+      }
+    } catch (error) {
+      record.error = record.error || `served:${error?.name || 'fetch-failed'}`;
+    }
+    compared.push(record);
+  }
+
+  const servedFailureCount = compared.filter((entry) => !entry.servedOk).length;
+  const mismatchCount = compared.filter((entry) => entry.matches === false).length;
+  const missingLocalCount = compared.filter((entry) => !entry.localExists).length;
+  const servedStatus = servedFailureCount > 0 || !manifest.ok
+    ? 'served-extension-unavailable'
+    : mismatchCount > 0 || missingLocalCount > 0
+    ? 'served-extension-mismatch'
+    : 'served-extension-match';
+
+  return {
+    status: servedStatus === 'served-extension-match' ? 'pass' : servedStatus === 'served-extension-mismatch' ? 'stale-extension' : 'environment-fail',
+    result: servedStatus,
+    servedStatus,
+    ok: servedStatus === 'served-extension-match',
+    baseUrl: normalizeBaseUrl(baseUrl),
+    extensionPath: normalizedExtensionPath,
+    manifest: {
+      ok: manifest.ok,
+      status: manifest.status,
+      key: manifest.json?.key || null,
+      displayName: manifest.json?.display_name || null,
+      js: manifest.json?.js || null,
+      css: manifest.json?.css || null
+    },
+    compared,
+    mismatchCount,
+    missingLocalCount,
+    servedFailureCount
+  };
+}
+
+function compactBrowserIssue(error) {
+  return {
+    name: error?.name || 'Error',
+    message: sanitizeHarnessText(error?.message || String(error || ''), 240)
+  };
+}
+
+function browserSnapshotScript() {
+  return () => {
+    const text = (selector) => String(document.querySelector(selector)?.textContent || '').replace(/\s+/g, ' ').trim();
+    const visible = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return false;
+      const style = globalThis.getComputedStyle ? getComputedStyle(element) : null;
+      return style ? style.display !== 'none' && style.visibility !== 'hidden' : true;
+    };
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    return {
+      readyState: document.readyState,
+      url: location.href,
+      title: document.title,
+      rootMounted: Boolean(document.querySelector('#recursion-root')),
+      barVisible: visible('[data-recursion-bar]'),
+      statusText: text('[data-recursion-status]'),
+      handText: text('[data-recursion-hand-count]'),
+      composerText: text('[data-recursion-composer]'),
+      reasonerText: text('[data-recursion-reasoner]'),
+      ribbonText: text('[data-recursion-ribbon-label]'),
+      handOpen: document.querySelector('[data-recursion-hand-dropdown]')?.hidden === false,
+      viewerOpen: Boolean(document.querySelector('[data-recursion-viewer]')?.open) || document.querySelector('[data-recursion-viewer]')?.hidden === false,
+      bridge: {
+        interceptor: typeof globalThis.recursionGenerationInterceptor === 'function',
+        enableHook: typeof globalThis.recursionOnEnable === 'function',
+        disableHook: typeof globalThis.recursionOnDisable === 'function'
+      },
+      sillyTavernContext: {
+        available: Boolean(context),
+        chatLength: Array.isArray(context?.chat) ? context.chat.length : null
+      },
+      recursionScripts: Array.from(document.scripts || [])
+        .map((script) => script.src || script.id || '')
+        .filter((value) => /Recursion|third-party\/Recursion|recursion/i.test(value))
+        .slice(0, 12),
+      recursionStyles: Array.from(document.querySelectorAll('link[rel="stylesheet"]') || [])
+        .map((link) => link.href || link.id || '')
+        .filter((value) => /Recursion|third-party\/Recursion|recursion/i.test(value))
+        .slice(0, 12)
+    };
+  };
+}
+
+async function runBrowserUiSmoke({
+  baseUrl,
+  cookies = [],
+  artifactLocation = null,
+  timeoutMs = 30000,
+  env = {}
+} = {}) {
+  const consoleMessages = [];
+  const pageErrors = [];
+  let browser = null;
+  let context = null;
+  let page = null;
+  let traceStarted = false;
+  const artifacts = {};
+
+  async function captureFailureArtifacts() {
+    if (!artifactLocation || !page) return;
+    if (!artifacts.failureScreenshot) {
+      try {
+        const failure = artifactTarget(artifactLocation, 'screenshots/failure.png');
+        await page.screenshot({ path: failure.target, fullPage: true });
+        artifacts.failureScreenshot = failure.relativePath;
+      } catch {
+        // Screenshot capture is best-effort after a browser failure.
+      }
+    }
+  }
+
+  async function stopTraceArtifact() {
+    if (!traceStarted || !context || !artifactLocation) return;
+    try {
+      const trace = artifactTarget(artifactLocation, 'playwright/trace.zip');
+      await context.tracing.stop({ path: trace.target });
+      artifacts.trace = trace.relativePath;
+    } catch {
+      await context.tracing.stop().catch(() => {});
+    } finally {
+      traceStarted = false;
+    }
+  }
+
+  try {
+    const { chromium } = await import('playwright');
+    browser = await chromium.launch({
+      headless: env.RECURSION_PLAYWRIGHT_HEADFUL === '1' ? false : true
+    });
+    context = await browser.newContext({
+      viewport: { width: 1366, height: 900 }
+    });
+    if (cookies.length) await context.addCookies(cookies);
+    if (artifactLocation) {
+      await context.tracing.start({ screenshots: true, snapshots: true });
+      traceStarted = true;
+    }
+    page = await context.newPage();
+    page.on('console', (message) => {
+      consoleMessages.push({
+        type: message.type(),
+        text: sanitizeHarnessText(message.text(), 240)
+      });
+    });
+    page.on('pageerror', (error) => {
+      pageErrors.push(compactBrowserIssue(error));
+    });
+
+    await page.goto(normalizeBaseUrl(baseUrl), { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    await page.waitForSelector('[data-recursion-bar]', { timeout: timeoutMs });
+    await page.waitForFunction(() => {
+      return typeof globalThis.recursionGenerationInterceptor === 'function'
+        && typeof globalThis.recursionOnEnable === 'function'
+        && typeof globalThis.recursionOnDisable === 'function';
+    }, null, { timeout: timeoutMs });
+
+    const handButton = page.locator('[data-recursion-hand-toggle]').first();
+    await handButton.click({ timeout: timeoutMs });
+    await page.waitForFunction(() => document.querySelector('[data-recursion-hand-dropdown]')?.hidden === false, null, { timeout: timeoutMs });
+
+    const viewerButton = page.locator('[data-recursion-viewer-toggle]').first();
+    await viewerButton.click({ timeout: timeoutMs });
+    await page.waitForFunction(() => {
+      const viewer = document.querySelector('[data-recursion-viewer]');
+      return Boolean(viewer && (viewer.open || viewer.hidden === false));
+    }, null, { timeout: timeoutMs });
+
+    const snapshot = await page.evaluate(browserSnapshotScript());
+    if (!snapshot.rootMounted || !snapshot.barVisible || !snapshot.bridge?.interceptor || !snapshot.bridge?.enableHook || !snapshot.bridge?.disableHook) {
+      const error = new Error('Recursion UI bridge assertion failed.');
+      error.status = 'fail';
+      error.result = 'browser-smoke-assertion-failed';
+      throw error;
+    }
+    if (artifactLocation) {
+      const desktop = artifactTarget(artifactLocation, 'screenshots/desktop.png');
+      await page.screenshot({ path: desktop.target, fullPage: true });
+      artifacts.desktopScreenshot = desktop.relativePath;
+      await page.setViewportSize({ width: 390, height: 845 });
+      await page.waitForTimeout(100);
+      const phone = artifactTarget(artifactLocation, 'screenshots/phone.png');
+      await page.screenshot({ path: phone.target, fullPage: true });
+      artifacts.phoneScreenshot = phone.relativePath;
+      await stopTraceArtifact();
+    }
+
+    await context.close();
+    return {
+      status: 'pass',
+      result: 'browser-smoke-pass',
+      snapshot,
+      consoleMessages: consoleMessages.slice(-20),
+      pageErrors: pageErrors.slice(-20),
+      artifacts
+    };
+  } catch (error) {
+    await captureFailureArtifacts();
+    await stopTraceArtifact();
+    return {
+      status: error?.status || (error?.name === 'TimeoutError' ? 'fail' : 'environment-fail'),
+      result: error?.result || (error?.name === 'TimeoutError' ? 'browser-smoke-timeout' : 'browser-smoke-failed'),
+      error: compactBrowserIssue(error),
+      consoleMessages: consoleMessages.slice(-20),
+      pageErrors: pageErrors.slice(-20),
+      artifacts
+    };
+  } finally {
+    try {
+      await stopTraceArtifact();
+    } catch {
+      // Trace cleanup is best effort after a failed browser smoke.
+    }
+    if (browser) await browser.close().catch(() => {});
+  }
 }
 
 export function createBaseReport({ scriptName, args = {}, env = {}, runId = createRunId(scriptName) } = {}) {
@@ -668,10 +1038,29 @@ export function prepareArtifactRunDirectory(report, options = {}) {
 
 function writeJsonArtifact(report, artifactLocation, relativePath, value) {
   try {
-    const safeRelativePath = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
-    const target = join(artifactLocation.dir, safeRelativePath);
-    mkdirSync(dirname(target), { recursive: true });
+    const { relativePath: safeRelativePath, target } = artifactTarget(artifactLocation, relativePath);
     writeFileSync(target, `${JSON.stringify(redactHarnessValue(value), null, 2)}\n`, 'utf8');
+    return safeRelativePath;
+  } catch (error) {
+    addCheck(report, {
+      name: 'artifact-write',
+      status: 'environment-fail',
+      summary: 'Artifact write failed.',
+      details: {
+        name: error?.name,
+        code: error?.code
+      }
+    });
+    setReportStatus(report, 'environment-fail', 'artifact-write-failed');
+    report.nextAction = 'Set RECURSION_ARTIFACT_DIR to a writable directory or omit --write-artifacts.';
+    return null;
+  }
+}
+
+function writeTextArtifact(report, artifactLocation, relativePath, value) {
+  try {
+    const { relativePath: safeRelativePath, target } = artifactTarget(artifactLocation, relativePath);
+    writeFileSync(target, String(value ?? ''), 'utf8');
     return safeRelativePath;
   } catch (error) {
     addCheck(report, {
@@ -939,7 +1328,7 @@ export async function runSoakUsersPreflight({ argv = [], env = process.env, arti
       summary: 'No SillyTavern state was touched because --live was not set.'
     });
     setReportStatus(report, 'skipped', 'dry-run');
-    report.nextAction = 'Re-run with --live only after dedicated users exist and storage probes are implemented.';
+    report.nextAction = 'Re-run with --live only after dedicated recursion-soak-* users exist.';
   } else if (!env.SILLYTAVERN_BASE_URL) {
     addCheck(report, {
       name: 'base-url',
@@ -980,7 +1369,7 @@ export async function runSoakUsersPreflight({ argv = [], env = process.env, arti
     });
     setReportStatus(report, probeResult.status, probeResult.result);
     report.nextAction = probeResult.status === 'pass'
-      ? 'Storage probe passed; live UI smoke can run after served-extension checks are implemented.'
+      ? 'Storage probe passed; run smoke-sillytavern-live.mjs for no-generation browser UI evidence.'
       : 'Create dedicated recursion-soak-* users, verify credentials, and rerun the storage preflight.';
     if (artifactLocation?.ok) {
       const probePath = writeJsonArtifact(report, artifactLocation, 'storage/probe.json', probeResult);
@@ -993,7 +1382,7 @@ export async function runSoakUsersPreflight({ argv = [], env = process.env, arti
   return report;
 }
 
-export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, artifactRoot } = {}) {
+export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, artifactRoot, fetchImpl = globalThis.fetch, localRoot = process.cwd() } = {}) {
   const args = parseHarnessArgs(argv);
   let report = createBaseReport({ scriptName: 'smoke-sillytavern-live', args, env });
   if (args.liveRequested && args.dryRunRequested) {
@@ -1035,7 +1424,7 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
       summary: 'No browser, chat, storage, prompt, or provider state was touched because --live was not set.'
     });
     setReportStatus(report, 'skipped', 'dry-run');
-    report.nextAction = 'Re-run with --live only after the browser smoke implementation is present.';
+    report.nextAction = 'Re-run with --live to authenticate, compare served files, and check the Recursion UI with Playwright.';
   } else if (!env.SILLYTAVERN_BASE_URL) {
     addCheck(report, {
       name: 'base-url',
@@ -1045,13 +1434,217 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
     setReportStatus(report, 'environment-fail', 'missing-base-url');
     report.nextAction = 'Set SILLYTAVERN_BASE_URL before attempting guarded live smoke.';
   } else {
-    addCheck(report, {
-      name: 'browser-live-smoke',
-      status: 'manual-required',
-      summary: 'Live browser smoke is guarded but not implemented in this slice.'
-    });
-    setReportStatus(report, 'manual-required', 'browser-smoke-not-implemented');
-    report.nextAction = 'Implement browser interaction, prompt diagnostics, and cleanup before claiming live smoke evidence.';
+    const artifactLocation = args.writeArtifacts
+      ? prepareArtifactRunDirectory(report, { artifactRoot, family: 'live-smoke/sillytavern' })
+      : null;
+    if (artifactLocation && !artifactLocation.ok) return artifactLocation.report;
+
+    const liveLog = [];
+    const event = (phase, status, label, details = {}) => {
+      liveLog.push({
+        recordType: 'recursion.liveSmokeEvent',
+        schemaVersion: 1,
+        runId: report.runId,
+        recordedAt: nowIso(),
+        phase,
+        status,
+        label: sanitizeHarnessText(label, 240),
+        details: redactHarnessValue(details)
+      });
+    };
+
+    const configuredTimeoutMs = Number(env.RECURSION_LIVE_TIMEOUT_MS || 30000);
+    const timeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0 ? configuredTimeoutMs : 30000;
+    const extensionPath = normalizeExtensionPath(env.RECURSION_SILLYTAVERN_EXTENSION_PATH || DEFAULT_RECURSION_EXTENSION_PATH);
+    let session = null;
+    try {
+      session = createSillyTavernHttpSession({
+        baseUrl: env.SILLYTAVERN_BASE_URL,
+        user: userResult.user,
+        password: passwordForUser(userResult.user, env),
+        fetchImpl
+      });
+      await session.init();
+      await session.login();
+      event('auth', 'pass', 'Dedicated SillyTavern user authenticated.', { user: userResult.user });
+      addCheck(report, {
+        name: 'sillytavern-auth',
+        status: 'pass',
+        summary: 'Dedicated SillyTavern user authenticated.'
+      });
+
+      const served = await compareServedRecursionExtension({
+        baseUrl: env.SILLYTAVERN_BASE_URL,
+        extensionPath,
+        localRoot,
+        headers: session.authHeaders(),
+        fetchImpl,
+        timeoutMs
+      });
+      report.extension = served;
+      const servedAllowsBrowser = served.ok;
+      addCheck(report, {
+        name: 'served-extension-freshness',
+        status: served.ok ? 'pass' : served.status,
+        summary: served.ok
+          ? 'Served Recursion extension files match the checkout.'
+          : served.servedStatus === 'served-extension-mismatch'
+          ? 'Served Recursion extension files do not match the checkout.'
+          : 'Served Recursion extension files are unavailable.',
+        details: {
+          servedStatus: served.servedStatus,
+          extensionPath: served.extensionPath,
+          mismatchCount: served.mismatchCount,
+          servedFailureCount: served.servedFailureCount,
+          missingLocalCount: served.missingLocalCount
+        }
+      });
+      event('served-extension', servedAllowsBrowser ? 'pass' : served.status, served.servedStatus, {
+        extensionPath: served.extensionPath,
+        mismatchCount: served.mismatchCount,
+        servedFailureCount: served.servedFailureCount
+      });
+      if (artifactLocation?.ok) {
+        const servedPath = writeJsonArtifact(report, artifactLocation, 'host-extensions/served-extension-compare.json', served);
+        if (!servedPath) {
+          const error = new Error('Served-extension artifact write failed.');
+          error.status = 'environment-fail';
+          error.result = 'artifact-write-failed';
+          throw error;
+        }
+        report.artifacts = { ...(report.artifacts || {}), servedExtension: servedPath };
+      }
+
+      if (!servedAllowsBrowser) {
+        setReportStatus(report, served.status, served.result);
+        report.nextAction = served.servedStatus === 'served-extension-mismatch'
+          ? 'Sync the installed SillyTavern Recursion extension copy to this checkout before running browser smoke.'
+          : 'Install Recursion for the dedicated recursion-soak-* SillyTavern user before running browser smoke.';
+      } else {
+        const storageProbe = await runStorageProbeSuite({
+          baseUrl: env.SILLYTAVERN_BASE_URL,
+          users: [userResult.user],
+          env,
+          fetchImpl,
+          runId: report.runId
+        });
+        report.storageProbe = storageProbe;
+        for (const warning of storageProbe.warnings || []) report.warnings.push(warning);
+        addCheck(report, {
+          name: 'storage-isolation-probe',
+          status: storageProbe.status,
+          summary: storageProbe.status === 'pass'
+            ? 'Dedicated-user storage probe completed.'
+            : 'Dedicated-user storage probe failed before browser smoke.',
+          details: {
+            result: storageProbe.result,
+            users: storageProbe.users,
+            probeCount: storageProbe.probes?.length || 0,
+            isolationChecks: storageProbe.isolationChecks?.length || 0,
+            cleanup: storageProbe.cleanup || [],
+            error: storageProbe.error
+          }
+        });
+        event('storage-probe', storageProbe.status, storageProbe.result, {
+          users: storageProbe.users,
+          probeCount: storageProbe.probes?.length || 0,
+          cleanup: storageProbe.cleanup || []
+        });
+        if (artifactLocation?.ok) {
+          const probePath = writeJsonArtifact(report, artifactLocation, 'storage/probe.json', storageProbe);
+          if (!probePath) {
+            const error = new Error('Storage probe artifact write failed.');
+            error.status = 'environment-fail';
+            error.result = 'artifact-write-failed';
+            throw error;
+          }
+          report.artifacts = { ...(report.artifacts || {}), storageProbe: probePath };
+        }
+        if (storageProbe.status !== 'pass') {
+          setReportStatus(report, storageProbe.status, storageProbe.result);
+          report.nextAction = 'Create dedicated recursion-soak-* users, verify credentials and file-storage access, then rerun live smoke.';
+        } else {
+          const browserResult = await runBrowserUiSmoke({
+            baseUrl: env.SILLYTAVERN_BASE_URL,
+            cookies: session.playwrightCookies(),
+            artifactLocation: artifactLocation?.ok ? artifactLocation : null,
+            timeoutMs,
+            env
+          });
+          report.browser = browserResult;
+          if (browserResult.artifacts && Object.keys(browserResult.artifacts).length > 0) {
+            report.artifacts = { ...(report.artifacts || {}), ...browserResult.artifacts };
+          }
+          if (artifactLocation?.ok) {
+            const browserPath = writeJsonArtifact(report, artifactLocation, 'browser/snapshot.json', browserResult);
+            if (!browserPath) {
+              const error = new Error('Browser snapshot artifact write failed.');
+              error.status = 'environment-fail';
+              error.result = 'artifact-write-failed';
+              throw error;
+            }
+            report.artifacts = { ...(report.artifacts || {}), browserSnapshot: browserPath };
+          }
+          addCheck(report, {
+            name: 'browser-live-smoke',
+            status: browserResult.status,
+            summary: browserResult.status === 'pass'
+              ? 'Recursion bar, hand dropdown, viewer, and bridge hooks were visible in SillyTavern.'
+              : 'Recursion browser UI smoke failed.',
+            details: {
+              result: browserResult.result,
+              rootMounted: browserResult.snapshot?.rootMounted,
+              barVisible: browserResult.snapshot?.barVisible,
+              handOpen: browserResult.snapshot?.handOpen,
+              viewerOpen: browserResult.snapshot?.viewerOpen,
+              bridge: browserResult.snapshot?.bridge,
+              error: browserResult.error,
+              consoleCount: browserResult.consoleMessages?.length || 0,
+              pageErrorCount: browserResult.pageErrors?.length || 0
+            }
+          });
+          event('browser-ui', browserResult.status, browserResult.result, {
+            rootMounted: browserResult.snapshot?.rootMounted,
+            barVisible: browserResult.snapshot?.barVisible,
+            handOpen: browserResult.snapshot?.handOpen,
+            viewerOpen: browserResult.snapshot?.viewerOpen
+          });
+          setReportStatus(report, browserResult.status, browserResult.result);
+          report.nextAction = browserResult.status === 'pass'
+            ? 'No-generation Recursion UI smoke passed; generation-enabled smoke remains a separate opt-in gate.'
+            : 'Inspect browser snapshot, screenshots, and console/page errors before running generation-enabled smoke.';
+        }
+      }
+    } catch (error) {
+      const status = error?.status || 'environment-fail';
+      const result = error?.result || 'live-smoke-failed';
+      event('live-smoke', status, result, { error: compactBrowserIssue(error) });
+      addCheck(report, {
+        name: 'live-smoke-runtime',
+        status,
+        summary: 'Live smoke failed before browser checks completed.',
+        details: {
+          result,
+          httpStatus: error?.httpStatus,
+          error: compactBrowserIssue(error)
+        }
+      });
+      setReportStatus(report, status, result);
+      report.nextAction = result === 'login-failed'
+        ? 'Create the dedicated recursion-soak-* SillyTavern user or correct its password, then rerun live smoke.'
+        : 'Inspect the live smoke runtime failure and rerun after the environment issue is corrected.';
+    } finally {
+      if (artifactLocation?.ok) {
+        const liveLogPath = writeTextArtifact(
+          report,
+          artifactLocation,
+          'live-log.jsonl',
+          `${liveLog.map((entry) => JSON.stringify(redactHarnessValue(entry))).join('\n')}${liveLog.length ? '\n' : ''}`
+        );
+        if (liveLogPath) report.artifacts = { ...(report.artifacts || {}), liveLog: liveLogPath };
+      }
+      if (typeof session?.close === 'function') await session.close();
+    }
   }
 
   report = finalizeReport(report);

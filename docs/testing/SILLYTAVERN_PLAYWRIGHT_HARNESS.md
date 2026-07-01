@@ -8,10 +8,10 @@ The first executable slice has these files:
 
 | Path | Current status |
 | --- | --- |
-| `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared helpers for argv parsing, soak-user validation, offline Playwright readiness, SillyTavern HTTP auth, storage probes, report writing, artifact paths, redaction, and status handling. Served-extension checks, live browser smoke, and runtime snapshots are still deferred. |
+| `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared helpers for argv parsing, soak-user validation, offline Playwright readiness, SillyTavern HTTP auth, storage probes, served-extension comparison, no-generation browser UI smoke, report writing, artifact paths, redaction, and status handling. Runtime snapshots and generation-enabled smoke are still deferred. |
 | `tools/scripts/check-playwright-readiness.mjs` | Offline browser readiness probe. It dynamically imports Playwright, launches Chromium when available, drives a local fixture, and never contacts SillyTavern. |
 | `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety and storage preflight. It rejects unsafe users before mutation, logs into dedicated users, writes/reads/verifies/deletes Recursion-owned probe files, and checks cross-user isolation when two or more users are configured. |
-| `tools/scripts/smoke-sillytavern-live.mjs` | Focused smoke guardrail. It validates the dedicated user and base URL gate, then reports browser smoke as `manual-required` until live browser work is implemented. |
+| `tools/scripts/smoke-sillytavern-live.mjs` | Focused no-generation smoke. It validates the dedicated user and base URL gate, authenticates, compares served Recursion files, verifies the Recursion Bar, Last Hand dropdown, full viewer, and bridge hooks with Playwright, and writes screenshots/trace when artifacts are enabled. |
 | `tools/scripts/test-live-harness.mjs` | Deterministic contract tests for the guardrail behavior. |
 
 The harness should be a library, not a second runtime. Runtime behavior stays in `src/`; the harness drives the public host/UI surface and reads documented diagnostics.
@@ -27,13 +27,12 @@ Common environment variables:
 | `RECURSION_SOAK_ST_USERS` | Comma-separated dedicated users for isolation checks, such as `recursion-soak-a,recursion-soak-b,recursion-soak-c`. |
 | `RECURSION_SILLYTAVERN_PASSWORD` | Password for account-mode SillyTavern when one shared password is enough. |
 | `RECURSION_SILLYTAVERN_PASSWORD_<USER>` | Per-user password override, where the user handle is uppercased and non-alphanumeric characters become underscores. |
-| `RECURSION_SILLYTAVERN_HEADLESS` | Set to `0` for visible browser debugging. Default is headless. |
+| `RECURSION_PLAYWRIGHT_HEADFUL` | Set to `1` for visible browser debugging. Default is headless. |
 | `RECURSION_PLAYWRIGHT_TIMEOUT_MS` | Browser-control timeout for readiness checks. |
-| `RECURSION_SILLYTAVERN_TIMEOUT_MS` | Browser-control timeout for live host checks. |
+| `RECURSION_LIVE_TIMEOUT_MS` | Browser-control timeout for live host checks. |
 | `RECURSION_LIVE_GENERATION` | Set to `1` to allow real provider calls during live smoke. |
 | `RECURSION_LIVE_STRICT` | Set to `1` to promote warnings to failures. |
 | `RECURSION_ARTIFACT_DIR` | Override artifact root for reports, traces, screenshots, and logs. |
-| `RECURSION_CONFIRM_EXTENSION_SYNCED` | Operator acknowledgement used only when the served-extension hash check cannot run. Reports must mark this as weaker than hash proof. |
 
 Scripts should print a dry-run checklist when required live variables are missing. State-mutating scripts must fail before mutation when no dedicated user is configured. No live script may infer, create, or select `default-user` as a fallback.
 
@@ -106,19 +105,17 @@ State-mutating live smoke must run preflight checks before changing chat or prom
 4. Fetch the served Recursion manifest.
 5. Compare selected served files against the checkout under test.
 6. Write, verify, read, and delete one Recursion-owned `/user/files` probe.
-7. Confirm Playwright can open the host and see a chat surface.
-8. Confirm the Recursion extension is enabled or report that it must be enabled manually.
+7. Confirm Playwright can open the host and see the Recursion Bar.
+8. Confirm the Recursion Last Hand dropdown, full viewer, and bridge hooks are available without sending a chat message.
 
 The selected served files should be small and representative:
 
 - `manifest.json`;
 - extension entrypoint;
-- host adapter entrypoint;
-- Recursion Bar UI module;
 - main stylesheet;
-- package/version metadata when present.
+- local fallback entries for the extension entrypoint and stylesheet when the manifest cannot enumerate them.
 
-Reports must distinguish `served-extension-match`, `served-extension-mismatch`, `served-extension-unavailable`, and `operator-confirmed-sync`.
+Reports must distinguish `served-extension-match`, `served-extension-mismatch`, and `served-extension-unavailable`. A mismatch or unavailable served extension blocks storage mutation and browser smoke in automated runs.
 
 ## Multi-User Isolation Flow
 

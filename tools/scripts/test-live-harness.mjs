@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -126,6 +127,221 @@ function createFakeSillyTavernFetch({ users = {}, failDeleteFor = [] } = {}) {
   }
 
   return { fetchImpl, state };
+}
+
+function parseCookieHeader(header = '') {
+  return Object.fromEntries(String(header || '').split(';').map((entry) => {
+    const separator = entry.indexOf('=');
+    if (separator <= 0) return null;
+    return [entry.slice(0, separator).trim(), entry.slice(separator + 1).trim()];
+  }).filter(Boolean));
+}
+
+async function readRequestJson(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  const text = Buffer.concat(chunks).toString('utf8');
+  return text ? JSON.parse(text) : {};
+}
+
+function sendJson(response, status, value, headers = {}) {
+  response.writeHead(status, { 'content-type': 'application/json', ...headers });
+  response.end(JSON.stringify(value));
+}
+
+function sendText(response, status, text, headers = {}) {
+  response.writeHead(status, { 'content-type': 'text/html; charset=utf-8', ...headers });
+  response.end(text);
+}
+
+function recursionSmokeFixtureHtml({ missingDisableHook = false } = {}) {
+  const disableHookScript = missingDisableHook
+    ? ''
+    : 'globalThis.recursionOnDisable = function recursionOnDisable() { return true; };';
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Recursion Smoke Fixture</title>
+    <link rel="stylesheet" href="/scripts/extensions/third-party/Recursion/styles/recursion.css">
+    <script id="recursion-script-probe" data-src="/scripts/extensions/third-party/Recursion/src/extension/index.js"></script>
+  </head>
+  <body>
+    <main id="chat-root">
+      <section id="recursion-root" class="recursion-root">
+        <div class="recursion-bar" data-recursion-bar role="toolbar" aria-label="Recursion">
+          <strong class="recursion-brand">Recursion</strong>
+          <span data-recursion-status>Ready - Auto</span>
+          <span data-recursion-hand-count>Hand 0</span>
+          <span data-recursion-composer>Composer Utility</span>
+          <span data-recursion-reasoner>Reasoner Auto</span>
+          <button type="button" data-recursion-actions>Actions</button>
+          <button type="button" data-recursion-hand-toggle>Hand</button>
+          <button type="button" data-recursion-viewer-toggle>Open</button>
+        </div>
+        <div data-recursion-activity-ribbon role="status">
+          <span data-recursion-ribbon-label>Ready</span>
+        </div>
+        <div data-recursion-hand-dropdown hidden>No hand has been composed for this chat.</div>
+        <dialog data-recursion-viewer aria-label="Recursion Viewer">
+          <button type="button" data-recursion-viewer-close>Close</button>
+          <h2>Recursion Viewer</h2>
+        </dialog>
+      </section>
+    </main>
+    <script>
+      globalThis.SillyTavern = { getContext: () => ({ chat: [] }) };
+      globalThis.recursionGenerationInterceptor = function recursionGenerationInterceptor(chat) { return chat; };
+      globalThis.recursionOnEnable = function recursionOnEnable() { return true; };
+      ${disableHookScript}
+      document.querySelector('[data-recursion-hand-toggle]').addEventListener('click', () => {
+        const panel = document.querySelector('[data-recursion-hand-dropdown]');
+        panel.hidden = !panel.hidden;
+      });
+      document.querySelector('[data-recursion-viewer-toggle]').addEventListener('click', () => {
+        const viewer = document.querySelector('[data-recursion-viewer]');
+        if (viewer.showModal) viewer.showModal();
+        else viewer.hidden = false;
+      });
+    </script>
+  </body>
+</html>`;
+}
+
+async function createSillyTavernSmokeFixtureServer({ serveExtension = true, mismatchManifest = false, missingDisableHook = false } = {}) {
+  const sessions = new Map();
+  let nextSession = 1;
+  const users = {
+    'recursion-soak-a': {
+      password: '',
+      files: new Map()
+    }
+  };
+  const extensionFiles = {
+    '/scripts/extensions/third-party/Recursion/manifest.json': {
+      type: 'application/json',
+      text: mismatchManifest
+        ? JSON.stringify({ ...JSON.parse(readFileSync('manifest.json', 'utf8')), version: 'stale-fixture' }, null, 2)
+        : readFileSync('manifest.json', 'utf8')
+    },
+    '/scripts/extensions/third-party/Recursion/src/extension/index.js': {
+      type: 'text/javascript',
+      text: readFileSync('src/extension/index.js', 'utf8')
+    },
+    '/scripts/extensions/third-party/Recursion/styles/recursion.css': {
+      type: 'text/css',
+      text: readFileSync('styles/recursion.css', 'utf8')
+    }
+  };
+
+  function sessionFromRequest(request) {
+    const cookies = parseCookieHeader(request.headers.cookie || '');
+    const existing = cookies.sid && sessions.get(cookies.sid);
+    if (existing) return existing;
+    const sid = `fixture-${nextSession++}`;
+    const session = { sid, csrf: `csrf-${sid}`, user: null };
+    sessions.set(sid, session);
+    return session;
+  }
+
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url, 'http://127.0.0.1');
+    const session = sessionFromRequest(request);
+
+    if (request.method === 'GET' && url.pathname === '/csrf-token') {
+      sendJson(response, 200, { token: session.csrf }, { 'set-cookie': `sid=${session.sid}; Path=/; HttpOnly` });
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/users/login') {
+      const body = await readRequestJson(request);
+      const csrf = request.headers['x-csrf-token'];
+      if (csrf !== session.csrf) {
+        sendJson(response, 403, { error: 'bad csrf' });
+        return;
+      }
+      const user = users[body.handle];
+      if (!user || user.password !== (body.password || '')) {
+        sendJson(response, 403, { error: 'bad credentials' });
+        return;
+      }
+      session.user = body.handle;
+      sendJson(response, 200, { handle: body.handle }, { 'set-cookie': `sid=${session.sid}; Path=/; HttpOnly` });
+      return;
+    }
+
+    const user = session.user ? users[session.user] : null;
+    if (request.method === 'POST' && ['/api/files/upload', '/api/files/verify', '/api/files/delete'].includes(url.pathname)) {
+      if (!user || request.headers['x-csrf-token'] !== session.csrf) {
+        sendJson(response, 403, { error: 'not authorized' });
+        return;
+      }
+      const body = await readRequestJson(request);
+      if (url.pathname === '/api/files/upload') {
+        user.files.set(body.name, Buffer.from(body.data, 'base64').toString('utf8'));
+        sendJson(response, 200, { path: `/user/files/${body.name}` });
+        return;
+      }
+      if (url.pathname === '/api/files/verify') {
+        sendJson(response, 200, Object.fromEntries((body.urls || []).map((entry) => {
+          const fileName = decodeURIComponent(String(entry).replace('/user/files/', ''));
+          return [entry, user.files.has(fileName)];
+        })));
+        return;
+      }
+      if (url.pathname === '/api/files/delete') {
+        const fileName = decodeURIComponent(String(body.path || '').replace('/user/files/', ''));
+        if (!user.files.has(fileName)) {
+          sendJson(response, 404, { error: 'missing' });
+          return;
+        }
+        user.files.delete(fileName);
+        sendJson(response, 200, {});
+        return;
+      }
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/user/files/')) {
+      if (!user) {
+        sendJson(response, 403, { error: 'not authorized' });
+        return;
+      }
+      const fileName = decodeURIComponent(url.pathname.slice('/user/files/'.length));
+      if (!user.files.has(fileName)) {
+        sendJson(response, 404, { error: 'missing' });
+        return;
+      }
+      sendText(response, 200, user.files.get(fileName), { 'content-type': 'application/json' });
+      return;
+    }
+
+    if (request.method === 'GET' && extensionFiles[url.pathname] && serveExtension) {
+      const file = extensionFiles[url.pathname];
+      sendText(response, 200, file.text, { 'content-type': file.type });
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/') {
+      if (!session.user) {
+        sendText(response, 403, '<!doctype html><title>login required</title>');
+        return;
+      }
+      sendText(response, 200, recursionSmokeFixtureHtml({ missingDisableHook }));
+      return;
+    }
+
+    sendJson(response, 404, { error: 'missing' });
+  });
+
+  await new Promise((resolveServer) => server.listen(0, '127.0.0.1', resolveServer));
+  const address = server.address();
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close() {
+      return new Promise((resolveClose) => server.close(resolveClose));
+    },
+    users
+  };
 }
 
 assertEqual(normalizeSoakUserHandle(' Recursion-Soak-A '), 'recursion-soak-a', 'user handles normalize to trimmed lowercase');
@@ -353,6 +569,123 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
+  const server = await createSillyTavernSmokeFixtureServer({ serveExtension: false });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl
+      }
+    });
+    assertEqual(report.status, 'environment-fail', 'live smoke fails when served Recursion files are unavailable');
+    assertEqual(report.result, 'served-extension-unavailable', 'missing served extension result is explicit');
+    assert(!report.browser, 'browser smoke does not run when served extension is unavailable');
+    assert(!report.storageProbe, 'storage probe does not run when served extension is unavailable');
+    assertDeepEqual([...server.users['recursion-soak-a'].files.keys()], [], 'served extension failure writes no probe files');
+    assert(report.checks.some((check) => check.name === 'sillytavern-auth' && check.status === 'pass'), 'auth gate passes before served extension failure');
+    assert(report.checks.some((check) => check.name === 'served-extension-freshness' && check.status === 'environment-fail'), 'served extension failure is recorded');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ mismatchManifest: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_CONFIRM_EXTENSION_SYNCED: '1'
+      }
+    });
+    assertEqual(report.status, 'stale-extension', 'served extension mismatch blocks live smoke even with operator confirmation');
+    assertEqual(report.result, 'served-extension-mismatch', 'served mismatch result is explicit');
+    assert(!report.browser, 'browser smoke does not run when served extension mismatch is detected');
+    assert(!report.storageProbe, 'storage probe does not run when served extension mismatch is detected');
+    assertDeepEqual([...server.users['recursion-soak-a'].files.keys()], [], 'served mismatch writes no probe files');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer();
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-live-smoke-'));
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live', '--write-artifacts'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl
+      },
+      artifactRoot
+    });
+    assertEqual(report.status, 'pass', 'live browser smoke passes against authenticated fixture');
+    assertEqual(report.result, 'browser-smoke-pass', 'live browser smoke result is explicit');
+    assertEqual(report.extension.servedStatus, 'served-extension-match', 'live smoke compares served Recursion files');
+    assertEqual(report.storageProbe.status, 'pass', 'live smoke runs storage probe before browser smoke');
+    assertEqual(report.browser.status, 'pass', 'browser result is pass');
+    assertEqual(report.browser.snapshot.rootMounted, true, 'browser smoke sees Recursion root');
+    assertEqual(report.browser.snapshot.handOpen, true, 'browser smoke opens hand dropdown');
+    assertEqual(report.browser.snapshot.viewerOpen, true, 'browser smoke opens full viewer');
+    assertEqual(report.browser.snapshot.bridge.interceptor, true, 'browser smoke sees Recursion generation bridge');
+    assertEqual(report.browser.snapshot.bridge.enableHook, true, 'browser smoke sees Recursion enable hook');
+    assertEqual(report.browser.snapshot.bridge.disableHook, true, 'browser smoke sees Recursion disable hook');
+    assertEqual(report.artifacts.liveLog, 'live-log.jsonl', 'live smoke writes live log path');
+    assertEqual(report.artifacts.servedExtension, 'host-extensions/served-extension-compare.json', 'live smoke writes served extension compare path');
+    assertEqual(report.artifacts.storageProbe, 'storage/probe.json', 'live smoke writes storage probe path');
+    assertEqual(report.artifacts.browserSnapshot, 'browser/snapshot.json', 'live smoke writes browser snapshot path');
+    assertEqual(report.artifacts.desktopScreenshot, 'screenshots/desktop.png', 'live smoke writes desktop screenshot path');
+    assertEqual(report.artifacts.phoneScreenshot, 'screenshots/phone.png', 'live smoke writes phone screenshot path');
+    assertEqual(report.artifacts.trace, 'playwright/trace.zip', 'live smoke writes trace path');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    assert(readFileSync(join(runRoot, 'report.json'), 'utf8').includes('"browser-smoke-pass"'), 'live smoke report persisted');
+    assert(readFileSync(join(runRoot, 'live-log.jsonl'), 'utf8').includes('"browser-ui"'), 'live smoke log persisted');
+    assert(readFileSync(join(runRoot, 'host-extensions', 'served-extension-compare.json'), 'utf8').includes('"served-extension-match"'), 'served extension artifact persisted');
+    assert(readFileSync(join(runRoot, 'storage', 'probe.json'), 'utf8').includes('"storage-probe-pass"'), 'storage probe artifact persisted');
+    assert(readFileSync(join(runRoot, 'browser', 'snapshot.json'), 'utf8').includes('"rootMounted": true'), 'browser snapshot artifact persisted');
+    assert(readFileSync(join(runRoot, 'screenshots', 'desktop.png')).length > 0, 'live smoke desktop screenshot written');
+    assert(readFileSync(join(runRoot, 'screenshots', 'phone.png')).length > 0, 'live smoke phone screenshot written');
+    assert(readFileSync(join(runRoot, 'playwright', 'trace.zip')).length > 0, 'live smoke trace written');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ missingDisableHook: true });
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-live-smoke-fail-'));
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live', '--write-artifacts'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_TIMEOUT_MS: '1000'
+      },
+      artifactRoot
+    });
+    assertEqual(report.status, 'fail', 'missing bridge hook fails live browser smoke');
+    assertEqual(report.result, 'browser-smoke-timeout', 'missing bridge hook fails at bridge wait');
+    assertEqual(report.storageProbe.status, 'pass', 'bridge failure happens after storage probe pass');
+    assertEqual(report.browser.artifacts.failureScreenshot, 'screenshots/failure.png', 'failed browser smoke writes failure screenshot path');
+    assertEqual(report.browser.artifacts.trace, 'playwright/trace.zip', 'failed browser smoke writes trace path');
+    assertEqual(report.artifacts.failureScreenshot, 'screenshots/failure.png', 'failed live smoke promotes failure screenshot artifact');
+    assertEqual(report.artifacts.trace, 'playwright/trace.zip', 'failed live smoke promotes trace artifact');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    assert(readFileSync(join(runRoot, 'screenshots', 'failure.png')).length > 0, 'failed live smoke screenshot written');
+    assert(readFileSync(join(runRoot, 'playwright', 'trace.zip')).length > 0, 'failed live smoke trace written');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
   const report = await runPlaywrightReadiness({
     argv: ['--dry-run'],
     env: {}
@@ -445,7 +778,7 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assert(persisted.includes('"recordType": "recursion.liveHarnessReport"'), 'artifact report uses live harness record type');
     assert(persisted.includes('"artifacts"'), 'persisted artifact report includes artifact metadata');
     assert(summary.includes('## Next Action'), 'summary includes next action section');
-    assert(summary.includes('Re-run with --live only after the browser smoke implementation is present.'), 'summary includes actionable next step');
+    assert(summary.includes('Re-run with --live to authenticate, compare served files, and check the Recursion UI with Playwright.'), 'summary includes actionable next step');
   } finally {
     rmSync(artifactRoot, { recursive: true, force: true });
   }

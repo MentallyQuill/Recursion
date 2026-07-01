@@ -81,7 +81,7 @@ $env:RECURSION_LIVE_REASONER='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts --strict
 ```
 
-Generation-enabled Utility and Reasoner smoke remain separate opt-in work. Today, setting `RECURSION_LIVE_GENERATION=1` or `RECURSION_LIVE_REASONER=1` runs the safe preflight and no-generation UI evidence, then returns `manual-required` with `generation-smoke-not-implemented` instead of claiming prompt-injection or provider-call proof. The current no-generation browser smoke must stay dedicated-user-only and must reject unsafe users before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
+Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIVE_GENERATION=1` or `RECURSION_LIVE_REASONER=1` runs the safe preflight and UI evidence, switches Recursion to Auto, wraps `setExtensionPrompt` to record only prompt-key metadata, calls the public generation bridge, and verifies prompt install, hand readiness, and prompt-packet metadata. The default browser smoke stays no-generation. Both paths must stay dedicated-user-only and must reject unsafe users before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
 
 ## Scenario Matrix
 
@@ -162,12 +162,13 @@ Observe mode may record hashes, counts, ids, and bounded labels. It must not cre
 With live generation enabled:
 
 - Set Auto mode.
-- Send a safe, short user message through the SillyTavern chat UI.
+- Trigger the public `recursionGenerationInterceptor` with a safe, short smoke message or, when the host UI path is stable, send the same message through the SillyTavern chat UI.
 - Wait for Recursion foreground activity to start.
 - Verify Utility Arbiter, card refresh, hand selection, composition, and prompt install stages appear.
 - Verify the prompt packet metadata references the active snapshot id.
 - Verify the Last Hand dropdown lists used card families.
-- Wait for host generation to continue or complete.
+- Verify prompt-install evidence through Recursion-owned prompt keys, hashes, lengths, and placement metadata. Do not store raw prompt text.
+- Wait for host generation to continue or complete when using the full chat UI path.
 - Verify the prompt packet can be cleared after the run.
 
 The smoke should fail if Recursion blocks generation indefinitely, injects stale packet metadata, stores raw model I/O, or leaves prompt keys active after cleanup.

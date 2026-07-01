@@ -154,7 +154,7 @@ function sendText(response, status, text, headers = {}) {
   response.end(text);
 }
 
-function recursionSmokeFixtureHtml({ missingDisableHook = false } = {}) {
+function recursionSmokeFixtureHtml({ missingDisableHook = false, omitPromptPacketMetadata = false, asyncUiGeneration = false } = {}) {
   const disableHookScript = missingDisableHook
     ? ''
     : 'globalThis.recursionOnDisable = function recursionOnDisable() { return true; };';
@@ -187,18 +187,45 @@ function recursionSmokeFixtureHtml({ missingDisableHook = false } = {}) {
         </div>
         <div data-recursion-hand-dropdown hidden>No hand has been composed for this chat.</div>
         <div data-recursion-settings-panel hidden>
-          <select data-recursion-setting-mode aria-label="Mode"><option value="auto">Auto</option></select>
+          <select data-recursion-setting-mode aria-label="Mode"><option value="observe">Observe</option><option value="auto">Auto</option></select>
+          <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
+          <input type="checkbox" data-recursion-provider-enabled-reasoner aria-label="Reasoner enabled">
+          <button type="button" data-recursion-settings-save>Save Settings</button>
+          <button type="button" data-recursion-reasoner-provider-save data-recursion-provider-lane="reasoner">Save Reasoner</button>
           <button type="button" data-recursion-provider-test data-recursion-provider-lane="utility">Test Provider</button>
         </div>
         <dialog data-recursion-viewer aria-label="Recursion Viewer">
           <button type="button" data-recursion-viewer-close>Close</button>
           <h2>Recursion Viewer</h2>
+          <pre data-recursion-prompt-packet>{}</pre>
         </dialog>
       </section>
     </main>
     <script>
-      globalThis.SillyTavern = { getContext: () => ({ chat: [] }) };
-      globalThis.recursionGenerationInterceptor = function recursionGenerationInterceptor(chat) { return chat; };
+      const smokeContext = {
+        chat: [],
+        prompts: {},
+        setExtensionPrompt(key, text, position, depth, scan, role) {
+          this.prompts[key] = { text, position, depth, scan, role };
+        }
+      };
+      globalThis.SillyTavern = { getContext: () => smokeContext };
+      globalThis.recursionGenerationInterceptor = async function recursionGenerationInterceptor(chat) {
+        const sourceChat = Array.isArray(chat) ? chat : smokeContext.chat;
+        smokeContext.setExtensionPrompt('recursion.sceneBrief', 'Recursion smoke scene brief.', 'IN_PROMPT', 4, false, 'SYSTEM');
+        smokeContext.setExtensionPrompt('recursion.turnBrief', 'Recursion smoke turn brief.', 'IN_CHAT', 2, false, 'SYSTEM');
+        const renderGenerationUi = () => {
+          document.querySelector('[data-recursion-status]').textContent = 'Ready - Auto';
+          document.querySelector('[data-recursion-hand-count]').textContent = 'Hand 2';
+          document.querySelector('[data-recursion-ribbon-label]').textContent = 'Recursion prompt ready.';
+          document.querySelector('[data-recursion-prompt-packet]').textContent = ${omitPromptPacketMetadata
+            ? "JSON.stringify({ packetId: '', handId: '', selectedCardRefs: [] })"
+            : "JSON.stringify({ packetId: 'packet-smoke', handId: 'hand-smoke', selectedCardRefs: ['scene-frame', 'turn-brief'] })"};
+        };
+        if (${asyncUiGeneration ? 'true' : 'false'}) setTimeout(renderGenerationUi, 650);
+        else renderGenerationUi();
+        return sourceChat;
+      };
       globalThis.recursionOnEnable = function recursionOnEnable() { return true; };
       ${disableHookScript}
       document.querySelector('[data-recursion-actions]').addEventListener('click', () => {
@@ -208,6 +235,9 @@ function recursionSmokeFixtureHtml({ missingDisableHook = false } = {}) {
       document.querySelector('[data-recursion-settings-toggle]').addEventListener('click', () => {
         document.querySelector('[data-recursion-action-menu]').hidden = true;
         document.querySelector('[data-recursion-settings-panel]').hidden = false;
+      });
+      document.querySelector('[data-recursion-settings-save]').addEventListener('click', () => {
+        document.querySelector('[data-recursion-status]').textContent = 'Ready - Auto';
       });
       document.querySelector('[data-recursion-hand-toggle]').addEventListener('click', () => {
         const panel = document.querySelector('[data-recursion-hand-dropdown]');
@@ -223,7 +253,14 @@ function recursionSmokeFixtureHtml({ missingDisableHook = false } = {}) {
 </html>`;
 }
 
-async function createSillyTavernSmokeFixtureServer({ serveExtension = true, mismatchManifest = false, staleModule = null, missingDisableHook = false } = {}) {
+async function createSillyTavernSmokeFixtureServer({
+  serveExtension = true,
+  mismatchManifest = false,
+  staleModule = null,
+  missingDisableHook = false,
+  omitPromptPacketMetadata = false,
+  asyncUiGeneration = false
+} = {}) {
   const sessions = new Map();
   let nextSession = 1;
   const users = {
@@ -358,7 +395,7 @@ async function createSillyTavernSmokeFixtureServer({ serveExtension = true, mism
         sendText(response, 403, '<!doctype html><title>login required</title>');
         return;
       }
-      sendText(response, 200, recursionSmokeFixtureHtml({ missingDisableHook }));
+      sendText(response, 200, recursionSmokeFixtureHtml({ missingDisableHook, omitPromptPacketMetadata, asyncUiGeneration }));
       return;
     }
 
@@ -724,10 +761,50 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
         RECURSION_LIVE_GENERATION: '1'
       }
     });
-    assertEqual(report.status, 'manual-required', 'generation-enabled smoke does not pass as no-generation evidence');
-    assertEqual(report.result, 'generation-smoke-not-implemented', 'generation-enabled smoke gap is explicit');
-    assertEqual(report.browser.status, 'pass', 'generation smoke still proves no-generation UI preflight');
-    assert(report.checks.some((check) => check.name === 'generation-live-smoke' && check.status === 'manual-required'), 'generation smoke check records manual-required status');
+    assertEqual(report.status, 'pass', 'generation-enabled smoke passes when prompt bridge proof succeeds');
+    assertEqual(report.result, 'generation-smoke-pass', 'generation-enabled smoke result is explicit');
+    assertEqual(report.browser.status, 'pass', 'generation smoke still proves browser UI preflight');
+    assertEqual(report.browser.snapshot.generation.promptInstalled, true, 'generation smoke records Recursion prompt install');
+    assertEqual(report.browser.snapshot.generation.handReady, true, 'generation smoke records a composed hand');
+    assertEqual(report.browser.snapshot.generation.promptPacketVisible, true, 'generation smoke sees prompt packet metadata');
+    assert(report.checks.some((check) => check.name === 'generation-live-smoke' && check.status === 'pass'), 'generation smoke check records pass status');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ asyncUiGeneration: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      }
+    });
+    assertEqual(report.status, 'pass', 'generation smoke waits for delayed UI-rendered prompt evidence');
+    assertEqual(report.browser.snapshot.generation.promptPacketVisible, true, 'delayed UI prompt metadata is eventually observed');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ omitPromptPacketMetadata: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1',
+        RECURSION_LIVE_TIMEOUT_MS: '1000'
+      }
+    });
+    assertEqual(report.status, 'fail', 'generation smoke fails without non-empty prompt packet metadata');
+    assertEqual(report.result, 'generation-smoke-assertion-failed', 'missing packet metadata failure is explicit');
   } finally {
     await server.close();
   }

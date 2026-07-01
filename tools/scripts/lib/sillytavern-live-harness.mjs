@@ -788,6 +788,7 @@ function browserSnapshotScript() {
       settingsPanelOpen: document.querySelector('[data-recursion-settings-panel]')?.hidden === false,
       providerTestVisible: visible('[data-recursion-provider-test]'),
       viewerOpen: Boolean(document.querySelector('[data-recursion-viewer]')?.open) || document.querySelector('[data-recursion-viewer]')?.hidden === false,
+      generation: globalThis.__recursionSmokeGeneration || null,
       bridge: {
         interceptor: typeof globalThis.recursionGenerationInterceptor === 'function',
         enableHook: typeof globalThis.recursionOnEnable === 'function',
@@ -809,12 +810,171 @@ function browserSnapshotScript() {
   };
 }
 
+function generationRecorderInstallScript() {
+  return () => {
+    const hashText = (value) => {
+      let hash = 0x811c9dc5;
+      for (const char of String(value || '')) {
+        hash ^= char.codePointAt(0);
+        hash = Math.imul(hash, 0x01000193);
+      }
+      return (hash >>> 0).toString(16).padStart(8, '0');
+    };
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    if (!context || typeof context.setExtensionPrompt !== 'function') {
+      globalThis.__recursionSmokePromptRecorder = {
+        ok: false,
+        reason: 'setExtensionPrompt-unavailable',
+        events: []
+      };
+      return globalThis.__recursionSmokePromptRecorder;
+    }
+    if (!context.__recursionSmokeOriginalSetExtensionPrompt) {
+      context.__recursionSmokeOriginalSetExtensionPrompt = context.setExtensionPrompt.bind(context);
+    }
+    context.__recursionSmokePromptEvents = [];
+    context.setExtensionPrompt = (...args) => {
+      const [key, text, position, depth, scan, role] = args;
+      const promptKey = String(key || '');
+      if (promptKey.startsWith('recursion.')) {
+        const promptText = String(text || '');
+        context.__recursionSmokePromptEvents.push({
+          key: promptKey,
+          textHash: hashText(promptText),
+          textLength: promptText.length,
+          cleared: promptText.length === 0,
+          position: String(position ?? ''),
+          depth: Number(depth) || 0,
+          scan: Boolean(scan),
+          role: String(role ?? '')
+        });
+      }
+      return context.__recursionSmokeOriginalSetExtensionPrompt(...args);
+    };
+    globalThis.__recursionSmokePromptRecorder = {
+      ok: true,
+      reason: 'installed',
+      events: context.__recursionSmokePromptEvents
+    };
+    return globalThis.__recursionSmokePromptRecorder;
+  };
+}
+
+function generationTriggerScript({ reasonerRequested = false } = {}) {
+  return async ({ reasonerRequested: pageReasonerRequested }) => {
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const startedAt = new Date().toISOString();
+    const smokeMessage = {
+      mesid: Array.isArray(context?.chat) ? context.chat.length : 0,
+      is_user: true,
+      name: 'Recursion Smoke',
+      mes: pageReasonerRequested
+        ? 'Recursion live smoke: exercise the Reasoner-capable prompt bridge safely.'
+        : 'Recursion live smoke: exercise the Utility prompt bridge safely.'
+    };
+    if (Array.isArray(context?.chat)) context.chat.push(smokeMessage);
+    let interceptorOk = false;
+    let interceptorError = '';
+    try {
+      if (typeof globalThis.recursionGenerationInterceptor !== 'function') {
+        throw new Error('recursionGenerationInterceptor unavailable');
+      }
+      await globalThis.recursionGenerationInterceptor(context?.chat || [smokeMessage]);
+      interceptorOk = true;
+    } catch (error) {
+      interceptorError = String(error?.message || error || 'Generation interceptor failed.');
+    }
+    globalThis.__recursionSmokeGenerationBase = {
+      requested: true,
+      reasonerRequested: Boolean(pageReasonerRequested),
+      startedAt,
+      interceptorOk,
+      interceptorError,
+      promptRecorderOk: globalThis.__recursionSmokePromptRecorder?.ok === true
+    };
+    return globalThis.__recursionSmokeGenerationBase;
+  };
+}
+
+function generationEvidenceScript() {
+  return () => {
+    const base = globalThis.__recursionSmokeGenerationBase || {};
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const promptEvents = Array.isArray(context?.__recursionSmokePromptEvents)
+      ? context.__recursionSmokePromptEvents.slice()
+      : [];
+    const handText = String(document.querySelector('[data-recursion-hand-count]')?.textContent || '');
+    const statusText = String(document.querySelector('[data-recursion-status]')?.textContent || '');
+    const packetNode = document.querySelector('[data-recursion-prompt-packet]');
+    const promptInstalled = promptEvents.some((entry) => entry && entry.cleared === false && String(entry.key || '').startsWith('recursion.'));
+    const promptKeys = [...new Set(promptEvents
+      .filter((entry) => entry && String(entry.key || '').startsWith('recursion.'))
+      .map((entry) => String(entry.key)))];
+    const packetText = String(packetNode?.textContent || '').trim();
+    let packet = null;
+    try {
+      packet = packetText ? JSON.parse(packetText) : null;
+    } catch {
+      packet = null;
+    }
+    const packetId = String(packet?.packetId || '').trim();
+    const handId = String(packet?.handId || '').trim();
+    const selectedCardRefs = Array.isArray(packet?.selectedCardRefs) ? packet.selectedCardRefs : [];
+    const generation = {
+      ...base,
+      requested: true,
+      completedAt: new Date().toISOString(),
+      interceptorOk: base.interceptorOk === true,
+      interceptorError: String(base.interceptorError || ''),
+      promptRecorderOk: base.promptRecorderOk === true,
+      promptInstalled,
+      promptKeys,
+      promptEventCount: promptEvents.length,
+      promptEvents: promptEvents.slice(-12),
+      handText,
+      handReady: /\bHand\s+[1-9]\d*/i.test(handText),
+      statusText,
+      ready: /Ready/i.test(statusText),
+      promptPacketVisible: Boolean(packetId && handId && selectedCardRefs.length > 0),
+      promptPacket: packet
+        ? {
+            packetId,
+            handId,
+            selectedCardRefs: selectedCardRefs.map((entry) => String(entry)).filter(Boolean).slice(0, 12)
+          }
+        : null
+    };
+    globalThis.__recursionSmokeGeneration = generation;
+    return generation;
+  };
+}
+
 async function runBrowserUiSmoke({
   baseUrl,
   cookies = [],
   artifactLocation = null,
   timeoutMs = 30000,
-  env = {}
+  env = {},
+  generationRequested = false,
+  reasonerRequested = false
 } = {}) {
   const consoleMessages = [];
   const pageErrors = [];
@@ -893,6 +1053,18 @@ async function runBrowserUiSmoke({
         && Boolean(document.querySelector('[data-recursion-provider-test]'));
     }, null, { timeout: timeoutMs });
 
+    if (generationRequested) {
+      await page.evaluate(generationRecorderInstallScript());
+      await page.locator('[data-recursion-setting-mode]').selectOption('auto', { timeout: timeoutMs });
+      if (reasonerRequested) {
+        await page.locator('[data-recursion-setting-reasoner]').selectOption('always', { timeout: timeoutMs }).catch(() => {});
+        await page.locator('[data-recursion-provider-enabled-reasoner]').check({ timeout: timeoutMs }).catch(() => {});
+        await page.locator('[data-recursion-reasoner-provider-save]').click({ timeout: timeoutMs }).catch(() => {});
+      }
+      await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
+      await page.waitForFunction(() => /Auto/i.test(document.querySelector('[data-recursion-status]')?.textContent || ''), null, { timeout: timeoutMs });
+    }
+
     await actionsButton.click({ timeout: timeoutMs });
     await page.waitForFunction(() => document.querySelector('[data-recursion-action-menu]')?.hidden === false, null, { timeout: timeoutMs });
 
@@ -907,11 +1079,72 @@ async function runBrowserUiSmoke({
       return Boolean(viewer && (viewer.open || viewer.hidden === false));
     }, null, { timeout: timeoutMs });
 
+    let generation = null;
+    if (generationRequested) {
+      generation = await page.evaluate(generationTriggerScript({ reasonerRequested }), { reasonerRequested });
+      try {
+        await page.waitForFunction(() => {
+          const generation = (() => {
+            const base = globalThis.__recursionSmokeGenerationBase || {};
+            const context = (() => {
+              try {
+                return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+              } catch {
+                return null;
+              }
+            })();
+            const promptEvents = Array.isArray(context?.__recursionSmokePromptEvents)
+              ? context.__recursionSmokePromptEvents.slice()
+              : [];
+            const handText = String(document.querySelector('[data-recursion-hand-count]')?.textContent || '');
+            const packetText = String(document.querySelector('[data-recursion-prompt-packet]')?.textContent || '').trim();
+            let packet = null;
+            try {
+              packet = packetText ? JSON.parse(packetText) : null;
+            } catch {
+              packet = null;
+            }
+            const promptInstalled = promptEvents.some((entry) => entry && entry.cleared === false && String(entry.key || '').startsWith('recursion.'));
+            const packetId = String(packet?.packetId || '').trim();
+            const handId = String(packet?.handId || '').trim();
+            const selectedCardRefs = Array.isArray(packet?.selectedCardRefs) ? packet.selectedCardRefs : [];
+            const current = {
+              interceptorOk: base.interceptorOk === true,
+              promptInstalled,
+              handReady: /\bHand\s+[1-9]\d*/i.test(handText),
+              promptPacketVisible: Boolean(packetId && handId && selectedCardRefs.length > 0)
+            };
+            globalThis.__recursionSmokeGeneration = { ...(globalThis.__recursionSmokeGeneration || {}), ...current };
+            return current;
+          })();
+          return generation.interceptorOk === true
+            && generation.promptInstalled === true
+            && generation.handReady === true
+            && generation.promptPacketVisible === true;
+        }, null, { timeout: timeoutMs });
+      } catch (error) {
+        const failed = new Error('Recursion generation bridge assertion failed.');
+        failed.status = 'fail';
+        failed.result = 'generation-smoke-assertion-failed';
+        failed.cause = error;
+        failed.generation = await page.evaluate(generationEvidenceScript()).catch(() => generation);
+        throw failed;
+      }
+      generation = await page.evaluate(generationEvidenceScript());
+    }
+
     const snapshot = await page.evaluate(browserSnapshotScript());
     if (!snapshot.rootMounted || !snapshot.barVisible || !snapshot.bridge?.interceptor || !snapshot.bridge?.enableHook || !snapshot.bridge?.disableHook) {
       const error = new Error('Recursion UI bridge assertion failed.');
       error.status = 'fail';
       error.result = 'browser-smoke-assertion-failed';
+      throw error;
+    }
+    if (generationRequested && (!snapshot.generation?.interceptorOk || !snapshot.generation?.promptInstalled || !snapshot.generation?.handReady || !snapshot.generation?.promptPacketVisible)) {
+      const error = new Error('Recursion generation bridge assertion failed.');
+      error.status = 'fail';
+      error.result = 'generation-smoke-assertion-failed';
+      error.generation = generation || snapshot.generation;
       throw error;
     }
     if (artifactLocation) {
@@ -929,7 +1162,7 @@ async function runBrowserUiSmoke({
     await context.close();
     return {
       status: 'pass',
-      result: 'browser-smoke-pass',
+      result: generationRequested ? 'generation-smoke-pass' : 'browser-smoke-pass',
       snapshot,
       consoleMessages: consoleMessages.slice(-20),
       pageErrors: pageErrors.slice(-20),
@@ -1669,12 +1902,16 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
           setReportStatus(report, storageProbe.status, storageProbe.result);
           report.nextAction = 'Create dedicated recursion-soak-* users, verify credentials and file-storage access, then rerun live smoke.';
         } else {
+          const generationRequested = env.RECURSION_LIVE_GENERATION === '1' || env.RECURSION_LIVE_REASONER === '1';
+          const reasonerRequested = env.RECURSION_LIVE_REASONER === '1';
           const browserResult = await runBrowserUiSmoke({
             baseUrl: env.SILLYTAVERN_BASE_URL,
             cookies: session.playwrightCookies(),
             artifactLocation: artifactLocation?.ok ? artifactLocation : null,
             timeoutMs,
-            env
+            env,
+            generationRequested,
+            reasonerRequested
           });
           report.browser = browserResult;
           if (browserResult.artifacts && Object.keys(browserResult.artifacts).length > 0) {
@@ -1703,6 +1940,19 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
               actionMenuOpen: browserResult.snapshot?.actionMenuOpen,
               settingsPanelOpen: browserResult.snapshot?.settingsPanelOpen,
               providerTestVisible: browserResult.snapshot?.providerTestVisible,
+              generation: browserResult.snapshot?.generation
+                ? {
+                    requested: browserResult.snapshot.generation.requested,
+                    reasonerRequested: browserResult.snapshot.generation.reasonerRequested,
+                    interceptorOk: browserResult.snapshot.generation.interceptorOk,
+                    promptRecorderOk: browserResult.snapshot.generation.promptRecorderOk,
+                    promptInstalled: browserResult.snapshot.generation.promptInstalled,
+                    handReady: browserResult.snapshot.generation.handReady,
+                    promptPacketVisible: browserResult.snapshot.generation.promptPacketVisible,
+                    promptKeys: browserResult.snapshot.generation.promptKeys,
+                    promptEventCount: browserResult.snapshot.generation.promptEventCount
+                  }
+                : null,
               handOpen: browserResult.snapshot?.handOpen,
               viewerOpen: browserResult.snapshot?.viewerOpen,
               bridge: browserResult.snapshot?.bridge,
@@ -1717,26 +1967,40 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
             actionMenuOpen: browserResult.snapshot?.actionMenuOpen,
             settingsPanelOpen: browserResult.snapshot?.settingsPanelOpen,
             providerTestVisible: browserResult.snapshot?.providerTestVisible,
+            generation: browserResult.snapshot?.generation
+              ? {
+                  requested: browserResult.snapshot.generation.requested,
+                  reasonerRequested: browserResult.snapshot.generation.reasonerRequested,
+                  promptInstalled: browserResult.snapshot.generation.promptInstalled,
+                  handReady: browserResult.snapshot.generation.handReady,
+                  promptPacketVisible: browserResult.snapshot.generation.promptPacketVisible
+                }
+              : null,
             handOpen: browserResult.snapshot?.handOpen,
             viewerOpen: browserResult.snapshot?.viewerOpen
           });
-          const generationRequested = env.RECURSION_LIVE_GENERATION === '1' || env.RECURSION_LIVE_REASONER === '1';
           if (browserResult.status === 'pass' && generationRequested) {
             addCheck(report, {
               name: 'generation-live-smoke',
-              status: 'manual-required',
-              summary: 'Generation-enabled live smoke is not implemented in this no-generation runner.',
+              status: browserResult.snapshot?.generation?.promptInstalled ? 'pass' : 'fail',
+              summary: browserResult.snapshot?.generation?.promptInstalled
+                ? 'Generation bridge installed a Recursion prompt packet through the live extension.'
+                : 'Generation bridge did not produce prompt-install evidence.',
               details: {
                 liveGeneration: env.RECURSION_LIVE_GENERATION === '1',
-                liveReasoner: env.RECURSION_LIVE_REASONER === '1'
+                liveReasoner: env.RECURSION_LIVE_REASONER === '1',
+                generation: browserResult.snapshot?.generation
               }
             });
-            event('generation-live-smoke', 'manual-required', 'generation-smoke-not-implemented', {
+            event('generation-live-smoke', browserResult.snapshot?.generation?.promptInstalled ? 'pass' : 'fail', browserResult.result, {
               liveGeneration: env.RECURSION_LIVE_GENERATION === '1',
-              liveReasoner: env.RECURSION_LIVE_REASONER === '1'
+              liveReasoner: env.RECURSION_LIVE_REASONER === '1',
+              generation: browserResult.snapshot?.generation
             });
-            setReportStatus(report, 'manual-required', 'generation-smoke-not-implemented');
-            report.nextAction = 'No-generation UI smoke passed. Implement and run the generation-enabled live smoke before claiming prompt-injection or provider-call proof.';
+            setReportStatus(report, browserResult.snapshot?.generation?.promptInstalled ? 'pass' : 'fail', browserResult.result);
+            report.nextAction = browserResult.snapshot?.generation?.promptInstalled
+              ? 'Generation-enabled Recursion bridge smoke passed. Inspect sanitized prompt-key evidence and screenshots before treating this as host-quality proof.'
+              : 'Inspect generation bridge evidence, prompt recorder status, screenshots, and console/page errors.';
           } else {
             setReportStatus(report, browserResult.status, browserResult.result);
             report.nextAction = browserResult.status === 'pass'

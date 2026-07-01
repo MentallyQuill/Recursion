@@ -166,6 +166,7 @@ function recursionSmokeFixtureHtml({
   observeInjectsPrompt = false,
   observeModeSave = 'sync',
   unclearedPromptOnDisable = false,
+  staleModeChip = false,
   sendSurface = 'complete'
 } = {}) {
   const disableHookScript = missingDisableHook
@@ -184,7 +185,8 @@ function recursionSmokeFixtureHtml({
       <section id="recursion-root" class="recursion-root">
         <div class="recursion-bar" data-recursion-bar role="toolbar" aria-label="Recursion">
           <strong class="recursion-brand">Recursion</strong>
-          <span data-recursion-status>Ready - Auto</span>
+          <span data-recursion-status>Ready</span>
+          <span data-recursion-mode>Auto</span>
           <span data-recursion-hand-count>Hand 0</span>
           <span data-recursion-composer>Composer Utility</span>
           <span data-recursion-reasoner>Reasoner Auto</span>
@@ -237,7 +239,10 @@ function recursionSmokeFixtureHtml({
         const sourceChat = Array.isArray(chat) ? chat : smokeContext.chat;
         const activeMode = smokeContext.mode || document.querySelector('[data-recursion-setting-mode]')?.value || 'auto';
         const renderGenerationUi = () => {
-          document.querySelector('[data-recursion-status]').textContent = activeMode === 'observe' ? 'Ready - Observe' : 'Ready - Auto';
+          document.querySelector('[data-recursion-status]').textContent = 'Ready';
+          if (!${staleModeChip ? 'true' : 'false'}) {
+            document.querySelector('[data-recursion-mode]').textContent = activeMode === 'observe' ? 'Observe only' : (activeMode === 'off' ? 'Off' : 'Auto');
+          }
           document.querySelector('[data-recursion-hand-count]').textContent = 'Hand 2';
           document.querySelector('[data-recursion-ribbon-label]').textContent = activeMode === 'observe' ? 'Observe mode: hand preview ready. No prompt injected.' : 'Recursion prompt ready.';
           document.querySelector('[data-recursion-prompt-packet]').textContent = ${omitPromptPacketMetadata
@@ -303,7 +308,10 @@ function recursionSmokeFixtureHtml({
               smokeContext.setExtensionPrompt(key, '', 'IN_PROMPT', 0, false, 'SYSTEM');
             }
           }
-          document.querySelector('[data-recursion-status]').textContent = mode === 'off' ? 'Ready - Off' : (mode === 'observe' ? 'Ready - Observe' : 'Ready - Auto');
+          document.querySelector('[data-recursion-status]').textContent = 'Ready';
+          if (!${staleModeChip ? 'true' : 'false'}) {
+            document.querySelector('[data-recursion-mode]').textContent = mode === 'off' ? 'Off' : (mode === 'observe' ? 'Observe only' : 'Auto');
+          }
         };
         if ('${observeModeSave}' === 'noop' && mode === 'observe') return;
         if ('${observeModeSave}' === 'async' && mode === 'observe') setTimeout(applyMode, 150);
@@ -342,6 +350,7 @@ async function createSillyTavernSmokeFixtureServer({
   observeInjectsPrompt = false,
   observeModeSave = 'sync',
   unclearedPromptOnDisable = false,
+  staleModeChip = false,
   sendSurface = 'complete'
 } = {}) {
   const sessions = new Map();
@@ -489,6 +498,7 @@ async function createSillyTavernSmokeFixtureServer({
         observeInjectsPrompt,
         observeModeSave,
         unclearedPromptOnDisable,
+        staleModeChip,
         sendSurface
       }));
       return;
@@ -815,6 +825,8 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.storageProbe.status, 'pass', 'live smoke runs storage probe before browser smoke');
     assertEqual(report.browser.status, 'pass', 'browser result is pass');
     assertEqual(report.browser.snapshot.rootMounted, true, 'browser smoke sees Recursion root');
+    assertEqual(report.browser.snapshot.statusText, 'Ready', 'browser smoke reads runtime health separately');
+    assertEqual(report.browser.snapshot.modeText, 'Off', 'browser smoke reads mode chip separately');
     assertEqual(report.browser.snapshot.handOpen, true, 'browser smoke opens hand dropdown');
     assertEqual(report.browser.snapshot.actionMenuOpen, true, 'browser smoke opens actions menu');
     assertEqual(report.browser.snapshot.settingsPanelOpen, true, 'browser smoke opens settings panel');
@@ -851,6 +863,25 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assert(readFileSync(join(runRoot, 'playwright', 'trace.zip')).length > 0, 'live smoke trace written');
   } finally {
     rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ staleModeChip: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_TIMEOUT_MS: '1000'
+      }
+    });
+    assertEqual(report.status, 'fail', 'live browser smoke fails when mode chip is stale');
+    assertEqual(report.result, 'browser-mode-smoke-failed', 'stale mode chip failure uses mode smoke result');
+    assertEqual(report.browser.snapshot.modeSmoke?.ok, false, 'stale mode chip does not pass via context or select fallback');
+  } finally {
     await server.close();
   }
 }

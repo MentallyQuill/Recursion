@@ -843,6 +843,7 @@ function browserSnapshotScript() {
       rootMounted: Boolean(document.querySelector('#recursion-root')),
       barVisible: visible('[data-recursion-bar]'),
       statusText: text('[data-recursion-status]'),
+      modeText: text('[data-recursion-mode]'),
       handText: text('[data-recursion-hand-count]'),
       composerText: text('[data-recursion-composer]'),
       reasonerText: text('[data-recursion-reasoner]'),
@@ -913,12 +914,12 @@ function modeSmokeReadStepScript() {
       }
     })();
     const statusText = String(document.querySelector('[data-recursion-status]')?.textContent || '').replace(/\s+/g, ' ').trim();
+    const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').replace(/\s+/g, ' ').trim();
     const selectedValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '').toLowerCase();
-    const contextMode = String(context?.mode || '').toLowerCase();
-    const statusLower = statusText.toLowerCase();
-    const observedMode = ['off', 'observe', 'auto'].includes(contextMode)
-      ? contextMode
-      : (/off/.test(statusLower) ? 'off' : (/observe/.test(statusLower) ? 'observe' : (/auto/.test(statusLower) ? 'auto' : selectedValue || 'unknown')));
+    const modeLower = modeText.toLowerCase();
+    const observedMode = /off/.test(modeLower)
+      ? 'off'
+      : (/observe/.test(modeLower) ? 'observe' : (/auto/.test(modeLower) ? 'auto' : 'unknown'));
     const promptKeys = Object.entries(context?.prompts || {})
       .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
       .map(([key]) => String(key))
@@ -929,6 +930,7 @@ function modeSmokeReadStepScript() {
       observedMode,
       modeApplied: selectedValue === mode && observedMode === mode,
       statusText,
+      modeText,
       promptCleared: promptKeys.length === 0,
       promptKeys
     };
@@ -945,11 +947,10 @@ function modeSmokeWaitScript() {
       }
     })();
     const selectedValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '').toLowerCase();
-    const statusText = String(document.querySelector('[data-recursion-status]')?.textContent || '').toLowerCase();
-    const contextMode = String(context?.mode || '').toLowerCase();
-    const observedMode = ['off', 'observe', 'auto'].includes(contextMode)
-      ? contextMode
-      : (/off/.test(statusText) ? 'off' : (/observe/.test(statusText) ? 'observe' : (/auto/.test(statusText) ? 'auto' : selectedValue || 'unknown')));
+    const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').toLowerCase();
+    const observedMode = /off/.test(modeText)
+      ? 'off'
+      : (/observe/.test(modeText) ? 'observe' : (/auto/.test(modeText) ? 'auto' : 'unknown'));
     const promptKeys = Object.entries(context?.prompts || {})
       .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
       .map(([key]) => String(key));
@@ -1029,12 +1030,11 @@ function generationObserveProofScript() {
       ? context.__recursionSmokePromptEvents.slice()
       : [];
     const observedMode = (() => {
-      const selectValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '').toLowerCase();
-      const statusText = String(document.querySelector('[data-recursion-status]')?.textContent || '').toLowerCase();
-      const contextMode = String(context?.mode || '').toLowerCase();
-      if (contextMode === 'observe' || /observe/.test(statusText)) return 'observe';
-      if (contextMode === 'auto' || /auto/.test(statusText)) return 'auto';
-      return selectValue || 'unknown';
+      const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').toLowerCase();
+      if (/observe/.test(modeText)) return 'observe';
+      if (/auto/.test(modeText)) return 'auto';
+      if (/off/.test(modeText)) return 'off';
+      return 'unknown';
     })();
     const modeApplied = observedMode === 'observe';
 
@@ -1298,6 +1298,7 @@ function generationEvidenceScript() {
       : [];
     const handText = String(document.querySelector('[data-recursion-hand-count]')?.textContent || '');
     const statusText = String(document.querySelector('[data-recursion-status]')?.textContent || '');
+    const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '');
     const packetNode = document.querySelector('[data-recursion-prompt-packet]');
     const promptInstalled = promptEvents.some((entry) => entry && entry.cleared === false && String(entry.key || '').startsWith('recursion.'));
     const promptKeys = [...new Set(promptEvents
@@ -1356,6 +1357,7 @@ function generationEvidenceScript() {
       handText,
       handReady: /\bHand\s+[1-9]\d*/i.test(handText),
       statusText,
+      modeText,
       ready: /Ready/i.test(statusText),
       promptPacketVisible,
       observeProof: base.observeProof || globalThis.__recursionSmokeObserveProof || null,
@@ -1512,6 +1514,7 @@ async function runRecursionModeSmoke(page, timeoutMs) {
       observedMode: String(step.observedMode || ''),
       modeApplied: step.modeApplied === true,
       statusText: sanitizeHarnessText(step.statusText || '', 160),
+      modeText: sanitizeHarnessText(step.modeText || '', 160),
       promptCleared: step.promptCleared === true,
       promptKeys: Array.isArray(step.promptKeys) ? step.promptKeys.slice(0, 24) : []
     }))
@@ -1641,9 +1644,9 @@ async function runBrowserUiSmoke({
       await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
       try {
         await page.waitForFunction(() => {
-          const statusText = String(document.querySelector('[data-recursion-status]')?.textContent || '');
+          const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '');
           const selectValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '');
-          return selectValue === 'observe' && /Observe/i.test(statusText);
+          return selectValue === 'observe' && /Observe/i.test(modeText);
         }, null, { timeout: timeoutMs });
       } catch (error) {
         const observeProof = await page.evaluate(() => {
@@ -1654,12 +1657,10 @@ async function runBrowserUiSmoke({
               return null;
             }
           })();
-          const statusText = String(document.querySelector('[data-recursion-status]')?.textContent || '').toLowerCase();
-          const selectValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '').toLowerCase();
-          const contextMode = String(context?.mode || '').toLowerCase();
-          const observedMode = contextMode === 'observe' || /observe/.test(statusText)
+          const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').toLowerCase();
+          const observedMode = /observe/.test(modeText)
             ? 'observe'
-            : (contextMode === 'auto' || /auto/.test(statusText) ? 'auto' : (selectValue || 'unknown'));
+            : (/auto/.test(modeText) ? 'auto' : (/off/.test(modeText) ? 'off' : 'unknown'));
           const promptKeys = Object.entries(context?.prompts || {})
             .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
             .map(([key]) => String(key));
@@ -1722,7 +1723,7 @@ async function runBrowserUiSmoke({
         await page.locator('[data-recursion-reasoner-provider-save]').click({ timeout: timeoutMs }).catch(() => {});
       }
       await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
-      await page.waitForFunction(() => /Auto/i.test(document.querySelector('[data-recursion-status]')?.textContent || ''), null, { timeout: timeoutMs });
+      await page.waitForFunction(() => /Auto/i.test(document.querySelector('[data-recursion-mode]')?.textContent || ''), null, { timeout: timeoutMs });
     }
 
     await actionsButton.click({ timeout: timeoutMs });
@@ -2076,6 +2077,7 @@ function activityLatestRunFromReport(report, liveLog, browserResult) {
             rootMounted: browserResult.snapshot?.rootMounted === true,
             barVisible: browserResult.snapshot?.barVisible === true,
             statusText: browserResult.snapshot?.statusText || '',
+            modeText: browserResult.snapshot?.modeText || '',
             handText: browserResult.snapshot?.handText || '',
             ribbonText: browserResult.snapshot?.ribbonText || '',
             generation: browserGeneration

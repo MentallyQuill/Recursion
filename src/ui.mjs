@@ -118,6 +118,13 @@ function laneLabel(value, fallback = 'Utility') {
   return fallback;
 }
 
+function modeLabel(value) {
+  const mode = cleanText(value, 'observe').toLowerCase();
+  if (mode === 'off') return 'Off';
+  if (mode === 'auto') return 'Auto';
+  return 'Observe only';
+}
+
 function cardSummary(card) {
   const source = asObject(card);
   return cleanText(source.summary || source.promptText || source.text || source.id, 'Untitled card');
@@ -168,8 +175,8 @@ export function createRecursionViewModel(view = {}) {
 
   return {
     mode,
-    modeLabel: titleCase(mode, 'Observe'),
-    statusText: `${ready ? 'Ready' : 'Working'} - ${titleCase(mode, 'Observe')}`,
+    modeLabel: modeLabel(mode),
+    runtimeHealthLabel: ready ? 'Ready' : 'Working',
     handCount: cards.length,
     activityLabel: activityLabel(activity),
     activitySeverity: normalizeSeverity(activity.severity),
@@ -578,8 +585,8 @@ function renderViewer(viewer, view, model) {
   ]);
   viewer.appendChild(header);
   appendViewerSection(viewer, 'Now', {
-    status: model.statusText,
-    mode: model.mode,
+    status: model.runtimeHealthLabel,
+    mode: model.modeLabel,
     composer: model.composerLabel,
     reasoner: model.reasonerState,
     activity: model.activityLabel
@@ -606,6 +613,7 @@ function buildRoot() {
   }, [
     el('strong', { className: 'recursion-brand', text: 'Recursion' }),
     el('span', { className: 'recursion-status recursion-chip', dataset: { recursionStatus: '' } }),
+    el('span', { className: 'recursion-chip recursion-mode-chip', dataset: { recursionMode: '' } }),
     el('span', { className: 'recursion-chip', dataset: { recursionHandCount: '' } }),
     el('span', { className: 'recursion-chip', dataset: { recursionComposer: '' } }),
     el('span', { className: 'recursion-chip recursion-reasoner-chip', dataset: { recursionReasoner: '' } }),
@@ -918,7 +926,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function update() {
     const view = currentView();
     const model = createRecursionViewModel(view);
-    setText(root, '[data-recursion-status]', model.statusText);
+    setText(root, '[data-recursion-status]', model.runtimeHealthLabel);
+    setText(root, '[data-recursion-mode]', model.modeLabel);
     setText(root, '[data-recursion-hand-count]', `Hand ${model.handCount}`);
     setText(root, '[data-recursion-composer]', model.composerLabel);
     setText(root, '[data-recursion-reasoner]', model.reasonerLabel);

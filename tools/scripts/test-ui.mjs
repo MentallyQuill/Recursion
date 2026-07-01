@@ -8,7 +8,9 @@ const model = createRecursionViewModel({
   activity: { phase: 'settled', label: 'Recursion prompt ready.', severity: 'success' },
   lastPacket: { diagnostics: { composerLane: 'utility' } }
 });
-assertEqual(model.statusText, 'Ready - Auto', 'status text built');
+assertEqual(model.runtimeHealthLabel, 'Ready', 'runtime health label built');
+assertEqual(model.modeLabel, 'Auto', 'mode label built');
+assertEqual(model.statusText, undefined, 'view model does not expose combined runtime/mode status');
 assertEqual(model.handCount, 2, 'hand count built');
 assertEqual(model.composerLabel, 'Utility', 'composer label built');
 
@@ -18,7 +20,8 @@ assertEqual(activityLabel({ label: 'Custom visible label.', phase: 'unknown' }),
 assertEqual(activityLabel({ phase: 'unknown' }), 'Recursion is working...', 'unknown phase label falls back');
 
 const fallbackModel = createRecursionViewModel({});
-assertEqual(fallbackModel.statusText, 'Ready - Observe', 'missing view defaults to observe ready status');
+assertEqual(fallbackModel.runtimeHealthLabel, 'Ready', 'missing view defaults to ready runtime health');
+assertEqual(fallbackModel.modeLabel, 'Observe only', 'missing view defaults to observe only mode');
 assertEqual(fallbackModel.handCount, 0, 'missing hand defaults to zero');
 assertEqual(fallbackModel.composerLabel, 'Utility', 'missing composer defaults to Utility');
 assertEqual(fallbackModel.reasonerState, 'Unavailable', 'missing reasoner provider is unavailable');
@@ -34,7 +37,8 @@ const activeModel = createRecursionViewModel({
   },
   lastPacket: { diagnostics: { composerLane: 'reasoner' } }
 });
-assertEqual(activeModel.statusText, 'Working - Off', 'non-settled status is working');
+assertEqual(activeModel.runtimeHealthLabel, 'Working', 'non-settled status is working');
+assertEqual(activeModel.modeLabel, 'Off', 'mode label is separate from runtime health');
 assertEqual(activeModel.activitySeverity, 'warning', 'activity severity is preserved');
 assertDeepEqual(activeModel.activityChips, ['Reasoner', 'Cards', '3'], 'activity chips are normalized and deduped');
 assertEqual(activeModel.composerLabel, 'Reasoner', 'reasoner composer label built');
@@ -432,7 +436,8 @@ try {
   assertEqual(promptPacketMetadata.handId, 'hand-ui', 'prompt packet metadata includes hand id from the last hand');
   assertDeepEqual(promptPacketMetadata.selectedCardRefs.map((entry) => entry.cardId), ['card-a'], 'prompt packet metadata includes selected card refs');
   assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, true, 'foreground ribbon waits briefly before revealing working activity');
-  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working - Auto', 'rendered status text');
+  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working', 'rendered runtime health');
+  assertEqual(root.querySelector('[data-recursion-mode]').textContent, 'Auto', 'rendered separate mode text');
   assertEqual(root.querySelector('[data-recursion-hand-count]').textContent, 'Hand 1', 'rendered hand count');
   assertEqual(root.querySelector('[data-recursion-composer]').textContent, 'Utility', 'rendered composer');
 
@@ -467,12 +472,14 @@ try {
     focus: 'character',
     reasonerUse: 'always'
   }, 'settings panel can switch Recursion Off');
-  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working - Off', 'Off settings save shows cleanup work');
+  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working', 'Off settings save shows cleanup work');
+  assertEqual(root.querySelector('[data-recursion-mode]').textContent, 'Off', 'Off settings save shows mode separately');
   assertEqual(root.querySelector('[data-recursion-ribbon-label]').textContent, 'Clearing Recursion prompt...', 'Off settings save shows prompt cleanup label');
   resolveOffSettingsUpdate();
   await offSettingsUpdate;
   ui.update();
-  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Ready - Off', 'Off warning still leaves mode ready');
+  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Ready', 'Off warning still leaves runtime ready');
+  assertEqual(root.querySelector('[data-recursion-mode]').textContent, 'Off', 'Off warning keeps mode separate');
   assertEqual(root.querySelector('[data-recursion-ribbon-label]').textContent, 'Prompt clear failed. Recursion skipped without clearing host prompt.', 'Off clear warning label remains visible');
   assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, false, 'Off clear warning ribbon stays visible');
 
@@ -522,7 +529,8 @@ try {
   };
   ui.update();
   ui.update();
-  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Ready - Auto', 'update refreshes status text');
+  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Ready', 'update refreshes runtime health');
+  assertEqual(root.querySelector('[data-recursion-mode]').textContent, 'Auto', 'update refreshes mode text');
   runNextTimeout(2000);
   assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, true, 'success ribbon collapses after the success timeout');
   ui.update();

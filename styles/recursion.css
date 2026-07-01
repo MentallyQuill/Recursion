@@ -1228,6 +1228,15 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .recursion-root *,
+  .recursion-root *::before,
+  .recursion-root *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 @media (max-width: 720px) {
   .recursion-bar,
   .recursion-activity-ribbon {

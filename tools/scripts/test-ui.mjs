@@ -435,6 +435,8 @@ assert(/function syncProgressRow/.test(barImplementationReference), 'turn animat
 assert(/\.recursion-brand-stage\s*\{[\s\S]*?--brand-stage-width:\s*calc\(var\(--brand-offset\) \+ var\(--brand-text-width\)\);/.test(recursionCss), 'production brand stage uses the same Recursion wordmark geometry as the reference');
 assert(/\.recursion-activity-trigger\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production activity trigger keeps reference spacing around pixel blocks');
 assert(/\.recursion-hero-pixel-array\s*\{[\s\S]*?width:\s*max\(0px,/.test(recursionCss), 'production Hero Pixel Array uses column-based width animation');
+assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(recursionCss), 'production CSS honors reduced-motion preferences');
+assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.recursion-root \*[\s\S]*?animation:\s*none\s*!important;[\s\S]*?transition:\s*none\s*!important;/.test(recursionCss), 'reduced-motion rule disables Recursion animations and transitions');
 assert(/function renderHeroPixelArray\(container, blocks = \[\]\) \{[\s\S]*?querySelectorAll\('\[data-recursion-hero-block\]'\)[\s\S]*?insertBefore\(node, before\);/.test(recursionUi), 'production renderer updates Hero Pixel Array blocks in place');
 assert(/window\.playRecursionTurnAnimation/.test(barImplementationReference), 'turn animation preview exposes a replay hook');
 assert(/\.step-row\.done \.step-icon\s*\{[\s\S]*?background:\s*var\(--green\);[\s\S]*?border-color:\s*var\(--green\);/.test(barImplementationReference), 'progress menu done dots use the same success green token');

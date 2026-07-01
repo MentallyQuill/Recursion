@@ -208,7 +208,7 @@ function recursionSmokeFixtureHtml({ missingDisableHook = false } = {}) {
 </html>`;
 }
 
-async function createSillyTavernSmokeFixtureServer({ serveExtension = true, mismatchManifest = false, missingDisableHook = false } = {}) {
+async function createSillyTavernSmokeFixtureServer({ serveExtension = true, mismatchManifest = false, staleModule = null, missingDisableHook = false } = {}) {
   const sessions = new Map();
   let nextSession = 1;
   const users = {
@@ -224,15 +224,32 @@ async function createSillyTavernSmokeFixtureServer({ serveExtension = true, mism
         ? JSON.stringify({ ...JSON.parse(readFileSync('manifest.json', 'utf8')), version: 'stale-fixture' }, null, 2)
         : readFileSync('manifest.json', 'utf8')
     },
-    '/scripts/extensions/third-party/Recursion/src/extension/index.js': {
-      type: 'text/javascript',
-      text: readFileSync('src/extension/index.js', 'utf8')
-    },
     '/scripts/extensions/third-party/Recursion/styles/recursion.css': {
       type: 'text/css',
       text: readFileSync('styles/recursion.css', 'utf8')
     }
   };
+  const moduleFiles = [
+    'src/extension/index.js',
+    'src/activity.mjs',
+    'src/cards.mjs',
+    'src/core.mjs',
+    'src/hosts/sillytavern/host.mjs',
+    'src/hosts/sillytavern/storage.mjs',
+    'src/prompt.mjs',
+    'src/providers.mjs',
+    'src/runtime.mjs',
+    'src/settings.mjs',
+    'src/storage.mjs',
+    'src/ui.mjs'
+  ];
+  for (const relativePath of moduleFiles) {
+    const text = readFileSync(relativePath, 'utf8');
+    extensionFiles[`/scripts/extensions/third-party/Recursion/${relativePath}`] = {
+      type: 'text/javascript',
+      text: relativePath === staleModule ? `${text}\n// stale fixture module\n` : text
+    };
+  }
 
   function sessionFromRequest(request) {
     const cookies = parseCookieHeader(request.headers.cookie || '');
@@ -606,6 +623,28 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assert(!report.browser, 'browser smoke does not run when served extension mismatch is detected');
     assert(!report.storageProbe, 'storage probe does not run when served extension mismatch is detected');
     assertDeepEqual([...server.users['recursion-soak-a'].files.keys()], [], 'served mismatch writes no probe files');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ staleModule: 'src/runtime.mjs' });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl
+      }
+    });
+    assertEqual(report.status, 'stale-extension', 'stale imported runtime module blocks live smoke');
+    assertEqual(report.result, 'served-extension-mismatch', 'stale imported module reports served mismatch');
+    assert(report.extension.compared.some((entry) => entry.relativePath === 'src/runtime.mjs' && entry.matches === false), 'served freshness checks imported runtime module');
+    assert(report.extension.compared.some((entry) => entry.relativePath === 'src/hosts/sillytavern/storage.mjs'), 'served freshness checks nested host imports');
+    assert(!report.browser, 'browser smoke does not run when imported module is stale');
+    assert(!report.storageProbe, 'storage probe does not run when imported module is stale');
+    assertDeepEqual([...server.users['recursion-soak-a'].files.keys()], [], 'stale imported module writes no probe files');
   } finally {
     await server.close();
   }

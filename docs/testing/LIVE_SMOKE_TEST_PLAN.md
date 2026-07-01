@@ -60,7 +60,7 @@ $env:RECURSION_SILLYTAVERN_USER='recursion-soak-a'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts
 ```
 
-This command authenticates the dedicated user, compares the served Recursion manifest/entry files against the checkout, runs the Recursion-owned storage probe, opens SillyTavern with Playwright, verifies the Recursion Bar, Last Hand dropdown, full viewer, and bridge hooks, then writes screenshots, trace, live log, served-extension comparison, storage probe, browser snapshot, summary, and report artifacts. It does not send chat messages or call providers.
+This command authenticates the dedicated user, compares the served Recursion manifest, entrypoint, static import graph, and stylesheet against the checkout, runs the Recursion-owned storage probe, opens SillyTavern with Playwright, verifies the Recursion Bar, Last Hand dropdown, full viewer, and bridge hooks, then writes screenshots, trace, live log, served-extension comparison, storage probe, browser snapshot, summary, and report artifacts. It does not send chat messages or call providers.
 
 Generation-enabled Utility smoke:
 
@@ -106,7 +106,7 @@ The live runner should execute these stages in order.
 - Validate environment variables.
 - Reject unsafe users.
 - Authenticate when needed.
-- Compare served extension files to the checkout.
+- Compare served extension manifest, entrypoint, static import graph, and stylesheet to the checkout.
 - Run storage probe.
 - Open SillyTavern with Playwright.
 - Capture baseline console and page-error state.

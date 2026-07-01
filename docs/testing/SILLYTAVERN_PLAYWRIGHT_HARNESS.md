@@ -103,16 +103,17 @@ State-mutating live smoke must run preflight checks before changing chat or prom
 2. Reject `default-user`.
 3. Authenticate if SillyTavern account mode requires it.
 4. Fetch the served Recursion manifest.
-5. Compare selected served files against the checkout under test.
+5. Compare the served manifest entrypoint, stylesheet, and local static ESM import graph against the checkout under test.
 6. Write, verify, read, and delete one Recursion-owned `/user/files` probe.
 7. Confirm Playwright can open the host and see the Recursion Bar.
 8. Confirm the Recursion Last Hand dropdown, full viewer, and bridge hooks are available without sending a chat message.
 
-The selected served files should be small and representative:
+The served freshness gate must cover the browser-loaded implementation, not just the manifest shell:
 
 - `manifest.json`;
-- extension entrypoint;
-- main stylesheet;
+- manifest `js` entrypoint;
+- every local static ESM import reachable from the entrypoint;
+- manifest `css` file;
 - local fallback entries for the extension entrypoint and stylesheet when the manifest cannot enumerate them.
 
 Reports must distinguish `served-extension-match`, `served-extension-mismatch`, and `served-extension-unavailable`. A mismatch or unavailable served extension blocks storage mutation and browser smoke in automated runs.

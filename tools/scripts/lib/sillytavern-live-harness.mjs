@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { redact, safeId } from '../../../src/core.mjs';
 
@@ -564,6 +564,88 @@ async function runStorageProbeSuite({ baseUrl, users, env = {}, fetchImpl = glob
   return outcome;
 }
 
+const STATIC_ESM_SPECIFIER_PATTERN = /\b(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+
+function normalizeRelativeFilePath(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/^\.\//, '');
+}
+
+function relativePathInside(root, filePath) {
+  const path = relative(root, filePath).replace(/\\/g, '/');
+  if (!path || path === '..' || path.startsWith('../') || isAbsolute(path)) return null;
+  return normalizeRelativeFilePath(path);
+}
+
+function readLocalUtf8(localRoot, relativePath) {
+  return readFileSync(resolve(localRoot, normalizeRelativeFilePath(relativePath)), 'utf8');
+}
+
+function extractStaticImportSpecifiers(source) {
+  const specifiers = [];
+  STATIC_ESM_SPECIFIER_PATTERN.lastIndex = 0;
+  for (const match of String(source || '').matchAll(STATIC_ESM_SPECIFIER_PATTERN)) {
+    const specifier = String(match[1] || match[2] || '').trim();
+    if (specifier) specifiers.push(specifier);
+  }
+  return specifiers;
+}
+
+function resolveLocalImportSpecifier({ localRoot, importerRelativePath, specifier }) {
+  if (!String(specifier || '').startsWith('.')) return null;
+  const root = resolve(localRoot);
+  const importerDirectory = dirname(normalizeRelativeFilePath(importerRelativePath));
+  const absoluteBase = resolve(root, importerDirectory, specifier);
+  const candidates = [
+    absoluteBase,
+    `${absoluteBase}.mjs`,
+    `${absoluteBase}.js`,
+    resolve(absoluteBase, 'index.mjs'),
+    resolve(absoluteBase, 'index.js')
+  ];
+  for (const candidate of candidates) {
+    const relativeCandidate = relativePathInside(root, candidate);
+    if (!relativeCandidate) continue;
+    try {
+      readLocalUtf8(root, relativeCandidate);
+      return relativeCandidate;
+    } catch {
+      // Try the next ESM resolution candidate.
+    }
+  }
+  return null;
+}
+
+function buildLocalStaticModuleGraph({ localRoot = process.cwd(), entryFiles = [] } = {}) {
+  const root = resolve(localRoot);
+  const queue = [];
+  const seen = new Set();
+
+  function enqueue(relativePath) {
+    const normalized = normalizeRelativeFilePath(relativePath);
+    if (!/\.(?:mjs|js)$/i.test(normalized) || seen.has(normalized)) return;
+    seen.add(normalized);
+    queue.push(normalized);
+  }
+
+  for (const entry of entryFiles) enqueue(entry);
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    let source = '';
+    try {
+      source = readLocalUtf8(root, current);
+    } catch {
+      continue;
+    }
+    for (const specifier of extractStaticImportSpecifiers(source)) {
+      const resolved = resolveLocalImportSpecifier({ localRoot: root, importerRelativePath: current, specifier });
+      if (resolved) enqueue(resolved);
+    }
+  }
+
+  return [...seen];
+}
+
 async function compareServedRecursionExtension({
   baseUrl,
   extensionPath = DEFAULT_RECURSION_EXTENSION_PATH,
@@ -580,10 +662,16 @@ async function compareServedRecursionExtension({
     if (manifest.json.js) manifestFiles.push(String(manifest.json.js));
     if (manifest.json.css) manifestFiles.push(String(manifest.json.css));
   }
+  const manifestScripts = manifestFiles.filter((file) => /\.(?:mjs|js)$/i.test(file));
+  const manifestStyles = manifestFiles.filter((file) => /\.css$/i.test(file));
+  const moduleGraph = buildLocalStaticModuleGraph({
+    localRoot,
+    entryFiles: [...manifestScripts, 'src/extension/index.js']
+  });
   const files = [...new Set([
     'manifest.json',
-    ...manifestFiles,
-    'src/extension/index.js',
+    ...moduleGraph,
+    ...manifestStyles,
     'styles/recursion.css'
   ])];
 

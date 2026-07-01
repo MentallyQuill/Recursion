@@ -58,6 +58,8 @@ function normalizeEvent(input = {}, defaults = {}) {
   const event = {
     runId: cleanRunId(input.runId ?? defaults.runId),
     phase: cleanText(input.phase ?? defaults.phase ?? 'activity', 80),
+    operationId: cleanText(input.operationId ?? defaults.operationId, 128) ?? null,
+    logicalStage: cleanText(input.logicalStage ?? defaults.logicalStage, 160) ?? null,
     mode: cleanChoice(input.mode ?? defaults.mode, VALID_MODES, defaults.mode ?? 'background'),
     severity: cleanChoice(input.severity ?? defaults.severity, VALID_SEVERITIES, defaults.severity ?? 'info'),
     label: cleanText(input.label ?? defaults.label ?? '', 160),
@@ -77,6 +79,8 @@ function normalizeIdleEvent() {
   return cloneJson({
     runId: null,
     phase: 'idle',
+    operationId: null,
+    logicalStage: null,
     mode: 'background',
     severity: 'info',
     label: '',

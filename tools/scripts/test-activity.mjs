@@ -13,6 +13,8 @@ function assertNoSecret(value, message) {
 const EVENT_KEYS = [
   'runId',
   'phase',
+  'operationId',
+  'logicalStage',
   'mode',
   'severity',
   'label',
@@ -200,5 +202,22 @@ rejectingReporter.settle({ outcome: 'success', label: 'Still settled after rejec
 await new Promise((resolve) => setTimeout(resolve, 0));
 assertEqual(rejectingReporter.current().phase, 'settled', 'async onEvent rejections are best-effort');
 assertEqual(rejectingReporter.current().runId, rejectingRun.runId, 'async rejection reporter keeps active run state through settle');
+
+const storageProgressReporter = createActivityReporter();
+const storageRun = storageProgressReporter.start({ runId: 'storage-progress-run', label: 'Storage run' });
+const storageProgress = storageProgressReporter.stage({
+  runId: storageRun.runId,
+  phase: 'storageProgress',
+  operationId: 'storage-op-1',
+  logicalStage: 'Updating scene cache',
+  label: 'Updating scene cache...',
+  detail: {
+    kind: 'sceneCache',
+    key: 'recursion-scene-should-not-leak.v1.json'
+  }
+});
+assertEqual(storageProgress.operationId, 'storage-op-1', 'activity preserves storage operation id');
+assertEqual(storageProgress.logicalStage, 'Updating scene cache', 'activity preserves logical storage stage');
+assertEventShape(storageProgress, 'storage progress event uses stable key shape');
 
 console.log('[pass] activity');

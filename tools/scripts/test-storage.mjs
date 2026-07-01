@@ -5,6 +5,7 @@ import {
   sceneCacheKey,
   runJournalKey
 } from '../../src/storage.mjs';
+import { createActivityReporter } from '../../src/activity.mjs';
 import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 
 function assertNoSecret(value, message) {
@@ -193,8 +194,27 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertNoOwnField(saved, 'rawUnexpected', 'scene cache drops unexpected top-level fields');
   assertEqual(loaded.recordType, 'recursion.sceneCache', 'loaded scene cache recordType canonical');
   assertNoSecret(adapter.dump(), 'scene cache does not persist dropped secrets');
-  assertEqual(activityEvents[0].phase, 'storageSaving', 'save emits storageSaving activity');
-  assertEqual(activityEvents[1].phase, 'storageComplete', 'save emits storageComplete activity');
+  assertEqual(activityEvents[0].phase, 'storageProgress', 'save emits logical storage progress start');
+  assertEqual(activityEvents[1].phase, 'storageProgress', 'save emits logical storage progress completion');
+  assertEqual(activityEvents[0].logicalStage, 'Updating scene cache', 'save reports logical cache update stage');
+  assertEqual(activityEvents[1].logicalStage, 'Storage ready', 'save reports logical storage ready stage');
+  assertType(activityEvents[0].operationId, 'string', 'save progress has stable operation id');
+  assertEqual(activityEvents[1].operationId, activityEvents[0].operationId, 'save progress reuses operation id');
+  assert(!JSON.stringify(activityEvents).includes('recursion-scene-Unsafe-Chat-Unsafe-Scene.v1.json'), 'save progress does not expose scene cache filename');
+
+  const reporterEvents = [];
+  const reporter = createActivityReporter({ onEvent: (event) => reporterEvents.push(event) });
+  const reporterRun = reporter.start({ runId: 'storage-reporter-run', label: 'Storage reporter run' });
+  const reporterRepo = createStorageRepository({ storage: createMemoryStorageAdapter(), activity: reporter });
+  await reporterRepo.saveSceneCache('Reporter Chat', 'Reporter Scene', {
+    cards: [{ id: 'reporter-card', promptText: 'keep' }]
+  });
+  const reporterProgress = reporterEvents.filter((event) => event.phase === 'storageProgress');
+  assertEqual(reporterProgress.length, 2, 'real activity reporter records storage progress events');
+  assertEqual(reporterProgress[0].runId, reporterRun.runId, 'storage progress uses active reporter run');
+  assertEqual(reporterProgress[0].logicalStage, 'Updating scene cache', 'real reporter preserves storage logical start');
+  assertEqual(reporterProgress[1].logicalStage, 'Storage ready', 'real reporter preserves storage logical completion');
+  assertEqual(reporterProgress[1].operationId, reporterProgress[0].operationId, 'real reporter preserves shared storage operation id');
 
   const throwingAdapter = createMemoryStorageAdapter();
   const throwingRepo = createStorageRepository({

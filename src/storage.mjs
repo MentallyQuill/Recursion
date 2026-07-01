@@ -303,11 +303,37 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
     loadSceneCache,
     async saveSceneCache(chatKey, sceneKey, value) {
       const key = sceneCacheKey(chatKey, sceneKey);
-      reportActivity(activity, { phase: 'storageSaving', mode: 'background', severity: 'info', label: 'Saving scene cache...', detail: key });
+      const operationId = makeId('storage');
+      reportActivity(activity, {
+        operationId,
+        phase: 'storageProgress',
+        logicalStage: 'Updating scene cache',
+        mode: 'background',
+        severity: 'info',
+        label: 'Updating scene cache...',
+        detail: {
+          kind: 'sceneCache',
+          chatKey: safeId(chatKey, 'chat'),
+          sceneKey: safeId(sceneKey, 'scene')
+        }
+      });
       const record = normalizeSceneCache(chatKey, sceneKey, value);
       await storage.writeJson(key, record);
       await writeIndexEntry(key, 'sceneCache', safeId(chatKey, 'chat'));
-      reportActivity(activity, { phase: 'storageComplete', mode: 'background', severity: 'success', label: 'Scene cache saved.' });
+      reportActivity(activity, {
+        operationId,
+        phase: 'storageProgress',
+        logicalStage: 'Storage ready',
+        mode: 'background',
+        severity: 'success',
+        label: 'Storage ready.',
+        detail: {
+          kind: 'sceneCache',
+          chatKey: safeId(chatKey, 'chat'),
+          sceneKey: safeId(sceneKey, 'scene'),
+          cardCount: record.cards.length
+        }
+      });
       return record;
     },
     async invalidateSceneCache(chatKey, sceneKey, options = {}) {

@@ -1,6 +1,8 @@
 const VALID_STATES = new Set(['pending', 'running', 'done', 'warning', 'failed', 'skipped']);
 const VALID_PROVIDER_LANES = new Set(['utility', 'reasoner']);
 const SAFE_PROGRESS_TITLES = new Set(['Generating', 'Ready', 'Idle', 'Issue', 'Needs attention']);
+const DEFAULT_HERO_PIXEL_ROWS = 3;
+const DEFAULT_HERO_PIXEL_MAX_COLUMNS = 12;
 const MODEL_CALL_ROLE_IDS = new Set([
   'sceneFrameCard',
   'activeCastCard',
@@ -344,6 +346,19 @@ function heroPixelState(steps) {
   return 'pending';
 }
 
+function overflowPixelState(steps) {
+  if (steps.some((step) => step.state === 'running')) return 'running';
+  if (steps.some((step) => step.state === 'failed')) return 'failed';
+  if (steps.some((step) => step.state === 'warning')) return 'warning';
+  if (steps.some((step) => step.state === 'pending')) return 'pending';
+  if (steps.some((step) => step.state === 'done')) return 'done';
+  return steps[0]?.state || 'pending';
+}
+
+function overflowProviderLane(steps) {
+  return steps.some((step) => step.providerLane === 'reasoner') ? 'reasoner' : 'utility';
+}
+
 function finalizeProgress(progress, options = {}) {
   const steps = Array.isArray(progress.steps)
     ? progress.steps.map((step, index) => normalizeStep(step, index))
@@ -373,14 +388,29 @@ export function createProgressRunModel(view = {}) {
 export function createHeroPixelBlocks(progressRun = {}, options = {}) {
   const source = asObject(progressRun);
   const steps = Array.isArray(source.steps) ? source.steps.map((step, index) => normalizeStep(step, index)) : [];
-  const rows = Math.max(1, Math.floor(Number(options.rows ?? 3)) || 3);
+  const rows = Math.max(1, Math.floor(Number(options.rows ?? DEFAULT_HERO_PIXEL_ROWS)) || DEFAULT_HERO_PIXEL_ROWS);
+  const maxColumns = Math.max(1, Math.floor(Number(options.maxColumns ?? DEFAULT_HERO_PIXEL_MAX_COLUMNS)) || DEFAULT_HERO_PIXEL_MAX_COLUMNS);
+  const maxBlocks = rows * maxColumns;
   const delayStepMs = Math.max(0, Math.floor(Number(options.delayStepMs ?? 24)) || 0);
-  const columnCount = steps.length ? Math.ceil(steps.length / rows) : 0;
-  return steps.map((step, index) => ({
+  const visibleSteps = steps.length > maxBlocks
+    ? [
+        ...steps.slice(0, maxBlocks - 1),
+        {
+          id: 'overflow-progress',
+          label: `${steps.length - maxBlocks + 1} more progress items`,
+          state: overflowPixelState(steps.slice(maxBlocks - 1)),
+          providerLane: overflowProviderLane(steps.slice(maxBlocks - 1)),
+          hiddenStepCount: steps.length - maxBlocks + 1
+        }
+      ]
+    : steps;
+  const columnCount = visibleSteps.length ? Math.ceil(visibleSteps.length / rows) : 0;
+  return visibleSteps.map((step, index) => ({
     id: step.id,
     label: step.label,
     state: step.state,
     providerLane: step.providerLane,
+    hiddenStepCount: step.hiddenStepCount || 0,
     row: index % rows,
     column: Math.floor(index / rows),
     columnCount,

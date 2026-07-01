@@ -338,6 +338,8 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 <script>
 (() => {
   const ROWS_PER_COLUMN = 3;
+  const MAX_COLUMNS = 12;
+  const MAX_BLOCKS = ROWS_PER_COLUMN * MAX_COLUMNS;
   const STEP_DELAY_MS = 24;
   const stateClass = {
     pending: 'queued',
@@ -389,6 +391,34 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
   function visibleSteps() {
     return TURN_ANIMATION_STEPS.filter((step) => step.visible);
+  }
+
+  function overflowState(steps) {
+    if (steps.some((step) => step.state === 'running')) return 'running';
+    if (steps.some((step) => step.state === 'failed')) return 'failed';
+    if (steps.some((step) => step.state === 'warning')) return 'warning';
+    if (steps.some((step) => step.state === 'pending')) return 'pending';
+    if (steps.some((step) => step.state === 'done')) return 'done';
+    return 'pending';
+  }
+
+  function overflowProvider(steps) {
+    return steps.some((step) => step.provider === 'reasoner') ? 'reasoner' : 'utility';
+  }
+
+  function visibleHeroSteps() {
+    const steps = visibleSteps();
+    if (steps.length <= MAX_BLOCKS) return steps;
+    const overflowSteps = steps.slice(MAX_BLOCKS - 1);
+    return [
+      ...steps.slice(0, MAX_BLOCKS - 1),
+      {
+        id: 'overflow-progress',
+        label: `${overflowSteps.length} more progress items`,
+        provider: overflowProvider(overflowSteps),
+        state: overflowState(overflowSteps)
+      }
+    ];
   }
 
   function progressSummary(steps) {
@@ -476,14 +506,15 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     const stage = root.querySelector('#array-button');
     const array = root.querySelector('.hero-pixel-array');
     const steps = visibleSteps();
-    const columns = Math.max(1, Math.ceil(steps.length / ROWS_PER_COLUMN));
+    const heroSteps = visibleHeroSteps();
+    const columns = Math.min(MAX_COLUMNS, Math.max(1, Math.ceil(heroSteps.length / ROWS_PER_COLUMN)));
     stage.style.setProperty('--columns', String(columns));
-    stage.style.setProperty('--block-count', String(steps.length));
+    stage.style.setProperty('--block-count', String(heroSteps.length));
     stage.dataset.state = heroState(steps);
     array.dataset.state = stage.dataset.state;
-    const visibleIds = new Set(steps.map((step) => step.id));
+    const visibleIds = new Set(heroSteps.map((step) => step.id));
     removeStaleStepElements(array, '.hero-block', visibleIds);
-    steps.forEach((step, index) => syncHeroBlock(array, step, index));
+    heroSteps.forEach((step, index) => syncHeroBlock(array, step, index));
   }
 
   function renderProgressRows(root, changedId) {
@@ -585,6 +616,8 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   --ring-cutout: #202124;
   --hero-block-size: 4px;
   --hero-block-gap: 2px;
+  --hero-max-columns: 12;
+  --hero-max-width: calc((var(--hero-max-columns) * var(--hero-block-size)) + ((var(--hero-max-columns) - 1) * var(--hero-block-gap)));
   --hero-pending: rgba(224, 224, 224, .28);
   --hero-running: var(--cyan);
   --hero-done: var(--green);
@@ -612,7 +645,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 8px;
+  padding: 0 8px 0 2px;
   border: 1px solid var(--border);
   border-radius: 10px 10px 0 0;
   background: var(--surface);
@@ -652,7 +685,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   position: relative;
   --brand-offset: calc(var(--hero-block-size) + 7px);
   --brand-text-width: 66px;
-  --brand-stage-width: calc(var(--brand-offset) + var(--brand-text-width));
+  --brand-stage-width: calc(var(--hero-max-width) + 7px);
   --brand-cover-tail: 16px;
   --brand-cover-width: 0px;
   width: var(--brand-stage-width);
@@ -1525,7 +1558,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 @media (max-width: 620px) {
   .recursion-bar {
     height: 30px;
-    padding: 0 6px;
+    padding: 0 6px 0 2px;
   }
 
   .brand {

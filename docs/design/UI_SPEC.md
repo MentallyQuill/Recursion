@@ -200,6 +200,8 @@ The array layout is deterministic:
 - `createHeroPixelBlocks(progressRun)` returns one block per normalized progress row.
 - Blocks build top-to-bottom through three rows, then begin the next column to the right.
 - Each block carries `row`, `column`, `columnCount`, `delayMs`, `state`, and a stable state class.
+- The compact Hero Pixel Array caps at 12 columns, for 36 represented blocks at three rows.
+- If a run has more than 36 top-level progress rows, the progress menu still shows every row, but the Hero Pixel Array uses its final block as an overflow aggregate. The aggregate state is selected from represented overflow rows in this priority order: running, failed, warning, pending, done, skipped.
 - The renderer sets `--columns` from `columnCount`, `grid-row` from `row + 1`, `grid-column` from `column + 1`, and `--block-index` from the block index.
 - Entry delay is slight, roughly 24ms per block, so a 12-step run visibly builds without feeling slow.
 - The brand stage remains fixed width; the brand text, fade layer, and pixel array are absolute layers inside that stage.
@@ -384,7 +386,7 @@ Reference CSS contract:
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 8px;
+  padding: 0 8px 0 2px;
   border: 1px solid var(--SmartThemeBorderColor);
   border-radius: 10px 10px 0 0;
   background: var(--SmartThemeBlurTintColor);
@@ -420,7 +422,9 @@ Reference CSS contract:
   position: relative;
   --brand-offset: calc(var(--hero-block-size, 4px) + 7px);
   --brand-text-width: 66px;
-  --brand-stage-width: calc(var(--brand-offset) + var(--brand-text-width));
+  --hero-max-columns: 12;
+  --hero-max-width: calc((var(--hero-max-columns) * var(--hero-block-size, 4px)) + ((var(--hero-max-columns) - 1) * var(--hero-block-gap, 2px)));
+  --brand-stage-width: calc(var(--hero-max-width) + 7px);
   --brand-cover-tail: 16px;
   --brand-cover-width: 0px;
   width: var(--brand-stage-width);

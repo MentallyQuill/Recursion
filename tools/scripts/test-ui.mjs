@@ -66,6 +66,25 @@ assertDeepEqual(
 );
 assertEqual(heroBlocks.at(-1).columnCount, 2, 'hero pixel array reports the visible column count for brand movement');
 
+const overflowingProgress = createProgressRunModel({
+  progressRun: {
+    runId: 'overflow-progress',
+    steps: Array.from({ length: 40 }, (_, index) => ({
+      id: `overflow-step-${index + 1}`,
+      label: `Overflow step ${index + 1}`,
+      providerLane: index % 2 === 0 ? 'utility' : 'reasoner',
+      state: index >= 36 ? ['done', 'failed', 'warning', 'running'][index - 36] : 'done'
+    }))
+  }
+});
+const overflowingBlocks = createHeroPixelBlocks(overflowingProgress);
+assertEqual(overflowingProgress.steps.length, 40, 'progress menu model keeps every visible step even when the pixel array overflows');
+assertEqual(overflowingBlocks.length, 36, 'hero pixel array caps at twelve three-row columns');
+assertEqual(overflowingBlocks.at(-1).id, 'overflow-progress', 'hero pixel array uses the last block as the overflow aggregate');
+assertEqual(overflowingBlocks.at(-1).state, 'running', 'overflow aggregate prioritizes running hidden work');
+assertEqual(overflowingBlocks.at(-1).hiddenStepCount, 5, 'overflow aggregate counts the represented overflow steps');
+assertEqual(overflowingBlocks.at(-1).columnCount, 12, 'overflow aggregate keeps the compact array within twelve columns');
+
 const derivedProgress = createProgressRunModel({
   settings: { mode: 'auto' },
   activityHistory: [
@@ -154,6 +173,7 @@ assertEqual(progressViewModel.heroPixelBlocks[1].state, 'running', 'view model k
 assertEqual(progressViewModel.heroPixelColumnCount, 1, 'view model exposes pixel column count for moving brand layout');
 
 const barImplementationReference = readFileSync(new URL('../../docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md', import.meta.url), 'utf8');
+assert(/padding:\s*0 8px 0 2px;/.test(barImplementationReference), 'recursion bar uses a tighter left inset than right controls');
 assert(/--hero-running:\s*var\(--cyan\);/.test(barImplementationReference), 'hero pixel running blocks use the active blue token');
 assert(/--hero-done:\s*var\(--green\);/.test(barImplementationReference), 'hero pixel done blocks use the success green token');
 assert(/--hero-warning:\s*var\(--amber\);/.test(barImplementationReference), 'hero pixel warning blocks use the caution yellow token');
@@ -172,6 +192,10 @@ assert(/\.step-row\.is-entering/.test(barImplementationReference), 'progress row
 assert(/@keyframes step-row-enter/.test(barImplementationReference), 'progress row insertion animation is defined');
 assert(/## Turn Animation Preview Script/.test(barImplementationReference), 'implementation reference includes a turn animation preview script');
 assert(/const TURN_ANIMATION_STEPS = \[/.test(barImplementationReference), 'turn animation preview declares deterministic step data');
+assert(/const MAX_COLUMNS = 12;/.test(barImplementationReference), 'turn animation preview caps the Hero Pixel Array at twelve columns');
+assert(/const MAX_BLOCKS = ROWS_PER_COLUMN \* MAX_COLUMNS;/.test(barImplementationReference), 'turn animation preview derives the block cap from rows and columns');
+assert(/function visibleHeroSteps/.test(barImplementationReference), 'turn animation preview has a capped Hero Pixel Array projection');
+assert(/overflow-progress/.test(barImplementationReference), 'turn animation preview uses an overflow aggregate block');
 assert(/function renderHeroBlocks/.test(barImplementationReference), 'turn animation preview renders hero blocks from step state');
 assert(/function renderProgressRows/.test(barImplementationReference), 'turn animation preview renders progress rows from step state');
 assert(!/array\.innerHTML\s*=\s*steps\.map/.test(barImplementationReference), 'turn animation preview does not recreate all hero blocks on every tick');

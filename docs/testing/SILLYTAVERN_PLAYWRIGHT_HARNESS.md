@@ -30,7 +30,8 @@ Common environment variables:
 | `RECURSION_PLAYWRIGHT_HEADFUL` | Set to `1` for visible browser debugging. Default is headless. |
 | `RECURSION_PLAYWRIGHT_TIMEOUT_MS` | Browser-control timeout for readiness checks. |
 | `RECURSION_LIVE_TIMEOUT_MS` | Browser-control timeout for live host checks. |
-| `RECURSION_LIVE_GENERATION` | Set to `1` to allow real provider calls during live smoke. |
+| `RECURSION_LIVE_GENERATION` | Target flag for future generation-enabled smoke. The current runner returns `manual-required` after safe no-generation evidence instead of sending chat or calling providers. |
+| `RECURSION_LIVE_REASONER` | Target flag for future Reasoner-enabled smoke. The current runner treats it like `RECURSION_LIVE_GENERATION` and returns `manual-required` after safe no-generation evidence. |
 | `RECURSION_LIVE_STRICT` | Set to `1` to promote warnings to failures. |
 | `RECURSION_ARTIFACT_DIR` | Override artifact root for reports, traces, screenshots, and logs. |
 

@@ -62,7 +62,7 @@ node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts
 
 This command authenticates the dedicated user, compares the served Recursion manifest, entrypoint, static import graph, and stylesheet against the checkout, runs the Recursion-owned storage probe, opens SillyTavern with Playwright, verifies the Recursion Bar, Last Hand dropdown, full viewer, and bridge hooks, then writes screenshots, trace, live log, served-extension comparison, storage probe, browser snapshot, summary, and report artifacts. It does not send chat messages or call providers.
 
-Generation-enabled Utility smoke:
+Generation-enabled Utility smoke target:
 
 ```powershell
 $env:SILLYTAVERN_BASE_URL='http://127.0.0.1:8000'
@@ -71,7 +71,7 @@ $env:RECURSION_LIVE_GENERATION='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts --strict
 ```
 
-Reasoner-enabled smoke:
+Reasoner-enabled smoke target:
 
 ```powershell
 $env:SILLYTAVERN_BASE_URL='http://127.0.0.1:8000'
@@ -81,7 +81,7 @@ $env:RECURSION_LIVE_REASONER='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts --strict
 ```
 
-Generation-enabled Utility and Reasoner smoke remain separate opt-in work. The current no-generation browser smoke must stay dedicated-user-only and must reject unsafe users before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
+Generation-enabled Utility and Reasoner smoke remain separate opt-in work. Today, setting `RECURSION_LIVE_GENERATION=1` or `RECURSION_LIVE_REASONER=1` runs the safe preflight and no-generation UI evidence, then returns `manual-required` with `generation-smoke-not-implemented` instead of claiming prompt-injection or provider-call proof. The current no-generation browser smoke must stay dedicated-user-only and must reject unsafe users before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
 
 ## Scenario Matrix
 

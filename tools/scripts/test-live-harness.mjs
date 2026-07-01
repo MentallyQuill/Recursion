@@ -696,6 +696,26 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
+  const server = await createSillyTavernSmokeFixtureServer();
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      }
+    });
+    assertEqual(report.status, 'manual-required', 'generation-enabled smoke does not pass as no-generation evidence');
+    assertEqual(report.result, 'generation-smoke-not-implemented', 'generation-enabled smoke gap is explicit');
+    assertEqual(report.browser.status, 'pass', 'generation smoke still proves no-generation UI preflight');
+    assert(report.checks.some((check) => check.name === 'generation-live-smoke' && check.status === 'manual-required'), 'generation smoke check records manual-required status');
+  } finally {
+    await server.close();
+  }
+}
+
+{
   const server = await createSillyTavernSmokeFixtureServer({ missingDisableHook: true });
   const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-live-smoke-fail-'));
   try {

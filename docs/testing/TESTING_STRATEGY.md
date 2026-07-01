@@ -8,7 +8,7 @@ Recursion testing should prove the extension is useful and safe without turning 
 | Playwright readiness | Offline probe proves the local machine can launch/control Chromium through Playwright, use a role locator, switch desktop/phone viewports, and write trace/screenshot artifacts. If Playwright is unavailable, it returns `environment-fail` without contacting SillyTavern. | Current evidence: `check-playwright-readiness` report, trace, and viewport screenshots when Playwright is installed; otherwise a sanitized environment-fail report. |
 | Focused live SillyTavern smoke | Current preflight proves dedicated-user rejection, dry-run behavior, report shape, fail-closed semantics, Recursion-owned storage probes, served-extension freshness, and no-generation UI mount/open behavior. Generation-enabled smoke will prove turn observation, invisible-work reporting, prompt packet install/clear, sanitized cache persistence, and fail-soft provider paths. | Current evidence: `check-sillytavern-soak-users` storage-probe reports and `smoke-sillytavern-live` no-generation browser reports, screenshots, trace, live log, served-extension comparison, storage probe artifact, and browser snapshot. Future live evidence: prompt packet hashes, run journal events, generation continuation, and prompt cleanup. |
 
-The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, offline Playwright readiness, SillyTavern storage probes when dedicated users are available, and no-generation SillyTavern UI evidence when Recursion is installed for a dedicated user. Prompt-injection timing and generation-enabled smoke remain future live-harness work.
+The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, offline Playwright readiness, SillyTavern storage probes when dedicated users are available, and no-generation SillyTavern UI evidence when Recursion is installed for a dedicated user. Prompt-injection timing and generation-enabled smoke remain future live-harness work; generation flags currently return `manual-required` after safe no-generation evidence instead of claiming provider proof.
 
 ## Core Invariants
 
@@ -99,7 +99,7 @@ Primary live scenarios:
 - Reasoner failure falls back to Utility or local composition without blocking host generation;
 - storage repair and journal pruning report logical progress without leaking physical paths.
 
-Live smoke is allowed to use real model calls when explicitly enabled by environment flags. No-generation live smoke may prove mount, UI, settings, storage, and prompt-clear behavior, but it cannot claim provider or prompt-quality proof.
+Future generation-enabled smoke may use real model calls only when explicitly enabled by environment flags. The current live smoke runner stays no-generation: generation or reasoner flags return `manual-required` after safe no-generation evidence instead of sending chat, calling providers, or claiming prompt-quality proof.
 
 ## Dedicated Live Users
 

@@ -1697,10 +1697,29 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
             handOpen: browserResult.snapshot?.handOpen,
             viewerOpen: browserResult.snapshot?.viewerOpen
           });
-          setReportStatus(report, browserResult.status, browserResult.result);
-          report.nextAction = browserResult.status === 'pass'
-            ? 'No-generation Recursion UI smoke passed; generation-enabled smoke remains a separate opt-in gate.'
-            : 'Inspect browser snapshot, screenshots, and console/page errors before running generation-enabled smoke.';
+          const generationRequested = env.RECURSION_LIVE_GENERATION === '1' || env.RECURSION_LIVE_REASONER === '1';
+          if (browserResult.status === 'pass' && generationRequested) {
+            addCheck(report, {
+              name: 'generation-live-smoke',
+              status: 'manual-required',
+              summary: 'Generation-enabled live smoke is not implemented in this no-generation runner.',
+              details: {
+                liveGeneration: env.RECURSION_LIVE_GENERATION === '1',
+                liveReasoner: env.RECURSION_LIVE_REASONER === '1'
+              }
+            });
+            event('generation-live-smoke', 'manual-required', 'generation-smoke-not-implemented', {
+              liveGeneration: env.RECURSION_LIVE_GENERATION === '1',
+              liveReasoner: env.RECURSION_LIVE_REASONER === '1'
+            });
+            setReportStatus(report, 'manual-required', 'generation-smoke-not-implemented');
+            report.nextAction = 'No-generation UI smoke passed. Implement and run the generation-enabled live smoke before claiming prompt-injection or provider-call proof.';
+          } else {
+            setReportStatus(report, browserResult.status, browserResult.result);
+            report.nextAction = browserResult.status === 'pass'
+              ? 'No-generation Recursion UI smoke passed; generation-enabled smoke remains a separate opt-in gate.'
+              : 'Inspect browser snapshot, screenshots, and console/page errors before running generation-enabled smoke.';
+          }
         }
       }
     } catch (error) {

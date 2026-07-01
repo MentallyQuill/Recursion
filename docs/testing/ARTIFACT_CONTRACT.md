@@ -283,7 +283,7 @@ Keep:
 
 - latest passing readiness report;
 - latest passing no-generation live smoke;
-- latest passing generation-enabled Utility smoke;
+- latest passing generation-enabled Utility smoke after that runner exists;
 - latest failing run until the failure has a contract regression or fix.
 
 Do not promote live artifacts into product storage. Recursion runtime storage remains cache-oriented and bounded.

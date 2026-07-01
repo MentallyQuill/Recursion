@@ -1,4 +1,4 @@
-import { compact, hashJson, makeId, nowIso, safeId, truncate } from './core.mjs';
+import { compact, hashJson, makeId, nowIso, redact, safeId, truncate } from './core.mjs';
 import { UTILITY_ROLE_IDS } from './providers.mjs';
 
 const TEXT_LIMIT = 1000;
@@ -9,6 +9,40 @@ const INSPECTOR_NOTES_LIMIT = 800;
 const ARBITER_REASON_LIMIT = 240;
 const MAX_TOKEN_ESTIMATE = 1000;
 const CARD_RESPONSE_SCHEMA = 'recursion.card.v1';
+const PROVIDER_PROMPT_SECRET_KEY_SUFFIXES = Object.freeze([
+  'apikey',
+  'authorization',
+  'auth',
+  'authentication',
+  'authheader',
+  'cookie',
+  'cookieheader',
+  'token',
+  'password',
+  'secret',
+  'session',
+  'sessionkey',
+  'bearer',
+  'privatekey',
+  'credential',
+  'credentials'
+]);
+const PROVIDER_PROMPT_SECRET_KEY_QUALIFIERS = Object.freeze([
+  'hash',
+  'value',
+  'header',
+  'pem',
+  'material',
+  'body',
+  'text',
+  'string',
+  'id'
+]);
+const PROVIDER_PROMPT_SECRET_ASSIGNMENT_PATTERN = /\b([A-Za-z][A-Za-z0-9_-]*)\s*([:=])\s*("[^"]*"|'[^']*'|Bearer\s+[\s\S]*?|[\s\S]*?)(?=\s+(?:[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*|\[[^\]]+\])?\s*[:=]|[{\[])|[,;\n]|$)/gi;
+const PROVIDER_PROMPT_BRACKET_ASSIGNMENT_PATTERN = /\[[\\"']+([A-Za-z][A-Za-z0-9_-]*)[\\"']+\]\s*[:=]\s*("[^"]*"|'[^']*'|Bearer\s+[\s\S]*?|[\s\S]*?)(?=\s+(?:[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*|\[[^\]]+\])?\s*[:=]|[{\[])|[,;\n]|$)/gi;
+const PROVIDER_PROMPT_SINGLE_QUOTED_PAIR_PATTERN = /'([^']+)'\s*:\s*('(?:[^'\\]|\\.)*'|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/g;
+const PROVIDER_PROMPT_MALFORMED_SECRET_JSON_PAIR_PATTERN = /(["'])([A-Za-z0-9_.-]*(?:apiKey|authorization|auth|cookie|token|password|secret|session|bearer|privateKey|credential)[A-Za-z0-9_.-]*)\1\s*:\s*(["'])([^"'}\]]+)\3/gi;
+const PROVIDER_PROMPT_AMBIGUOUS_COLON_KEYS = new Set(['bearer', 'secret', 'session', 'token']);
 
 function catalogEntry(entry) {
   return Object.freeze(entry);
@@ -99,6 +133,246 @@ function asObject(value) {
 
 function cleanText(value, limit) {
   return truncate(compact(value ?? '', limit), limit);
+}
+
+function isProviderPromptSecretKey(value) {
+  const key = providerPromptKey(value);
+  if (!key || key.endsWith('count')) return false;
+  return PROVIDER_PROMPT_SECRET_KEY_SUFFIXES.some((suffix) => {
+    if (key === suffix || key.endsWith(suffix)) return true;
+    return PROVIDER_PROMPT_SECRET_KEY_QUALIFIERS.some((qualifier) => {
+      const compound = `${suffix}${qualifier}`;
+      return key === compound || key.endsWith(compound);
+    });
+  });
+}
+
+function providerPromptKey(value) {
+  return String(value ?? '').replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
+}
+
+function isHighConfidenceSecretAssignmentValue(value) {
+  const text = String(value ?? '').replace(/^["']|["']$/g, '').toLowerCase();
+  return /\bbearer\s+\S+/.test(text)
+    || /\bsk-[a-z0-9_-]+\b/i.test(text)
+    || /\braw[-_\s]/.test(text)
+    || /\b(api[-_\s]*key|authorization|credential|password|private[-_\s]*key|secret[-_\s]*value|session[-_\s]*key|token[-_\s]*value)\b/.test(text)
+    || /[a-z0-9_+/=-]{24,}/i.test(text);
+}
+
+function shouldRedactProviderPromptAssignment(key, delimiter, value) {
+  if (!isProviderPromptSecretKey(key)) return false;
+  if (delimiter === ':' && PROVIDER_PROMPT_AMBIGUOUS_COLON_KEYS.has(providerPromptKey(key))) {
+    return isHighConfidenceSecretAssignmentValue(value);
+  }
+  return true;
+}
+
+function jsonQuoteInfo(text, start) {
+  if (text[start] === '"' || text[start] === "'") {
+    return { quote: text[start], contentStart: start + 1, escaped: false };
+  }
+  if (text[start] === '\\' && (text[start + 1] === '"' || text[start + 1] === "'")) {
+    return { quote: text[start + 1], contentStart: start + 2, escaped: true };
+  }
+  return null;
+}
+
+function jsonStringBounds(text, start) {
+  const info = jsonQuoteInfo(text, start);
+  const quote = info?.quote;
+  if (quote !== '"' && quote !== "'") return -1;
+  let index = info.contentStart;
+  while (index < text.length) {
+    const char = text[index];
+    if (info.escaped) {
+      if (char === '\\' && text[index + 1] === quote && text[index - 1] !== '\\') {
+        return { start, contentStart: info.contentStart, contentEnd: index, end: index + 1, quote, escaped: true };
+      }
+      index += 1;
+      continue;
+    }
+    if (char === '\\') {
+      index += 2;
+      continue;
+    }
+    if (char === quote) {
+      return { start, contentStart: info.contentStart, contentEnd: index, end: index, quote, escaped: false };
+    }
+    index += 1;
+  }
+  return -1;
+}
+
+function jsonStringEnd(text, start) {
+  const bounds = jsonStringBounds(text, start);
+  return bounds === -1 ? -1 : bounds.end;
+}
+
+function jsonNestedEnd(text, start, open, close) {
+  let depth = 0;
+  let index = start;
+  while (index < text.length) {
+    const char = text[index];
+    if (jsonQuoteInfo(text, index)) {
+      const end = jsonStringEnd(text, index);
+      if (end < 0) return -1;
+      index = end + 1;
+      continue;
+    }
+    if (char === open) depth += 1;
+    if (char === close) {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+    index += 1;
+  }
+  return -1;
+}
+
+function jsonPrimitiveEnd(text, start) {
+  let index = start;
+  while (index < text.length && !/[\s,}\]]/.test(text[index])) index += 1;
+  return index > start ? index - 1 : -1;
+}
+
+function jsonValueEnd(text, start) {
+  const char = text[start];
+  if (jsonQuoteInfo(text, start)) return jsonStringEnd(text, start);
+  if (char === '{') return jsonNestedEnd(text, start, '{', '}');
+  if (char === '[') return jsonNestedEnd(text, start, '[', ']');
+  return jsonPrimitiveEnd(text, start);
+}
+
+function redactedJsonPair(bounds) {
+  if (bounds?.escaped) {
+    const quote = bounds.quote === "'" ? "\\'" : '\\"';
+    return `${quote}[redactedKey]${quote}:${quote}[redacted]${quote}`;
+  }
+  if (bounds?.quote === "'") return "'[redactedKey]':'[redacted]'";
+  return '"[redactedKey]":"[redacted]"';
+}
+
+function scrubJsonStringContent(text, bounds) {
+  const prefix = text.slice(bounds.start, bounds.contentStart);
+  const suffix = text.slice(bounds.contentEnd, bounds.end + 1);
+  const originalContent = text.slice(bounds.contentStart, bounds.contentEnd);
+  let content = originalContent;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const normalized = content.replace(/\\+(["'])/g, '\\$1');
+    const scrubbed = scrubProviderPromptSecrets(normalized);
+    if (scrubbed === normalized && normalized !== content) break;
+    if (scrubbed === content) break;
+    content = scrubbed;
+  }
+  return `${prefix}${content === originalContent.replace(/\\+(["'])/g, '\\$1') ? originalContent : content}${suffix}`;
+}
+
+function redactJsonSecretPairs(value) {
+  const text = String(value ?? '');
+  let output = '';
+  let index = 0;
+  while (index < text.length) {
+    let keyStart = -1;
+    for (let cursor = index; cursor < text.length; cursor += 1) {
+      if (jsonQuoteInfo(text, cursor)) {
+        keyStart = cursor;
+        break;
+      }
+    }
+    if (keyStart < 0) {
+      output += text.slice(index);
+      break;
+    }
+
+    const keyBounds = jsonStringBounds(text, keyStart);
+    if (keyBounds === -1) {
+      output += text.slice(index);
+      break;
+    }
+    const keyEnd = keyBounds.end;
+
+    let colonIndex = keyEnd + 1;
+    while (colonIndex < text.length && /\s/.test(text[colonIndex])) colonIndex += 1;
+    if (text[colonIndex] !== ':') {
+      output += text.slice(index, keyEnd + 1);
+      index = keyEnd + 1;
+      continue;
+    }
+
+    let valueStart = colonIndex + 1;
+    while (valueStart < text.length && /\s/.test(text[valueStart])) valueStart += 1;
+    const valueEnd = jsonValueEnd(text, valueStart);
+    if (valueEnd < 0) {
+      const key = text.slice(keyBounds.contentStart, keyBounds.contentEnd);
+      if (isProviderPromptSecretKey(key)) {
+        output += `${text.slice(index, keyStart)}${redactedJsonPair(keyBounds)}`;
+        break;
+      }
+      output += text.slice(index, keyEnd + 1);
+      index = keyEnd + 1;
+      continue;
+    }
+
+    const key = text.slice(keyBounds.contentStart, keyBounds.contentEnd);
+    if (!isProviderPromptSecretKey(key)) {
+      if (text[valueStart] === '{' || text[valueStart] === '[') {
+        output += text.slice(index, valueStart);
+        output += redactJsonSecretPairs(text.slice(valueStart, valueEnd + 1));
+        index = valueEnd + 1;
+        continue;
+      }
+      const valueBounds = jsonStringBounds(text, valueStart);
+      if (valueBounds !== -1) {
+        output += text.slice(index, valueStart);
+        output += scrubJsonStringContent(text, valueBounds);
+        index = valueEnd + 1;
+        continue;
+      }
+      output += text.slice(index, valueEnd + 1);
+      index = valueEnd + 1;
+      continue;
+    }
+
+    output += `${text.slice(index, keyStart)}${redactedJsonPair(keyBounds)}`;
+    index = valueEnd + 1;
+  }
+  return output;
+}
+
+function scrubProviderPromptSecrets(value) {
+  return redactJsonSecretPairs(value)
+    .replace(PROVIDER_PROMPT_SINGLE_QUOTED_PAIR_PATTERN, (match, key) => (isProviderPromptSecretKey(key) ? "'[redactedKey]':'[redacted]'" : match))
+    .replace(PROVIDER_PROMPT_MALFORMED_SECRET_JSON_PAIR_PATTERN, (match, keyQuote, key, valueQuote) => (
+      isProviderPromptSecretKey(key) ? `${keyQuote}[redactedKey]${keyQuote}:${valueQuote}[redacted]${valueQuote}` : match
+    ))
+    .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
+    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, 'sk-[redacted]')
+    .replace(/\bprivate[-_\s]*secret\b/gi, '[redacted]')
+    .replace(PROVIDER_PROMPT_BRACKET_ASSIGNMENT_PATTERN, (match, key) => (isProviderPromptSecretKey(key) ? '[redacted]' : match))
+    .replace(PROVIDER_PROMPT_SECRET_ASSIGNMENT_PATTERN, (match, key, delimiter, assignmentValue) => (
+      shouldRedactProviderPromptAssignment(key, delimiter, assignmentValue) ? '[redacted]' : match
+    ));
+}
+
+function scrubProviderPromptStructured(value, visiting = new WeakSet()) {
+  if (typeof value === 'string') return scrubProviderPromptSecrets(value);
+  if (!value || typeof value !== 'object') return value;
+  if (visiting.has(value)) return '[Circular]';
+  visiting.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((entry) => scrubProviderPromptStructured(entry, visiting));
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+      isProviderPromptSecretKey(key) ? '[redactedKey]' : key,
+      isProviderPromptSecretKey(key) ? '[redacted]' : scrubProviderPromptStructured(child, visiting)
+    ]));
+  } finally {
+    visiting.delete(value);
+  }
+}
+
+function cleanProviderPromptText(value, limit) {
+  return cleanText(scrubProviderPromptSecrets(value), limit);
 }
 
 function cleanOptionalText(value, limit) {
@@ -258,7 +532,8 @@ function validEnum(value, allowed, fallback) {
 
 function stringifyForPrompt(value) {
   try {
-    return JSON.stringify(value ?? {}, null, 2);
+    const scrubbed = scrubProviderPromptStructured(value ?? {});
+    return scrubProviderPromptSecrets(JSON.stringify(redact(scrubbed, { maxString: TEXT_LIMIT }), null, 2));
   } catch {
     return JSON.stringify({ unavailable: true });
   }
@@ -356,25 +631,26 @@ export function buildCardRequests(plan = {}, context = {}) {
       const source = asObject(job);
       const catalog = resolveCatalog({ family: source.family, role: source.role ?? source.roleId }, { strict: false });
       if (!catalog) return null;
-      const reason = cleanText(source.reason ?? '', ARBITER_REASON_LIMIT);
-      const snapshotHash = String(context.snapshotHash ?? source.snapshotHash ?? '');
+      const reason = cleanProviderPromptText(source.reason ?? '', ARBITER_REASON_LIMIT);
+      const sourceSnapshotHash = String(context.snapshotHash ?? source.snapshotHash ?? '');
+      const promptSnapshotHash = cleanProviderPromptText(sourceSnapshotHash, TEXT_LIMIT);
       return {
         roleId: catalog.role,
-        runId: String(context.runId ?? source.runId ?? ''),
-        snapshotHash,
+        runId: cleanProviderPromptText(context.runId ?? source.runId ?? '', TEXT_LIMIT),
+        snapshotHash: promptSnapshotHash,
         prompt: [
           `Create one compact ${catalog.family} card for the current scene.`,
           'Return one JSON object only. Do not wrap it in markdown.',
           'The JSON object must use schema "recursion.card.v1" and an "items" array with one card object.',
           `Envelope role must be "${catalog.role}".`,
           `Envelope family must be "${catalog.family}".`,
-          snapshotHash ? `Envelope snapshotHash must be "${snapshotHash}".` : '',
+          promptSnapshotHash ? `Envelope snapshotHash must be "${promptSnapshotHash}".` : '',
           'The card object may contain promptText, summary, evidenceRefs, tokenEstimate, detailProfile, emphasis, and inspectorNotes.',
           'The card object must include at least one evidenceRefs entry containing a message:N reference.',
           'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
           cardPromptSafetyInstruction(catalog),
           reason ? `Arbiter request reason: ${reason}` : '',
-          `Snapshot hash: ${snapshotHash}`,
+          `Snapshot hash: ${promptSnapshotHash}`,
           `Snapshot:\n${stringifyForPrompt(context.snapshot ?? {})}`
         ].filter(Boolean).join('\n\n'),
         metadata: {

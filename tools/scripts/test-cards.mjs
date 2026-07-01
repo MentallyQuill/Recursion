@@ -185,6 +185,377 @@ const motivationRequest = buildCardRequests({ cardJobs: [{ family: 'Character Mo
   snapshotHash: 'hash'
 })[0];
 assert(motivationRequest.prompt.includes('Do not include first-person internal monologue'), 'motivation request includes internal-thought safety instruction');
+const truncationRequest = buildCardRequests({
+  cardJobs: [{
+    role: 'sceneFrameCard',
+    reason: `Safe truncation reason ${'x'.repeat(190)} {"apiKey":"leakv-reason-tail"}`
+  }]
+}, {
+  snapshotHash: 'hash',
+  snapshot: {
+    message: `Safe truncation snapshot ${'x'.repeat(950)} {"apiKey":"leakv-snapshot-tail"}`
+  }
+})[0];
+assert(!truncationRequest.prompt.includes('leakv'), 'request prompt scrubs secret-like text before truncating dynamic strings');
+assert(!truncationRequest.prompt.includes('apiKey'), 'request prompt scrubs secret-like keys before truncating dynamic strings');
+const malformedJsonRequest = buildCardRequests({
+  cardJobs: [{
+    role: 'sceneFrameCard',
+    reason: 'Safe malformed reason {"apiKey":{"value":"raw-malformed-reason-secret"'
+  }]
+}, {
+  snapshotHash: 'Safe malformed hash {"apiKey":{"value":"raw-malformed-hash-secret"',
+  snapshot: {
+    message: 'Safe malformed snapshot {"apiKey":{"value":"raw-malformed-snapshot-secret"'
+  }
+})[0];
+assert(malformedJsonRequest.prompt.includes('Safe malformed reason'), 'safe malformed reason prefix survives prompt redaction');
+assert(malformedJsonRequest.prompt.includes('Safe malformed hash'), 'safe malformed snapshot hash prefix survives prompt redaction');
+assert(malformedJsonRequest.prompt.includes('Safe malformed snapshot'), 'safe malformed snapshot text prefix survives prompt redaction');
+assert(!malformedJsonRequest.prompt.includes('raw-malformed-reason-secret'), 'request prompt redacts malformed JSON secret value in reason');
+assert(!malformedJsonRequest.prompt.includes('raw-malformed-hash-secret'), 'request prompt redacts malformed JSON secret value in snapshotHash');
+assert(!malformedJsonRequest.prompt.includes('raw-malformed-snapshot-secret'), 'request prompt redacts malformed JSON secret value in snapshot text');
+assert(!malformedJsonRequest.metadata.reason.includes('raw-malformed-reason-secret'), 'metadata reason redacts malformed JSON secret value');
+assert(!malformedJsonRequest.snapshotHash.includes('raw-malformed-hash-secret'), 'request snapshotHash redacts malformed JSON secret value');
+const malformedNestedQuotedJsonRequest = buildCardRequests({
+  cardJobs: [{
+    role: 'sceneFrameCard',
+    reason: 'Safe malformed nested reason {"outer":"{"apiKey":"raw-nested-malformed-reason"}"}'
+  }]
+}, {
+  runId: 'Safe malformed nested run {"outer":"{"apiKey":"raw-nested-malformed-run"}"}',
+  snapshotHash: 'Safe malformed nested hash {"outer":"{"apiKey":"raw-nested-malformed-hash"}"}',
+  snapshot: {
+    message: 'Safe malformed nested snapshot {"outer":"{"apiKey":"raw-nested-malformed-snapshot"}"}'
+  }
+})[0];
+for (const value of [
+  'raw-nested-malformed-reason',
+  'raw-nested-malformed-run',
+  'raw-nested-malformed-hash',
+  'raw-nested-malformed-snapshot'
+]) {
+  const payload = JSON.stringify(malformedNestedQuotedJsonRequest);
+  assert(!payload.includes(value), `provider-facing request data redacts ${value}`);
+}
+const idQualifiedRequest = buildCardRequests({
+  cardJobs: [{
+    role: 'sceneFrameCard',
+    reason: 'Safe id reason sessionId=raw-reason-session-id credentialId=raw-reason-credential-id apiKeyId=raw-reason-api-key-id'
+  }]
+}, {
+  runId: 'Safe id run sessionId=raw-run-session-id credentialId=raw-run-credential-id apiKeyId=raw-run-api-key-id',
+  snapshotHash: 'Safe id hash sessionId=raw-hash-session-id credentialId=raw-hash-credential-id apiKeyId=raw-hash-api-key-id'
+})[0];
+assert(idQualifiedRequest.prompt.includes('Safe id reason'), 'safe id-qualified reason text survives prompt redaction');
+assert(idQualifiedRequest.prompt.includes('Safe id hash'), 'safe id-qualified snapshot hash text survives prompt redaction');
+assert(idQualifiedRequest.runId.includes('Safe id run'), 'safe id-qualified run id text survives request redaction');
+assert(idQualifiedRequest.metadata.reason.includes('Safe id reason'), 'safe id-qualified metadata reason text survives redaction');
+for (const value of [
+  'raw-reason-session-id',
+  'raw-reason-credential-id',
+  'raw-reason-api-key-id',
+  'raw-run-session-id',
+  'raw-run-credential-id',
+  'raw-run-api-key-id',
+  'raw-hash-session-id',
+  'raw-hash-credential-id',
+  'raw-hash-api-key-id'
+]) {
+  assert(!idQualifiedRequest.prompt.includes(value), `request prompt redacts ${value}`);
+  assert(!idQualifiedRequest.runId.includes(value), `request runId redacts ${value}`);
+  assert(!idQualifiedRequest.snapshotHash.includes(value), `request snapshotHash redacts ${value}`);
+  assert(!idQualifiedRequest.metadata.reason.includes(value), `metadata reason redacts ${value}`);
+}
+const multiTokenAssignmentRequest = buildCardRequests({
+  cardJobs: [{
+    role: 'sceneFrameCard',
+    reason: 'Safe multiline reason privateKeyPem=-----BEGIN PRIVATE KEY----- ABCDEF apiKeyValue=raw multi word key'
+  }]
+}, {
+  runId: 'Safe multiline run privateKeyPem=-----BEGIN PRIVATE KEY----- RUNKEY',
+  snapshotHash: 'Safe multiline hash privateKeyPem=-----BEGIN PRIVATE KEY----- HASHKEY',
+  snapshot: {
+    message: 'Safe multiline snapshot privateKeyPem=-----BEGIN PRIVATE KEY----- SNAPKEY'
+  }
+})[0];
+for (const text of ['Safe multiline reason', 'Safe multiline run', 'Safe multiline hash', 'Safe multiline snapshot']) {
+  assert(JSON.stringify(multiTokenAssignmentRequest).includes(text), `${text} survives multi-token assignment redaction`);
+}
+for (const value of [
+  'BEGIN PRIVATE KEY',
+  'ABCDEF',
+  'RUNKEY',
+  'HASHKEY',
+  'SNAPKEY',
+  'raw multi word key'
+]) {
+  const payload = JSON.stringify(multiTokenAssignmentRequest);
+  assert(!payload.includes(value), `provider-facing request data redacts multi-token secret ${value}`);
+}
+const safeQuotedSnapshotRequest = buildCardRequests({
+  cardJobs: [{ role: 'sceneFrameCard' }]
+}, {
+  snapshotHash: 'hash',
+  snapshot: {
+    message: 'She said "stay safe" before leaving.',
+    literal: String.raw`He typed \"stay safe\" before leaving.`
+  }
+})[0];
+assert(safeQuotedSnapshotRequest.prompt.includes('\\"stay safe\\"'), 'safe quoted snapshot text remains escaped inside provider JSON prompt');
+assert(safeQuotedSnapshotRequest.prompt.includes('\\\\\\"stay safe\\\\\\"'), 'safe literal backslash-quote snapshot text keeps its escape layer');
+const safeProseAssignmentRequest = buildCardRequests({
+  cardJobs: [{
+    role: 'sceneFrameCard',
+    reason: 'Safe prose token: a brass coin session: evening watch secret: a whispered rumor headers.authorization=raw-safe-prose-prop'
+  }]
+}, {
+  runId: 'Safe prose run',
+  snapshotHash: 'Safe prose hash token: a brass coin session: evening watch secret: a whispered rumor headers.authorization=raw-safe-prose-hash-prop',
+  snapshot: {
+    message: 'Safe prose snapshot token: a brass coin session: evening watch secret: a whispered rumor headers.authorization=raw-safe-prose-snapshot-prop'
+  }
+})[0];
+for (const text of [
+  'token: a brass coin',
+  'session: evening watch',
+  'secret: a whispered rumor'
+]) {
+  assert(safeProseAssignmentRequest.prompt.includes(text), `${text} survives provider prompt sanitization`);
+  assert(safeProseAssignmentRequest.snapshotHash.includes(text), `${text} survives snapshotHash sanitization`);
+}
+for (const value of ['raw-safe-prose-prop', 'raw-safe-prose-hash-prop', 'raw-safe-prose-snapshot-prop']) {
+  assert(!JSON.stringify(safeProseAssignmentRequest).includes(value), `${value} redacted after safe prose assignment`);
+}
+const jsonInStringRequest = buildCardRequests({
+  cardJobs: [{
+    role: 'sceneFrameCard',
+    reason: String.raw`Safe json string reason {"outer":"{\"apiKey\":\"raw-json-string-reason\"}"} {\"outer\":\"{\\\"apiKey\\\":\\\"raw-double-json-string-reason\\\"}\"}`
+  }]
+}, {
+  runId: String.raw`Safe json string run {"outer":"{\"apiKey\":\"raw-json-string-run\"}"} {\"outer\":\"{\\\"apiKey\\\":\\\"raw-double-json-string-run\\\"}\"}`,
+  snapshotHash: String.raw`Safe json string hash {"outer":"{\"apiKey\":\"raw-json-string-hash\"}"} {\"outer\":\"{\\\"apiKey\\\":\\\"raw-double-json-string-hash\\\"}\"}`,
+  snapshot: {
+    message: String.raw`Safe json string snapshot {"outer":"{\"apiKey\":\"raw-json-string-snapshot\"}"} {\"outer\":\"{\\\"apiKey\\\":\\\"raw-double-json-string-snapshot\\\"}\"}`
+  }
+})[0];
+for (const text of ['Safe json string reason', 'Safe json string run', 'Safe json string hash', 'Safe json string snapshot']) {
+  assert(JSON.stringify(jsonInStringRequest).includes(text), `${text} survives quoted JSON string sanitization`);
+}
+for (const value of [
+  'raw-json-string-reason',
+  'raw-double-json-string-reason',
+  'raw-json-string-run',
+  'raw-double-json-string-run',
+  'raw-json-string-hash',
+  'raw-double-json-string-hash',
+  'raw-json-string-snapshot',
+  'raw-double-json-string-snapshot'
+]) {
+  const payload = JSON.stringify(jsonInStringRequest);
+  assert(!payload.includes(value), `provider-facing request data redacts ${value}`);
+}
+const laxJsonAndBracketRequest = buildCardRequests({
+  cardJobs: [{
+    role: 'sceneFrameCard',
+    reason: String.raw`Safe escaped reason {'apiKey':{'value':'raw-single-nested-reason'}} {'credentials':['raw-single-array-reason']} {\"apiKey\":\"raw-escaped-reason\"} {'authorizationHeader':'raw-single-quote-reason'} headers[\"authorization\"]=raw-bracket-reason headers.authorization=raw-prop-reason`
+  }]
+}, {
+  runId: String.raw`Safe escaped run {'apiKey':{'value':'raw-single-nested-run'}} {'credentials':['raw-single-array-run']} {\"apiKey\":\"raw-escaped-run\"} headers[\"authorization\"]=raw-bracket-run headers.authorization=raw-prop-run`,
+  snapshotHash: String.raw`Safe escaped hash {'apiKey':{'value':'raw-single-nested-hash'}} {'credentials':['raw-single-array-hash']} {\"apiKey\":\"raw-escaped-hash\"} {'authorizationHeader':'raw-single-quote-hash'} headers[\"authorization\"]=raw-bracket-hash headers.authorization=raw-prop-hash`,
+  snapshot: {
+    message: String.raw`Safe escaped snapshot {'apiKey':{'value':'raw-single-nested-snapshot'}} {'credentials':['raw-single-array-snapshot']} {\"apiKey\":\"raw-escaped-snapshot\"} {'authorizationHeader':'raw-single-quote-snapshot'} headers[\"authorization\"]=raw-bracket-snapshot headers.authorization=raw-prop-snapshot`
+  }
+})[0];
+for (const text of ['Safe escaped reason', 'Safe escaped run', 'Safe escaped hash', 'Safe escaped snapshot']) {
+  assert(JSON.stringify(laxJsonAndBracketRequest).includes(text), `${text} survives lax escaped redaction`);
+}
+for (const value of [
+  'raw-escaped-reason',
+  'raw-single-nested-reason',
+  'raw-single-array-reason',
+  'raw-single-quote-reason',
+  'raw-bracket-reason',
+  'raw-prop-reason',
+  'raw-escaped-run',
+  'raw-single-nested-run',
+  'raw-single-array-run',
+  'raw-bracket-run',
+  'raw-prop-run',
+  'raw-escaped-hash',
+  'raw-single-nested-hash',
+  'raw-single-array-hash',
+  'raw-single-quote-hash',
+  'raw-bracket-hash',
+  'raw-prop-hash',
+  'raw-escaped-snapshot',
+  'raw-single-nested-snapshot',
+  'raw-single-array-snapshot',
+  'raw-single-quote-snapshot',
+  'raw-bracket-snapshot',
+  'raw-prop-snapshot'
+]) {
+  const payload = JSON.stringify(laxJsonAndBracketRequest);
+  assert(!payload.includes(value), `provider-facing request data redacts ${value}`);
+}
+const rawProviderUnsafeSnapshotHash = 'hash-redacted Bearer hash-token sk-card-hash private-secret authentication=raw-authentication-value auth: Bearer abc/def+ghi= session: raw-session-hash credential=raw-credential-hash {"authorizationHeader":"hash-json-secret"}';
+const rawProviderUnsafeSnapshotHashWithQualified = `${rawProviderUnsafeSnapshotHash} Safe snapshot hash prefix before auth: raw-hash-safe-prefix-secret should remain. authorizationHeader=raw-hash-auth-header passwordHash=raw-hash-password-hash privateKeyPem=raw-hash-private-key-pem apiKeyValue=raw-hash-api-key-value {"apiKey":12345} {"authorizationHeader":false} {"credentials":null} {"apiKey":{"value":"raw-hash-nested-secret"}} {"credentials":["raw-hash-array-secret"]} {"outer":{"apiKey":"raw-hash-deep-secret"}} {"list":[{"credentials":["raw-hash-deep-array-secret"]}]}`;
+const redactedRequest = buildCardRequests({
+  cardJobs: [{
+    role: 'sceneFrameCard',
+    reason: 'Safe reason remains. Safe reason prefix before auth: raw-reason-safe-prefix-secret should remain while Bearer card-token sk-card-request private-secret auth: raw-auth-value auth: Bearer abc/def+ghi= session: raw-session-reason credential=raw-credential-reason authorizationHeader=raw-reason-auth-header passwordHash=raw-reason-password-hash privateKeyPem=raw-reason-private-key-pem apiKeyValue=raw-reason-api-key-value and {"apiKey":"reason-json-secret"} {"apiKey":12345} {"authorizationHeader":false} {"credentials":null} {"apiKey":{"value":"raw-reason-nested-secret"}} {"credentials":["raw-reason-array-secret"]} {"outer":{"apiKey":"raw-reason-deep-secret"}} {"list":[{"credentials":["raw-reason-deep-array-secret"]}]} are removed.'
+  }]
+}, {
+  runId: 'run-redacted Bearer run/token+value= apiKeyValue=raw-run-api-key',
+  snapshotHash: rawProviderUnsafeSnapshotHashWithQualified,
+  snapshot: {
+    scene: 'Safe visible snapshot text remains.',
+    auth: 'auth-value',
+    session: 'raw-session-value',
+    credential: 'raw-credential-value',
+    passwordHash: 'raw-password-hash',
+    privateKeyPem: 'raw-private-key-pem',
+    apiKeyValue: 'raw-api-key-value-2',
+    authorizationHeader: 'Bearer raw-authorization-header',
+    nested: {
+      message: 'Safe message text remains while Bearer snapshot-token Bearer abc/def+ghi= sk-snapshot-key {"cookie":"snapshot-json-secret"} {"apiKey":12345} {"apiKey":{"value":"raw-snapshot-nested-secret"}} {"credentials":["raw-snapshot-array-secret"]} {"outer":{"apiKey":"raw-snapshot-deep-secret"}} {"list":[{"credentials":["raw-snapshot-deep-array-secret"]}]} Safe snapshot text prefix before auth: raw-snapshot-safe-prefix-secret should remain and private-secret are removed.',
+      apiKey: 'raw-api-key-value',
+      authorization: 'Bearer nested-auth-token'
+    },
+    visibleMessages: [
+      {
+        text: 'The safe visible message remains.',
+        cookie: 'raw-cookie-value'
+      }
+    ]
+  }
+})[0];
+assert(redactedRequest.snapshotHash, 'provider-facing request snapshotHash survives after sanitization');
+assert(redactedRequest.snapshotHash !== rawProviderUnsafeSnapshotHashWithQualified, 'provider-facing request snapshotHash is sanitized when source hash contains unsafe text');
+assert(redactedRequest.runId !== 'run-redacted Bearer run/token+value= apiKeyValue=raw-run-api-key', 'provider-facing request runId is sanitized');
+assert(redactedRequest.prompt.includes(`Envelope snapshotHash must be "${redactedRequest.snapshotHash}"`), 'provider prompt asks for sanitized snapshot hash echo');
+assert(!redactedRequest.snapshotHash.includes('Bearer hash-token'), 'request snapshotHash redacts bearer token');
+assert(!redactedRequest.snapshotHash.includes('sk-card-hash'), 'request snapshotHash redacts sk token');
+assert(!redactedRequest.snapshotHash.includes('raw-authentication-value'), 'request snapshotHash redacts authentication assignment');
+assert(!redactedRequest.snapshotHash.includes('raw-session-hash'), 'request snapshotHash redacts session assignment');
+assert(!redactedRequest.snapshotHash.includes('raw-credential-hash'), 'request snapshotHash redacts credential assignment');
+assert(!redactedRequest.snapshotHash.includes('hash-json-secret'), 'request snapshotHash redacts JSON-style secret value');
+assert(!redactedRequest.snapshotHash.includes('raw-hash-auth-header'), 'request snapshotHash redacts qualified authorizationHeader assignment');
+assert(!redactedRequest.snapshotHash.includes('raw-hash-password-hash'), 'request snapshotHash redacts qualified passwordHash assignment');
+assert(!redactedRequest.snapshotHash.includes('raw-hash-private-key-pem'), 'request snapshotHash redacts qualified privateKeyPem assignment');
+assert(!redactedRequest.snapshotHash.includes('raw-hash-api-key-value'), 'request snapshotHash redacts qualified apiKeyValue assignment');
+assert(!redactedRequest.snapshotHash.includes('raw-hash-safe-prefix-secret'), 'request snapshotHash redacts safe-prefix auth assignment value');
+assert(!redactedRequest.snapshotHash.includes('raw-hash-nested-secret'), 'request snapshotHash redacts nested object JSON secret value');
+assert(!redactedRequest.snapshotHash.includes('raw-hash-array-secret'), 'request snapshotHash redacts array JSON secret value');
+assert(!redactedRequest.snapshotHash.includes('raw-hash-deep-secret'), 'request snapshotHash redacts nested secret under safe JSON object key');
+assert(!redactedRequest.snapshotHash.includes('raw-hash-deep-array-secret'), 'request snapshotHash redacts nested secret under safe JSON array key');
+assert(!redactedRequest.snapshotHash.includes(':12345'), 'request snapshotHash redacts unquoted numeric JSON secret value');
+assert(!redactedRequest.snapshotHash.includes(':false'), 'request snapshotHash redacts unquoted boolean JSON secret value');
+assert(!redactedRequest.snapshotHash.includes(':null'), 'request snapshotHash redacts null JSON secret value');
+assert(!redactedRequest.runId.includes('run/token+value='), 'request runId redacts bearer credential payload');
+assert(!redactedRequest.runId.includes('raw-run-api-key'), 'request runId redacts secret assignment payload');
+assert(redactedRequest.prompt.includes('Safe reason remains'), 'safe request reason text survives prompt redaction');
+assert(redactedRequest.prompt.includes('Safe reason prefix before'), 'safe request reason prefix before auth assignment survives prompt redaction');
+assert(redactedRequest.prompt.includes('Safe snapshot hash prefix before'), 'safe snapshot hash prefix before auth assignment survives prompt redaction');
+assert(redactedRequest.prompt.includes('Safe visible snapshot text remains.'), 'safe snapshot text survives prompt redaction');
+assert(redactedRequest.prompt.includes('Safe message text remains'), 'safe nested snapshot text survives prompt redaction');
+assert(redactedRequest.prompt.includes('Safe snapshot text prefix before'), 'safe snapshot text prefix before auth assignment survives prompt redaction');
+assert(redactedRequest.prompt.includes('The safe visible message remains.'), 'safe visible message text survives prompt redaction');
+assert(redactedRequest.metadata.reason.includes('Safe reason remains'), 'metadata reason preserves safe request reason text');
+assert(redactedRequest.metadata.reason.includes('Safe reason prefix before'), 'metadata reason preserves safe prefix before auth assignment');
+assert(!redactedRequest.metadata.reason.includes('Bearer card-token'), 'metadata reason redacts bearer token');
+assert(!redactedRequest.metadata.reason.includes('abc/def+ghi='), 'metadata reason redacts bearer slash/plus/equals payload');
+assert(!redactedRequest.metadata.reason.includes('sk-card-request'), 'metadata reason redacts sk token');
+assert(!redactedRequest.metadata.reason.includes('raw-auth-value'), 'metadata reason redacts auth assignment');
+assert(!redactedRequest.metadata.reason.includes('raw-session-reason'), 'metadata reason redacts session assignment');
+assert(!redactedRequest.metadata.reason.includes('raw-credential-reason'), 'metadata reason redacts credential assignment');
+assert(!redactedRequest.metadata.reason.includes('raw-reason-auth-header'), 'metadata reason redacts qualified authorizationHeader assignment');
+assert(!redactedRequest.metadata.reason.includes('raw-reason-password-hash'), 'metadata reason redacts qualified passwordHash assignment');
+assert(!redactedRequest.metadata.reason.includes('raw-reason-private-key-pem'), 'metadata reason redacts qualified privateKeyPem assignment');
+assert(!redactedRequest.metadata.reason.includes('raw-reason-api-key-value'), 'metadata reason redacts qualified apiKeyValue assignment');
+assert(!redactedRequest.metadata.reason.includes('raw-reason-safe-prefix-secret'), 'metadata reason redacts safe-prefix auth assignment value');
+assert(!redactedRequest.metadata.reason.includes('raw-reason-nested-secret'), 'metadata reason redacts nested object JSON secret value');
+assert(!redactedRequest.metadata.reason.includes('raw-reason-array-secret'), 'metadata reason redacts array JSON secret value');
+assert(!redactedRequest.metadata.reason.includes('raw-reason-deep-secret'), 'metadata reason redacts nested secret under safe JSON object key');
+assert(!redactedRequest.metadata.reason.includes('raw-reason-deep-array-secret'), 'metadata reason redacts nested secret under safe JSON array key');
+assert(!redactedRequest.metadata.reason.includes('reason-json-secret'), 'metadata reason redacts JSON-style secret value');
+assert(!redactedRequest.metadata.reason.includes(':12345'), 'metadata reason redacts unquoted numeric JSON secret value');
+assert(!redactedRequest.metadata.reason.includes(':false'), 'metadata reason redacts unquoted boolean JSON secret value');
+assert(!redactedRequest.metadata.reason.includes(':null'), 'metadata reason redacts null JSON secret value');
+assert(!redactedRequest.metadata.reason.includes('apiKey'), 'metadata reason does not expose secret-like apiKey field name');
+assert(!redactedRequest.metadata.reason.includes('authorizationHeader'), 'metadata reason does not expose secret-like authorizationHeader field name');
+assert(!redactedRequest.prompt.includes('Bearer hash-token'), 'request prompt redacts bearer token in snapshotHash display');
+assert(!redactedRequest.prompt.includes('sk-card-hash'), 'request prompt redacts sk token in snapshotHash display');
+assert(!redactedRequest.prompt.includes('raw-authentication-value'), 'request prompt redacts authentication assignment in snapshotHash display');
+assert(!redactedRequest.prompt.includes('raw-session-hash'), 'request prompt redacts session assignment in snapshotHash display');
+assert(!redactedRequest.prompt.includes('raw-credential-hash'), 'request prompt redacts credential assignment in snapshotHash display');
+assert(!redactedRequest.prompt.includes('hash-json-secret'), 'request prompt redacts JSON-style secret value in snapshotHash display');
+assert(!redactedRequest.prompt.includes('Bearer card-token'), 'request prompt redacts bearer token in reason');
+assert(!redactedRequest.prompt.includes('abc/def+ghi='), 'request prompt redacts full bearer credential payload with slash/plus/equals');
+assert(!redactedRequest.prompt.includes('/def+ghi='), 'request prompt redacts partial bearer credential remainder');
+assert(!redactedRequest.prompt.includes('sk-card-request'), 'request prompt redacts sk token in reason');
+assert(!redactedRequest.prompt.includes('raw-auth-value'), 'request prompt redacts auth assignment in reason');
+assert(!redactedRequest.prompt.includes('raw-session-reason'), 'request prompt redacts session assignment in reason');
+assert(!redactedRequest.prompt.includes('raw-credential-reason'), 'request prompt redacts credential assignment in reason');
+assert(!redactedRequest.prompt.includes('raw-reason-auth-header'), 'request prompt redacts qualified authorizationHeader assignment in reason');
+assert(!redactedRequest.prompt.includes('raw-reason-password-hash'), 'request prompt redacts qualified passwordHash assignment in reason');
+assert(!redactedRequest.prompt.includes('raw-reason-private-key-pem'), 'request prompt redacts qualified privateKeyPem assignment in reason');
+assert(!redactedRequest.prompt.includes('raw-reason-api-key-value'), 'request prompt redacts qualified apiKeyValue assignment in reason');
+assert(!redactedRequest.prompt.includes('raw-reason-safe-prefix-secret'), 'request prompt redacts safe-prefix auth assignment value in reason');
+assert(!redactedRequest.prompt.includes('raw-reason-nested-secret'), 'request prompt redacts nested object JSON secret value in reason');
+assert(!redactedRequest.prompt.includes('raw-reason-array-secret'), 'request prompt redacts array JSON secret value in reason');
+assert(!redactedRequest.prompt.includes('raw-reason-deep-secret'), 'request prompt redacts nested secret under safe JSON object key in reason');
+assert(!redactedRequest.prompt.includes('raw-reason-deep-array-secret'), 'request prompt redacts nested secret under safe JSON array key in reason');
+assert(!redactedRequest.prompt.includes('reason-json-secret'), 'request prompt redacts JSON-style secret value in reason');
+assert(!redactedRequest.prompt.includes('private-secret'), 'request prompt redacts private-secret marker');
+assert(!redactedRequest.prompt.includes('Bearer snapshot-token'), 'request prompt redacts bearer token in snapshot text');
+assert(!redactedRequest.prompt.includes('sk-snapshot-key'), 'request prompt redacts sk token in snapshot text');
+assert(!redactedRequest.prompt.includes('snapshot-json-secret'), 'request prompt redacts JSON-style secret value in snapshot text');
+assert(!redactedRequest.prompt.includes('raw-snapshot-safe-prefix-secret'), 'request prompt redacts safe-prefix auth assignment value in snapshot text');
+assert(!redactedRequest.prompt.includes('raw-snapshot-nested-secret'), 'request prompt redacts nested object JSON secret value in snapshot text');
+assert(!redactedRequest.prompt.includes('raw-snapshot-array-secret'), 'request prompt redacts array JSON secret value in snapshot text');
+assert(!redactedRequest.prompt.includes('raw-snapshot-deep-secret'), 'request prompt redacts nested secret under safe JSON object key in snapshot text');
+assert(!redactedRequest.prompt.includes('raw-snapshot-deep-array-secret'), 'request prompt redacts nested secret under safe JSON array key in snapshot text');
+assert(!redactedRequest.prompt.includes(':12345'), 'request prompt redacts unquoted numeric JSON secret value');
+assert(!redactedRequest.prompt.includes(':false'), 'request prompt redacts unquoted boolean JSON secret value');
+assert(!redactedRequest.prompt.includes(':null'), 'request prompt redacts null JSON secret value');
+assert(!redactedRequest.prompt.includes('auth-value'), 'request prompt redacts plain auth field value');
+assert(!redactedRequest.prompt.includes('raw-session-value'), 'request prompt redacts plain session field value');
+assert(!redactedRequest.prompt.includes('raw-credential-value'), 'request prompt redacts plain credential field value');
+assert(!redactedRequest.prompt.includes('raw-password-hash'), 'request prompt redacts passwordHash field value');
+assert(!redactedRequest.prompt.includes('raw-private-key-pem'), 'request prompt redacts privateKeyPem field value');
+assert(!redactedRequest.prompt.includes('raw-api-key-value-2'), 'request prompt redacts apiKeyValue field value');
+assert(!redactedRequest.prompt.includes('Bearer raw-authorization-header'), 'request prompt redacts authorizationHeader field value');
+assert(!redactedRequest.prompt.includes('raw-api-key-value'), 'request prompt redacts apiKey value');
+assert(!redactedRequest.prompt.includes('Bearer nested-auth-token'), 'request prompt redacts authorization value');
+assert(!redactedRequest.prompt.includes('raw-cookie-value'), 'request prompt redacts cookie value');
+assert(!redactedRequest.prompt.includes('apiKey'), 'request prompt does not expose secret-like apiKey field name');
+assert(!redactedRequest.prompt.includes('authorization'), 'request prompt does not expose secret-like authorization field name');
+assert(!redactedRequest.prompt.includes('"session"'), 'request prompt does not expose secret-like session field name');
+assert(!redactedRequest.prompt.includes('"credential"'), 'request prompt does not expose secret-like credential field name');
+assert(!redactedRequest.prompt.includes('passwordHash'), 'request prompt does not expose secret-like passwordHash field name');
+assert(!redactedRequest.prompt.includes('privateKeyPem'), 'request prompt does not expose secret-like privateKeyPem field name');
+assert(!redactedRequest.prompt.includes('apiKeyValue'), 'request prompt does not expose secret-like apiKeyValue field name');
+assert(!redactedRequest.prompt.includes('authorizationHeader'), 'request prompt does not expose secret-like authorizationHeader field name');
+const redactedEchoCards = cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: redactedRequest.snapshotHash,
+    items: [{ promptText: 'Sanitized request hash echo validates without exposing source hash.', evidenceRefs: ['message:9'] }]
+  }
+}, {
+  sceneId: 'scene-redacted-provider',
+  snapshotHash: 'source-window-hash-stays-local',
+  expectedSnapshotHash: redactedRequest.snapshotHash,
+  expectedRole: 'sceneFrameCard',
+  expectedFamily: 'Scene Frame'
+});
+assertEqual(redactedEchoCards.length, 1, 'provider cards validate against sanitized request snapshot hash');
+assertEqual(redactedEchoCards[0].source.snapshotHash, 'source-window-hash-stays-local', 'provider card provenance keeps runtime source hash separate from provider echo hash');
 
 const providerCards = cardsFromProviderResult({
   ok: true,

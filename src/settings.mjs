@@ -96,7 +96,8 @@ function providerTestSignature(provider = {}) {
     hostConnectionProfileId: String(provider.hostConnectionProfileId || ''),
     baseUrl: String(provider.openAICompatible?.baseUrl || ''),
     model: String(provider.openAICompatible?.model || ''),
-    sessionApiKeyPresent: provider.openAICompatible?.sessionApiKeyPresent === true
+    sessionApiKeyPresent: provider.openAICompatible?.sessionApiKeyPresent === true,
+    maxTokens: Number(provider.maxTokens) || 0
   });
 }
 

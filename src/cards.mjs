@@ -81,6 +81,8 @@ const CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS = Object.freeze([
   /\b(?:thinks?|thoughts?|inner\s+monologue|internal\s+monologue)\s*:/i,
   /\b(?:secret|hidden|private|undisclosed)\s+(?:thoughts?|motives?|motivations?|plans?|intentions?)\b/i,
   /\breveal\s+(?:their\s+|his\s+|her\s+|my\s+|our\s+)?(?:inner|private|hidden|secret)\s+thoughts?\b/i,
+  /\b[A-Z][A-Za-z0-9_.-]*\s+(?:secretly|privately|silently)\s+(?:wants?|plans?|intends?|hopes?|fears?|feels?|knows?|believes?)\b/i,
+  /\b(?:he|she|they)\s+(?:secretly|privately|silently)\s+(?:wants?|plans?|intends?|hopes?|fears?|feels?|knows?|believes?)\b/i,
   /(?:^|[\s"'])I\s+(?:secretly|privately|silently|really|actually)\s+(?:want|wants|plan|plans|intend|intends|hope|hopes|fear|fears|feel|feels|know|knows|believe|believes)\b/i,
   /(?:^|[\s"'])I\s+(?:will|would|can|could|should)\s+never\s+reveal\b/i
 ]);
@@ -148,10 +150,10 @@ function assertCardPromptTextSafe(catalog, promptText) {
 }
 
 function providerSnapshotMatches(data, context) {
-  const expected = String(context?.snapshotHash ?? '').trim();
+  const expected = String(context?.expectedSnapshotHash ?? context?.snapshotHash ?? '').trim();
   const actual = String(data?.snapshotHash ?? '').trim();
   if (!expected) return true;
-  if (!actual) return context?.requireSnapshotHash !== true;
+  if (!actual) return context?.allowMissingSnapshotHash === true;
   return actual === expected;
 }
 

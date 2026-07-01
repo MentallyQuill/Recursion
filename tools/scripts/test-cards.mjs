@@ -59,6 +59,14 @@ await assertRejects(
   /Character Motivation/,
   'character motivation rejects first-person hidden thought text'
 );
+await assertRejects(
+  async () => normalizeCard({
+    family: 'Character Motivation',
+    promptText: 'Mara secretly plans to betray them once the hatch opens.'
+  }, { sceneId: 'scene-1' }),
+  /Character Motivation/,
+  'character motivation rejects third-person hidden plan text'
+);
 
 const roleMapped = normalizeCard({
   role: 'continuityRiskCard',
@@ -289,6 +297,35 @@ assertEqual(cardsFromProviderResult({
     items: [{ promptText: 'Wrong snapshot hash should be ignored.', evidenceRefs: ['message:8'] }]
   }
 }, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with mismatched snapshot hash ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    items: [{ promptText: 'Missing snapshot hash should be ignored.', evidenceRefs: ['message:8'] }]
+  }
+}, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope without snapshot hash ignored when expected');
+const requestHashContextCards = cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'request-frozen-hash',
+    items: [{ promptText: 'Request hash echo should validate while source hash stays local.', evidenceRefs: ['message:8'] }]
+  }
+}, {
+  sceneId: 'scene-provider',
+  snapshotHash: 'source-window-hash',
+  expectedSnapshotHash: 'request-frozen-hash',
+  expectedRole: 'sceneFrameCard',
+  expectedFamily: 'Scene Frame'
+});
+assertEqual(requestHashContextCards.length, 1, 'provider card validates request hash separately from source hash');
+assertEqual(requestHashContextCards[0].source.snapshotHash, 'source-window-hash', 'provider card provenance keeps runtime source hash');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',

@@ -99,7 +99,7 @@ The implementation must not persist API keys in:
 - diagnostics exports;
 - browser local storage or SillyTavern file storage.
 
-Persisted settings may record only `sessionApiKeyPresent: true | false` so the UI can show that the current browser session has a key loaded. Clearing a session key must remove it from memory and immediately mark the lane untestable until a key is re-entered. Changing source, host connection profile, base URL, model, or session key must clear stale provider-test pass state and resolved provider/model labels.
+Persisted settings may record only `sessionApiKeyPresent: true | false` so the UI can show that the current browser session has a key loaded. Clearing a session key must remove it from memory and immediately mark the lane untestable until a key is re-entered. Changing source, host connection profile, base URL, model, max tokens, or session key must clear stale provider-test pass state and resolved provider/model labels.
 
 Provider requests may receive the key through an in-memory provider runtime object. The key must not be copied into request hashes, error text, telemetry payloads, or thrown exceptions.
 
@@ -191,6 +191,7 @@ Common card output envelope:
 {
   "schema": "recursion.card.v1",
   "role": "sceneFrameCard",
+  "family": "Scene Frame",
   "snapshotHash": "string",
   "items": [
     {
@@ -205,7 +206,7 @@ Common card output envelope:
 }
 ```
 
-Cards should be concise, observable, and player-message-adjacent. Provider cards are omitted independently when the envelope role/family does not match the requested catalog slot, an envelope `snapshotHash` is present but does not match the frozen request hash, the card lacks parseable `message:N` evidence, or prompt-facing text contains hidden-reasoning wording. They must not include hidden character thoughts, private chain-of-thought, or broad plot plans.
+Cards should be concise, observable, and player-message-adjacent. Provider cards are omitted independently when the envelope role/family does not match the requested catalog slot, the envelope `snapshotHash` is missing or does not match the frozen request hash, the card lacks parseable `message:N` evidence, or prompt-facing text contains hidden-reasoning wording. They must not include hidden character thoughts, private chain-of-thought, or broad plot plans.
 
 ## Cached Card Freshness
 

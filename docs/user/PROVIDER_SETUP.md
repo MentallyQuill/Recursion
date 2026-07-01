@@ -76,7 +76,7 @@ Clearing a session key should immediately mark that lane untestable until a key 
 
 Use `Test Provider` after setup and after changing source, model, base URL, key, or token settings.
 
-Recursion clears stale provider health after source, profile, base URL, model, or session key changes. A previous pass badge should not be treated as current until `Test Provider` passes again.
+Recursion clears stale provider health after source, profile, base URL, model, max token, or session key changes. A previous pass badge should not be treated as current until `Test Provider` passes again.
 
 A safe provider test should:
 

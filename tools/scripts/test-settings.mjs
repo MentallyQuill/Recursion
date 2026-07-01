@@ -109,6 +109,11 @@ markUtilityProviderTestPass();
 store.updateProvider('utility', { hostConnectionProfileId: 'profile-b' });
 assertUtilityProviderTestReset('changing host connection profile');
 
+store.updateProvider('utility', { source: 'openai-compatible', apiKey: 'test-key', openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' }, maxTokens: 4096 });
+markUtilityProviderTestPass();
+store.updateProvider('utility', { maxTokens: 8192 });
+assertUtilityProviderTestReset('changing provider token limit');
+
 store.update({ diagnostics: { maxJournalEntries: 321 } });
 store.update({ diagnostics: { includeExcerpts: true } });
 assertEqual(root.recursion.diagnostics.maxJournalEntries, 321, 'partial diagnostics update preserves max entries');

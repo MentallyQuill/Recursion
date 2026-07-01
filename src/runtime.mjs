@@ -1880,6 +1880,7 @@ export function createRecursionRuntime({
       const results = await generationRouter.batch(signalRequests, { runId, signal, isCurrent: () => isActiveRun(runId) });
       return results.flatMap((result, index) => cardsFromProviderResult(result, {
         ...cardSourceContext(snapshot),
+        expectedSnapshotHash: requests[index]?.snapshotHash,
         expectedRole: requests[index]?.metadata?.role,
         expectedFamily: requests[index]?.metadata?.family
       }));

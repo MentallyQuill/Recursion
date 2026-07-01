@@ -1,4 +1,5 @@
 import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
+import { hashJson } from '../../src/core.mjs';
 
 const RECURSION_PROMPT_KEYS = [
   'recursion.sceneBrief',
@@ -145,6 +146,173 @@ try {
 }
 if (lifecycleFailures.length) {
   throw new Error(lifecycleFailures.join('\n'));
+}
+
+{
+  const prompts = [];
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = {
+    getContext: () => ({
+      chatId: 'pending-interceptor-chat',
+      chat: [{ mesid: 0, is_user: false, mes: 'Committed assistant message.' }],
+      extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+      extension_prompt_roles: { SYSTEM: 'SYSTEM' },
+      setExtensionPrompt() {},
+      async generateRaw(request = {}) {
+        prompts.push(String(request.prompt || ''));
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.utilityArbiter.v1',
+            action: 'skip',
+            reasonerDecision: { mode: 'skip', reason: 'pending interceptor smoke', signals: [] },
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['pending-interceptor-smoke']
+          })
+        };
+      }
+    })
+  };
+
+  await globalThis.recursionOnDelete();
+  const pendingChat = [
+    { mesid: 0, is_user: false, mes: 'Committed assistant message.' },
+    { mesid: 1, is_user: true, mes: 'Pending submitted user message.' }
+  ];
+  assertEqual(await globalThis.recursionGenerationInterceptor(pendingChat), pendingChat, 'pending chat interceptor returns original array');
+  assert(prompts.some((prompt) => prompt.includes('Pending submitted user message.')), 'interceptor passes pending user text into runtime snapshot');
+  assert(prompts.some((prompt) => prompt.includes(`User message hash: ${hashJson('Pending submitted user message.')}`)), 'interceptor passes pending user text hash into Arbiter prompt');
+  await globalThis.recursionOnDelete();
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const prompts = [];
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = {
+    getContext: () => ({
+      chatId: 'pending-messages-array-chat',
+      chat: [{ mesid: 2, is_user: false, mes: 'Committed assistant before object payload.' }],
+      extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+      extension_prompt_roles: { SYSTEM: 'SYSTEM' },
+      setExtensionPrompt() {},
+      async generateRaw(request = {}) {
+        prompts.push(String(request.prompt || ''));
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.utilityArbiter.v1',
+            action: 'skip',
+            reasonerDecision: { mode: 'skip', reason: 'messages array smoke', signals: [] },
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['messages-array-smoke']
+          })
+        };
+      }
+    })
+  };
+
+  await globalThis.recursionOnDelete();
+  const messagesPayload = {
+    messages: [
+      { mesid: 2, is_user: false, mes: 'Committed assistant before object payload.' },
+      { mesid: 7, is_user: true, mes: 'Pending user from raw messages array.' }
+    ]
+  };
+  assertEqual(await globalThis.recursionGenerationInterceptor(messagesPayload), messagesPayload, 'raw messages-array interceptor returns original object');
+  assert(prompts.some((prompt) => prompt.includes('Pending user from raw messages array.')), 'raw messages-array payload passes pending user text');
+  assert(prompts.some((prompt) => prompt.includes(`User message hash: ${hashJson('Pending user from raw messages array.')}`)), 'raw messages-array payload passes pending user hash');
+  await globalThis.recursionOnDelete();
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const prompts = [];
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = {
+    getContext: () => ({
+      chatId: 'assistant-tail-chat',
+      chat: [
+        { mesid: 0, is_user: true, mes: 'Committed user message.' },
+        { mesid: 1, is_user: false, mes: 'Committed assistant reply.' }
+      ],
+      extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+      extension_prompt_roles: { SYSTEM: 'SYSTEM' },
+      setExtensionPrompt() {},
+      async generateRaw(request = {}) {
+        prompts.push(String(request.prompt || ''));
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.utilityArbiter.v1',
+            action: 'skip',
+            reasonerDecision: { mode: 'skip', reason: 'assistant tail smoke', signals: [] },
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['assistant-tail-smoke']
+          })
+        };
+      }
+    })
+  };
+
+  await globalThis.recursionOnDelete();
+  const assistantTailChat = [
+    { mesid: 0, is_user: true, mes: 'Committed user message.' },
+    { mesid: 1, is_user: false, mes: 'Committed assistant reply.' }
+  ];
+  assertEqual(await globalThis.recursionGenerationInterceptor(assistantTailChat), assistantTailChat, 'assistant-tail interceptor returns original array');
+  assert(prompts.some((prompt) => prompt.includes(`User message hash: ${hashJson('')}`)), 'assistant-tail payload does not pass stale user text hash');
+  assert(!prompts.some((prompt) => prompt.includes(`User message hash: ${hashJson('Committed user message.')}`)), 'assistant-tail payload does not promote prior user text as pending');
+  await globalThis.recursionOnDelete();
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const prompts = [];
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = {
+    getContext: () => ({
+      chatId: 'provider-shaped-payload-chat',
+      chat: [{ mesid: 4, is_user: false, mes: 'Committed assistant reply only.' }],
+      extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+      extension_prompt_roles: { SYSTEM: 'SYSTEM' },
+      setExtensionPrompt() {},
+      async generateRaw(request = {}) {
+        prompts.push(String(request.prompt || ''));
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.utilityArbiter.v1',
+            action: 'skip',
+            reasonerDecision: { mode: 'skip', reason: 'provider payload smoke', signals: [] },
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['provider-payload-smoke']
+          })
+        };
+      }
+    })
+  };
+
+  await globalThis.recursionOnDelete();
+  const providerPayload = {
+    messages: [
+      { role: 'system', content: 'Provider system scaffold.' },
+      { role: 'user', content: 'Provider-shaped user block is not raw chat.' }
+    ]
+  };
+  assertEqual(await globalThis.recursionGenerationInterceptor(providerPayload), providerPayload, 'provider-shaped interceptor returns original object');
+  assert(prompts.some((prompt) => prompt.includes(`User message hash: ${hashJson('')}`)), 'provider-shaped payload does not pass prompt-array user hash');
+  assert(!prompts.some((prompt) => prompt.includes('Provider-shaped user block is not raw chat.')), 'provider-shaped payload text is not promoted into runtime snapshot');
+  await globalThis.recursionOnDelete();
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
 }
 
 {

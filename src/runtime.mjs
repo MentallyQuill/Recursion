@@ -146,6 +146,53 @@ function latestVisibleUserMessage(snapshot) {
     .find((message) => message?.visible !== false && message?.role === 'user' && String(message?.text ?? '').trim());
 }
 
+function normalizePendingUserMessage(userMessage) {
+  if (typeof userMessage === 'string') {
+    return { text: safeText(userMessage, PROVIDER_MESSAGE_TEXT_LIMIT) };
+  }
+  const source = asObject(userMessage);
+  const text = safeText(source.text ?? source.mes ?? '', PROVIDER_MESSAGE_TEXT_LIMIT);
+  const mesid = Number(source.mesid ?? source.id ?? source.messageId);
+  return {
+    text,
+    ...(Number.isFinite(mesid) ? { mesid } : {})
+  };
+}
+
+function snapshotWithPendingUserMessage(snapshot, userMessage) {
+  const pending = normalizePendingUserMessage(userMessage);
+  const pendingText = pending.text;
+  if (!pendingText) return snapshot;
+  const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+  const latest = latestVisibleMessage(snapshot);
+  const currentLatestMesId = numberOr(snapshot?.latestMesId, 0);
+  const pendingMesId = Number.isFinite(pending.mesid) && pending.mesid > currentLatestMesId
+    ? pending.mesid
+    : currentLatestMesId + 1;
+  const alreadyVisible = latest?.role === 'user'
+    && safeText(latest?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingText
+    && (!Number.isFinite(pending.mesid) || numberOr(latest?.mesid, null) === pending.mesid);
+  if (alreadyVisible) return snapshot;
+  const nextMessages = [
+    ...messages,
+    {
+      mesid: pendingMesId,
+      role: 'user',
+      text: pendingText,
+      visible: true
+    }
+  ];
+  return {
+    ...snapshot,
+    latestMesId: pendingMesId,
+    messages: nextMessages,
+    turnFingerprint: hashJson({
+      latestMesId: pendingMesId,
+      messages: nextMessages.slice(-3)
+    })
+  };
+}
+
 function localFallbackPlan(snapshot, settings) {
   const snapshotHash = hashJson(snapshot);
   return {
@@ -1210,17 +1257,18 @@ export function createRecursionRuntime({
     }
 
     await waitForExternalMutations();
+    const pendingUserMessage = normalizePendingUserMessage(userMessage);
     const runId = makeId('run');
     const signal = startRun(runId);
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: ['Auto'] });
     try {
-      const snapshot = await readSnapshot();
+      const snapshot = snapshotWithPendingUserMessage(await readSnapshot(), pendingUserMessage);
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastSnapshot = snapshot;
       const fallbackPlan = localFallbackPlan(snapshot, settings);
       fallbackPlan.source = {
         ...fallbackPlan.source,
-        userMessageHash: hashJson(userMessage),
+        userMessageHash: hashJson(pendingUserMessage.text),
         catalogHash: hashJson(CARD_CATALOG)
       };
       const initialCache = await loadSceneCacheSafe(runId, snapshot);
@@ -1231,7 +1279,7 @@ export function createRecursionRuntime({
         settings,
         fallbackPlan,
         sceneCache: initialCache,
-        userMessage,
+        userMessage: pendingUserMessage.text,
         signal
       });
       if (!isActiveRun(runId)) return supersededResult(runId);

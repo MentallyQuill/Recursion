@@ -471,6 +471,116 @@ function createRuntimeHarness({
 }
 
 {
+  let arbiterPrompt = '';
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: {
+      chatId: 'pending-chat',
+      chatKey: 'pending-chat',
+      sceneKey: 'pending-scene',
+      sceneFingerprint: 'pending-scene-fp',
+      turnFingerprint: 'pending-old-turn-fp',
+      latestMesId: 7,
+      messages: [
+        { mesid: 7, role: 'assistant', text: 'The previous assistant reply is already committed.', visible: true }
+      ]
+    },
+    generationRouter: {
+      async generate(roleId, request) {
+        assertEqual(roleId, 'utilityArbiter', 'pending user message merge only needs Utility Arbiter');
+        arbiterPrompt = request.prompt;
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'skip',
+            diagnostics: ['pending-user-message']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'The pending user turn should be visible to Recursion.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'pending user message merge run skips safely');
+  assert(view.lastSnapshot.messages.some((message) => message.text === 'The pending user turn should be visible to Recursion.'), 'runtime snapshot includes pending user turn');
+  assert(arbiterPrompt.includes('The pending user turn should be visible to Recursion.'), 'arbiter prompt includes pending user turn text');
+  assertEqual(view.lastSnapshot.latestMesId, 8, 'pending user turn advances latest message id');
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: {
+      chatId: 'pending-mesid-chat',
+      chatKey: 'pending-mesid-chat',
+      sceneKey: 'pending-mesid-scene',
+      sceneFingerprint: 'pending-mesid-scene-fp',
+      turnFingerprint: 'pending-mesid-old-turn-fp',
+      latestMesId: 7,
+      messages: [
+        { mesid: 7, role: 'assistant', text: 'The previous assistant reply is committed.', visible: true }
+      ]
+    },
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'skip',
+            diagnostics: ['pending-user-message-mesid']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({
+    userMessage: { mesid: 12, text: 'The pending user turn carries its host mesid.' }
+  });
+  const view = runtime.view();
+  const pendingMessage = view.lastSnapshot.messages.find((message) => message.text === 'The pending user turn carries its host mesid.');
+  assertEqual(result.ok, true, 'pending user message object merge run skips safely');
+  assertEqual(pendingMessage?.mesid, 12, 'pending user turn preserves host mesid');
+  assertEqual(view.lastSnapshot.latestMesId, 12, 'pending user turn preserves host latest message id');
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: {
+      chatId: 'repeat-pending-chat',
+      chatKey: 'repeat-pending-chat',
+      sceneKey: 'repeat-pending-scene',
+      sceneFingerprint: 'repeat-pending-scene-fp',
+      turnFingerprint: 'repeat-pending-old-turn-fp',
+      latestMesId: 4,
+      messages: [
+        { mesid: 3, role: 'user', text: 'Repeat this.', visible: true },
+        { mesid: 4, role: 'assistant', text: 'The assistant answered the first repeat.', visible: true }
+      ]
+    },
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'skip',
+            diagnostics: ['repeated-pending-user-message']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Repeat this.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'repeated pending user text run skips safely');
+  assertEqual(view.lastSnapshot.messages.filter((message) => message.role === 'user' && message.text === 'Repeat this.').length, 2, 'repeated pending user text is appended after an assistant reply');
+  assertEqual(view.lastSnapshot.latestMesId, 5, 'repeated pending user turn advances latest message id');
+}
+
+{
   const arbiterPrompts = [];
   const { runtime } = createRuntimeHarness({
     settings: {
@@ -1445,9 +1555,9 @@ function createRuntimeHarness({
       };
     }
   });
-  const first = runtime.prepareForGeneration({ userMessage: 'first run' });
+  const first = runtime.prepareForGeneration({ userMessage: 'Stale first run text.' });
   await waitUntil(() => typeof releaseFirstLoad === 'function', 'first run did not reach scene cache wait');
-  const second = await runtime.prepareForGeneration({ userMessage: 'second run' });
+  const second = await runtime.prepareForGeneration({ userMessage: 'Fresh second run text.' });
   assertEqual(second.ok, true, 'newer run completes while older run is blocked');
   assertEqual(installed.length, 1, 'newer run installs while older run remains blocked');
   assert(JSON.stringify(installed[0]).includes('Fresh second run text.'), 'newer installed packet uses second snapshot');
@@ -1507,9 +1617,9 @@ function createRuntimeHarness({
       };
     }
   });
-  const first = runtime.prepareForGeneration({ userMessage: 'first save' });
+  const first = runtime.prepareForGeneration({ userMessage: 'Older save packet.' });
   await waitUntil(() => typeof releaseFirstSave === 'function', 'first run did not enter scene cache save');
-  const second = runtime.prepareForGeneration({ userMessage: 'second save' });
+  const second = runtime.prepareForGeneration({ userMessage: 'Newer save packet.' });
   await Promise.resolve();
   assertEqual(snapshotCalls, 1, 'newer run waits for in-flight scene cache save before snapshot');
   assertEqual(sideEffects.length, 0, 'blocked first save has not committed yet');
@@ -1576,7 +1686,7 @@ function createRuntimeHarness({
       }
     }
   });
-  const result = await runtime.prepareForGeneration({ userMessage: 'honor lifecycle' });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Use only the Arbiter-selected card.' });
   assertEqual(result.ok, true, 'arbiter lifecycle run installs');
   assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['arbiter-keep'], 'turn hand honors Arbiter select/stow lifecycle');
   const updated = await storage.loadSceneCache('arbiter-chat', 'arbiter-scene');
@@ -1642,7 +1752,7 @@ function createRuntimeHarness({
       }
     }
   });
-  const result = await runtime.prepareForGeneration({ userMessage: 'hard shift lifecycle' });
+  const result = await runtime.prepareForGeneration({ userMessage: 'A new scene begins elsewhere.' });
   assertEqual(result.ok, true, 'hard-shift lifecycle run installs');
   assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['new-scene-card'], 'hard-shift cache survives stale pre-shift lifecycle selection');
   const updated = await storage.loadSceneCache('hard-shift-chat', shiftedSceneKey);
@@ -1701,7 +1811,7 @@ function createRuntimeHarness({
       }
     }
   });
-  const result = await runtime.prepareForGeneration({ userMessage: 'mixed cache lifecycle' });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Use valid cache despite rejected selection.' });
   assertEqual(result.ok, true, 'mixed cache lifecycle run installs');
   assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['valid-cache-card'], 'valid cache card survives lifecycle for rejected card id');
 }
@@ -1862,9 +1972,9 @@ function createRuntimeHarness({
       }
     }
   });
-  const first = runtime.prepareForGeneration({ userMessage: 'first clear' });
+  const first = runtime.prepareForGeneration({ userMessage: 'Older clear packet.' });
   await waitUntil(() => typeof releaseFirstClear === 'function', 'first run did not enter prompt clear');
-  const second = runtime.prepareForGeneration({ userMessage: 'second install' });
+  const second = runtime.prepareForGeneration({ userMessage: 'Newer install after clear.' });
   await Promise.resolve();
   assertEqual(snapshotCalls, 1, 'newer run waits for in-flight prompt clear before snapshot');
   assertDeepEqual(sideEffects, [], 'blocked clear has not produced host side effect yet');
@@ -1912,9 +2022,9 @@ function createRuntimeHarness({
       }
     }
   });
-  const first = runtime.prepareForGeneration({ userMessage: 'first install' });
+  const first = runtime.prepareForGeneration({ userMessage: 'Older install packet.' });
   await waitUntil(() => typeof releaseFirstInstall === 'function', 'first run did not enter prompt install');
-  const second = runtime.prepareForGeneration({ userMessage: 'second install' });
+  const second = runtime.prepareForGeneration({ userMessage: 'Newer install packet.' });
   await Promise.resolve();
   assertEqual(snapshotCalls, 1, 'newer run waits for in-flight prompt install before snapshot');
   assertEqual(sideEffects.length, 0, 'blocked first install has not produced host side effect yet');

@@ -67,6 +67,49 @@ function createProviderJournal(storage, currentHost) {
   };
 }
 
+function messageText(message) {
+  if (message === undefined || message === null) return '';
+  if (typeof message === 'string') return message.trim();
+  if (typeof message !== 'object') return '';
+  return String(message.mes ?? message.text ?? '').trim();
+}
+
+function messageMesId(message) {
+  if (!message || typeof message !== 'object') return undefined;
+  const value = Number(message.mesid ?? message.id ?? message.messageId);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function isSuppressedMessage(message) {
+  if (!message || typeof message !== 'object') return false;
+  return message.visible === false || message.hidden === true || message.is_system === true;
+}
+
+function isRawUserChatMessage(message) {
+  return Boolean(message && typeof message === 'object' && message.is_user === true && !isSuppressedMessage(message));
+}
+
+function chatMessagesFromPayload(chat) {
+  if (Array.isArray(chat)) return chat;
+  if (Array.isArray(chat?.messages)) return chat.messages;
+  if (Array.isArray(chat?.chat)) return chat.chat;
+  return [];
+}
+
+function latestPendingUserMessageFromPayload(chat) {
+  if (typeof chat === 'string') return { text: chat.trim() };
+  const messages = chatMessagesFromPayload(chat);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (isSuppressedMessage(message)) continue;
+    if (!isRawUserChatMessage(message)) return null;
+    const text = messageText(message);
+    if (text) return { text, mesid: messageMesId(message) };
+    return null;
+  }
+  return null;
+}
+
 export function bootstrapRecursion() {
   if (runtime) return runtime;
   if (!hasSillyTavernContext()) return null;
@@ -132,7 +175,7 @@ export async function recursionGenerationInterceptor(chat) {
   if (!activeRuntime) return chat;
 
   try {
-    await activeRuntime.prepareForGeneration({ userMessage: '' });
+    await activeRuntime.prepareForGeneration({ userMessage: latestPendingUserMessageFromPayload(chat) });
   } catch (error) {
     warn('Generation preparation failed.', error);
   }

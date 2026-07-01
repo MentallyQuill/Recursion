@@ -36,6 +36,12 @@ function parsePromptJsonSection(prompt, label) {
   return JSON.parse(section.slice(prefix.length));
 }
 
+function parseReasonerPromptSnapshotHash(prompt) {
+  const match = /^Snapshot hash: (.+)$/m.exec(String(prompt || ''));
+  assert(match, 'reasoner prompt includes snapshot hash');
+  return match[1].trim();
+}
+
 function messageTextHash(message) {
   return hashJson(String(message?.text ?? message?.mes ?? message?.content ?? ''));
 }
@@ -1580,7 +1586,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', promptFootprint: 'compact', reasonerUse: 'auto' },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request = {}) {
         routerCalls.push(roleId);
         if (roleId === 'utilityArbiter') {
           return {
@@ -1598,6 +1604,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
             ok: true,
             data: {
               schema: 'recursion.reasonerComposer.v1',
+              snapshotHash: parseReasonerPromptSnapshotHash(request.prompt),
               instructionPatch: 'Use the richer synthesis for this turn.',
               keptCardIds: [],
               droppedCardIds: []
@@ -2374,7 +2381,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', promptFootprint: 'normal', reasonerUse: 'auto' },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request = {}) {
         routerCalls.push(roleId);
         if (roleId === 'utilityArbiter') {
           return {
@@ -2391,6 +2398,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
             ok: true,
             data: {
               schema: 'recursion.reasonerComposer.v1',
+              snapshotHash: parseReasonerPromptSnapshotHash(request.prompt),
               instructionPatch: 'Use the compact synthesis.',
               keptCardIds: [],
               droppedCardIds: []
@@ -2471,6 +2479,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
             ok: true,
             data: {
               schema: 'recursion.reasonerComposer.v1',
+              snapshotHash: parseReasonerPromptSnapshotHash(request.prompt),
               instructionPatch: 'Keep the signal-threaded guidance.',
               keptCardIds: [],
               droppedCardIds: []

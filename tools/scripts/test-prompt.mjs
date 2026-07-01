@@ -262,6 +262,7 @@ assertEqual(offReasonerCalls, 0, 'reasonerUse off skips router even on rich foot
 assertEqual(offReasonerPacket.diagnostics.reasonerStatus, 'skipped', 'off reasoner status is skipped');
 
 const richReasonerCalls = [];
+const richReasonerSnapshot = baseSnapshot();
 const richReasonerPacket = await composePromptPacket({
   runId: 'rich-run',
   hand: baseHand({
@@ -278,7 +279,7 @@ const richReasonerPacket = await composePromptPacket({
       ...baseHand().cards.slice(1)
     ]
   }),
-  snapshot: baseSnapshot(),
+  snapshot: richReasonerSnapshot,
   settings: { promptFootprint: 'rich', reasonerUse: 'auto' },
   generationRouter: {
     async generate(roleId, request) {
@@ -287,6 +288,7 @@ const richReasonerPacket = await composePromptPacket({
         ok: true,
         data: {
           schema: 'recursion.reasonerComposer.v1',
+          snapshotHash: hashJson(richReasonerSnapshot),
           instructionPatch: 'Fuse the alley mood with the broken lamp constraint.',
           keptCardIds: ['c1', 'c2', 'private-secret'],
           droppedCardIds: ['private-secret']
@@ -310,6 +312,7 @@ assertEqual(richReasonerPacket.diagnostics.reasonerInvalidSourceIdCount, 2, 'inv
 assert(!JSON.stringify(richReasonerPacket.injectionPlan).includes('private-secret'), 'invalid reasoner source ids are dropped from injection plan');
 assert(richReasonerPacket.sections.turnBrief.includes('Reasoner synthesis: Fuse the alley mood'), 'reasoner synthesis appended to turn brief');
 
+const nearCapReasonerSnapshot = baseSnapshot();
 const nearCapReasonerPacket = await composePromptPacket({
   hand: {
     handId: 'near-cap',
@@ -321,7 +324,7 @@ const nearCapReasonerPacket = await composePromptPacket({
     }],
     omitted: []
   },
-  snapshot: baseSnapshot(),
+  snapshot: nearCapReasonerSnapshot,
   settings: { promptFootprint: 'compact', reasonerUse: 'always' },
   generationRouter: {
     async generate() {
@@ -329,6 +332,7 @@ const nearCapReasonerPacket = await composePromptPacket({
         ok: true,
         data: {
           schema: 'recursion.reasonerComposer.v1',
+          snapshotHash: hashJson(nearCapReasonerSnapshot),
           instructionPatch: 'Required visible synthesis.',
           keptCardIds: ['near-cap-turn'],
           droppedCardIds: []
@@ -341,6 +345,7 @@ assertEqual(nearCapReasonerPacket.diagnostics.reasonerStatus, 'used', 'near-cap 
 assert(nearCapReasonerPacket.sections.turnBrief.includes('Reasoner synthesis: Required visible synthesis.'), 'near-cap reasoner patch survives budgeting');
 
 let alwaysReasonerCalls = 0;
+const alwaysReasonerSnapshot = baseSnapshot();
 const reasonerPacket = await composePromptPacket({
   hand: {
     handId: 'hand-1',
@@ -350,7 +355,7 @@ const reasonerPacket = await composePromptPacket({
     ],
     omitted: []
   },
-  snapshot: baseSnapshot(),
+  snapshot: alwaysReasonerSnapshot,
   settings: { promptFootprint: 'normal', reasonerUse: 'always' },
   generationRouter: {
     async generate() {
@@ -359,6 +364,7 @@ const reasonerPacket = await composePromptPacket({
         ok: true,
         data: {
           schema: 'recursion.reasonerComposer.v1',
+          snapshotHash: hashJson(alwaysReasonerSnapshot),
           instructionPatch: 'Fuse the alley mood with the broken lamp constraint.',
           keptCardIds: ['c1', 'c2'],
           droppedCardIds: []
@@ -390,6 +396,33 @@ assertEqual(invalidReasonerPacket.diagnostics.composerLane, 'utility', 'invalid 
 assertEqual(invalidReasonerPacket.diagnostics.reasonerStatus, 'fallback', 'invalid reasoner schema records fallback');
 assert(!invalidReasonerPacket.sections.turnBrief.includes('Do not use this'), 'invalid reasoner patch is not appended');
 assert(invalidReasonerEvents.some((event) => event.phase === 'promptReasonerFallback'), 'invalid reasoner emits fallback activity');
+
+const staleReasonerSnapshot = baseSnapshot();
+const staleReasonerPacket = await composePromptPacket({
+  hand: baseHand(),
+  snapshot: staleReasonerSnapshot,
+  settings: { promptFootprint: 'rich', reasonerUse: 'auto' },
+  generationRouter: {
+    async generate(roleId, request) {
+      assertEqual(roleId, 'reasonerComposer', 'stale reasoner test uses reasoner role');
+      assert(request.prompt.includes(`Snapshot hash: ${hashJson(staleReasonerSnapshot)}`), 'reasoner prompt includes expected snapshot hash');
+      return {
+        ok: true,
+        data: {
+          schema: 'recursion.reasonerComposer.v1',
+          snapshotHash: 'wrong-snapshot',
+          instructionPatch: 'This stale reasoner patch must not be used.',
+          keptCardIds: ['c1'],
+          droppedCardIds: []
+        }
+      };
+    }
+  }
+});
+assertEqual(staleReasonerPacket.diagnostics.composerLane, 'utility', 'stale reasoner snapshot falls back to utility');
+assertEqual(staleReasonerPacket.diagnostics.reasonerStatus, 'fallback', 'stale reasoner snapshot records fallback');
+assertEqual(staleReasonerPacket.diagnostics.fallbackReason, 'reasoner_snapshot_mismatch', 'stale reasoner snapshot records explicit fallback reason');
+assert(!staleReasonerPacket.sections.turnBrief.includes('This stale reasoner patch'), 'stale reasoner patch is not appended');
 
 const errorReasonerPacket = await composePromptPacket({
   hand: baseHand(),

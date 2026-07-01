@@ -37,6 +37,7 @@ The composer receives:
 - selected hand cards
 - omitted hand candidates
 - current snapshot identifiers
+- frozen snapshot hash
 - scene fingerprint
 - turn fingerprint
 - settings for footprint and Reasoner use
@@ -58,9 +59,9 @@ Utility composition removes unsafe text, enforces section budgets, records sourc
 
 ## Reasoner Composition
 
-Reasoner composition is optional. It runs only when settings allow it and the current footprint or Arbiter decision makes it eligible. The Reasoner receives selected cards and Utility sections, then returns `recursion.reasonerComposer.v1` with an instruction patch and source card ids.
+Reasoner composition is optional. It runs only when settings allow it and the current footprint or Arbiter decision makes it eligible. The Reasoner receives selected cards, Utility sections, and the frozen snapshot hash, then returns `recursion.reasonerComposer.v1` with the same `snapshotHash`, an instruction patch, and source card ids.
 
-Runtime validates the schema, patch text, kept ids, and dropped ids. If validation fails, if the provider fails, or if the patch cannot fit the Turn Brief budget, the packet remains Utility-composed and diagnostics record a Reasoner fallback.
+Runtime validates the schema, echoed snapshot hash, patch text, kept ids, and dropped ids. If validation fails, if the provider fails, or if the patch cannot fit the Turn Brief budget, the packet remains Utility-composed and diagnostics record a Reasoner fallback.
 
 Reasoner output cannot invent lore, forward plot, hidden motives, or private analysis.
 

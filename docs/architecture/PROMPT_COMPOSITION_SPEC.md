@@ -41,6 +41,7 @@ Required fields:
 
 - `packetId`: unique id for the composed packet.
 - `packetVersion`: schema version for diagnostics and migration.
+- `snapshotHash`: frozen source snapshot hash for this generation attempt.
 - `chatId`: active SillyTavern chat identity or stable runtime alias.
 - `sceneFingerprint`: current scene identity used for cache checks.
 - `turnFingerprint`: current turn identity used to avoid stale installation.
@@ -163,9 +164,9 @@ Reasoner Composer triggers may include:
 - user-enabled strong guidance mode;
 - repeated diagnostics showing weak previous composition.
 
-Reasoner output is not authoritative by itself. Runtime must validate, cap, and merge it into the packet. The Reasoner must not invent lore, future plot, hidden motivations, or private analysis. It should transform selected evidence into concise writing guidance, then return structured output that the Utility Composer or runtime validator can accept, trim, or reject.
+Reasoner output is not authoritative by itself. Runtime must validate, cap, and merge it into the packet. The Reasoner must echo the packet's frozen `snapshotHash`; missing or mismatched hashes are stale output and must be rejected. The Reasoner must not invent lore, future plot, hidden motivations, or private analysis. It should transform selected evidence into concise writing guidance, then return structured output that the Utility Composer or runtime validator can accept, trim, or reject.
 
-If the Reasoner fails, times out, returns invalid schema, or exceeds safety limits, Recursion falls back to Utility Composer output and records the fallback in diagnostics.
+If the Reasoner fails, times out, returns invalid schema, returns the wrong snapshot hash, or exceeds safety limits, Recursion falls back to Utility Composer output and records the fallback in diagnostics.
 
 ## Injection Lanes/Depths
 
@@ -328,6 +329,7 @@ Each composition run should record:
 
 - packet id and version;
 - run id;
+- snapshot hash;
 - chat id or sanitized alias;
 - scene fingerprint and turn fingerprint;
 - footprint profile;

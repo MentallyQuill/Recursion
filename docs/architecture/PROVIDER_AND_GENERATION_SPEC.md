@@ -229,7 +229,7 @@ Cards that fail this check are stale cache artifacts. They may be counted in vis
 
 ## Reasoner Composer Call
 
-The Reasoner Composer receives accepted Utility cards, budget metadata, conflict markers, and the same snapshot hash. It returns a compact instruction patch for prompt composition.
+The Reasoner Composer receives accepted Utility cards, budget metadata, conflict markers, and the same snapshot hash. It returns a compact instruction patch for prompt composition. Runtime rejects missing or mismatched `snapshotHash` values as stale composer output and falls back to Utility composition.
 
 Reasoner is appropriate when:
 

@@ -324,11 +324,16 @@ function snapshotField(snapshot, key) {
   return safeText(asObject(snapshot)[key], 200);
 }
 
-function baseDiagnostics({ runId, footprint, budgets, cards, omissions, composerLane = 'utility', reasonerStatus = 'skipped' }) {
+function snapshotHash(snapshot) {
+  return hashJson(asObject(snapshot));
+}
+
+function baseDiagnostics({ runId, snapshotHash: sourceSnapshotHash, footprint, budgets, cards, omissions, composerLane = 'utility', reasonerStatus = 'skipped' }) {
   return {
     runId,
     composerLane,
     reasonerStatus,
+    snapshotHash: sourceSnapshotHash,
     sectionBudgets: { ...budgets },
     selectedCardCount: cards.length,
     omissionCount: omissions.length,
@@ -361,9 +366,11 @@ function buildPacket({
   diagnostics,
   composedAt
 }) {
+  const sourceSnapshotHash = snapshotHash(snapshot);
   return withSectionHashes({
     packetId,
     packetVersion: PACKET_VERSION,
+    snapshotHash: sourceSnapshotHash,
     chatId: snapshotField(snapshot, 'chatId'),
     sceneFingerprint: snapshotField(snapshot, 'sceneFingerprint'),
     turnFingerprint: snapshotField(snapshot, 'turnFingerprint'),
@@ -372,7 +379,7 @@ function buildPacket({
     selectedCardRefs: cards.map((card) => selectedCardRef(card)),
     omissions,
     injectionPlan: buildInjectionPlan(sectionSources, budgets),
-    diagnostics: diagnostics || baseDiagnostics({ runId, footprint, budgets, cards, omissions }),
+    diagnostics: diagnostics || baseDiagnostics({ runId, snapshotHash: sourceSnapshotHash, footprint, budgets, cards, omissions }),
     composedAt
   });
 }
@@ -384,13 +391,14 @@ function shouldUseReasoner(settings, footprint, generationRouter) {
   return reasonerUse === 'always' || footprint === 'rich';
 }
 
-function buildReasonerPrompt({ runId, footprint, cards, sections }) {
+function buildReasonerPrompt({ runId, snapshotHash: sourceSnapshotHash, footprint, cards, sections }) {
   return [
     'Compose an optional Recursion prompt packet synthesis.',
     `Return one JSON object only using schema "${REASONER_SCHEMA}".`,
     'Use only the selected card objects below; do not invent facts or inspect hidden fields.',
-    'Expected JSON shape: {"schema":"recursion.reasonerComposer.v1","instructionPatch":"concise instruction patch","keptCardIds":["card-id"],"droppedCardIds":[]}.',
+    'Expected JSON shape: {"schema":"recursion.reasonerComposer.v1","snapshotHash":"same snapshot hash","instructionPatch":"concise instruction patch","keptCardIds":["card-id"],"droppedCardIds":[]}.',
     `Run id: ${runId}`,
+    `Snapshot hash: ${sourceSnapshotHash}`,
     `Footprint: ${footprint}`,
     `Selected cards:\n${JSON.stringify(cards.map((card) => reasonerCard(card)), null, 2)}`,
     `Utility sections:\n${JSON.stringify(sections, null, 2)}`
@@ -402,13 +410,16 @@ function safeFallbackReason(value, fallback = 'reasoner_fallback') {
   return redacted || fallback;
 }
 
-function fallbackReasonFromResult(result) {
+function fallbackReasonFromResult(result, expectedSnapshotHash = '') {
   if (!result) return 'Reasoner returned no result.';
   if (result.ok === false) {
     return safeFallbackReason(result.error?.code || result.error?.message || 'reasoner_failed');
   }
   const schema = result.data?.schema;
   if (schema !== REASONER_SCHEMA) return 'reasoner_schema_mismatch';
+  if (expectedSnapshotHash && String(result.data?.snapshotHash || '') !== expectedSnapshotHash) {
+    return 'reasoner_snapshot_mismatch';
+  }
   if (!cleanOptionalText(result.data?.instructionPatch, MAX_REASONER_PATCH)) {
     return 'reasoner_patch_missing';
   }
@@ -427,11 +438,14 @@ function filterReasonerIds(value, allowedIds) {
   return { ids: uniqueStrings(ids), invalidCount };
 }
 
-function validateReasonerResult(result, allowedIds) {
-  if (!result?.ok) return { ok: false, reason: fallbackReasonFromResult(result) };
-  if (result.data?.schema !== REASONER_SCHEMA) return { ok: false, reason: fallbackReasonFromResult(result) };
+function validateReasonerResult(result, allowedIds, expectedSnapshotHash) {
+  if (!result?.ok) return { ok: false, reason: fallbackReasonFromResult(result, expectedSnapshotHash) };
+  if (result.data?.schema !== REASONER_SCHEMA) return { ok: false, reason: fallbackReasonFromResult(result, expectedSnapshotHash) };
+  if (expectedSnapshotHash && String(result.data?.snapshotHash || '') !== expectedSnapshotHash) {
+    return { ok: false, reason: fallbackReasonFromResult(result, expectedSnapshotHash) };
+  }
   const instructionPatch = safeOptionalText(result.data?.instructionPatch, MAX_REASONER_PATCH);
-  if (!instructionPatch) return { ok: false, reason: fallbackReasonFromResult(result) };
+  if (!instructionPatch) return { ok: false, reason: fallbackReasonFromResult(result, expectedSnapshotHash) };
   const kept = filterReasonerIds(result.data?.keptCardIds, allowedIds);
   const dropped = filterReasonerIds(result.data?.droppedCardIds, allowedIds);
   return {
@@ -487,12 +501,13 @@ async function applyReasonerPatch({
   try {
     const prompt = buildReasonerPrompt({
       runId,
+      snapshotHash: packet.snapshotHash,
       footprint: packet.footprint,
       cards,
       sections: packet.sections
     });
     const result = await generationRouter.generate('reasonerComposer', { runId, prompt });
-    const validated = validateReasonerResult(result, allowedIds);
+    const validated = validateReasonerResult(result, allowedIds, packet.snapshotHash);
     if (!validated.ok) {
       emitFallbackActivity(activity, { runId, reason: validated.reason });
       return {
@@ -678,6 +693,7 @@ export function validatePromptPacket(packet) {
   const source = asObject(packet);
   assertRequiredString(source.packetId, 'packetId');
   if (source.packetVersion !== PACKET_VERSION) throw new Error('packetVersion is invalid.');
+  assertRequiredString(source.snapshotHash, 'snapshotHash');
   assertRequiredString(source.chatId, 'chatId');
   assertRequiredString(source.sceneFingerprint, 'sceneFingerprint');
   assertRequiredString(source.turnFingerprint, 'turnFingerprint');

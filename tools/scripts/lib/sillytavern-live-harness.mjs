@@ -890,7 +890,7 @@ function modeSmokeSeedPromptScript() {
       if (!context || typeof context.setExtensionPrompt !== 'function') {
         throw new Error('setExtensionPrompt unavailable for mode smoke');
       }
-      context.setExtensionPrompt('recursion.modeSmokeBaseline', 'Recursion mode smoke baseline.', 'IN_PROMPT', 4, false, 'SYSTEM');
+      context.setExtensionPrompt('recursion.sceneBrief', 'Recursion mode smoke baseline.', 'IN_PROMPT', 4, false, 'SYSTEM');
       seeded = true;
     } catch (seedError) {
       error = String(seedError?.message || seedError || 'mode smoke seed failed');

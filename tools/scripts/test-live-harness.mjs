@@ -299,8 +299,8 @@ function recursionSmokeFixtureHtml({
         const applyMode = () => {
           smokeContext.mode = mode;
           if (mode === 'off') {
-            for (const key of Object.keys(smokeContext.prompts)) {
-              if (String(key).startsWith('recursion.')) smokeContext.setExtensionPrompt(key, '', 'IN_PROMPT', 0, false, 'SYSTEM');
+            for (const key of ['recursion.sceneBrief', 'recursion.turnBrief', 'recursion.guardrails']) {
+              smokeContext.setExtensionPrompt(key, '', 'IN_PROMPT', 0, false, 'SYSTEM');
             }
           }
           document.querySelector('[data-recursion-status]').textContent = mode === 'off' ? 'Ready - Off' : (mode === 'observe' ? 'Ready - Observe' : 'Ready - Auto');

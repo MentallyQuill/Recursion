@@ -982,6 +982,33 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
+  const server = await createSillyTavernSmokeFixtureServer({ sendSurface: 'none' });
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-strict-direct-bridge-smoke-'));
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live', '--write-artifacts', '--strict'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      },
+      artifactRoot
+    });
+    assertEqual(report.status, 'fail', 'strict generation smoke rejects direct bridge diagnostic fallback');
+    assertEqual(report.result, 'generation-direct-bridge-diagnostic', 'strict direct bridge failure uses explicit result');
+    assertEqual(report.browser.snapshot.generation.triggerSource, 'direct-bridge', 'strict direct bridge failure preserves trigger source');
+    assert(report.checks.some((check) => check.name === 'generation-live-smoke' && check.status === 'fail'), 'strict direct bridge records failing generation check');
+    const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
+    const promptMetadata = readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8');
+    assert(promptMetadata.includes('"triggerSource": "direct-bridge"'), 'strict direct bridge prompt metadata records trigger source');
+    assert(promptMetadata.includes('"result": "generation-direct-bridge-diagnostic"'), 'strict direct bridge prompt metadata records release-proof failure');
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
   const server = await createSillyTavernSmokeFixtureServer({ omitHostGenerationContinuation: true });
   const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-host-continuation-smoke-'));
   try {

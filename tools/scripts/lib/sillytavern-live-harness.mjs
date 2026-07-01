@@ -3223,27 +3223,41 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
             viewerOpen: browserResult.snapshot?.viewerOpen
           });
           if (browserResult.status === 'pass' && generationRequested) {
+            const generationEvidence = browserResult.snapshot?.generation || null;
+            const directBridgeDiagnostic = report.strict === true && generationEvidence?.triggerSource === 'direct-bridge';
+            const generationProofStatus = generationEvidence?.promptInstalled && !directBridgeDiagnostic ? 'pass' : 'fail';
+            const generationProofResult = directBridgeDiagnostic
+              ? 'generation-direct-bridge-diagnostic'
+              : browserResult.result;
             addCheck(report, {
               name: 'generation-live-smoke',
-              status: browserResult.snapshot?.generation?.promptInstalled ? 'pass' : 'fail',
-              summary: browserResult.snapshot?.generation?.promptInstalled
-                ? 'Generation bridge installed a Recursion prompt packet through the live extension.'
-                : 'Generation bridge did not produce prompt-install evidence.',
+              status: generationProofStatus,
+              summary: directBridgeDiagnostic
+                ? 'Direct bridge fallback is diagnostic only; strict generation proof requires visible send controls.'
+                : generationEvidence?.promptInstalled
+                  ? 'Generation bridge installed a Recursion prompt packet through the live extension.'
+                  : 'Generation bridge did not produce prompt-install evidence.',
               details: {
                 liveGeneration: env.RECURSION_LIVE_GENERATION === '1',
                 liveReasoner: env.RECURSION_LIVE_REASONER === '1',
-                generation: browserResult.snapshot?.generation
+                releaseProof: generationProofStatus === 'pass',
+                diagnosticOnly: directBridgeDiagnostic,
+                generation: generationEvidence
               }
             });
-            event('generation-live-smoke', browserResult.snapshot?.generation?.promptInstalled ? 'pass' : 'fail', browserResult.result, {
+            event('generation-live-smoke', generationProofStatus, generationProofResult, {
               liveGeneration: env.RECURSION_LIVE_GENERATION === '1',
               liveReasoner: env.RECURSION_LIVE_REASONER === '1',
-              generation: browserResult.snapshot?.generation
+              releaseProof: generationProofStatus === 'pass',
+              diagnosticOnly: directBridgeDiagnostic,
+              generation: generationEvidence
             });
-            setReportStatus(report, browserResult.snapshot?.generation?.promptInstalled ? 'pass' : 'fail', browserResult.result);
-            report.nextAction = browserResult.snapshot?.generation?.promptInstalled
-              ? 'Generation-enabled Recursion bridge smoke passed. Inspect sanitized prompt-key, host-continuation, prompt-metadata, and activity evidence before treating this as host-quality proof.'
-              : 'Inspect generation bridge evidence, prompt recorder status, prompt metadata, activity latest-run, and console/page errors.';
+            setReportStatus(report, generationProofStatus, generationProofResult);
+            report.nextAction = directBridgeDiagnostic
+              ? 'Run generation-enabled strict smoke against a Recursion-enabled chat with visible SillyTavern input and send controls; direct bridge evidence is diagnostic only.'
+              : generationEvidence?.promptInstalled
+                ? 'Generation-enabled Recursion bridge smoke passed. Inspect sanitized prompt-key, host-continuation, prompt-metadata, and activity evidence before treating this as host-quality proof.'
+                : 'Inspect generation bridge evidence, prompt recorder status, prompt metadata, activity latest-run, and console/page errors.';
           } else {
             setReportStatus(report, browserResult.status, browserResult.result);
             if (generationRequested) {

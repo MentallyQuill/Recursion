@@ -443,12 +443,18 @@ try {
 
   root.querySelector('[data-recursion-actions]').click();
   assertEqual(root.querySelector('[data-recursion-action-menu]').hidden, false, 'actions button opens action menu');
+  assertEqual(root.querySelector('[data-recursion-action-mode-toggle]').textContent, 'Switch to Observe only', 'action mode toggle uses Observe only wording');
   root.querySelector('[data-recursion-action-refresh]').click();
   assertEqual(refreshed, 1, 'actions button calls refresh scene');
   root.querySelector('[data-recursion-action-mode-toggle]').click();
   assertDeepEqual(settingsUpdates.at(-1), { mode: 'observe' }, 'mode toggle updates high-level settings');
   root.querySelector('[data-recursion-settings-toggle]').click();
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings action opens settings panel');
+  assertDeepEqual(
+    root.querySelector('[data-recursion-setting-mode]').children.map((child) => child.textContent),
+    ['Off', 'Observe only', 'Auto'],
+    'mode settings options use product wording'
+  );
 
   root.querySelector('[data-recursion-setting-mode]').value = 'auto';
   root.querySelector('[data-recursion-setting-strength]').value = 'strong';

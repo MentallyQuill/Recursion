@@ -30,7 +30,7 @@ const REASONER_ACTIVE_PHASES = new Set(['reasonerComposing']);
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const MODE_OPTIONS = Object.freeze([
   ['off', 'Off'],
-  ['observe', 'Observe'],
+  ['observe', 'Observe only'],
   ['auto', 'Auto']
 ]);
 const STRENGTH_OPTIONS = Object.freeze([
@@ -345,9 +345,9 @@ function renderActionMenu(panel, view, model) {
   }));
   panel.appendChild(button('Refresh Scene', 'recursionActionRefresh', 'Refresh Recursion scene'));
   panel.appendChild(button(
-    nextMode === 'observe' ? 'Observe Only' : 'Auto Mode',
+    nextMode === 'observe' ? 'Switch to Observe only' : 'Switch to Auto',
     'recursionActionModeToggle',
-    nextMode === 'observe' ? 'Switch Recursion to Observe Only' : 'Switch Recursion to Auto Mode'
+    nextMode === 'observe' ? 'Switch Recursion to Observe only' : 'Switch Recursion to Auto'
   ));
   const copyButton = button('Copy Last Prompt Packet', 'recursionCopyPromptPacket', 'Copy last Recursion prompt packet');
   copyButton.disabled = !view.lastPacket;

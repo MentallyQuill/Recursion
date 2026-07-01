@@ -202,7 +202,7 @@ function recursionSmokeFixtureHtml({
         </div>
         <div data-recursion-hand-dropdown hidden>No hand has been composed for this chat.</div>
         <div data-recursion-settings-panel hidden>
-          <select data-recursion-setting-mode aria-label="Mode"><option value="off">Off</option><option value="observe">Observe</option><option value="auto" selected>Auto</option></select>
+          <select data-recursion-setting-mode aria-label="Mode"><option value="off">Off</option><option value="observe">Observe only</option><option value="auto" selected>Auto</option></select>
           <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
           <input type="checkbox" data-recursion-provider-enabled-reasoner aria-label="Reasoner enabled">
           <button type="button" data-recursion-settings-save>Save Settings</button>

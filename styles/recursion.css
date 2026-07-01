@@ -962,6 +962,76 @@
   word-break: break-word;
 }
 
+.recursion-viewer-card-list {
+  display: grid;
+  gap: 8px;
+}
+
+.recursion-viewer-card {
+  background: color-mix(in srgb, var(--recursion-panel) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--recursion-border) 68%, transparent);
+  border-radius: 6px;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+}
+
+.recursion-viewer-card-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.recursion-viewer-card-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.recursion-viewer-card-title span,
+.recursion-viewer-label {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
+  font-size: 11px;
+}
+
+.recursion-viewer-card-meta,
+.recursion-viewer-card-evidence {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.recursion-viewer-card-summary,
+.recursion-viewer-card-text,
+.recursion-viewer-card-reasons p,
+.recursion-viewer-inspector-note {
+  line-height: 1.35;
+  margin: 0;
+}
+
+.recursion-viewer-card-summary {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 82%, transparent);
+  font-weight: 600;
+}
+
+.recursion-viewer-card-text {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 72%, transparent);
+}
+
+.recursion-viewer-inspector-note {
+  border-left: 2px solid color-mix(in srgb, var(--recursion-accent) 42%, transparent);
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 66%, transparent);
+  padding-left: 7px;
+}
+
+.recursion-viewer-lifecycle {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 66%, transparent);
+  margin: 0;
+  padding-left: 20px;
+}
+
 .recursion-hand-dropdown,
 .recursion-settings-panel {
   position: absolute;

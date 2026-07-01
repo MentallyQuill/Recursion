@@ -437,6 +437,9 @@ assert(/\.recursion-activity-trigger\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?padd
 assert(/\.recursion-hero-pixel-array\s*\{[\s\S]*?width:\s*max\(0px,/.test(recursionCss), 'production Hero Pixel Array uses column-based width animation');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(recursionCss), 'production CSS honors reduced-motion preferences');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.recursion-root \*[\s\S]*?animation:\s*none\s*!important;[\s\S]*?transition:\s*none\s*!important;/.test(recursionCss), 'reduced-motion rule disables Recursion animations and transitions');
+assert(/\.recursion-viewer-card-list\s*\{[\s\S]*?display:\s*grid;[\s\S]*?gap:\s*8px;/.test(recursionCss), 'full viewer deck renders structured cards in a compact grid');
+assert(/\.recursion-viewer-card\s*\{[\s\S]*?border:\s*1px solid[\s\S]*?border-radius:\s*6px;/.test(recursionCss), 'full viewer card details use bounded native panel styling');
+assert(/\.recursion-viewer-inspector-note\s*\{[\s\S]*?border-left:\s*2px solid/.test(recursionCss), 'full viewer inspector-only notes are visually labeled');
 assert(/function renderHeroPixelArray\(container, blocks = \[\]\) \{[\s\S]*?querySelectorAll\('\[data-recursion-hero-block\]'\)[\s\S]*?insertBefore\(node, before\);/.test(recursionUi), 'production renderer updates Hero Pixel Array blocks in place');
 assert(/window\.playRecursionTurnAnimation/.test(barImplementationReference), 'turn animation preview exposes a replay hook');
 assert(/\.step-row\.done \.step-icon\s*\{[\s\S]*?background:\s*var\(--green\);[\s\S]*?border-color:\s*var\(--green\);/.test(barImplementationReference), 'progress menu done dots use the same success green token');
@@ -784,12 +787,21 @@ try {
       cards: [{
         id: 'card-a',
         family: 'Scene Frame',
+        role: 'sceneFrameCard',
         status: 'fresh',
         source: 'generated',
         detailProfile: 'standard',
         promptText: 'Door stays blocked and the brass lock remains warped.',
         summary: 'Door stays blocked.',
-        emphasis: 'emphasized'
+        emphasis: 'emphasized',
+        evidenceRefs: ['turn:42', 'scene-hash:abc123'],
+        inspectorNotes: 'Inspector-only: player has not seen the brass lock flaw.',
+        lifecycle: [
+          { state: 'generated', reason: 'scene opening required fresh frame', at: '2026-07-01T00:00:00.000Z' },
+          { state: 'selected', reason: 'highest scene relevance' }
+        ],
+        selectedReason: 'anchors the blocked exit',
+        omittedReason: ''
       }]
     },
     activity: { phase: 'cardBatchRunning', severity: 'info', chips: ['Utility', 'Cards'] },
@@ -1156,6 +1168,18 @@ try {
     closeCount += 1;
     viewer.open = false;
   };
+  const cardDetail = root.querySelector('[data-recursion-viewer-card]');
+  assert(cardDetail, 'full viewer renders structured card detail rows');
+  const cardDetailText = fakeDocument.textTree(cardDetail);
+  assert(cardDetailText.includes('Scene Frame'), 'viewer card detail includes card family');
+  assert(cardDetailText.includes('fresh'), 'viewer card detail includes lifecycle state');
+  assert(cardDetailText.includes('emphasized'), 'viewer card detail includes emphasis');
+  assert(cardDetailText.includes('standard'), 'viewer card detail includes detail profile');
+  assert(cardDetailText.includes('generated'), 'viewer card detail includes provider/source state');
+  assert(cardDetailText.includes('turn:42'), 'viewer card detail includes evidence refs');
+  assert(cardDetailText.includes('anchors the blocked exit'), 'viewer card detail includes selection reason');
+  assert(cardDetailText.includes('Inspector-only'), 'viewer card detail labels inspector notes');
+  assert(cardDetailText.includes('scene opening required fresh frame'), 'viewer card detail includes lifecycle history');
 
   view = {
     ...view,

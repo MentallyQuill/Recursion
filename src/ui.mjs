@@ -857,6 +857,130 @@ function appendViewerSection(viewer, title, data, options = {}) {
   viewer.appendChild(section);
 }
 
+function viewerChip(text, className = '') {
+  const label = safeText(cleanText(text), 140);
+  if (!label) return null;
+  return el('span', { className: `recursion-mini-chip${className ? ` ${className}` : ''}`, text: label });
+}
+
+function appendViewerChips(container, values, className = '') {
+  for (const value of values) {
+    const chip = viewerChip(value, className);
+    if (chip) container.appendChild(chip);
+  }
+}
+
+function compactEvidenceRef(ref) {
+  if (typeof ref === 'string') return safeText(ref, 160);
+  const source = asObject(ref);
+  return safeText(source.id || source.hash || source.ref || source.source || safeJson(source, { maxString: 160 }), 160);
+}
+
+function cardLifecycle(card) {
+  const source = asObject(card);
+  const history = Array.isArray(source.lifecycle)
+    ? source.lifecycle
+    : Array.isArray(source.lifecycleHistory)
+      ? source.lifecycleHistory
+      : Array.isArray(source.history)
+        ? source.history
+        : [];
+  return history.slice(0, 6);
+}
+
+function appendViewerDeckSection(viewer, hand) {
+  const source = asObject(hand);
+  const cards = Array.isArray(source.cards) ? source.cards.slice(0, 20) : [];
+  const section = el('section', { className: 'recursion-viewer-section recursion-viewer-deck', dataset: { recursionViewerDeck: '' } });
+  section.appendChild(el('h3', { text: 'Deck' }));
+  if (!cards.length) {
+    section.appendChild(el('p', { className: 'recursion-empty', text: 'No cards are active in the current hand.' }));
+    viewer.appendChild(section);
+    return;
+  }
+
+  const list = el('div', { className: 'recursion-viewer-card-list' });
+  for (const [index, card] of cards.entries()) {
+    const cardSource = asObject(card);
+    const family = cardFamily(cardSource);
+    const metaChips = [
+      cardSource.status,
+      cardSource.emphasis,
+      cardSource.detailProfile,
+      cardSource.source || cardSource.provider || cardSource.provenance,
+      cardSource.updatedAt,
+      cardSource.role || cardSource.target
+    ].map((entry) => cleanText(entry, '')).filter(Boolean);
+    const evidenceRefs = Array.isArray(cardSource.evidenceRefs) ? cardSource.evidenceRefs.map(compactEvidenceRef).filter(Boolean).slice(0, 8) : [];
+    const selectedReason = cleanText(cardSource.selectedReason || cardSource.selectionReason || cardSource.whySelected || '');
+    const omittedReason = cleanText(cardSource.omittedReason || cardSource.omissionReason || cardSource.whyOmitted || '');
+    const notes = cleanText(cardSource.inspectorNotes || cardSource.inspectorNote || '');
+    const lifecycle = cardLifecycle(cardSource);
+    const article = el('article', {
+      className: 'recursion-viewer-card',
+      attrs: { 'aria-label': `${family} card detail` },
+      dataset: { recursionViewerCard: cardSource.id || `card-${index + 1}` }
+    });
+
+    const header = el('div', { className: 'recursion-viewer-card-head' }, [
+      el('span', { className: 'recursion-hand-icon', text: cardFamilyIcon(family), attrs: { 'aria-hidden': 'true' } }),
+      el('div', { className: 'recursion-viewer-card-title' }, [
+        el('strong', { text: family }),
+        el('span', { text: safeText(cardSource.id || cardSource.role || `card-${index + 1}`, 120) })
+      ])
+    ]);
+    const meta = el('div', { className: 'recursion-viewer-card-meta' });
+    appendViewerChips(meta, [...new Set(metaChips)]);
+    article.appendChild(header);
+    if (meta.children.length) article.appendChild(meta);
+    article.appendChild(el('p', {
+      className: 'recursion-viewer-card-summary',
+      text: safeText(cardSummary(cardSource), 260)
+    }));
+    article.appendChild(el('p', {
+      className: 'recursion-viewer-card-text',
+      text: safeText(cardText(cardSource) || cardSummary(cardSource), 900),
+      dataset: { recursionViewerCardText: '' }
+    }));
+
+    if (selectedReason || omittedReason) {
+      const reasons = el('div', { className: 'recursion-viewer-card-reasons' });
+      if (selectedReason) reasons.appendChild(el('p', { text: `Selected: ${safeText(selectedReason, 260)}` }));
+      if (omittedReason) reasons.appendChild(el('p', { text: `Omitted: ${safeText(omittedReason, 260)}` }));
+      article.appendChild(reasons);
+    }
+    if (evidenceRefs.length) {
+      const evidence = el('div', { className: 'recursion-viewer-card-evidence' }, [
+        el('span', { className: 'recursion-viewer-label', text: 'Evidence' })
+      ]);
+      appendViewerChips(evidence, evidenceRefs, 'recursion-viewer-ref-chip');
+      article.appendChild(evidence);
+    }
+    if (notes) {
+      article.appendChild(el('p', {
+        className: 'recursion-viewer-inspector-note',
+        text: `Inspector-only: ${safeText(notes.replace(/^inspector-only:\s*/i, ''), 360)}`
+      }));
+    }
+    if (lifecycle.length) {
+      const lifecycleList = el('ol', { className: 'recursion-viewer-lifecycle' });
+      for (const entry of lifecycle) {
+        const item = asObject(entry);
+        const label = [
+          item.state || item.status || item.event || 'event',
+          item.reason || item.summary || item.detail || '',
+          item.at || item.recordedAt || item.updatedAt || ''
+        ].map((part) => safeText(part, 180)).filter(Boolean).join(' - ');
+        lifecycleList.appendChild(el('li', { text: label }));
+      }
+      article.appendChild(lifecycleList);
+    }
+    list.appendChild(article);
+  }
+  section.appendChild(list);
+  viewer.appendChild(section);
+}
+
 function safeJson(value, options = {}) {
   const visiting = new WeakSet();
   const maxString = Number(options.maxString) > 0 ? Number(options.maxString) : 900;
@@ -947,7 +1071,7 @@ function renderViewer(viewer, view, model) {
     reasoner: model.reasonerState,
     activity: model.activityLabel
   });
-  appendViewerSection(viewer, 'Deck', view.lastHand ?? { cards: [] });
+  appendViewerDeckSection(viewer, view.lastHand ?? { cards: [] });
   appendViewerSection(viewer, 'Activity', view.activity ?? null);
   appendViewerSection(viewer, 'Prompt Packet', promptPacketPreview(view.lastPacket, view.lastHand), {
     dataset: { recursionPromptPacket: '' },

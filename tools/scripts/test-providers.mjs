@@ -26,6 +26,10 @@ function assertNoRawBatchMarker(value, message) {
   assert(!serialized.includes('RAW_BATCH'), message);
 }
 
+function assertNoProviderMarker(value, marker, message) {
+  assert(!JSON.stringify(value).includes(marker), message);
+}
+
 assertEqual(parseStructuredOutput('```json\n{"schema":"x"}\n```').schema, 'x', 'structured parser accepts fenced json');
 assertEqual(roleLane('unknownRole'), 'utility', 'unknown roles default to utility lane');
 assertEqual(roleLane('reasonerComposer'), 'reasoner', 'reasonerComposer uses reasoner lane');
@@ -475,6 +479,65 @@ const badJsonResult = await createGenerationRouter({
 }).generate('utilityArbiter', { prompt: 'Bad response JSON' });
 assertEqual(badJsonResult.ok, false, 'bad provider response json returns failure result');
 assertEqual(badJsonResult.error.code, 'RECURSION_PROVIDER_RESPONSE_JSON_INVALID', 'bad response json exposes stable code');
+
+async function openAiProviderFailure(payload, prompt = 'OpenAI provider failure') {
+  const marker = 'RAW_PROVIDER_NORMALIZER_MARKER';
+  const activity = createActivityReporter();
+  const journal = [];
+  const store = createStore();
+  store.updateProvider('utility', {
+    source: 'openai-compatible',
+    apiKey: 'session-key',
+    openAICompatible: { baseUrl: 'https://normalizer.test/v1', model: 'normalizer-model' }
+  });
+  const router = createGenerationRouter({
+    client: createProviderClient({
+      settingsStore: store,
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => payload(marker)
+      })
+    }),
+    activity,
+    journal: { append: (entry) => journal.push(entry) }
+  });
+  const result = await router.generate('utilityArbiter', { prompt });
+  assertNoProviderMarker(result, marker, `${prompt} result does not expose raw provider text`);
+  assertNoProviderMarker(activity.history(), marker, `${prompt} activity does not expose raw provider text`);
+  assertNoProviderMarker(journal, marker, `${prompt} journal does not expose raw provider text`);
+  return { result, activity, journal };
+}
+
+const tokenLimitFailure = await openAiProviderFailure((marker) => ({
+  model: 'normalizer-model',
+  choices: [{
+    finish_reason: 'length',
+    message: { content: `{"schema":"${marker}` }
+  }]
+}), 'Token limit response');
+assertEqual(tokenLimitFailure.result.ok, false, 'token-limit provider response returns failure result');
+assertEqual(tokenLimitFailure.result.error.code, 'RECURSION_PROVIDER_TOKEN_LIMIT', 'token-limit response exposes stable code');
+assertEqual(tokenLimitFailure.result.diagnostics.status, 'provider-failed', 'token-limit response is a provider failure, not a JSON parse failure');
+
+const reasoningOnlyFailure = await openAiProviderFailure((marker) => ({
+  model: 'normalizer-model',
+  choices: [{
+    finish_reason: 'stop',
+    message: {
+      content: '',
+      reasoning_content: `private reasoning ${marker}`
+    }
+  }]
+}), 'Reasoning-only response');
+assertEqual(reasoningOnlyFailure.result.ok, false, 'reasoning-only provider response returns failure result');
+assertEqual(reasoningOnlyFailure.result.error.code, 'RECURSION_PROVIDER_REASONING_ONLY', 'reasoning-only response exposes stable code');
+
+const emptyVisibleFailure = await openAiProviderFailure(() => ({
+  model: 'normalizer-model',
+  choices: [{ finish_reason: 'stop', message: { content: '   ' } }]
+}), 'Empty visible response');
+assertEqual(emptyVisibleFailure.result.ok, false, 'empty visible provider response returns failure result');
+assertEqual(emptyVisibleFailure.result.error.code, 'RECURSION_PROVIDER_EMPTY_RESPONSE', 'empty visible response exposes stable code');
 
 const redactionActivityEvents = [];
 const redactionJournalEntries = [];

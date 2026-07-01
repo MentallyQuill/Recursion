@@ -285,6 +285,7 @@ All provider-owned Recursion jobs must request structured JSON and validate befo
 Validation requirements:
 
 - parse JSON, including safe recovery from fenced JSON wrappers when needed;
+- normalize provider-shaped responses before parsing so empty visible output, reasoning-only output, and token-limit truncation become stable provider failures instead of ambiguous JSON parse failures;
 - verify `schema`, `role`, `snapshotHash`, enum values, string lengths, numeric ranges, and required arrays;
 - reject outputs that include raw hidden reasoning, chain-of-thought, private motives, or unsupported durable lore;
 - reject outputs that cite evidence outside the frozen snapshot;
@@ -320,6 +321,12 @@ Journal entries may include:
 - schema id;
 - retry count;
 - compact error code and compact error message.
+
+Normalized provider error codes include:
+
+- `RECURSION_PROVIDER_EMPTY_RESPONSE`: the provider returned no visible content.
+- `RECURSION_PROVIDER_REASONING_ONLY`: the provider returned hidden reasoning without visible JSON content.
+- `RECURSION_PROVIDER_TOKEN_LIMIT`: the provider stopped at a token limit before returning complete visible JSON.
 
 Journal entries must not include:
 

@@ -39,6 +39,13 @@ export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
 const UTILITY_ROLES = new Set(UTILITY_ROLE_IDS);
 const REASONER_ROLES = new Set(REASONER_ROLE_IDS);
 const SECRET_TEXT_PATTERN = /(sk-[a-z0-9_-]+|bearer\s+[a-z0-9._-]+|session-key|secret[-_\s]*value|private[-_\s]*key[-_\s]*material)/ig;
+const TOKEN_LIMIT_FINISH_REASONS = new Set([
+  'length',
+  'max_tokens',
+  'max_output_tokens',
+  'max_completion_tokens',
+  'token_limit'
+]);
 
 function scrubSecretText(value) {
   if (typeof value === 'string') return value.replace(SECRET_TEXT_PATTERN, '[redacted]');
@@ -152,11 +159,62 @@ function chatMessages(request = {}) {
 
 function parseOpenAiText(payload) {
   const choice = payload?.choices?.[0];
-  const content = choice?.message?.content ?? choice?.text ?? payload?.output_text;
-  if (typeof content === 'string' && content.trim()) return content;
+  const finishReason = normalizeFinishReason(choice?.finish_reason ?? choice?.finishReason ?? payload?.finish_reason ?? payload?.finishReason);
+  if (TOKEN_LIMIT_FINISH_REASONS.has(finishReason)) {
+    throw providerError('RECURSION_PROVIDER_TOKEN_LIMIT', 'Provider response stopped at the token limit before returning complete visible JSON.', {
+      retryable: false
+    });
+  }
+
+  const content = visibleProviderText(choice?.message?.content ?? choice?.text ?? payload?.output_text);
+  if (content.trim()) return content;
+
+  if (hasReasoningOnlyText(payload)) {
+    throw providerError('RECURSION_PROVIDER_REASONING_ONLY', 'Provider returned hidden reasoning without visible JSON content.', {
+      retryable: false
+    });
+  }
+
   throw providerError('RECURSION_PROVIDER_EMPTY_RESPONSE', 'Provider response did not include message content.', {
     retryable: false
   });
+}
+
+function normalizeFinishReason(value) {
+  return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function visibleProviderText(value) {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return '';
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => {
+        if (typeof entry === 'string') return entry;
+        if (!entry || typeof entry !== 'object') return '';
+        return String(entry.text ?? entry.content ?? entry.value ?? '');
+      })
+      .join('');
+  }
+  return String(value.text ?? value.content ?? value.value ?? '');
+}
+
+function hasReasoningOnlyText(value) {
+  return containsReasoningText(value, false);
+}
+
+function containsReasoningText(value, insideReasoningField) {
+  if (typeof value === 'string') return insideReasoningField && value.trim().length > 0;
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some((entry) => containsReasoningText(entry, insideReasoningField));
+  for (const [key, child] of Object.entries(value)) {
+    const normalizedKey = String(key || '').replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
+    const nextInsideReasoningField = insideReasoningField
+      || normalizedKey.includes('reasoning')
+      || normalizedKey.includes('thought');
+    if (containsReasoningText(child, nextInsideReasoningField)) return true;
+  }
+  return false;
 }
 
 function normalizeProviderResponse(response, enriched) {

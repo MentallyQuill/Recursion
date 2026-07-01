@@ -86,7 +86,7 @@ const PHASE_STEP_IDS = Object.freeze({
 });
 
 const FINAL_STATES = new Set(['done', 'warning', 'failed', 'skipped']);
-const UNSAFE_DISPLAY_PATTERN = /\b(raw\s*prompt|prompt\s*text|system\s*prompt|password|api[-_\s]*key|bearer\s+[a-z0-9._-]+|sk-[a-z0-9_-]+|private[-_\s]*secret)\b/i;
+const UNSAFE_DISPLAY_PATTERN = /\b(raw\s*prompt|prompt\s*text|system\s*prompt|password|api[-_\s]*key|authorization|cookie|credentials?|session[-_\s]*id|session[-_\s]*key|bearer\s+\S+|sk-[a-z0-9_-]+|private[-_\s]*secret)\b\s*(?:[:=]|\]|$)/i;
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};

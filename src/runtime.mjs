@@ -6,6 +6,7 @@ import { createSettingsStore } from './settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
+const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
 const DEFAULT_CHAT_ID = 'chat';
 const DEFAULT_SCENE_KEY = 'scene';
 const INSTALL_FAILURE_LABEL = 'Prompt install failed. Generation will continue without Recursion.';
@@ -1135,12 +1136,21 @@ export function createRecursionRuntime({
   function providerTestFailure(lane, checkedAt, error) {
     const compactError = safeText(error?.message || error?.code || error || 'Provider test failed.', 300);
     return settingsStore.updateProvider(lane, {
+      resolvedProviderLabel: '',
+      resolvedModelLabel: '',
       lastTest: {
         status: 'fail',
         checkedAt,
         compactError
       }
     });
+  }
+
+  function validProviderTestResult(result) {
+    const data = asObject(result?.data);
+    return result?.ok === true
+      && data.schema === PROVIDER_TEST_SCHEMA
+      && data.ok !== false;
   }
 
   async function testProvider(lane = 'utility') {
@@ -1197,7 +1207,7 @@ export function createRecursionRuntime({
         lane: resolvedLane,
         prompt: providerTestPrompt(resolvedLane)
       });
-      if (result?.ok) {
+      if (validProviderTestResult(result)) {
         const provider = settingsStore.updateProvider(resolvedLane, {
           resolvedProviderLabel: safeText(result.diagnostics?.providerId || result.providerId || '', 120),
           resolvedModelLabel: safeText(result.diagnostics?.model || result.model || '', 120),
@@ -1220,6 +1230,25 @@ export function createRecursionRuntime({
           }
         });
         return result;
+      }
+
+      if (result?.ok) {
+        const invalid = {
+          code: 'RECURSION_PROVIDER_TEST_INVALID',
+          message: 'Provider test returned an invalid structured response.'
+        };
+        const provider = providerTestFailure(resolvedLane, checkedAt, invalid);
+        settleRuntimeActivity({
+          runId,
+          outcome: 'warning',
+          phase: 'providerTestFailed',
+          severity: 'warning',
+          providerLane: resolvedLane,
+          label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
+          chips: ['Provider'],
+          detail: provider.lastTest
+        });
+        return { ok: false, error: invalid };
       }
 
       const provider = providerTestFailure(resolvedLane, checkedAt, result?.error || 'Provider test failed.');

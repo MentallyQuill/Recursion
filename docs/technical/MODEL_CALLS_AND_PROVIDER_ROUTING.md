@@ -62,7 +62,7 @@ flowchart TD
 
 ## Structured Output Validation
 
-All provider work must return a JSON object. OpenAI-compatible responses are normalized before JSON parsing so empty visible output, reasoning-only payloads, and token-limit truncation are reported as provider failures with stable error codes. The router then parses visible text through the structured JSON parser, including recovery from fenced JSON wrappers, and returns either `ok: true` with parsed data or `ok: false` with sanitized diagnostics.
+All provider work must return a JSON object. OpenAI-compatible responses are normalized before JSON parsing so empty visible output, reasoning-only payloads, and token-limit truncation are reported as provider failures with stable error codes. The router then parses visible text through the structured JSON parser, including recovery from fenced JSON wrappers, and returns either `ok: true` with parsed data or `ok: false` with sanitized diagnostics. Runtime consumers still validate role-specific schemas; for example, provider tests only pass on `recursion.providerTest.v1`.
 
 Validation failures do not become successful model calls. Prompt composition consumes accepted structured data only.
 

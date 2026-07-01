@@ -4159,4 +4159,76 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertNoSecretText(reasoner.lastTest, 'provider test failure status');
 }
 
+{
+  const { runtime, settingsStore } = createRuntimeHarness({
+    settings: {
+      providers: {
+        utility: {
+          resolvedProviderLabel: 'stale-provider',
+          resolvedModelLabel: 'stale-model'
+        }
+      }
+    },
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          diagnostics: { providerId: 'unsafe-provider', model: 'unsafe-model' },
+          data: {
+            schema: 'wrong.providerTest.schema',
+            ok: true,
+            detail: 'Bearer invalid-provider-token and sk-invalid-provider'
+          }
+        };
+      }
+    }
+  });
+
+  const invalid = await runtime.testProvider('utility');
+  assertEqual(invalid.ok, false, 'runtime provider test rejects invalid success schema');
+  assertEqual(invalid.error.code, 'RECURSION_PROVIDER_TEST_INVALID', 'invalid provider test returns stable error code');
+  const utility = settingsStore.get().providers.utility;
+  assertEqual(utility.lastTest.status, 'fail', 'invalid provider test records failing status');
+  assertEqual(utility.resolvedProviderLabel, '', 'invalid provider test clears stale provider label');
+  assertEqual(utility.resolvedModelLabel, '', 'invalid provider test does not record resolved model');
+  assertNoSecretText(utility.lastTest, 'invalid provider test status');
+  assertNoSecretText(invalid, 'invalid provider test result');
+}
+
+{
+  const { runtime, settingsStore } = createRuntimeHarness({
+    settings: {
+      providers: {
+        utility: {
+          resolvedProviderLabel: 'stale-provider',
+          resolvedModelLabel: 'stale-model'
+        }
+      }
+    },
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          diagnostics: { providerId: 'unsafe-provider', model: 'unsafe-model' },
+          data: {
+            schema: 'recursion.providerTest.v1',
+            ok: false,
+            message: 'Bearer false-provider-token and sk-false-provider'
+          }
+        };
+      }
+    }
+  });
+
+  const invalid = await runtime.testProvider('utility');
+  assertEqual(invalid.ok, false, 'runtime provider test rejects schema success with false ok flag');
+  assertEqual(invalid.error.code, 'RECURSION_PROVIDER_TEST_INVALID', 'false-ok provider test returns stable error code');
+  const utility = settingsStore.get().providers.utility;
+  assertEqual(utility.lastTest.status, 'fail', 'false-ok provider test records failing status');
+  assertEqual(utility.resolvedProviderLabel, '', 'false-ok provider test clears stale provider label');
+  assertEqual(utility.resolvedModelLabel, '', 'false-ok provider test clears stale model label');
+  assertNoSecretText(utility.lastTest, 'false-ok provider test status');
+  assertNoSecretText(invalid, 'false-ok provider test result');
+}
+
 console.log('[pass] runtime');

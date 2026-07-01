@@ -21,9 +21,9 @@ Each lane can use one provider source when the host supports it.
 
 ## Utility Setup
 
-1. Open the Recursion Actions menu.
-2. Open Provider Setup or the Full Viewer Providers section.
-3. Select `Utility`.
+1. Open the Recursion options menu from the ellipsis.
+2. Select the `Providers` tab, or open the Full Viewer Providers section.
+3. Select the `Utility` provider card.
 4. Choose a provider source.
 5. Fill the required fields for that source.
 6. For OpenAI-compatible endpoints, enter base URL, model, and session API key.
@@ -41,7 +41,7 @@ Utility is healthy when the test passes and the bar or provider card shows a rea
 4. Fill the required fields.
 5. Save provider settings.
 6. Run `Test Provider`.
-7. Leave Reasoner Use as `Auto` unless you are deliberately testing Reasoner routing.
+7. Use Reasoning Level in the Play tab for broad provider bias; leave it at `High` unless you are deliberately testing lower Utility-only or higher Reasoner-heavy routing.
 
 Reasoner is eligible only when enabled, healthy, and selected by Recursion for a useful reason such as crowded hand, conflicting cards, high continuity risk, or complex active cast.
 
@@ -92,7 +92,7 @@ Provider tests should not store raw prompt bodies, raw responses, API keys, or u
 
 ## Fallback Behavior
 
-Fallbacks should be visible in the Recursion Bar, Activity Ribbon, and Full Viewer Activity section.
+Fallbacks should be visible in the Recursion Bar, Hero Pixel Array progress menu, and Full Viewer Activity section.
 
 <Render Needed>: assets/documentation/renders/recursion-provider-fallback-states.png - Provider fallback states showing Utility unavailable, Reasoner timeout, invalid structured output, Utility fallback composition, and prompt skipped state.
 

@@ -77,7 +77,7 @@ Fallback behavior:
 - Reasoner failure falls back to Utility composition.
 - Provider test failure updates lane status with compact error text.
 - Host generation unavailability makes the lane unhealthy without blocking normal chat generation.
-- Token-limit, reasoning-only, and empty visible provider responses are classified before raw response text can enter diagnostics, journals, or Activity Ribbon details.
+- Token-limit, reasoning-only, and empty visible provider responses are classified before raw response text can enter diagnostics, journals, or progress details.
 
 ## Model-Call Journal
 

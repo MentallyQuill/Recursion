@@ -20,7 +20,7 @@ Related specs:
 
 The default experience should feel invisible during play. A user enables Recursion, chooses basic provider behavior if needed, and keeps writing. The extension observes the active chat, understands the current scene at a high level, and installs a compact prompt packet before generation when doing so is useful.
 
-The user should not need to manage a catalog of cards, tune semantic relevance rules, or manually edit prompt fragments turn by turn. The UI should explain what Recursion did, expose health and diagnostics, show live Activity Ribbon feedback while invisible work is happening, and offer a few high-level controls such as enabled state, intensity, refresh, provider setup, and optional Reasoner use.
+The user should not need to manage a catalog of cards, tune semantic relevance rules, or manually edit prompt fragments turn by turn. The UI should explain what Recursion did, expose health and diagnostics, show live Hero Pixel Array progress feedback while invisible work is happening, and offer a few high-level controls such as enabled state, Reasoning Level, provider setup, and optional Reasoner use.
 
 Advanced surfaces should support inspection and trust, not micromanagement.
 
@@ -48,7 +48,7 @@ V1 should include the smallest complete loop that proves Recursion's value:
 - Select a compact turn hand from that deck for the next generation.
 - Optionally run a Reasoner Composer when configured and available.
 - Compose and install a compact prompt packet with clear token caps and omission behavior.
-- Expose high-level UI status, Activity Ribbon progress, refresh, enablement, intensity, provider health, and last-run diagnostics.
+- Expose high-level UI status, Hero Pixel Array progress, enablement, Reasoning Level, provider health, and last-run diagnostics.
 - Persist only settings, bounded scene cache, provider-safe metadata, and diagnostics needed to understand recent behavior.
 
 Detailed behavior belongs in the companion specs:
@@ -56,7 +56,7 @@ Detailed behavior belongs in the companion specs:
 - Card creation, lifecycle signals, and hand selection: [CARD_SYSTEM_SPEC.md](CARD_SYSTEM_SPEC.md)
 - Runtime orchestration and SillyTavern hooks: [RUNTIME_ARCHITECTURE.md](../architecture/RUNTIME_ARCHITECTURE.md)
 - Prompt packet shape, depth, roles, and budgets: [PROMPT_COMPOSITION_SPEC.md](../architecture/PROMPT_COMPOSITION_SPEC.md)
-- Recursion Bar, Activity Ribbon, Last Hand dropdown, status, and viewer surfaces: [UI_SPEC.md](UI_SPEC.md)
+- Recursion Bar, Hero Pixel Array progress menu, Last Brief dropdown, status, and viewer surfaces: [UI_SPEC.md](UI_SPEC.md)
 - Storage keys, journals, privacy, and diagnostics: [STORAGE_AND_DIAGNOSTICS.md](../architecture/STORAGE_AND_DIAGNOSTICS.md)
 - Provider lanes, structured calls, schemas, and fallbacks: [PROVIDER_AND_GENERATION_SPEC.md](../architecture/PROVIDER_AND_GENERATION_SPEC.md)
 - Build order and validation plan: [IMPLEMENTATION_PLAN.md](../testing/IMPLEMENTATION_PLAN.md)

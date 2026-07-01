@@ -252,7 +252,7 @@ Default `maxEntries` should be small enough that the journal stays cheap to load
 
 ## Activity Event Contract
 
-Activity events are the sanitized source for the Recursion Bar, Activity Ribbon, and Full Viewer activity surface. They are not raw logs. They translate runtime/provider/storage events into compact user-facing stages.
+Activity events are the sanitized source for the Recursion Bar, Hero Pixel Array progress menu, and Full Viewer activity surface. They are not raw logs. They translate runtime/provider/storage events into compact user-facing stages.
 
 Recommended activity details:
 
@@ -279,7 +279,7 @@ Activity events must not include:
 - physical file paths when a logical storage key is enough;
 - hidden reasoning or private story plans.
 
-The Activity Ribbon should prefer the latest active run state over a chronological dump. The Full Viewer may show a bounded timeline derived from the same activity events.
+The progress menu should prefer the latest active run state over a chronological dump. The Full Viewer may show a bounded timeline derived from the same activity events.
 
 ## Diagnostics and Redaction
 
@@ -331,7 +331,7 @@ Hard invalidation retires or deletes the current scene cache:
 
 Soft invalidation marks the cache stale and asks the Utility Arbiter to review:
 
-- user requests Refresh Scene, recorded as reason `user-refresh`;
+- manual scene refresh is invoked by runtime/tooling, recorded as reason `user-refresh`;
 - provider settings, model, route, strength, focus, prompt footprint, or Reasoner mode changes;
 - freshness cap is reached;
 - source window advances beyond the card evidence range;
@@ -379,7 +379,7 @@ Recommended logical stages:
 - `Cleaning old cache`
 - `Storage ready`
 
-The normal auto path should stay quiet unless storage is slow, blocked, or invoked through Refresh Scene or Off-mode cleanup. Those paths should show concise progress in the Recursion bar or viewer activity surface.
+The normal auto path should stay quiet unless storage is slow, blocked, or invoked through manual scene refresh or Off-mode cleanup. Those paths should show concise progress in the Recursion Bar or viewer activity surface.
 
 Progress events should include a stable operation id, logical stage, severity, and optional sanitized counts. They should not expose physical paths or full JSON payloads. Storage progress should be separate from provider generation progress so that a model cancellation does not make a completed cache write look like a failed generation.
 

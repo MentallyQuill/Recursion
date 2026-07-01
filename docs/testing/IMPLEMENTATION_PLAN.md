@@ -28,7 +28,7 @@ Build:
 - Runtime event bus or small coordinator.
 - Core type/schema files for cards, hands, auto control plan, prompt packets, provider settings, scene cache, and run journal.
 - Minimal diagnostics channel.
-- Activity event contract for the Recursion Bar, Activity Ribbon, and Full Viewer.
+- Activity event contract for the Recursion Bar, Hero Pixel Array progress menu, and Full Viewer.
 
 Tests:
 
@@ -177,16 +177,16 @@ Exit criteria:
 
 - Recursion can compile and inject a prompt packet for the next generation.
 
-## Stage 7: Recursion Bar, Activity Ribbon, And Viewer
+## Stage 7: Recursion Bar, Hero Pixel Array Progress Menu, And Viewer
 
 Goal: make Recursion visible enough to trust without turning it into a workbench.
 
 Build:
 
 - Recursion Bar.
-- Activity Ribbon with foreground, background, review, success, fallback, and error states.
-- Actions menu.
-- Last Hand dropdown.
+- Hero Pixel Array progress menu with foreground, background, review, success, fallback, and error states.
+- Options/settings menu.
+- Last Brief dropdown.
 - Full viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers.
 - High-level settings controls.
 - Provider controls.
@@ -195,10 +195,10 @@ Build:
 Tests:
 
 - Bar renders in ready, compiling, paused, disabled, provider issue states.
-- Activity Ribbon renders Arbiter, card batch, composition, prompt install, storage, fallback, and provider issue stages.
-- Quick operations do not flicker the ribbon.
+- Hero Pixel Array progress menu renders Arbiter, card batch, composition, prompt install, storage, fallback, and provider issue stages.
+- Quick operations do not flicker the progress surface.
 - Warning/error states persist until dismissed or superseded.
-- Last Hand shows used cards from the prior run.
+- Last Brief shows used cards from the prior run.
 - Viewer handles empty/corrupt diagnostics gracefully.
 - Mobile/narrow layout does not overlap chat controls.
 
@@ -229,7 +229,7 @@ Tests:
 - Live SillyTavern smoke: initialize, configure Utility, observe mode, auto mode, prompt packet install, prompt packet clear.
 - Chat change invalidates active scene cache.
 - Provider failure falls back without blocking generation.
-- Activity Ribbon visibly reports model work, cache use, storage progress, prompt readiness, and fallbacks.
+- Hero Pixel Array progress menu visibly reports model work, cache use, storage progress, prompt readiness, and fallbacks.
 - Live artifacts include sanitized `report.json`, `summary.md`, `live-log.jsonl`, no-generation screenshots/traces, prompt packet metadata, storage probe results, and redaction checks.
 - Documentation render gaps are inventoried with visible markers and final assets promote only into `assets/documentation/renders/`.
 

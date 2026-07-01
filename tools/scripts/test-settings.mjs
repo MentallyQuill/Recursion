@@ -21,6 +21,7 @@ function assertThrows(fn, pattern, message) {
 const normalized = normalizeSettings({
   mode: 'auto',
   strength: 'strong',
+  reasoningLevel: 'ultra',
   reasonerUse: 'auto',
   providers: {
     utility: { source: 'openai-compatible', openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' }, temperature: 0.3 },
@@ -28,6 +29,8 @@ const normalized = normalizeSettings({
   }
 });
 assertEqual(normalized.mode, 'auto', 'mode preserved');
+assertEqual(normalized.reasoningLevel, 'ultra', 'reasoning level preserved');
+assertEqual(normalized.reasonerUse, 'always', 'ultra reasoning derives always-on reasoner routing');
 assertEqual(normalized.providers.utility.openAICompatible.model, 'fast', 'utility model preserved');
 assertEqual(normalized.providers.reasoner.enabled, true, 'reasoner enabled preserved');
 
@@ -45,8 +48,14 @@ const blankDiagnostics = normalizeSettings({ diagnostics: { maxJournalEntries: '
 assertEqual(blankDiagnostics.diagnostics.maxJournalEntries, DEFAULT_RECURSION_SETTINGS.diagnostics.maxJournalEntries, 'blank diagnostics max falls back');
 
 const defaultUi = normalizeSettings({});
+assertEqual(defaultUi.reasoningLevel, 'high', 'reasoning level defaults to high');
 assertEqual(defaultUi.ui.progressChildVisibleLimit, 5, 'sub-tier visible item default is five');
 assertEqual(defaultUi.ui.progressListVisibleLimit, 15, 'whole progress list visible item default is fifteen');
+
+const invalidReasoning = normalizeSettings({ reasoningLevel: 'maximum' });
+assertEqual(invalidReasoning.reasoningLevel, 'high', 'invalid reasoning level falls back to high');
+assertEqual(normalizeSettings({ reasoningLevel: 'low', reasonerUse: 'always' }).reasonerUse, 'off', 'low reasoning disables reasoner routing even when stale reasonerUse differs');
+assertEqual(normalizeSettings({ reasoningLevel: 'medium', reasonerUse: 'always' }).reasonerUse, 'auto', 'medium reasoning derives auto reasoner routing');
 
 const clampedUi = normalizeSettings({ ui: { progressChildVisibleLimit: 99, progressListVisibleLimit: -10 } });
 assertEqual(clampedUi.ui.progressChildVisibleLimit, 20, 'sub-tier visible item limit clamps high');
@@ -126,6 +135,11 @@ store.update({ diagnostics: { maxJournalEntries: 321 } });
 store.update({ diagnostics: { includeExcerpts: true } });
 assertEqual(root.recursion.diagnostics.maxJournalEntries, 321, 'partial diagnostics update preserves max entries');
 assertEqual(root.recursion.diagnostics.includeExcerpts, true, 'partial diagnostics update changes includeExcerpts');
+
+store.update({ reasoningLevel: 'medium' });
+store.update({ strength: 'light' });
+assertEqual(root.recursion.reasoningLevel, 'medium', 'partial settings update preserves reasoning level');
+assertEqual(root.recursion.strength, 'light', 'partial settings update changes strength');
 
 store.update({ ui: { progressChildVisibleLimit: 7 } });
 store.update({ ui: { progressListVisibleLimit: 22 } });

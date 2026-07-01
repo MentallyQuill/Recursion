@@ -564,7 +564,7 @@ function currentStepText(steps) {
   const failed = steps.find((step) => step.state === 'failed');
   if (failed) return `${failed.label.replace(/\.+$/g, '')} failed`;
   const pending = steps.find((step) => step.state === 'pending');
-  if (pending) return `${pending.label.replace(/\.+$/g, '')} waiting`;
+  if (pending) return `${pending.label.replace(/\.+$/g, '')}...`;
   return steps.length ? 'Ready' : '';
 }
 

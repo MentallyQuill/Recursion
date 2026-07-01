@@ -3,10 +3,13 @@
   --recursion-panel: color-mix(in srgb, var(--SmartThemeBlurTintColor, #242424) 72%, #0f0f0f);
   --recursion-border: color-mix(in srgb, var(--SmartThemeBorderColor, #555) 74%, transparent);
   --recursion-hover: color-mix(in srgb, var(--SmartThemeQuoteColor, #6fd5e8) 18%, transparent);
-  --recursion-accent: var(--SmartThemeQuoteColor, #78d8e8);
+  --recursion-accent: #65d6e8;
   --recursion-success: #7fcf8a;
+  --recursion-cached: #a78bfa;
   --recursion-warning: #ffd479;
   --recursion-error: #ff8a8a;
+  --hero-block-size: 4px;
+  --hero-block-gap: 2px;
   color: var(--SmartThemeBodyColor, #d8d8d8);
   background: var(--recursion-bg);
   border-block: 1px solid var(--recursion-border);
@@ -15,7 +18,7 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   position: relative;
-  z-index: 20;
+  z-index: 10000;
 }
 
 .recursion-root *,
@@ -28,16 +31,570 @@
   align-items: center;
   display: flex;
   gap: 6px;
-  min-height: 32px;
-  padding: 3px 8px;
+  min-height: 34px;
+  padding: 0 8px 0 2px;
+  position: relative;
 }
 
 .recursion-brand {
-  color: var(--recursion-accent);
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 72%, transparent);
   flex: 0 0 auto;
+  font-family: "Segoe UI Light", var(--mainFontFamily, "Segoe UI", sans-serif);
+  font-size: 13px;
+  font-weight: 300;
+  letter-spacing: 0;
+  line-height: 1;
+  left: var(--brand-offset);
+  margin-inline-end: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.recursion-brand-stage,
+.recursion-mode-button,
+.recursion-activity-trigger,
+.recursion-icon-button,
+.recursion-reasoning-node {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.recursion-brand-stage {
+  --brand-offset: calc(var(--hero-block-size) + 7px);
+  --brand-text-width: 66px;
+  --brand-stage-width: calc(var(--brand-offset) + var(--brand-text-width));
+  align-items: center;
+  cursor: pointer;
+  display: block;
+  flex: 0 0 var(--brand-stage-width);
+  height: 24px;
+  justify-content: flex-start;
+  min-width: var(--brand-stage-width);
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  width: var(--brand-stage-width);
+}
+
+.recursion-brand-stage:hover .recursion-brand,
+.recursion-brand-stage:focus-visible .recursion-brand {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 86%, var(--recursion-accent));
+}
+
+.recursion-bar-separator {
+  align-self: center;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 22%, transparent), transparent);
+  flex: 0 0 1px;
+  height: 18px;
+}
+
+.recursion-mode-cluster {
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.recursion-mode-button,
+.recursion-icon-button {
+  align-items: center;
+  border-radius: 5px;
+  cursor: pointer;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0;
+}
+
+.recursion-mode-button:hover,
+.recursion-mode-button:focus-visible,
+.recursion-icon-button:hover,
+.recursion-icon-button:focus-visible {
+  background: color-mix(in srgb, var(--recursion-panel) 72%, var(--recursion-hover));
+  outline: 1px solid color-mix(in srgb, var(--recursion-accent) 40%, transparent);
+  outline-offset: 1px;
+}
+
+.recursion-activity-trigger:hover,
+.recursion-activity-trigger:focus-visible {
+  background: transparent;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 84%, transparent);
+  outline: none;
+}
+
+.recursion-activity-trigger:hover .recursion-current-step,
+.recursion-activity-trigger:focus-visible .recursion-current-step {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 84%, transparent);
+}
+
+.recursion-activity-trigger:hover .recursion-hero-pixel-array,
+.recursion-activity-trigger:focus-visible .recursion-hero-pixel-array {
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--recursion-accent) 22%, transparent));
+}
+
+.recursion-mode-icon {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 70%, transparent);
+  display: inline-block;
+  height: 16px;
+  position: relative;
+  width: 16px;
+}
+
+.recursion-mode-icon::before,
+.recursion-mode-icon::after {
+  content: "";
+  position: absolute;
+}
+
+.recursion-mode-button[data-recursion-mode-kind="eye"] .recursion-mode-icon::before {
+  border: 1.4px solid currentColor;
+  border-radius: 999px;
+  height: 9px;
+  left: 1px;
+  top: 3px;
+  transform: rotate(-4deg);
+  width: 14px;
+}
+
+.recursion-mode-button[data-recursion-mode-kind="eye"] .recursion-mode-icon::after {
+  background: currentColor;
+  border-radius: 50%;
+  height: 3.5px;
+  left: 6.25px;
+  top: 5.75px;
+  width: 3.5px;
+}
+
+.recursion-mode-button[data-recursion-mode-kind="cards"] .recursion-mode-icon::before,
+.recursion-mode-button[data-recursion-mode-kind="cards"] .recursion-mode-icon::after {
+  border: 1.3px solid currentColor;
+  border-radius: 2px;
+  height: 8px;
+  width: 11px;
+}
+
+.recursion-mode-button[data-recursion-mode-kind="cards"] .recursion-mode-icon::before {
+  left: 2px;
+  top: 6px;
+}
+
+.recursion-mode-button[data-recursion-mode-kind="cards"] .recursion-mode-icon::after {
+  background: color-mix(in srgb, var(--recursion-bg) 80%, transparent);
+  left: 4px;
+  top: 2px;
+}
+
+.recursion-mode-button[data-recursion-mode-kind="power"] .recursion-mode-icon::before {
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  height: 12px;
+  left: 2px;
+  top: 3px;
+  width: 12px;
+}
+
+.recursion-mode-button[data-recursion-mode-kind="power"] .recursion-mode-icon::after {
+  background: color-mix(in srgb, var(--recursion-bg) 92%, #000);
+  border-left: 1.5px solid currentColor;
+  height: 8px;
+  left: 7px;
+  top: 1px;
+  width: 2px;
+}
+
+.recursion-mode-text,
+.recursion-status-text,
+.recursion-legacy-hand-count,
+.recursion-legacy-composer,
+.recursion-reasoner-chip {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.recursion-mode-menu,
+.recursion-status-popover,
+.recursion-hand-dropdown,
+.recursion-settings-panel {
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #242424) 86%, #090909);
+  border: 1px solid var(--recursion-border);
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, .40);
+}
+
+.recursion-mode-menu {
+  left: 0;
+  position: absolute;
+  top: 29px;
+  width: 222px;
+  z-index: 86;
+}
+
+.recursion-mode-choice {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  min-height: 34px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.recursion-mode-choice:hover,
+.recursion-mode-choice:focus-visible {
+  background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
+  outline: none;
+}
+
+.recursion-activity-trigger {
+  align-items: center;
+  border-radius: 5px;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 1 1 auto;
+  gap: 7px;
+  height: 24px;
+  justify-content: flex-start;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  transition: color .14s ease;
+}
+
+.recursion-current-step {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 62%, transparent);
+  flex: 0 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recursion-hero-pixel-array {
+  align-content: start;
+  display: grid;
+  flex: 0 0 auto;
+  grid-auto-columns: var(--hero-block-size);
+  grid-auto-flow: column;
+  grid-template-rows: repeat(3, var(--hero-block-size));
+  gap: var(--hero-block-gap);
+  height: calc((var(--hero-block-size) * 3) + (var(--hero-block-gap) * 2));
+  justify-content: start;
+  min-width: 0;
+  overflow: visible;
+  position: relative;
+  transition: width .18s ease, filter .14s ease;
+  width: max(0px, calc((var(--columns, 0) * var(--hero-block-size)) + ((var(--columns, 0) - 1) * var(--hero-block-gap))));
+  z-index: 1;
+}
+
+.hero-block {
+  aspect-ratio: 1 / 1;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 26%, transparent);
+  border-radius: 0;
+  display: block;
+  height: var(--hero-block-size);
+  opacity: 0;
+  width: var(--hero-block-size);
+  animation: recursion-hero-enter .18s ease-out forwards;
+  animation-delay: calc(var(--block-index, 0) * 24ms);
+  transition: background .14s ease, border-color .14s ease, box-shadow .14s ease, opacity .14s ease;
+}
+
+.hero-block.running {
+  animation:
+    recursion-hero-enter .18s ease-out forwards,
+    recursion-hero-active 1.05s ease-in-out infinite;
+  animation-delay: calc(var(--block-index, 0) * 24ms), 0ms;
+  background: var(--recursion-accent);
+  border-color: var(--recursion-accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--recursion-accent) 35%, transparent);
+}
+
+.hero-block.done {
+  background: var(--recursion-success);
+  border-color: var(--recursion-success);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--recursion-accent) 22%, transparent);
+}
+
+.hero-block.cached {
+  background: var(--recursion-cached);
+  border-color: var(--recursion-cached);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--recursion-cached) 24%, transparent);
+}
+
+.hero-block.warning {
+  background: var(--recursion-warning);
+  border-color: var(--recursion-warning);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--recursion-warning) 25%, transparent);
+}
+
+.hero-block.failed {
+  background: var(--recursion-error);
+  border-color: var(--recursion-error);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--recursion-error) 28%, transparent);
+}
+
+.recursion-status-popover {
+  left: 0;
+  max-height: min(52vh, 460px);
+  overflow: hidden;
+  position: absolute;
+  top: 35px;
+  width: 352px;
+  z-index: 90;
+}
+
+.recursion-status-head,
+.recursion-status-foot {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-height: 30px;
+  padding: 6px 9px;
+}
+
+.recursion-status-head {
+  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 10%, transparent);
+}
+
+.recursion-status-foot {
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 10%, transparent);
+  justify-content: space-between;
+}
+
+.recursion-status-title {
+  font-weight: 650;
+}
+
+.recursion-status-subtitle {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.recursion-status-list {
+  max-height: calc(var(--recursion-progress-list-limit, 15) * 30px);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.recursion-status-list::-webkit-scrollbar {
+  display: none;
+}
+
+.recursion-step-row {
+  align-items: center;
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 5%, transparent);
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 14px 1px 18px minmax(0, 1fr) auto;
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+.recursion-step-children {
+  max-height: calc(var(--recursion-progress-child-limit, 5) * 30px);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.recursion-step-children::-webkit-scrollbar {
+  display: none;
+}
+
+.recursion-step-children.is-scrollable {
+  position: relative;
+}
+
+.recursion-step-children.is-scrollable:not(.is-at-end)::after {
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--recursion-bg) 94%, #000));
+  bottom: 0;
+  content: "";
+  height: 20px;
+  left: 0;
+  pointer-events: none;
+  position: sticky;
+  right: 0;
+  width: 100%;
+}
+
+.recursion-provider-mark {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 48%, transparent);
+  font-size: 10px;
   font-weight: 700;
-  line-height: 1.2;
-  margin-inline-end: 2px;
+  text-align: center;
+}
+
+.recursion-step-separator {
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 20%, transparent), transparent);
+  height: 16px;
+}
+
+.recursion-step-icon {
+  border: 1.4px solid color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 42%, transparent);
+  border-radius: 999px;
+  height: 10px;
+  width: 10px;
+}
+
+.recursion-step-row.running .recursion-step-icon {
+  animation: recursion-spin 900ms linear infinite;
+  background: conic-gradient(var(--recursion-accent) 0 82deg, transparent 82deg 360deg);
+  border-color: color-mix(in srgb, var(--recursion-accent) 86%, transparent);
+}
+
+.recursion-step-row.done .recursion-step-icon {
+  background: var(--recursion-success);
+  border-color: var(--recursion-success);
+}
+
+.recursion-step-row.cached .recursion-step-icon {
+  background: #9b7cff;
+  border-color: #9b7cff;
+}
+
+.recursion-step-row.warning .recursion-step-icon {
+  background: var(--recursion-warning);
+  border-color: var(--recursion-warning);
+}
+
+.recursion-step-row.failed .recursion-step-icon {
+  background: var(--recursion-error);
+  border-color: var(--recursion-error);
+}
+
+.recursion-step-label,
+.recursion-step-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recursion-step-meta {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 48%, transparent);
+  font-size: 10px;
+}
+
+.recursion-right-tools {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.recursion-reasoning-chain {
+  --chain-start: 5px;
+  --chain-step: 15px;
+  --chain-span: calc(var(--chain-step) * 3);
+  --chain-fill: calc(var(--chain-step) * 2);
+  color: var(--recursion-accent);
+  flex: 0 0 58px;
+  height: 24px;
+  position: relative;
+  width: 58px;
+}
+
+.recursion-reasoning-chain[data-recursion-reasoning-selected="low"] {
+  --chain-fill: 0px;
+}
+
+.recursion-reasoning-chain[data-recursion-reasoning-selected="medium"] {
+  --chain-fill: var(--chain-step);
+}
+
+.recursion-reasoning-chain[data-recursion-reasoning-selected="high"] {
+  --chain-fill: calc(var(--chain-step) * 2);
+}
+
+.recursion-reasoning-chain[data-recursion-reasoning-selected="ultra"] {
+  --chain-fill: calc(var(--chain-step) * 3);
+}
+
+.recursion-reasoning-chain::before,
+.recursion-reasoning-line-fill {
+  content: "";
+  height: 1px;
+  left: var(--chain-start);
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.recursion-reasoning-chain::before {
+  background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 16%, transparent);
+  width: var(--chain-span);
+}
+
+.recursion-reasoning-line-fill {
+  background: color-mix(in srgb, var(--recursion-accent) 72%, transparent);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--recursion-accent) 30%, transparent);
+  transition: width .16s ease;
+  width: var(--chain-fill);
+}
+
+.recursion-reasoning-node {
+  --node-size: 7px;
+  --node-x: var(--chain-start);
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 26%, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+  height: var(--node-size);
+  left: var(--node-x);
+  padding: 0;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: var(--node-size);
+  z-index: 1;
+}
+
+.recursion-reasoning-node[data-recursion-reasoning-level-low] {
+  --node-size: 5px;
+}
+
+.recursion-reasoning-node[data-recursion-reasoning-level-medium] {
+  --node-size: 7px;
+  --node-x: calc(var(--chain-start) + var(--chain-step));
+}
+
+.recursion-reasoning-node[data-recursion-reasoning-level-high] {
+  --node-size: 9px;
+  --node-x: calc(var(--chain-start) + (var(--chain-step) * 2));
+}
+
+.recursion-reasoning-node[data-recursion-reasoning-level-ultra] {
+  --node-size: 11px;
+  --node-x: calc(var(--chain-start) + (var(--chain-step) * 3));
+}
+
+.recursion-reasoning-node.is-lit {
+  background: color-mix(in srgb, var(--recursion-accent) 70%, transparent);
+  border-color: color-mix(in srgb, var(--recursion-accent) 92%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--recursion-accent) 38%, transparent);
+}
+
+.recursion-reasoning-node.is-selected {
+  background: var(--recursion-accent);
 }
 
 .recursion-chip,
@@ -64,13 +621,6 @@
 
 .recursion-reasoner-chip {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 82%, var(--recursion-accent));
-}
-
-.recursion-actions {
-  display: inline-flex;
-  gap: 5px;
-  margin-inline-start: auto;
-  min-width: max-content;
 }
 
 .recursion-button {
@@ -100,10 +650,13 @@
 }
 
 .recursion-activity-ribbon[hidden],
-.recursion-action-menu[hidden],
 .recursion-hand-dropdown[hidden],
 .recursion-settings-panel[hidden] {
   display: none;
+}
+
+.recursion-activity-ribbon {
+  display: none !important;
 }
 
 .recursion-activity-ribbon[data-recursion-severity="success"] {
@@ -156,16 +709,6 @@
   padding: 8px;
 }
 
-.recursion-action-menu {
-  align-items: center;
-  background: color-mix(in srgb, var(--recursion-bg) 94%, #000);
-  border-top: 1px solid color-mix(in srgb, var(--recursion-border) 65%, transparent);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px;
-}
-
 .recursion-dropdown-title {
   color: var(--SmartThemeBodyColor, #e5e5e5);
   font-weight: 700;
@@ -187,11 +730,25 @@
   display: grid;
   font: inherit;
   gap: 3px 8px;
-  grid-template-columns: minmax(64px, max-content) minmax(120px, 0.4fr) minmax(0, 1fr);
+  grid-template-columns: 18px minmax(64px, max-content) minmax(120px, 0.4fr) minmax(0, 1fr);
   line-height: 1.25;
   padding: 6px 7px;
   text-align: left;
   width: 100%;
+}
+
+.recursion-hand-icon {
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 16%, transparent);
+  border-radius: 3px;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 62%, transparent);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 700;
+  height: 16px;
+  justify-content: center;
+  line-height: 1;
+  width: 16px;
 }
 
 .recursion-hand-emphasis {
@@ -206,7 +763,43 @@
 .recursion-hand-summary {
   min-width: 0;
   opacity: 0.9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recursion-brief-card[aria-expanded="true"] .recursion-hand-summary {
+  overflow: visible;
   overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.recursion-brief-detail,
+.recursion-brief-meta {
+  display: none;
+  grid-column: 2 / -1;
+}
+
+.recursion-brief-detail {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 76%, transparent);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  padding-top: 4px;
+  white-space: normal;
+}
+
+.recursion-brief-meta {
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-top: 3px;
+}
+
+.recursion-brief-card[aria-expanded="true"] .recursion-brief-detail {
+  display: block;
+}
+
+.recursion-brief-card[aria-expanded="true"] .recursion-brief-meta {
+  display: flex;
 }
 
 .recursion-settings-panel {
@@ -369,6 +962,249 @@
   word-break: break-word;
 }
 
+.recursion-hand-dropdown,
+.recursion-settings-panel {
+  position: absolute;
+  top: 35px;
+  z-index: 70;
+}
+
+.recursion-hand-dropdown {
+  left: 0;
+  right: 0;
+  max-height: min(52vh, 420px);
+  overflow: hidden;
+}
+
+.recursion-settings-panel {
+  left: 360px;
+  right: 0;
+  max-height: min(70vh, 680px);
+  overflow: auto;
+  z-index: 88;
+}
+
+.recursion-brief-head,
+.recursion-settings-footer {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.recursion-brief-head {
+  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 10%, transparent);
+  min-height: 30px;
+  padding: 6px 9px;
+}
+
+.recursion-brief-summary {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
+  font-size: 11px;
+}
+
+.recursion-prompt-packet-button {
+  margin-left: auto;
+}
+
+.recursion-prompt-packet-panel[hidden] {
+  display: none;
+}
+
+.recursion-prompt-packet-panel {
+  background: color-mix(in srgb, var(--recursion-panel) 76%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 9%, transparent);
+}
+
+.recursion-packet-head {
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 72%, transparent);
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 7px 9px;
+}
+
+.recursion-packet-text {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 76%, transparent);
+  font: 11px/1.4 Consolas, ui-monospace, SFMono-Regular, monospace;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px 9px 10px;
+  white-space: pre-wrap;
+}
+
+.recursion-brief-scroll {
+  max-height: 286px;
+  overflow-y: auto;
+}
+
+.recursion-settings-tabs {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.recursion-tab-button {
+  background: var(--recursion-panel);
+  border: 1px solid var(--recursion-border);
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  min-height: 26px;
+}
+
+.recursion-settings-pane[hidden] {
+  display: none;
+}
+
+.recursion-settings-footer {
+  border-top: 1px solid color-mix(in srgb, var(--recursion-border) 46%, transparent);
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.recursion-root .recursion-settings-panel {
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #242424) 88%, #080808) !important;
+  border: 1px solid var(--recursion-border);
+  border-radius: 0 0 8px 8px;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 86%, transparent);
+  gap: 0;
+  padding: 0;
+  scrollbar-width: none;
+}
+
+.recursion-root .recursion-settings-panel::-webkit-scrollbar {
+  display: none;
+}
+
+.recursion-root .recursion-settings-header,
+.recursion-root .recursion-settings-footer {
+  min-height: 34px;
+  padding: 7px 9px;
+}
+
+.recursion-root .recursion-settings-header {
+  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 10%, transparent);
+}
+
+.recursion-root .recursion-settings-footer {
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 10%, transparent);
+}
+
+.recursion-root .recursion-settings-header h2,
+.recursion-root .recursion-settings-group h3 {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 82%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.recursion-root .recursion-settings-header [data-recursion-settings-close] {
+  justify-content: center;
+  margin-left: auto;
+  min-height: 22px;
+  padding: 0;
+  width: 22px;
+}
+
+.recursion-root .recursion-settings-tabs {
+  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 10%, transparent);
+  gap: 5px;
+  padding: 7px 9px;
+}
+
+.recursion-root .recursion-tab-button,
+.recursion-root .recursion-button {
+  appearance: none;
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #242424) 74%, #111) !important;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 10%, transparent) !important;
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 74%, transparent) !important;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.recursion-root .recursion-tab-button {
+  min-height: 24px;
+  padding: 4px 8px;
+}
+
+.recursion-root .recursion-tab-button.is-selected {
+  background: color-mix(in srgb, var(--recursion-accent) 12%, var(--recursion-panel)) !important;
+  border-color: color-mix(in srgb, var(--recursion-accent) 48%, transparent) !important;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 92%, var(--recursion-accent)) !important;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--recursion-accent) 12%, transparent);
+}
+
+.recursion-root .recursion-button:disabled,
+.recursion-root .recursion-button[disabled] {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+.recursion-root .recursion-settings-pane {
+  gap: 8px;
+  padding: 8px 9px 10px;
+}
+
+.recursion-root .recursion-settings-group {
+  border-top: 0;
+  gap: 8px;
+  padding-top: 0;
+}
+
+.recursion-root .recursion-control-row {
+  align-items: center;
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 9px;
+}
+
+.recursion-root .recursion-control-label {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 62%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.recursion-root .recursion-control-note {
+  display: none;
+}
+
+.recursion-root .recursion-input {
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #242424) 70%, #101010) !important;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 10%, transparent) !important;
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 84%, transparent) !important;
+  min-height: 24px;
+  padding: 3px 6px;
+}
+
+@keyframes recursion-hero-active {
+  0%, 100% {
+    opacity: .62;
+    box-shadow: 0 0 3px color-mix(in srgb, var(--recursion-accent) 20%, transparent);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 7px color-mix(in srgb, var(--recursion-accent) 42%, transparent);
+  }
+}
+
+@keyframes recursion-hero-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes recursion-spin {
+  to { transform: rotate(360deg); }
+}
+
 @keyframes recursion-slide {
   from {
     opacity: 0;
@@ -399,11 +1235,6 @@
     flex-wrap: wrap;
   }
 
-  .recursion-actions {
-    margin-inline-start: 0;
-    width: 100%;
-  }
-
   .recursion-button {
     justify-content: center;
   }
@@ -412,11 +1243,6 @@
     grid-template-columns: 1fr;
   }
 
-  .recursion-action-menu {
-    align-items: stretch;
-  }
-
-  .recursion-action-menu .recursion-button,
   .recursion-provider-actions .recursion-button {
     justify-content: center;
     width: 100%;

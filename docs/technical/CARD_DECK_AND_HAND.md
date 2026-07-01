@@ -93,7 +93,7 @@ flowchart LR
 
 Hard invalidation retires or replaces the deck when chat identity, scene fingerprint, source hashes, schema versions, catalog versions, or prompt composition contracts no longer match.
 
-Soft invalidation marks the deck stale for Arbiter review when the user refreshes, provider settings change, the source window advances, the prompt budget changes, or runtime rejects cards for schema, size, freshness, or safety reasons. Refresh Scene uses reason `user-refresh` and rechecks the current host snapshot without adding synthetic chat content.
+Soft invalidation marks the deck stale for Arbiter review when manual scene refresh is invoked, provider settings change, the source window advances, the prompt budget changes, or runtime rejects cards for schema, size, freshness, or safety reasons. Manual refresh uses reason `user-refresh` and rechecks the current host snapshot without adding synthetic chat content.
 
 Pre-alpha storage can invalidate old experimental records instead of carrying compatibility layers.
 

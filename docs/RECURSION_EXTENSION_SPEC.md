@@ -20,11 +20,11 @@ Start here, then follow the focused specs:
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md): Utility and Reasoner lanes, structured calls, validation, session-only secrets, model-call journal.
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md): prompt packet contract, Utility/Reasoner composition, injection lanes, footprint profiles, omissions.
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md): settings, logical JSON records, scene cache, run journal, activity events, redaction, invalidation.
-- [UI Spec](design/UI_SPEC.md): Recursion Bar, Activity Ribbon, Actions menu, Last Hand dropdown, full viewer, high-level settings, SillyTavern-native graphite visual system.
+- [UI Spec](design/UI_SPEC.md): Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, full viewer, high-level settings, SillyTavern-native graphite visual system.
 - [Technical Manuals](technical/README.md): release-facing technical overview, runtime turn sequence, card deck and hand, prompt packet and injection, provider routing, storage/diagnostics, and host integration.
 - [Testing Strategy](testing/TESTING_STRATEGY.md): fast contract suite, Playwright readiness, focused live SillyTavern smoke, dedicated soak users, and pass/fail semantics.
 - [SillyTavern Playwright Harness](testing/SILLYTAVERN_PLAYWRIGHT_HARNESS.md): target harness scripts, environment variables, live preflight, selector rules, and redaction requirements.
-- [Live Smoke Test Plan](testing/LIVE_SMOKE_TEST_PLAN.md): Recursion Bar, Activity Ribbon, Observe, Auto, provider, prompt cleanup, fallback, and responsive UI smoke scenarios.
+- [Live Smoke Test Plan](testing/LIVE_SMOKE_TEST_PLAN.md): Recursion Bar, Hero Pixel Array progress menu, Observe, Auto, provider, prompt cleanup, fallback, and responsive UI smoke scenarios.
 - [Artifact Contract](testing/ARTIFACT_CONTRACT.md): report, live-log, screenshot, prompt metadata, storage probe, and redaction contract.
 - [Implementation Plan](testing/IMPLEMENTATION_PLAN.md): staged build order and verification gates.
 
@@ -42,7 +42,7 @@ Current V1 decisions:
 - Use Directive-style runtime discipline for retries, timeouts, aborts, fallbacks, structured validation, and sanitized model-call diagnostics without importing Directive's campaign architecture.
 - Do not store raw provider prompts or raw provider responses by default.
 - Recursion lives in its own chat-attached top bar. It should sit as the lowest bar in the top-bar stack when the host layout makes that possible.
-- Invisible model calls, cache updates, prompt installs, and fallback actions must be visible through the Recursion Activity Ribbon instead of popup spam.
+- Invisible model calls, cache updates, prompt installs, and fallback actions must be visible through the Hero Pixel Array progress menu and current-step status instead of popup spam.
 - Automated live SillyTavern tests must reject `default-user` and use dedicated users such as `recursion-soak-a`, `recursion-soak-b`, and `recursion-soak-c`.
 
 ## Product Boundary
@@ -130,14 +130,14 @@ Prompt footprint can be compact, normal, or rich. Even rich packets must stay bo
 The primary UI is a Recursion Bar attached to the chat surface:
 
 ```text
-Recursion | Ready | Auto | Hand 5 v | Utility ready | Reasoner idle        Actions v | Viewer
+RECURSION | Mode | Hero Pixel Array + current step        Reasoning Level | Last Brief v | Options ...
 ```
 
 It replaces the earlier shelf/drawer idea. The bar is thin, stable, mostly observational, and paired with:
 
-- a drop-down Activity Ribbon for live status, model-call progress, cache writes, prompt installation, and fallback visibility;
-- an Actions menu for high-level commands;
-- a Last Hand dropdown opened from the `Hand 0 v` / `Hand 5 v` chip;
+- a Hero Pixel Array progress menu for live status, model-call progress, cache writes, prompt installation, and fallback visibility;
+- an options/settings menu opened from the ellipsis;
+- a Last Brief dropdown opened from the dropdown arrow;
 - a full viewer for deck/activity/prompt/settings/provider inspection;
 - provider settings for Utility and Reasoner lanes;
 - a small set of broad behavior controls.
@@ -181,7 +181,7 @@ The implementation should proceed in vertical slices:
 4. Utility Arbiter and card deck.
 5. Batched card generation.
 6. Prompt composition and injection.
-7. Recursion Bar, Activity Ribbon, and viewer.
+7. Recursion Bar, Hero Pixel Array progress menu, and viewer.
 8. SillyTavern integration smoke.
 
 Each slice should preserve the product boundary: current-scene prompt compilation, fail-soft behavior, no durable memory ownership, no card micromanagement, and no campaign-save architecture.

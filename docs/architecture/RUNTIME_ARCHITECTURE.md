@@ -62,7 +62,7 @@ Primary components:
 - Reasoner: optional deeper synthesis lane that is never required for generation to continue.
 - Prompt Injector: installs, updates, and clears host prompt entries through the adapter.
 - Diagnostics Recorder: records structured, sanitized runtime events for the status and inspector surfaces.
-- Activity Reporter: aggregates runtime, provider, storage, and prompt events into concise user-visible phases for the Recursion Bar, Activity Ribbon, and Full Viewer.
+- Activity Reporter: aggregates runtime, provider, storage, and prompt events into concise user-visible phases for the Recursion Bar, Hero Pixel Array progress menu, and Full Viewer.
 
 ## Turn Pipeline
 
@@ -262,7 +262,7 @@ The operation result shape is:
 }
 ```
 
-When the resulting mode is `off`, the Activity Ribbon must show prompt-clearing work and then settle to either `Recursion Off. Prompt cleared.` or a sanitized prompt-clear warning. A clear failure does not roll back the Off setting, but the operation returns `ok: false` and the UI keeps the warning visible. This makes Off mode a real emergency brake while still exposing host prompt cleanup failures.
+When the resulting mode is `off`, the progress surface must show prompt-clearing work and then settle to either `Recursion Off. Prompt cleared.` or a sanitized prompt-clear warning. A clear failure does not roll back the Off setting, but the operation returns `ok: false` and the UI keeps the warning visible. This makes Off mode a real emergency brake while still exposing host prompt cleanup failures.
 
 Provider setting and session-key mutations follow the same prompt-safety rule. `runtime.updateProvider(lane, patch)` and `runtime.clearProviderKey(lane)` apply the provider change immediately, supersede active work, best-effort soft-invalidates the last successful scene cache, then await host prompt clear before resolving. Provider updates use reason `provider-changed`; session-key clears use `provider-key-cleared`.
 
@@ -335,6 +335,6 @@ V1 should be built in small vertical slices that preserve the end-to-end loop.
    - Persist settings, cache metadata, last packet metadata, and bounded diagnostics using logical keys and privacy-safe records.
 
 9. UI integration and smoke validation
-   - Connect the Recursion Bar, Activity Ribbon, status, refresh, provider health, mode controls, and inspector diagnostics. Validate Off, Observe only, Auto, provider failure, scene refresh, storage activity, prompt install, and stale-result behavior.
+   - Connect the Recursion Bar, Hero Pixel Array progress menu, status, provider health, mode controls, and inspector diagnostics. Validate Off, Observe only, Auto, provider failure, scene refresh, storage activity, prompt install, and stale-result behavior.
 
 Each slice should keep generation usable if it fails. The first complete proof is not perfect card intelligence; it is a reliable loop from observe -> Arbiter -> card jobs/cache -> hand -> prompt packet -> host injection -> diagnostics.

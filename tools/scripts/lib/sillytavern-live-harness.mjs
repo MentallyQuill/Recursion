@@ -849,10 +849,16 @@ function browserSnapshotScript() {
       reasonerText: text('[data-recursion-reasoner]'),
       ribbonText: text('[data-recursion-ribbon-label]'),
       actionMenuOpen: document.querySelector('[data-recursion-action-menu]')?.hidden === false,
+      progressOpen: document.querySelector('[data-recursion-status-popover]')?.hidden === false,
       handOpen: document.querySelector('[data-recursion-hand-dropdown]')?.hidden === false,
       settingsPanelOpen: document.querySelector('[data-recursion-settings-panel]')?.hidden === false,
       providerTestVisible: visible('[data-recursion-provider-test]'),
-      viewerOpen: Boolean(document.querySelector('[data-recursion-viewer]')?.open) || document.querySelector('[data-recursion-viewer]')?.hidden === false,
+      viewerOpen: (() => {
+        const viewer = document.querySelector('[data-recursion-viewer]');
+        if (!viewer) return false;
+        return viewer.tagName === 'DIALOG' ? viewer.open === true : viewer.hidden === false;
+      })(),
+      viewerOpened: globalThis.__recursionSmokeViewerOpened === true,
       modeSmoke: globalThis.__recursionSmokeModeSmoke || null,
       generation: globalThis.__recursionSmokeGeneration || null,
       bridge: {
@@ -1603,14 +1609,16 @@ async function runBrowserUiSmoke({
 
     const actionsButton = page.locator('[data-recursion-actions]').first();
     await actionsButton.click({ timeout: timeoutMs });
-    await page.waitForFunction(() => document.querySelector('[data-recursion-action-menu]')?.hidden === false, null, { timeout: timeoutMs });
-
-    const settingsButton = page.locator('[data-recursion-settings-toggle]').first();
-    await settingsButton.click({ timeout: timeoutMs });
     await page.waitForFunction(() => {
       return document.querySelector('[data-recursion-settings-panel]')?.hidden === false
         && Boolean(document.querySelector('[data-recursion-provider-test]'));
     }, null, { timeout: timeoutMs });
+
+    const progressButton = page.locator('[data-recursion-status-trigger]').first();
+    if (!await page.evaluate(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false).catch(() => false)) {
+      await progressButton.click({ timeout: timeoutMs });
+    }
+    await page.waitForFunction(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false, null, { timeout: timeoutMs });
 
     if (!generationRequested) {
       const modeSmoke = await runRecursionModeSmoke(page, timeoutMs).catch(async (error) => {
@@ -1726,24 +1734,33 @@ async function runBrowserUiSmoke({
       await page.waitForFunction(() => /Auto/i.test(document.querySelector('[data-recursion-mode]')?.textContent || ''), null, { timeout: timeoutMs });
     }
 
-    await actionsButton.click({ timeout: timeoutMs });
-    await page.waitForFunction(() => document.querySelector('[data-recursion-action-menu]')?.hidden === false, null, { timeout: timeoutMs });
-
     const handButton = page.locator('[data-recursion-hand-toggle]').first();
     await handButton.click({ timeout: timeoutMs });
     await page.waitForFunction(() => document.querySelector('[data-recursion-hand-dropdown]')?.hidden === false, null, { timeout: timeoutMs });
+    if (!await page.evaluate(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false).catch(() => false)) {
+      await progressButton.click({ timeout: timeoutMs });
+    }
+    await page.waitForFunction(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false, null, { timeout: timeoutMs });
 
-    const viewerButton = page.locator('[data-recursion-viewer-toggle]').first();
-    await viewerButton.click({ timeout: timeoutMs });
-    await page.waitForFunction(() => {
-      const viewer = document.querySelector('[data-recursion-viewer]');
-      return Boolean(viewer && (viewer.open || viewer.hidden === false));
-    }, null, { timeout: timeoutMs });
-    if (generationRequested) {
-      const viewerClosed = () => {
+    const viewerButton = page.locator('[data-recursion-viewer-toggle]:visible').first();
+    const viewerButtonAvailable = await viewerButton.count()
+      .then(async (count) => count > 0 && await viewerButton.isVisible().catch(() => false))
+      .catch(() => false);
+    if (viewerButtonAvailable) {
+      await viewerButton.click({ timeout: timeoutMs });
+      await page.waitForFunction(() => {
         const viewer = document.querySelector('[data-recursion-viewer]');
-        return !viewer || (!viewer.open && (viewer.tagName === 'DIALOG' || viewer.hidden !== false));
-      };
+        return Boolean(viewer && (viewer.open || viewer.hidden === false));
+      }, null, { timeout: timeoutMs });
+      await page.evaluate(() => {
+        globalThis.__recursionSmokeViewerOpened = true;
+      }).catch(() => {});
+    }
+    const viewerClosed = () => {
+      const viewer = document.querySelector('[data-recursion-viewer]');
+      return !viewer || (!viewer.open && (viewer.tagName === 'DIALOG' || viewer.hidden !== false));
+    };
+    if (viewerButtonAvailable) {
       await page.locator('[data-recursion-viewer-close]').first().click({ timeout: Math.min(timeoutMs, 5000) }).catch(() => {});
       const closed = await page.waitForFunction(viewerClosed, null, { timeout: Math.min(timeoutMs, 5000) })
         .then(() => true)
@@ -3133,7 +3150,7 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
             name: 'browser-live-smoke',
             status: browserResult.status,
             summary: browserResult.status === 'pass'
-              ? 'Recursion bar, hand dropdown, viewer, and bridge hooks were visible in SillyTavern.'
+              ? 'Recursion bar, progress menu, Last Brief dropdown, settings, viewer access, and bridge hooks were visible in SillyTavern.'
               : 'Recursion browser UI smoke failed.',
             details: {
               result: browserResult.result,

@@ -226,11 +226,9 @@ On each new `runId`, the Hero Pixel Array clears the previous turn's blocks, cre
 
 When the user sends the next message, the renderer should briefly enter a reset state before the next run starts:
 
-- Add `.brand-block.is-resetting` while the previous run's blocks are still mounted.
-- Wipe `.brand-fade` back to `0` width.
 - Reverse-stagger the old `.hero-block` elements out.
 - Remove old blocks after the wipe completes.
-- Start the next run from a fully visible `RECURSION` word.
+- Start the next run from an empty Hero Pixel Array while the `RECURSION` word remains fixed and fully visible.
 
 The array layout is deterministic:
 
@@ -241,13 +239,16 @@ The array layout is deterministic:
 - If a run has more than 36 top-level progress rows, the progress menu still shows every row, but the Hero Pixel Array uses its final block as an overflow aggregate. The aggregate state is selected from represented overflow rows in this priority order: running, failed, warning, pending, cached, done, skipped.
 - The renderer sets `--columns` from `columnCount`, `grid-row` from `row + 1`, `grid-column` from `column + 1`, and `--block-index` from the block index.
 - Entry delay is slight, roughly 24ms per block, so a 12-step run visibly builds without feeling slow.
-- The brand stage remains fixed width; the brand text, fade layer, and pixel array are absolute layers inside that stage.
-- The pixel array and brand fade start at the same `--brand-offset` as the `RECURSION` word, so the left-side visual content has the same inset as the brand text and balances the right-side controls.
-- The renderer sets `--columns` and `--block-count` on `.brand-stage` so both the pixel grid and fade width can derive from the same run state.
+- The brand stage remains fixed width and contains only the `RECURSION` wordmark.
+- The Hero Pixel Array sits to the right of the mode separator and to the left of the current-step status text.
+- The current-step status text shifts smoothly with the array width, keeping a small gap from the growing columns.
+- The compact current-step text uses action wording only, such as `Installing Recursion prompt...`; it must not append row meta like `waiting`, `done`, `generated`, or `cached`.
+- No gradient or fade layer should cover the `RECURSION` word in V1.
+- The renderer sets `--columns` and `--block-count` on the activity trigger so the pixel grid and status spacing derive from the same run state.
 
 The list is not always sequential. Several model calls may launch at once or start a few moments apart, so multiple rows can be active at the same time.
 
-The reference preview includes a deterministic full-turn animation script so the interaction can be visually reviewed before wiring live runtime events. It must animate from the same state model the product uses: reset the previous turn, add newly visible rows with `.step-row.is-entering`, update settled rows with `.step-row.is-updating`, fill the paired Hero Pixel Array blocks from the same `step.state`, and grow the brand fade from the same `--columns` value. During a run, the renderer must key rows and blocks by stable step id and update them in place; it must not replace the entire progress list or pixel array on each state tick, because that restarts entry animations and reads as flicker. The script is a visual mock only; the production renderer should replace the deterministic timeline with live `progressRun.steps[]` updates.
+The reference preview includes a deterministic full-turn animation script so the interaction can be visually reviewed before wiring live runtime events. It must animate from the same state model the product uses: reset the previous turn, add newly visible rows with `.step-row.is-entering`, update settled rows with `.step-row.is-updating`, and fill the paired Hero Pixel Array blocks from the same `step.state`. During a run, the renderer must key rows and blocks by stable step id and update them in place; it must not replace the entire progress list or pixel array on each state tick, because that restarts entry animations and reads as flicker. The script is a visual mock only; the production renderer should replace the deterministic timeline with live `progressRun.steps[]` updates.
 
 Default behavior:
 
@@ -337,13 +338,18 @@ Reference DOM shape:
 
 ```html
 <div class="brand-block">
-  <button class="brand-stage status-array-button"
-          aria-label="Open Recursion generation status"
-          aria-expanded="false"
-          data-state="running"
-          style="--columns: 3; --block-count: 7">
+  <button class="brand-stage" aria-label="Recursion status">
     <span class="brand">RECURSION</span>
-    <span class="brand-fade" aria-hidden="true"></span>
+  </button>
+</div>
+
+<button class="recursion-mode-button" aria-label="Mode: Auto">...</button>
+
+<button class="status-array-button"
+        aria-label="Open Recursion generation status"
+        aria-expanded="false"
+        data-state="running"
+        style="--columns: 3; --block-count: 7">
     <span class="hero-pixel-array"
           aria-hidden="true"
           data-state="running"
@@ -356,9 +362,10 @@ Reference DOM shape:
       <span class="hero-block pending" style="grid-row: 3; grid-column: 2; --block-index: 5"></span>
       <span class="hero-block pending" style="grid-row: 1; grid-column: 3; --block-index: 6"></span>
     </span>
-  </button>
+    <span class="recursion-current-step" role="status">2 model calls running...</span>
+</button>
 
-  <section class="recursion-status-popover" aria-label="Generation status steps">
+<section class="recursion-status-popover" aria-label="Generation status steps">
     <header class="recursion-status-head">
       <span class="recursion-status-title">Generating</span>
       <span class="recursion-status-subtitle">2 model calls running</span>
@@ -413,11 +420,7 @@ Reference DOM shape:
       <span>Auto - Utility and Reasoner lanes</span>
       <span class="recursion-mini-chip">Live</span>
     </footer>
-  </section>
-</div>
-
-<button class="recursion-mode-button" aria-label="Mode: Auto">...</button>
-<span class="recursion-current-step" role="status">2 model calls running...</span>
+</section>
 ```
 
 Reference CSS contract:
@@ -464,63 +467,27 @@ Reference CSS contract:
 
 .brand-stage {
   position: relative;
-  --brand-offset: calc(var(--hero-block-size, 4px) + 7px);
   --brand-text-width: 66px;
-  --hero-max-columns: 12;
-  --hero-max-width: calc((var(--hero-max-columns) * var(--hero-block-size, 4px)) + ((var(--hero-max-columns) - 1) * var(--hero-block-gap, 2px)));
-  --brand-stage-width: calc(var(--hero-max-width) + 7px);
-  --brand-cover-tail: 16px;
-  --brand-cover-width: 0px;
-  width: var(--brand-stage-width);
-  min-width: var(--brand-stage-width);
+  width: var(--brand-text-width);
+  min-width: var(--brand-text-width);
   height: 24px;
   overflow: hidden;
   display: block;
 }
 
-.brand-stage[data-state="running"],
-.brand-stage[data-state="done"],
-.brand-stage[data-state="cached"],
-.brand-stage[data-state="warning"],
-.brand-stage[data-state="failed"] {
-  --brand-cover-width: calc((var(--columns, 0) * (var(--hero-block-size, 4px) + var(--hero-block-gap, 2px))) + var(--brand-cover-tail));
-}
-
 .brand {
-  position: absolute;
-  left: var(--brand-offset);
-  top: 50%;
+  display: block;
   z-index: 1;
   font-family: "Segoe UI Light", "Segoe UI", system-ui, sans-serif;
   font-weight: 300;
   letter-spacing: 0;
   color: var(--SmartThemeBodyColor);
   opacity: .74;
-  transform: translateY(-50%);
   pointer-events: none;
-}
-
-.brand-fade {
-  position: absolute;
-  inset: 0 auto 0 0;
-  z-index: 2;
-  width: min(100%, var(--brand-cover-width));
-  background: linear-gradient(90deg, var(--SmartThemeBlurTintColor) 0%, var(--SmartThemeBlurTintColor) calc(100% - 12px), transparent 100%);
-  opacity: .96;
-  pointer-events: none;
-  transition: width .16s ease, opacity .16s ease;
-}
-
-.brand-block.is-resetting .brand-fade {
-  width: 0;
-  opacity: 0;
-  transition: width .22s ease, opacity .14s ease;
 }
 
 .hero-pixel-array {
-  position: absolute;
-  left: 0;
-  top: 50%;
+  position: static;
   z-index: 3;
   width: calc((var(--columns, 1) * var(--hero-block-size, 4px)) + ((var(--columns, 1) - 1) * var(--hero-block-gap, 2px)));
   height: calc((3 * var(--hero-block-size, 4px)) + (2 * var(--hero-block-gap, 2px)));
@@ -530,7 +497,6 @@ Reference CSS contract:
   gap: var(--hero-block-gap, 2px);
   align-content: start;
   justify-content: start;
-  transform: translateY(-50%);
   filter: drop-shadow(0 0 5px rgba(101, 216, 232, .12));
   transition: width .16s ease;
 }
@@ -743,8 +709,6 @@ Reference CSS contract:
     transform: none;
   }
 
-  .brand-fade,
-  .brand-block.is-resetting .brand-fade,
   .hero-pixel-array {
     transition: none;
   }
@@ -763,21 +727,11 @@ A larger activity view can exist inside the Full Viewer for diagnostics and hist
 
 The activity surface must not show raw prompts, raw provider responses, stack traces, unbounded provider error text, hidden reasoning, private story plans, or per-card debug spam.
 
-## Actions Menu
+## Options Menu
 
-The Actions menu opens from the ellipsis button on the right side of the Recursion Bar. It contains high-level commands and settings entry points. It should not expose raw card operations.
+The ellipsis button opens the integrated settings/options menu, not the Last Brief dropdown. This keeps the right side of the compact bar simple: dropdown arrow means cards, ellipsis means configuration/options.
 
-V1 actions:
-
-- Refresh Scene.
-- Switch to Auto / Switch to Observe only.
-- Copy Last Prompt Packet.
-- Open Settings.
-- Open Viewer.
-
-Provider setup lives in Open Settings. Detailed state inspection lives in Open Viewer.
-
-Actions should be disabled with clear tooltip copy when unavailable. For example, Refresh Scene is disabled when Recursion is off, and Copy Last Prompt Packet is disabled when no packet has been composed.
+Provider setup lives in the Providers tab. Detailed activity and prompt inspection lives in the Last Brief Prompt Packet panel and Full Viewer surfaces. Low-frequency diagnostic commands may appear in Advanced, but commands without V1 runtime handlers must be disabled with clear tooltip copy rather than silently doing nothing.
 
 ## Last Brief Dropdown
 
@@ -1079,24 +1033,52 @@ Card detail view should include:
 
 Settings should be few, powerful, and understandable.
 
-Primary controls:
+The compact settings menu opens from the ellipsis/options path. On desktop, it should align its right edge with the right edge of the Recursion Bar. When the Hero Pixel Array progress menu is also open, the settings menu begins to the right of the progress menu with a small gutter, so the two popovers read as an integrated pair instead of overlapping. On narrow viewports, settings may become full-width or close competing popovers.
+
+The menu uses three tabs:
+
+- Play.
+- Providers.
+- Advanced.
+
+Play is the default tab. It contains controls users are expected to understand during normal play:
 
 - Mode: Off, Observe only, Auto.
-- Reasoner Use: Off, Auto, Always Compose. Utility remains the default composer and fallback path.
+- Reasoning Level: Low, Medium, High, Ultra.
 - Strength: Light, Balanced, Strong.
-- Prompt Footprint: Compact, Normal, Rich.
 - Focus: Balanced, Character, Continuity, Prose, Plot.
+- Prompt Footprint: Compact, Normal, Rich.
+
+Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual. The Play tab may use that compact chain or a native select, depending on available width and SillyTavern theme constraints:
+
+- Low: Utility-only bias, reduced card pressure, compact packet preference.
+- Medium: mostly Utility, Reasoner eligible for brief composition when useful.
+- High: mixed Utility/Reasoner bias for crowded or conflicted checks.
+- Ultra: Reasoner-heavy composition bias with a richer card/packet tendency.
+
+`reasoningLevel` is persisted as `low | medium | high | ultra`, default `high`. It is the authoritative user-facing provider-bias setting. Runtime may still carry an internal `reasonerUse` route value, but that value is always derived from `reasoningLevel`: Low maps to `off`, Medium/High map to `auto`, and Ultra maps to `always`. If the Reasoner provider is unavailable while High or Ultra is selected, the UI should keep the selected level and show fallback status rather than blocking the user.
+
+Providers contains the complete provider setup surface:
+
+- Utility Provider, always enabled.
+- Reasoner Provider, optional.
+- Source, profile, endpoint, model, session key, temperature, top-p, max tokens.
+- Save Provider, Test Provider, Clear Session Key.
+- Status, resolved provider, and resolved model.
+
+Advanced contains low-frequency controls:
+
 - Sub-tier Rows: numeric control for `ui.progressChildVisibleLimit`; default 5, minimum 1, maximum 20.
 - Progress Rows: numeric control for `ui.progressListVisibleLimit`; default 15, minimum 5, maximum 80.
-
-Most internal Auto settings should not be exposed as controls. The UI can display Auto decisions for inspection, but users should not have to manage per-turn action, scene status, Reasoner decision rules, or individual card families.
-
-Advanced controls can exist behind a compact disclosure if needed:
-
+- Diagnostics journal size.
+- Include sanitized excerpts.
 - Reset scene cache.
 - Export sanitized diagnostics.
 - Clear run journal.
-- Copy storage diagnostics.
+
+Advanced commands without V1 runtime handlers must render disabled with tooltip copy. They should not appear active until they perform the named action.
+
+Most internal Auto settings should not be exposed as controls. The UI can display Auto decisions for inspection, but users should not have to manage per-turn action, scene status, Reasoner decision rules, or individual card families.
 
 ## Provider Controls
 

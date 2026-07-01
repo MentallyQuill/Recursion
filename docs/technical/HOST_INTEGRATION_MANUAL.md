@@ -93,7 +93,7 @@ If only `generateQuietPrompt` is available, host connection profiles are unsuppo
 
 ## UI Mount
 
-The UI mounts a chat-attached Recursion root near the `#chat` element when possible, otherwise into a stable parent. It renders the Recursion Bar, Activity Ribbon, Actions menu, Last Hand dropdown, settings panel, and Full Viewer. The UI updates from `runtime.view()` on a short interval and uses sanitized view data.
+The UI mounts a chat-attached Recursion root near the `#chat` element when possible, otherwise into a stable parent. It renders the Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, settings panel, and Full Viewer. The UI updates from `runtime.view()` on a short interval and uses sanitized view data.
 
 ## Fake And Contract Tests
 

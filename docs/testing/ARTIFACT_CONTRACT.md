@@ -28,7 +28,7 @@ Every live smoke run should write text and JSON evidence. No-generation UI smoke
 | `playwright/trace.zip` | Playwright trace for readiness and no-generation UI runs only. |
 | `storage/probe.json` | Sanitized storage probe result. |
 | `prompt/latest-packet-metadata.json` | Prompt packet metadata, hashes, selected cards, install status, and clear status. |
-| `activity/latest-run.json` | Last visible Activity Ribbon state and compact stage timeline. |
+| `activity/latest-run.json` | Last visible progress state and compact stage timeline. |
 | `diagnostics/redaction-check.json` | Redaction scan result for generated artifacts. |
 
 Readiness-only runs should write `report.json`, `summary.md`, screenshots, and trace when enabled. They do not write live prompt, storage, or activity artifacts.
@@ -264,7 +264,7 @@ Strict: true
 
 - Preflight: pass
 - Recursion Bar: pass
-- Activity Ribbon: pass
+- Progress menu: pass
 - Observe only mode: pass
 - Auto Utility pass: pass
 - Prompt cleanup: pass

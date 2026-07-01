@@ -23,7 +23,7 @@ flowchart TD
     Composer --> Packet["Prompt packet"]
     Reasoner --> Packet
     Packet --> Inject["SillyTavern prompt injection"]
-    Inject --> Activity["Activity Ribbon and viewer"]
+    Inject --> Activity["Hero Pixel Array progress and viewer"]
     Activity --> Storage["Scene cache and run journal"]
 ```
 
@@ -36,14 +36,14 @@ The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src
 | Component | Owner module | Responsibility |
 | --- | --- | --- |
 | Core helpers | `src/core.mjs` | Stable hashing, safe ids, truncation, JSON parsing, cloning, timestamps, and redaction. |
-| Settings | `src/settings.mjs` | Mode, strength, footprint, focus, Reasoner use, provider preferences, and session-only API key handling. |
-| Activity | `src/activity.mjs` | Sanitized user-facing activity events for the bar, ribbon, viewer, and diagnostics. |
+| Settings | `src/settings.mjs` | Mode, Reasoning Level, strength, footprint, focus, provider preferences, and session-only API key handling. |
+| Activity | `src/activity.mjs` | Sanitized user-facing activity events for the bar, progress menu, viewer, and diagnostics. |
 | Providers | `src/providers.mjs` | Utility and Reasoner lane routing, host and OpenAI-compatible calls, JSON parsing, retries, timeouts, aborts, and model-call diagnostics. |
 | Cards | `src/cards.mjs` | Fixed V1 catalog, card normalization, provider-result conversion, lifecycle application, and hand selection. |
 | Prompt | `src/prompt.mjs` | Packet sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
 | Storage | `src/storage.mjs` | Logical scene-cache and run-journal records, key safety, redaction, index maintenance, and bounded retention. |
 | Runtime | `src/runtime.mjs` | Off/Observe only/Auto orchestration, snapshot use, Utility Arbiter plan handling, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
-| UI | `src/ui.mjs` | Recursion Bar, Activity Ribbon, Actions, Last Hand, Full Viewer, settings, and provider controls. |
+| UI | `src/ui.mjs` | Recursion Bar, Hero Pixel Array progress menu, options/settings, Last Brief, Full Viewer, settings, and provider controls. |
 | SillyTavern host | `src/hosts/sillytavern/host.mjs` | Snapshot capture, prompt install/clear, provider bridge, settings store, and user-file storage adapter selection. |
 | Entrypoint | `src/extension/index.js` | Extension lifecycle hooks, runtime bootstrap, UI mount, generation interceptor, and teardown cleanup. |
 
@@ -86,7 +86,7 @@ The model-facing artifact is the prompt packet, not the raw scene deck. V1 packe
 | Turn Brief | Immediate next-generation guidance, latest visible user pressure, continuity risks, and response cues. |
 | Guardrails | Compact constraints that protect continuity, player intent, privacy, and scope. |
 
-Prompt packets include selected-card references, omissions, injection metadata, diagnostics, section hashes, and composition lane status. Full prompt sections are hidden from the viewer preview by default to avoid accidental raw prompt exposure in broad diagnostics.
+Prompt packets include selected-card references, omissions, injection metadata, diagnostics, section hashes, and composition lane status. The Last Brief Prompt Packet panel and Full Viewer show the final injected packet text with bounded redaction so users can inspect what Recursion actually installed.
 
 ## Storage And Diagnostics
 
@@ -108,7 +108,7 @@ Additional host integrations are reserved behind the adapter boundary and are no
 
 ## UI Observability
 
-The Recursion Bar shows mode, ready/working state, hand count, composer lane, Reasoner state, and top-level actions. The Activity Ribbon shows user-safe stages such as reading the turn, planning card work, generating cards, selecting the hand, installing prompt entries, storage warnings, and ready or fallback states. The Full Viewer exposes Now, Deck, Activity, Prompt Packet metadata, Settings, and Providers.
+The Recursion Bar shows the wordmark, icon-only mode, Hero Pixel Array, current-step text, Reasoning Level chain, Last Brief dropdown arrow, and options entry. The progress menu shows user-safe stages such as reading the turn, planning card work, generating cards, selecting the hand, installing prompt entries, storage warnings, and ready or fallback states. The Full Viewer exposes Now, Deck, Activity, Prompt Packet, Settings, and Providers.
 
 The UI is an observatory, not a card editor. It shows what Recursion did without turning the card system into a user-managed memory product.
 

@@ -11,7 +11,7 @@ The first executable slice has these files:
 | `tools/scripts/lib/sillytavern-live-harness.mjs` | Shared helpers for argv parsing, soak-user validation, offline Playwright readiness, SillyTavern HTTP auth, storage probes, served-extension comparison, browser UI smoke, opt-in visible-send generation smoke, prompt-key metadata capture, report writing, artifact paths, redaction, and status handling. |
 | `tools/scripts/check-playwright-readiness.mjs` | Offline browser readiness probe. It dynamically imports Playwright, launches Chromium when available, drives a local fixture, and never contacts SillyTavern. |
 | `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety and storage preflight. It rejects unsafe users before mutation, logs into dedicated users, writes/reads/verifies/deletes Recursion-owned probe files, and checks cross-user isolation when two or more users are configured. |
-| `tools/scripts/smoke-sillytavern-live.mjs` | Focused live smoke. It validates the dedicated user and base URL gate, authenticates, compares served Recursion files, verifies the Recursion Bar, Actions menu, settings panel, provider controls, Last Hand dropdown, full viewer, and bridge hooks with Playwright, and writes screenshots/trace for no-generation UI runs when artifacts are enabled. With generation flags, it drives visible send controls when available, records the trigger source, proves host generation continued for UI sends, suppresses binary artifacts, and proves Recursion-owned prompt keys can install and clear without storing raw prompt text. |
+| `tools/scripts/smoke-sillytavern-live.mjs` | Focused live smoke. It validates the dedicated user and base URL gate, authenticates, compares served Recursion files, verifies the Recursion Bar, Hero Pixel Array progress menu, options/settings menu, provider controls, Last Brief dropdown, Full Viewer access, and bridge hooks with Playwright, and writes screenshots/trace for no-generation UI runs when artifacts are enabled. With generation flags, it drives visible send controls when available, records the trigger source, proves host generation continued for UI sends, suppresses binary artifacts, and proves Recursion-owned prompt keys can install and clear without storing raw prompt text. |
 | `tools/scripts/test-live-harness.mjs` | Deterministic contract tests for the guardrail behavior. |
 
 The harness should be a library, not a second runtime. Runtime behavior stays in `src/`; the harness drives the public host/UI surface and reads documented diagnostics.
@@ -107,7 +107,7 @@ State-mutating live smoke must run preflight checks before changing chat or prom
 5. Compare the served manifest entrypoint, stylesheet, and local static ESM import graph against the checkout under test.
 6. Write, verify, read, and delete one Recursion-owned `/user/files` probe.
 7. Confirm Playwright can open the host and see the Recursion Bar.
-8. Confirm the Recursion Last Hand dropdown, full viewer, and bridge hooks are available without sending a chat message.
+8. Confirm the Hero Pixel Array progress menu, Last Brief dropdown, settings/options menu, Full Viewer access, and bridge hooks are available without sending a chat message.
 
 The served freshness gate must cover the browser-loaded implementation, not just the manifest shell:
 
@@ -156,13 +156,14 @@ When only one user is configured, the script verifies that user's storage but em
 - navigate to SillyTavern;
 - ensure the Recursion extension is mounted;
 - locate the Recursion Bar;
-- open the Actions menu;
+- open the options/settings menu;
+- open the Hero Pixel Array progress menu;
 - switch Off, Observe only, and Auto modes;
 - seed and clear a Recursion-owned prompt sentinel during no-generation mode smoke;
 - run Test Provider actions through visible controls when configured;
 - send a safe test message only when the live run explicitly allows chat mutation;
-- wait for Recursion Activity Ribbon states instead of sleeping blindly;
-- open Last Hand and Full Viewer;
+- wait for Recursion progress states instead of sleeping blindly;
+- open Last Brief and prove Full Viewer access;
 - capture screenshots for desktop and phone viewports during no-generation UI runs;
 - clear prompt injection through Off mode or teardown.
 

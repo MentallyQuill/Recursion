@@ -51,9 +51,9 @@ Committed Auto prompt install attempts and completed Observe previews write a `h
 
 ## Activity Event Contract
 
-Activity events feed the Recursion Bar, Activity Ribbon, Full Viewer, and selected journal entries. Events include run id, phase, foreground/background/review mode, severity, label, compact detail, chips, provider lane, composer lane, card counts, and fallback reason.
+Activity events feed the Recursion Bar, Hero Pixel Array progress menu, Full Viewer, and selected journal entries. Events include run id, phase, foreground/background/review mode, severity, label, compact detail, chips, provider lane, composer lane, card counts, and fallback reason.
 
-The Activity Ribbon renders the latest active run state. The Full Viewer can show bounded diagnostic history.
+The progress menu renders the latest active run state. The Full Viewer can show bounded diagnostic history.
 
 ## Redaction
 

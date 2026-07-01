@@ -25,7 +25,7 @@ Highest-priority invariants:
 - Direct endpoint API keys are session-only and never written to settings, cache, journals, reports, screenshots, artifacts, or prompt packets.
 - Raw provider prompts and raw provider responses are not persisted by default.
 - Character Motivation cards may produce behavior-facing motivation guidance but must not inject private internal-thought dumps.
-- Activity Ribbon stages visibly report foreground model calls, cache reuse, card refresh, prompt install, storage progress, fallback paths, warnings, and errors.
+- Hero Pixel Array progress stages visibly report foreground model calls, cache reuse, card refresh, prompt install, storage progress, fallback paths, warnings, and errors.
 - Provider failure, storage failure, or injection failure must not block normal SillyTavern generation.
 - Recursion tests must not mutate World Info, Memory Books, Summaryception, VectFox, unrelated SillyTavern data, or non-Recursion extension records.
 - Automated live tests must reject `default-user`. Use dedicated test users such as `recursion-soak-a`, `recursion-soak-b`, and `recursion-soak-c`.
@@ -92,8 +92,8 @@ Primary live scenarios:
 - provider setup display and Test Provider action for Utility and Reasoner;
 - Observe only mode diagnostics without prompt injection;
 - Auto mode Utility Arbiter pass, card refresh, hand selection, prompt packet composition, and prompt installation;
-- Last Hand dropdown reflects the cards used for the last prompt packet;
-- Activity Ribbon shows model-call, cache, storage, composition, injection, fallback, and settled states;
+- Last Brief dropdown reflects the cards used for the last prompt packet;
+- Hero Pixel Array progress menu shows model-call, cache, storage, composition, injection, fallback, and settled states;
 - full viewer opens Now, Deck, Activity, Prompt Packet, Settings, and Providers views;
 - prompt packet clear on Off mode, chat change, disable, and teardown;
 - Utility provider failure falls back without blocking host generation;

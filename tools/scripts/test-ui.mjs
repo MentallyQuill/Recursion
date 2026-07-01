@@ -307,6 +307,21 @@ assertEqual(progressViewModel.heroPixelColumnCount, 1, 'view model exposes pixel
 assertEqual(progressViewModel.progressChildVisibleLimit, 5, 'view model defaults to five visible sub-tier rows');
 assertEqual(progressViewModel.progressListVisibleLimit, 15, 'view model defaults to fifteen visible progress items');
 
+const pendingProgressViewModel = createRecursionViewModel({
+  settings: { mode: 'auto' },
+  progressRun: {
+    runId: 'pending-progress',
+    steps: [
+      { id: 'installing-recursion-prompt', label: 'Installing Recursion prompt', providerLane: 'utility', state: 'pending' }
+    ]
+  }
+});
+assertEqual(
+  pendingProgressViewModel.progressRun.currentStepText,
+  'Installing Recursion prompt...',
+  'compact bar omits progress-row meta such as waiting'
+);
+
 const customProgressCapsViewModel = createRecursionViewModel({
   settings: { ui: { progressChildVisibleLimit: 8, progressListVisibleLimit: 24 } }
 });
@@ -315,10 +330,14 @@ assertEqual(customProgressCapsViewModel.progressListVisibleLimit, 24, 'view mode
 
 const barImplementationReference = readFileSync(new URL('../../docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md', import.meta.url), 'utf8');
 const uiSpec = readFileSync(new URL('../../docs/design/UI_SPEC.md', import.meta.url), 'utf8');
+const recursionCss = readFileSync(new URL('../../styles/recursion.css', import.meta.url), 'utf8');
+const recursionUi = readFileSync(new URL('../../src/ui.mjs', import.meta.url), 'utf8');
 const activityTriggerCss = barImplementationReference.match(/\.activity-trigger\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const heroBlockCss = barImplementationReference.match(/\.hero-block\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const heroBlockEnterCss = barImplementationReference.match(/@keyframes hero-block-enter\s*\{([\s\S]*?)\n\}\n\n@keyframes hero-block-active/)?.[1] ?? '';
 const heroBlockActiveCss = barImplementationReference.match(/@keyframes hero-block-active\s*\{([\s\S]*?)\n\}\n\n@keyframes hero-block-wipe/)?.[1] ?? '';
+const reasoningChainCss = barImplementationReference.match(/\.reasoning-chain\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const reasoningNodeCss = barImplementationReference.match(/\.reasoning-node\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 assert(/padding:\s*0 8px 0 2px;/.test(barImplementationReference), 'recursion bar uses a tighter left inset than right controls');
 assert(/--hero-running:\s*var\(--cyan\);/.test(barImplementationReference), 'hero pixel running blocks use the active blue token');
 assert(/--hero-done:\s*var\(--green\);/.test(barImplementationReference), 'hero pixel done blocks use the success green token');
@@ -348,6 +367,28 @@ assert(!/transform:\s*scale/.test(heroBlockActiveCss), 'hero block running anima
 assert(/display:\s*block;/.test(heroBlockCss), 'hero pixel blocks render as block boxes, not inline spans');
 assert(/aspect-ratio:\s*1\s*\/\s*1;/.test(heroBlockCss), 'hero pixel blocks explicitly preserve a square aspect ratio');
 assert(/border-radius:\s*0;/.test(heroBlockCss), 'hero pixel blocks use sharp square corners');
+assert(/class="reasoning-chain"/.test(barImplementationReference), 'right tools include a compact reasoning level chain');
+assert(/role="radiogroup"/.test(barImplementationReference), 'reasoning level chain is exposed as a radio group');
+assert(/data-selected="high"/.test(barImplementationReference), 'mock defaults the reasoning chain to High');
+assert(/data-level="low"[\s\S]*?title="Low/.test(barImplementationReference), 'reasoning chain includes Low tooltip copy');
+assert(/data-level="medium"[\s\S]*?title="Medium/.test(barImplementationReference), 'reasoning chain includes Medium tooltip copy');
+assert(/data-level="high"[\s\S]*?title="High/.test(barImplementationReference), 'reasoning chain includes High tooltip copy');
+assert(/data-level="ultra"[\s\S]*?title="Ultra/.test(barImplementationReference), 'reasoning chain includes Ultra tooltip copy');
+assert(/border-radius:\s*2px;/.test(reasoningNodeCss), 'reasoning nodes use 2px radius square boxes');
+assert(/box-shadow:\s*0 0 8px rgba\(101,\s*216,\s*232,\s*\.38\)/.test(barImplementationReference), 'lit reasoning nodes glow with the cyan token');
+assert(/\.reasoning-chain::before/.test(barImplementationReference), 'reasoning nodes are connected by a chain line');
+assert(/--chain-start:\s*5px;/.test(reasoningChainCss), 'reasoning chain defines the first node center');
+assert(/--chain-step:\s*15px;/.test(reasoningChainCss), 'reasoning chain defines exact node-center spacing');
+assert(/--chain-span:\s*calc\(var\(--chain-step\) \* 3\);/.test(reasoningChainCss), 'reasoning chain line spans exact node centers');
+assert(!/--chain-fill:\s*\d+%;/.test(barImplementationReference), 'reasoning chain fill does not use approximate percentage stops');
+assert(!/justify-content:\s*space-between;/.test(reasoningChainCss), 'reasoning nodes do not rely on space-between geometry');
+assert(/\.reasoning-chain\[data-selected="high"\]\s*\{[\s\S]*?--chain-fill:\s*calc\(var\(--chain-step\) \* 2\);/.test(barImplementationReference), 'High reasoning fill ends on the High node center');
+assert(/\.reasoning-line-fill\s*\{[\s\S]*?left:\s*var\(--chain-start\);[\s\S]*?width:\s*var\(--chain-fill\);/.test(barImplementationReference), 'reasoning fill starts and ends from explicit node-center geometry');
+assert(/\.reasoning-node\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?left:\s*var\(--node-x\);[\s\S]*?transform:\s*translate\(-50%,\s*-50%\);/.test(barImplementationReference), 'reasoning nodes are centered on explicit x coordinates');
+assert(/\.reasoning-node\[data-level="ultra"\]\s*\{[\s\S]*?--node-x:\s*calc\(var\(--chain-start\) \+ \(var\(--chain-step\) \* 3\)\);/.test(barImplementationReference), 'Ultra reasoning node shares the final chain endpoint');
+assert(/\.reasoning-node\[data-level="low"\]\s*\{[\s\S]*?--node-size:\s*5px;/.test(barImplementationReference), 'Low reasoning node is the smallest box');
+assert(/\.reasoning-node\[data-level="ultra"\]\s*\{[\s\S]*?--node-size:\s*11px;/.test(barImplementationReference), 'Ultra reasoning node is the largest box');
+assert(/function setReasoningLevel/.test(barImplementationReference), 'turn animation preview lets reasoning nodes update selection');
 assert(/\.status-popover\s*\{[\s\S]*?left:\s*-3px;/.test(barImplementationReference), 'status popover aligns to the visible left edge of the bar');
 assert(/const PROGRESS_CHILD_VISIBLE_LIMIT = 5;/.test(barImplementationReference), 'turn animation preview defaults to five visible sub-tier rows');
 assert(/const PROGRESS_LIST_VISIBLE_LIMIT = 15;/.test(barImplementationReference), 'turn animation preview defaults to fifteen visible progress items');
@@ -391,6 +432,10 @@ assert(!/const before = list\.children\[index\];[\s\S]*?list\.insertBefore\(row,
 assert(/dataset\.stepId/.test(barImplementationReference), 'turn animation preview keys hero blocks and progress rows by stable step id');
 assert(/function syncHeroBlock/.test(barImplementationReference), 'turn animation preview updates hero blocks in place');
 assert(/function syncProgressRow/.test(barImplementationReference), 'turn animation preview updates progress rows in place');
+assert(/\.recursion-brand-stage\s*\{[\s\S]*?--brand-stage-width:\s*calc\(var\(--brand-offset\) \+ var\(--brand-text-width\)\);/.test(recursionCss), 'production brand stage uses the same Recursion wordmark geometry as the reference');
+assert(/\.recursion-activity-trigger\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production activity trigger keeps reference spacing around pixel blocks');
+assert(/\.recursion-hero-pixel-array\s*\{[\s\S]*?width:\s*max\(0px,/.test(recursionCss), 'production Hero Pixel Array uses column-based width animation');
+assert(/function renderHeroPixelArray\(container, blocks = \[\]\) \{[\s\S]*?querySelectorAll\('\[data-recursion-hero-block\]'\)[\s\S]*?insertBefore\(node, before\);/.test(recursionUi), 'production renderer updates Hero Pixel Array blocks in place');
 assert(/window\.playRecursionTurnAnimation/.test(barImplementationReference), 'turn animation preview exposes a replay hook');
 assert(/\.step-row\.done \.step-icon\s*\{[\s\S]*?background:\s*var\(--green\);[\s\S]*?border-color:\s*var\(--green\);/.test(barImplementationReference), 'progress menu done dots use the same success green token');
 assert(/\.step-row\.running \.step-icon\s*\{[\s\S]*?var\(--cyan\) 0 82deg/.test(barImplementationReference), 'progress menu running spinners use the same active blue token');
@@ -502,6 +547,12 @@ function createFakeDocument() {
       this.value = '';
       this.checked = false;
       this.disabled = false;
+      this.style = {
+        props: {},
+        setProperty(name, value) {
+          this.props[name] = String(value);
+        }
+      };
     }
 
     appendChild(child) {
@@ -575,6 +626,10 @@ function createFakeDocument() {
     querySelector(selector) {
       return findFirst(this, selector);
     }
+
+    querySelectorAll(selector) {
+      return findAll(this, selector);
+    }
   }
 
   function matches(element, selector) {
@@ -594,6 +649,15 @@ function createFakeDocument() {
       if (nested) return nested;
     }
     return null;
+  }
+
+  function findAll(element, selector) {
+    const matchesList = [];
+    for (const child of element.children) {
+      if (matches(child, selector)) matchesList.push(child);
+      matchesList.push(...findAll(child, selector));
+    }
+    return matchesList;
   }
 
   function textTree(element) {
@@ -713,14 +777,61 @@ try {
         }
       }
     },
-    lastHand: { handId: 'hand-ui', cards: [{ id: 'card-a', family: 'Scene Frame', summary: 'Door stays blocked.', emphasis: 'critical' }] },
+    lastHand: {
+      handId: 'hand-ui',
+      cards: [{
+        id: 'card-a',
+        family: 'Scene Frame',
+        status: 'fresh',
+        source: 'generated',
+        detailProfile: 'standard',
+        promptText: 'Door stays blocked and the brass lock remains warped.',
+        summary: 'Door stays blocked.',
+        emphasis: 'emphasized'
+      }]
+    },
     activity: { phase: 'cardBatchRunning', severity: 'info', chips: ['Utility', 'Cards'] },
+    progressRun: {
+      runId: 'ui-progress',
+      steps: [
+        {
+          id: 'utility-card-batch',
+          label: 'Utility card batch',
+          providerLane: 'utility',
+          state: 'running',
+          children: [
+            { id: 'scene-frame-card', label: 'Scene Frame', providerLane: 'utility', state: 'running' },
+            { id: 'continuity-risk-card', label: 'Continuity Risk', providerLane: 'utility', state: 'pending' },
+            { id: 'motivation-card', label: 'Motivation', providerLane: 'utility', state: 'pending' },
+            { id: 'threads-card', label: 'Open Threads', providerLane: 'utility', state: 'pending' },
+            { id: 'cast-card', label: 'Active Cast', providerLane: 'utility', state: 'pending' },
+            { id: 'prose-card', label: 'Prose Pacing', providerLane: 'utility', state: 'pending' }
+          ]
+        }
+      ]
+    },
     lastPacket: {
       packetId: 'packet-ui',
+      packetVersion: 1,
       chatId: 'chat-ui',
       sceneKey: 'scene-ui',
-      selectedCardRefs: [{ cardId: 'card-a', family: 'Scene Frame' }],
-      diagnostics: { composerLane: 'utility' }
+      sceneFingerprint: 'scene-ui',
+      turnFingerprint: 'turn-ui',
+      footprint: 'normal',
+      sections: {
+        sceneBrief: 'Scene brief:\n- [Scene Frame] Door stays blocked and the brass lock remains warped.',
+        turnBrief: 'Turn brief: No turn-specific card guidance selected.',
+        guardrails: 'Guardrails:\n- Respect the player message.'
+      },
+      selectedCardRefs: [{ cardId: 'card-a', family: 'Scene Frame', emphasis: 'emphasized', tokenEstimate: 12, detailProfile: 'standard', evidenceRefs: [] }],
+      omissions: [],
+      injectionPlan: [
+        { id: 'sceneBrief', section: 'sceneBrief', promptKey: 'recursion.sceneBrief', title: 'Recursion Scene Brief', placement: 'in_prompt', depth: 4, role: 'system', maxChars: 900, sourceIds: ['card-a'] },
+        { id: 'turnBrief', section: 'turnBrief', promptKey: 'recursion.turnBrief', title: 'Recursion Turn Brief', placement: 'in_chat', depth: 2, role: 'system', maxChars: 900, sourceIds: [] },
+        { id: 'guardrails', section: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', placement: 'in_prompt', depth: 1, role: 'system', maxChars: 900, sourceIds: [] }
+      ],
+      diagnostics: { runId: 'run-ui', composerLane: 'utility', reasonerStatus: 'skipped', sectionBudgets: { sceneBrief: 900, turnBrief: 900, guardrails: 900 } },
+      composedAt: '2026-07-01T00:00:00.000Z'
     }
   };
   const ui = mountRecursionUi({
@@ -813,8 +924,24 @@ try {
   const root = fakeDocument.getElementById('recursion-root');
   assert(root, 'root is rendered');
   assert(root.querySelector('[data-recursion-bar]'), 'bar selector is rendered');
+  assert(root.querySelector('[data-recursion-brand-stage]'), 'compact bar renders the Recursion brand stage');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-brand-stage]')).includes('RECURSION'), 'compact brand uses uppercase Recursion wordmark');
+  assert(root.querySelector('[data-recursion-mode-button]'), 'compact bar renders an icon-only mode button');
+  assert(root.querySelector('[data-recursion-mode-menu]'), 'compact bar renders the mode selector menu');
+  assert(root.querySelector('[data-recursion-status-trigger]'), 'compact bar renders the progress activity trigger');
+  assert(root.querySelector('[data-recursion-hero-array]'), 'compact bar renders the Hero Pixel Array');
+  assert(root.querySelector('[data-recursion-status-popover]'), 'compact bar renders the progress popover');
+  assert(root.querySelector('[data-recursion-current-step]'), 'compact bar renders one current-step status text');
+  assert(root.querySelector('[data-recursion-reasoning-chain]'), 'compact bar renders the reasoning level chain');
+  assert(root.querySelector('[data-recursion-reasoning-level-high]'), 'reasoning chain defaults to the High node');
+  assert(root.querySelector('[data-recursion-brief-arrow]'), 'compact bar renders a dedicated last-brief dropdown arrow');
+  assert(root.querySelector('[data-recursion-options-button]'), 'compact bar renders a dedicated ellipsis options button');
+  assertEqual(root.querySelector('[data-recursion-brand-stage]').getAttribute('aria-expanded'), 'false', 'brand progress button starts collapsed');
+  assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'false', 'progress activity trigger starts collapsed');
+  assertEqual(root.querySelector('[data-recursion-hand-toggle]').getAttribute('aria-expanded'), 'false', 'brief dropdown trigger starts collapsed');
+  assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode menu trigger starts collapsed');
   assert(root.querySelector('[data-recursion-activity-ribbon]'), 'activity ribbon selector is rendered');
-  assert(root.querySelector('[data-recursion-action-menu]'), 'actions menu selector is rendered');
+  assert(!root.querySelector('[data-recursion-action-menu]'), 'legacy action menu is not rendered');
   assert(root.querySelector('[data-recursion-hand-dropdown]'), 'hand dropdown selector is rendered');
   assert(root.querySelector('[data-recursion-settings-panel]'), 'settings panel selector is rendered');
   assert(root.querySelector('[data-recursion-viewer]'), 'viewer selector is rendered');
@@ -827,54 +954,154 @@ try {
   assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, true, 'foreground ribbon waits briefly before revealing working activity');
   assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working', 'rendered runtime health');
   assertEqual(root.querySelector('[data-recursion-mode]').textContent, 'Auto', 'rendered separate mode text');
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Utility card batch...', 'rendered compact current progress step');
+  assert(root.querySelector('[data-recursion-hero-array]').children.length >= 1, 'hero array renders visible progress blocks');
+  assertEqual(root.querySelector('[data-recursion-status-trigger]').style.props['--columns'], '1', 'activity trigger exposes column count for width animation');
+  assertEqual(root.querySelector('[data-recursion-hero-array]').style.props['--columns'], '1', 'hero array exposes column count for width animation');
+  assertEqual(root.querySelector('[data-recursion-hero-array]').style.props['--block-count'], '1', 'hero array exposes top-level block count for animation timing');
   assertEqual(root.querySelector('[data-recursion-hand-count]').textContent, 'Hand 1', 'rendered hand count');
   assertEqual(root.querySelector('[data-recursion-composer]').textContent, 'Utility', 'rendered composer');
 
+  root.querySelector('[data-recursion-mode-button]').click();
+  assertEqual(root.querySelector('[data-recursion-mode-menu]').hidden, false, 'mode button opens mode selector');
+  assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'true', 'mode button reflects open menu');
+  root.querySelector('[data-recursion-mode-choice-observe]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { mode: 'observe' }, 'mode menu updates mode directly');
+  assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode button reflects closed menu after selection');
+  root.querySelector('[data-recursion-brand-stage]').click();
+  assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, false, 'brand button opens progress popover');
+  assertEqual(root.querySelector('[data-recursion-brand-stage]').getAttribute('aria-expanded'), 'true', 'brand button reflects open progress popover');
+  assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'true', 'activity trigger mirrors open progress popover');
+  root.querySelector('[data-recursion-status-trigger]').click();
+  assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'activity trigger closes progress popover');
+  assertEqual(root.querySelector('[data-recursion-brand-stage]').getAttribute('aria-expanded'), 'false', 'brand button reflects closed progress popover');
+  assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'false', 'activity trigger reflects closed progress popover');
+  root.querySelector('[data-recursion-status-trigger]').click();
+  assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, false, 'activity trigger opens progress popover');
+  assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'true', 'activity trigger reflects open progress popover');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-status-popover]')).includes('Utility card batch'), 'progress popover renders progress rows');
+  assertEqual(
+    root.querySelector('[data-recursion-progress-list]').style.props['--recursion-progress-list-limit'],
+    '15',
+    'progress popover applies visible progress list limit'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-progress-children]').style.props['--recursion-progress-child-limit'],
+    '5',
+    'progress popover applies visible child row limit'
+  );
+  root.querySelector('[data-recursion-reasoning-level-ultra]').click();
+  assertDeepEqual(
+    settingsUpdates.at(-1),
+    { reasoningLevel: 'ultra', reasonerUse: 'always' },
+    'reasoning chain updates reasoning level and derived reasoner use'
+  );
+
   root.querySelector('[data-recursion-actions]').click();
-  assertEqual(root.querySelector('[data-recursion-action-menu]').hidden, false, 'actions button opens action menu');
-  assertEqual(root.querySelector('[data-recursion-action-mode-toggle]').textContent, 'Switch to Observe only', 'action mode toggle uses Observe only wording');
-  root.querySelector('[data-recursion-action-refresh]').click();
-  assertEqual(refreshed, 1, 'actions button calls refresh scene');
-  root.querySelector('[data-recursion-action-mode-toggle]').click();
-  assertDeepEqual(settingsUpdates.at(-1), { mode: 'observe' }, 'mode toggle updates high-level settings');
-  root.querySelector('[data-recursion-settings-toggle]').click();
-  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings action opens settings panel');
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'options button opens settings panel directly');
+  assertEqual(root.querySelector('[data-recursion-actions]').getAttribute('aria-expanded'), 'true', 'options button reflects open settings state');
+  assert(root.querySelector('[data-recursion-settings-tabs]'), 'settings menu renders tab controls');
+  assert(root.querySelector('[data-recursion-settings-play]'), 'settings menu renders Play pane');
+  assert(root.querySelector('[data-recursion-settings-providers]'), 'settings menu renders Providers pane');
+  assert(root.querySelector('[data-recursion-settings-advanced]'), 'settings menu renders Advanced pane');
+  assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, false, 'Play pane is the default settings tab');
+  assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, true, 'Providers pane starts tucked behind a tab');
+  root.querySelector('[data-recursion-settings-tab-providers]').click();
+  assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, true, 'clicking Providers hides Play pane');
+  assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, false, 'clicking Providers shows provider controls');
   assertDeepEqual(
     root.querySelector('[data-recursion-setting-mode]').children.map((child) => child.textContent),
     ['Off', 'Observe only', 'Auto'],
     'mode settings options use product wording'
   );
+  root.querySelector('[data-recursion-settings-close]').click();
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, true, 'settings close button closes options panel');
+  assertEqual(root.querySelector('[data-recursion-actions]').getAttribute('aria-expanded'), 'false', 'options button reflects closed settings state');
+
+  root.querySelector('[data-recursion-hand-toggle]').click();
+  assertEqual(root.querySelector('[data-recursion-hand-dropdown]').hidden, false, 'brief dropdown button opens Last Brief');
+  assertEqual(root.querySelector('[data-recursion-hand-toggle]').getAttribute('aria-expanded'), 'true', 'brief dropdown trigger reflects open state');
+  const briefCard = root.querySelector('[data-recursion-brief-card-id]');
+  assertEqual(briefCard.getAttribute('aria-expanded'), 'false', 'brief card starts compact');
+  briefCard.click();
+  assertEqual(briefCard.getAttribute('aria-expanded'), 'true', 'brief card expands on click');
+  assert(fakeDocument.textTree(briefCard).includes('#'), 'brief card uses a category glyph instead of a generic card icon');
+  assert(fakeDocument.textTree(briefCard).includes('Door stays blocked and the brass lock remains warped.'), 'expanded brief card exposes full card text');
+  assert(fakeDocument.textTree(briefCard).includes('fresh'), 'expanded brief card exposes bounded meta chips');
+  const packetButton = root.querySelector('[data-recursion-prompt-packet-button]');
+  assert(packetButton, 'last brief renders Prompt Packet button');
+  packetButton.click();
+  assertEqual(root.querySelector('[data-recursion-prompt-packet-panel]').hidden, false, 'Prompt Packet button opens composed packet panel');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('packet-ui'), 'prompt packet panel renders composed packet metadata');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Recursion Scene Brief'), 'prompt packet panel renders injected block titles');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Door stays blocked and the brass lock remains warped.'), 'prompt packet panel renders actual injected prompt text');
+  const progressList = root.querySelector('[data-recursion-progress-list]');
+  const progressChildren = root.querySelector('[data-recursion-progress-children]');
+  const briefScroll = root.querySelector('[data-recursion-brief-scroll]');
+  const packetPreview = root.querySelector('[data-recursion-prompt-packet-preview]');
+  progressList.scrollTop = 48;
+  progressChildren.scrollTop = 36;
+  briefScroll.scrollTop = 44;
+  packetPreview.scrollTop = 52;
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-progress-list]').scrollTop, 48, 'progress list preserves scroll position across rerender');
+  assertEqual(root.querySelector('[data-recursion-progress-children]').scrollTop, 36, 'progress child list preserves scroll position across rerender');
+  assertEqual(root.querySelector('[data-recursion-brief-scroll]').scrollTop, 44, 'brief card list preserves scroll position across rerender');
+  assertEqual(root.querySelector('[data-recursion-prompt-packet-preview]').scrollTop, 52, 'prompt packet preview preserves scroll position across rerender');
+  assertEqual(root.querySelector('[data-recursion-prompt-packet-panel]').hidden, false, 'prompt packet panel stays open across rerender');
+  assertEqual(root.querySelector('[data-recursion-brief-card-id]').getAttribute('aria-expanded'), 'true', 'expanded brief card stays expanded across rerender');
+  const rerenderedChildren = root.querySelector('[data-recursion-progress-children]');
+  rerenderedChildren.scrollHeight = 180;
+  rerenderedChildren.clientHeight = 90;
+  rerenderedChildren.scrollTop = 42;
+  for (const listener of rerenderedChildren.eventListeners.scroll || []) listener({ target: rerenderedChildren });
+  assert(!rerenderedChildren.className.includes('is-at-end'), 'child progress fade remains active before scroll end');
+  rerenderedChildren.scrollTop = 90;
+  for (const listener of rerenderedChildren.eventListeners.scroll || []) listener({ target: rerenderedChildren });
+  assert(rerenderedChildren.className.includes('is-at-end'), 'child progress fade clears at scroll end');
 
   root.querySelector('[data-recursion-setting-mode]').value = 'auto';
+  root.querySelector('[data-recursion-setting-reasoning-level]').value = 'medium';
   root.querySelector('[data-recursion-setting-strength]').value = 'strong';
   root.querySelector('[data-recursion-setting-footprint]').value = 'rich';
   root.querySelector('[data-recursion-setting-focus]').value = 'character';
-  root.querySelector('[data-recursion-setting-reasoner]').value = 'always';
   root.querySelector('[data-recursion-setting-progress-child-limit]').value = '7';
   root.querySelector('[data-recursion-setting-progress-list-limit]').value = '22';
+  root.querySelector('[data-recursion-setting-journal-limit]').value = '120';
+  root.querySelector('[data-recursion-setting-include-excerpts]').checked = true;
   root.querySelector('[data-recursion-settings-save]').click();
   assertDeepEqual(settingsUpdates.at(-1), {
     mode: 'auto',
+    reasoningLevel: 'medium',
     strength: 'strong',
     promptFootprint: 'rich',
     focus: 'character',
-    reasonerUse: 'always',
+    reasonerUse: 'auto',
     ui: {
       progressChildVisibleLimit: 7,
       progressListVisibleLimit: 22
+    },
+    diagnostics: {
+      maxJournalEntries: 120,
+      includeExcerpts: true
     }
   }, 'settings panel saves broad behavior controls');
   root.querySelector('[data-recursion-setting-mode]').value = 'off';
   root.querySelector('[data-recursion-settings-save]').click();
   assertDeepEqual(settingsUpdates.at(-1), {
     mode: 'off',
+    reasoningLevel: 'medium',
     strength: 'strong',
     promptFootprint: 'rich',
     focus: 'character',
-    reasonerUse: 'always',
+    reasonerUse: 'auto',
     ui: {
       progressChildVisibleLimit: 7,
       progressListVisibleLimit: 22
+    },
+    diagnostics: {
+      maxJournalEntries: 120,
+      includeExcerpts: true
     }
   }, 'settings panel can switch Recursion Off');
   assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working', 'Off settings save shows cleanup work');
@@ -912,6 +1139,7 @@ try {
   root.querySelector('[data-recursion-copy-prompt-packet]').click();
   await Promise.resolve();
   assert(copied[0].includes('composerLane'), 'copy prompt packet writes sanitized packet preview');
+  assert(copied[0].includes('Door stays blocked and the brass lock remains warped.'), 'copy prompt packet includes actual injected prompt text');
 
   const viewer = root.querySelector('[data-recursion-viewer]');
   let showModalCount = 0;

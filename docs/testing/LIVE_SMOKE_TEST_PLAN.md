@@ -60,7 +60,7 @@ $env:RECURSION_SILLYTAVERN_USER='recursion-soak-a'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts
 ```
 
-This command authenticates the dedicated user, compares the served Recursion manifest, entrypoint, static import graph, and stylesheet against the checkout, runs the Recursion-owned storage probe, opens SillyTavern with Playwright, verifies the Recursion Bar, Last Hand dropdown, full viewer, and bridge hooks, then writes screenshots, trace, live log, served-extension comparison, storage probe, browser snapshot, summary, and report artifacts. It does not send chat messages or call providers.
+This command authenticates the dedicated user, compares the served Recursion manifest, entrypoint, static import graph, and stylesheet against the checkout, runs the Recursion-owned storage probe, opens SillyTavern with Playwright, verifies the Recursion Bar, Hero Pixel Array progress menu, Last Brief dropdown, settings/options menu, Full Viewer access, and bridge hooks, then writes screenshots, trace, live log, served-extension comparison, storage probe, browser snapshot, summary, and report artifacts. It does not send chat messages or call providers.
 
 Generation-enabled Utility smoke target:
 
@@ -87,11 +87,11 @@ Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIV
 
 | Scenario | Mutates chat | Requires provider | Must prove |
 | --- | --- | --- | --- |
-| Mount smoke | no | no | Recursion extension loads, Recursion Bar renders, Activity Ribbon can open, viewer can open. |
+| Mount smoke | no | no | Recursion extension loads, Recursion Bar renders, Hero Pixel Array progress menu can open, settings/options can open, viewer can open. |
 | Mode smoke | no | no | Off, Observe only, Auto, and return-to-Off controls update runtime mode, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
 | Storage probe | files only | no | Dedicated user can write/read/delete Recursion-owned files and records are isolated from other users. |
 | Observe only smoke | optional | no | Snapshot and diagnostics can be previewed without prompt injection. |
-| Utility provider smoke | yes | Utility | Arbiter/card/composer work runs, Activity Ribbon reports it, prompt packet installs, and generation continues. |
+| Utility provider smoke | yes | Utility | Arbiter/card/composer work runs, progress menu reports it, prompt packet installs, and generation continues. |
 | Reasoner fallback smoke | yes | Utility and Reasoner | Reasoner can compose when healthy and falls back to Utility when off, timed out, or invalid. |
 | Prompt cleanup smoke | no | no | Off mode, disable, teardown, and chat change clear Recursion prompt keys. |
 | Failure smoke | optional | simulated or real failing lane | Provider/storage/injection failure reports visible fallback and does not block host generation. |
@@ -116,15 +116,16 @@ The run stops here on unsafe user, stale extension, missing host, failed auth, o
 ### 2. Mount And UI
 
 - Locate the Recursion Bar.
-- Assert the bar has a stable status chip.
-- Open the Actions menu.
-- Open Last Hand.
-- Open Full Viewer.
-- Visit Now, Deck, Activity, Prompt Packet, Settings, and Providers views.
+- Assert the compact bar has stable wordmark, mode, progress, reasoning, Last Brief, and options zones.
+- Open the Hero Pixel Array progress menu.
+- Open the Last Brief dropdown.
+- Open settings/options and verify Play, Providers, and Advanced tabs.
+- Open Full Viewer from settings/options.
+- Visit Now, Deck, Activity, Prompt Packet, Settings, and Providers views when viewer is open.
 - Capture desktop screenshot.
 - Capture phone viewport screenshot.
 
-The smoke should fail if controls overlap chat input, if text escapes compact controls, or if the Activity Ribbon cannot render a clear status.
+The smoke should fail if controls overlap chat input, if text escapes compact controls, or if the progress menu cannot render a clear status.
 
 ### 3. Mode Transitions
 
@@ -142,7 +143,7 @@ When providers are configured:
 
 - Run Utility Test Provider.
 - Run Reasoner Test Provider when enabled.
-- Verify provider test activity appears in the Activity Ribbon.
+- Verify provider test activity appears in the progress menu or Full Viewer Activity section.
 - Verify model, lane, status, duration, and redacted error category appear in diagnostics.
 
 Provider tests must not persist API keys, raw prompts, or raw responses.
@@ -154,7 +155,7 @@ In Observe only mode:
 - Capture a turn snapshot or current chat snapshot.
 - Ask runtime for a preview-safe decision when supported.
 - Verify no prompt packet is installed.
-- Verify Activity and Full Viewer show sanitized snapshot/card-plan metadata.
+- Verify the progress menu and Full Viewer show sanitized snapshot/card-plan metadata.
 
 Observe only mode may record hashes, counts, ids, and bounded labels. It must not create model-facing prompt keys.
 
@@ -169,7 +170,7 @@ With live generation enabled:
 - Wait for Recursion foreground activity to start.
 - Verify Utility Arbiter, card refresh, hand selection, composition, and prompt install stages appear.
 - Verify the prompt packet metadata references the active snapshot id.
-- Verify the Last Hand dropdown lists used card families.
+- Verify the Last Brief dropdown lists used card families.
 - Verify prompt-install evidence through Recursion-owned prompt keys, hashes, lengths, and placement metadata. Do not store raw prompt text.
 - Wait for host generation to continue or complete when using the full chat UI path.
 - Verify the prompt packet can be cleared after the run.
@@ -207,7 +208,7 @@ Live destructive failure simulation should stay narrow and Recursion-owned. The 
 - write final artifacts;
 - record whether warnings were promoted to failures.
 
-## Expected Activity Ribbon Evidence
+## Expected Progress Evidence
 
 A passing generation-enabled run should show stages equivalent to:
 
@@ -232,7 +233,7 @@ Prompt packet over budget, omitted low-priority cards
 Storage slow, continuing with memory cache
 ```
 
-Activity text must be user-facing, bounded, and free of raw prompts, raw responses, secrets, private notes, or full transcript text.
+Progress text must be user-facing, bounded, and free of raw prompts, raw responses, secrets, private notes, or full transcript text.
 
 ## Prompt Packet Proof
 

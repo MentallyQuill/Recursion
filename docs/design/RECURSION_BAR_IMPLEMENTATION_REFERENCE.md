@@ -14,6 +14,8 @@ Runtime toggles:
 - `.hero-block.pending`, `.hero-block.running`, `.hero-block.done`, `.hero-block.cached`, `.hero-block.warning`, and `.hero-block.failed` control each Hero Pixel Array block.
 - `.mode-menu.is-open` opens the mode menu.
 - `.brief-menu.is-open` opens the Last Brief menu.
+- `.settings-menu.is-open` opens the settings menu; on desktop it starts to the right of the progress popover and aligns its right edge with the bar.
+- `.settings-tab.is-selected` and `.settings-pane.is-selected` switch Play, Providers, and Advanced settings groups.
 - `.prompt-packet-panel.is-open` opens the injected prompt packet panel.
 - `.brief-card[aria-expanded="true"]` expands a card row.
 - `.step-row.done`, `.step-row.running`, `.step-row.cached`, `.step-row.queued`, `.step-row.warn`, and `.step-row.fail` control progress-row state.
@@ -186,10 +188,17 @@ Runtime toggles:
     </button>
 
     <div class="right-tools">
+      <div class="reasoning-chain" role="radiogroup" aria-label="Reasoning level" data-selected="high">
+        <span class="reasoning-line-fill" aria-hidden="true"></span>
+        <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="low" title="Low: Utility-only, reduced cards."></button>
+        <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="medium" title="Medium: mostly Utility, Reasoner eligible for the brief."></button>
+        <button class="reasoning-node is-lit is-selected" type="button" role="radio" aria-checked="true" data-level="high" title="High: mixed Utility and Reasoner checks."></button>
+        <button class="reasoning-node" type="button" role="radio" aria-checked="false" data-level="ultra" title="Ultra: Reasoner-heavy synthesis with a larger card bias."></button>
+      </div>
       <button class="icon-button brief-arrow" id="brief-arrow" aria-label="Open last brief preview" aria-expanded="false">
         <span class="arrow-down" aria-hidden="true"></span>
       </button>
-      <button class="icon-button options-btn" aria-label="Open Recursion options">
+      <button class="icon-button options-btn" id="options-button" aria-label="Open Recursion options" aria-expanded="true">
         <span class="ellipsis" aria-hidden="true"><span></span><span></span><span></span></span>
       </button>
     </div>
@@ -356,6 +365,51 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
       <span class="tiny-chip">Esc</span>
     </footer>
   </section>
+
+  <section class="settings-menu is-open" id="settings-menu" aria-label="Recursion settings">
+    <header class="settings-head">
+      <span class="settings-title">Settings</span>
+      <button class="settings-close" type="button" aria-label="Close settings">x</button>
+    </header>
+
+    <div class="settings-tabs" role="tablist">
+      <button class="settings-tab is-selected" type="button" data-tab="play">Play</button>
+      <button class="settings-tab" type="button" data-tab="providers">Providers</button>
+      <button class="settings-tab" type="button" data-tab="advanced">Advanced</button>
+    </div>
+
+    <div class="settings-pane is-selected" data-pane="play">
+      <label class="settings-row"><span>Mode</span><select><option>Observe only</option><option selected>Auto</option><option>Off</option></select></label>
+      <label class="settings-row"><span>Reasoning Level</span><div class="mini-chain" data-selected="high"><span></span><i></i><i></i><i class="on"></i><i></i></div></label>
+      <label class="settings-row"><span>Strength</span><select><option>Light</option><option selected>Balanced</option><option>Strong</option></select></label>
+      <label class="settings-row"><span>Focus</span><select><option selected>Balanced</option><option>Character</option><option>Continuity</option><option>Prose</option><option>Plot</option></select></label>
+      <label class="settings-row"><span>Prompt Footprint</span><select><option>Compact</option><option selected>Normal</option><option>Rich</option></select></label>
+    </div>
+
+    <div class="settings-pane" data-pane="providers">
+      <div class="provider-card"><span class="provider-card-title">Utility Provider</span><span class="provider-status pass">not run</span></div>
+      <div class="provider-grid">
+        <label>Source<select><option selected>Current Host Model</option><option>Host Connection Profile</option><option>OpenAI-Compatible Endpoint</option></select></label>
+        <label>Profile<input placeholder="Host profile id"></label>
+        <label>Base URL<input placeholder="https://host/v1"></label>
+        <label>Model<input placeholder="model"></label>
+        <label>Session Key<input type="password" placeholder="Session API key"></label>
+        <label>Max Tokens<input type="number" value="4096"></label>
+      </div>
+      <div class="provider-actions"><button>Save Provider</button><button>Test Provider</button><button>Clear Session Key</button></div>
+      <div class="provider-card"><span class="provider-card-title">Reasoner Provider</span><span class="provider-status">optional</span></div>
+    </div>
+
+    <div class="settings-pane" data-pane="advanced">
+      <label class="settings-row"><span>Sub-tier Rows</span><input type="number" value="5"></label>
+      <label class="settings-row"><span>Progress Rows</span><input type="number" value="15"></label>
+      <label class="settings-row"><span>Journal Entries</span><input type="number" value="100"></label>
+      <label class="settings-row"><span>Include Excerpts</span><input type="checkbox"></label>
+      <div class="provider-actions"><button>Reset Scene Cache</button><button>Clear Run Journal</button><button>Export Diagnostics</button></div>
+    </div>
+
+    <footer class="settings-foot"><button>Save Settings</button></footer>
+  </section>
 </div>
 ```
 
@@ -386,6 +440,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     warning: 'caution',
     failed: 'failed'
   };
+  const REASONING_LEVELS = ['low', 'medium', 'high', 'ultra'];
   const TURN_ANIMATION_STEPS = [
     { id: 'read-turn', label: 'Reading current turn', provider: 'utility', state: 'pending' },
     { id: 'scene-shift', label: 'Checking scene shift', provider: 'utility', state: 'pending' },
@@ -634,6 +689,19 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     return node;
   }
 
+  function setReasoningLevel(root, level) {
+    const chain = root.querySelector('.reasoning-chain');
+    const selectedIndex = REASONING_LEVELS.indexOf(level);
+    if (!chain || selectedIndex < 0) return;
+    chain.dataset.selected = level;
+    chain.querySelectorAll('.reasoning-node').forEach((node, index) => {
+      const selected = node.dataset.level === level;
+      node.classList.toggle('is-lit', index <= selectedIndex);
+      node.classList.toggle('is-selected', selected);
+      node.setAttribute('aria-checked', selected ? 'true' : 'false');
+    });
+  }
+
   function syncProgressRow(list, step, index, changedId) {
     let row = findStepElement(list, '.step-row:not(.child-row)', step.id);
     const isNew = !row;
@@ -850,8 +918,36 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
   window.playRecursionTurnAnimation = playRecursionTurnAnimation;
   window.addEventListener('DOMContentLoaded', () => {
+    const root = document.querySelector('.recursion-topbar-host');
+    root?.querySelectorAll('.reasoning-node').forEach((node) => {
+      node.addEventListener('click', () => setReasoningLevel(root, node.dataset.level));
+    });
+    setReasoningLevel(root, root?.querySelector('.reasoning-chain')?.dataset.selected || 'high');
+
+    const settingsMenu = document.querySelector('#settings-menu');
+    const optionsButton = document.querySelector('#options-button');
+    function setSettingsOpen(open) {
+      settingsMenu?.classList.toggle('is-open', open);
+      optionsButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    optionsButton?.addEventListener('click', () => {
+      setSettingsOpen(!settingsMenu?.classList.contains('is-open'));
+    });
+    settingsMenu?.querySelector('.settings-close')?.addEventListener('click', () => setSettingsOpen(false));
+    settingsMenu?.querySelectorAll('.settings-tab').forEach((tabButton) => {
+      tabButton.addEventListener('click', () => {
+        const selected = tabButton.dataset.tab;
+        settingsMenu.querySelectorAll('.settings-tab').forEach((button) => {
+          button.classList.toggle('is-selected', button === tabButton);
+        });
+        settingsMenu.querySelectorAll('.settings-pane').forEach((pane) => {
+          pane.classList.toggle('is-selected', pane.dataset.pane === selected);
+        });
+      });
+    });
+
     document.querySelector('#array-button')?.addEventListener('click', () => {
-      document.querySelector('#status-control')?.classList.add('is-open');
+      root?.querySelector('#status-control')?.classList.add('is-open');
       playRecursionTurnAnimation({ loop: false });
     });
     setTimeout(() => playRecursionTurnAnimation({ loop: true }), 450);
@@ -1148,8 +1244,124 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 .right-tools {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   flex: 0 0 auto;
+}
+
+.reasoning-chain {
+  --chain-start: 5px;
+  --chain-step: 15px;
+  --chain-span: calc(var(--chain-step) * 3);
+  --chain-fill: calc(var(--chain-step) * 2);
+  position: relative;
+  width: 58px;
+  height: 24px;
+  padding: 0 2px;
+  display: inline-block;
+  flex: 0 0 58px;
+  color: var(--cyan);
+}
+
+.reasoning-chain[data-selected="low"] {
+  --chain-fill: 0px;
+}
+
+.reasoning-chain[data-selected="medium"] {
+  --chain-fill: var(--chain-step);
+}
+
+.reasoning-chain[data-selected="high"] {
+  --chain-fill: calc(var(--chain-step) * 2);
+}
+
+.reasoning-chain[data-selected="ultra"] {
+  --chain-fill: calc(var(--chain-step) * 3);
+}
+
+.reasoning-chain::before {
+  content: "";
+  position: absolute;
+  left: var(--chain-start);
+  width: var(--chain-span);
+  top: 50%;
+  height: 1px;
+  background: rgba(224, 224, 224, .16);
+  transform: translateY(-50%);
+}
+
+.reasoning-line-fill {
+  position: absolute;
+  left: var(--chain-start);
+  top: 50%;
+  width: var(--chain-fill);
+  height: 1px;
+  background: rgba(101, 216, 232, .72);
+  box-shadow: 0 0 7px rgba(101, 216, 232, .30);
+  transform: translateY(-50%);
+  transition: width .16s ease;
+}
+
+.reasoning-node {
+  --node-size: 7px;
+  --node-x: var(--chain-start);
+  position: absolute;
+  left: var(--node-x);
+  top: 50%;
+  z-index: 1;
+  display: block;
+  width: var(--node-size);
+  height: var(--node-size);
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border: 1px solid rgba(224, 224, 224, .26);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .035);
+  box-shadow: none;
+  cursor: default;
+  transform: translate(-50%, -50%);
+  transition: background .14s ease, border-color .14s ease, box-shadow .14s ease, opacity .14s ease;
+}
+
+.reasoning-node[data-level="low"] {
+  --node-x: var(--chain-start);
+  --node-size: 5px;
+}
+
+.reasoning-node[data-level="medium"] {
+  --node-x: calc(var(--chain-start) + var(--chain-step));
+  --node-size: 7px;
+}
+
+.reasoning-node[data-level="high"] {
+  --node-x: calc(var(--chain-start) + (var(--chain-step) * 2));
+  --node-size: 9px;
+}
+
+.reasoning-node[data-level="ultra"] {
+  --node-x: calc(var(--chain-start) + (var(--chain-step) * 3));
+  --node-size: 11px;
+}
+
+.reasoning-node.is-lit {
+  border-color: rgba(101, 216, 232, .92);
+  background: rgba(101, 216, 232, .70);
+  box-shadow: 0 0 8px rgba(101, 216, 232, .38);
+}
+
+.reasoning-node.is-selected {
+  background: var(--cyan);
+  box-shadow: 0 0 10px rgba(101, 216, 232, .46);
+}
+
+.reasoning-node:not(.is-lit) {
+  opacity: .58;
+}
+
+.reasoning-node:hover,
+.reasoning-node:focus-visible {
+  border-color: rgba(101, 216, 232, .96);
+  box-shadow: 0 0 9px rgba(101, 216, 232, .40);
+  outline: none;
 }
 
 .brief-arrow {
@@ -1822,6 +2034,222 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   background: rgba(101, 216, 232, .045);
 }
 
+.settings-menu {
+  display: none;
+  position: absolute;
+  top: 36px;
+  left: 360px;
+  right: 0;
+  z-index: 88;
+  border: 1px solid var(--border);
+  border-radius: 0 0 8px 8px;
+  background: var(--surface-2);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, .40);
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+}
+
+.settings-menu.is-open {
+  display: block;
+}
+
+.settings-head,
+.settings-foot {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+}
+
+.settings-head {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.settings-foot {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border-soft);
+}
+
+.settings-title {
+  color: rgba(224, 224, 224, .82);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-close,
+.settings-tab,
+.settings-foot button,
+.provider-actions button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, .095);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, .035);
+  color: rgba(224, 224, 224, .68);
+  font: inherit;
+  line-height: 1;
+}
+
+.settings-close {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+}
+
+.settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.settings-tab {
+  min-height: 24px;
+  font-size: 11px;
+}
+
+.settings-tab.is-selected {
+  color: rgba(229, 249, 252, .92);
+  border-color: rgba(101, 216, 232, .38);
+  background: rgba(101, 216, 232, .075);
+  box-shadow: 0 0 12px rgba(101, 216, 232, .10);
+}
+
+.settings-pane {
+  display: none;
+  gap: 8px;
+  max-height: min(54vh, 430px);
+  overflow: auto;
+  padding: 8px 9px 10px;
+  scrollbar-width: none;
+}
+
+.settings-pane::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-pane.is-selected {
+  display: grid;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  color: rgba(224, 224, 224, .62);
+  font-size: 11px;
+}
+
+.settings-row select,
+.settings-row input,
+.provider-grid select,
+.provider-grid input {
+  min-width: 0;
+  min-height: 24px;
+  border: 1px solid rgba(255, 255, 255, .10);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, .035);
+  color: rgba(238, 238, 238, .78);
+  font: inherit;
+  padding: 3px 6px;
+}
+
+.mini-chain {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 14px);
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  height: 22px;
+}
+
+.mini-chain span {
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  top: 10px;
+  height: 1px;
+  background: rgba(101, 216, 232, .32);
+}
+
+.mini-chain i {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgba(101, 216, 232, .45);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .035);
+}
+
+.mini-chain i:nth-of-type(-n + 3) {
+  background: rgba(101, 216, 232, .72);
+  box-shadow: 0 0 9px rgba(101, 216, 232, .28);
+}
+
+.provider-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 7px;
+  border: 1px solid rgba(255, 255, 255, .075);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .026);
+}
+
+.provider-card-title {
+  color: rgba(238, 238, 238, .76);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.provider-status {
+  color: rgba(224, 224, 224, .48);
+  font-size: 10px;
+}
+
+.provider-status.pass {
+  color: rgba(123, 216, 143, .84);
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.provider-grid label {
+  display: grid;
+  gap: 3px;
+  color: rgba(224, 224, 224, .56);
+  font-size: 10.5px;
+}
+
+.provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.provider-actions button,
+.settings-foot button {
+  min-height: 24px;
+  padding: 4px 8px;
+  font-size: 10.5px;
+}
+
+.settings-close:hover,
+.settings-tab:hover,
+.settings-foot button:hover,
+.provider-actions button:hover {
+  border-color: rgba(101, 216, 232, .32);
+  background: rgba(101, 216, 232, .07);
+  color: rgba(245, 245, 245, .88);
+}
+
 @keyframes hero-block-enter {
   from {
     opacity: 0;
@@ -1905,6 +2333,16 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
   .brief-menu {
     top: 34px;
+  }
+
+  .settings-menu {
+    left: 0;
+    top: 34px;
+  }
+
+  .provider-grid,
+  .settings-row {
+    grid-template-columns: 1fr;
   }
 
   .brief-card {

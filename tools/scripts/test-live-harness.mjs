@@ -190,6 +190,7 @@ function recursionSmokeFixtureHtml({
           <span data-recursion-hand-count>Hand 0</span>
           <span data-recursion-composer>Composer Utility</span>
           <span data-recursion-reasoner>Reasoner Auto</span>
+          <button type="button" data-recursion-status-trigger>Status</button>
           <button type="button" data-recursion-actions>Actions</button>
           <button type="button" data-recursion-hand-toggle>Hand</button>
           <button type="button" data-recursion-viewer-toggle>Open</button>
@@ -197,9 +198,7 @@ function recursionSmokeFixtureHtml({
         <div data-recursion-activity-ribbon role="status">
           <span data-recursion-ribbon-label>Ready</span>
         </div>
-        <div data-recursion-action-menu hidden>
-          <button type="button" data-recursion-settings-toggle>Open Settings</button>
-        </div>
+        <div data-recursion-status-popover hidden>Progress ready</div>
         <div data-recursion-hand-dropdown hidden>No hand has been composed for this chat.</div>
         <div data-recursion-settings-panel hidden>
           <select data-recursion-setting-mode aria-label="Mode"><option value="off">Off</option><option value="observe">Observe only</option><option value="auto" selected>Auto</option></select>
@@ -292,12 +291,8 @@ function recursionSmokeFixtureHtml({
         }
       });
       document.querySelector('[data-recursion-actions]').addEventListener('click', () => {
-        const panel = document.querySelector('[data-recursion-action-menu]');
+        const panel = document.querySelector('[data-recursion-settings-panel]');
         panel.hidden = !panel.hidden;
-      });
-      document.querySelector('[data-recursion-settings-toggle]').addEventListener('click', () => {
-        document.querySelector('[data-recursion-action-menu]').hidden = true;
-        document.querySelector('[data-recursion-settings-panel]').hidden = false;
       });
       document.querySelector('[data-recursion-settings-save]').addEventListener('click', () => {
         const mode = document.querySelector('[data-recursion-setting-mode]')?.value || 'auto';
@@ -319,6 +314,10 @@ function recursionSmokeFixtureHtml({
       });
       document.querySelector('[data-recursion-hand-toggle]').addEventListener('click', () => {
         const panel = document.querySelector('[data-recursion-hand-dropdown]');
+        panel.hidden = !panel.hidden;
+      });
+      document.querySelector('[data-recursion-status-trigger]').addEventListener('click', () => {
+        const panel = document.querySelector('[data-recursion-status-popover]');
         panel.hidden = !panel.hidden;
       });
       document.querySelector('[data-recursion-viewer-toggle]').addEventListener('click', () => {
@@ -829,10 +828,12 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.browser.snapshot.statusText, 'Ready', 'browser smoke reads runtime health separately');
     assertEqual(report.browser.snapshot.modeText, 'Off', 'browser smoke reads mode chip separately');
     assertEqual(report.browser.snapshot.handOpen, true, 'browser smoke opens hand dropdown');
-    assertEqual(report.browser.snapshot.actionMenuOpen, true, 'browser smoke opens actions menu');
+    assertEqual(report.browser.snapshot.progressOpen, true, 'browser smoke opens progress popover');
+    assertEqual(report.browser.snapshot.actionMenuOpen, false, 'browser smoke sees no legacy action menu');
     assertEqual(report.browser.snapshot.settingsPanelOpen, true, 'browser smoke opens settings panel');
     assertEqual(report.browser.snapshot.providerTestVisible, true, 'browser smoke sees provider test control');
-    assertEqual(report.browser.snapshot.viewerOpen, true, 'browser smoke opens full viewer');
+    assertEqual(report.browser.snapshot.viewerOpened, true, 'browser smoke proves full viewer can open');
+    assertEqual(report.browser.snapshot.viewerOpen, false, 'browser smoke closes full viewer before screenshots');
     assertEqual(report.browser.snapshot.bridge.interceptor, true, 'browser smoke sees Recursion generation bridge');
     assertEqual(report.browser.snapshot.bridge.enableHook, true, 'browser smoke sees Recursion enable hook');
     assertEqual(report.browser.snapshot.bridge.disableHook, true, 'browser smoke sees Recursion disable hook');

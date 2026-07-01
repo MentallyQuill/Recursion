@@ -8,7 +8,7 @@ This manual describes the turn lifecycle implemented by `src/runtime.mjs` and th
 | --- | --- |
 | Off | Supersedes active Recursion work, clears Recursion prompt entries, and returns without chat inspection or prompt compilation. |
 | Observe only | Captures a snapshot, runs Utility planning and safe card/prompt work, saves diagnostics, clears prompt entries, and returns a preview without injection. |
-| Auto | Captures a snapshot, runs the full pipeline, installs validated prompt blocks, writes bounded diagnostics, and settles the Activity Ribbon. |
+| Auto | Captures a snapshot, runs the full pipeline, installs validated prompt blocks, writes bounded diagnostics, and settles the progress surface. |
 
 ## Auto Sequence
 

@@ -2,9 +2,9 @@ import { cloneJson } from './core.mjs';
 
 const MODES = new Set(['off', 'observe', 'auto']);
 const STRENGTHS = new Set(['light', 'balanced', 'strong']);
+const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
 const FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const FOCUS = new Set(['balanced', 'character', 'continuity', 'prose', 'plot']);
-const REASONER_USE = new Set(['off', 'auto', 'always']);
 const SOURCES = new Set(['host-current-model', 'host-connection-profile', 'openai-compatible']);
 const LANES = new Set(['utility', 'reasoner']);
 const UI_PROGRESS_CHILD_MIN = 1;
@@ -21,6 +21,7 @@ function deepFreeze(value) {
 export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   mode: 'observe',
   strength: 'balanced',
+  reasoningLevel: 'high',
   promptFootprint: 'normal',
   focus: 'balanced',
   reasonerUse: 'auto',
@@ -62,6 +63,12 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
 function enumValue(value, allowed, fallback) {
   const normalized = String(value ?? fallback).trim().toLowerCase();
   return allowed.has(normalized) ? normalized : fallback;
+}
+
+function reasonerUseForReasoningLevel(value) {
+  if (value === 'low') return 'off';
+  if (value === 'ultra') return 'always';
+  return 'auto';
 }
 
 function numberInRange(value, fallback, min, max) {
@@ -149,12 +156,14 @@ export function normalizeProviderSettings(lane, value = {}, secretStore = null) 
 
 export function normalizeSettings(value = {}, secretStore = null) {
   const source = value && typeof value === 'object' ? value : {};
+  const reasoningLevel = enumValue(source.reasoningLevel, REASONING_LEVELS, DEFAULT_RECURSION_SETTINGS.reasoningLevel);
   return {
     mode: enumValue(source.mode, MODES, DEFAULT_RECURSION_SETTINGS.mode),
     strength: enumValue(source.strength, STRENGTHS, DEFAULT_RECURSION_SETTINGS.strength),
+    reasoningLevel,
     promptFootprint: enumValue(source.promptFootprint, FOOTPRINTS, DEFAULT_RECURSION_SETTINGS.promptFootprint),
     focus: enumValue(source.focus, FOCUS, DEFAULT_RECURSION_SETTINGS.focus),
-    reasonerUse: enumValue(source.reasonerUse, REASONER_USE, DEFAULT_RECURSION_SETTINGS.reasonerUse),
+    reasonerUse: reasonerUseForReasoningLevel(reasoningLevel),
     diagnostics: {
       maxJournalEntries: Math.round(numberInRange(source.diagnostics?.maxJournalEntries, 100, 10, 500)),
       includeExcerpts: source.diagnostics?.includeExcerpts === true

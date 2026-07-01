@@ -566,6 +566,7 @@ function arbiterSafeSettings(settings) {
   return {
     mode: safeText(source.mode || 'auto', 40),
     strength: safeText(source.strength || 'balanced', 40),
+    reasoningLevel: safeText(source.reasoningLevel || 'high', 40),
     promptFootprint: safeText(source.promptFootprint || 'normal', 40),
     focus: safeText(source.focus || 'balanced', 80),
     reasonerUse: safeText(source.reasonerUse || 'auto', 40),
@@ -620,6 +621,7 @@ function safeSettingsView(settings) {
   return {
     mode: safeText(source.mode || 'observe', 40),
     strength: safeText(source.strength || 'balanced', 40),
+    reasoningLevel: safeText(source.reasoningLevel || 'high', 40),
     promptFootprint: safeText(source.promptFootprint || 'normal', 40),
     focus: safeText(source.focus || 'balanced', 80),
     reasonerUse: safeText(source.reasonerUse || 'auto', 40),
@@ -632,7 +634,9 @@ function safeSettingsView(settings) {
       reasoner: safeProviderSettingsView(source.providers?.reasoner)
     },
     ui: {
-      viewerOpen: source.ui?.viewerOpen === true
+      viewerOpen: source.ui?.viewerOpen === true,
+      progressChildVisibleLimit: numberOr(source.ui?.progressChildVisibleLimit, 5),
+      progressListVisibleLimit: numberOr(source.ui?.progressListVisibleLimit, 15)
     }
   };
 }

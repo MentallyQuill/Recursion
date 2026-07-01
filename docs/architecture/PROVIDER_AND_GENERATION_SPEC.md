@@ -63,6 +63,8 @@ type RecursionProviderSettings = {
 };
 ```
 
+The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `high`. V1 derives the internal Reasoner route preference from it: Low disables Reasoner use, Medium and High keep Reasoner in Auto, and Ultra prefers Reasoner composition when the lane is healthy.
+
 Source options:
 
 - `host-current-model`: use the model currently active in SillyTavern.
@@ -292,7 +294,7 @@ The first end-to-end loop should prove both composer paths even if the default s
 5. Compose through Reasoner Composer when the setting and Arbiter decision permit it.
 6. Fall back to the Utility-composed packet if Reasoner fails, times out, returns invalid schema, or is disabled during the run.
 7. Install, skip, or clear the Recursion prompt packet through the host adapter.
-8. Emit visible Activity Ribbon stages and sanitized model-call journal entries for the route taken.
+8. Emit visible progress stages and sanitized model-call journal entries for the route taken.
 
 Reasoner must not become mandatory for normal operation. The Utility path must remain good enough to ship as the default path.
 
@@ -407,7 +409,7 @@ Recursion should borrow Directive's robustness discipline in smaller form:
 - card failures omit only the failed card and keep valid siblings;
 - Utility Arbiter failure reuses valid cache or skips injection;
 - Reasoner failure falls back to Utility composition;
-- all fallbacks emit Activity Ribbon status and sanitized journal events.
+- all fallbacks emit progress status and sanitized journal events.
 
 The retry policy should be conservative. Reattempts are for resilience, not for chasing better creative output.
 

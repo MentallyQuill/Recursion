@@ -8,19 +8,19 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 <Render Needed>: assets/documentation/renders/recursion-operator-install-enable.png - Install and enable flow with SillyTavern extension list, Recursion enabled state, and mounted Recursion Bar.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-mode-controls.png - Mode controls showing Off, Observe only, Auto, Refresh Scene, and Off-mode cleanup behavior.
+<Render Needed>: assets/documentation/renders/recursion-operator-mode-controls.png - Mode controls showing Off, Observe only, Auto, Reasoning Level, and Off-mode cleanup behavior.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-bar-states.png - Recursion Bar ready, working, warning, disabled, provider issue, and prompt-ready states.
+<Render Needed>: assets/documentation/renders/recursion-operator-bar-states.png - Recursion Bar ready, working, warning, disabled, provider issue, prompt-ready states, Hero Pixel Array, and current-step text.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-activity-ribbon-states.png - Activity Ribbon showing snapshot, Utility planning, card generation, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states.
+<Render Needed>: assets/documentation/renders/recursion-operator-progress-menu-states.png - Hero Pixel Array progress menu showing snapshot, Utility planning, card generation child rows, cached rows, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-actions-menu.png - Actions menu with Refresh Scene, Switch to Auto or Switch to Observe only, Copy Last Prompt Packet, Open Settings, and Open Viewer controls, including disabled copy state when no packet exists.
+<Render Needed>: assets/documentation/renders/recursion-operator-options-menu.png - Options/settings menu with Play, Providers, Advanced, Reasoning Level, provider controls, diagnostics limits, disabled planned commands, and Full Viewer entry point.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-last-hand-states.png - Last Hand dropdown with compact selected cards, omission hints, prompt packet link, empty hand, stale hand, and error state.
+<Render Needed>: assets/documentation/renders/recursion-operator-last-brief-states.png - Last Brief dropdown with compact selected cards, category glyphs, meta chips, expandable text, Prompt Packet button, empty brief, stale brief, and error state.
 
 <Render Needed>: assets/documentation/renders/recursion-operator-full-viewer-sections.png - Full Viewer showing Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-settings.png - Settings view showing Mode, Strength, Prompt Footprint, Focus, Reasoner Use, Utility provider setup, and Reasoner provider setup.
+<Render Needed>: assets/documentation/renders/recursion-operator-settings.png - Settings view showing Play, Providers, Advanced, Mode, Reasoning Level, Strength, Prompt Footprint, Focus, Utility provider setup, and Reasoner provider setup.
 
 <Render Needed>: assets/documentation/renders/recursion-operator-provider-controls.png - Provider controls for Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, and fallback warning.
 
@@ -37,18 +37,18 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 The Recursion Bar is the normal control surface. It sits near the chat surface and shows:
 
 - runtime health: Ready, Working, Paused, Issue, or Off;
-- mode: Off, Observe only, or Auto;
-- Hand dropdown and last hand count;
-- Utility lane state;
-- Reasoner lane state;
-- Actions menu;
-- Viewer entry.
+- `RECURSION` wordmark;
+- icon-only mode control: Off, Observe only, or Auto;
+- Hero Pixel Array plus current-step text;
+- Reasoning Level chain;
+- Last Brief dropdown arrow;
+- ellipsis options/settings entry.
 
 The bar should be stable. Status changes should not repeatedly resize the transcript or cover message input controls.
 
-### Activity Ribbon
+### Hero Pixel Array Progress Menu
 
-The Activity Ribbon is the trust surface for invisible work. It appears below the bar during active work or review states, then collapses when the run settles.
+The Hero Pixel Array and current-step text are the trust surface for invisible work. Clicking either opens the progress menu. The array shows one block per top-level progress row, with child rows visible inside the menu.
 
 Expected stages include:
 
@@ -65,23 +65,25 @@ Expected stages include:
 
 Fallback states should be equally direct, such as `Reasoner unavailable. Utility composed the packet.` or `Prompt install failed. Generation will continue without Recursion.`
 
-The ribbon must not show raw prompts, raw provider responses, stack traces, provider secrets, hidden reasoning, or private story plans.
+The progress menu must not show raw prompts, raw provider responses, stack traces, provider secrets, hidden reasoning, or private story plans.
 
-### Actions Menu
+### Options Menu
 
-The Actions menu holds the current high-level commands:
+The ellipsis opens the integrated settings/options menu. It is configuration-first, not a command drawer.
 
-- Refresh Scene;
-- Switch to Auto or Switch to Observe only;
-- Copy Last Prompt Packet;
-- Open Settings;
-- Open Viewer.
+Main controls:
 
-Copy Last Prompt Packet is disabled when no packet exists. Provider setup lives in Open Settings. Detailed state inspection lives in Open Viewer.
+- Play: Mode, Reasoning Level, Strength, Prompt Footprint, and Focus.
+- Providers: Utility and Reasoner provider setup, test controls, and session key controls.
+- Advanced: progress row limits, diagnostics settings, disabled planned maintenance commands, and the Full Viewer entry point.
 
-### Last Hand
+The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 
-Last Hand is the compact inspection surface for what Recursion used last. It opens from the `Hand 0 v` / `Hand 5 v` chip in the bar. It should show selected card families, emphasis, concise summaries, composition route, omitted items when useful, and a link to the Prompt Packet or Full Viewer.
+### Last Brief
+
+Last Brief is the compact inspection surface for what Recursion used last. It opens from the dropdown arrow in the bar. It shows selected card families, category glyphs, emphasis, concise one-line summaries, bounded meta chips, and a Prompt Packet button.
+
+Cards expand in place to show the full card text. The Prompt Packet button opens the final injected packet text plus route metadata, omitted items, source card refs, and copy control.
 
 Rows are read-only. Recursion V1 is not a card editor.
 
@@ -115,7 +117,7 @@ Auto lets Recursion compile and install the next prompt packet. It should finish
 Operator settings should stay broad:
 
 - Mode: Off, Observe only, Auto.
-- Reasoner Use: Off, Auto, Always Compose.
+- Reasoning Level: Low, Medium, High, Ultra.
 - Strength: Light, Balanced, Strong.
 - Prompt Footprint: Compact, Normal, Rich.
 - Focus: Balanced, Character, Continuity, Prose, Plot.
@@ -153,11 +155,11 @@ Use this first-run path:
 3. Leave Reasoner off unless you need it.
 4. Set mode to Observe only.
 5. Send or select a safe ordinary turn.
-6. Confirm Activity shows work and no prompt was injected.
+6. Confirm the Hero Pixel Array progress menu shows work and no prompt was injected.
 7. Set mode to Auto.
 8. Send a safe ordinary turn.
-9. Confirm Activity reaches prompt ready or a clear fallback.
-10. Inspect Last Hand and Prompt Packet.
+9. Confirm progress reaches prompt ready or a clear fallback.
+10. Inspect Last Brief and Prompt Packet.
 11. Use Off to verify prompt cleanup.
 
 See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.
@@ -167,10 +169,10 @@ See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.
 During normal play:
 
 1. Keep Recursion in Auto when you want current-scene prompt help.
-2. Watch the Activity Ribbon when it appears.
-3. Use Last Hand when output quality suggests the wrong scene pressure was selected.
+2. Watch the Hero Pixel Array and current-step text while work runs.
+3. Use Last Brief when output quality suggests the wrong scene pressure was selected.
 4. Open Prompt Packet when you need to inspect exact model-facing Recursion guidance.
-5. Use Refresh Scene when the chat has shifted and Recursion has not caught up.
+5. Use the progress menu or Full Viewer when you need diagnostic detail.
 6. Use Off when you want an unassisted generation or prompt cleanup.
 
 Recursion should not require card editing or repeated manual tuning.
@@ -225,9 +227,10 @@ Normal diagnostics must not include API keys, authorization headers, cookies, ra
 
 Recursion storage is cache-oriented. The runtime owns scene cache, run journal, prompt metadata, redaction, pruning, and prompt-lane cleanup. Current operator controls are:
 
-- Refresh Scene;
 - Off mode cleanup;
 - Clear Session Key for each provider lane;
+- diagnostics row-limit and excerpt settings;
+- disabled planned maintenance commands until runtime handlers exist;
 - extension disable when Recursion should be fully inactive.
 
 These controls must touch only Recursion-owned settings, scene caches, journals, prompt lanes, and diagnostics. They must not delete SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or other extension records.
@@ -249,15 +252,15 @@ Use this checklist for a practical browser pass:
 
 1. Load SillyTavern with Recursion installed and enabled.
 2. Confirm the Recursion Bar appears near the chat surface.
-3. Open Actions, the Hand dropdown, and Full Viewer.
-4. Visit Now, Deck, Activity, Prompt Packet, Settings, and Providers.
+3. Open the Hero Pixel Array progress menu, Last Brief dropdown, Settings, and Full Viewer.
+4. Visit Play, Providers, Advanced, Prompt Packet, and Viewer sections.
 5. Configure and test Utility when provider work is intended.
 6. Set Off and confirm prompt lanes are absent or cleared.
 7. Set Observe only and confirm no prompt packet is installed.
 8. Set Auto and confirm Recursion is ready to compile.
 9. Run a safe Auto pass only when provider and live mutation are intended.
 10. Confirm Activity reaches ready or a clear fallback.
-11. Inspect Last Hand and Prompt Packet metadata.
+11. Inspect Last Brief and the final Prompt Packet text.
 12. Clear prompt or return to Off and confirm cleanup.
 13. Clear session keys before screenshots or exports that might show provider setup.
 

@@ -1308,7 +1308,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', promptFootprint: 'rich', reasonerUse: 'off' },
+    settings: { mode: 'auto', promptFootprint: 'rich', reasoningLevel: 'low' },
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push({ roleId, request });
@@ -1334,13 +1334,13 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(view.lastPlan.budgets.targetBriefTokens, 60, 'router token budget merged');
   assertEqual(view.lastPlan.reasonerDecision.mode, 'use', 'arbiter reasoner decision preserved in plan');
   assertEqual(view.lastHand.cards.length, 1, 'router card budget changes selected hand');
-  assertEqual(view.lastPacket.diagnostics.reasonerStatus, 'skipped', 'settings reasonerUse off is preserved');
-  assertEqual(routerCalls.length, 1, 'reasoner composer not called when reasonerUse is off');
+  assertEqual(view.lastPacket.diagnostics.reasonerStatus, 'skipped', 'low reasoning level skips reasoner routing');
+  assertEqual(routerCalls.length, 1, 'reasoner composer not called when reasoning level is low');
 }
 
 {
   const { runtime, installed, settingsStore } = createRuntimeHarness({
-    settings: { mode: 'auto', promptFootprint: 'normal', reasonerUse: 'off' },
+    settings: { mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'low' },
     generationRouter: {
       async generate(roleId) {
         assertEqual(roleId, 'utilityArbiter', 'compact footprint override only calls utility arbiter');
@@ -1913,6 +1913,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const { runtime } = createRuntimeHarness({
     settings: {
       mode: 'auto',
+      reasoningLevel: 'medium',
       promptFootprint: 'normal',
       reasonerUse: 'auto',
       providers: {
@@ -1931,6 +1932,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(result.ok, true, 'settings projection run skips safely');
   assertEqual(arbiterPrompts.length, 1, 'arbiter prompt captured');
   assert(arbiterPrompts[0].includes('"mode":"auto"'), 'arbiter prompt includes planning mode');
+  assert(arbiterPrompts[0].includes('"reasoningLevel":"medium"'), 'arbiter prompt includes reasoning level');
   assert(arbiterPrompts[0].includes('"promptFootprint":"normal"'), 'arbiter prompt includes prompt footprint');
   assert(!arbiterPrompts[0].includes('lastTest'), 'arbiter prompt omits provider test diagnostics');
   assert(!arbiterPrompts[0].includes('openAICompatible'), 'arbiter prompt omits endpoint settings');
@@ -1943,6 +1945,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   }, 'arbiter provider health prompt exposes only lane, source, and status');
   assertNoSecretText(arbiterPrompts[0], 'arbiter settings prompt');
   assertNoSecretText(runtime.view().settings, 'runtime view settings');
+  assertEqual(runtime.view().settings.reasoningLevel, 'medium', 'runtime view keeps reasoning level');
   assertEqual(runtime.view().settings.providers.utility.enabled, true, 'view keeps utility provider enabled flag');
   assertEqual(runtime.view().settings.providers.utility.source, 'host-current-model', 'view keeps utility provider source');
   assertDeepEqual(

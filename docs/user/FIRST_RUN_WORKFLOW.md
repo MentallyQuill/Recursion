@@ -13,16 +13,16 @@ Recursion is a current-scene prompt compiler. It observes the active chat, build
 
 <Render Needed>: assets/documentation/renders/recursion-first-run-install-enable.png - SillyTavern extension settings with Recursion enabled and the Recursion Bar mounted in the active chat.
 
-The bar should expose runtime health, mode, the Hand dropdown, Utility status, Reasoner status, Actions, and Viewer controls on desktop. On narrow screens, extra details may collapse into a menu.
+The bar should expose the `RECURSION` wordmark, icon-only mode control, Hero Pixel Array plus current-step text, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, extra details may collapse into compact menus.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-bar-mounted.png - Recursion Bar mounted below the SillyTavern chat header with Ready, mode, Hand dropdown, Utility state, Reasoner state, Actions, and Viewer controls visible.
+<Render Needed>: assets/documentation/renders/recursion-first-run-bar-mounted.png - Recursion Bar mounted below the SillyTavern chat header with wordmark, mode icon, Hero Pixel Array, Reasoning Level chain, Last Brief dropdown arrow, and options entry visible.
 
 ## 2. Configure Utility
 
 Utility is required. It is the default lane for Arbiter planning, card work, and normal prompt composition.
 
-1. Open the Recursion Actions menu.
-2. Choose `Open Settings`.
+1. Open the Recursion options menu from the ellipsis.
+2. Choose the `Providers` tab.
 3. Configure the Utility provider source:
    - Current Host Model;
    - Host Connection Profile; or
@@ -44,11 +44,11 @@ Observe only lets you inspect Recursion without installing a prompt packet.
 
 1. Set mode to `Observe only`.
 2. Send or select a safe, ordinary chat turn.
-3. Watch the Activity Ribbon.
-4. Confirm the ribbon reports snapshot, planning, card, hand, or preview work.
+3. Watch the Hero Pixel Array and current-step text.
+4. Confirm the progress menu reports snapshot, planning, card, brief, or preview work.
 5. Confirm the status says no prompt was injected.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-observe-pass.png - Activity Ribbon during an Observe only pass showing snapshot capture, Utility planning, hand preview, and no prompt injection.
+<Render Needed>: assets/documentation/renders/recursion-first-run-observe-pass.png - Hero Pixel Array progress menu during an Observe only pass showing snapshot capture, Utility planning, brief preview, and no prompt injection.
 
 Use Observe only when you want to check what Recursion would do before letting it affect generation.
 
@@ -58,25 +58,26 @@ Auto prepares and installs the next Recursion prompt packet.
 
 1. Set mode to `Auto`.
 2. Send a safe, ordinary chat message.
-3. Watch the Activity Ribbon for visible progress.
+3. Watch the Hero Pixel Array progress menu for visible progress.
 4. Wait for `Recursion prompt ready.` or a clear fallback state.
 5. Let SillyTavern generation continue normally.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-auto-pass.png - Activity Ribbon during an Auto pass showing Utility planning, card generation, prompt composition, prompt install, and ready state.
+<Render Needed>: assets/documentation/renders/recursion-first-run-auto-pass.png - Hero Pixel Array progress menu during an Auto pass showing Utility planning, card generation, prompt composition, prompt install, and ready state.
 
 A normal Auto pass may show stages such as reading the current turn, planning the card pass, generating or reusing scene cards, selecting the turn hand, composing the prompt packet, installing the Recursion prompt, saving cache, and ready state.
 
-## 6. Inspect Last Hand And Viewer
+## 6. Inspect Last Brief And Viewer
 
 After Observe only or Auto has produced a hand:
 
-1. Open the `Hand 0 v` / `Hand 5 v` dropdown from the Recursion Bar.
+1. Open the Last Brief dropdown arrow from the Recursion Bar.
 2. Review compact selected cards, emphasis, omission hints, and composition route.
-3. Use `View Prompt Packet` when available.
-4. Open the Full Viewer.
-5. Inspect `Now`, `Deck`, `Activity`, `Prompt Packet`, `Settings`, and `Providers`.
+3. Expand card rows when you need full card text.
+4. Use `Prompt Packet` when available.
+5. Open the Full Viewer from options/settings.
+6. Inspect `Now`, `Deck`, `Activity`, `Prompt Packet`, `Settings`, and `Providers`.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-inspection.png - Last Hand dropdown and Full Viewer showing selected cards, Activity, Prompt Packet, Settings, and Providers after a first Auto pass.
+<Render Needed>: assets/documentation/renders/recursion-first-run-inspection.png - Last Brief dropdown and Full Viewer showing selected cards, Activity, Prompt Packet, Settings, and Providers after a first Auto pass.
 
 The prompt packet should be bounded and inspectable. It should contain current-scene guidance, not raw provider output, hidden reasoning, broad lore, or transcript-scale summaries.
 
@@ -98,7 +99,7 @@ The first run is healthy when:
 - Utility provider can be configured and tested.
 - Observe only mode shows visible work without prompt injection.
 - Auto mode reaches prompt ready or a clear fail-soft fallback.
-- Last Hand and Full Viewer inspection are available.
+- Last Brief and Full Viewer inspection are available.
 - Prompt Packet inspection shows bounded current-scene guidance.
 - Off mode or extension disable removes Recursion from the next prompt path.
 

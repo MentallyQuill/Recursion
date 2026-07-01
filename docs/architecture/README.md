@@ -6,3 +6,5 @@ Use this folder for implementation-facing diagrams, module boundaries, storage c
 - [Provider and Generation Spec](PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](STORAGE_AND_DIAGNOSTICS.md)
+
+For release-facing technical manuals, use [Technical Manuals](../technical/README.md).

@@ -1,6 +1,6 @@
 # Testing
 
-This folder defines Recursion's verification strategy, Playwright harness contract, focused live SillyTavern smoke plan, and artifact rules.
+This folder defines Recursion's verification strategy, Playwright harness contract, focused live SillyTavern smoke plan, artifact rules, and documentation render tracking.
 
 Start with [Testing Strategy](TESTING_STRATEGY.md).
 
@@ -10,6 +10,7 @@ Start with [Testing Strategy](TESTING_STRATEGY.md).
 - [SillyTavern Playwright Harness](SILLYTAVERN_PLAYWRIGHT_HARNESS.md): target harness files, environment variables, dedicated user checks, browser flow, selector rules, and failure categories.
 - [Live Smoke Test Plan](LIVE_SMOKE_TEST_PLAN.md): focused Recursion live scenarios for mount, modes, provider controls, Observe, Auto, prompt cleanup, fallback, and responsive UI.
 - [Artifact Contract](ARTIFACT_CONTRACT.md): report, live-log, screenshot, prompt metadata, storage probe, redaction, and retention rules.
+- [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md): open `<Render Needed>` inventory, source types, target assets, promotion workflow, redaction constraints, and render verification commands.
 - [Implementation Plan](IMPLEMENTATION_PLAN.md): staged build order and verification gates for the extension.
 
 ## Live User Rule

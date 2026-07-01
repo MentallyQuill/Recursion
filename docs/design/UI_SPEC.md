@@ -147,18 +147,12 @@ The Actions menu contains high-level commands. It should not expose raw card ope
 V1 actions:
 
 - Refresh Scene.
-- Regenerate Next Brief.
 - Toggle Observe Only / Auto.
-- Pause Recursion.
 - Copy Last Prompt Packet.
 - Open Settings.
-- Open Full Viewer.
+- Open Viewer.
 
-Provider issue actions:
-
-- Retry Utility.
-- Use Utility Only This Turn.
-- Open Provider Settings.
+Provider setup lives in Open Settings. Detailed state inspection lives in Open Viewer.
 
 Actions should be disabled with clear tooltip copy when unavailable. For example, Refresh Scene is disabled when Recursion is off, and Copy Last Prompt Packet is disabled when no packet has been composed.
 
@@ -254,7 +248,7 @@ Each provider card should support:
 - Clear Session Key.
 - Status and resolved model.
 
-API keys are session-only. They must not be written to extension settings, scene caches, prompt packets, run journals, debug exports, or diagnostics.
+API keys are session-only. They must not be written to extension settings, scene caches, prompt packets, run journals, diagnostics, reports, or artifacts.
 
 ## Visual System
 

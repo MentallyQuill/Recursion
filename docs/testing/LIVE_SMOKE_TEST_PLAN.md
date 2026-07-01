@@ -32,7 +32,7 @@ It launches offline Playwright readiness, but does not contact SillyTavern, muta
 
 ## Current Guardrail Commands
 
-The commands in this section currently prove safety gates, report shape, offline Playwright readiness, dedicated-user storage probes, served-extension freshness, and no-generation Recursion UI smoke. They do not contact SillyTavern unless a live script is run with `--live`. Live scripts reject unsafe users before mutation.
+The commands in this section prove safety gates, report shape, offline Playwright readiness, dedicated-user storage probes, served-extension freshness, no-generation Recursion UI smoke, and opt-in generation evidence when the required flags and providers are configured. They do not contact SillyTavern unless a live script is run with `--live`. Live scripts reject unsafe users before mutation.
 
 Offline Playwright readiness:
 
@@ -88,7 +88,7 @@ Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIV
 | Scenario | Mutates chat | Requires provider | Must prove |
 | --- | --- | --- | --- |
 | Mount smoke | no | no | Recursion extension loads, Recursion Bar renders, Activity Ribbon can open, viewer can open. |
-| Mode smoke | no | no | Off, Observe, and Auto controls update runtime mode and visible status. |
+| Mode smoke | no | no | Off, Observe, Auto, and return-to-Off controls update runtime mode, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
 | Storage probe | files only | no | Dedicated user can write/read/delete Recursion-owned files and records are isolated from other users. |
 | Observe smoke | optional | no | Snapshot and diagnostics can be previewed without prompt injection. |
 | Utility provider smoke | yes | Utility | Arbiter/card/composer work runs, Activity Ribbon reports it, prompt packet installs, and generation continues. |
@@ -128,12 +128,13 @@ The smoke should fail if controls overlap chat input, if text escapes compact co
 
 ### 3. Mode Transitions
 
+- Seed a Recursion-owned prompt key as a cleanup sentinel.
 - Set Off mode and verify prompt keys are absent or cleared.
 - Set Observe mode and verify no prompt packet is installed.
 - Set Auto mode and verify the runtime is ready to compile when a generation begins.
 - Return to Off mode and verify cleanup.
 
-Mode changes should be visible in the bar and should append sanitized activity events.
+Mode changes should be visible in the bar and should append sanitized activity events. The no-generation browser snapshot should include `modeSmoke.sequence: ["off", "observe", "auto", "off"]`, per-step selected/observed modes, and prompt-key names only. It must not store seeded prompt text.
 
 ### 4. Provider Controls
 
@@ -249,7 +250,7 @@ Live smoke should not store the full prompt body by default. It should record:
 - clear status;
 - omission reasons.
 
-Optional debug export may include bounded excerpts only after an explicit user action. Normal smoke artifacts should rely on hashes and metadata.
+Normal smoke artifacts should rely on hashes and metadata. Bounded excerpts require an explicit user action and redaction.
 
 ## Stop Conditions
 
@@ -280,6 +281,8 @@ After a live smoke, the reviewer should inspect:
 - Playwright trace for readiness and no-generation interaction failures only.
 
 Manual review should not be required for every local iteration. It is most useful before release checkpoints or after a smoke failure that cannot be reproduced through a contract test.
+
+Reviewed no-generation screenshots may become documentation render sources only after redaction review and promotion through [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md). Raw live smoke artifacts remain local evidence under `artifacts/`.
 
 ## Scope Boundary
 

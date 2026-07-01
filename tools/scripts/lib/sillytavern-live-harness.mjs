@@ -852,6 +852,7 @@ function browserSnapshotScript() {
       settingsPanelOpen: document.querySelector('[data-recursion-settings-panel]')?.hidden === false,
       providerTestVisible: visible('[data-recursion-provider-test]'),
       viewerOpen: Boolean(document.querySelector('[data-recursion-viewer]')?.open) || document.querySelector('[data-recursion-viewer]')?.hidden === false,
+      modeSmoke: globalThis.__recursionSmokeModeSmoke || null,
       generation: globalThis.__recursionSmokeGeneration || null,
       bridge: {
         interceptor: typeof globalThis.recursionGenerationInterceptor === 'function',
@@ -871,6 +872,88 @@ function browserSnapshotScript() {
         .filter((value) => /Recursion|third-party\/Recursion|recursion/i.test(value))
         .slice(0, 12)
     };
+  };
+}
+
+function modeSmokeSeedPromptScript() {
+  return () => {
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    let seeded = false;
+    let error = '';
+    try {
+      if (!context || typeof context.setExtensionPrompt !== 'function') {
+        throw new Error('setExtensionPrompt unavailable for mode smoke');
+      }
+      context.setExtensionPrompt('recursion.modeSmokeBaseline', 'Recursion mode smoke baseline.', 'IN_PROMPT', 4, false, 'SYSTEM');
+      seeded = true;
+    } catch (seedError) {
+      error = String(seedError?.message || seedError || 'mode smoke seed failed');
+    }
+    const promptKeys = Object.entries(context?.prompts || {})
+      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
+      .map(([key]) => String(key))
+      .slice(0, 24);
+    return { seeded, promptKeys, error };
+  };
+}
+
+function modeSmokeReadStepScript() {
+  return (mode) => {
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const statusText = String(document.querySelector('[data-recursion-status]')?.textContent || '').replace(/\s+/g, ' ').trim();
+    const selectedValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '').toLowerCase();
+    const contextMode = String(context?.mode || '').toLowerCase();
+    const statusLower = statusText.toLowerCase();
+    const observedMode = ['off', 'observe', 'auto'].includes(contextMode)
+      ? contextMode
+      : (/off/.test(statusLower) ? 'off' : (/observe/.test(statusLower) ? 'observe' : (/auto/.test(statusLower) ? 'auto' : selectedValue || 'unknown')));
+    const promptKeys = Object.entries(context?.prompts || {})
+      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
+      .map(([key]) => String(key))
+      .slice(0, 24);
+    return {
+      mode: String(mode || ''),
+      selectedValue,
+      observedMode,
+      modeApplied: selectedValue === mode && observedMode === mode,
+      statusText,
+      promptCleared: promptKeys.length === 0,
+      promptKeys
+    };
+  };
+}
+
+function modeSmokeWaitScript() {
+  return (mode) => {
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const selectedValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '').toLowerCase();
+    const statusText = String(document.querySelector('[data-recursion-status]')?.textContent || '').toLowerCase();
+    const contextMode = String(context?.mode || '').toLowerCase();
+    const observedMode = ['off', 'observe', 'auto'].includes(contextMode)
+      ? contextMode
+      : (/off/.test(statusText) ? 'off' : (/observe/.test(statusText) ? 'observe' : (/auto/.test(statusText) ? 'auto' : selectedValue || 'unknown')));
+    const promptKeys = Object.entries(context?.prompts || {})
+      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
+      .map(([key]) => String(key));
+    return selectedValue === mode && observedMode === mode && (mode !== 'off' || promptKeys.length === 0);
   };
 }
 
@@ -1395,6 +1478,50 @@ function generationPromptClearScript() {
   };
 }
 
+async function applyRecursionModeSmokeStep(page, mode, timeoutMs) {
+  await page.locator('[data-recursion-setting-mode]').selectOption(mode, { timeout: timeoutMs });
+  await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
+  await page.waitForFunction(modeSmokeWaitScript(), mode, { timeout: timeoutMs });
+  return await page.evaluate(modeSmokeReadStepScript(), mode);
+}
+
+async function runRecursionModeSmoke(page, timeoutMs) {
+  const seed = await page.evaluate(modeSmokeSeedPromptScript());
+  const steps = [];
+  for (const mode of ['off', 'observe', 'auto', 'off']) {
+    steps.push(await applyRecursionModeSmokeStep(page, mode, timeoutMs));
+  }
+  const sequence = steps.map((step) => step.mode);
+  const ok = seed.seeded === true
+    && sequence.join('|') === 'off|observe|auto|off'
+    && steps.every((step) => step.modeApplied === true)
+    && steps[0]?.promptCleared === true
+    && steps.at(-1)?.promptCleared === true;
+  const modeSmoke = {
+    requested: true,
+    ok,
+    seed: {
+      seeded: seed.seeded === true,
+      promptKeys: Array.isArray(seed.promptKeys) ? seed.promptKeys.slice(0, 24) : [],
+      error: sanitizeHarnessText(seed.error || '', 240)
+    },
+    sequence,
+    steps: steps.map((step) => ({
+      mode: String(step.mode || ''),
+      selectedValue: String(step.selectedValue || ''),
+      observedMode: String(step.observedMode || ''),
+      modeApplied: step.modeApplied === true,
+      statusText: sanitizeHarnessText(step.statusText || '', 160),
+      promptCleared: step.promptCleared === true,
+      promptKeys: Array.isArray(step.promptKeys) ? step.promptKeys.slice(0, 24) : []
+    }))
+  };
+  await page.evaluate((value) => {
+    globalThis.__recursionSmokeModeSmoke = value;
+  }, modeSmoke).catch(() => {});
+  return modeSmoke;
+}
+
 async function runBrowserUiSmoke({
   baseUrl,
   cookies = [],
@@ -1481,6 +1608,32 @@ async function runBrowserUiSmoke({
       return document.querySelector('[data-recursion-settings-panel]')?.hidden === false
         && Boolean(document.querySelector('[data-recursion-provider-test]'));
     }, null, { timeout: timeoutMs });
+
+    if (!generationRequested) {
+      const modeSmoke = await runRecursionModeSmoke(page, timeoutMs).catch(async (error) => {
+        const failedModeSmoke = {
+          requested: true,
+          ok: false,
+          error: compactBrowserIssue(error)
+        };
+        await page.evaluate((value) => {
+          globalThis.__recursionSmokeModeSmoke = value;
+        }, failedModeSmoke).catch(() => {});
+        const failed = new Error('Recursion mode smoke failed.');
+        failed.status = 'fail';
+        failed.result = 'browser-mode-smoke-failed';
+        failed.cause = error;
+        failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ modeSmoke: failedModeSmoke }));
+        throw failed;
+      });
+      if (!modeSmoke?.ok) {
+        const failed = new Error('Recursion mode smoke did not prove Off/Observe/Auto/Off cleanup.');
+        failed.status = 'fail';
+        failed.result = 'browser-mode-smoke-failed';
+        failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ modeSmoke }));
+        throw failed;
+      }
+    }
 
     if (generationRequested) {
       await page.evaluate(generationRecorderInstallScript());

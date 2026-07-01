@@ -12,6 +12,9 @@ tmp/
 artifacts/
 *.log
 
+# Local documentation render tooling
+.recursion-doc-renderer/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

@@ -200,7 +200,7 @@ function recursionSmokeFixtureHtml({
         </div>
         <div data-recursion-hand-dropdown hidden>No hand has been composed for this chat.</div>
         <div data-recursion-settings-panel hidden>
-          <select data-recursion-setting-mode aria-label="Mode"><option value="observe">Observe</option><option value="auto" selected>Auto</option></select>
+          <select data-recursion-setting-mode aria-label="Mode"><option value="off">Off</option><option value="observe">Observe</option><option value="auto" selected>Auto</option></select>
           <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
           <input type="checkbox" data-recursion-provider-enabled-reasoner aria-label="Reasoner enabled">
           <button type="button" data-recursion-settings-save>Save Settings</button>
@@ -298,7 +298,12 @@ function recursionSmokeFixtureHtml({
         const mode = document.querySelector('[data-recursion-setting-mode]')?.value || 'auto';
         const applyMode = () => {
           smokeContext.mode = mode;
-          document.querySelector('[data-recursion-status]').textContent = mode === 'observe' ? 'Ready - Observe' : 'Ready - Auto';
+          if (mode === 'off') {
+            for (const key of Object.keys(smokeContext.prompts)) {
+              if (String(key).startsWith('recursion.')) smokeContext.setExtensionPrompt(key, '', 'IN_PROMPT', 0, false, 'SYSTEM');
+            }
+          }
+          document.querySelector('[data-recursion-status]').textContent = mode === 'off' ? 'Ready - Off' : (mode === 'observe' ? 'Ready - Observe' : 'Ready - Auto');
         };
         if ('${observeModeSave}' === 'noop' && mode === 'observe') return;
         if ('${observeModeSave}' === 'async' && mode === 'observe') setTimeout(applyMode, 150);
@@ -818,6 +823,10 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.browser.snapshot.bridge.interceptor, true, 'browser smoke sees Recursion generation bridge');
     assertEqual(report.browser.snapshot.bridge.enableHook, true, 'browser smoke sees Recursion enable hook');
     assertEqual(report.browser.snapshot.bridge.disableHook, true, 'browser smoke sees Recursion disable hook');
+    assertEqual(report.browser.snapshot.modeSmoke?.ok, true, 'browser smoke proves Off/Observe/Auto/Off mode flow');
+    assertDeepEqual(report.browser.snapshot.modeSmoke?.sequence, ['off', 'observe', 'auto', 'off'], 'mode smoke records exact mode sequence');
+    assertEqual(report.browser.snapshot.modeSmoke?.steps.at(0)?.promptCleared, true, 'initial Off clears seeded Recursion prompt');
+    assertEqual(report.browser.snapshot.modeSmoke?.steps.at(-1)?.promptCleared, true, 'final Off leaves Recursion prompts clear');
     assertEqual(report.artifacts.liveLog, 'live-log.jsonl', 'live smoke writes live log path');
     assertEqual(report.artifacts.servedExtension, 'host-extensions/served-extension-compare.json', 'live smoke writes served extension compare path');
     assertEqual(report.artifacts.storageProbe, 'storage/probe.json', 'live smoke writes storage probe path');

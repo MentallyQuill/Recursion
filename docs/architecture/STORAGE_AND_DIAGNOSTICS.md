@@ -20,7 +20,7 @@ Recursion stores the minimum structured state needed to reuse current-scene work
 - bounded scene cache records;
 - source references and hashes needed to detect drift;
 - sanitized recent run diagnostics;
-- optional user-triggered debug exports.
+- sanitized diagnostic artifacts.
 
 The design lesson from Directive applies here in smaller form: settings are the compact control plane, while larger structured records go through logical JSON storage and a repository boundary. Runtime, UI, provider, and prompt modules should not write ad hoc files or rely on physical filenames directly. They should call storage repository APIs that own key construction, schema validation, redaction, repair, and pruning.
 
@@ -33,18 +33,18 @@ Every persisted record is cache-oriented. If it is stale, corrupt, too large, or
 - enabled mode: off, observe, or auto;
 - strength, prompt footprint, focus, and Reasoner-use settings;
 - provider lane preferences without secrets;
-- advanced routing choices when exposed;
-- diagnostic toggles such as journal size or debug-export detail;
+- advanced routing choices that are part of the current settings contract;
+- diagnostic toggles such as journal size and artifact detail;
 - UI preferences that are truly user settings.
 
-It must not store scene decks, full cards, run journals, raw prompt packets, provider responses, transcript archives, or API keys. Direct endpoint API keys are session-only and must never be written to settings, cache records, journals, prompt packets, debug exports, or logs.
+It must not store scene decks, full cards, run journals, raw prompt packets, provider responses, transcript archives, or API keys. Direct endpoint API keys are session-only and must never be written to settings, cache records, journals, prompt packets, diagnostics, artifacts, or logs.
 
 Logical JSON files are for bounded structured records that are larger than settings:
 
 - `recursion-system-index.v1.json`
 - `recursion-scene-{chatKey}-{sceneKey}.v1.json`
 - `recursion-run-journal-{chatKey}.v1.json`
-- optional user-triggered debug export records or downloads
+- sanitized diagnostic artifact records
 
 The storage repository is the only layer that should construct those keys. `chatKey` and `sceneKey` must be normalized, path-safe identifiers, preferably derived from stable host ids plus hashes rather than raw chat titles or private story text.
 
@@ -56,7 +56,7 @@ The storage repository is the only layer that should construct those keys. `chat
 | `recursion-system-index.v1.json` | Recursion storage repository | Index of known scene caches and journals, active schema/catalog versions, record sizes, last update times, and repair status. | Durable but rebuildable. If missing, rebuild from logical records. |
 | `recursion-scene-{chatKey}-{sceneKey}.v1.json` | Recursion storage repository | Bounded scene deck, prompt-plan metadata, source refs/hashes, validation status, and last hand metadata for one chat scene. | Cache. Keep only recent active scenes per chat and prune aggressively. |
 | `recursion-run-journal-{chatKey}.v1.json` | Recursion storage repository | Bounded ring buffer of sanitized runtime, provider, cache, invalidation, and prompt-install events for one chat. | Cache/diagnostic. Prune by count and age. |
-| Optional debug export | UI action through repository | Sanitized snapshot of settings, index summary, selected scene cache metadata, and recent journal events for troubleshooting. | User-triggered only. Not written automatically during normal play. |
+| Diagnostic artifact | Repository and test harnesses | Sanitized snapshot of settings, index summary, selected scene cache metadata, and recent journal events for troubleshooting. | Explicit diagnostic flow only. Not written automatically during normal play. |
 
 All records should include:
 
@@ -150,7 +150,7 @@ Contract rules:
 - `summary` supports UI scanning and diagnostics; it is not a second prompt body.
 - `inspectorNotes` are diagnostic-only and must never enter prompt composition or injected prompt logs.
 - `sourceRefs` point to host message ids and hashes. They must not duplicate the transcript.
-- `excerpt` is optional, disabled by default for normal journals, and always bounded when present. Use excerpts only when they materially improve user-visible inspection or debug exports.
+- `excerpt` is optional, disabled by default for normal journals, and always bounded when present. Use excerpts only when they materially improve user-visible inspection or diagnostic artifacts.
 - Scene cache records must reject or truncate over-large cards before write.
 - A scene cache cannot be promoted into cross-scene memory. A new scene gets a new cache.
 
@@ -285,11 +285,11 @@ Forbidden by default:
 - inspector-only notes copied into prompt logs;
 - filesystem paths that expose private usernames when a logical key is enough.
 
-Redaction must be centralized in the storage/diagnostics layer. It should recursively remove or replace fields with sensitive key names such as `apiKey`, `authorization`, `cookie`, `token`, `password`, `secret`, and `sessionKey`. It should cap all strings in diagnostic exports, even when the field is otherwise allowed.
+Redaction must be centralized in the storage/diagnostics layer. It should recursively remove or replace fields with sensitive key names such as `apiKey`, `authorization`, `cookie`, `token`, `password`, `secret`, and `sessionKey`. It should cap all strings in diagnostic artifacts, even when the field is otherwise allowed.
 
-Bounded excerpts are opt-in and should be treated as more sensitive than hashes. If enabled, they must be short, source-labeled, and never used as a substitute for transcript storage. Debug exports should clearly mark whether excerpts are included.
+Bounded excerpts are opt-in and should be treated as more sensitive than hashes. If enabled, they must be short, source-labeled, and never used as a substitute for transcript storage. Diagnostic artifacts should clearly mark whether excerpts are included.
 
-Raw provider prompts and raw provider responses are disabled by default for normal diagnostics and debug exports. Any future raw-capture mode would require an explicit separate product decision, clear UI warning, redaction gates, short retention, and must never capture API keys or hidden reasoning.
+Raw provider prompts and raw provider responses are disabled by default for normal diagnostics and artifacts. Any raw-capture mode requires an explicit separate product decision, clear UI warning, redaction gates, short retention, and must never capture API keys or hidden reasoning.
 
 ## Invalidation Rules
 
@@ -309,7 +309,7 @@ Hard invalidation retires or deletes the current scene cache:
 
 Soft invalidation marks the cache stale and asks the Utility Arbiter to review:
 
-- user requests Refresh Scene or Regenerate Next Brief;
+- user requests Refresh Scene;
 - provider settings, model, route, strength, focus, prompt footprint, or Reasoner mode changes;
 - freshness cap is reached;
 - source window advances beyond the card evidence range;
@@ -319,11 +319,11 @@ Soft invalidation marks the cache stale and asks the Utility Arbiter to review:
 
 The repository should record the invalidation reason in the scene cache when the record remains readable, and in the run journal when the scene cache is removed. In pre-alpha, compatibility migrations should be rare. Prefer schema bumps, invalidation, and rebuilds unless a tiny in-place rewrite is clearly safer.
 
-## Cleanup/Repair
+## Cleanup
 
-Storage repair runs at startup, manual repair, and before debug export. It should be conservative about user data and aggressive about Recursion cache data.
+Storage cleanup runs during startup, repository load, scene refresh, and bounded runtime maintenance. It should be conservative about user data and aggressive about Recursion cache data.
 
-Repair responsibilities:
+Cleanup responsibilities:
 
 - rebuild `recursion-system-index.v1.json` if it is missing or stale;
 - remove index entries for missing records;
@@ -332,7 +332,7 @@ Repair responsibilities:
 - prune scene caches beyond the configured per-chat and total caps;
 - prune run journals beyond count and age caps;
 - remove records with unsupported schema versions during pre-alpha resets;
-- report repair actions through sanitized journal events and UI status.
+- report cleanup actions through sanitized journal events and UI status.
 
 V1 retention should start small:
 
@@ -357,7 +357,7 @@ Recommended logical stages:
 - `Cleaning old cache`
 - `Storage ready`
 
-The normal auto path should stay quiet unless storage is slow, blocked, or manually invoked. Manual actions such as Refresh Scene, Clear Scene Cache, Clear Run Journal, Repair Storage, and Export Diagnostics should show concise progress in the Recursion bar or viewer activity surface.
+The normal auto path should stay quiet unless storage is slow, blocked, or invoked through Refresh Scene or Off-mode cleanup. Those paths should show concise progress in the Recursion bar or viewer activity surface.
 
 Progress events should include a stable operation id, logical stage, severity, and optional sanitized counts. They should not expose physical paths or full JSON payloads. Storage progress should be separate from provider generation progress so that a model cancellation does not make a completed cache write look like a failed generation.
 
@@ -373,7 +373,7 @@ Required coverage:
 - scene cache writes store source refs/hashes and bounded excerpts only, not full transcript archives;
 - run journal enforces ring-buffer bounds;
 - journal redaction strips secrets, raw prompts, raw responses, headers, cookies, and private notes;
-- debug export uses the same redaction path as normal diagnostics;
+- diagnostic artifacts use the same redaction path as normal diagnostics;
 - invalidation matrix covers chat change, scene shift, message edit/delete, provider/settings changes, schema changes, card catalog changes, and prompt composition contract changes;
 - cleanup rebuilds a missing index, ignores corrupt records, prunes old caches, and never touches non-Recursion records;
 - storage progress aggregates logical stages instead of reporting each physical file write;

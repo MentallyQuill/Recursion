@@ -1011,17 +1011,46 @@ export function createRecursionRuntime({
     return cleanString(value).toLowerCase() === 'reasoner' ? 'reasoner' : 'utility';
   }
 
-  function queuePromptClearAfterSupersede() {
-    runPromptMutationSection(null, () => clearPromptBestEffort(host)).catch(() => {});
+  async function clearPromptAfterSupersede({ successLabel = 'Recursion prompt cleared after settings change.' } = {}) {
+    const runId = makeId('settings');
+    startRuntimeActivity({
+      runId,
+      phase: 'promptClearing',
+      label: 'Clearing Recursion prompt...',
+      chips: ['Prompt']
+    });
+    const clear = await runPromptMutationSection(null, () => clearPromptBestEffort(host));
+    if (clear?.ok === false) {
+      reportClearWarning(runId, clear);
+      return clear;
+    }
+    settleRuntimeActivity({
+      runId,
+      outcome: 'success',
+      phase: 'settled',
+      label: successLabel,
+      chips: ['Prompt']
+    });
+    return clear;
   }
 
-  function updateSettings(patch = {}) {
-    const next = settingsStore.update(patch);
-    if (Object.keys(asObject(patch)).length > 0) {
+  function queuePromptClearAfterSupersede() {
+    clearPromptAfterSupersede().catch(() => {});
+  }
+
+  async function updateSettings(patch = {}) {
+    const cleanPatch = asObject(patch);
+    const next = settingsStore.update(cleanPatch);
+    if (Object.keys(cleanPatch).length > 0) {
       supersedeActiveRun();
-      queuePromptClearAfterSupersede();
+      const clear = await clearPromptAfterSupersede({
+        successLabel: next.mode === 'off'
+          ? 'Recursion Off. Prompt cleared.'
+          : 'Recursion prompt cleared after settings change.'
+      });
+      return { ok: clear?.ok !== false, settings: next, clear };
     }
-    return next;
+    return { ok: true, settings: next, clear: null };
   }
 
   function updateProvider(lane, patch = {}) {

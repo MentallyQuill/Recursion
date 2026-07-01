@@ -32,7 +32,7 @@ This plan covers all Recursion V1 subsystems because they form one end-to-end ru
 - `styles/recursion.css` - SillyTavern-native graphite styling.
 - `tools/scripts/run-tests.mjs` - runs all local test scripts.
 - `tools/scripts/test-*.mjs` - focused verification scripts.
-- `docs/user/RECURSION_V1_OPERATOR_GUIDE.md` - V1 user guide.
+- `docs/user/RECURSION_OPERATOR_MANUAL.md` - operator manual.
 
 ---
 
@@ -2700,7 +2700,7 @@ Run:
 
 ```powershell
 node tools/scripts/test-extension-smoke.mjs
-npm test
+npm.cmd test
 ```
 
 Expected output contains:
@@ -2724,15 +2724,15 @@ git commit -m "feat: wire Recursion SillyTavern entrypoint"
 ### Task 13: User Guide And Live Smoke Checklist
 
 **Files:**
-- Create: `F:\git\Recursion\docs\user\RECURSION_V1_OPERATOR_GUIDE.md`
+- Create: `F:\git\Recursion\docs\user\RECURSION_OPERATOR_MANUAL.md`
 - Modify: `F:\git\Recursion\docs\user\README.md`
 
-- [ ] **Step 1: Add the V1 operator guide**
+- [ ] **Step 1: Add the operator manual**
 
-Create `F:\git\Recursion\docs\user\RECURSION_V1_OPERATOR_GUIDE.md`:
+Create `F:\git\Recursion\docs\user\RECURSION_OPERATOR_MANUAL.md`:
 
 ```markdown
-# Recursion V1 Operator Guide
+# Recursion Operator Manual
 
 Recursion is a mostly automatic SillyTavern extension that compiles current-scene writing context into a compact prompt packet before generation.
 
@@ -2793,7 +2793,7 @@ Replace `F:\git\Recursion\docs\user\README.md` with:
 ```markdown
 # User Guides
 
-- [Recursion V1 Operator Guide](RECURSION_V1_OPERATOR_GUIDE.md)
+- Recursion Operator Manual - RECURSION_OPERATOR_MANUAL.md
 ```
 
 - [ ] **Step 3: Verify docs and tests**
@@ -2801,21 +2801,21 @@ Replace `F:\git\Recursion\docs\user\README.md` with:
 Run:
 
 ```powershell
-npm test
+npm.cmd test
 rg -n "T[O]DO|T[B]D|raw provider responses are not shown" docs src tools
 ```
 
 Expected:
 
-- `npm test` passes.
+- `npm.cmd test` passes.
 - `rg` prints the expected guide line for `raw provider responses are not shown`.
 - `rg` does not print placeholder markers.
 
 - [ ] **Step 4: Commit**
 
 ```powershell
-git add docs/user/RECURSION_V1_OPERATOR_GUIDE.md docs/user/README.md
-git commit -m "docs: add Recursion V1 operator guide"
+git add docs/user/RECURSION_OPERATOR_MANUAL.md docs/user/README.md
+git commit -m "docs: add Recursion operator manual"
 ```
 
 ---
@@ -2825,7 +2825,7 @@ git commit -m "docs: add Recursion V1 operator guide"
 - [ ] **Run all deterministic tests**
 
 ```powershell
-npm test
+npm.cmd test
 ```
 
 Expected output includes every script as `[pass]` and ends with a total pass line.

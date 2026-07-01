@@ -317,6 +317,60 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 }
 
 {
+  let releaseClear;
+  let updateResolved = false;
+  const { runtime, calls } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    hostPrompt: {
+      async clear() {
+        await new Promise((resolve) => {
+          releaseClear = resolve;
+        });
+        return { ok: true, cleared: true };
+      }
+    }
+  });
+  const update = runtime.updateSettings({ mode: 'off' });
+  update.then(() => {
+    updateResolved = true;
+  });
+  await waitUntil(() => typeof releaseClear === 'function', 'Off settings change did not start prompt clear');
+  assertEqual(updateResolved, false, 'Off settings change waits for prompt clear before resolving');
+  assertEqual(runtime.view().settings.mode, 'off', 'Off settings change updates mode immediately');
+  assertEqual(runtime.view().activity.phase, 'promptClearing', 'Off settings change surfaces prompt clear activity');
+  releaseClear();
+  const result = await update;
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'Off settings change returns success when prompt clear succeeds');
+  assertEqual(result.settings.mode, 'off', 'Off settings change returns updated settings');
+  assertEqual(result.clear.ok, true, 'Off settings change returns clear result');
+  assertEqual(calls.clear, 1, 'Off settings change clears host prompt');
+  assertEqual(view.activity.severity, 'success', 'Off settings change surfaces success activity');
+  assertEqual(view.activity.label, 'Recursion Off. Prompt cleared.', 'Off settings change has visible success label');
+}
+
+{
+  const { runtime, calls } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    hostPrompt: {
+      async clear() {
+        throw new Error('clear failed with Bearer clear-token, sk-clear-runtime, and private-secret');
+      }
+    }
+  });
+  const result = await runtime.updateSettings({ mode: 'off' });
+  const view = runtime.view();
+  assertEqual(result.ok, false, 'Off settings change returns non-ok when prompt clear fails');
+  assertEqual(result.settings.mode, 'off', 'Off settings still applies when prompt clear fails');
+  assertEqual(result.clear.ok, false, 'Off settings change returns failed clear result');
+  assertEqual(calls.clear, 1, 'Off settings clear failure still calls host prompt clear');
+  assertEqual(view.activity.severity, 'warning', 'Off settings clear failure surfaces warning activity');
+  assert(view.activity.label.includes('Prompt clear failed'), 'Off settings clear failure has visible warning label');
+  assertNoSecretText(result, 'Off settings clear failure result');
+  assertNoSecretText(view.activity, 'Off settings clear failure activity');
+}
+
+{
   const { runtime, calls, installed, cleared } = createRuntimeHarness({
     settings: { mode: 'off', reasonerUse: 'off' }
   });
@@ -3088,12 +3142,13 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   });
   const pending = runtime.prepareForGeneration({ userMessage: 'Turn off before install.' });
   await waitUntil(() => typeof releaseArbiter === 'function', 'off-mode run did not enter arbiter');
-  runtime.updateSettings({ mode: 'off' });
+  const offUpdate = runtime.updateSettings({ mode: 'off' });
   releaseArbiter();
   const result = await pending;
   assertEqual(result.superseded, true, 'Off mode change supersedes in-flight generation preparation');
   assertEqual(installed.length, 0, 'Off mode change prevents stale prompt install');
   assertEqual(runtime.view().activeRunId, null, 'Off mode change clears active run id');
+  await offUpdate;
 }
 
 {
@@ -3288,15 +3343,16 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
     }
   });
 
-  const updated = runtime.updateSettings({
+  const updated = await runtime.updateSettings({
     mode: 'auto',
     strength: 'strong',
     promptFootprint: 'rich',
     focus: 'character',
     reasonerUse: 'always'
   });
-  assertEqual(updated.mode, 'auto', 'runtime exposes high-level settings update');
-  assertEqual(updated.strength, 'strong', 'runtime settings update preserves strength');
+  assertEqual(updated.ok, true, 'runtime exposes successful high-level settings update');
+  assertEqual(updated.settings.mode, 'auto', 'runtime exposes high-level settings update');
+  assertEqual(updated.settings.strength, 'strong', 'runtime settings update preserves strength');
   assertEqual(runtime.view().settings.focus, 'character', 'settings update is visible in runtime view');
 
   const utility = runtime.updateProvider('utility', {

@@ -15,6 +15,7 @@ Primary specs:
 - [SillyTavern Playwright Harness](SILLYTAVERN_PLAYWRIGHT_HARNESS.md)
 - [Live Smoke Test Plan](LIVE_SMOKE_TEST_PLAN.md)
 - [Artifact Contract](ARTIFACT_CONTRACT.md)
+- [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md)
 
 ## Stage 1: Contracts And Skeleton Runtime
 
@@ -63,7 +64,7 @@ Tests:
 - Read/create/update cache.
 - Bounded journal pruning.
 - Missing/corrupt payload diagnostics.
-- API key never persists to settings, cache, journals, or debug export.
+- API key never persists to settings, cache, journals, diagnostics, or artifacts.
 
 Exit criteria:
 
@@ -219,6 +220,7 @@ Build:
 - Offline Playwright readiness script.
 - Dedicated soak-user isolation script.
 - Focused live SillyTavern smoke script.
+- Documentation render register and promoted render asset directory.
 
 Tests:
 
@@ -229,6 +231,7 @@ Tests:
 - Provider failure falls back without blocking generation.
 - Activity Ribbon visibly reports model work, cache use, storage progress, prompt readiness, and fallbacks.
 - Live artifacts include sanitized `report.json`, `summary.md`, `live-log.jsonl`, no-generation screenshots/traces, prompt packet metadata, storage probe results, and redaction checks.
+- Documentation render gaps are inventoried with visible markers and final assets promote only into `assets/documentation/renders/`.
 
 Exit criteria:
 

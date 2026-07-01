@@ -286,6 +286,8 @@ try {
   const providerUpdates = [];
   const providerTests = [];
   const providerClears = [];
+  let resolveOffSettingsUpdate = null;
+  let offSettingsUpdate = null;
   let view = {
     settings: {
       mode: 'auto',
@@ -337,6 +339,32 @@ try {
       updateSettings: (patch) => {
         settingsUpdates.push(patch);
         view = { ...view, settings: { ...view.settings, ...patch } };
+        if (patch?.mode === 'off') {
+          view = {
+            ...view,
+            activity: {
+              phase: 'promptClearing',
+              severity: 'info',
+              label: 'Clearing Recursion prompt...',
+              chips: ['Prompt']
+            }
+          };
+          offSettingsUpdate = new Promise((resolve) => {
+            resolveOffSettingsUpdate = () => {
+              view = {
+                ...view,
+                activity: {
+                  phase: 'settled',
+                  severity: 'warning',
+                  label: 'Prompt clear failed. Recursion skipped without clearing host prompt.',
+                  chips: ['Prompt']
+                }
+              };
+              resolve({ ok: false, settings: view.settings, clear: { ok: false } });
+            };
+          });
+          return offSettingsUpdate;
+        }
         return view.settings;
       },
       updateProvider: (lane, patch) => {
@@ -430,6 +458,23 @@ try {
     focus: 'character',
     reasonerUse: 'always'
   }, 'settings panel saves broad behavior controls');
+  root.querySelector('[data-recursion-setting-mode]').value = 'off';
+  root.querySelector('[data-recursion-settings-save]').click();
+  assertDeepEqual(settingsUpdates.at(-1), {
+    mode: 'off',
+    strength: 'strong',
+    promptFootprint: 'rich',
+    focus: 'character',
+    reasonerUse: 'always'
+  }, 'settings panel can switch Recursion Off');
+  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working - Off', 'Off settings save shows cleanup work');
+  assertEqual(root.querySelector('[data-recursion-ribbon-label]').textContent, 'Clearing Recursion prompt...', 'Off settings save shows prompt cleanup label');
+  resolveOffSettingsUpdate();
+  await offSettingsUpdate;
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Ready - Off', 'Off warning still leaves mode ready');
+  assertEqual(root.querySelector('[data-recursion-ribbon-label]').textContent, 'Prompt clear failed. Recursion skipped without clearing host prompt.', 'Off clear warning label remains visible');
+  assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, false, 'Off clear warning ribbon stays visible');
 
   root.querySelector('[data-recursion-provider-source-utility]').value = 'openai-compatible';
   root.querySelector('[data-recursion-provider-profile-utility]').value = 'utility-profile';
@@ -470,7 +515,11 @@ try {
     viewer.open = false;
   };
 
-  view = { ...view, activity: { phase: 'settled', severity: 'success', label: 'Recursion prompt ready.' } };
+  view = {
+    ...view,
+    settings: { ...view.settings, mode: 'auto' },
+    activity: { phase: 'settled', severity: 'success', label: 'Recursion prompt ready.' }
+  };
   ui.update();
   ui.update();
   assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Ready - Auto', 'update refreshes status text');

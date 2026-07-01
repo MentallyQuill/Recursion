@@ -158,12 +158,15 @@ When only one user is configured, the script verifies that user's storage but em
 - locate the Recursion Bar;
 - open the Actions menu;
 - switch Off, Observe, and Auto modes;
+- seed and clear a Recursion-owned prompt sentinel during no-generation mode smoke;
 - run Test Provider actions through visible controls when configured;
 - send a safe test message only when the live run explicitly allows chat mutation;
 - wait for Recursion Activity Ribbon states instead of sleeping blindly;
 - open Last Hand and Full Viewer;
 - capture screenshots for desktop and phone viewports during no-generation UI runs;
 - clear prompt injection through Off mode or teardown.
+
+No-generation browser snapshots include a sanitized `modeSmoke` object with the exact Off -> Observe -> Auto -> Off sequence, observed mode labels, and Recursion prompt key names. Prompt text is not captured.
 
 `page.evaluate()` is acceptable for:
 
@@ -216,6 +219,8 @@ artifacts/playwright-readiness/<run-id>/
 
 Required artifact shape is defined in [Artifact Contract](ARTIFACT_CONTRACT.md).
 
+No-generation UI smoke may write screenshots and Playwright traces for visible UI proof. Generation-enabled smoke must not write screenshots or traces because binary artifacts can capture chat or model text that normal redaction scans cannot inspect. Documentation render promotion is handled separately through [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md); raw harness artifacts are not promoted directly.
+
 ## Redaction
 
 The harness must pass all report payloads through the same redaction helper used by diagnostics tests.
@@ -236,6 +241,8 @@ Always remove or replace:
 - absolute local paths when a logical artifact path is enough.
 
 Screenshots are allowed because they prove visible UI behavior. They should not be captured while provider secrets are visible in settings fields.
+
+Screenshots and traces are disallowed for generation-enabled runs. Use prompt-key hashes, lengths, placement metadata, hand readiness, and prompt-packet metadata for that evidence path.
 
 ## Failure Handling
 

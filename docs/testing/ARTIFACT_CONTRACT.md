@@ -168,7 +168,7 @@ Events should use compact, user-safe labels. The log is not a transcript and not
 
 `triggerSource` is `ui-send` when Playwright drove the visible and enabled SillyTavern input and send button, or `direct-bridge` only when no visible send controls were available and the diagnostic bridge fallback was used. Partial or disabled visible send surfaces are failures, not fallback candidates. `hostGenerationContinued` is required for `ui-send` runs and may be `null` for direct-bridge fallback runs.
 
-The full prompt body is excluded by default. Debug exports may include bounded excerpts only through an explicit user action outside the normal smoke path.
+The full prompt body is excluded by default. Diagnostic artifacts may include bounded excerpts only through an explicit user action outside the normal smoke path.
 
 ## Storage Probe
 
@@ -295,3 +295,15 @@ Keep:
 - latest failing run until the failure has a contract regression or fix.
 
 Do not promote live artifacts into product storage. Recursion runtime storage remains cache-oriented and bounded.
+
+## Documentation Render Assets
+
+Documentation render assets are not runtime artifacts. Raw captures, traces, browser profiles, and draft renders stay under `artifacts/` or `.recursion-doc-renderer/`. The ignored `.recursion-doc-renderer/` path is for local renderer scratch output only.
+
+Only reviewed, redacted final PNGs are promoted into:
+
+```text
+assets/documentation/renders/
+```
+
+Visible `<Render Needed>` markers remain in docs until promotion. The open inventory, source types, and promotion workflow are tracked in [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md).

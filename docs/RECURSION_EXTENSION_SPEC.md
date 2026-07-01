@@ -21,6 +21,7 @@ Start here, then follow the focused specs:
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md): prompt packet contract, Utility/Reasoner composition, injection lanes, footprint profiles, omissions.
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md): settings, logical JSON records, scene cache, run journal, activity events, redaction, invalidation.
 - [UI Spec](design/UI_SPEC.md): Recursion Bar, Activity Ribbon, Actions menu, Last Hand dropdown, full viewer, high-level settings, SillyTavern-native graphite visual system.
+- [Technical Manuals](technical/README.md): release-facing technical overview, runtime turn sequence, card deck and hand, prompt packet and injection, provider routing, storage/diagnostics, and host integration.
 - [Testing Strategy](testing/TESTING_STRATEGY.md): fast contract suite, Playwright readiness, focused live SillyTavern smoke, dedicated soak users, and pass/fail semantics.
 - [SillyTavern Playwright Harness](testing/SILLYTAVERN_PLAYWRIGHT_HARNESS.md): target harness scripts, environment variables, live preflight, selector rules, and redaction requirements.
 - [Live Smoke Test Plan](testing/LIVE_SMOKE_TEST_PLAN.md): Recursion Bar, Activity Ribbon, Observe, Auto, provider, prompt cleanup, fallback, and responsive UI smoke scenarios.
@@ -151,7 +152,7 @@ Storage is cache-oriented:
 - `recursion-system-index.v1.json`: rebuildable index of Recursion records.
 - `recursion-scene-{chatKey}-{sceneKey}.v1.json`: bounded scene deck and latest hand metadata.
 - `recursion-run-journal-{chatKey}.v1.json`: bounded sanitized diagnostics.
-- optional user-triggered debug export.
+- sanitized diagnostic artifacts.
 
 Cards are cache artifacts, not memories. Records can be invalidated aggressively on chat changes, hard scene shifts, source edits/deletes, provider/settings changes, or schema/catalog changes.
 
@@ -168,7 +169,7 @@ Provider sources:
 - host connection profile;
 - OpenAI-compatible endpoint.
 
-API keys for direct endpoints are session-only. They must not persist to settings, scene cache, prompt packet, run journal, diagnostics, or debug export.
+API keys for direct endpoints are session-only. They must not persist to settings, scene cache, prompt packet, run journal, diagnostics, reports, or artifacts.
 
 ## Implementation Strategy
 

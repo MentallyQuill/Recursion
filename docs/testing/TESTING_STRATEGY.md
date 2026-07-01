@@ -1,12 +1,13 @@
 # Testing Strategy
 
-Recursion testing should prove the extension is useful and safe without turning every verification path into a live SillyTavern run. The test framework has three layers:
+Recursion testing should prove the extension is useful and safe without turning every verification path into a live SillyTavern run. The test framework has three execution layers plus one documentation evidence register:
 
 | Layer | What it proves | Primary evidence |
 | --- | --- | --- |
 | Fast contract suite | Runtime contracts, schemas, card lifecycle, provider routing, storage, redaction, and prompt packet rules work without a live host. | Maintained deterministic gate: `node tools\scripts\run-alpha-gate.mjs`; focused scripts: `tools/scripts/test-*.mjs`. |
 | Playwright readiness | Offline probe proves the local machine can launch/control Chromium through Playwright, use a role locator, switch desktop/phone viewports, and write trace/screenshot artifacts. If Playwright is unavailable, it returns `environment-fail` without contacting SillyTavern. | Current evidence: `check-playwright-readiness` report, trace, and viewport screenshots when Playwright is installed; otherwise a sanitized environment-fail report. |
 | Focused live SillyTavern smoke | Current preflight proves dedicated-user rejection, dry-run behavior, report shape, fail-closed semantics, Recursion-owned storage probes, served-extension freshness, no-generation UI mount/open behavior, and opt-in generation bridge prompt-install evidence. | Current evidence: `check-sillytavern-soak-users` storage-probe reports and `smoke-sillytavern-live` reports, no-generation screenshots/trace, live log, served-extension comparison, storage probe artifact, browser snapshot, prompt-key hashes, hand readiness, and prompt-packet metadata. |
+| Documentation render tracking | Open screenshot, diagram, and static visual needs remain visible until promoted. | [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md), visible `<Render Needed>` markers, and promoted assets under `assets/documentation/renders/`. |
 
 The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, offline Playwright readiness, SillyTavern storage probes when dedicated users are available, no-generation SillyTavern UI evidence, and opt-in generation bridge evidence when Recursion is installed for a dedicated user.
 
@@ -21,7 +22,7 @@ Highest-priority invariants:
 - Stale provider results cannot update the active scene cache or active prompt packet.
 - Utility is the default provider lane for Arbiter and composition work.
 - Reasoner composition is optional and must fall back to Utility or local composition on timeout, failure, disabled state, or invalid schema.
-- Direct endpoint API keys are session-only and never written to settings, cache, journals, reports, screenshots, debug exports, or prompt packets.
+- Direct endpoint API keys are session-only and never written to settings, cache, journals, reports, screenshots, artifacts, or prompt packets.
 - Raw provider prompts and raw provider responses are not persisted by default.
 - Character Motivation cards may produce behavior-facing motivation guidance but must not inject private internal-thought dumps.
 - Activity Ribbon stages visibly report foreground model calls, cache reuse, card refresh, prompt install, storage progress, fallback paths, warnings, and errors.
@@ -126,6 +127,8 @@ artifacts/live-smoke/sillytavern/<run-id>/
 ```
 
 Required artifact families are defined in [Artifact Contract](ARTIFACT_CONTRACT.md). Normal no-generation UI reports should store hashes, ids, counts, bounded status text, screenshots, and traces. Generation-enabled reports should store text/JSON evidence only. They should not store raw provider prompts, raw provider responses, full transcript archives, API keys, cookies, authorization headers, private notes, or hidden reasoning.
+
+Documentation renders are separate from run artifacts. Draft captures, raw traces, browser profiles, and local renderer output stay under `artifacts/` or `.recursion-doc-renderer/`. Only reviewed final assets move into `assets/documentation/renders/` and only then replace visible `<Render Needed>` markers. The open inventory and promotion rules live in [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md).
 
 ## Pass And Fail Semantics
 

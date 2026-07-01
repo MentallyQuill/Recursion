@@ -1,0 +1,15 @@
+# Recursion Release Notes
+
+Release notes capture the current pre-alpha scope, verification posture, live-smoke guardrails, and known documentation/render gaps for each named Recursion checkpoint.
+
+## Releases
+
+- [0.1.0-pre-alpha.1](0.1.0-pre-alpha.1.md)
+
+## Related Docs
+
+- [Documentation Index](../DOCUMENTATION_INDEX.md)
+- [Root README](../../README.md)
+- [Testing Strategy](../testing/TESTING_STRATEGY.md)
+- [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md)
+- [Artifact Contract](../testing/ARTIFACT_CONTRACT.md)

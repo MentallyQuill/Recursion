@@ -5,6 +5,7 @@ const PACKET_VERSION = PROMPT_PACKET_VERSION;
 const REASONER_SCHEMA = 'recursion.reasonerComposer.v1';
 const VALID_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const VALID_REASONER_USE = new Set(['off', 'auto', 'always']);
+const VALID_REASONER_DROP_REASONS = new Set(['duplicate', 'lower-priority', 'budget-exceeded', 'unsupported']);
 const SECTION_KEYS = Object.freeze(['sceneBrief', 'turnBrief', 'guardrails']);
 const SCENE_BRIEF_FAMILIES = new Set(['Scene Frame', 'Active Cast', 'Environment/Items']);
 const GUARDRAIL_FAMILIES = new Set(['Continuity Risk']);
@@ -396,7 +397,7 @@ function buildReasonerPrompt({ runId, snapshotHash: sourceSnapshotHash, footprin
     'Compose an optional Recursion prompt packet synthesis.',
     `Return one JSON object only using schema "${REASONER_SCHEMA}".`,
     'Use only the selected card objects below; do not invent facts or inspect hidden fields.',
-    'Expected JSON shape: {"schema":"recursion.reasonerComposer.v1","snapshotHash":"same snapshot hash","instructionPatch":"concise instruction patch","keptCardIds":["card-id"],"droppedCardIds":[]}.',
+    'Expected JSON shape: {"schema":"recursion.reasonerComposer.v1","snapshotHash":"same snapshot hash","instructionPatch":"concise instruction patch","keptCardIds":["card-id"],"droppedCardIds":[{"id":"card-id","reason":"duplicate | lower-priority | budget-exceeded | unsupported"}]}.',
     `Run id: ${runId}`,
     `Snapshot hash: ${sourceSnapshotHash}`,
     `Footprint: ${footprint}`,
@@ -438,6 +439,20 @@ function filterReasonerIds(value, allowedIds) {
   return { ids: uniqueStrings(ids), invalidCount };
 }
 
+function filterReasonerDroppedCards(value, allowedIds) {
+  if (!Array.isArray(value)) return { ids: [], invalidCount: 0 };
+  const ids = [];
+  let invalidCount = 0;
+  for (const entry of value) {
+    const drop = asObject(entry);
+    const id = safePromptId(drop.id, 'reasoner-source');
+    const reason = cleanEnum(drop.reason, VALID_REASONER_DROP_REASONS, '');
+    if (id && allowedIds.has(id) && reason) ids.push(id);
+    else invalidCount += 1;
+  }
+  return { ids: uniqueStrings(ids), invalidCount };
+}
+
 function validateReasonerResult(result, allowedIds, expectedSnapshotHash) {
   if (!result?.ok) return { ok: false, reason: fallbackReasonFromResult(result, expectedSnapshotHash) };
   if (result.data?.schema !== REASONER_SCHEMA) return { ok: false, reason: fallbackReasonFromResult(result, expectedSnapshotHash) };
@@ -447,7 +462,7 @@ function validateReasonerResult(result, allowedIds, expectedSnapshotHash) {
   const instructionPatch = safeOptionalText(result.data?.instructionPatch, MAX_REASONER_PATCH);
   if (!instructionPatch) return { ok: false, reason: fallbackReasonFromResult(result, expectedSnapshotHash) };
   const kept = filterReasonerIds(result.data?.keptCardIds, allowedIds);
-  const dropped = filterReasonerIds(result.data?.droppedCardIds, allowedIds);
+  const dropped = filterReasonerDroppedCards(result.data?.droppedCardIds, allowedIds);
   return {
     ok: true,
     instructionPatch,

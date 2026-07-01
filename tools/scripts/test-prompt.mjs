@@ -290,8 +290,8 @@ const richReasonerPacket = await composePromptPacket({
           schema: 'recursion.reasonerComposer.v1',
           snapshotHash: hashJson(richReasonerSnapshot),
           instructionPatch: 'Fuse the alley mood with the broken lamp constraint.',
-          keptCardIds: ['c1', 'c2', 'private-secret'],
-          droppedCardIds: ['private-secret']
+          keptCardIds: ['c1', 'private-secret'],
+          droppedCardIds: [{ id: 'c2', reason: 'budget-exceeded' }]
         }
       };
     }
@@ -308,7 +308,8 @@ assert(richReasonerCalls[0].request.prompt.includes('"detailProfile": "standard"
 assertNoPrivateFields(richReasonerCalls[0].request.prompt, 'reasoner prompt excludes private hand fields');
 assertEqual(richReasonerPacket.diagnostics.composerLane, 'reasoner', 'reasoner composer used on rich auto');
 assertEqual(richReasonerPacket.diagnostics.reasonerStatus, 'used', 'reasoner status used on valid patch');
-assertEqual(richReasonerPacket.diagnostics.reasonerInvalidSourceIdCount, 2, 'invalid reasoner source ids are counted');
+assertEqual(richReasonerPacket.diagnostics.reasonerInvalidSourceIdCount, 1, 'invalid reasoner source ids are counted');
+assertDeepEqual(richReasonerPacket.diagnostics.reasonerDroppedCardIds, ['c2'], 'object-shaped dropped cards are accepted');
 assert(!JSON.stringify(richReasonerPacket.injectionPlan).includes('private-secret'), 'invalid reasoner source ids are dropped from injection plan');
 assert(richReasonerPacket.sections.turnBrief.includes('Reasoner synthesis: Fuse the alley mood'), 'reasoner synthesis appended to turn brief');
 

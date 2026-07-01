@@ -1,19 +1,33 @@
 # Recursion
 
-Recursion is a planned SillyTavern extension for improving roleplay generation quality through lightweight, scene-aware prompt compilation.
+Recursion is a pre-alpha SillyTavern extension for improving roleplay generation quality through lightweight, scene-aware prompt compilation.
 
-The extension is intended to run mostly invisibly. It will inspect the active story, scene, and characters, run fast Utility-model analysis in bounded batches, optionally use a stronger Reasoner pass, and inject compact writing guidance that improves prose, dialogue, continuity, and scene adhesion without becoming a replacement for Memory Books, Summaryception, VectFox, or other long-term context tools.
+The extension runs mostly invisibly. It inspects the active story, scene, and characters, runs fast Utility-model analysis in bounded batches, optionally uses a stronger Reasoner pass, and injects compact writing guidance that improves prose, dialogue, continuity, and scene adhesion without becoming a replacement for Memory Books, Summaryception, VectFox, or other long-term context tools.
 
 ## Current Status
 
-Recursion is in pre-alpha design. The repository currently contains the project structure and design notes only.
+Recursion V1 is implemented as a pre-alpha extension loop: settings, provider lanes, scene cards, runtime coordination, SillyTavern host adapter, prompt packet composition/injection, native-feeling UI, and focused automated tests are present. Live SillyTavern automation requires a dedicated `recursion-soak-*` user and rejects `default-user`.
+
+Run the maintained local gate:
+
+```powershell
+npm test
+node tools\scripts\run-alpha-gate.mjs
+```
+
+Optional live smoke scripts:
+
+```powershell
+node tools\scripts\check-playwright-readiness.mjs --write-artifacts
+node tools\scripts\check-sillytavern-soak-users.mjs --live --write-artifacts
+node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts --strict
+```
 
 ## Repository Layout
 
 - `src/` - Extension source modules.
 - `styles/` - Runtime and SillyTavern UI styling.
-- `assets/` - Icons, branding, and static extension assets.
-- `schemas/` - Structured contracts for generated briefs, scene state, and settings.
+- `schemas/` - Placeholder for future standalone schemas; current contracts live in source modules and docs.
 - `docs/` - Design notes, architecture docs, and user-facing manuals.
 - `tests/` - Focused unit and integration checks.
 - `tools/` - Local scripts for validation, packaging, and development utilities.

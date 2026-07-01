@@ -1,6 +1,6 @@
 # Recursion Documentation
 
-This folder holds the Recursion extension design, implementation-facing architecture specs, and eventual user manuals.
+This folder holds the Recursion extension design, implementation-facing architecture specs, testing contracts, and user manuals.
 
 Start with [Recursion Extension Spec](RECURSION_EXTENSION_SPEC.md).
 

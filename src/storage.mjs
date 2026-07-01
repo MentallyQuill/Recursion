@@ -88,9 +88,17 @@ function normalizeSceneCard(card) {
   if (!card || typeof card !== 'object' || Array.isArray(card)) return null;
   const source = card.source && typeof card.source === 'object' && !Array.isArray(card.source) ? card.source : {};
   const freshness = card.freshness && typeof card.freshness === 'object' && !Array.isArray(card.freshness) ? card.freshness : {};
+  const arbiter = card.arbiter && typeof card.arbiter === 'object' && !Array.isArray(card.arbiter) ? card.arbiter : {};
+  const sourceFingerprint = String(card.sourceFingerprint || source.snapshotHash || source.fingerprint || freshness.sourceFingerprint || '');
+  const firstMesId = Number(source.firstMesId ?? card.firstMesId ?? 0);
+  const lastMesId = Number(source.lastMesId ?? card.lastMesId ?? 0);
+  const expiresAfterMesId = Number(freshness.expiresAfterMesId);
   return {
     id: safeId(card.id || makeId('card')),
     family: String(card.family || 'unknown'),
+    role: String(card.role || ''),
+    sceneId: String(card.sceneId || ''),
+    catalogKey: String(card.catalogKey || ''),
     status: ['candidate', 'active', 'stowed', 'stale', 'discarded'].includes(card.status) ? card.status : 'active',
     summary: String(card.summary || '').slice(0, 400),
     promptText: String(card.promptText || '').slice(0, 1000),
@@ -98,8 +106,24 @@ function normalizeSceneCard(card) {
     tokenEstimate: Math.max(0, Math.min(1000, Number(card.tokenEstimate) || 0)),
     emphasis: ['normal', 'emphasized', 'muted'].includes(card.emphasis) ? card.emphasis : 'normal',
     detailProfile: ['compact', 'standard', 'expanded'].includes(card.detailProfile) ? card.detailProfile : 'standard',
-    generatedAt: timestampValue(card.generatedAt),
-    sourceFingerprint: String(card.sourceFingerprint || source.snapshotHash || source.fingerprint || freshness.sourceFingerprint || ''),
+    generatedAt: timestampValue(card.generatedAt || freshness.generatedAt),
+    sourceFingerprint,
+    source: {
+      chatId: String(source.chatId || card.chatId || ''),
+      firstMesId: Number.isFinite(firstMesId) ? Math.max(0, Math.round(firstMesId)) : 0,
+      lastMesId: Number.isFinite(lastMesId) ? Math.max(0, Math.round(lastMesId)) : 0,
+      fingerprint: String(source.fingerprint || sourceFingerprint),
+      snapshotHash: String(source.snapshotHash || sourceFingerprint)
+    },
+    freshness: {
+      generatedAt: timestampValue(freshness.generatedAt || card.generatedAt),
+      sourceFingerprint,
+      ...(Number.isFinite(expiresAfterMesId) ? { expiresAfterMesId: Math.round(expiresAfterMesId) } : {})
+    },
+    arbiter: {
+      lastDecisionId: String(arbiter.lastDecisionId || card.decisionId || ''),
+      reason: String(arbiter.reason || card.reason || '').slice(0, 240)
+    },
     arbiterDecisionHash: card.arbiterDecisionHash ? String(card.arbiterDecisionHash) : undefined,
     inspectorNotes: card.inspectorNotes ? String(card.inspectorNotes).slice(0, 800) : undefined
   };

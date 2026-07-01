@@ -271,6 +271,30 @@ const routerRunIdBatch = await routerHostBatchRouter.batch([
 assertDeepEqual(routerRunIdBatch.map((entry) => entry.diagnostics.runId), [suppliedBatchRunId, suppliedBatchRunId], 'router batch diagnostics use supplied shared run id');
 assertDeepEqual(routerRunIdBatch.map((entry) => entry.roleId), ['utilityArbiter', 'providerTest'], 'router batch preserves role ids in parsed results');
 
+let transientBatchCalls = 0;
+const transientBatch = await createGenerationRouter({
+  client: {
+    async generate() {
+      throw new Error('single generate should not be used for transient batch retry');
+    },
+    async batch(requests) {
+      transientBatchCalls += 1;
+      if (transientBatchCalls === 1) {
+        const error = new Error('temporary reset');
+        error.code = 'ECONNRESET';
+        throw error;
+      }
+      return requests.map((request) => ({ text: `{"schema":"retry.${request.roleId}","lane":"${request.lane}"}` }));
+    }
+  }
+}).batch([
+  { roleId: 'utilityArbiter', prompt: 'A' },
+  { roleId: 'providerTest', prompt: 'B' }
+], { runId: 'provider-batch-transient-retry' });
+assertEqual(transientBatchCalls, 2, 'router batch retries one transient transport failure');
+assertDeepEqual(transientBatch.map((entry) => entry.ok), [true, true], 'transient retry returns successful batch entries');
+assertDeepEqual(transientBatch.map((entry) => entry.diagnostics.retryCount), [1, 1], 'retried batch entries record retry count');
+
 const routerMalformedSlot = await createGenerationRouter({
   client: {
     async generate() {

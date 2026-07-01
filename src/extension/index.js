@@ -29,6 +29,44 @@ function destroyUi() {
   }
 }
 
+function createProviderJournal(storage, currentHost) {
+  return {
+    async append(entry = {}) {
+      try {
+        const snapshot = typeof currentHost?.snapshot === 'function'
+          ? await currentHost.snapshot()
+          : { chatKey: 'unknown-chat', sceneKey: 'unknown-scene' };
+        await storage.appendJournal(snapshot.chatKey || 'unknown-chat', {
+          event: 'provider.call',
+          severity: entry.status === 'success' ? 'info' : 'warn',
+          summary: `${entry.roleId || 'provider'} ${entry.status || 'completed'}`,
+          runId: entry.runId,
+          sceneKey: snapshot.sceneKey,
+          details: {
+            roleId: entry.roleId,
+            lane: entry.lane,
+            providerSource: entry.providerSource,
+            providerId: entry.providerId,
+            model: entry.model,
+            responseId: entry.responseId,
+            schema: entry.schema,
+            retryCount: entry.retryCount,
+            latencyMs: entry.latencyMs,
+            status: entry.status,
+            error: entry.error
+          },
+          hashes: {
+            requestHash: entry.requestHash,
+            responseHash: entry.responseHash
+          }
+        });
+      } catch {
+        // Provider journal writes are diagnostic only; never affect generation.
+      }
+    }
+  };
+}
+
 export function bootstrapRecursion() {
   if (runtime) return runtime;
   if (!hasSillyTavernContext()) return null;
@@ -42,7 +80,8 @@ export function bootstrapRecursion() {
     });
     const generationRouter = createGenerationRouter({
       client: nextHost.providerClient,
-      activity
+      activity,
+      journal: createProviderJournal(storage, nextHost)
     });
 
     const nextRuntime = createRecursionRuntime({
@@ -77,6 +116,11 @@ async function clearPromptBestEffort(label) {
 }
 
 async function teardownRecursion(label) {
+  try {
+    await runtime?.dispose?.();
+  } catch (error) {
+    warn(`${label} runtime dispose failed.`, error);
+  }
   await clearPromptBestEffort(label);
   destroyUi();
   host = null;

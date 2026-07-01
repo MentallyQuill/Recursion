@@ -181,6 +181,13 @@ function normalizeGenerationResponse(response) {
   return { text: stringValue(response) };
 }
 
+function hostProfileUnsupportedError() {
+  const error = new Error('Host connection profile generation requires the SillyTavern raw generation API.');
+  error.code = 'RECURSION_HOST_PROFILE_UNSUPPORTED';
+  error.retryable = false;
+  return error;
+}
+
 export function createSillyTavernHost({
   contextFactory = null,
   settingsRoot = globalThis.extension_settings || {},
@@ -203,14 +210,7 @@ export function createSillyTavernHost({
     const messages = (Array.isArray(context.chat) ? context.chat : []).map((message, index) => normalizeMessage(message, index));
     const latestMesId = latestMessageId(messages);
     const sceneFingerprint = hashJson({
-      chatKey,
-      messageCount: messages.length,
-      messages: messages.map((message) => ({
-        mesId: message.mesId,
-        role: message.role,
-        sender: message.sender,
-        text: message.text
-      }))
+      chatKey
     });
     const turnFingerprint = hashJson({
       chatKey,
@@ -301,6 +301,9 @@ export function createSillyTavernHost({
         }));
       }
       if (typeof context.generateQuietPrompt === 'function') {
+        if (request.providerSource === 'host-connection-profile' || request.hostConnectionProfileId || request.providerConfig?.hostConnectionProfileId) {
+          throw hostProfileUnsupportedError();
+        }
         return normalizeGenerationResponse(await context.generateQuietPrompt(stringValue(request.prompt)));
       }
       throw new Error('SillyTavern generation API is unavailable.');

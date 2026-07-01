@@ -107,6 +107,9 @@ function createRuntimeHarness({
   assertEqual(view.activeRunId, null, 'active run cleared after auto success');
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assert(cache.cards.length >= 2, 'scene cache persists fallback cards');
+  assert(cache.latestHand?.handId, 'scene cache persists latest hand metadata');
+  assert(cache.latestHand.cards.length > 0, 'scene cache latest hand records selected cards');
+  assert(cache.cards.some((card) => Number.isFinite(card.source?.firstMesId) && Number.isFinite(card.source?.lastMesId)), 'scene cache cards preserve source message range');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
   assertEqual(journal.entries.length, 1, 'install journal entry persisted');
   assertEqual(journal.entries[0].event, 'prompt.installed', 'install journal records success');
@@ -533,7 +536,7 @@ function createRuntimeHarness({
   assertEqual(result.plan.nested, undefined, 'result plan drops arbitrary top-level nested object');
   assertEqual(result.plan.cardJobs[0].extraJobField, undefined, 'result plan drops arbitrary card job fields');
   assertEqual(result.plan.reasonerDecision.extraDecisionField, undefined, 'result plan drops arbitrary reasoner decision fields');
-  assertDeepEqual(Object.keys(result.plan).sort(), ['action', 'budgets', 'cardJobs', 'diagnostics', 'reasonerDecision', 'sceneStatus', 'schema', 'snapshotHash', 'source'].sort(), 'result plan only exposes whitelisted fields');
+  assertDeepEqual(Object.keys(result.plan).sort(), ['action', 'budgets', 'cardJobs', 'diagnostics', 'lifecycle', 'reasonerDecision', 'sceneStatus', 'schema', 'snapshotHash', 'source'].sort(), 'result plan only exposes whitelisted fields');
   assert(result.plan.diagnostics.includes('safe-diagnostic'), 'safe diagnostics survive plan scrub');
   assert(result.plan.reasonerDecision.signals.includes('safe-signal'), 'safe reasoner signals survive plan scrub');
   assert(result.plan.reasonerDecision.signals.every((signal) => typeof signal === 'string'), 'reasoner signals normalize to strings');
@@ -1310,6 +1313,68 @@ function createRuntimeHarness({
 }
 
 {
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache('arbiter-chat', 'arbiter-scene', {
+    cards: [
+      {
+        id: 'arbiter-keep',
+        family: 'Continuity Risk',
+        status: 'active',
+        promptText: 'The only selected continuity risk should remain active.',
+        summary: 'Keep continuity',
+        tokenEstimate: 20,
+        source: { chatId: 'arbiter-chat', firstMesId: 1, lastMesId: 2, snapshotHash: 'arbiter-source' }
+      },
+      {
+        id: 'arbiter-stow',
+        family: 'Scene Frame',
+        status: 'active',
+        promptText: 'This card should be stowed by the Arbiter.',
+        summary: 'Stow scene',
+        tokenEstimate: 20,
+        source: { chatId: 'arbiter-chat', firstMesId: 1, lastMesId: 2, snapshotHash: 'arbiter-source' }
+      }
+    ]
+  });
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: {
+      chatId: 'arbiter-chat',
+      chatKey: 'arbiter-chat',
+      sceneKey: 'arbiter-scene',
+      sceneFingerprint: 'arbiter-scene-fp',
+      turnFingerprint: 'arbiter-turn-fp',
+      latestMesId: 3,
+      messages: [{ mesid: 3, role: 'user', text: 'Use only the Arbiter-selected card.', visible: true }]
+    },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'arbiter lifecycle regression only calls utility arbiter');
+        return {
+          ok: true,
+          data: {
+            action: 'reuse-cache',
+            lifecycle: [
+              { action: 'select', cardId: 'arbiter-keep', reason: 'still important' },
+              { action: 'stow', cardId: 'arbiter-stow', reason: 'not needed this turn' }
+            ],
+            budgets: { targetBriefTokens: 700, maxCards: 6 },
+            diagnostics: ['arbiter-lifecycle-regression']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'honor lifecycle' });
+  assertEqual(result.ok, true, 'arbiter lifecycle run installs');
+  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['arbiter-keep'], 'turn hand honors Arbiter select/stow lifecycle');
+  const updated = await storage.loadSceneCache('arbiter-chat', 'arbiter-scene');
+  assertEqual(updated.cards.find((card) => card.id === 'arbiter-stow')?.status, 'stowed', 'scene deck persists Arbiter stow decision');
+}
+
+{
   let utilityCalls = 0;
   let firstGenerateStarted = false;
   let firstAbortObserved = false;
@@ -1349,6 +1414,69 @@ function createRuntimeHarness({
   const firstResult = await first;
   assertEqual(firstResult.superseded, true, 'older provider run reports superseded');
   assertEqual(firstAbortObserved, true, 'blocked provider call observes abort when superseded');
+}
+
+{
+  let releaseArbiter;
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'dispose regression only needs utility arbiter');
+        await new Promise((resolve) => {
+          releaseArbiter = resolve;
+        });
+        assertEqual(request.signal?.aborted, true, 'dispose aborts in-flight provider signal');
+        return {
+          ok: true,
+          data: {
+            action: 'compose-brief',
+            diagnostics: ['dispose-regression']
+          }
+        };
+      }
+    }
+  });
+  const pending = runtime.prepareForGeneration({ userMessage: 'Dispose before install.' });
+  await waitUntil(() => typeof releaseArbiter === 'function', 'dispose run did not enter arbiter');
+  assertEqual(typeof runtime.dispose, 'function', 'runtime exposes dispose for extension teardown');
+  await runtime.dispose();
+  releaseArbiter();
+  const result = await pending;
+  assertEqual(result.superseded, true, 'disposed run reports superseded');
+  assertEqual(installed.length, 0, 'disposed run cannot install a prompt');
+  assertEqual(runtime.view().activeRunId, null, 'dispose clears active run id');
+}
+
+{
+  let releaseArbiter;
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'off-mode regression only needs utility arbiter');
+        await new Promise((resolve) => {
+          releaseArbiter = resolve;
+        });
+        assertEqual(request.signal?.aborted, true, 'switching to Off aborts in-flight provider signal');
+        return {
+          ok: true,
+          data: {
+            action: 'compose-brief',
+            diagnostics: ['off-mode-regression']
+          }
+        };
+      }
+    }
+  });
+  const pending = runtime.prepareForGeneration({ userMessage: 'Turn off before install.' });
+  await waitUntil(() => typeof releaseArbiter === 'function', 'off-mode run did not enter arbiter');
+  runtime.updateSettings({ mode: 'off' });
+  releaseArbiter();
+  const result = await pending;
+  assertEqual(result.superseded, true, 'Off mode change supersedes in-flight generation preparation');
+  assertEqual(installed.length, 0, 'Off mode change prevents stale prompt install');
+  assertEqual(runtime.view().activeRunId, null, 'Off mode change clears active run id');
 }
 
 {

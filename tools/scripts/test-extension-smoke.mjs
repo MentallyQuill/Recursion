@@ -8,6 +8,14 @@ const RECURSION_PROMPT_KEYS = [
 
 await import('../../src/extension/index.js');
 
+async function waitUntil(predicate, message, { attempts = 50 } = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(message);
+}
+
 assertEqual(typeof globalThis.recursionGenerationInterceptor, 'function', 'generation interceptor is registered globally');
 assertEqual(typeof globalThis.recursionOnEnable, 'function', 'enable hook is registered globally');
 
@@ -111,7 +119,8 @@ async function assertLifecycleClearFailureIsFailSoft(hookName) {
 const previousGlobals = {
   SillyTavern: globalThis.SillyTavern,
   getContext: globalThis.getContext,
-  extensionSettings: globalThis.extension_settings
+  extensionSettings: globalThis.extension_settings,
+  fetch: globalThis.fetch
 };
 const lifecycleFailures = [];
 try {
@@ -131,9 +140,79 @@ try {
   else globalThis.getContext = previousGlobals.getContext;
   if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
   else globalThis.extension_settings = previousGlobals.extensionSettings;
+  if (previousGlobals.fetch === undefined) delete globalThis.fetch;
+  else globalThis.fetch = previousGlobals.fetch;
 }
 if (lifecycleFailures.length) {
   throw new Error(lifecycleFailures.join('\n'));
+}
+
+{
+  const files = new Map();
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = {
+    getContext: () => ({
+      chatId: 'journal-chat',
+      chat: [{ mesid: 0, is_user: true, mes: 'Journal smoke user message.' }],
+      extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+      extension_prompt_roles: { SYSTEM: 'SYSTEM' },
+      getRequestHeaders: () => ({ 'X-CSRF-Token': 'journal-token' }),
+      setExtensionPrompt() {},
+      async generateRaw() {
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.utilityArbiter.v1',
+            action: 'compose-brief',
+            cardJobs: [],
+            reasonerDecision: { mode: 'skip', reason: 'journal smoke', signals: [] },
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['journal-smoke']
+          })
+        };
+      }
+    })
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    const target = String(url);
+    if (target.startsWith('/user/files/')) {
+      const fileName = decodeURIComponent(target.slice('/user/files/'.length));
+      if (!files.has(fileName)) return { ok: false, status: 404, json: async () => null };
+      return { ok: true, status: 200, json: async () => files.get(fileName) };
+    }
+    if (target === '/api/files/upload') {
+      const body = JSON.parse(String(options.body || '{}'));
+      const text = Buffer.from(String(body.data || ''), 'base64').toString('utf8');
+      files.set(String(body.name), JSON.parse(text));
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    if (target === '/api/files/delete') {
+      const body = JSON.parse(String(options.body || '{}'));
+      const fileName = String(body.path || '').split('/').pop();
+      files.delete(fileName);
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    return { ok: false, status: 404, json: async () => null };
+  };
+
+  await globalThis.recursionOnDelete();
+  const journalSmokeChat = { payload: 'journal-smoke' };
+  assertEqual(await globalThis.recursionGenerationInterceptor(journalSmokeChat), journalSmokeChat, 'journal smoke returns original object');
+  await waitUntil(
+    () => [...files.values()].some((file) => Array.isArray(file.entries) && file.entries.some((entry) => entry.event === 'provider.call')),
+    'provider model-call journal was not persisted by extension bootstrap'
+  );
+  const journal = [...files.values()].find((file) => Array.isArray(file.entries) && file.entries.some((entry) => entry.event === 'provider.call'));
+  const providerEntry = journal.entries.find((entry) => entry.event === 'provider.call');
+  assertEqual(providerEntry.details.roleId, 'utilityArbiter', 'provider journal records role id');
+  assert(providerEntry.hashes.responseHash, 'provider journal records response hash');
+  assert(!JSON.stringify(providerEntry).includes('Journal smoke user message.'), 'provider journal does not persist raw transcript text');
+  await globalThis.recursionOnDelete();
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+  if (previousGlobals.fetch === undefined) delete globalThis.fetch;
+  else globalThis.fetch = previousGlobals.fetch;
 }
 
 console.log('[pass] extension smoke');

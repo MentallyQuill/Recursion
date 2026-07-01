@@ -746,11 +746,11 @@ export function createGenerationRouter({ client, activity = null, journal = null
     });
     const results = new Array(entries.length);
 
-    function failureResult(entry, error) {
+    function failureResult(entry, error, retryCount = 0) {
       const safeError = sanitizedError(error, entry.request);
       const diagnostics = sanitize({
         ...entry.diagnostics,
-        retryCount: 0,
+        retryCount,
         latencyMs: Date.now() - entry.started,
         error: safeError,
         status: statusForError(error),
@@ -770,7 +770,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       };
     }
 
-    function successResult(entry, raw) {
+    function successResult(entry, raw, retryCount = 0) {
       const data = parseProviderStructuredOutput(raw?.text);
       const diagnostics = sanitize({
         ...entry.diagnostics,
@@ -780,7 +780,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         responseId: raw?.responseId,
         responseHash: responseTextHash(raw?.text),
         schema: data.schema,
-        retryCount: 0,
+        retryCount,
         latencyMs: Date.now() - entry.started,
         completedAt: nowIso()
       }, 300);
@@ -847,32 +847,50 @@ export function createGenerationRouter({ client, activity = null, journal = null
     }
 
     let rawResponses;
-    try {
-      rawResponses = await withBatchTimeout(
-        (requestsWithSignals) => client.batch(requestsWithSignals),
-        pendingEntries.map((entry) => ({ roleId: entry.roleId, ...entry.request })),
-        options.timeoutMs ?? timeoutMs,
-        options.signal || null
-      );
-      if (!Array.isArray(rawResponses) || rawResponses.length !== pendingEntries.length) {
-        throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Provider batch response shape did not match request batch.', {
-          retryable: false
-        });
+    let batchRetryCount = 0;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        rawResponses = await withBatchTimeout(
+          (requestsWithSignals) => client.batch(requestsWithSignals),
+          pendingEntries.map((entry) => ({ roleId: entry.roleId, ...entry.request })),
+          options.timeoutMs ?? timeoutMs,
+          options.signal || null
+        );
+        if (!Array.isArray(rawResponses) || rawResponses.length !== pendingEntries.length) {
+          throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Provider batch response shape did not match request batch.', {
+            retryable: false
+          });
+        }
+        break;
+      } catch (error) {
+        const canRetry = attempt === 0 && retryableError(error) && options.signal?.aborted !== true;
+        if (canRetry) {
+          batchRetryCount = 1;
+          activityStage(activity, {
+            runId: batchRunId,
+            phase: 'providerCallRetrying',
+            severity: 'warning',
+            providerLane: pendingEntries[0]?.lane || 'utility',
+            composerLane: pendingEntries[0]?.lane === 'reasoner' ? 'reasoner' : 'utility',
+            label: 'Retrying provider batch call.',
+            detail: { attempt: 1 }
+          });
+          continue;
+        }
+        for (const entry of pendingEntries) {
+          results[entry.index] = failureResult(entry, error, batchRetryCount);
+        }
+        settleBatchActivity();
+        return results;
       }
-    } catch (error) {
-      for (const entry of pendingEntries) {
-        results[entry.index] = failureResult(entry, error);
-      }
-      settleBatchActivity();
-      return results;
     }
 
     rawResponses.forEach((raw, batchIndex) => {
       const entry = pendingEntries[batchIndex];
       try {
-        results[entry.index] = successResult(entry, raw);
+        results[entry.index] = successResult(entry, raw, batchRetryCount);
       } catch (error) {
-        results[entry.index] = failureResult(entry, error);
+        results[entry.index] = failureResult(entry, error, batchRetryCount);
       }
     });
 

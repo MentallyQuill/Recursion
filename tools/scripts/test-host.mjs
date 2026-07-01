@@ -244,6 +244,42 @@ const quietResponse = await quietHost.generation.generate({ prompt: 'Fallback pr
 assertEqual(quietResponse.text, 'quiet text', 'quiet generation result normalized');
 assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
 
+const quietProfileHost = createSillyTavernHost({
+  contextFactory: () => ({
+    currentChatId: 'quiet-profile-chat',
+    chat: [],
+    generateQuietPrompt: async () => 'quiet profile text'
+  }),
+  settingsRoot: {
+    recursion: {
+      providers: {
+        utility: {
+          source: 'host-connection-profile',
+          hostConnectionProfileId: 'quiet-profile-a'
+        }
+      }
+    }
+  }
+});
+const quietProfileResult = await createGenerationRouter({ client: quietProfileHost.providerClient }).generate('utilityArbiter', { prompt: 'Profile should not silently fall back.' });
+assertEqual(quietProfileResult.ok, false, 'host profile route fails when only quiet generation is available');
+assertEqual(quietProfileResult.error.code, 'RECURSION_HOST_PROFILE_UNSUPPORTED', 'host profile route reports unsupported API instead of current-model fallback');
+
+const stableSceneMessages = [{ mesid: 1, is_user: true, mes: 'First turn in the same scene.' }];
+const stableSceneHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'stable-scene-chat',
+    chat: stableSceneMessages
+  }),
+  settingsRoot: {}
+});
+const firstStableScene = await stableSceneHost.snapshot();
+stableSceneMessages.push({ mesid: 2, is_user: false, mes: 'Second turn without a scene break.' });
+const secondStableScene = await stableSceneHost.snapshot();
+assertEqual(secondStableScene.chatKey, firstStableScene.chatKey, 'stable scene regression keeps chat key');
+assertEqual(secondStableScene.sceneKey, firstStableScene.sceneKey, 'ordinary new messages reuse the same scene cache key');
+assert(secondStableScene.turnFingerprint !== firstStableScene.turnFingerprint, 'turn fingerprint still changes across messages');
+
 const rawCalls = [];
 const rawResponse = await host.generation.generate({
   prompt: 'Return JSON',

@@ -227,10 +227,48 @@ function createFakeDocument() {
 const previousDocument = globalThis.document;
 const previousWindow = globalThis.window;
 const previousNavigator = globalThis.navigator;
+const previousSetTimeout = globalThis.setTimeout;
+const previousClearTimeout = globalThis.clearTimeout;
+const previousSetInterval = globalThis.setInterval;
+const previousClearInterval = globalThis.clearInterval;
 try {
+  let timerId = 0;
+  const timers = [];
+  const fakeSetTimeout = (callback, delay) => {
+    const timer = { id: ++timerId, kind: 'timeout', callback, delay, active: true };
+    timers.push(timer);
+    return timer;
+  };
+  const fakeClearTimeout = (timer) => {
+    if (timer) timer.active = false;
+  };
+  const fakeSetInterval = (callback, delay) => {
+    const timer = { id: ++timerId, kind: 'interval', callback, delay, active: true };
+    timers.push(timer);
+    return timer;
+  };
+  const fakeClearInterval = (timer) => {
+    if (timer) timer.active = false;
+  };
+  const runNextTimeout = (delay) => {
+    const timer = timers.find((entry) => entry.kind === 'timeout' && entry.delay === delay && entry.active);
+    assert(timer, `expected active timeout for ${delay}ms`);
+    timer.active = false;
+    timer.callback();
+  };
+
   const fakeDocument = createFakeDocument();
   globalThis.document = fakeDocument;
-  globalThis.window = { setInterval, clearInterval };
+  globalThis.setTimeout = fakeSetTimeout;
+  globalThis.clearTimeout = fakeClearTimeout;
+  globalThis.setInterval = fakeSetInterval;
+  globalThis.clearInterval = fakeClearInterval;
+  globalThis.window = {
+    setTimeout: fakeSetTimeout,
+    clearTimeout: fakeClearTimeout,
+    setInterval: fakeSetInterval,
+    clearInterval: fakeClearInterval
+  };
   const copied = [];
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
@@ -280,9 +318,15 @@ try {
         }
       }
     },
-    lastHand: { cards: [{ id: 'card-a', family: 'Scene Frame', summary: 'Door stays blocked.', emphasis: 'critical' }] },
+    lastHand: { handId: 'hand-ui', cards: [{ id: 'card-a', family: 'Scene Frame', summary: 'Door stays blocked.', emphasis: 'critical' }] },
     activity: { phase: 'cardBatchRunning', severity: 'info', chips: ['Utility', 'Cards'] },
-    lastPacket: { diagnostics: { composerLane: 'utility' } }
+    lastPacket: {
+      packetId: 'packet-ui',
+      chatId: 'chat-ui',
+      sceneKey: 'scene-ui',
+      selectedCardRefs: [{ cardId: 'card-a', family: 'Scene Frame' }],
+      diagnostics: { composerLane: 'utility' }
+    }
   };
   const ui = mountRecursionUi({
     runtime: {
@@ -353,6 +397,13 @@ try {
   assert(root.querySelector('[data-recursion-hand-dropdown]'), 'hand dropdown selector is rendered');
   assert(root.querySelector('[data-recursion-settings-panel]'), 'settings panel selector is rendered');
   assert(root.querySelector('[data-recursion-viewer]'), 'viewer selector is rendered');
+  const promptPacketNode = root.querySelector('[data-recursion-prompt-packet]');
+  assert(promptPacketNode, 'prompt packet metadata selector is rendered');
+  const promptPacketMetadata = JSON.parse(promptPacketNode.textContent);
+  assertEqual(promptPacketMetadata.packetId, 'packet-ui', 'prompt packet metadata includes packet id');
+  assertEqual(promptPacketMetadata.handId, 'hand-ui', 'prompt packet metadata includes hand id from the last hand');
+  assertDeepEqual(promptPacketMetadata.selectedCardRefs.map((entry) => entry.cardId), ['card-a'], 'prompt packet metadata includes selected card refs');
+  assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, true, 'foreground ribbon waits briefly before revealing working activity');
   assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working - Auto', 'rendered status text');
   assertEqual(root.querySelector('[data-recursion-hand-count]').textContent, 'Hand 1', 'rendered hand count');
   assertEqual(root.querySelector('[data-recursion-composer]').textContent, 'Utility', 'rendered composer');
@@ -423,6 +474,13 @@ try {
   ui.update();
   ui.update();
   assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Ready - Auto', 'update refreshes status text');
+  runNextTimeout(2000);
+  assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, true, 'success ribbon collapses after the success timeout');
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, true, 'success ribbon stays collapsed while the same success activity is polled');
+  view = { ...view, activity: { phase: 'providerIssue', severity: 'warning', label: 'Provider test failed.' } };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, false, 'warning ribbon appears immediately and persists');
   root.querySelector('[data-recursion-viewer-close]').click();
   assertEqual(closeCount, 1, 'viewer close listener is not duplicated across updates');
 
@@ -454,6 +512,10 @@ try {
   else globalThis.window = previousWindow;
   if (previousNavigator === undefined) delete globalThis.navigator;
   else Object.defineProperty(globalThis, 'navigator', { configurable: true, value: previousNavigator });
+  globalThis.setTimeout = previousSetTimeout;
+  globalThis.clearTimeout = previousClearTimeout;
+  globalThis.setInterval = previousSetInterval;
+  globalThis.clearInterval = previousClearInterval;
 }
 
 console.log('[pass] ui');

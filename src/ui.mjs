@@ -508,10 +508,10 @@ function renderSettingsPanel(panel, view) {
   renderProviderSettings(panel, 'reasoner', settings.providers?.reasoner || {});
 }
 
-function appendViewerSection(viewer, title, data) {
+function appendViewerSection(viewer, title, data, options = {}) {
   const section = el('section', { className: 'recursion-viewer-section' });
   section.appendChild(el('h3', { text: title }));
-  const pre = el('pre');
+  const pre = el('pre', { dataset: asObject(options).dataset || {} });
   pre.textContent = safeJson(data);
   section.appendChild(pre);
   viewer.appendChild(section);
@@ -554,11 +554,12 @@ function isSensitiveViewerKey(key) {
   return ['sections', 'prompt', 'prompttext', 'rawprompt', 'rawresponse', 'apikey', 'authorization', 'cookie', 'password', 'secret'].includes(normalized);
 }
 
-function promptPacketPreview(packet) {
+function promptPacketPreview(packet, hand = {}) {
   const source = asObject(packet);
+  const handSource = asObject(hand);
   return {
     packetId: source.packetId || '',
-    handId: source.handId || '',
+    handId: source.handId || handSource.handId || '',
     chatId: source.chatId || '',
     sceneKey: source.sceneKey || '',
     selectedCardRefs: source.selectedCardRefs || [],
@@ -585,7 +586,9 @@ function renderViewer(viewer, view, model) {
   });
   appendViewerSection(viewer, 'Deck', view.lastHand ?? { cards: [] });
   appendViewerSection(viewer, 'Activity', view.activity ?? null);
-  appendViewerSection(viewer, 'Prompt Packet', promptPacketPreview(view.lastPacket));
+  appendViewerSection(viewer, 'Prompt Packet', promptPacketPreview(view.lastPacket, view.lastHand), {
+    dataset: { recursionPromptPacket: '' }
+  });
   appendViewerSection(viewer, 'Settings', view.settings ?? null);
   appendViewerSection(viewer, 'Providers', view.settings?.providers ?? null);
 }
@@ -686,6 +689,95 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const viewer = root.querySelector('[data-recursion-viewer]');
   const ribbon = root.querySelector('[data-recursion-activity-ribbon]');
   let settingsPanelRendered = false;
+  let ribbonVisible = false;
+  let ribbonRevealTimer = null;
+  let ribbonSuccessTimer = null;
+  let ribbonSuccessTimerKey = '';
+  let collapsedSuccessKey = '';
+
+  function clearRibbonRevealTimer() {
+    if (ribbonRevealTimer !== null && typeof clearTimeout === 'function') clearTimeout(ribbonRevealTimer);
+    ribbonRevealTimer = null;
+  }
+
+  function clearRibbonSuccessTimer() {
+    if (ribbonSuccessTimer !== null && typeof clearTimeout === 'function') clearTimeout(ribbonSuccessTimer);
+    ribbonSuccessTimer = null;
+    ribbonSuccessTimerKey = '';
+  }
+
+  function setRibbonVisible(nextVisible) {
+    ribbonVisible = Boolean(nextVisible);
+    ribbon.hidden = !ribbonVisible;
+  }
+
+  function ribbonActivityKey(view, model) {
+    const activity = view.activity || {};
+    const chips = Array.isArray(activity.chips) ? activity.chips.join(',') : '';
+    return [
+      activity.runId || '',
+      activity.recordedAt || '',
+      activity.phase || '',
+      model.activitySeverity || '',
+      model.activityLabel || '',
+      chips
+    ].map((entry) => String(entry)).join('|');
+  }
+
+  function updateRibbonVisibility(view, model) {
+    const phase = view.activity?.phase;
+    const severity = model.activitySeverity;
+    const hasLabel = model.activityLabel !== '';
+    const idle = !hasLabel || phase === 'idle';
+
+    if (idle) {
+      clearRibbonRevealTimer();
+      clearRibbonSuccessTimer();
+      collapsedSuccessKey = '';
+      setRibbonVisible(false);
+      return;
+    }
+
+    if (severity === 'warning' || severity === 'error') {
+      clearRibbonRevealTimer();
+      clearRibbonSuccessTimer();
+      collapsedSuccessKey = '';
+      setRibbonVisible(true);
+      return;
+    }
+
+    if (severity === 'success' || phase === 'settled') {
+      const successKey = ribbonActivityKey(view, model);
+      clearRibbonRevealTimer();
+      if (collapsedSuccessKey === successKey) {
+        clearRibbonSuccessTimer();
+        setRibbonVisible(false);
+        return;
+      }
+      setRibbonVisible(true);
+      if (ribbonSuccessTimerKey !== successKey) clearRibbonSuccessTimer();
+      if (ribbonSuccessTimer === null && typeof setTimeout === 'function') {
+        ribbonSuccessTimerKey = successKey;
+        ribbonSuccessTimer = setTimeout(() => {
+          ribbonSuccessTimer = null;
+          ribbonSuccessTimerKey = '';
+          collapsedSuccessKey = successKey;
+          setRibbonVisible(false);
+        }, 2000);
+      }
+      return;
+    }
+
+    collapsedSuccessKey = '';
+    clearRibbonSuccessTimer();
+    if (ribbonVisible || ribbonRevealTimer !== null) return;
+    setRibbonVisible(false);
+    if (typeof setTimeout !== 'function') return;
+    ribbonRevealTimer = setTimeout(() => {
+      ribbonRevealTimer = null;
+      setRibbonVisible(true);
+    }, 350);
+  }
 
   root.querySelector('[data-recursion-actions]')?.addEventListener('click', () => {
     actionMenu.hidden = !actionMenu.hidden;
@@ -716,7 +808,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       actionMenu.hidden = true;
     }
     if (Object.prototype.hasOwnProperty.call(dataset, 'recursionCopyPromptPacket')) {
-      const packetText = safeJson(promptPacketPreview(currentView().lastPacket));
+      const view = currentView();
+      const packetText = safeJson(promptPacketPreview(view.lastPacket, view.lastHand));
       runAction(globalThis.navigator?.clipboard?.writeText?.(packetText));
       actionMenu.hidden = true;
     }
@@ -830,8 +923,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     setText(root, '[data-recursion-composer]', model.composerLabel);
     setText(root, '[data-recursion-reasoner]', model.reasonerLabel);
     setText(root, '[data-recursion-ribbon-label]', model.activityLabel);
-    ribbon.hidden = model.activityLabel === '' || view.activity?.phase === 'idle';
     ribbon.dataset.recursionSeverity = model.activitySeverity;
+    updateRibbonVisibility(view, model);
     renderChipList(root.querySelector('[data-recursion-ribbon-chips]'), model.activityChips);
     renderActionMenu(actionMenu, view, model);
     renderHandDropdown(handPanel, view, model);
@@ -849,6 +942,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     update,
     destroy() {
       if (timer !== null && typeof clearInterval === 'function') clearInterval(timer);
+      clearRibbonRevealTimer();
+      clearRibbonSuccessTimer();
       root.remove();
     }
   };

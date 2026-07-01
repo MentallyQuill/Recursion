@@ -221,6 +221,23 @@ function normalizePlanCardJobs(value) {
   }).filter((job) => job.family || job.role || job.roleId);
 }
 
+function normalizePlanLifecycle(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => {
+    const source = asObject(entry);
+    const action = safeText(source.action ?? source.decision, 60);
+    const cardId = safeText(source.cardId ?? source.id, 180);
+    const reason = safeText(source.reason, 240);
+    const decisionId = safeText(source.decisionId, 180);
+    const output = {};
+    if (action) output.action = action;
+    if (cardId) output.cardId = cardId;
+    if (reason) output.reason = reason;
+    if (decisionId) output.decisionId = decisionId;
+    return output;
+  }).filter((entry) => entry.action && entry.cardId);
+}
+
 function mergeSource(fallbackSource) {
   const source = asObject(fallbackSource);
   return {
@@ -248,6 +265,7 @@ function mergePlan(fallbackPlan, arbiterData) {
     action: normalizePlanAction(data.action, fallbackPlan.action),
     sceneStatus: safeText(data.sceneStatus || fallbackPlan.sceneStatus, 80) || fallbackPlan.sceneStatus,
     cardJobs: normalizePlanCardJobs(data.cardJobs) ?? fallbackPlan.cardJobs,
+    lifecycle: normalizePlanLifecycle(data.lifecycle ?? data.cardLifecycle ?? data.cardDecisions),
     reasonerDecision: normalizeReasonerDecision(fallbackPlan.reasonerDecision, data.reasonerDecision),
     budgets,
     diagnostics: mergeDiagnostics(fallbackPlan.diagnostics, data.diagnostics),
@@ -279,6 +297,50 @@ function settingsForPlan(settings, plan) {
     return { ...settings, reasonerUse: 'always' };
   }
   return settings;
+}
+
+function normalizeSceneStatus(value) {
+  const text = cleanString(value, 'same-scene').toLowerCase().replace(/_/g, '-');
+  if (['hard-shift', 'hard-shifted'].includes(text)) return 'hard-shift';
+  if (['soft-shift', 'same-scene', 'unknown', 'uncertain'].includes(text)) return text;
+  return 'same-scene';
+}
+
+function snapshotForPlan(snapshot, plan) {
+  const status = normalizeSceneStatus(plan?.sceneStatus);
+  if (status !== 'hard-shift') return snapshot;
+  const sceneFingerprint = hashJson({
+    previousSceneFingerprint: snapshot.sceneFingerprint,
+    hardShiftAtMesId: snapshot.latestMesId,
+    turnFingerprint: snapshot.turnFingerprint
+  });
+  return {
+    ...snapshot,
+    sceneFingerprint,
+    sceneKey: safeIdentifier(`${snapshot.chatKey}-${sceneFingerprint}`, snapshot.sceneKey)
+  };
+}
+
+function lifecycleForDeck(cards, plan, defaultReason) {
+  const explicit = normalizePlanLifecycle(plan?.lifecycle);
+  if (!explicit.length) {
+    return cards.map((card) => ({
+      action: 'select',
+      cardId: card.id,
+      reason: defaultReason(card)
+    }));
+  }
+  const hasSelection = explicit.some((entry) => entry.action === 'select' || entry.action === 'emphasize');
+  if (!hasSelection) return explicit;
+  const touched = new Set(explicit.map((entry) => entry.cardId));
+  const implicitStows = cards
+    .filter((card) => card?.id && !touched.has(card.id))
+    .map((card) => ({
+      action: 'stow',
+      cardId: card.id,
+      reason: 'not selected by Utility Arbiter'
+    }));
+  return [...implicitStows, ...explicit];
 }
 
 function budgetOr(value, fallback) {
@@ -621,6 +683,12 @@ export function createRecursionRuntime({
     }
   }
 
+  function supersedeActiveRun() {
+    abortActiveRun();
+    activeRunId = null;
+    activeRunController = null;
+  }
+
   function startRun(runId) {
     abortActiveRun();
     activeRunController = typeof AbortController === 'function' ? new AbortController() : null;
@@ -663,15 +731,28 @@ export function createRecursionRuntime({
     return cleanString(value).toLowerCase() === 'reasoner' ? 'reasoner' : 'utility';
   }
 
+  function queuePromptClearAfterSupersede() {
+    runPromptMutationSection(null, () => clearPromptBestEffort(host)).catch(() => {});
+  }
+
   function updateSettings(patch = {}) {
-    return settingsStore.update(patch);
+    const next = settingsStore.update(patch);
+    if (Object.keys(asObject(patch)).length > 0) {
+      supersedeActiveRun();
+      queuePromptClearAfterSupersede();
+    }
+    return next;
   }
 
   function updateProvider(lane, patch = {}) {
+    supersedeActiveRun();
+    queuePromptClearAfterSupersede();
     return settingsStore.updateProvider(providerLane(lane), patch);
   }
 
   function clearProviderKey(lane) {
+    supersedeActiveRun();
+    queuePromptClearAfterSupersede();
     return settingsStore.clearApiKey(providerLane(lane));
   }
 
@@ -696,6 +777,7 @@ export function createRecursionRuntime({
   }
 
   async function testProvider(lane = 'utility') {
+    supersedeActiveRun();
     const resolvedLane = providerLane(lane);
     const checkedAt = nowIso();
     const runId = makeId(`provider-test-${resolvedLane}`);
@@ -982,8 +1064,7 @@ export function createRecursionRuntime({
     const settings = settingsStore.get();
     if (settings.mode === 'off') {
       await waitForExternalMutations();
-      abortActiveRun();
-      clearActiveRun();
+      supersedeActiveRun();
       const clearRunId = makeId('run');
       startRuntimeActivity({
         runId: clearRunId,
@@ -1014,6 +1095,10 @@ export function createRecursionRuntime({
       const plan = await askUtilityArbiter({ runId, snapshot, settings, fallbackPlan, signal });
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastPlan = plan;
+      const sceneSnapshot = snapshotForPlan(snapshot, plan);
+      if (sceneSnapshot !== snapshot) {
+        lastSnapshot = sceneSnapshot;
+      }
       const action = planAction(plan);
       if (action === 'skip') {
         const clear = await runPromptMutationSection(runId, () => clearPromptBestEffort(host));
@@ -1038,13 +1123,13 @@ export function createRecursionRuntime({
         cardCounts: { requested: plan.cardJobs?.length || 0 },
         chips: ['Cards']
       });
-      const cache = await loadSceneCacheSafe(runId, snapshot);
+      const cache = await loadSceneCacheSafe(runId, sceneSnapshot);
       if (!isActiveRun(runId)) return supersededResult(runId);
-      const cacheCards = sanitizedCacheCards(runId, snapshot, cache?.cards);
+      const cacheCards = sanitizedCacheCards(runId, sceneSnapshot, cache?.cards);
       const reuseCacheOnly = action === 'reuse-cache' && cacheCards.length > 0;
-      const providerCards = reuseCacheOnly ? [] : (await generatePlanCards({ runId, plan, snapshot, signal })).map(sanitizeGeneratedCard);
+      const providerCards = reuseCacheOnly ? [] : (await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, signal })).map(sanitizeGeneratedCard);
       if (!isActiveRun(runId)) return supersededResult(runId);
-      const generatedCards = reuseCacheOnly ? [] : localCards(snapshot).map(sanitizeGeneratedCard);
+      const generatedCards = reuseCacheOnly ? [] : localCards(sceneSnapshot).map(sanitizeGeneratedCard);
       if (action === 'reuse-cache' && !cacheCards.length) {
         const clear = await runPromptMutationSection(runId, () => clearPromptBestEffort(host));
         if (clear?.superseded) return clear;
@@ -1062,27 +1147,14 @@ export function createRecursionRuntime({
       }
       const deck = applyCardPlan(cacheCards, {
         acceptedCards: [...generatedCards, ...providerCards],
-        lifecycle: (reuseCacheOnly ? cacheCards : [...generatedCards, ...providerCards]).map((card) => ({
-          action: 'select',
-          cardId: card.id,
-          reason: reuseCacheOnly
+        lifecycle: lifecycleForDeck(
+          reuseCacheOnly ? cacheCards : [...cacheCards, ...generatedCards, ...providerCards],
+          plan,
+          (card) => (reuseCacheOnly
             ? 'reused scene cache'
-            : (providerCards.some((entry) => entry.id === card.id) ? 'utility generated card' : 'current fallback hand')
-        }))
+            : (providerCards.some((entry) => entry.id === card.id) ? 'utility generated card' : 'current fallback hand'))
+        )
       });
-      if (!isActiveRun(runId)) return supersededResult(runId);
-      if (!reuseCacheOnly) {
-        await runStorageSaveSection(runId, () => saveSceneCacheSafe(runId, snapshot, {
-          cacheState: 'active',
-          source: {
-            chatIdHash: hashJson(snapshot.chatId),
-            latestMesId: snapshot.latestMesId,
-            sceneFingerprint: snapshot.sceneFingerprint,
-            chatWindowHash: hashJson(snapshot.messages)
-          },
-          cards: deck.cards
-        }));
-      }
       if (!isActiveRun(runId)) return supersededResult(runId);
 
       stageRuntimeActivity({
@@ -1096,9 +1168,23 @@ export function createRecursionRuntime({
         maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700)
       });
 
+      await runStorageSaveSection(runId, () => saveSceneCacheSafe(runId, sceneSnapshot, {
+        cacheState: 'active',
+        source: {
+          chatIdHash: hashJson(sceneSnapshot.chatId),
+          latestMesId: sceneSnapshot.latestMesId,
+          sceneFingerprint: sceneSnapshot.sceneFingerprint,
+          chatWindowHash: hashJson(sceneSnapshot.messages),
+          sceneStatus: plan.sceneStatus
+        },
+        cards: deck.cards,
+        latestHand: hand
+      }));
+      if (!isActiveRun(runId)) return supersededResult(runId);
+
       const packet = await composePromptPacket({
         hand,
-        snapshot,
+        snapshot: sceneSnapshot,
         settings: settingsForPlan(settings, plan),
         generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId),
         activity,
@@ -1137,12 +1223,12 @@ export function createRecursionRuntime({
         const install = await installPrompt(host, packet);
         if (!isActiveRun(runId)) return supersededResult(runId);
         const installOk = install?.ok !== false;
-        await appendJournalSafe(runId, snapshot.chatKey, {
+        await appendJournalSafe(runId, sceneSnapshot.chatKey, {
           event: installOk ? 'prompt.installed' : 'prompt.install_failed',
           severity: installOk ? 'info' : 'warn',
           summary: installSummary(install),
           runId,
-          sceneKey: snapshot.sceneKey,
+          sceneKey: sceneSnapshot.sceneKey,
           details: installJournalDetails(install),
           hashes: { promptPacketHash: hashJson(packet) }
         });
@@ -1173,6 +1259,10 @@ export function createRecursionRuntime({
   return {
     storage,
     prepareForGeneration,
+    async dispose() {
+      supersedeActiveRun();
+      await waitForExternalMutations();
+    },
     async refreshScene() {
       return prepareForGeneration({ userMessage: 'manual refresh' });
     },

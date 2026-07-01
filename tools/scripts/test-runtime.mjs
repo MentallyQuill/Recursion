@@ -107,7 +107,7 @@ function createRuntimeHarness({
   const view = runtime.view();
   assertEqual(runtime.storage, storage, 'runtime exposes storage repository');
   assertEqual(result.ok, true, 'auto mode returns ok');
-  assertEqual(calls.snapshot, 1, 'auto mode reads snapshot');
+  assertEqual(calls.snapshot, 3, 'auto mode reads snapshot and rechecks before compose and install');
   assertEqual(installed.length, 1, 'auto mode installs one prompt');
   assert(view.lastHand.cards.length > 0, 'hand available in view');
   assert(view.lastPacket.sections.sceneBrief.includes('The lamp breaks.'), 'scene frame uses latest visible message');
@@ -354,6 +354,92 @@ function createRuntimeHarness({
 }
 
 {
+  let snapshotReads = 0;
+  const firstTurn = {
+    chatId: 'stale-chat',
+    chatKey: 'stale-chat',
+    sceneKey: 'stale-scene',
+    sceneFingerprint: 'stale-scene',
+    turnFingerprint: 'stale-turn-1',
+    latestMesId: 10,
+    messages: [
+      { mesid: 10, role: 'user', text: 'First pending turn.', visible: true }
+    ]
+  };
+  const movedTurn = {
+    ...firstTurn,
+    turnFingerprint: 'stale-turn-2',
+    latestMesId: 11,
+    messages: [
+      ...firstTurn.messages,
+      { mesid: 11, role: 'assistant', text: 'The host has moved on.', visible: true }
+    ]
+  };
+  const { runtime, calls, installed, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      snapshotReads += 1;
+      return snapshotReads === 1 ? firstTurn : movedTurn;
+    },
+    hostPrompt: {
+      async install() {
+        throw new Error('stale prompt install should not be called');
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'First pending turn.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'stale prompt install returns nonfatal ok');
+  assertEqual(result.skipped, true, 'stale prompt install is skipped');
+  assertEqual(result.reason, 'stale-snapshot', 'stale prompt install reports stale snapshot reason');
+  assertEqual(calls.snapshot, 2, 'runtime rechecks host snapshot before prompt install');
+  assertEqual(calls.install, 0, 'stale snapshot does not call host prompt install');
+  assertEqual(installed.length, 0, 'stale snapshot does not write prompt packet');
+  assertEqual(view.activity.severity, 'warning', 'stale install skip surfaces warning activity');
+  assert(view.activity.label.includes('Recursion skipped'), 'stale install skip has visible status label');
+  const journal = await storage.loadRunJournal(firstTurn.chatKey);
+  assertEqual(journal.entries[0].event, 'prompt.install_skipped', 'stale install skip is journaled');
+}
+
+{
+  let snapshotReads = 0;
+  const currentTurn = {
+    chatId: 'recheck-fail-chat',
+    chatKey: 'recheck-fail-chat',
+    sceneKey: 'recheck-fail-scene',
+    sceneFingerprint: 'recheck-fail-scene',
+    turnFingerprint: 'recheck-fail-turn',
+    latestMesId: 20,
+    messages: [
+      { mesid: 20, role: 'user', text: 'Snapshot recheck should fail closed.', visible: true }
+    ]
+  };
+  const { runtime, calls, installed, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      snapshotReads += 1;
+      if (snapshotReads === 1) return currentTurn;
+      throw new Error('snapshot recheck failed with Bearer recheck-token and sk-recheck-runtime');
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Snapshot recheck should fail closed.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'failed snapshot recheck returns nonfatal ok');
+  assertEqual(result.skipped, true, 'failed snapshot recheck skips prompt install');
+  assertEqual(result.reason, 'snapshot-recheck-failed', 'failed snapshot recheck reports reason');
+  assertEqual(calls.snapshot, 2, 'failed recheck still attempts final host snapshot');
+  assertEqual(calls.install, 0, 'failed snapshot recheck does not call host prompt install');
+  assertEqual(installed.length, 0, 'failed snapshot recheck does not write prompt packet');
+  assertEqual(view.activity.severity, 'warning', 'failed snapshot recheck surfaces warning activity');
+  assertNoSecretText(result, 'snapshot recheck failure result');
+  assertNoSecretText(view.activity, 'snapshot recheck failure activity');
+  const journal = await storage.loadRunJournal(currentTurn.chatKey);
+  assertEqual(journal.entries[0].event, 'prompt.install_skipped', 'failed snapshot recheck skip is journaled');
+  assertEqual(journal.entries[0].details.reason, 'snapshot-recheck-failed', 'failed snapshot recheck journal records reason');
+  assertNoSecretText(journal.entries[0], 'snapshot recheck failure journal');
+}
+
+{
   const activity = createActivityReporter();
   const storage = {
     async loadSceneCache() {
@@ -548,6 +634,343 @@ function createRuntimeHarness({
   assertEqual(result.ok, true, 'pending user message object merge run skips safely');
   assertEqual(pendingMessage?.mesid, 12, 'pending user turn preserves host mesid');
   assertEqual(view.lastSnapshot.latestMesId, 12, 'pending user turn preserves host latest message id');
+}
+
+{
+  let snapshotReads = 0;
+  const pendingText = 'The committed pending turn should still install.';
+  const initialSnapshot = {
+    chatId: 'pending-install-chat',
+    chatKey: 'pending-install-chat',
+    sceneKey: 'pending-install-scene',
+    sceneFingerprint: 'pending-install-scene-fp',
+    turnFingerprint: 'pending-install-before-host-fp',
+    latestMesId: 30,
+    messages: [
+      { mesid: 30, role: 'assistant', text: 'The prior assistant reply is committed.', visible: true }
+    ]
+  };
+  const committedSnapshot = {
+    ...initialSnapshot,
+    turnFingerprint: 'host-committed-pending-fp',
+    latestMesId: 31,
+    messages: [
+      ...initialSnapshot.messages,
+      { mesid: 31, role: 'user', text: pendingText, visible: true }
+    ]
+  };
+  const { runtime, calls, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      snapshotReads += 1;
+      return snapshotReads === 1 ? initialSnapshot : committedSnapshot;
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: { mesid: 31, text: pendingText } });
+  assertEqual(result.ok, true, 'committed pending user turn is still fresh enough to install');
+  assertEqual(result.skipped, undefined, 'committed pending user turn is not treated as stale');
+  assertEqual(calls.snapshot, 3, 'committed pending install reads initial, compose, and install snapshots');
+  assertEqual(installed.length, 1, 'committed pending user turn installs prompt');
+  assert(JSON.stringify(installed[0]).includes(pendingText), 'installed prompt includes committed pending user turn');
+}
+
+{
+  let snapshotReads = 0;
+  const pendingText = 'The committed pending hard shift should still install.';
+  const initialSnapshot = {
+    chatId: 'pending-hard-shift-chat',
+    chatKey: 'pending-hard-shift-chat',
+    sceneKey: 'pending-hard-shift-scene',
+    sceneFingerprint: 'pending-hard-shift-scene-fp',
+    turnFingerprint: 'pending-hard-shift-before-host-fp',
+    latestMesId: 40,
+    messages: [
+      { mesid: 40, role: 'assistant', text: 'The prior scene ends.', visible: true }
+    ]
+  };
+  const committedSnapshot = {
+    ...initialSnapshot,
+    turnFingerprint: 'host-committed-pending-hard-shift-fp',
+    latestMesId: 41,
+    messages: [
+      ...initialSnapshot.messages,
+      { mesid: 41, role: 'user', text: pendingText, visible: true }
+    ]
+  };
+  const { runtime, installed, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      snapshotReads += 1;
+      return snapshotReads === 1 ? initialSnapshot : committedSnapshot;
+    },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'pending hard-shift install only needs Utility Arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'compose-brief',
+            sceneStatus: 'hard-shift',
+            diagnostics: ['pending-hard-shift-commit']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: { mesid: 41, text: pendingText } });
+  const expectedCommittedSceneFingerprint = hashJson({
+    previousSceneFingerprint: committedSnapshot.sceneFingerprint,
+    hardShiftAtMesId: committedSnapshot.latestMesId,
+    turnFingerprint: committedSnapshot.turnFingerprint
+  });
+  const expectedCommittedSceneKey = `${committedSnapshot.chatKey}-${expectedCommittedSceneFingerprint}`;
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'committed pending hard-shift turn is still fresh enough to install');
+  assertEqual(result.skipped, undefined, 'committed pending hard-shift turn is not treated as stale');
+  assertEqual(installed.length, 1, 'committed pending hard-shift turn installs prompt');
+  assertEqual(view.lastSnapshot.sceneFingerprint, expectedCommittedSceneFingerprint, 'committed pending hard-shift snapshot becomes canonical');
+  assertEqual(view.lastPacket.sceneFingerprint, expectedCommittedSceneFingerprint, 'committed pending hard-shift packet uses canonical scene fingerprint');
+  const committedCache = await storage.loadSceneCache(committedSnapshot.chatKey, expectedCommittedSceneKey);
+  assertEqual(committedCache.latestHand?.handId, view.lastHand.handId, 'committed pending hard-shift cache saves under canonical scene key');
+}
+
+{
+  let snapshotReads = 0;
+  const pendingText = 'The late committed hard shift should recompose before install.';
+  const initialSnapshot = {
+    chatId: 'late-hard-shift-chat',
+    chatKey: 'late-hard-shift-chat',
+    sceneKey: 'late-hard-shift-scene',
+    sceneFingerprint: 'late-hard-shift-scene-fp',
+    turnFingerprint: 'late-hard-shift-before-host-fp',
+    latestMesId: 50,
+    messages: [
+      { mesid: 50, role: 'assistant', text: 'The old scene is still closing.', visible: true }
+    ]
+  };
+  const committedSnapshot = {
+    ...initialSnapshot,
+    turnFingerprint: 'host-late-committed-hard-shift-fp',
+    latestMesId: 51,
+    messages: [
+      ...initialSnapshot.messages,
+      { mesid: 51, role: 'user', text: pendingText, visible: true }
+    ]
+  };
+  const { runtime, installed, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      snapshotReads += 1;
+      return snapshotReads <= 2 ? initialSnapshot : committedSnapshot;
+    },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'late pending hard-shift install only needs Utility Arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'compose-brief',
+            sceneStatus: 'hard-shift',
+            diagnostics: ['late-pending-hard-shift-commit']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: { mesid: 51, text: pendingText } });
+  const expectedCommittedSceneFingerprint = hashJson({
+    previousSceneFingerprint: committedSnapshot.sceneFingerprint,
+    hardShiftAtMesId: committedSnapshot.latestMesId,
+    turnFingerprint: committedSnapshot.turnFingerprint
+  });
+  const expectedCommittedSceneKey = `${committedSnapshot.chatKey}-${expectedCommittedSceneFingerprint}`;
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'late committed pending hard-shift turn still installs');
+  assertEqual(installed.length, 1, 'late committed pending hard-shift turn installs one prompt');
+  assertEqual(view.lastSnapshot.sceneFingerprint, expectedCommittedSceneFingerprint, 'late committed pending hard-shift snapshot becomes canonical');
+  assertEqual(view.lastPacket.sceneFingerprint, expectedCommittedSceneFingerprint, 'late committed pending hard-shift packet is recomposed with canonical scene fingerprint');
+  const committedCache = await storage.loadSceneCache(committedSnapshot.chatKey, expectedCommittedSceneKey);
+  assertEqual(committedCache.latestHand?.handId, view.lastHand.handId, 'late committed pending hard-shift cache saves under canonical scene key');
+}
+
+{
+  let snapshotReads = 0;
+  const pendingText = 'The final moved hard shift must not install.';
+  const initialSnapshot = {
+    chatId: 'final-move-chat',
+    chatKey: 'final-move-chat',
+    sceneKey: 'final-move-scene',
+    sceneFingerprint: 'final-move-scene-fp',
+    turnFingerprint: 'final-move-before-host-fp',
+    latestMesId: 60,
+    messages: [
+      { mesid: 60, role: 'assistant', text: 'The old scene waits.', visible: true }
+    ]
+  };
+  const committedSnapshot = {
+    ...initialSnapshot,
+    turnFingerprint: 'host-final-move-committed-fp',
+    latestMesId: 61,
+    messages: [
+      ...initialSnapshot.messages,
+      { mesid: 61, role: 'user', text: pendingText, visible: true }
+    ]
+  };
+  const movedSnapshot = {
+    ...committedSnapshot,
+    turnFingerprint: 'host-final-move-after-recompose-fp',
+    latestMesId: 62,
+    messages: [
+      ...committedSnapshot.messages,
+      { mesid: 62, role: 'assistant', text: 'The host moved again before install.', visible: true }
+    ]
+  };
+  const { runtime, calls, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      snapshotReads += 1;
+      if (snapshotReads <= 2) return initialSnapshot;
+      if (snapshotReads === 3) return committedSnapshot;
+      return movedSnapshot;
+    },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'final move hard-shift install only needs Utility Arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'compose-brief',
+            sceneStatus: 'hard-shift',
+            diagnostics: ['final-move-after-recompose']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: { mesid: 61, text: pendingText } });
+  assertEqual(result.ok, true, 'final moved hard-shift skip is nonfatal');
+  assertEqual(result.skipped, true, 'final moved hard-shift skips prompt install');
+  assertEqual(result.reason, 'stale-snapshot', 'final moved hard-shift reports stale snapshot');
+  assertEqual(calls.snapshot, 4, 'final moved hard-shift rechecks after recompose');
+  assertEqual(calls.install, 0, 'final moved hard-shift does not call host prompt install');
+  assertEqual(installed.length, 0, 'final moved hard-shift does not write prompt packet');
+}
+
+{
+  let snapshotReads = 0;
+  const unchangedPrefix = 'A'.repeat(950);
+  const initialText = `${unchangedPrefix} old visible ending`;
+  const editedText = `${unchangedPrefix} new visible ending`;
+  const initialSnapshot = {
+    chatId: 'long-edit-chat',
+    chatKey: 'long-edit-chat',
+    sceneKey: 'long-edit-scene',
+    sceneFingerprint: 'long-edit-scene-fp',
+    turnFingerprint: 'long-edit-before-fp',
+    latestMesId: 70,
+    messages: [
+      { mesid: 70, role: 'user', text: initialText, visible: true }
+    ]
+  };
+  const editedSnapshot = {
+    ...initialSnapshot,
+    turnFingerprint: 'long-edit-after-fp',
+    messages: [
+      { mesid: 70, role: 'user', text: editedText, visible: true }
+    ]
+  };
+  const { runtime, calls, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      snapshotReads += 1;
+      return snapshotReads === 1 ? initialSnapshot : editedSnapshot;
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: initialText });
+  assertEqual(result.ok, true, 'long visible edit skip is nonfatal');
+  assertEqual(result.skipped, true, 'long visible edit skips prompt install');
+  assertEqual(result.reason, 'stale-snapshot', 'long visible edit reports stale snapshot');
+  assertEqual(calls.install, 0, 'long visible edit does not call host prompt install');
+  assertEqual(installed.length, 0, 'long visible edit does not write prompt packet');
+}
+
+{
+  let snapshotReads = 0;
+  const unchangedPrefix = 'B'.repeat(1300);
+  const initialText = `${unchangedPrefix} old beyond runtime cap`;
+  const editedText = `${unchangedPrefix} new beyond runtime cap`;
+  const initialSnapshot = {
+    chatId: 'runtime-cap-edit-chat',
+    chatKey: 'runtime-cap-edit-chat',
+    sceneKey: 'runtime-cap-edit-scene',
+    sceneFingerprint: 'runtime-cap-edit-scene-fp',
+    turnFingerprint: 'runtime-cap-edit-before-fp',
+    latestMesId: 75,
+    messages: [
+      { mesid: 75, role: 'user', text: initialText, visible: true }
+    ]
+  };
+  const editedSnapshot = {
+    ...initialSnapshot,
+    turnFingerprint: 'runtime-cap-edit-after-fp',
+    messages: [
+      { mesid: 75, role: 'user', text: editedText, visible: true }
+    ]
+  };
+  const { runtime, calls, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      snapshotReads += 1;
+      return snapshotReads === 1 ? initialSnapshot : editedSnapshot;
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: initialText });
+  assertEqual(result.ok, true, 'runtime-cap visible edit skip is nonfatal');
+  assertEqual(result.skipped, true, 'runtime-cap visible edit skips prompt install');
+  assertEqual(result.reason, 'stale-snapshot', 'runtime-cap visible edit reports stale snapshot');
+  assertEqual(calls.install, 0, 'runtime-cap visible edit does not call host prompt install');
+  assertEqual(installed.length, 0, 'runtime-cap visible edit does not write prompt packet');
+}
+
+{
+  let snapshotReads = 0;
+  const visibleText = 'Visible turn is unchanged while hidden host state advances.';
+  const initialSnapshot = {
+    chatId: 'hidden-bookkeeping-chat',
+    chatKey: 'hidden-bookkeeping-chat',
+    sceneKey: 'hidden-bookkeeping-scene',
+    sceneFingerprint: 'hidden-bookkeeping-scene-fp',
+    turnFingerprint: 'hidden-bookkeeping-before-fp',
+    latestMesId: 80,
+    messages: [
+      { mesid: 80, role: 'user', text: visibleText, visible: true }
+    ]
+  };
+  const hiddenAdvancedSnapshot = {
+    ...initialSnapshot,
+    turnFingerprint: 'hidden-bookkeeping-after-fp',
+    latestMesId: 81,
+    messages: [
+      ...initialSnapshot.messages,
+      { mesid: 81, role: 'assistant', text: 'Hidden bookkeeping update.', visible: false }
+    ]
+  };
+  const { runtime, calls, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      snapshotReads += 1;
+      return snapshotReads === 1 ? initialSnapshot : hiddenAdvancedSnapshot;
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: visibleText });
+  assertEqual(result.ok, true, 'hidden host bookkeeping still installs');
+  assertEqual(result.skipped, undefined, 'hidden host bookkeeping is not treated as stale');
+  assertEqual(calls.snapshot, 3, 'hidden host bookkeeping uses normal install recheck cadence');
+  assertEqual(calls.install, 1, 'hidden host bookkeeping calls host prompt install');
+  assertEqual(installed.length, 1, 'hidden host bookkeeping writes one prompt packet');
 }
 
 {
@@ -1580,7 +2003,13 @@ function createRuntimeHarness({
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Fallback plan.' });
   const view = runtime.view();
-  const expectedSnapshotHash = hashJson(view.lastSnapshot);
+  const expectedSnapshotHash = hashJson({
+    ...view.lastSnapshot,
+    messages: view.lastSnapshot.messages.map((message) => ({
+      ...message,
+      textHash: hashJson(message.text)
+    }))
+  });
   assertEqual(result.ok, true, 'arbiter exception falls back without throwing');
   assertEqual(routerCalls.length, 1, 'arbiter attempted once');
   assert(view.lastPlan.diagnostics.includes('local-fallback-plan'), 'local fallback diagnostic retained');
@@ -1761,14 +2190,15 @@ function createRuntimeHarness({
     storage,
     snapshot: () => {
       snapshotCalls += 1;
+      const snapshotRun = snapshotCalls <= 2 ? 1 : 2;
       return {
-        chatId: `save-run-${snapshotCalls}`,
-        chatKey: `save-run-${snapshotCalls}`,
-        sceneKey: `save-scene-${snapshotCalls}`,
-        sceneFingerprint: `save-scene-${snapshotCalls}`,
-        turnFingerprint: `save-turn-${snapshotCalls}`,
-        latestMesId: snapshotCalls,
-        messages: [{ mesid: snapshotCalls, role: 'user', text: snapshotCalls === 1 ? 'Older save packet.' : 'Newer save packet.', visible: true }]
+        chatId: `save-run-${snapshotRun}`,
+        chatKey: `save-run-${snapshotRun}`,
+        sceneKey: `save-scene-${snapshotRun}`,
+        sceneFingerprint: `save-scene-${snapshotRun}`,
+        turnFingerprint: `save-turn-${snapshotRun}`,
+        latestMesId: snapshotRun,
+        messages: [{ mesid: snapshotRun, role: 'user', text: snapshotRun === 1 ? 'Older save packet.' : 'Newer save packet.', visible: true }]
       };
     }
   });
@@ -1776,7 +2206,7 @@ function createRuntimeHarness({
   await waitUntil(() => typeof releaseFirstSave === 'function', 'first run did not enter scene cache save');
   const second = runtime.prepareForGeneration({ userMessage: 'Newer save packet.' });
   await Promise.resolve();
-  assertEqual(snapshotCalls, 1, 'newer run waits for in-flight scene cache save before snapshot');
+  assertEqual(snapshotCalls, 2, 'newer run waits for in-flight scene cache save before snapshot');
   assertEqual(sideEffects.length, 0, 'blocked first save has not committed yet');
   releaseFirstSave();
   const [firstResult, secondResult] = await Promise.all([first, second]);
@@ -2088,14 +2518,15 @@ function createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     snapshot: () => {
       snapshotCalls += 1;
+      const snapshotRun = snapshotCalls === 1 ? 1 : 2;
       return {
-        chatId: `clear-run-${snapshotCalls}`,
-        chatKey: `clear-run-${snapshotCalls}`,
-        sceneKey: `clear-scene-${snapshotCalls}`,
-        sceneFingerprint: `clear-scene-${snapshotCalls}`,
-        turnFingerprint: `clear-turn-${snapshotCalls}`,
-        latestMesId: snapshotCalls,
-        messages: [{ mesid: snapshotCalls, role: 'user', text: snapshotCalls === 1 ? 'Older clear packet.' : 'Newer install after clear.', visible: true }]
+        chatId: `clear-run-${snapshotRun}`,
+        chatKey: `clear-run-${snapshotRun}`,
+        sceneKey: `clear-scene-${snapshotRun}`,
+        sceneFingerprint: `clear-scene-${snapshotRun}`,
+        turnFingerprint: `clear-turn-${snapshotRun}`,
+        latestMesId: snapshotRun,
+        messages: [{ mesid: snapshotRun, role: 'user', text: snapshotRun === 1 ? 'Older clear packet.' : 'Newer install after clear.', visible: true }]
       };
     },
     hostPrompt: {
@@ -2149,14 +2580,15 @@ function createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     snapshot: () => {
       snapshotCalls += 1;
+      const snapshotRun = snapshotCalls <= 3 ? 1 : 2;
       return {
-        chatId: `install-run-${snapshotCalls}`,
-        chatKey: `install-run-${snapshotCalls}`,
-        sceneKey: `install-scene-${snapshotCalls}`,
-        sceneFingerprint: `install-scene-${snapshotCalls}`,
-        turnFingerprint: `install-turn-${snapshotCalls}`,
-        latestMesId: snapshotCalls,
-        messages: [{ mesid: snapshotCalls, role: 'user', text: snapshotCalls === 1 ? 'Older install packet.' : 'Newer install packet.', visible: true }]
+        chatId: `install-run-${snapshotRun}`,
+        chatKey: `install-run-${snapshotRun}`,
+        sceneKey: `install-scene-${snapshotRun}`,
+        sceneFingerprint: `install-scene-${snapshotRun}`,
+        turnFingerprint: `install-turn-${snapshotRun}`,
+        latestMesId: snapshotRun,
+        messages: [{ mesid: snapshotRun, role: 'user', text: snapshotRun === 1 ? 'Older install packet.' : 'Newer install packet.', visible: true }]
       };
     },
     hostPrompt: {
@@ -2181,7 +2613,7 @@ function createRuntimeHarness({
   await waitUntil(() => typeof releaseFirstInstall === 'function', 'first run did not enter prompt install');
   const second = runtime.prepareForGeneration({ userMessage: 'Newer install packet.' });
   await Promise.resolve();
-  assertEqual(snapshotCalls, 1, 'newer run waits for in-flight prompt install before snapshot');
+  assertEqual(snapshotCalls, 3, 'newer run waits for in-flight prompt install before snapshot');
   assertEqual(sideEffects.length, 0, 'blocked first install has not produced host side effect yet');
   releaseFirstInstall();
   const [firstResult, secondResult] = await Promise.all([first, second]);

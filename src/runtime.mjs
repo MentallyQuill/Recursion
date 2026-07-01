@@ -10,6 +10,7 @@ const DEFAULT_CHAT_ID = 'chat';
 const DEFAULT_SCENE_KEY = 'scene';
 const INSTALL_FAILURE_LABEL = 'Prompt install failed. Generation will continue without Recursion.';
 const CLEAR_FAILURE_LABEL = 'Prompt clear failed. Recursion skipped without clearing host prompt.';
+const STALE_INSTALL_LABEL = 'Recursion skipped: host turn changed before prompt install.';
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const PROVIDER_VISIBLE_MESSAGE_LIMIT = 12;
 const PROVIDER_MESSAGE_TEXT_LIMIT = 900;
@@ -46,6 +47,7 @@ function numberOr(value, fallback = 0) {
 function normalizeMessage(message, index) {
   const source = asObject(message);
   const mesid = numberOr(source.mesid ?? source.id ?? source.messageId, index);
+  const rawText = source.text ?? source.mes ?? source.content ?? '';
   const role = cleanString(
     source.role ?? (source.is_user === true ? 'user' : (source.is_system === true ? 'system' : 'assistant')),
     'assistant'
@@ -53,7 +55,8 @@ function normalizeMessage(message, index) {
   return {
     mesid,
     role,
-    text: safeText(source.text ?? source.mes ?? source.content ?? '', 1200),
+    text: safeText(rawText, 1200),
+    textHash: hashJson(String(rawText ?? '')),
     visible: source.visible === false || source.hidden === true ? false : true
   };
 }
@@ -148,13 +151,18 @@ function latestVisibleUserMessage(snapshot) {
 
 function normalizePendingUserMessage(userMessage) {
   if (typeof userMessage === 'string') {
-    return { text: safeText(userMessage, PROVIDER_MESSAGE_TEXT_LIMIT) };
+    return {
+      text: safeText(userMessage, PROVIDER_MESSAGE_TEXT_LIMIT),
+      textHash: hashJson(userMessage)
+    };
   }
   const source = asObject(userMessage);
-  const text = safeText(source.text ?? source.mes ?? '', PROVIDER_MESSAGE_TEXT_LIMIT);
+  const rawText = source.text ?? source.mes ?? '';
+  const text = safeText(rawText, PROVIDER_MESSAGE_TEXT_LIMIT);
   const mesid = Number(source.mesid ?? source.id ?? source.messageId);
   return {
     text,
+    textHash: hashJson(String(rawText ?? '')),
     ...(Number.isFinite(mesid) ? { mesid } : {})
   };
 }
@@ -170,7 +178,10 @@ function snapshotWithPendingUserMessage(snapshot, userMessage) {
     ? pending.mesid
     : currentLatestMesId + 1;
   const alreadyVisible = latest?.role === 'user'
-    && safeText(latest?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingText
+    && (
+      (latest?.textHash && pending.textHash && latest.textHash === pending.textHash)
+      || safeText(latest?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingText
+    )
     && (!Number.isFinite(pending.mesid) || numberOr(latest?.mesid, null) === pending.mesid);
   if (alreadyVisible) return snapshot;
   const nextMessages = [
@@ -179,6 +190,7 @@ function snapshotWithPendingUserMessage(snapshot, userMessage) {
       mesid: pendingMesId,
       role: 'user',
       text: pendingText,
+      textHash: pending.textHash,
       visible: true
     }
   ];
@@ -369,6 +381,66 @@ function snapshotForPlan(snapshot, plan) {
     ...snapshot,
     sceneFingerprint,
     sceneKey: safeIdentifier(`${snapshot.chatKey}-${sceneFingerprint}`, snapshot.sceneKey)
+  };
+}
+
+function promptInstallFreshnessSignature(snapshot) {
+  const source = asObject(snapshot);
+  const visibleMessages = Array.isArray(source.messages)
+    ? source.messages
+        .filter((message) => message?.visible !== false)
+        .map((message) => ({
+          mesid: numberOr(message?.mesid, 0),
+          role: safeProviderRole(message?.role),
+          textHash: String(message?.textHash || hashJson(String(message?.text ?? '')))
+        }))
+    : [];
+  return {
+    chatKey: safeText(source.chatKey || source.chatId || DEFAULT_CHAT_ID, 160) || DEFAULT_CHAT_ID,
+    sceneKey: safeText(source.sceneKey || DEFAULT_SCENE_KEY, 160) || DEFAULT_SCENE_KEY,
+    sceneFingerprint: safeText(source.sceneFingerprint || '', 180),
+    latestMesId: numberOr(source.latestMesId, 0),
+    visibleMessagesHash: hashJson(visibleMessages)
+  };
+}
+
+function snapshotsMatchForPromptInstall(expected, current) {
+  const expectedSignature = promptInstallFreshnessSignature(expected);
+  const currentSignature = promptInstallFreshnessSignature(current);
+  return expectedSignature.chatKey === currentSignature.chatKey
+    && expectedSignature.visibleMessagesHash === currentSignature.visibleMessagesHash;
+}
+
+function promptSnapshotMetadataMatches(expected, current) {
+  return expected?.chatId === current?.chatId
+    && expected?.chatKey === current?.chatKey
+    && expected?.sceneKey === current?.sceneKey
+    && expected?.sceneFingerprint === current?.sceneFingerprint
+    && expected?.turnFingerprint === current?.turnFingerprint
+    && expected?.latestMesId === current?.latestMesId;
+}
+
+function rebaseCardsForSnapshot(cards, snapshot, plan) {
+  return (Array.isArray(cards) ? cards : []).map((card) => normalizeCard(card, {
+    sceneId: snapshot.sceneKey,
+    chatId: snapshot.chatId,
+    snapshotHash: plan?.snapshotHash || hashJson(snapshot),
+    lastMesId: snapshot.latestMesId
+  }));
+}
+
+function sceneCachePayload(snapshot, deck, hand, plan) {
+  return {
+    cacheState: 'active',
+    source: {
+      chatIdHash: hashJson(snapshot.chatId),
+      latestMesId: snapshot.latestMesId,
+      sceneFingerprint: snapshot.sceneFingerprint,
+      chatWindowHash: hashJson(snapshot.messages),
+      sceneStatus: plan.sceneStatus
+    },
+    cards: deck.cards,
+    latestHand: hand
   };
 }
 
@@ -1172,6 +1244,84 @@ export function createRecursionRuntime({
     });
   }
 
+  async function recheckPromptInstallSnapshot(runId, expectedSnapshot, plan, pendingUserMessage) {
+    try {
+      const currentSnapshot = snapshotForPlan(
+        snapshotWithPendingUserMessage(await readSnapshot(), pendingUserMessage),
+        plan
+      );
+      if (!snapshotsMatchForPromptInstall(expectedSnapshot, currentSnapshot)) {
+        return { ok: false, reason: 'stale-snapshot', currentSnapshot };
+      }
+      return { ok: true, snapshot: currentSnapshot };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: 'snapshot-recheck-failed',
+        error: sanitizePromptError(
+          error,
+          'RECURSION_PROMPT_SNAPSHOT_RECHECK_FAILED',
+          'Prompt install snapshot recheck failed.'
+        )
+      };
+    }
+  }
+
+  async function skipPromptInstallAfterFreshnessFailure(runId, {
+    reason,
+    sceneSnapshot,
+    currentSnapshot = null,
+    packet = null,
+    hand = null,
+    plan = null,
+    error = null
+  }) {
+    const install = {
+      ok: true,
+      skipped: true,
+      reason,
+      ...(error ? { error } : {})
+    };
+    const details = {
+      status: 'skipped',
+      reason,
+      ...(error ? { error } : {}),
+      expected: promptInstallFreshnessSignature(sceneSnapshot),
+      ...(currentSnapshot ? { current: promptInstallFreshnessSignature(currentSnapshot) } : {})
+    };
+    await appendJournalSafe(runId, sceneSnapshot.chatKey, {
+      event: 'prompt.install_skipped',
+      severity: 'warn',
+      summary: reason === 'snapshot-recheck-failed'
+        ? 'Prompt install skipped because the host snapshot could not be rechecked.'
+        : 'Prompt install skipped because the host turn changed before write.',
+      runId,
+      sceneKey: sceneSnapshot.sceneKey,
+      details,
+      ...(packet ? { hashes: { promptPacketHash: hashJson(packet) } } : {})
+    });
+    if (!isActiveRun(runId)) return supersededResult(runId);
+    settleRuntimeActivity({
+      runId,
+      outcome: 'warning',
+      label: STALE_INSTALL_LABEL,
+      chips: ['Prompt'],
+      detail: {
+        reason,
+        ...(error?.message ? { message: error.message } : {})
+      }
+    });
+    return {
+      ok: true,
+      skipped: true,
+      reason,
+      ...(packet ? { packet } : {}),
+      ...(hand ? { hand } : {}),
+      ...(plan ? { plan } : {}),
+      install
+    };
+  }
+
   async function askUtilityArbiter({ runId, snapshot, settings, fallbackPlan, sceneCache, userMessage, signal }) {
     if (!generationRouter || typeof generationRouter.generate !== 'function') return fallbackPlan;
     stageRuntimeActivity({
@@ -1360,28 +1510,50 @@ export function createRecursionRuntime({
         label: 'Selecting turn hand...',
         cardCounts: { selected: Math.min(deck.cards.length, budgetOr(plan.budgets?.maxCards, 6)) }
       });
-      const hand = selectHand(deck.cards, {
+      let promptSnapshot = sceneSnapshot;
+      let promptDeck = deck;
+      let hand = selectHand(deck.cards, {
         maxCards: budgetOr(plan.budgets?.maxCards, 6),
         maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700)
       });
 
-      await runStorageSaveSection(runId, () => saveSceneCacheSafe(runId, sceneSnapshot, {
-        cacheState: 'active',
-        source: {
-          chatIdHash: hashJson(sceneSnapshot.chatId),
-          latestMesId: sceneSnapshot.latestMesId,
-          sceneFingerprint: sceneSnapshot.sceneFingerprint,
-          chatWindowHash: hashJson(sceneSnapshot.messages),
-          sceneStatus: plan.sceneStatus
-        },
-        cards: deck.cards,
-        latestHand: hand
-      }));
+      if (settings.mode !== 'observe') {
+        const freshness = await recheckPromptInstallSnapshot(runId, sceneSnapshot, plan, pendingUserMessage);
+        if (!isActiveRun(runId)) return supersededResult(runId);
+        if (freshness.ok === false) {
+          return await skipPromptInstallAfterFreshnessFailure(runId, {
+            reason: freshness.reason,
+            sceneSnapshot,
+            currentSnapshot: freshness.currentSnapshot,
+            hand,
+            plan,
+            error: freshness.error
+          });
+        }
+        promptSnapshot = freshness.snapshot;
+        if (promptSnapshot.sceneKey !== sceneSnapshot.sceneKey || promptSnapshot.sceneFingerprint !== sceneSnapshot.sceneFingerprint) {
+          promptDeck = {
+            ...deck,
+            cards: rebaseCardsForSnapshot(deck.cards, promptSnapshot, plan)
+          };
+          hand = selectHand(promptDeck.cards, {
+            maxCards: budgetOr(plan.budgets?.maxCards, 6),
+            maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700)
+          });
+        }
+        lastSnapshot = promptSnapshot;
+      }
+
+      await runStorageSaveSection(runId, () => saveSceneCacheSafe(
+        runId,
+        promptSnapshot,
+        sceneCachePayload(promptSnapshot, promptDeck, hand, plan)
+      ));
       if (!isActiveRun(runId)) return supersededResult(runId);
 
-      const packet = await composePromptPacket({
+      let packet = await composePromptPacket({
         hand,
-        snapshot: sceneSnapshot,
+        snapshot: promptSnapshot,
         settings: settingsForPlan(settings, plan),
         generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId),
         activity,
@@ -1417,15 +1589,71 @@ export function createRecursionRuntime({
           chips: ['Prompt']
         });
         if (!isActiveRun(runId)) return supersededResult(runId);
+        let recomposeAttempts = 0;
+        while (true) {
+          const freshness = await recheckPromptInstallSnapshot(runId, promptSnapshot, plan, pendingUserMessage);
+          if (!isActiveRun(runId)) return supersededResult(runId);
+          if (freshness.ok === false) {
+            return skipPromptInstallAfterFreshnessFailure(runId, {
+              reason: freshness.reason,
+              sceneSnapshot: promptSnapshot,
+              currentSnapshot: freshness.currentSnapshot,
+              packet,
+              hand,
+              plan,
+              error: freshness.error
+            });
+          }
+          if (promptSnapshotMetadataMatches(promptSnapshot, freshness.snapshot)) break;
+          recomposeAttempts += 1;
+          if (recomposeAttempts > 3) {
+            return skipPromptInstallAfterFreshnessFailure(runId, {
+              reason: 'stale-snapshot',
+              sceneSnapshot: promptSnapshot,
+              currentSnapshot: freshness.snapshot,
+              packet,
+              hand,
+              plan
+            });
+          }
+          promptSnapshot = freshness.snapshot;
+          promptDeck = {
+            ...promptDeck,
+            cards: rebaseCardsForSnapshot(promptDeck.cards, promptSnapshot, plan)
+          };
+          hand = selectHand(promptDeck.cards, {
+            maxCards: budgetOr(plan.budgets?.maxCards, 6),
+            maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700)
+          });
+          await runStorageSaveSection(runId, () => saveSceneCacheSafe(
+            runId,
+            promptSnapshot,
+            sceneCachePayload(promptSnapshot, promptDeck, hand, plan)
+          ));
+          if (!isActiveRun(runId)) return supersededResult(runId);
+          packet = await composePromptPacket({
+            hand,
+            snapshot: promptSnapshot,
+            settings: settingsForPlan(settings, plan),
+            generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId),
+            activity,
+            runId,
+            signal
+          });
+          if (!isActiveRun(runId)) return supersededResult(runId);
+          lastSnapshot = promptSnapshot;
+          lastHand = hand;
+          lastPacket = packet;
+        }
         const install = await installPrompt(host, packet);
         if (!isActiveRun(runId)) return supersededResult(runId);
         const installOk = install?.ok !== false;
-        await appendJournalSafe(runId, sceneSnapshot.chatKey, {
+        await appendJournalSafe(runId, promptSnapshot.chatKey, {
           event: installOk ? 'prompt.installed' : 'prompt.install_failed',
           severity: installOk ? 'info' : 'warn',
           summary: installSummary(install),
           runId,
-          sceneKey: sceneSnapshot.sceneKey,
+          sceneKey: promptSnapshot.sceneKey,
           details: installJournalDetails(install),
           hashes: { promptPacketHash: hashJson(packet) }
         });

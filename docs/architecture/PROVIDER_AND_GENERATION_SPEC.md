@@ -133,7 +133,7 @@ Inputs:
 - current settings hash;
 - known scene cache metadata;
 - available card types and token budgets;
-- Reasoner enabled/disabled state and health summary.
+- Reasoner on/off state and health summary.
 
 The Arbiter should return every auto decision it can in the initial call. Recursion should not spend a separate model call just to decide whether to use Reasoner unless a later version has a concrete, measured reason to do so.
 
@@ -236,7 +236,7 @@ Reasoner is not appropriate when:
 
 - the hand is small and non-conflicting;
 - Utility produced invalid or insufficient card data;
-- the user disabled Reasoner;
+- the user turned Reasoner off;
 - the Reasoner lane is missing a provider secret or failed its last connectivity test.
 
 Required output shape:
@@ -377,7 +377,7 @@ Card failure:
 
 Reasoner failure:
 
-- retry the same Reasoner call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot and the user has not disabled Reasoner;
+- retry the same Reasoner call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot and the user has not turned Reasoner off;
 - fall back to Utility-only composition;
 - do not run an additional hidden Utility model call solely to recover the Reasoner result; use the Utility composer output that is already part of the normal route, or compose locally from accepted cards if available;
 - record a compact reason such as auth failure, timeout, validation failure, or provider error.

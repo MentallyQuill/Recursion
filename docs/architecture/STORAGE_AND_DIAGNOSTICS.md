@@ -149,10 +149,11 @@ Contract rules:
 - `promptText` is injectable card text, but it is still cache data and must remain compact.
 - `summary` supports UI scanning and diagnostics; it is not a second prompt body.
 - `inspectorNotes` are diagnostic-only and must never enter prompt composition or injected prompt logs.
-- `sourceRefs` point to host message ids and hashes. They must not duplicate the transcript.
+- `sourceRefs`, card ids, families, roles, catalog keys, source fingerprints, chat ids, and arbiter metadata must pass through the same unsafe-text screening used by diagnostics. Unsafe metadata is dropped or replaced with a neutral fallback before write.
 - `excerpt` is optional, disabled by default for normal journals, and always bounded when present. Use excerpts only when they materially improve user-visible inspection or diagnostic artifacts.
 - Scene cache records must reject or truncate over-large cards before write.
 - A scene cache cannot be promoted into cross-scene memory. A new scene gets a new cache.
+- `latestHand` is an allowlisted metadata snapshot only: `handId`, `composedAt`, `cardIds`, `promptPacketHash`, and bounded `omitted[]` card id/reason pairs. It must not persist card `promptText`, prompt packet sections, inspector notes, provider payloads, arbitrary composer metadata, or raw hand objects.
 
 ## Run Journal Contract
 
@@ -197,6 +198,8 @@ type RecursionRunJournalEntry = {
     | "card.rejected"
     | "hand.selected"
     | "prompt.installed"
+    | "prompt.install_failed"
+    | "prompt.install_skipped"
     | "prompt.cleared"
     | "provider.call.started"
     | "provider.call.completed"
@@ -304,7 +307,7 @@ Forbidden by default:
 - inspector-only notes copied into prompt logs;
 - filesystem paths that expose private usernames when a logical key is enough.
 
-Redaction must be centralized in the storage/diagnostics layer. It should recursively remove or replace fields with sensitive key names such as `apiKey`, `authorization`, `cookie`, `token`, `password`, `secret`, and `sessionKey`, plus forbidden diagnostic payload keys such as `rawPrompt`, `rawResponse`, `providerPrompt`, `providerResponse`, `hiddenReasoning`, `privateStoryPlan`, `privatePlan`, and `sessionId`. It should cap all strings in diagnostic artifacts, even when the field is otherwise allowed, while preserving safe counters such as `tokenCount` and `sessionCount`.
+Redaction must be centralized in the storage/diagnostics layer. It should recursively remove or replace fields with sensitive key names such as `apiKey`, `api_key`, `authorization`, `cookie`, `token`, `password`, `secret`, `sessionKey`, and `session_key`, plus forbidden diagnostic payload keys such as `rawPrompt`, `rawPromptText`, `debugRawPrompt`, `raw_response`, `providerPrompt`, `providerResponseText`, `hiddenReasoning`, `hidden_reasoning`, `privateStoryPlan`, `privatePlan`, `private_plan`, and `sessionId`. It must also catch `Cookie=`, `Cookie:`, `Set-Cookie=`, `Set-Cookie:`, bearer tokens, direct `sk-...` tokens, and real path-like strings before generic truncation. Taxonomy labels with a single slash, such as `Dialogue/Relationship`, are valid metadata and should not be treated as filesystem paths. It should cap all strings in diagnostic artifacts, even when the field is otherwise allowed, while preserving safe counters such as `tokenCount` and `sessionCount`.
 
 Bounded excerpts are opt-in and should be treated as more sensitive than hashes. If enabled, they must be short, source-labeled, and never used as a substitute for transcript storage. Diagnostic artifacts should clearly mark whether excerpts are included.
 

@@ -171,7 +171,7 @@ Tests:
 - Reasoner composition cannot add unsupported lore fields.
 - Reasoner timeout, provider failure, or invalid schema falls back to Utility composition.
 - Injection installs, replaces, and clears by Recursion-owned key.
-- Observe mode composes diagnostics without injecting.
+- Observe only mode composes diagnostics without injecting.
 
 Exit criteria:
 

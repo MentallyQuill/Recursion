@@ -8,13 +8,13 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 <Render Needed>: assets/documentation/renders/recursion-operator-install-enable.png - Install and enable flow with SillyTavern extension list, Recursion enabled state, and mounted Recursion Bar.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-mode-controls.png - Mode controls showing Off, Observe, Auto, Refresh Scene, and Off-mode cleanup behavior.
+<Render Needed>: assets/documentation/renders/recursion-operator-mode-controls.png - Mode controls showing Off, Observe only, Auto, Refresh Scene, and Off-mode cleanup behavior.
 
 <Render Needed>: assets/documentation/renders/recursion-operator-bar-states.png - Recursion Bar ready, working, warning, disabled, provider issue, and prompt-ready states.
 
 <Render Needed>: assets/documentation/renders/recursion-operator-activity-ribbon-states.png - Activity Ribbon showing snapshot, Utility planning, card generation, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-actions-menu.png - Actions menu with Refresh Scene, Observe or Auto mode toggle, Copy Last Prompt Packet, Open Settings, and Open Viewer controls, including disabled copy state when no packet exists.
+<Render Needed>: assets/documentation/renders/recursion-operator-actions-menu.png - Actions menu with Refresh Scene, Switch to Auto or Switch to Observe only, Copy Last Prompt Packet, Open Settings, and Open Viewer controls, including disabled copy state when no packet exists.
 
 <Render Needed>: assets/documentation/renders/recursion-operator-last-hand-states.png - Last Hand dropdown with compact selected cards, omission hints, prompt packet link, empty hand, stale hand, and error state.
 
@@ -22,7 +22,7 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 <Render Needed>: assets/documentation/renders/recursion-operator-settings.png - Settings view showing Mode, Strength, Prompt Footprint, Focus, Reasoner Use, Utility provider setup, and Reasoner provider setup.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-provider-controls.png - Provider controls for Utility setup, Reasoner setup, session-only key state, test connection, disabled Reasoner, and fallback warning.
+<Render Needed>: assets/documentation/renders/recursion-operator-provider-controls.png - Provider controls for Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, and fallback warning.
 
 <Render Needed>: assets/documentation/renders/recursion-operator-prompt-packet-inspection.png - Prompt Packet inspection showing Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and redaction-safe diagnostics.
 
@@ -36,14 +36,13 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 The Recursion Bar is the normal control surface. It sits near the chat surface and shows:
 
-- runtime status: ready, observing, compiling, paused, provider issue, or disabled;
-- mode: Off, Observe, or Auto;
-- last hand count;
-- Utility status;
-- Reasoner status;
+- runtime health: Ready, Working, Paused, Issue, or Off;
+- mode: Off, Observe only, or Auto;
+- Hand dropdown and last hand count;
+- Utility lane state;
+- Reasoner lane state;
 - Actions menu;
-- Last Hand dropdown;
-- Full Viewer entry.
+- Viewer entry.
 
 The bar should be stable. Status changes should not repeatedly resize the transcript or cover message input controls.
 
@@ -73,7 +72,7 @@ The ribbon must not show raw prompts, raw provider responses, stack traces, prov
 The Actions menu holds the current high-level commands:
 
 - Refresh Scene;
-- Toggle Observe Only or Auto;
+- Switch to Auto or Switch to Observe only;
 - Copy Last Prompt Packet;
 - Open Settings;
 - Open Viewer.
@@ -82,7 +81,7 @@ Copy Last Prompt Packet is disabled when no packet exists. Provider setup lives 
 
 ### Last Hand
 
-Last Hand is the compact inspection surface for what Recursion used last. It should show selected card families, emphasis, concise summaries, composition route, omitted items when useful, and a link to the Prompt Packet or Full Viewer.
+Last Hand is the compact inspection surface for what Recursion used last. It opens from the `Hand 0 v` / `Hand 5 v` chip in the bar. It should show selected card families, emphasis, concise summaries, composition route, omitted items when useful, and a link to the Prompt Packet or Full Viewer.
 
 Rows are read-only. Recursion V1 is not a card editor.
 
@@ -103,9 +102,9 @@ The Full Viewer is the complete observatory. It should include:
 
 Off stops Recursion from preparing prompt packets. It should clear or skip Recursion-owned prompt lanes so stale packets do not affect generation.
 
-### Observe
+### Observe Only
 
-Observe lets Recursion inspect the active chat and preview hand or prompt decisions without installing a prompt packet. Use it for first-run validation, provider checks, or when you want visibility without influence.
+Observe only lets Recursion inspect the active chat and preview hand or prompt decisions without installing a prompt packet. Use it for first-run validation, provider checks, or when you want visibility without influence.
 
 ### Auto
 
@@ -115,7 +114,7 @@ Auto lets Recursion compile and install the next prompt packet. It should finish
 
 Operator settings should stay broad:
 
-- Mode: Off, Observe, Auto.
+- Mode: Off, Observe only, Auto.
 - Reasoner Use: Off, Auto, Always Compose.
 - Strength: Light, Balanced, Strong.
 - Prompt Footprint: Compact, Normal, Rich.
@@ -143,7 +142,7 @@ Each lane may support:
 - Clear Session Key;
 - status and resolved model labels.
 
-Utility must be configured for normal operation. Reasoner can remain disabled. See [Provider Setup](PROVIDER_SETUP.md).
+Utility must be configured for normal operation. Reasoner can remain off. See [Provider Setup](PROVIDER_SETUP.md).
 
 ## First Run
 
@@ -151,8 +150,8 @@ Use this first-run path:
 
 1. Enable Recursion and confirm the bar mounts.
 2. Configure Utility.
-3. Leave Reasoner disabled unless you need it.
-4. Set mode to Observe.
+3. Leave Reasoner off unless you need it.
+4. Set mode to Observe only.
 5. Send or select a safe ordinary turn.
 6. Confirm Activity shows work and no prompt was injected.
 7. Set mode to Auto.
@@ -185,7 +184,7 @@ Expected behavior:
 - Utility unavailable: skip new work, reuse valid cache when safe, or avoid injection.
 - Utility invalid output: reject unsafe structured output and use conservative fallback.
 - Card failure: omit failed cards and keep valid siblings.
-- Reasoner disabled or failed: compose with Utility.
+- Reasoner off or failed: compose with Utility.
 - Storage write failure: continue with memory state when safe and report a warning.
 - Prompt install failure: allow SillyTavern generation to continue without Recursion guidance.
 - Chat, settings, or source change during a run: abort or discard stale results.
@@ -250,11 +249,11 @@ Use this checklist for a practical browser pass:
 
 1. Load SillyTavern with Recursion installed and enabled.
 2. Confirm the Recursion Bar appears near the chat surface.
-3. Open Actions, Last Hand, and Full Viewer.
+3. Open Actions, the Hand dropdown, and Full Viewer.
 4. Visit Now, Deck, Activity, Prompt Packet, Settings, and Providers.
 5. Configure and test Utility when provider work is intended.
 6. Set Off and confirm prompt lanes are absent or cleared.
-7. Set Observe and confirm no prompt packet is installed.
+7. Set Observe only and confirm no prompt packet is installed.
 8. Set Auto and confirm Recursion is ready to compile.
 9. Run a safe Auto pass only when provider and live mutation are intended.
 10. Confirm Activity reaches ready or a clear fallback.

@@ -163,7 +163,7 @@ Before using Auto:
 
 1. Confirm Utility is healthy.
 2. Confirm Reasoner is intentionally enabled or disabled.
-3. Use Observe first if you are unsure what Recursion will compile.
+3. Use Observe only first if you are unsure what Recursion will compile.
 4. Inspect Prompt Packet when output quality or privacy matters.
 5. Confirm the packet is current-scene guidance, not lore, memory, or hidden planning.
 

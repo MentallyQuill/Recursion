@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { activityLabel, createRecursionViewModel, mountRecursionUi } from '../../src/ui.mjs';
+import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 assertEqual(activityLabel({ phase: 'cardBatchRunning' }), 'Generating scene cards...', 'phase label mapped');
@@ -13,6 +15,175 @@ assertEqual(model.modeLabel, 'Auto', 'mode label built');
 assertEqual(model.statusText, undefined, 'view model does not expose combined runtime/mode status');
 assertEqual(model.handCount, 2, 'hand count built');
 assertEqual(model.composerLabel, 'Utility', 'composer label built');
+
+const explicitProgress = createProgressRunModel({
+  progressRun: {
+    runId: 'run-progress',
+    title: 'Generating',
+    subtitle: '2 model calls running',
+    steps: [
+      { id: 'read-turn', label: 'Reading current turn', providerLane: 'utility', state: 'done' },
+      { id: 'card-batch', label: 'Utility card batch', providerLane: 'utility', state: 'running' },
+      { id: 'reasoner-brief', label: 'Reasoner brief', providerLane: 'reasoner', state: 'running' },
+      { id: 'compose-packet', label: 'Composing prompt packet', providerLane: 'utility', state: 'pending' },
+      { id: 'repair-json', label: 'Repairing card JSON', providerLane: 'utility', state: 'warning' },
+      { id: 'provider-failure', label: 'Provider retry exhausted', providerLane: 'reasoner', state: 'failed' }
+    ]
+  }
+});
+assertEqual(explicitProgress.runId, 'run-progress', 'progress model keeps run id');
+assertEqual(explicitProgress.steps.length, 6, 'progress model keeps visible top-level steps');
+assertEqual(explicitProgress.activeCount, 2, 'progress model counts concurrent running steps');
+assertEqual(explicitProgress.heroPixelState, 'failed', 'failed progress dominates hero pixel state');
+assertEqual(explicitProgress.currentStepText, '2 model calls running...', 'concurrent work gets compact bar text');
+assertDeepEqual(
+  explicitProgress.steps.map((step) => [step.id, step.providerLane, step.state, step.meta]),
+  [
+    ['read-turn', 'utility', 'done', 'done'],
+    ['card-batch', 'utility', 'running', 'running'],
+    ['reasoner-brief', 'reasoner', 'running', 'running'],
+    ['compose-packet', 'utility', 'pending', 'waiting'],
+    ['repair-json', 'utility', 'warning', 'caution'],
+    ['provider-failure', 'reasoner', 'failed', 'failed']
+  ],
+  'progress steps normalize provider lanes, states, and meta labels'
+);
+const heroBlocks = createHeroPixelBlocks(explicitProgress);
+assertEqual(heroBlocks.length, 6, 'hero pixel array renders one block per visible progress row');
+assertEqual(heroBlocks[0].className, 'hero-block done', 'done block class is stable');
+assertEqual(heroBlocks[1].className, 'hero-block running', 'running block class is stable');
+assertDeepEqual(
+  heroBlocks.map((block) => [block.row, block.column, block.delayMs]),
+  [
+    [0, 0, 0],
+    [1, 0, 24],
+    [2, 0, 48],
+    [0, 1, 72],
+    [1, 1, 96],
+    [2, 1, 120]
+  ],
+  'hero pixel array builds down three rows, then starts the next column to the right'
+);
+assertEqual(heroBlocks.at(-1).columnCount, 2, 'hero pixel array reports the visible column count for brand movement');
+
+const derivedProgress = createProgressRunModel({
+  settings: { mode: 'auto' },
+  activityHistory: [
+    { runId: 'run-derived', phase: 'started', label: 'Reading current turn...', providerLane: 'utility' },
+    { runId: 'run-derived', phase: 'arbiterPlanning', label: 'Planning card pass...', providerLane: 'utility' },
+    { runId: 'run-derived', phase: 'cardBatchRunning', label: 'Generating scene cards...', providerLane: 'utility', cardCounts: { requested: 3 } }
+  ],
+  activity: { runId: 'run-derived', phase: 'cardBatchRunning', label: 'Generating scene cards...', providerLane: 'utility', cardCounts: { requested: 3 } },
+  lastPlan: {
+    cardJobs: [{ family: 'Scene Frame' }, { family: 'Motivation' }, { family: 'Continuity Risk' }],
+    reasonerDecision: { mode: 'use' }
+  }
+});
+assertDeepEqual(
+  derivedProgress.steps.map((step) => [step.id, step.state]),
+  [
+    ['read-turn', 'done'],
+    ['planning-card-pass', 'done'],
+    ['utility-card-batch', 'running'],
+    ['selecting-turn-hand', 'pending'],
+    ['saving-scene-cache', 'pending'],
+    ['composing-prompt-packet', 'pending'],
+    ['reasoner-brief', 'pending'],
+    ['installing-recursion-prompt', 'pending']
+  ],
+  'progress model derives top-level pending steps from activity history and plan'
+);
+
+const concurrentDerivedProgress = createProgressRunModel({
+  settings: { mode: 'auto' },
+  activityHistory: [
+    { runId: 'run-concurrent', phase: 'providerCallRunning', label: 'Utility call', providerLane: 'utility', detail: { roleId: 'sceneFrameCard' } },
+    { runId: 'run-concurrent', phase: 'providerCallRunning', label: 'Reasoner call', providerLane: 'reasoner', detail: { roleId: 'reasonerComposer' } }
+  ],
+  activity: { runId: 'run-concurrent', phase: 'providerCallRunning', label: 'Reasoner call', providerLane: 'reasoner', detail: { roleId: 'reasonerComposer' } }
+});
+assertDeepEqual(
+  concurrentDerivedProgress.steps
+    .filter((step) => ['utility-card-batch', 'reasoner-brief'].includes(step.id))
+    .map((step) => [step.id, step.state]),
+  [
+    ['utility-card-batch', 'running'],
+    ['reasoner-brief', 'running']
+  ],
+  'derived progress keeps concurrent provider rows running'
+);
+assertEqual(concurrentDerivedProgress.currentStepText, '2 model calls running...', 'derived concurrent progress gets compact bar text');
+
+const unsafeExplicitProgress = createProgressRunModel({
+  progressRun: {
+    runId: 'unsafe-progress',
+    title: 'rawPrompt: SYSTEM PROMPT TEXT',
+    subtitle: 'Bearer unsafe-progress-token',
+    steps: [
+      {
+        id: 'read-turn',
+        label: 'rawPrompt: SYSTEM PROMPT TEXT password: hunter2',
+        providerLane: 'utility',
+        state: 'running',
+        meta: 'password: hunter2'
+      }
+    ]
+  }
+});
+assertEqual(unsafeExplicitProgress.title, 'Generating', 'unsafe progress title falls back to friendly title');
+assertEqual(unsafeExplicitProgress.subtitle, '', 'unsafe progress subtitle is omitted');
+assertEqual(unsafeExplicitProgress.steps[0].label, 'Reading current turn', 'unsafe progress label falls back to known step label');
+assertEqual(unsafeExplicitProgress.steps[0].meta, 'running', 'unsafe progress meta falls back to state meta');
+assert(!JSON.stringify(unsafeExplicitProgress).includes('SYSTEM PROMPT TEXT'), 'progress model omits raw prompt text');
+assert(!JSON.stringify(unsafeExplicitProgress).includes('hunter2'), 'progress model omits password text');
+assert(!JSON.stringify(unsafeExplicitProgress).includes('unsafe-progress-token'), 'progress model omits bearer token text');
+
+const progressViewModel = createRecursionViewModel({
+  settings: { mode: 'auto' },
+  progressRun: {
+    runId: 'view-progress',
+    steps: [
+      { id: 'read-turn', label: 'Reading current turn', providerLane: 'utility', state: 'done' },
+      { id: 'card-batch', label: 'Utility card batch', providerLane: 'utility', state: 'running' }
+    ]
+  }
+});
+assertEqual(progressViewModel.progressRun.currentStepText, 'Utility card batch...', 'view model exposes progress current step text');
+assertEqual(progressViewModel.heroPixelBlocks.length, 2, 'view model exposes hero pixel blocks for renderers');
+assertEqual(progressViewModel.heroPixelBlocks[1].state, 'running', 'view model keeps active hero pixel block state');
+assertEqual(progressViewModel.heroPixelColumnCount, 1, 'view model exposes pixel column count for moving brand layout');
+
+const barImplementationReference = readFileSync(new URL('../../docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md', import.meta.url), 'utf8');
+assert(/--hero-running:\s*var\(--cyan\);/.test(barImplementationReference), 'hero pixel running blocks use the active blue token');
+assert(/--hero-done:\s*var\(--green\);/.test(barImplementationReference), 'hero pixel done blocks use the success green token');
+assert(/--hero-warning:\s*var\(--amber\);/.test(barImplementationReference), 'hero pixel warning blocks use the caution yellow token');
+assert(/--hero-failed:\s*var\(--red\);/.test(barImplementationReference), 'hero pixel failed blocks use the failure red token');
+assert(/--hero-block-gap:\s*2px;/.test(barImplementationReference), 'hero pixel blocks use a 2px row and column gap');
+assert(/grid-template-rows:\s*repeat\(3,\s*var\(--hero-block-size\)\);/.test(barImplementationReference), 'hero pixel array uses three rows per column');
+assert(/class="brand-stage status-array-button"/.test(barImplementationReference), 'hero pixel array and brand share a fixed overlay stage');
+assert(/class="brand-fade"/.test(barImplementationReference), 'brand stage includes a growing background fade layer');
+assert(/\.brand-stage\s*\{[\s\S]*?position:\s*relative;[\s\S]*?overflow:\s*hidden;/.test(barImplementationReference), 'brand stage clips overlay animation without shifting the bar');
+assert(/\.brand\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?z-index:\s*1;/.test(barImplementationReference), 'brand text stays fixed behind the overlay layers');
+assert(/\.brand-fade\s*\{[\s\S]*?z-index:\s*2;[\s\S]*?width:\s*min\(100%,\s*var\(--brand-cover-width\)\);/.test(barImplementationReference), 'brand fade grows over the fixed brand text');
+assert(/\.hero-pixel-array\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?z-index:\s*3;/.test(barImplementationReference), 'hero pixel blocks render above the brand fade');
+assert(/\.brand-block\.is-resetting \.brand-fade/.test(barImplementationReference), 'brand reset state wipes the fade layer');
+assert(/\.brand-block\.is-resetting \.hero-block/.test(barImplementationReference), 'brand reset state wipes old pixel blocks');
+assert(/\.step-row\.is-entering/.test(barImplementationReference), 'progress rows have an insertion animation class');
+assert(/@keyframes step-row-enter/.test(barImplementationReference), 'progress row insertion animation is defined');
+assert(/## Turn Animation Preview Script/.test(barImplementationReference), 'implementation reference includes a turn animation preview script');
+assert(/const TURN_ANIMATION_STEPS = \[/.test(barImplementationReference), 'turn animation preview declares deterministic step data');
+assert(/function renderHeroBlocks/.test(barImplementationReference), 'turn animation preview renders hero blocks from step state');
+assert(/function renderProgressRows/.test(barImplementationReference), 'turn animation preview renders progress rows from step state');
+assert(!/array\.innerHTML\s*=\s*steps\.map/.test(barImplementationReference), 'turn animation preview does not recreate all hero blocks on every tick');
+assert(!/list\.innerHTML\s*=\s*rows\.map/.test(barImplementationReference), 'turn animation preview does not recreate all progress rows on every tick');
+assert(/dataset\.stepId/.test(barImplementationReference), 'turn animation preview keys hero blocks and progress rows by stable step id');
+assert(/function syncHeroBlock/.test(barImplementationReference), 'turn animation preview updates hero blocks in place');
+assert(/function syncProgressRow/.test(barImplementationReference), 'turn animation preview updates progress rows in place');
+assert(/window\.playRecursionTurnAnimation/.test(barImplementationReference), 'turn animation preview exposes a replay hook');
+assert(/\.step-row\.done \.step-icon\s*\{[\s\S]*?background:\s*var\(--green\);[\s\S]*?border-color:\s*var\(--green\);/.test(barImplementationReference), 'progress menu done dots use the same success green token');
+assert(/\.step-row\.running \.step-icon\s*\{[\s\S]*?var\(--cyan\) 0 82deg/.test(barImplementationReference), 'progress menu running spinners use the same active blue token');
+assert(/\.step-row\.warn \.step-icon\s*\{[\s\S]*?background:\s*var\(--amber\);[\s\S]*?border-color:\s*var\(--amber\);/.test(barImplementationReference), 'progress menu warning dots use the same caution yellow token');
+assert(/\.step-row\.fail \.step-icon\s*\{[\s\S]*?background:\s*var\(--red\);[\s\S]*?border-color:\s*var\(--red\);/.test(barImplementationReference), 'progress menu failed dots use the same failure red token');
 
 assertEqual(activityLabel({ phase: 'promptInstalling' }), 'Installing Recursion prompt...', 'prompt phase label mapped');
 assertEqual(activityLabel({ phase: 'idle' }), '', 'idle phase has no working label');

@@ -88,11 +88,11 @@ Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIV
 | Scenario | Mutates chat | Requires provider | Must prove |
 | --- | --- | --- | --- |
 | Mount smoke | no | no | Recursion extension loads, Recursion Bar renders, Activity Ribbon can open, viewer can open. |
-| Mode smoke | no | no | Off, Observe, Auto, and return-to-Off controls update runtime mode, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
+| Mode smoke | no | no | Off, Observe only, Auto, and return-to-Off controls update runtime mode, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
 | Storage probe | files only | no | Dedicated user can write/read/delete Recursion-owned files and records are isolated from other users. |
-| Observe smoke | optional | no | Snapshot and diagnostics can be previewed without prompt injection. |
+| Observe only smoke | optional | no | Snapshot and diagnostics can be previewed without prompt injection. |
 | Utility provider smoke | yes | Utility | Arbiter/card/composer work runs, Activity Ribbon reports it, prompt packet installs, and generation continues. |
-| Reasoner fallback smoke | yes | Utility and Reasoner | Reasoner can compose when healthy and falls back to Utility when disabled, timed out, or invalid. |
+| Reasoner fallback smoke | yes | Utility and Reasoner | Reasoner can compose when healthy and falls back to Utility when off, timed out, or invalid. |
 | Prompt cleanup smoke | no | no | Off mode, disable, teardown, and chat change clear Recursion prompt keys. |
 | Failure smoke | optional | simulated or real failing lane | Provider/storage/injection failure reports visible fallback and does not block host generation. |
 | Responsive UI smoke | no | no | Desktop and phone viewport screenshots show no overlap with chat controls. |
@@ -130,7 +130,7 @@ The smoke should fail if controls overlap chat input, if text escapes compact co
 
 - Seed a Recursion-owned prompt key as a cleanup sentinel.
 - Set Off mode and verify prompt keys are absent or cleared.
-- Set Observe mode and verify no prompt packet is installed.
+- Set Observe only mode and verify no prompt packet is installed.
 - Set Auto mode and verify the runtime is ready to compile when a generation begins.
 - Return to Off mode and verify cleanup.
 
@@ -147,16 +147,16 @@ When providers are configured:
 
 Provider tests must not persist API keys, raw prompts, or raw responses.
 
-### 5. Observe Pass
+### 5. Observe Only Pass
 
-In Observe mode:
+In Observe only mode:
 
 - Capture a turn snapshot or current chat snapshot.
 - Ask runtime for a preview-safe decision when supported.
 - Verify no prompt packet is installed.
 - Verify Activity and Full Viewer show sanitized snapshot/card-plan metadata.
 
-Observe mode may record hashes, counts, ids, and bounded labels. It must not create model-facing prompt keys.
+Observe only mode may record hashes, counts, ids, and bounded labels. It must not create model-facing prompt keys.
 
 ### 6. Auto Utility Pass
 

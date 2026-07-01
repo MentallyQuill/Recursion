@@ -107,7 +107,7 @@ Build a source-backed inventory before expanding public prose.
 ### Work
 
 - Audit `README.md`, `docs/README.md`, existing design docs, architecture docs, user docs, testing docs, and source READMEs.
-- Inventory user-facing surfaces: Recursion Bar, Activity Ribbon, Actions menu, Last Hand dropdown, Full Viewer, Settings, Provider Controls, Off/Observe/Auto mode controls, warnings, fallback states, and mobile behavior.
+- Inventory user-facing surfaces: Recursion Bar, Activity Ribbon, Actions menu, Last Hand dropdown, Full Viewer, Settings, Provider Controls, Off/Observe only/Auto mode controls, warnings, fallback states, and mobile behavior.
 - Inventory technical seams: SillyTavern host adapter, generation interceptor, runtime coordinator, Utility Arbiter, card catalog, scene cache, turn hand selection, prompt packet composition, prompt injection, provider lanes, storage, activity reporting, diagnostics, and redaction.
 - Inventory verification evidence: `npm.cmd test`, `node tools\scripts\run-alpha-gate.mjs`, Playwright readiness artifacts, dedicated soak-user checks, live smoke plans, and artifact contracts.
 - Identify stale or overlapping docs that should be renamed, merged, or rewritten in place.
@@ -176,14 +176,14 @@ Capture or plan visuals before writing screenshot-backed prose.
 | Surface Or Flow | Required States |
 | --- | --- |
 | Install and enable | SillyTavern extension listed, enabled, and bar mounted. |
-| Mode controls | Off, Observe, Auto, Refresh Scene, and Off-mode cleanup behavior. |
+| Mode controls | Off, Observe only, Auto, Refresh Scene, and Off-mode cleanup behavior. |
 | Recursion Bar | Ready, working, warning, disabled, provider issue, and prompt-ready states. |
 | Activity Ribbon | Snapshot, Utility planning, card generation, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states. |
-| Actions menu | Refresh Scene, Observe or Auto toggle, Copy Last Prompt Packet, Open Settings, Open Viewer, and disabled copy state. |
+| Actions menu | Refresh Scene, Switch to Auto or Switch to Observe only, Copy Last Prompt Packet, Open Settings, Open Viewer, and disabled copy state. |
 | Last Hand dropdown | Compact selected cards, omission hints, prompt packet link, empty hand, stale hand, and error state. |
 | Full Viewer | Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections. |
 | Settings | Mode, Strength, Prompt Footprint, Focus, Reasoner Use, Utility provider setup, and Reasoner provider setup. |
-| Provider Controls | Utility setup, Reasoner setup, session-only key state, test connection, disabled Reasoner, fallback warning. |
+| Provider Controls | Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, fallback warning. |
 | Prompt packet inspection | Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and redaction-safe diagnostics. |
 | Fail-soft states | Utility unavailable, Reasoner timeout, invalid structured output, storage write failure, injection failure, and stale async result. |
 | Mobile behavior | Bar wrap behavior, menu access, viewer layout, and touch-safe controls. |
@@ -229,10 +229,10 @@ Create the practical guide for using Recursion in SillyTavern.
 
 - Rewrite the current operator guide around real operator tasks:
   - install and enable Recursion;
-  - choose Off, Observe, or Auto;
+  - choose Off, Observe only, or Auto;
   - configure Utility;
   - optionally configure Reasoner;
-  - run the first Observe pass;
+  - run the first Observe only pass;
   - run the first Auto pass;
   - inspect Activity, Last Hand, and Prompt Packet;
   - interpret fallback states;

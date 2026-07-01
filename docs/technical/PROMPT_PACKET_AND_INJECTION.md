@@ -107,7 +107,7 @@ flowchart LR
 
 The SillyTavern adapter accepts only prompt keys starting with `recursion.` and currently installs the three V1 keys. It clears known Recursion keys before install, tracks installed keys, and rolls back known keys if a partial install fails.
 
-Off mode, Observe mode, disable, delete, and runtime teardown clear Recursion prompt keys best-effort.
+Off mode, Observe only mode, disable, delete, and runtime teardown clear Recursion prompt keys best-effort.
 
 <Render Needed>: assets/documentation/renders/recursion-prompt-injection-lanes.png - Injection visual showing Recursion prompt keys, clear-before-install, rollback on failure, and host prompt boundary.
 

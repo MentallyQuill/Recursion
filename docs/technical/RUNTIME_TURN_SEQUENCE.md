@@ -7,7 +7,7 @@ This manual describes the turn lifecycle implemented by `src/runtime.mjs` and th
 | Mode | Runtime behavior |
 | --- | --- |
 | Off | Supersedes active Recursion work, clears Recursion prompt entries, and returns without chat inspection or prompt compilation. |
-| Observe | Captures a snapshot, runs Utility planning and safe card/prompt work, saves diagnostics, clears prompt entries, and returns a preview without injection. |
+| Observe only | Captures a snapshot, runs Utility planning and safe card/prompt work, saves diagnostics, clears prompt entries, and returns a preview without injection. |
 | Auto | Captures a snapshot, runs the full pipeline, installs validated prompt blocks, writes bounded diagnostics, and settles the Activity Ribbon. |
 
 ## Auto Sequence
@@ -120,9 +120,8 @@ flowchart TD
 | Card batch failure | Continue with accepted siblings and local fallback cards. |
 | Invalid cached card | Ignore the card and show a cache warning. |
 | No reusable cache for `reuse-cache` | Clear Recursion prompt and return a warning skip. |
-| Reasoner disabled or failed | Compose with Utility and record Reasoner fallback metadata. |
+| Reasoner off or failed | Compose with Utility and record Reasoner fallback metadata. |
 | Prompt install failed | Record warning; normal SillyTavern generation continues. |
 | Prompt clear failed | Record warning because a stale prompt may remain in host state. |
 | Storage write failed | Continue in memory for current turn and show storage warning. |
 | Runtime exception | Settle activity as error and throw a sanitized runtime error. |
-

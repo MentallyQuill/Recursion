@@ -157,7 +157,7 @@ When only one user is configured, the script verifies that user's storage but em
 - ensure the Recursion extension is mounted;
 - locate the Recursion Bar;
 - open the Actions menu;
-- switch Off, Observe, and Auto modes;
+- switch Off, Observe only, and Auto modes;
 - seed and clear a Recursion-owned prompt sentinel during no-generation mode smoke;
 - run Test Provider actions through visible controls when configured;
 - send a safe test message only when the live run explicitly allows chat mutation;

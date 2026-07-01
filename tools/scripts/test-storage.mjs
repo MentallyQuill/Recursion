@@ -97,6 +97,143 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
 {
   const adapter = createMemoryStorageAdapter();
   const repo = createStorageRepository({ storage: adapter });
+  await repo.saveSceneCache('Card Privacy Chat', 'Scene One', {
+    cards: [{
+      id: 'privacy-card',
+      family: 'Scene Frame',
+      summary: 'rawPrompt: SYSTEM PROMPT TEXT credentials: session token',
+      promptText: 'Visible card guidance with sk-card-secret and Cookie: sid=abc',
+      inspectorNotes: 'private diagnostic notes with session-token-card'
+    }]
+  });
+  const cache = await repo.loadSceneCache('Card Privacy Chat', 'Scene One');
+  assertEqual(cache.cards[0].summary, '[redacted]', 'scene card summary redacts unsafe diagnostic text');
+  assertEqual(cache.cards[0].promptText, '[redacted]', 'scene card promptText redacts unsafe secrets');
+  assertEqual(cache.cards[0].inspectorNotes, '[redacted]', 'scene card inspector notes redact unsafe private notes');
+  assert(!JSON.stringify(cache).includes('SYSTEM PROMPT TEXT'), 'scene cache omits raw prompt text');
+  assert(!JSON.stringify(cache).includes('sk-card-secret'), 'scene cache omits sk token text');
+  assert(!JSON.stringify(cache).includes('sid=abc'), 'scene cache omits cookie text');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  await repo.saveSceneCache('Slash Metadata Chat', 'Scene One', {
+    cards: [{
+      id: 'slash-card',
+      family: 'Dialogue/Relationship',
+      role: 'Environment/Items',
+      catalogKey: 'Prose/Pacing',
+      summary: 'safe summary',
+      promptText: 'safe prompt'
+    }]
+  });
+  const cache = await repo.loadSceneCache('Slash Metadata Chat', 'Scene One');
+  assertEqual(cache.cards[0].family, 'Dialogue/Relationship', 'scene card family preserves category slash');
+  assertEqual(cache.cards[0].role, 'Environment/Items', 'scene card role preserves category slash');
+  assertEqual(cache.cards[0].catalogKey, 'Prose/Pacing', 'scene card catalog key preserves category slash');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  await repo.saveSceneCache('Card Metadata Privacy Chat', 'Scene One', {
+    latestHand: {
+      handId: 'hand-safe',
+      composedAt: '2026-06-30T00:00:00.000Z',
+      cardIds: ['card-safe', 'F:\\SillyTavern\\secret-card'],
+      promptPacketHash: 'packet-safe',
+      omitted: [
+        { cardId: 'card-safe', reason: 'already active' },
+        { cardId: 'unsafe-card', reason: 'private_plan: should not persist' }
+      ],
+      promptText: 'latest hand promptText should not persist',
+      inspectorNotes: 'latest hand inspectorNotes should not persist',
+      providerResponse: 'provider_response: hidden'
+    },
+    cards: [{
+      id: 'card-safe',
+      family: 'raw_prompt: hidden family',
+      role: 'provider_response: hidden role',
+      catalogKey: 'private_plan: hidden catalog',
+      sceneId: 'session_key: hidden scene',
+      evidenceRefs: [
+        'safe-ref',
+        'F:\\SillyTavern\\secret\\message.jsonl',
+        'hidden_reasoning: evidence'
+      ],
+      sourceFingerprint: 'api_key: hidden fingerprint',
+      source: {
+        chatId: 'Cookie=sid-hidden',
+        fingerprint: 'raw_prompt: source fingerprint',
+        snapshotHash: 'provider_response: source snapshot'
+      },
+      arbiter: {
+        lastDecisionId: 'session_key: decision',
+        reason: 'Set-Cookie=sid-hidden'
+      },
+      arbiterDecisionHash: 'raw_prompt: hash',
+      summary: 'safe summary',
+      promptText: 'safe prompt'
+    }]
+  });
+  const cache = await repo.loadSceneCache('Card Metadata Privacy Chat', 'Scene One');
+  const serialized = JSON.stringify(cache);
+  assertEqual(cache.latestHand.handId, 'hand-safe', 'latestHand keeps hand id');
+  assertEqual(cache.latestHand.cardIds.length, 1, 'latestHand drops unsafe card ids');
+  assertEqual(cache.latestHand.cardIds[0], 'card-safe', 'latestHand keeps safe card id');
+  assertEqual(cache.latestHand.promptPacketHash, 'packet-safe', 'latestHand keeps safe prompt packet hash');
+  assertEqual(cache.latestHand.omitted.length, 1, 'latestHand drops unsafe omission reasons');
+  assert(!serialized.includes('latest hand promptText should not persist'), 'latestHand omits prompt text');
+  assert(!serialized.includes('latest hand inspectorNotes should not persist'), 'latestHand omits inspector notes');
+  assert(!serialized.includes('provider_response'), 'scene cache omits provider_response marker');
+  assert(!serialized.includes('raw_prompt'), 'scene cache omits raw_prompt marker');
+  assert(!serialized.includes('private_plan'), 'scene cache omits private_plan marker');
+  assert(!serialized.includes('hidden_reasoning'), 'scene cache omits hidden_reasoning marker');
+  assert(!serialized.includes('api_key'), 'scene cache omits api_key marker');
+  assert(!serialized.includes('session_key'), 'scene cache omits session_key marker');
+  assert(!serialized.includes('sid-hidden'), 'scene cache omits cookie values');
+  assert(!serialized.includes('SillyTavern'), 'scene cache omits path-like refs');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  await repo.appendJournal('Hand Privacy Chat', {
+    event: 'hand.selected',
+    summary: 'Turn hand selected.',
+    details: {
+      handId: 'hand-privacy',
+      selectedCount: 1,
+      omittedCount: 0,
+      listedCount: 1,
+      truncated: false,
+      promptText: 'top-level prompt text must not persist',
+      inspectorNotes: 'top-level notes must not persist',
+      cards: [{
+        id: 'card-safe',
+        family: 'Scene Frame',
+        role: 'scene',
+        emphasis: 'normal',
+        detailProfile: 'standard',
+        tokenEstimate: 12,
+        promptText: 'card prompt text must not persist',
+        inspectorNotes: 'card notes must not persist'
+      }]
+    }
+  });
+  const journal = await repo.loadRunJournal('Hand Privacy Chat');
+  const details = journal.entries[0].details;
+  assertEqual(details.handId, 'hand-privacy', 'hand.selected journal keeps hand id');
+  assertEqual(details.selectedCount, 1, 'hand.selected journal keeps selected count');
+  assertEqual(details.cards[0].id, 'card-safe', 'hand.selected journal keeps card id');
+  assert(!JSON.stringify(journal).includes('prompt text must not persist'), 'hand.selected journal omits prompt text');
+  assert(!JSON.stringify(journal).includes('notes must not persist'), 'hand.selected journal omits inspector notes');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
   const key = sceneCacheKey('Invalidate Chat', 'Scene One');
   await repo.saveSceneCache('Invalidate Chat', 'Scene One', {
     cacheState: 'active',
@@ -248,7 +385,10 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   await repo.saveSceneCache('Nested Secret Chat', 'Scene Cache', {
     createdAt: { apiKey: 'created-secret' },
     latestHand: {
-      id: 'hand-1',
+      handId: 'hand-1',
+      composedAt: '2026-06-30T00:00:00.000Z',
+      cardIds: ['nested-card'],
+      promptPacketHash: 'packet-nested',
       provider: { apiKey: 'latest-hand-secret' }
     },
     source: {
@@ -263,7 +403,8 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   });
   const persisted = adapter.dump()[key];
   assertParseableTimestamp(persisted.createdAt, 'scene cache invalid createdAt replaced with timestamp string');
-  assertEqual(persisted.latestHand.provider.apiKey, '[redacted]', 'latestHand nested apiKey redacted');
+  assertEqual(persisted.latestHand.handId, 'hand-1', 'latestHand keeps allowlisted handId');
+  assertNoOwnField(persisted.latestHand, 'provider', 'latestHand drops non-contract provider metadata');
   assertEqual(persisted.source.authorization, '[redacted]', 'source authorization redacted');
   assertEqual(persisted.versions.prompt.token, '[redacted]', 'versions nested token redacted');
   assertNoSecret(persisted, 'scene cache nested metadata contains no raw secrets');
@@ -323,7 +464,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertParseableTimestamp(entry.recordedAt, 'journal entry recordedAt normalized to timestamp string');
   assert(entry.recordedAt !== 'not-a-date', 'journal entry invalid recordedAt not preserved');
   assertEqual(entry.severity, 'info', 'journal entry invalid severity defaults to info');
-  assertEqual(entry.event, 'runtime.event', 'journal entry object event falls back');
+  assertEqual(entry.event, 'activity.stage_changed', 'journal entry object event falls back to canonical default');
   assertEqual(entry.summary, '', 'journal entry object summary falls back');
   assertEqual(entry.runId, undefined, 'journal entry object runId is omitted');
   assertEqual(entry.sceneKey, undefined, 'journal entry object sceneKey is omitted');
@@ -374,8 +515,72 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assert(index.records[sceneCacheKey('Corrupt Chat', 'Index Repair')], 'corrupt index repaired on write');
 
   const clean = await repo.appendJournal('Corrupt Chat', null);
-  assertEqual(clean.event, 'runtime.event', 'null journal entry gets default event');
+  assertEqual(clean.event, 'activity.stage_changed', 'null journal entry gets canonical default event');
   assertEqual(clean.summary, '', 'null journal entry gets empty summary');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  const clean = await repo.appendJournal('Event Gate Chat', {
+    id: 'F:\\SillyTavern\\secret\\entry.json',
+    event: 'raw.provider.response.should.not.persist',
+    summary: `${'SYSTEM PROMPT TEXT '.repeat(40)} rawPrompt: credentials: live session token; Set-Cookie: sid=abc`,
+    runId: 'F:\\SillyTavern\\secret\\chat.jsonl',
+    sceneKey: '../Bearer scene-token',
+    details: {
+      debugRawPrompt: 'SYSTEM PROMPT TEXT without marker',
+      rawPromptText: 'raw prompt value without canonical key',
+      providerResponseText: 'provider response value without marker',
+      authorizationHeader: 'plain authorization header value',
+      cookieHeader: 'sid=plain-cookie-value',
+      apiKeyValue: 'plain api key value',
+      selectedTokenEstimate: 42,
+      nested: `${'visible detail '.repeat(60)} rawPrompt: credentials: live session token; Cookie: sid=abc`,
+      variants: 'raw_prompt provider_response hidden_reasoning private_plan api_key session_key Cookie=sid Set-Cookie=sid',
+      prefixedPath: 'path=F:\\SillyTavern\\secret\\cache.json',
+      prefixedUrl: 'url=https://provider-change.test/v1/raw.json',
+      path: 'F:\\SillyTavern\\secret\\cache.json',
+      sessionKey: 'sessionKey: abc123'
+    }
+  });
+  assertEqual(clean.event, 'activity.stage_changed', 'unknown journal event normalizes to canonical default');
+  const journal = await repo.loadRunJournal('Event Gate Chat');
+  assertEqual(journal.entries[0].event, 'activity.stage_changed', 'persisted unknown event is canonical default');
+  assert(!journal.entries[0].id.includes('SillyTavern'), 'journal id redacts path-like source id');
+  assertEqual(journal.entries[0].runId, undefined, 'unsafe journal run id is omitted');
+  assertEqual(journal.entries[0].sceneKey, undefined, 'unsafe journal scene key is omitted');
+  assert(!JSON.stringify(journal).includes('raw.provider.response.should.not.persist'), 'unknown event name is not persisted');
+  assert(!JSON.stringify(journal).includes('SYSTEM PROMPT TEXT'), 'journal summary redacts raw prompt text');
+  assert(!JSON.stringify(journal).includes('credentials'), 'journal summary redacts credential text');
+  assert(!JSON.stringify(journal).includes('session token'), 'journal summary redacts session token text');
+  assert(!JSON.stringify(journal).includes('sid=abc'), 'journal summary redacts cookie text');
+  assert(!JSON.stringify(journal).includes('abc123'), 'journal details redact session key text');
+  assert(!JSON.stringify(journal).includes('raw_prompt'), 'journal details redact raw_prompt variant');
+  assert(!JSON.stringify(journal).includes('provider_response'), 'journal details redact provider_response variant');
+  assert(!JSON.stringify(journal).includes('hidden_reasoning'), 'journal details redact hidden_reasoning variant');
+  assert(!JSON.stringify(journal).includes('private_plan'), 'journal details redact private_plan variant');
+  assert(!JSON.stringify(journal).includes('api_key'), 'journal details redact api_key variant');
+  assert(!JSON.stringify(journal).includes('session_key'), 'journal details redact session_key variant');
+  assert(!JSON.stringify(journal).includes('Cookie='), 'journal details redact Cookie= variant');
+  assert(!JSON.stringify(journal).includes('Set-Cookie='), 'journal details redact Set-Cookie= variant');
+  assert(!JSON.stringify(journal).includes('SillyTavern'), 'journal details redact path-like text');
+  assert(!JSON.stringify(journal).includes('provider-change.test'), 'journal details redact prefixed URL text');
+  assertEqual(journal.entries[0].summary, '[redacted]', 'unsafe journal summary redacts whole summary');
+  assertEqual(journal.entries[0].details.debugRawPrompt, '[redacted]', 'unsafe raw prompt key redacts value without marker');
+  assertEqual(journal.entries[0].details.rawPromptText, '[redacted]', 'unsafe raw prompt suffix key redacts value without marker');
+  assertEqual(journal.entries[0].details.providerResponseText, '[redacted]', 'unsafe provider response suffix key redacts value without marker');
+  assertEqual(journal.entries[0].details.authorizationHeader, '[redacted]', 'authorization header key redacts value without marker');
+  assertEqual(journal.entries[0].details.cookieHeader, '[redacted]', 'cookie header key redacts value without marker');
+  assertEqual(journal.entries[0].details.apiKeyValue, '[redacted]', 'api key value key redacts value without marker');
+  assertEqual(journal.entries[0].details.selectedTokenEstimate, 42, 'safe token estimate counter survives key screening');
+  assertEqual(journal.entries[0].details.nested, '[redacted]', 'unsafe nested string journal details redact whole value');
+  assertEqual(journal.entries[0].details.variants, '[redacted]', 'unsafe variant string journal details redact whole value');
+  assertEqual(journal.entries[0].details.prefixedPath, '[redacted]', 'prefixed path-like journal details redact whole value');
+  assertEqual(journal.entries[0].details.prefixedUrl, '[redacted]', 'prefixed URL-like journal details redact whole value');
+  assertEqual(journal.entries[0].details.path, '[redacted]', 'path-like journal details redact whole value');
+  assertNoRawSecretText(journal, 'journal summary redacts raw secret text');
+  assertNoSecret(journal, 'unknown event normalization keeps redaction');
 }
 
 {
@@ -446,7 +651,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   const loaded = await repo.loadRunJournal('Bounds Chat');
   assertEqual(loaded.maxEntries, 1, 'maxJournalEntries clamps to at least one');
   assertEqual(Number.isNaN(loaded.nextIndex), false, 'loaded journal nextIndex is numeric');
-  await repo.appendJournal('Bounds Chat', { event: 'runtime.next', summary: 'new' });
+  await repo.appendJournal('Bounds Chat', { event: 'activity.settled', summary: 'new' });
   const journal = await repo.loadRunJournal('Bounds Chat');
   assertEqual(journal.entries.length, 1, 'clamped journal keeps one entry');
   assertEqual(Number.isNaN(journal.nextIndex), false, 'appended journal nextIndex is numeric');
@@ -477,7 +682,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   const loaded = await repo.loadRunJournal('Index Floor Chat');
   assertEqual(loaded.nextIndex, 3, 'journal nextIndex loads at least retained entry count');
   const { appendJournal } = repo;
-  await appendJournal('Index Floor Chat', { event: 'runtime.next', summary: 'four' });
+  await appendJournal('Index Floor Chat', { event: 'activity.settled', summary: 'four' });
   const journal = await repo.loadRunJournal('Index Floor Chat');
   assertEqual(journal.nextIndex, 4, 'destructured appendJournal increments from normalized nextIndex');
 }

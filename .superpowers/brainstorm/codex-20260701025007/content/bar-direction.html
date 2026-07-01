@@ -1,0 +1,155 @@
+<style>
+  .st-frame {
+    background: #151515;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px;
+    overflow: hidden;
+    color: #d8d8d8;
+    font: 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .st-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+    background: #1e1e1e;
+    border-bottom: 1px solid rgba(255,255,255,.1);
+    color: #aaa;
+  }
+  .st-icon {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    background: #2c2c2c;
+    border: 1px solid rgba(255,255,255,.12);
+  }
+  .recbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-height: 34px;
+    padding: 0 12px;
+    background: #191919;
+    border-bottom: 1px solid rgba(255,255,255,.12);
+    white-space: nowrap;
+  }
+  .brand {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    color: #78d8e8;
+    font-weight: 650;
+  }
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #78c985;
+  }
+  .pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #78d8e8;
+    box-shadow: 0 0 0 4px rgba(120,216,232,.12);
+  }
+  .mode, .action, .brief {
+    border-radius: 5px;
+    padding: 4px 8px;
+  }
+  .mode, .action {
+    border: 1px solid rgba(255,255,255,.14);
+    background: #222;
+  }
+  .brief {
+    color: #ededed;
+    min-width: 150px;
+  }
+  .muted { color: #9d9d9d; }
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .transcript {
+    min-height: 76px;
+    padding: 14px 16px;
+    color: #999;
+  }
+  .option .card-image {
+    padding: 0;
+    background: #101010;
+  }
+</style>
+
+<h2>Which simplified Recursion bar should become the V1 direction?</h2>
+<p class="subtitle">Goal: quiet during play, show brief state instead of provider internals, expose only actions that change user behavior.</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="st-frame">
+        <div class="st-toolbar">
+          <div class="st-icon"></div><div class="st-icon"></div><div class="st-icon"></div><div class="st-icon"></div>
+        </div>
+        <div class="recbar">
+          <span class="brand"><span class="dot"></span>Recursion</span>
+          <span class="mode">Auto v</span>
+          <span class="brief">5-card brief</span>
+          <span class="actions"><span class="action">Inspect</span><span class="action">More</span></span>
+        </div>
+        <div class="transcript">Transcript starts here...</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Quietest</h3>
+      <p>Only mode, brief, Inspect, More. Refresh moves into More. Least chrome, but scene refresh is one click deeper.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="st-frame">
+        <div class="st-toolbar">
+          <div class="st-icon"></div><div class="st-icon"></div><div class="st-icon"></div><div class="st-icon"></div>
+        </div>
+        <div class="recbar">
+          <span class="brand"><span class="dot"></span>Recursion</span>
+          <span class="mode">Auto v</span>
+          <span class="brief">5-card brief</span>
+          <span class="actions"><span class="action">Refresh</span><span class="action">Inspect</span><span class="action">More</span></span>
+        </div>
+        <div class="transcript">Transcript starts here...</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Quiet + Operable</h3>
+      <p>Matches feedback: health as dot, brief as main artifact, Refresh top-level, Inspect for details, More for secondary controls.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="st-frame">
+        <div class="st-toolbar">
+          <div class="st-icon"></div><div class="st-icon"></div><div class="st-icon"></div><div class="st-icon"></div>
+        </div>
+        <div class="recbar">
+          <span class="brand"><span class="pulse"></span>Recursion</span>
+          <span class="mode">Auto</span>
+          <span class="brief">Composing brief...</span>
+          <span class="actions"><span class="action">Inspect</span><span class="action">More</span></span>
+        </div>
+        <div class="transcript">Activity ribbon appears only while work is active.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. Activity First</h3>
+      <p>Optimized around working state. Very calm when active, but idle state may hide too much unless paired with strong More/status popover.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p class="subtitle">Click an option if one feels right. Terminal answer matters most: especially whether Refresh deserves top-level space.</p>
+</div>

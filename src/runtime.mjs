@@ -47,6 +47,11 @@ function numberOr(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function timestampOrNow(value) {
+  const text = String(value ?? '');
+  return text && Number.isFinite(Date.parse(text)) ? text : nowIso();
+}
+
 function finiteNumberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
@@ -483,7 +488,29 @@ function rebaseCardsForSnapshot(cards, snapshot) {
   return (Array.isArray(cards) ? cards : []).map((card) => normalizeCard(card, context));
 }
 
-function sceneCachePayload(snapshot, deck, hand, plan) {
+function sceneCacheLatestHand(hand, packet = null) {
+  const selectedCards = Array.isArray(hand?.cards) ? hand.cards : [];
+  const omittedCards = Array.isArray(hand?.omitted) ? hand.omitted : [];
+  return {
+    handId: safeIdentifier(hand?.handId || '', 'hand', 160),
+    composedAt: timestampOrNow(hand?.composedAt),
+    cardIds: selectedCards
+      .map((card) => safeIdentifier(card?.id || card?.cardId || '', 'card', 160))
+      .filter(Boolean)
+      .slice(0, 32),
+    omitted: omittedCards
+      .map((entry) => {
+        const cardId = safeIdentifier(entry?.cardId || entry?.id || '', 'card', 160);
+        const reason = safeText(entry?.reason || '', 160);
+        return cardId && reason ? { cardId, reason } : null;
+      })
+      .filter(Boolean)
+      .slice(0, 32),
+    promptPacketHash: packet ? hashJson(packet) : safeIdentifier(hand?.promptPacketHash || '', '', 160)
+  };
+}
+
+function sceneCachePayload(snapshot, deck, hand, plan, packet = null) {
   return {
     cacheState: 'active',
     source: {
@@ -494,7 +521,7 @@ function sceneCachePayload(snapshot, deck, hand, plan) {
       sceneStatus: plan.sceneStatus
     },
     cards: deck.cards,
-    latestHand: hand
+    latestHand: sceneCacheLatestHand(hand, packet)
   };
 }
 
@@ -705,8 +732,8 @@ function compactSceneCacheForArbiter(cache, snapshot) {
     .filter(Boolean)
     .slice(0, 32);
   const latestHand = asObject(source.latestHand);
-  const handCards = Array.isArray(latestHand.cards)
-    ? latestHand.cards.map((card) => arbiterSafeRef(card?.id || card?.cardId || '', 'card')).filter(Boolean).slice(0, 16)
+  const handCards = Array.isArray(latestHand.cardIds)
+    ? latestHand.cardIds.map((cardId) => arbiterSafeRef(cardId || '', 'card')).filter(Boolean).slice(0, 16)
     : [];
   const handId = arbiterSafeRef(latestHand.handId || '', 'hand');
   return {
@@ -806,6 +833,18 @@ function safeCurrentActivity(activity) {
     return null;
   }
   return null;
+}
+
+function safeActivityHistory(activity) {
+  try {
+    if (typeof activity?.history === 'function') {
+      const history = activity.history();
+      return Array.isArray(history) ? history : [];
+    }
+  } catch {
+    return [];
+  }
+  return [];
 }
 
 function sanitizePromptError(error, fallbackCode, fallbackMessage) {
@@ -1991,6 +2030,12 @@ export function createRecursionRuntime({
       lastPacket = packet;
 
       if (settings.mode === 'observe') {
+        await runStorageSaveSection(runId, () => saveSceneCacheSafe(
+          runId,
+          promptSnapshot,
+          sceneCachePayload(promptSnapshot, promptDeck, hand, plan, packet)
+        ));
+        if (!isActiveRun(runId)) return supersededResult(runId);
         const observeResult = await runPromptMutationSection(runId, async () => {
           const clear = await clearPromptBestEffort(host);
           if (clear?.superseded) return clear;
@@ -2079,10 +2124,8 @@ export function createRecursionRuntime({
           lastPacket = packet;
         }
         const install = await installPrompt(host, packet);
-        if (!isActiveRun(runId)) return supersededResult(runId);
         const installOk = install?.ok !== false;
         await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
-        if (!isActiveRun(runId)) return supersededResult(runId);
         await appendJournalSafe(runId, promptSnapshot.chatKey, {
           event: installOk ? 'prompt.installed' : 'prompt.install_failed',
           severity: installOk ? 'info' : 'warn',
@@ -2092,6 +2135,11 @@ export function createRecursionRuntime({
           details: installJournalDetails(install),
           hashes: { promptPacketHash: hashJson(packet) }
         });
+        await runStorageSaveSection(runId, () => saveSceneCacheSafe(
+          runId,
+          promptSnapshot,
+          sceneCachePayload(promptSnapshot, promptDeck, hand, plan, packet)
+        ));
         if (!isActiveRun(runId)) return supersededResult(runId);
         settleRuntimeActivity({
           runId,
@@ -2138,6 +2186,7 @@ export function createRecursionRuntime({
         lastPlan,
         lastSnapshot: viewSnapshot(lastSnapshot),
         activity: safeCurrentActivity(activity),
+        activityHistory: safeActivityHistory(activity),
         settings: safeSettingsView(settingsStore.get()),
         updatedAt: nowIso()
       };

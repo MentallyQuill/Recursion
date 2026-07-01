@@ -380,6 +380,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/core.mjs',
     'src/hosts/sillytavern/host.mjs',
     'src/hosts/sillytavern/storage.mjs',
+    'src/progress.mjs',
     'src/prompt.mjs',
     'src/providers.mjs',
     'src/runtime.mjs',

@@ -130,14 +130,14 @@ Prompt footprint can be compact, normal, or rich. Even rich packets must stay bo
 The primary UI is a Recursion Bar attached to the chat surface:
 
 ```text
-Recursion   Ready - Auto   Hand 5   Utility   Reasoner idle   [Actions] [Hand] [Open]
+Recursion | Ready | Auto | Hand 5 v | Utility ready | Reasoner idle        Actions v | Viewer
 ```
 
 It replaces the earlier shelf/drawer idea. The bar is thin, stable, mostly observational, and paired with:
 
 - a drop-down Activity Ribbon for live status, model-call progress, cache writes, prompt installation, and fallback visibility;
 - an Actions menu for high-level commands;
-- a Last Hand dropdown for recent card visibility;
+- a Last Hand dropdown opened from the `Hand 0 v` / `Hand 5 v` chip;
 - a full viewer for deck/activity/prompt/settings/provider inspection;
 - provider settings for Utility and Reasoner lanes;
 - a small set of broad behavior controls.

@@ -123,7 +123,7 @@ Plan action controls runtime cost and cache churn.
 
 `compose-brief` means compose a packet from the current hand after any requested cache/card work. Local fallback also uses this action when the Arbiter is unavailable and safe fallback cards can be built from the snapshot.
 
-Action choice should be automatic by default. User controls should stay high level, such as Off/Observe/Auto, refresh, intensity, provider setup, prompt footprint fallback, and optional Reasoner enablement.
+Action choice should be automatic by default. User controls should stay high level, such as Off/Observe only/Auto, refresh, intensity, provider setup, prompt footprint fallback, and optional Reasoner enablement.
 
 ## Scene Shift Handling
 
@@ -210,7 +210,7 @@ Runtime state should be minimal, bounded, and inspectable.
 
 In memory:
 
-- active mode: Off, Observe, or Auto;
+- active mode: Off, Observe only, or Auto;
 - active host and chat identifiers;
 - current turn snapshot id and message fingerprint;
 - scene fingerprint and scene status;
@@ -284,7 +284,7 @@ Diagnostics should explain what Recursion did without storing sensitive provider
 
 Core event types:
 
-- `runtime.mode_changed`: Off, Observe, or Auto changed.
+- `runtime.mode_changed`: Off, Observe only, or Auto changed.
 - `turn.snapshot_captured`: chat id, snapshot id, message fingerprint, and size metadata.
 - `arbiter.plan_requested`: provider lane, snapshot id, and cache fingerprint.
 - `arbiter.plan_received`: action, scene status, prompt footprint, card job count, Reasoner decision, and budgets.
@@ -311,7 +311,7 @@ Diagnostics should support the UI's Status and Inspector surfaces, automated tes
 V1 should be built in small vertical slices that preserve the end-to-end loop.
 
 1. Host adapter skeleton and modes
-   - Implement SillyTavern lifecycle hooks, Off/Observe/Auto mode state, snapshot capture, activity event contract, and no-op prompt clear/install methods.
+   - Implement SillyTavern lifecycle hooks, Off/Observe only/Auto mode state, snapshot capture, activity event contract, and no-op prompt clear/install methods.
 
 2. Snapshot and diagnostics foundation
    - Add stable snapshot ids, message fingerprints, bounded diagnostics events, and inspector-ready last-run summaries.
@@ -335,6 +335,6 @@ V1 should be built in small vertical slices that preserve the end-to-end loop.
    - Persist settings, cache metadata, last packet metadata, and bounded diagnostics using logical keys and privacy-safe records.
 
 9. UI integration and smoke validation
-   - Connect the Recursion Bar, Activity Ribbon, status, refresh, provider health, mode controls, and inspector diagnostics. Validate Off, Observe, Auto, provider failure, scene refresh, storage activity, prompt install, and stale-result behavior.
+   - Connect the Recursion Bar, Activity Ribbon, status, refresh, provider health, mode controls, and inspector diagnostics. Validate Off, Observe only, Auto, provider failure, scene refresh, storage activity, prompt install, and stale-result behavior.
 
 Each slice should keep generation usable if it fails. The first complete proof is not perfect card intelligence; it is a reliable loop from observe -> Arbiter -> card jobs/cache -> hand -> prompt packet -> host injection -> diagnostics.

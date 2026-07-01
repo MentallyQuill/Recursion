@@ -42,7 +42,7 @@ The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src
 | Cards | `src/cards.mjs` | Fixed V1 catalog, card normalization, provider-result conversion, lifecycle application, and hand selection. |
 | Prompt | `src/prompt.mjs` | Packet sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
 | Storage | `src/storage.mjs` | Logical scene-cache and run-journal records, key safety, redaction, index maintenance, and bounded retention. |
-| Runtime | `src/runtime.mjs` | Off/Observe/Auto orchestration, snapshot use, Utility Arbiter plan handling, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
+| Runtime | `src/runtime.mjs` | Off/Observe only/Auto orchestration, snapshot use, Utility Arbiter plan handling, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
 | UI | `src/ui.mjs` | Recursion Bar, Activity Ribbon, Actions, Last Hand, Full Viewer, settings, and provider controls. |
 | SillyTavern host | `src/hosts/sillytavern/host.mjs` | Snapshot capture, prompt install/clear, provider bridge, settings store, and user-file storage adapter selection. |
 | Entrypoint | `src/extension/index.js` | Extension lifecycle hooks, runtime bootstrap, UI mount, generation interceptor, and teardown cleanup. |
@@ -51,7 +51,7 @@ The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src
 
 Off mode clears or avoids Recursion prompt entries and does not inspect chat for prompt compilation.
 
-Observe mode captures the current turn, runs safe runtime work, composes a preview packet, updates diagnostics, and clears Recursion prompt entries instead of injecting.
+Observe only mode captures the current turn, runs safe runtime work, composes a preview packet, updates diagnostics, and clears Recursion prompt entries instead of injecting.
 
 Auto mode runs the full pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the Utility Arbiter or local fallback path produces useful guidance.
 

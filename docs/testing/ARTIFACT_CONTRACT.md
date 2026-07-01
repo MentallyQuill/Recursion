@@ -265,7 +265,7 @@ Strict: true
 - Preflight: pass
 - Recursion Bar: pass
 - Activity Ribbon: pass
-- Observe mode: pass
+- Observe only mode: pass
 - Auto Utility pass: pass
 - Prompt cleanup: pass
 

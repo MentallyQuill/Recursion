@@ -4,7 +4,7 @@ Recursion is a pre-alpha SillyTavern extension that compiles compact, current-sc
 
 Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product. It is a focused prompt compiler for the scene in front of the user.
 
-<Render Needed>: assets/documentation/renders/recursion-bar-desktop.png - Recursion Bar mounted in SillyTavern on desktop, showing mode, hand count, Utility state, Reasoner state, Actions, Hand, and Open controls.
+<Render Needed>: assets/documentation/renders/recursion-bar-desktop.png - Recursion Bar mounted in SillyTavern on desktop, showing Ready, mode, Hand dropdown, Utility state, Reasoner state, Actions, and Viewer controls.
 
 ## Current Status
 
@@ -23,8 +23,8 @@ V1 currently covers settings, provider lanes, scene cards, runtime coordination,
 1. Install or serve Recursion as a SillyTavern extension.
 2. Enable the `Recursion` extension in SillyTavern.
 3. Configure the Utility provider.
-4. Leave Reasoner disabled unless you want the optional composition lane.
-5. Use `Observe` to inspect without prompt injection, or `Auto` to prepare and install the next prompt packet.
+4. Leave Reasoner off unless you want the optional composition lane.
+5. Use `Observe only` to inspect without prompt injection, or `Auto` to prepare and install the next prompt packet.
 6. Watch the Activity Ribbon, then inspect the Last Hand or Full Viewer when you need details.
 
 ## Key Features

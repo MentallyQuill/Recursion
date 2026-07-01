@@ -189,11 +189,18 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assert(view.lastPacket.sections.sceneBrief.includes('The lamp breaks.'), 'scene frame uses latest visible message');
   assert(!view.lastPacket.sections.sceneBrief.includes('hidden draft'), 'scene frame ignores invisible message');
   assertEqual(view.activity.label, 'Recursion prompt ready.', 'activity settled');
+  assert(Array.isArray(view.activityHistory), 'runtime view exposes bounded activity history');
+  assert(view.activityHistory.some((event) => event.phase === 'started'), 'activity history includes turn start');
+  assert(view.activityHistory.some((event) => event.phase === 'handSelected'), 'activity history includes hand selection');
+  assertNoSecretText(view.activityHistory, 'runtime view activity history');
   assertEqual(view.activeRunId, null, 'active run cleared after auto success');
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assert(cache.cards.length >= 2, 'scene cache persists fallback cards');
   assert(cache.latestHand?.handId, 'scene cache persists latest hand metadata');
-  assert(cache.latestHand.cards.length > 0, 'scene cache latest hand records selected cards');
+  assert(cache.latestHand.cardIds.length > 0, 'scene cache latest hand records selected card ids');
+  assert(cache.latestHand.promptPacketHash, 'scene cache latest hand records prompt packet hash');
+  assert(!Object.prototype.hasOwnProperty.call(cache.latestHand, 'cards'), 'scene cache latest hand omits raw card objects');
+  assert(!JSON.stringify(cache.latestHand).includes(view.lastHand.cards[0].promptText), 'scene cache latest hand omits prompt text');
   assert(cache.cards.some((card) => Number.isFinite(card.source?.firstMesId) && Number.isFinite(card.source?.lastMesId)), 'scene cache cards preserve source message range');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
   assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.installed'], 'auto journals hand before prompt install');
@@ -208,6 +215,72 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(handSelected.details?.truncated, false, 'hand selection journal records truncation state');
   assert(handSelected.hashes?.promptPacketHash, 'hand selection journal records prompt packet hash');
   assert(!JSON.stringify(handSelected).includes(view.lastHand.cards[0].promptText), 'hand selection journal omits prompt text');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const baseStorage = createStorageRepository({ storage: adapter });
+  let saveCalls = 0;
+  let finalHashSaveStarted = false;
+  let releaseFinalHashSave;
+  const storage = {
+    ...baseStorage,
+    async saveSceneCache(chatKey, sceneKey, value) {
+      saveCalls += 1;
+      if (saveCalls === 2) {
+        finalHashSaveStarted = true;
+        await new Promise((resolve) => {
+          releaseFinalHashSave = resolve;
+        });
+      }
+      return baseStorage.saveSceneCache(chatKey, sceneKey, value);
+    }
+  };
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage
+  });
+  const pending = runtime.prepareForGeneration({ userMessage: 'Install before final cache hash save.' });
+  await waitUntil(() => finalHashSaveStarted, 'final prompt-packet hash cache save did not start');
+  assertEqual(installed.length, 1, 'prompt installs before final prompt-packet-hash cache save can block');
+  releaseFinalHashSave();
+  const result = await pending;
+  assertEqual(result.ok, true, 'run completes after final cache hash save');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const baseStorage = createStorageRepository({ storage: adapter });
+  let saveCalls = 0;
+  let finalHashSaveStarted = false;
+  let releaseFinalHashSave;
+  const storage = {
+    ...baseStorage,
+    async saveSceneCache(chatKey, sceneKey, value) {
+      saveCalls += 1;
+      if (saveCalls === 2) {
+        finalHashSaveStarted = true;
+        await new Promise((resolve) => {
+          releaseFinalHashSave = resolve;
+        });
+      }
+      return baseStorage.saveSceneCache(chatKey, sceneKey, value);
+    }
+  };
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage
+  });
+  const pending = runtime.prepareForGeneration({ userMessage: 'Journal install before superseded final cache save.' });
+  await waitUntil(() => finalHashSaveStarted, 'journal regression final cache save did not start');
+  assertEqual(installed.length, 1, 'journal regression prompt is installed before final cache save');
+  const providerUpdate = runtime.updateProvider('utility', { source: 'host-current-model' });
+  await Promise.resolve();
+  releaseFinalHashSave();
+  await Promise.allSettled([pending, providerUpdate]);
+  const journal = await baseStorage.loadRunJournal('chat-1');
+  assert(journal.entries.some((entry) => entry.event === 'hand.selected'), 'installed prompt hand journal survives superseded final save');
+  assert(journal.entries.some((entry) => entry.event === 'prompt.installed'), 'installed prompt install journal survives superseded final save');
 }
 
 {
@@ -380,7 +453,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
     ...baseStorage,
     async saveSceneCache(chatKey, sceneKey, value) {
       saveCalls += 1;
-      if (saveCalls === 2) {
+      if (saveCalls === 3) {
         delayedSaveStarted = true;
         await new Promise((resolve) => {
           releaseDelayedSave = resolve;
@@ -3499,7 +3572,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const [firstResult, secondResult] = await Promise.all([first, second]);
   assert(firstResult.ok || firstResult.superseded, 'first save run either completes or is superseded after save commits');
   assertEqual(secondResult.ok, true, 'queued newer run completes after cache save');
-  assertDeepEqual(sideEffects, ['save:save-run-1', 'save:save-run-2'], 'scene cache saves commit in run order');
+  assertDeepEqual(sideEffects, ['save:save-run-1', 'save:save-run-2', 'save:save-run-2'], 'scene cache saves commit in run order, including final prompt-packet hash write');
 }
 
 {

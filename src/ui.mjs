@@ -1,4 +1,5 @@
 import { redact } from './core.mjs';
+import { createHeroPixelBlocks, createProgressRunModel } from './progress.mjs';
 
 const PHASE_LABELS = Object.freeze({
   idle: '',
@@ -167,6 +168,8 @@ export function createRecursionViewModel(view = {}) {
   const cards = Array.isArray(source.lastHand?.cards) ? source.lastHand.cards : [];
   const composerLane = source.lastPacket?.diagnostics?.composerLane || activity.composerLane || activity.providerLane || 'utility';
   const ready = READY_PHASES.has(activity.phase);
+  const progressRun = createProgressRunModel(source);
+  const heroPixelBlocks = createHeroPixelBlocks(progressRun);
   const activityChips = normalizeChips([
     ...(Array.isArray(activity.chips) ? activity.chips : []),
     activity.providerLane ? laneLabel(activity.providerLane) : '',
@@ -181,6 +184,10 @@ export function createRecursionViewModel(view = {}) {
     activityLabel: activityLabel(activity),
     activitySeverity: normalizeSeverity(activity.severity),
     activityChips,
+    progressRun,
+    currentStepText: progressRun.currentStepText,
+    heroPixelBlocks,
+    heroPixelColumnCount: heroPixelBlocks.at(-1)?.columnCount || 0,
     composerLabel: laneLabel(composerLane, 'Utility'),
     reasonerState: reasonerState(source, activity),
     reasonerLabel: `Reasoner ${reasonerState(source, activity).toLowerCase()}`,

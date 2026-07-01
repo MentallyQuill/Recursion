@@ -7,7 +7,7 @@ These manuals explain how Recursion works behind the SillyTavern UI. They are re
 | Manual | Purpose |
 | --- | --- |
 | [Recursion Technical Manual](RECURSION_TECHNICAL_MANUAL.md) | System overview, boundaries, runtime spine, component ownership, UI observability, fail-soft invariants, evidence, and non-goals. |
-| [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md) | Off, Observe, and Auto lifecycle from snapshot capture through Arbiter decisions, cards, composition, injection, storage, cancellation, and failure branches. |
+| [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md) | Off, Observe only, and Auto lifecycle from snapshot capture through Arbiter decisions, cards, composition, injection, storage, cancellation, and failure branches. |
 | [Card Deck And Hand](CARD_DECK_AND_HAND.md) | Fixed V1 card families, card contract, deck lifecycle, hand selection, invalidation, Character Motivation safety, and inspector visibility. |
 | [Prompt Packet And Injection](PROMPT_PACKET_AND_INJECTION.md) | Scene Brief, Turn Brief, Guardrails, composer inputs, Utility/Reasoner composition, budgets, omissions, injection lanes, cleanup, and privacy guardrails. |
 | [Model Calls And Provider Routing](MODEL_CALLS_AND_PROVIDER_ROUTING.md) | Utility and Reasoner lanes, provider sources, generation roles, structured output validation, retries, fallbacks, journals, secrets, aborts, and provider status. |
@@ -27,4 +27,3 @@ These manuals explain how Recursion works behind the SillyTavern UI. They are re
 - [Source Layout](../../src/README.md)
 - [Testing Strategy](../testing/TESTING_STRATEGY.md)
 - [Artifact Contract](../testing/ARTIFACT_CONTRACT.md)
-

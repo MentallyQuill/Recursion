@@ -16,12 +16,12 @@ The fast contract suite is the normal maintained confidence gate in this checkou
 Highest-priority invariants:
 
 - Off mode performs no chat inspection, provider calls, card updates, or prompt injection.
-- Observe mode may capture diagnostics and preview decisions but must not install prompt packets.
+- Observe only mode may capture diagnostics and preview decisions but must not install prompt packets.
 - Auto mode may install prompt packets only through Recursion-owned SillyTavern prompt keys.
 - Prompt packet installation is replace-or-clear by Recursion metadata, not blind append.
 - Stale provider results cannot update the active scene cache or active prompt packet.
 - Utility is the default provider lane for Arbiter and composition work.
-- Reasoner composition is optional and must fall back to Utility or local composition on timeout, failure, disabled state, or invalid schema.
+- Reasoner composition is optional and must fall back to Utility or local composition on timeout, failure, off state, or invalid schema.
 - Direct endpoint API keys are session-only and never written to settings, cache, journals, reports, screenshots, artifacts, or prompt packets.
 - Raw provider prompts and raw provider responses are not persisted by default.
 - Character Motivation cards may produce behavior-facing motivation guidance but must not inject private internal-thought dumps.
@@ -88,9 +88,9 @@ Live smoke must start with these gates:
 Primary live scenarios:
 
 - extension mount and Recursion Bar render;
-- mode transitions: Off, Observe, Auto;
+- mode transitions: Off, Observe only, Auto;
 - provider setup display and Test Provider action for Utility and Reasoner;
-- Observe mode diagnostics without prompt injection;
+- Observe only mode diagnostics without prompt injection;
 - Auto mode Utility Arbiter pass, card refresh, hand selection, prompt packet composition, and prompt installation;
 - Last Hand dropdown reflects the cards used for the last prompt packet;
 - Activity Ribbon shows model-call, cache, storage, composition, injection, fallback, and settled states;

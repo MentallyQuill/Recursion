@@ -13,9 +13,9 @@ Recursion is a current-scene prompt compiler. It observes the active chat, build
 
 <Render Needed>: assets/documentation/renders/recursion-first-run-install-enable.png - SillyTavern extension settings with Recursion enabled and the Recursion Bar mounted in the active chat.
 
-The bar should expose mode, hand count, Utility status, Reasoner status, Actions, Last Hand, and Open controls on desktop. On narrow screens, extra details may collapse into a menu.
+The bar should expose runtime health, mode, the Hand dropdown, Utility status, Reasoner status, Actions, and Viewer controls on desktop. On narrow screens, extra details may collapse into a menu.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-bar-mounted.png - Recursion Bar mounted below the SillyTavern chat header with ready status, mode control, provider chips, Actions, Hand, and Open controls visible.
+<Render Needed>: assets/documentation/renders/recursion-first-run-bar-mounted.png - Recursion Bar mounted below the SillyTavern chat header with Ready, mode, Hand dropdown, Utility state, Reasoner state, Actions, and Viewer controls visible.
 
 ## 2. Configure Utility
 
@@ -34,23 +34,23 @@ Session API keys are memory-only for the browser session. Recursion may remember
 
 ## 3. Optionally Configure Reasoner
 
-Reasoner is optional. Leave it disabled for the first pass unless you intentionally want the extra composer lane.
+Reasoner is optional. Leave it off for the first pass unless you intentionally want the extra composer lane.
 
-Reasoner is used only when enabled, healthy, and selected for a crowded, conflicted, or subtle hand. If Reasoner fails, times out, is disabled, or returns invalid output, Recursion falls back to Utility composition.
+Reasoner is used only when enabled, healthy, and selected for a crowded, conflicted, or subtle hand. If Reasoner fails, times out, is off, or returns invalid output, Recursion falls back to Utility composition.
 
-## 4. Start In Observe
+## 4. Start In Observe Only
 
-Observe lets you inspect Recursion without installing a prompt packet.
+Observe only lets you inspect Recursion without installing a prompt packet.
 
-1. Set mode to `Observe`.
+1. Set mode to `Observe only`.
 2. Send or select a safe, ordinary chat turn.
 3. Watch the Activity Ribbon.
 4. Confirm the ribbon reports snapshot, planning, card, hand, or preview work.
 5. Confirm the status says no prompt was injected.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-observe-pass.png - Activity Ribbon during an Observe pass showing snapshot capture, Utility planning, hand preview, and no prompt injection.
+<Render Needed>: assets/documentation/renders/recursion-first-run-observe-pass.png - Activity Ribbon during an Observe only pass showing snapshot capture, Utility planning, hand preview, and no prompt injection.
 
-Use Observe when you want to check what Recursion would do before letting it affect generation.
+Use Observe only when you want to check what Recursion would do before letting it affect generation.
 
 ## 5. Run The First Auto Pass
 
@@ -68,9 +68,9 @@ A normal Auto pass may show stages such as reading the current turn, planning th
 
 ## 6. Inspect Last Hand And Viewer
 
-After Observe or Auto has produced a hand:
+After Observe only or Auto has produced a hand:
 
-1. Open `Hand` from the Recursion Bar.
+1. Open the `Hand 0 v` / `Hand 5 v` dropdown from the Recursion Bar.
 2. Review compact selected cards, emphasis, omission hints, and composition route.
 3. Use `View Prompt Packet` when available.
 4. Open the Full Viewer.
@@ -96,7 +96,7 @@ The first run is healthy when:
 
 - Recursion Bar is mounted and stable.
 - Utility provider can be configured and tested.
-- Observe mode shows visible work without prompt injection.
+- Observe only mode shows visible work without prompt injection.
 - Auto mode reaches prompt ready or a clear fail-soft fallback.
 - Last Hand and Full Viewer inspection are available.
 - Prompt Packet inspection shows bounded current-scene guidance.

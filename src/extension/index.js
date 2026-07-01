@@ -36,8 +36,10 @@ function createProviderJournal(storage, currentHost) {
         const snapshot = typeof currentHost?.snapshot === 'function'
           ? await currentHost.snapshot()
           : { chatKey: 'unknown-chat', sceneKey: 'unknown-scene' };
+        const status = String(entry.status || '').toLowerCase();
+        const event = status === 'success' ? 'provider.call.completed' : 'provider.call.failed';
         await storage.appendJournal(snapshot.chatKey || 'unknown-chat', {
-          event: 'provider.call',
+          event,
           severity: entry.status === 'success' ? 'info' : 'warn',
           summary: `${entry.roleId || 'provider'} ${entry.status || 'completed'}`,
           runId: entry.runId,

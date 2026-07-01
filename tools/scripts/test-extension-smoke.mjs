@@ -328,13 +328,15 @@ if (lifecycleFailures.length) {
       setExtensionPrompt() {},
       async generateRaw() {
         return {
+          providerId: 'journal-success-provider',
+          model: 'journal-success-model',
           text: JSON.stringify({
             schema: 'recursion.utilityArbiter.v1',
             action: 'compose-brief',
             cardJobs: [],
             reasonerDecision: { mode: 'skip', reason: 'journal smoke', signals: [] },
             budgets: { targetBriefTokens: 500, maxCards: 6 },
-            diagnostics: ['journal-smoke']
+            diagnostics: ['journal-smoke', 'JOURNAL_SUCCESS_RESPONSE_SENTINEL']
           })
         };
       }
@@ -366,14 +368,76 @@ if (lifecycleFailures.length) {
   const journalSmokeChat = { payload: 'journal-smoke' };
   assertEqual(await globalThis.recursionGenerationInterceptor(journalSmokeChat), journalSmokeChat, 'journal smoke returns original object');
   await waitUntil(
-    () => [...files.values()].some((file) => Array.isArray(file.entries) && file.entries.some((entry) => entry.event === 'provider.call')),
+    () => [...files.values()].some((file) => Array.isArray(file.entries) && file.entries.some((entry) => entry.event === 'provider.call.completed')),
     'provider model-call journal was not persisted by extension bootstrap'
   );
-  const journal = [...files.values()].find((file) => Array.isArray(file.entries) && file.entries.some((entry) => entry.event === 'provider.call'));
-  const providerEntry = journal.entries.find((entry) => entry.event === 'provider.call');
+  const journal = [...files.values()].find((file) => Array.isArray(file.entries) && file.entries.some((entry) => entry.event === 'provider.call.completed'));
+  const providerEntry = journal.entries.find((entry) => entry.event === 'provider.call.completed');
+  assert(!journal.entries.some((entry) => entry.event === 'provider.call'), 'provider journal does not use obsolete generic event');
   assertEqual(providerEntry.details.roleId, 'utilityArbiter', 'provider journal records role id');
   assert(providerEntry.hashes.responseHash, 'provider journal records response hash');
   assert(!JSON.stringify(providerEntry).includes('Journal smoke user message.'), 'provider journal does not persist raw transcript text');
+  assert(!JSON.stringify(providerEntry).includes('JOURNAL_SUCCESS_RESPONSE_SENTINEL'), 'provider journal does not persist raw provider response text');
+  await globalThis.recursionOnDelete();
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+  if (previousGlobals.fetch === undefined) delete globalThis.fetch;
+  else globalThis.fetch = previousGlobals.fetch;
+}
+
+{
+  const files = new Map();
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = {
+    getContext: () => ({
+      chatId: 'journal-failure-chat',
+      chat: [{ mesid: 0, is_user: true, mes: 'Journal failure smoke user message.' }],
+      extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+      extension_prompt_roles: { SYSTEM: 'SYSTEM' },
+      getRequestHeaders: () => ({ 'X-CSRF-Token': 'journal-failure-token' }),
+      setExtensionPrompt() {},
+      async generateRaw() {
+        return { text: 'provider failure raw text should not persist' };
+      }
+    })
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    const target = String(url);
+    if (target.startsWith('/user/files/')) {
+      const fileName = decodeURIComponent(target.slice('/user/files/'.length));
+      if (!files.has(fileName)) return { ok: false, status: 404, json: async () => null };
+      return { ok: true, status: 200, json: async () => files.get(fileName) };
+    }
+    if (target === '/api/files/upload') {
+      const body = JSON.parse(String(options.body || '{}'));
+      const text = Buffer.from(String(body.data || ''), 'base64').toString('utf8');
+      files.set(String(body.name), JSON.parse(text));
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    if (target === '/api/files/delete') {
+      const body = JSON.parse(String(options.body || '{}'));
+      const fileName = String(body.path || '').split('/').pop();
+      files.delete(fileName);
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    return { ok: false, status: 404, json: async () => null };
+  };
+
+  await globalThis.recursionOnDelete();
+  const journalFailureChat = { payload: 'journal-failure-smoke' };
+  assertEqual(await globalThis.recursionGenerationInterceptor(journalFailureChat), journalFailureChat, 'journal failure smoke returns original object');
+  await waitUntil(
+    () => [...files.values()].some((file) => Array.isArray(file.entries) && file.entries.some((entry) => entry.event === 'provider.call.failed')),
+    'provider failed-call journal was not persisted by extension bootstrap'
+  );
+  const journal = [...files.values()].find((file) => Array.isArray(file.entries) && file.entries.some((entry) => entry.event === 'provider.call.failed'));
+  const providerEntry = journal.entries.find((entry) => entry.event === 'provider.call.failed');
+  assert(!journal.entries.some((entry) => entry.event === 'provider.call'), 'failed provider journal does not use obsolete generic event');
+  assertEqual(providerEntry.details.roleId, 'utilityArbiter', 'failed provider journal records role id');
+  assert(!JSON.stringify(providerEntry).includes('provider failure raw text should not persist'), 'failed provider journal does not persist raw provider text');
+  assert(!JSON.stringify(providerEntry).includes('Journal failure smoke user message.'), 'failed provider journal does not persist raw transcript text');
   await globalThis.recursionOnDelete();
   if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
   else globalThis.SillyTavern = previousGlobals.SillyTavern;

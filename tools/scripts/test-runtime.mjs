@@ -42,6 +42,20 @@ function parseReasonerPromptSnapshotHash(prompt) {
   return match[1].trim();
 }
 
+function healthyReasonerSettings(settings = {}) {
+  return {
+    ...settings,
+    providers: {
+      ...(settings.providers || {}),
+      reasoner: {
+        enabled: true,
+        lastTest: { status: 'pass' },
+        ...(settings.providers?.reasoner || {})
+      }
+    }
+  };
+}
+
 function messageTextHash(message) {
   return hashJson(String(message?.text ?? message?.mes ?? message?.content ?? ''));
 }
@@ -1523,7 +1537,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', promptFootprint: 'rich', reasoningLevel: 'low' },
+    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'rich', reasoningLevel: 'low' }),
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push({ roleId, request });
@@ -1584,7 +1598,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', promptFootprint: 'compact', reasonerUse: 'auto' },
+    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'compact', reasonerUse: 'auto' }),
     generationRouter: {
       async generate(roleId, request = {}) {
         routerCalls.push(roleId);
@@ -1622,6 +1636,97 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(view.lastPacket.footprint, 'rich', 'last packet uses arbiter rich footprint');
   assert(routerCalls.includes('reasonerComposer'), 'rich arbiter footprint with auto reasoner invokes reasoner composer');
   assertEqual(view.lastPacket.diagnostics.composerLane, 'reasoner', 'rich arbiter footprint records reasoner composer lane');
+}
+
+for (const scenario of [
+  {
+    label: 'disabled reasoner',
+    settings: { mode: 'auto', promptFootprint: 'rich' },
+    expectedReason: 'reasoner-disabled'
+  },
+  {
+    label: 'failed reasoner test',
+    settings: healthyReasonerSettings({
+      mode: 'auto',
+      promptFootprint: 'rich',
+      providers: {
+        reasoner: {
+          lastTest: { status: 'fail', compactError: 'Bearer reasoner-token sk-reasoner-runtime private-secret' }
+        }
+      }
+    }),
+    expectedReason: 'reasoner-unhealthy'
+  },
+  {
+    label: 'untested reasoner',
+    settings: {
+      mode: 'auto',
+      promptFootprint: 'rich',
+      providers: {
+        reasoner: { enabled: true }
+      }
+    },
+    expectedReason: 'reasoner-not-tested'
+  },
+  {
+    label: 'missing direct reasoner key',
+    settings: healthyReasonerSettings({
+      mode: 'auto',
+      promptFootprint: 'rich',
+      providers: {
+        reasoner: {
+          source: 'openai-compatible',
+          openAICompatible: { baseUrl: 'https://reasoner.test/v1', model: 'reasoner-model' }
+        }
+      }
+    }),
+    expectedReason: 'reasoner-key-missing'
+  },
+  {
+    label: 'missing profile reasoner id',
+    settings: healthyReasonerSettings({
+      mode: 'auto',
+      promptFootprint: 'rich',
+      providers: {
+        reasoner: {
+          source: 'host-connection-profile',
+          hostConnectionProfileId: ''
+        }
+      }
+    }),
+    expectedReason: 'reasoner-profile-missing'
+  }
+]) {
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: scenario.settings,
+    generationRouter: {
+      async generate(roleId) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              reasonerDecision: { mode: 'use', reason: `${scenario.label} should be gated`, signals: ['health-gate'] },
+              budgets: { targetBriefTokens: 900, maxCards: 6 }
+            }
+          };
+        }
+        throw new Error(`${scenario.label} should not call reasonerComposer`);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: `Gate ${scenario.label}.` });
+  const view = runtime.view();
+  assertEqual(result.ok, true, `${scenario.label} run still installs Utility packet`);
+  assert(!routerCalls.includes('reasonerComposer'), `${scenario.label} suppresses reasoner composer`);
+  assertEqual(result.plan.reasonerDecision.mode, 'skip', `${scenario.label} rewrites plan reasoner decision to skip`);
+  assertEqual(result.plan.reasonerDecision.reason, scenario.expectedReason, `${scenario.label} records stable reasoner gate reason`);
+  assert(result.plan.reasonerDecision.signals.includes('health-gate'), `${scenario.label} preserves Arbiter signal for diagnostics`);
+  assert(result.plan.diagnostics.includes('reasoner-unavailable'), `${scenario.label} records reasoner unavailable diagnostic`);
+  assertEqual(view.lastPacket.diagnostics.reasonerStatus, 'skipped', `${scenario.label} composes with Utility only`);
+  assertNoSecretText(result.plan, `${scenario.label} plan`);
 }
 
 {
@@ -2379,7 +2484,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', promptFootprint: 'normal', reasonerUse: 'auto' },
+    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasonerUse: 'auto' }),
     generationRouter: {
       async generate(roleId, request = {}) {
         routerCalls.push(roleId);
@@ -2458,7 +2563,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   let batchSignal = null;
   let reasonerSignal = null;
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', promptFootprint: 'rich', reasonerUse: 'always' },
+    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'rich', reasonerUse: 'always' }),
     generationRouter: {
       async generate(roleId, request = {}) {
         if (roleId === 'utilityArbiter') {

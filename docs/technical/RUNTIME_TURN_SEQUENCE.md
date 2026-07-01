@@ -51,7 +51,7 @@ Snapshot hashes and fingerprints are used to reject stale work. A newer run supe
 
 ## Utility Arbiter
 
-The Utility Arbiter receives safe settings, the fixed card catalog, and the bounded snapshot. It returns the V1 `recursion.utilityArbiter.v1` plan shape:
+The Utility Arbiter receives safe settings, the fixed card catalog, provider health, and the bounded snapshot. It returns the V1 `recursion.utilityArbiter.v1` plan shape:
 
 - `action`: `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`
 - `sceneStatus`: `same-scene`, `soft-shift`, `hard-shift`, or `unknown`
@@ -61,6 +61,8 @@ The Utility Arbiter receives safe settings, the fixed card catalog, and the boun
 - `diagnostics`: compact labels
 
 Runtime validates and normalizes the plan. If the Utility provider is unavailable, runtime reuses a valid cache when safe or clears Recursion injection and continues the turn without new guidance. If the Arbiter returns invalid structured output, runtime may use the conservative local fallback plan because the provider responded but the plan was unsafe.
+
+Reasoner decisions are advisory after normalization. When the Arbiter requests Reasoner but the Reasoner lane is disabled, untested, has a failed provider test, lacks a required direct-endpoint session key, or has incomplete route settings, runtime rewrites the decision to `skip`, records a stable `reasoner-unavailable` diagnostic, and composes through Utility only.
 
 ## Card Jobs And Deck Update
 
@@ -122,7 +124,8 @@ flowchart TD
 | Card batch failure | Continue with accepted siblings and local fallback cards after a valid or locally recoverable plan. |
 | Invalid cached card | Ignore the card and show a cache warning. |
 | No reusable cache for `reuse-cache` | Clear Recursion prompt and return a warning skip. |
-| Reasoner off or failed | Compose with Utility and record Reasoner fallback metadata. |
+| Reasoner disabled, untested, unhealthy, or missing required route settings | Skip Reasoner before the composer call and compose through Utility. |
+| Reasoner call failed | Compose with Utility and record Reasoner fallback metadata. |
 | Prompt install failed | Record warning; normal SillyTavern generation continues. |
 | Prompt clear failed | Record warning because a stale prompt may remain in host state. |
 | Storage write failed | Continue in memory for current turn and show storage warning. |

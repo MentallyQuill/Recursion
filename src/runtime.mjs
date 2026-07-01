@@ -373,6 +373,43 @@ function normalizeReasonerDecision(fallbackDecision, value) {
   };
 }
 
+function reasonerUnavailableReason(settings = {}) {
+  const provider = asObject(settings?.providers?.reasoner);
+  if (provider.enabled !== true) return 'reasoner-disabled';
+  const lastTestStatus = safeProviderLastTest(provider.lastTest).status;
+  if (lastTestStatus !== 'pass') {
+    return lastTestStatus === 'not-run' ? 'reasoner-not-tested' : 'reasoner-unhealthy';
+  }
+  const source = safeText(provider.source || 'host-current-model', 80) || 'host-current-model';
+  if (source === 'openai-compatible') {
+    const openAICompatible = asObject(provider.openAICompatible);
+    if (openAICompatible.sessionApiKeyPresent !== true) return 'reasoner-key-missing';
+    if (!safeText(openAICompatible.baseUrl || '', 300) || !safeText(openAICompatible.model || '', 160)) {
+      return 'reasoner-config-missing';
+    }
+  }
+  if (source === 'host-connection-profile' && !safeText(provider.hostConnectionProfileId || '', 160)) {
+    return 'reasoner-profile-missing';
+  }
+  return '';
+}
+
+function enforceReasonerAvailability(plan, settings) {
+  const decision = asObject(plan?.reasonerDecision);
+  if (decision.mode !== 'use') return plan;
+  const reason = reasonerUnavailableReason(settings);
+  if (!reason) return plan;
+  return {
+    ...plan,
+    reasonerDecision: {
+      mode: 'skip',
+      reason,
+      signals: safeStringList(decision.signals, 120)
+    },
+    diagnostics: mergeDiagnostics(plan.diagnostics, ['reasoner-unavailable', reason])
+  };
+}
+
 function normalizePlanCardJobs(value) {
   if (!Array.isArray(value)) return null;
   return value.map((job) => {
@@ -2128,7 +2165,7 @@ export function createRecursionRuntime({
       };
       const initialCache = await loadSceneCacheSafe(runId, snapshot, settings);
       if (!isActiveRun(runId)) return supersededResult(runId);
-      const plan = await askUtilityArbiter({
+      let plan = await askUtilityArbiter({
         runId,
         snapshot,
         settings,
@@ -2137,6 +2174,7 @@ export function createRecursionRuntime({
         userMessage: pendingUserMessage.text,
         signal
       });
+      plan = enforceReasonerAvailability(plan, settings);
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastPlan = plan;
       const sceneSnapshot = snapshotForPlan(snapshot, plan);

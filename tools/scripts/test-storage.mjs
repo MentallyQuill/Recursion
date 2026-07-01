@@ -585,6 +585,13 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
         chatKey: 'Repair Chat',
         updatedAt: '2026-06-30T00:00:00.000Z',
         apiKey: 'stale-index-secret'
+      },
+      '../../outside.json': {
+        key: '../../outside.json',
+        kind: 'sceneCache',
+        chatKey: 'Unsafe Secret Chat',
+        updatedAt: 'not-a-date',
+        apiKey: 'unsafe-index-secret'
       }
     }
   });
@@ -608,6 +615,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assert(result.repaired.some((entry) => entry.kind === 'runJournal'), 'repairIndex reports repaired run journal index entry');
   assert(result.pruned.some((entry) => entry.reason === 'missing-record'), 'repairIndex reports missing record prune');
   assert(result.pruned.some((entry) => entry.reason === 'invalid-record'), 'repairIndex reports invalid record prune');
+  assert(result.pruned.some((entry) => entry.reason === 'invalid-index-record'), 'repairIndex reports raw invalid index record prune');
   assert(result.journalEvents.some((entry) => entry.event === 'storage.repaired'), 'repairIndex reports storage.repaired diagnostic');
   assert(result.journalEvents.some((entry) => entry.event === 'storage.pruned'), 'repairIndex reports storage.pruned diagnostic');
   assert(!serializedResult.includes('secret'), 'repairIndex diagnostics omit secret text');

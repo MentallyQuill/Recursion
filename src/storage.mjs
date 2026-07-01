@@ -503,6 +503,19 @@ function rawIndexRequiresRewrite(rawIndex, normalizedIndex) {
   return false;
 }
 
+function rawIndexPrunedDiagnostics(rawIndex) {
+  if (!isStorageObject(rawIndex) || !isStorageObject(rawIndex.records)) return [];
+  const pruned = [];
+  for (const [fallbackKey, record] of Object.entries(rawIndex.records)) {
+    if (normalizeIndexRecord(fallbackKey, record)) continue;
+    pruned.push(repairDiagnostic('index-removed', {
+      kind: isStorageObject(record) ? record.kind : 'unknown',
+      reason: 'invalid-index-record'
+    }));
+  }
+  return pruned;
+}
+
 function normalizeStorageKeyList(value) {
   return Array.isArray(value) ? value.filter((key) => typeof key === 'string') : null;
 }
@@ -606,7 +619,7 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
     const existingIndex = normalizeIndex(rawIndex);
     const desiredRecords = {};
     const repaired = [];
-    const pruned = [];
+    const pruned = rawIndexPrunedDiagnostics(rawIndex);
     const skipped = [];
     const discoveredKeys = await discoverStorageKeys(storage);
     const discoveredKeySet = discoveredKeys ? new Set(discoveredKeys) : null;

@@ -204,6 +204,20 @@ Common card output envelope:
 
 Cards should be concise, observable, and player-message-adjacent. They must not include hidden character thoughts, private chain-of-thought, or broad plot plans.
 
+## Cached Card Freshness
+
+Scene cache entries may be shown to the Utility Arbiter as compact metadata so it can decide whether to reuse, stow, discard, or regenerate cards. Runtime must not treat that Arbiter visibility as permission to inject cached cards.
+
+Before any cached card can enter the deck/hand for prompt composition, runtime must verify source freshness against the current normalized snapshot:
+
+- source chat id matches the current chat when present;
+- source message range is valid, visible, and not ahead of the current turn;
+- at least one parseable `message:N` evidence ref exists, and all `message:N` evidence refs still point at visible messages inside that source range;
+- expiry metadata has not passed;
+- stored source fingerprint matches the current source-window fingerprint.
+
+Cards that fail this check are stale cache artifacts. They may be counted in visible cache warnings, but their `promptText`, summaries, and evidence must not become prompt-facing. If the Arbiter requests `reuse-cache` and no cached cards pass freshness, runtime should fail soft as cache unavailable instead of injecting stale guidance.
+
 ## Reasoner Composer Call
 
 The Reasoner Composer receives accepted Utility cards, budget metadata, conflict markers, and the same snapshot hash. It returns a compact instruction patch for prompt composition.

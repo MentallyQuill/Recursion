@@ -44,6 +44,12 @@ function numberOr(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function finiteNumberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function normalizeMessage(message, index) {
   const source = asObject(message);
   const mesid = numberOr(source.mesid ?? source.id ?? source.messageId, index);
@@ -404,6 +410,46 @@ function promptInstallFreshnessSignature(snapshot) {
   };
 }
 
+function sourceWindowMessages(snapshot, firstMesId = null, lastMesId = null) {
+  const source = asObject(snapshot);
+  const requestedFirst = finiteNumberOrNull(firstMesId);
+  const requestedLast = finiteNumberOrNull(lastMesId);
+  const first = requestedFirst ?? Number.NEGATIVE_INFINITY;
+  const last = requestedLast ?? numberOr(source.latestMesId, Number.POSITIVE_INFINITY);
+  return (Array.isArray(source.messages) ? source.messages : [])
+    .filter((message) => message?.visible !== false)
+    .map((message) => ({
+      mesid: numberOr(message?.mesid, 0),
+      role: safeProviderRole(message?.role),
+      textHash: String(message?.textHash || hashJson(String(message?.text ?? '')))
+    }))
+    .filter((message) => message.mesid >= first && message.mesid <= last);
+}
+
+function sourceWindowFingerprint(snapshot, firstMesId = null, lastMesId = null) {
+  return hashJson(sourceWindowMessages(snapshot, firstMesId, lastMesId));
+}
+
+function sourceWindowRange(snapshot) {
+  const messages = sourceWindowMessages(snapshot);
+  const first = messages[0]?.mesid ?? 0;
+  const last = messages.at(-1)?.mesid ?? numberOr(snapshot?.latestMesId, 0);
+  return { firstMesId: first, lastMesId: last };
+}
+
+function cardSourceContext(snapshot, overrides = {}) {
+  const range = sourceWindowRange(snapshot);
+  const firstMesId = finiteNumberOrNull(overrides.firstMesId) ?? range.firstMesId;
+  const lastMesId = finiteNumberOrNull(overrides.lastMesId) ?? range.lastMesId;
+  return {
+    sceneId: snapshot.sceneKey,
+    chatId: snapshot.chatId,
+    firstMesId,
+    lastMesId,
+    snapshotHash: sourceWindowFingerprint(snapshot, firstMesId, lastMesId)
+  };
+}
+
 function snapshotsMatchForPromptInstall(expected, current) {
   const expectedSignature = promptInstallFreshnessSignature(expected);
   const currentSignature = promptInstallFreshnessSignature(current);
@@ -420,13 +466,9 @@ function promptSnapshotMetadataMatches(expected, current) {
     && expected?.latestMesId === current?.latestMesId;
 }
 
-function rebaseCardsForSnapshot(cards, snapshot, plan) {
-  return (Array.isArray(cards) ? cards : []).map((card) => normalizeCard(card, {
-    sceneId: snapshot.sceneKey,
-    chatId: snapshot.chatId,
-    snapshotHash: plan?.snapshotHash || hashJson(snapshot),
-    lastMesId: snapshot.latestMesId
-  }));
+function rebaseCardsForSnapshot(cards, snapshot) {
+  const context = cardSourceContext(snapshot);
+  return (Array.isArray(cards) ? cards : []).map((card) => normalizeCard(card, context));
 }
 
 function sceneCachePayload(snapshot, deck, hand, plan) {
@@ -675,19 +717,13 @@ function runtimeError(error) {
 }
 
 function localCards(snapshot) {
-  const snapshotHash = hashJson(snapshot);
   const latest = latestVisibleMessage(snapshot);
   const latestUser = latestVisibleUserMessage(snapshot);
   const latestText = safeText(latest?.text || '', 700);
   const latestUserText = safeText(latestUser?.text || '', 700);
   const evidenceMesId = latest?.mesid ?? snapshot.latestMesId ?? 0;
   const userEvidenceMesId = latestUser?.mesid ?? evidenceMesId;
-  const context = {
-    sceneId: snapshot.sceneKey,
-    chatId: snapshot.chatId,
-    snapshotHash,
-    lastMesId: snapshot.latestMesId
-  };
+  const context = cardSourceContext(snapshot);
 
   const scene = normalizeCard({
     family: 'Scene Frame',
@@ -1203,31 +1239,129 @@ export function createRecursionRuntime({
     }
   }
 
+  function messageIds(snapshot) {
+    return new Set(sourceWindowMessages(snapshot).map((message) => message.mesid));
+  }
+
+  function messageEvidenceIds(card) {
+    const ids = [];
+    for (const entry of Array.isArray(card?.evidenceRefs) ? card.evidenceRefs : []) {
+      const text = String(entry ?? '');
+      for (const match of text.matchAll(/\bmessage:(\d+)\b/ig)) {
+        const id = Number(match[1]);
+        if (Number.isFinite(id)) ids.push(id);
+      }
+    }
+    return ids;
+  }
+
+  function cacheFingerprintCandidates(card) {
+    const source = asObject(card?.source);
+    const freshness = asObject(card?.freshness);
+    return [
+      card?.sourceFingerprint,
+      source.fingerprint,
+      source.snapshotHash,
+      freshness.sourceFingerprint
+    ]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean);
+  }
+
+  function rawSourceRange(card) {
+    const source = asObject(card?.source);
+    const hasFirst = Object.prototype.hasOwnProperty.call(source, 'firstMesId')
+      || Object.prototype.hasOwnProperty.call(card || {}, 'firstMesId');
+    const hasLast = Object.prototype.hasOwnProperty.call(source, 'lastMesId')
+      || Object.prototype.hasOwnProperty.call(card || {}, 'lastMesId');
+    if (!hasFirst || !hasLast) return null;
+    return {
+      firstMesId: finiteNumberOrNull(source.firstMesId ?? card?.firstMesId),
+      lastMesId: finiteNumberOrNull(source.lastMesId ?? card?.lastMesId)
+    };
+  }
+
+  function sourceRangeIsVisible(snapshot, firstMesId, lastMesId) {
+    if (!Number.isInteger(firstMesId) || !Number.isInteger(lastMesId)) return false;
+    const ids = messageIds(snapshot);
+    for (let id = firstMesId; id <= lastMesId; id += 1) {
+      if (!ids.has(id)) return false;
+    }
+    return true;
+  }
+
+  function staleCacheCardReason(card, normalized, snapshot) {
+    const source = asObject(card?.source);
+    const freshness = asObject(card?.freshness);
+    const sourceChatId = String(source.chatId || card?.chatId || '').trim();
+    if (sourceChatId && sourceChatId !== snapshot.chatId) return 'source-chat-mismatch';
+
+    const sourceRange = rawSourceRange(card);
+    if (!sourceRange) return 'source-range-missing';
+    const firstMesId = sourceRange.firstMesId;
+    const lastMesId = sourceRange.lastMesId;
+    if (!Number.isFinite(firstMesId) || !Number.isFinite(lastMesId)) return 'source-range-missing';
+    if (!Number.isInteger(firstMesId) || !Number.isInteger(lastMesId) || firstMesId > lastMesId) return 'source-range-invalid';
+    if (lastMesId > numberOr(snapshot.latestMesId, 0)) return 'source-range-future';
+    if (!sourceRangeIsVisible(snapshot, firstMesId, lastMesId)) return 'source-range-not-visible';
+
+    const expiresAfterMesId = Number(freshness.expiresAfterMesId ?? normalized?.freshness?.expiresAfterMesId);
+    if (Number.isFinite(expiresAfterMesId) && numberOr(snapshot.latestMesId, 0) > expiresAfterMesId) {
+      return 'source-expired';
+    }
+
+    const windowMessages = sourceWindowMessages(snapshot, firstMesId, lastMesId);
+    if (!windowMessages.length) return 'source-window-missing';
+
+    const evidenceIds = messageEvidenceIds(normalized);
+    if (!evidenceIds.length) return 'evidence-message-missing';
+    const visibleMessageIds = messageIds(snapshot);
+    for (const evidenceId of evidenceIds) {
+      if (!visibleMessageIds.has(evidenceId)) return 'evidence-message-missing';
+      if (evidenceId < firstMesId || evidenceId > lastMesId) return 'evidence-outside-source-range';
+    }
+
+    const candidates = cacheFingerprintCandidates(card);
+    if (!candidates.length) return 'source-fingerprint-missing';
+    const currentWindow = sourceWindowFingerprint(snapshot, firstMesId, lastMesId);
+    if (!candidates.includes(currentWindow)) return 'source-fingerprint-mismatch';
+
+    return '';
+  }
+
   function sanitizedCacheCards(runId, snapshot, cards) {
     const accepted = [];
-    let rejected = 0;
+    let invalid = 0;
+    let stale = 0;
     for (const card of Array.isArray(cards) ? cards : []) {
       const sanitized = sanitizeGeneratedCard(card);
       try {
-        normalizeCard(sanitized, {
+        const normalized = normalizeCard(sanitized, {
           sceneId: snapshot.sceneKey,
           chatId: snapshot.chatId,
           snapshotHash: hashJson(snapshot),
           lastMesId: snapshot.latestMesId
         });
+        const staleReason = staleCacheCardReason(sanitized, normalized, snapshot);
+        if (staleReason) {
+          stale += 1;
+          continue;
+        }
         accepted.push(sanitized);
       } catch {
-        rejected += 1;
+        invalid += 1;
       }
     }
-    if (rejected) {
+    if (invalid || stale) {
       stageRuntimeActivity({
         runId,
         phase: 'cacheWarning',
         severity: 'warning',
-        label: 'Ignored invalid cached Recursion cards.',
+        label: stale
+          ? 'Ignored stale cached Recursion cards.'
+          : 'Ignored invalid cached Recursion cards.',
         chips: ['Cache'],
-        cardCounts: { omitted: rejected }
+        cardCounts: { omitted: invalid + stale, invalid, stale }
       });
     }
     return accepted;
@@ -1378,10 +1512,7 @@ export function createRecursionRuntime({
         : requests;
       const results = await generationRouter.batch(signalRequests, { runId, signal });
       return results.flatMap((result, index) => cardsFromProviderResult(result, {
-        sceneId: snapshot.sceneKey,
-        chatId: snapshot.chatId,
-        snapshotHash: plan.snapshotHash || hashJson(snapshot),
-        lastMesId: snapshot.latestMesId,
+        ...cardSourceContext(snapshot),
         expectedRole: requests[index]?.metadata?.role,
         expectedFamily: requests[index]?.metadata?.family
       }));

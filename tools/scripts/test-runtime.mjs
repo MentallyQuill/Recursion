@@ -36,6 +36,41 @@ function parsePromptJsonSection(prompt, label) {
   return JSON.parse(section.slice(prefix.length));
 }
 
+function messageTextHash(message) {
+  return hashJson(String(message?.text ?? message?.mes ?? message?.content ?? ''));
+}
+
+function sourceWindowHash(messages, firstMesId, lastMesId) {
+  return hashJson((Array.isArray(messages) ? messages : [])
+    .filter((message) => message?.visible !== false)
+    .map((message, index) => ({
+      mesid: Number(message?.mesid ?? message?.id ?? message?.messageId ?? index),
+      role: String(message?.role ?? (message?.is_user === true ? 'user' : (message?.is_system === true ? 'system' : 'assistant'))),
+      textHash: String(message?.textHash || messageTextHash(message))
+    }))
+    .filter((message) => message.mesid >= firstMesId && message.mesid <= lastMesId));
+}
+
+function runtimeSnapshotHash(snapshot) {
+  const messages = (Array.isArray(snapshot.messages) ? snapshot.messages : []).map((message, index) => ({
+    mesid: Number(message?.mesid ?? message?.id ?? message?.messageId ?? index),
+    role: String(message?.role ?? (message?.is_user === true ? 'user' : (message?.is_system === true ? 'system' : 'assistant'))),
+    text: String(message?.text ?? message?.mes ?? message?.content ?? ''),
+    textHash: String(message?.textHash || messageTextHash(message)),
+    visible: message?.visible === false || message?.hidden === true ? false : true
+  }));
+  const latest = messages.at(-1);
+  return hashJson({
+    chatId: String(snapshot.chatId ?? snapshot.chatKey ?? 'chat'),
+    chatKey: String(snapshot.chatKey ?? snapshot.chatId ?? 'chat'),
+    sceneKey: String(snapshot.sceneKey ?? snapshot.sceneFingerprint ?? 'scene'),
+    sceneFingerprint: String(snapshot.sceneFingerprint ?? hashJson(messages)),
+    turnFingerprint: String(snapshot.turnFingerprint ?? hashJson({ latestMesId: snapshot.latestMesId ?? latest?.mesid ?? 0, messages: messages.slice(-3) })),
+    latestMesId: Number(snapshot.latestMesId ?? latest?.mesid ?? 0),
+    messages
+  });
+}
+
 function isAbortSignal(value) {
   return Boolean(value)
     && typeof value.aborted === 'boolean'
@@ -97,6 +132,47 @@ function createRuntimeHarness({
   };
   const runtime = createRecursionRuntime({ host, settingsStore, storage, activity, generationRouter });
   return { runtime, calls, installed, cleared, storage, settingsStore, activity, adapter };
+}
+
+async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, label }) {
+  const storage = {
+    async loadSceneCache() {
+      return { cards: [card] };
+    },
+    async saveSceneCache() {
+      return {};
+    },
+    async appendJournal() {
+      return {};
+    }
+  };
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot,
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', `${label}: only utility arbiter should run`);
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'reuse-cache',
+            lifecycle: [{ action: 'select', cardId: card.id, reason: label }],
+            budgets: { targetBriefTokens: 500, maxCards: 4 },
+            diagnostics: [label]
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage });
+  const serialized = JSON.stringify({ result, view: runtime.view() });
+  assertEqual(result.ok, true, `${label}: stale cache remains fail-soft`);
+  assertEqual(result.skipped, true, `${label}: cache is unavailable`);
+  assertEqual(result.reason, 'cache-unavailable', `${label}: unavailable reason returned`);
+  assertEqual(installed.length, 0, `${label}: prompt is not installed`);
+  assert(!serialized.includes(card.promptText), `${label}: stale prompt text is not exposed`);
 }
 
 {
@@ -1188,11 +1264,15 @@ function createRuntimeHarness({
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   const providerCard = cache.cards.find((card) => card.promptText.includes('Provider card should keep runtime-owned provenance.'));
   const handCard = view.lastHand.cards.find((card) => card.promptText.includes('Provider card should keep runtime-owned provenance.'));
+  const expectedProviderSourceHash = sourceWindowHash([
+    { mesid: 2, role: 'user', text: 'The lamp breaks.', visible: true },
+    { mesid: 3, role: 'user', text: 'Provider provenance.', visible: true }
+  ], 2, 3);
   assertEqual(result.ok, true, 'provider card provenance run installs');
   assert(handCard, 'provider card is selected into full hand');
   assertEqual(handCard.source?.snapshotHash, undefined, 'hand card exposes compact prompt-safe shape only');
   assert(providerCard, 'provider card is persisted to cache');
-  assertEqual(providerCard.sourceFingerprint, result.plan.snapshotHash, 'provider card cache fingerprint uses runtime snapshot hash');
+  assertEqual(providerCard.sourceFingerprint, expectedProviderSourceHash, 'provider card cache fingerprint uses runtime source-window hash');
   assert(!JSON.stringify({ view, cache }).includes('hallucinated-card-snapshot-hash'), 'provider card top-level snapshot hash is ignored everywhere visible');
   assert(!JSON.stringify({ view, cache }).includes('hallucinated-source-snapshot-hash'), 'provider card source snapshot hash is ignored everywhere visible');
   assert(!JSON.stringify({ view, cache }).includes('hallucinated-freshness-hash'), 'provider card freshness fingerprint is ignored everywhere visible');
@@ -1635,6 +1715,12 @@ function createRuntimeHarness({
 {
   const adapter = createMemoryStorageAdapter();
   const storage = createStorageRepository({ storage: adapter });
+  const cacheAwareMessages = [
+    { mesid: 1, role: 'assistant', text: 'The shuttle shudders in the storm.', visible: true },
+    { mesid: 2, role: 'user', text: 'Mara braces against the hatch.', visible: true },
+    { mesid: 3, role: 'user', text: 'Check cached card relevance.', visible: true }
+  ];
+  const cacheAwareSourceHash = sourceWindowHash(cacheAwareMessages, 1, 2);
   await storage.saveSceneCache('cache-aware-chat', 'cache-aware-scene', {
     cards: [{
       id: 'cache-aware-card',
@@ -1643,7 +1729,15 @@ function createRuntimeHarness({
       promptText: 'Cached scene card the Arbiter should be able to inspect.',
       summary: 'Cached scene summary',
       tokenEstimate: 12,
-      source: { chatId: 'cache-aware-chat', firstMesId: 1, lastMesId: 2, snapshotHash: 'cache-aware-source' }
+      evidenceRefs: ['message:2'],
+      source: {
+        chatId: 'cache-aware-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: cacheAwareSourceHash,
+        snapshotHash: cacheAwareSourceHash
+      },
+      freshness: { sourceFingerprint: cacheAwareSourceHash }
     }],
     latestHand: {
       handId: 'cache-aware-hand',
@@ -1661,7 +1755,7 @@ function createRuntimeHarness({
       sceneFingerprint: 'cache-aware-scene-fp',
       turnFingerprint: 'cache-aware-turn-fp',
       latestMesId: 3,
-      messages: [{ mesid: 3, role: 'user', text: 'Check cached card relevance.', visible: true }]
+      messages: cacheAwareMessages
     },
     generationRouter: {
       async generate(roleId, request) {
@@ -1685,6 +1779,435 @@ function createRuntimeHarness({
   assert(arbiterPrompt.includes('cache-aware-card'), 'arbiter prompt includes compact scene cache card metadata');
   assert(arbiterPrompt.includes('cache-aware-hand'), 'arbiter prompt includes latest hand metadata');
   assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['cache-aware-card'], 'cache-aware plan reuses selected cached card');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  const staleMessages = [
+    { mesid: 1, role: 'assistant', text: 'The old corridor is no longer reliable.', visible: true },
+    { mesid: 2, role: 'user', text: 'The player changed what happened here.', visible: true },
+    { mesid: 3, role: 'user', text: 'Try to reuse a stale cache card.', visible: true }
+  ];
+  await storage.saveSceneCache('stale-cache-chat', 'stale-cache-scene', {
+    cards: [{
+      id: 'stale-cache-card',
+      family: 'Continuity Risk',
+      status: 'active',
+      promptText: 'Stale cached continuity must not reach the prompt.',
+      summary: 'Stale continuity',
+      tokenEstimate: 12,
+      evidenceRefs: ['message:2'],
+      source: {
+        chatId: 'stale-cache-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: 'stale-source-fingerprint',
+        snapshotHash: 'stale-source-fingerprint'
+      },
+      freshness: { sourceFingerprint: 'stale-source-fingerprint' }
+    }],
+    latestHand: {
+      handId: 'stale-cache-hand',
+      cards: [{ id: 'stale-cache-card', family: 'Continuity Risk' }]
+    }
+  });
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: {
+      chatId: 'stale-cache-chat',
+      chatKey: 'stale-cache-chat',
+      sceneKey: 'stale-cache-scene',
+      sceneFingerprint: 'stale-cache-scene-fp',
+      turnFingerprint: 'stale-cache-turn-fp',
+      latestMesId: 3,
+      messages: staleMessages
+    },
+    generationRouter: {
+      async generate(roleId) {
+        assertEqual(roleId, 'utilityArbiter', 'stale cache test only calls utility arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            action: 'reuse-cache',
+            lifecycle: [{ action: 'select', cardId: 'stale-cache-card', reason: 'provider thought it was reusable' }],
+            budgets: { targetBriefTokens: 500, maxCards: 4 },
+            diagnostics: ['stale-cache-reuse']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Try to reuse a stale cache card.' });
+  const serialized = JSON.stringify({ result, view: runtime.view() });
+  assertEqual(result.ok, true, 'stale reuse-cache remains fail-soft');
+  assertEqual(result.skipped, true, 'stale reuse-cache is treated as unavailable');
+  assertEqual(result.reason, 'cache-unavailable', 'stale reuse-cache returns unavailable reason');
+  assertEqual(installed.length, 0, 'stale cache card does not install prompt');
+  assert(!serialized.includes('Stale cached continuity must not reach the prompt'), 'stale cache prompt text is not exposed');
+}
+
+{
+  const fullHashBypassMessages = [
+    { mesid: 1, role: 'assistant', text: 'Old source window.', visible: true },
+    { mesid: 2, role: 'user', text: 'User source window.', visible: true },
+    { mesid: 3, role: 'user', text: 'Reject full snapshot hash bypass.', visible: true }
+  ];
+  const snapshot = {
+    chatId: 'full-hash-cache-chat',
+    chatKey: 'full-hash-cache-chat',
+    sceneKey: 'full-hash-cache-scene',
+    sceneFingerprint: 'full-hash-cache-scene-fp',
+    turnFingerprint: 'full-hash-cache-turn-fp',
+    latestMesId: 3,
+    messages: fullHashBypassMessages
+  };
+  await assertSingleCachedCardUnavailable({
+    label: 'full-snapshot-hash-cache',
+    userMessage: 'Reject full snapshot hash bypass.',
+    snapshot,
+    card: {
+      id: 'full-hash-cache-card',
+      family: 'Scene Frame',
+      status: 'active',
+      promptText: 'Full snapshot hash must not validate stale source window.',
+      evidenceRefs: ['message:2'],
+      source: {
+        chatId: 'full-hash-cache-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: runtimeSnapshotHash(snapshot),
+        snapshotHash: runtimeSnapshotHash(snapshot)
+      },
+      freshness: { sourceFingerprint: runtimeSnapshotHash(snapshot) }
+    }
+  });
+}
+
+{
+  const missingRangeMessages = [
+    { mesid: 1, role: 'assistant', text: 'Message one.', visible: true },
+    { mesid: 2, role: 'user', text: 'Reject missing source range.', visible: true }
+  ];
+  const snapshot = {
+    chatId: 'missing-range-cache-chat',
+    chatKey: 'missing-range-cache-chat',
+    sceneKey: 'missing-range-cache-scene',
+    sceneFingerprint: 'missing-range-cache-scene-fp',
+    turnFingerprint: 'missing-range-cache-turn-fp',
+    latestMesId: 2,
+    messages: missingRangeMessages
+  };
+  await assertSingleCachedCardUnavailable({
+    label: 'missing-source-range-cache',
+    userMessage: 'Reject missing source range.',
+    snapshot,
+    card: {
+      id: 'missing-range-cache-card',
+      family: 'Scene Frame',
+      status: 'active',
+      promptText: 'Missing source range must not be inferred from current snapshot.',
+      source: {
+        chatId: 'missing-range-cache-chat',
+        fingerprint: runtimeSnapshotHash(snapshot),
+        snapshotHash: runtimeSnapshotHash(snapshot)
+      },
+      freshness: { sourceFingerprint: runtimeSnapshotHash(snapshot) }
+    }
+  });
+}
+
+{
+  const gappedRangeMessages = [
+    { mesid: 1, role: 'assistant', text: 'Visible endpoint one.', visible: true },
+    { mesid: 3, role: 'user', text: 'Reject gapped source range.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(gappedRangeMessages, 1, 3);
+  await assertSingleCachedCardUnavailable({
+    label: 'gapped-source-range-cache',
+    userMessage: 'Reject gapped source range.',
+    snapshot: {
+      chatId: 'gapped-cache-chat',
+      chatKey: 'gapped-cache-chat',
+      sceneKey: 'gapped-cache-scene',
+      sceneFingerprint: 'gapped-cache-scene-fp',
+      turnFingerprint: 'gapped-cache-turn-fp',
+      latestMesId: 3,
+      messages: gappedRangeMessages
+    },
+    card: {
+      id: 'gapped-cache-card',
+      family: 'Continuity Risk',
+      status: 'active',
+      promptText: 'Gapped source range must not be reused.',
+      evidenceRefs: ['message:3'],
+      source: {
+        chatId: 'gapped-cache-chat',
+        firstMesId: 1,
+        lastMesId: 3,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash }
+    }
+  });
+}
+
+{
+  const malformedEvidenceMessages = [
+    { mesid: 1, role: 'assistant', text: 'Valid source start.', visible: true },
+    { mesid: 2, role: 'user', text: 'Reject malformed evidence ref.', visible: true },
+    { mesid: 4, role: 'assistant', text: 'Outside evidence target.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(malformedEvidenceMessages, 1, 2);
+  await assertSingleCachedCardUnavailable({
+    label: 'malformed-evidence-cache',
+    userMessage: 'Reject malformed evidence ref.',
+    snapshot: {
+      chatId: 'malformed-evidence-chat',
+      chatKey: 'malformed-evidence-chat',
+      sceneKey: 'malformed-evidence-scene',
+      sceneFingerprint: 'malformed-evidence-scene-fp',
+      turnFingerprint: 'malformed-evidence-turn-fp',
+      latestMesId: 4,
+      messages: malformedEvidenceMessages
+    },
+    card: {
+      id: 'malformed-evidence-card',
+      family: 'Continuity Risk',
+      status: 'active',
+      promptText: 'Malformed evidence ref outside source range must not be ignored.',
+      evidenceRefs: ['message:4 stale suffix'],
+      source: {
+        chatId: 'malformed-evidence-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash }
+    }
+  });
+}
+
+{
+  const chatMismatchMessages = [
+    { mesid: 1, role: 'assistant', text: 'Reject wrong chat source.', visible: true },
+    { mesid: 2, role: 'user', text: 'Source chat mismatch.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(chatMismatchMessages, 1, 2);
+  await assertSingleCachedCardUnavailable({
+    label: 'source-chat-mismatch-cache',
+    userMessage: 'Reject source chat mismatch.',
+    snapshot: {
+      chatId: 'current-cache-chat',
+      chatKey: 'current-cache-chat',
+      sceneKey: 'current-cache-scene',
+      sceneFingerprint: 'current-cache-scene-fp',
+      turnFingerprint: 'current-cache-turn-fp',
+      latestMesId: 2,
+      messages: chatMismatchMessages
+    },
+    card: {
+      id: 'chat-mismatch-cache-card',
+      family: 'Continuity Risk',
+      status: 'active',
+      promptText: 'Wrong chat cache card must not be reused.',
+      evidenceRefs: ['message:2'],
+      source: {
+        chatId: 'other-cache-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash }
+    }
+  });
+}
+
+{
+  const futureRangeMessages = [
+    { mesid: 1, role: 'assistant', text: 'Known source start.', visible: true },
+    { mesid: 2, role: 'user', text: 'Reject future source range.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(futureRangeMessages, 1, 3);
+  await assertSingleCachedCardUnavailable({
+    label: 'future-source-range-cache',
+    userMessage: 'Reject future source range.',
+    snapshot: {
+      chatId: 'future-cache-chat',
+      chatKey: 'future-cache-chat',
+      sceneKey: 'future-cache-scene',
+      sceneFingerprint: 'future-cache-scene-fp',
+      turnFingerprint: 'future-cache-turn-fp',
+      latestMesId: 2,
+      messages: futureRangeMessages
+    },
+    card: {
+      id: 'future-range-cache-card',
+      family: 'Scene Frame',
+      status: 'active',
+      promptText: 'Future source range must not be reused.',
+      evidenceRefs: ['message:2'],
+      source: {
+        chatId: 'future-cache-chat',
+        firstMesId: 1,
+        lastMesId: 3,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash }
+    }
+  });
+}
+
+{
+  const hiddenRangeMessages = [
+    { mesid: 1, role: 'assistant', text: 'Visible range start.', visible: true },
+    { mesid: 2, role: 'assistant', text: 'Hidden middle source.', visible: false },
+    { mesid: 3, role: 'user', text: 'Reject hidden source range.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(hiddenRangeMessages, 1, 3);
+  await assertSingleCachedCardUnavailable({
+    label: 'hidden-source-range-cache',
+    userMessage: 'Reject hidden source range.',
+    snapshot: {
+      chatId: 'hidden-range-chat',
+      chatKey: 'hidden-range-chat',
+      sceneKey: 'hidden-range-scene',
+      sceneFingerprint: 'hidden-range-scene-fp',
+      turnFingerprint: 'hidden-range-turn-fp',
+      latestMesId: 3,
+      messages: hiddenRangeMessages
+    },
+    card: {
+      id: 'hidden-range-cache-card',
+      family: 'Continuity Risk',
+      status: 'active',
+      promptText: 'Hidden source range must not be reused.',
+      evidenceRefs: ['message:3'],
+      source: {
+        chatId: 'hidden-range-chat',
+        firstMesId: 1,
+        lastMesId: 3,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash }
+    }
+  });
+}
+
+{
+  const expiredMessages = [
+    { mesid: 1, role: 'assistant', text: 'Expired card source.', visible: true },
+    { mesid: 2, role: 'user', text: 'Still in source window.', visible: true },
+    { mesid: 3, role: 'user', text: 'Reject expired source freshness.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(expiredMessages, 1, 2);
+  await assertSingleCachedCardUnavailable({
+    label: 'expired-cache-card',
+    userMessage: 'Reject expired cached card.',
+    snapshot: {
+      chatId: 'expired-cache-chat',
+      chatKey: 'expired-cache-chat',
+      sceneKey: 'expired-cache-scene',
+      sceneFingerprint: 'expired-cache-scene-fp',
+      turnFingerprint: 'expired-cache-turn-fp',
+      latestMesId: 3,
+      messages: expiredMessages
+    },
+    card: {
+      id: 'expired-cache-card',
+      family: 'Scene Frame',
+      status: 'active',
+      promptText: 'Expired cache card must not be reused.',
+      evidenceRefs: ['message:2'],
+      source: {
+        chatId: 'expired-cache-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash, expiresAfterMesId: 2 }
+    }
+  });
+}
+
+{
+  const missingEvidenceMessages = [
+    { mesid: 1, role: 'assistant', text: 'Valid source start.', visible: true },
+    { mesid: 2, role: 'user', text: 'Reject missing evidence ref.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(missingEvidenceMessages, 1, 2);
+  await assertSingleCachedCardUnavailable({
+    label: 'missing-evidence-cache',
+    userMessage: 'Reject missing evidence ref.',
+    snapshot: {
+      chatId: 'missing-evidence-chat',
+      chatKey: 'missing-evidence-chat',
+      sceneKey: 'missing-evidence-scene',
+      sceneFingerprint: 'missing-evidence-scene-fp',
+      turnFingerprint: 'missing-evidence-turn-fp',
+      latestMesId: 2,
+      messages: missingEvidenceMessages
+    },
+    card: {
+      id: 'missing-evidence-card',
+      family: 'Continuity Risk',
+      status: 'active',
+      promptText: 'Missing evidence ref must not be ignored.',
+      evidenceRefs: ['message:4'],
+      source: {
+        chatId: 'missing-evidence-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash }
+    }
+  });
+}
+
+{
+  const unparseableEvidenceMessages = [
+    { mesid: 1, role: 'assistant', text: 'Valid source start.', visible: true },
+    { mesid: 2, role: 'user', text: 'Reject unparseable evidence refs.', visible: true }
+  ];
+  const sourceHash = sourceWindowHash(unparseableEvidenceMessages, 1, 2);
+  await assertSingleCachedCardUnavailable({
+    label: 'unparseable-evidence-cache',
+    userMessage: 'Reject unparseable evidence refs.',
+    snapshot: {
+      chatId: 'unparseable-evidence-chat',
+      chatKey: 'unparseable-evidence-chat',
+      sceneKey: 'unparseable-evidence-scene',
+      sceneFingerprint: 'unparseable-evidence-scene-fp',
+      turnFingerprint: 'unparseable-evidence-turn-fp',
+      latestMesId: 2,
+      messages: unparseableEvidenceMessages
+    },
+    card: {
+      id: 'unparseable-evidence-card',
+      family: 'Continuity Risk',
+      status: 'active',
+      promptText: 'Unparseable evidence ref must not be ignored.',
+      evidenceRefs: ['turn:2'],
+      source: {
+        chatId: 'unparseable-evidence-chat',
+        firstMesId: 1,
+        lastMesId: 2,
+        fingerprint: sourceHash,
+        snapshotHash: sourceHash
+      },
+      freshness: { sourceFingerprint: sourceHash }
+    }
+  });
 }
 
 {
@@ -1809,6 +2332,10 @@ function createRuntimeHarness({
 }
 
 {
+  const reuseCacheMessages = [
+    { mesid: 2, role: 'user', text: 'Reuse cached card.', visible: true }
+  ];
+  const reuseCacheSourceHash = sourceWindowHash(reuseCacheMessages, 2, 2);
   const storage = {
     async loadSceneCache() {
       return {
@@ -1819,7 +2346,15 @@ function createRuntimeHarness({
           summary: 'Cached summary with Bearer cache-token.',
           evidenceRefs: ['message:2 sk-cache-runtime'],
           inspectorNotes: 'Cached inspector private-secret',
-          emphasis: 'normal'
+          emphasis: 'normal',
+          source: {
+            chatId: 'reuse-cache-chat',
+            firstMesId: 2,
+            lastMesId: 2,
+            fingerprint: reuseCacheSourceHash,
+            snapshotHash: reuseCacheSourceHash
+          },
+          freshness: { sourceFingerprint: reuseCacheSourceHash }
         }]
       };
     },
@@ -1833,6 +2368,15 @@ function createRuntimeHarness({
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     storage,
+    snapshot: {
+      chatId: 'reuse-cache-chat',
+      chatKey: 'reuse-cache-chat',
+      sceneKey: 'reuse-cache-scene',
+      sceneFingerprint: 'reuse-cache-scene-fp',
+      turnFingerprint: 'reuse-cache-turn-fp',
+      latestMesId: 2,
+      messages: reuseCacheMessages
+    },
     generationRouter: {
       async generate() {
         return {
@@ -2218,6 +2762,12 @@ function createRuntimeHarness({
 {
   const adapter = createMemoryStorageAdapter();
   const storage = createStorageRepository({ storage: adapter });
+  const arbiterMessages = [
+    { mesid: 1, role: 'assistant', text: 'The continuity risk was established.', visible: true },
+    { mesid: 2, role: 'user', text: 'Keep only the risk that matters.', visible: true },
+    { mesid: 3, role: 'user', text: 'Use only the Arbiter-selected card.', visible: true }
+  ];
+  const arbiterSourceHash = sourceWindowHash(arbiterMessages, 1, 2);
   await storage.saveSceneCache('arbiter-chat', 'arbiter-scene', {
     cards: [
       {
@@ -2227,7 +2777,15 @@ function createRuntimeHarness({
         promptText: 'The only selected continuity risk should remain active.',
         summary: 'Keep continuity',
         tokenEstimate: 20,
-        source: { chatId: 'arbiter-chat', firstMesId: 1, lastMesId: 2, snapshotHash: 'arbiter-source' }
+        evidenceRefs: ['message:2'],
+        source: {
+          chatId: 'arbiter-chat',
+          firstMesId: 1,
+          lastMesId: 2,
+          fingerprint: arbiterSourceHash,
+          snapshotHash: arbiterSourceHash
+        },
+        freshness: { sourceFingerprint: arbiterSourceHash }
       },
       {
         id: 'arbiter-stow',
@@ -2236,7 +2794,15 @@ function createRuntimeHarness({
         promptText: 'This card should be stowed by the Arbiter.',
         summary: 'Stow scene',
         tokenEstimate: 20,
-        source: { chatId: 'arbiter-chat', firstMesId: 1, lastMesId: 2, snapshotHash: 'arbiter-source' }
+        evidenceRefs: ['message:2'],
+        source: {
+          chatId: 'arbiter-chat',
+          firstMesId: 1,
+          lastMesId: 2,
+          fingerprint: arbiterSourceHash,
+          snapshotHash: arbiterSourceHash
+        },
+        freshness: { sourceFingerprint: arbiterSourceHash }
       }
     ]
   });
@@ -2250,7 +2816,7 @@ function createRuntimeHarness({
       sceneFingerprint: 'arbiter-scene-fp',
       turnFingerprint: 'arbiter-turn-fp',
       latestMesId: 3,
-      messages: [{ mesid: 3, role: 'user', text: 'Use only the Arbiter-selected card.', visible: true }]
+      messages: arbiterMessages
     },
     generationRouter: {
       async generate(roleId) {
@@ -2306,6 +2872,7 @@ function createRuntimeHarness({
     turnFingerprint: snapshot.turnFingerprint
   });
   const shiftedSceneKey = `${snapshot.chatKey}-${shiftedFingerprint}`;
+  const shiftedSourceHash = sourceWindowHash(snapshot.messages, 3, 3);
   await storage.saveSceneCache('hard-shift-chat', shiftedSceneKey, {
     cards: [{
       id: 'new-scene-card',
@@ -2313,7 +2880,15 @@ function createRuntimeHarness({
       status: 'active',
       promptText: 'New scene cache should remain available after hard shift.',
       summary: 'New scene continuity',
-      source: { chatId: 'hard-shift-chat', firstMesId: 3, lastMesId: 3, snapshotHash: 'new-source' }
+      evidenceRefs: ['message:3'],
+      source: {
+        chatId: 'hard-shift-chat',
+        firstMesId: 3,
+        lastMesId: 3,
+        fingerprint: shiftedSourceHash,
+        snapshotHash: shiftedSourceHash
+      },
+      freshness: { sourceFingerprint: shiftedSourceHash }
     }]
   });
   const { runtime } = createRuntimeHarness({
@@ -2345,6 +2920,10 @@ function createRuntimeHarness({
 }
 
 {
+  const mixedCacheMessages = [
+    { mesid: 2, role: 'user', text: 'Use valid cache despite rejected selection.', visible: true }
+  ];
+  const mixedCacheSourceHash = sourceWindowHash(mixedCacheMessages, 2, 2);
   const storage = {
     async loadSceneCache() {
       return {
@@ -2356,7 +2935,15 @@ function createRuntimeHarness({
             status: 'active',
             promptText: 'Valid cache card should not be stowed by rejected-card lifecycle.',
             summary: 'Valid cache card',
-            source: { chatId: 'mixed-cache-chat', firstMesId: 1, lastMesId: 1, snapshotHash: 'valid-source' }
+            evidenceRefs: ['message:2'],
+            source: {
+              chatId: 'mixed-cache-chat',
+              firstMesId: 2,
+              lastMesId: 2,
+              fingerprint: mixedCacheSourceHash,
+              snapshotHash: mixedCacheSourceHash
+            },
+            freshness: { sourceFingerprint: mixedCacheSourceHash }
           }
         ]
       };
@@ -2378,7 +2965,7 @@ function createRuntimeHarness({
       sceneFingerprint: 'mixed-cache-scene-fp',
       turnFingerprint: 'mixed-cache-turn-fp',
       latestMesId: 2,
-      messages: [{ mesid: 2, role: 'user', text: 'Use valid cache despite rejected selection.', visible: true }]
+      messages: mixedCacheMessages
     },
     generationRouter: {
       async generate(roleId) {

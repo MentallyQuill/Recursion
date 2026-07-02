@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Recursion is a mostly turnkey SillyTavern extension for improving writing output quality during live roleplay and story generation. Its job is to help the next model response better respect the current story, scene, cast, emotional continuity, dialogue needs, and prose direction.
+Recursion is a mostly turnkey SillyTavern extension for improving writing output quality during live roleplay and story generation. Its job is to improve the next model response by expanding reasoning over the current scene: what the active location, cast, relationships, objects, pressures, and reveal boundaries imply for the next beat.
 
-Recursion is not a long-term memory or lore authority. It complements Memory Books, Summaryception, VectFox, World Info, and similar extensions by compiling a compact, current-scene writing brief instead of owning durable canon.
+Recursion is not a continuity extension, long-term memory, or lore authority. It complements Memory Books, Summaryception, VectFox, World Info, and similar extensions by compiling a compact, current-scene reasoning brief instead of owning durable canon.
 
 Related specs:
 
@@ -26,16 +26,18 @@ Advanced surfaces should support inspection and trust, not micromanagement.
 
 ## Core Promise
 
-Recursion improves the next generated response by answering one narrow question: what compact writing context would help the model adhere to the current scene right now?
+Recursion improves the next generated response by answering one narrow question: what compact current-scene reasoning would help the model notice the right implications for the next response?
+
+A useful Recursion card is not a fact ledger. It starts from active scene evidence, expands the immediate affordances, constraints, tensions, or opportunities that follow from that evidence, and states a relevance boundary so the prompt packet does not drift into lore, summary, or generic writing advice.
 
 The core runtime shape is:
 
 1. Utility Arbiter evaluates the active chat and current turn.
 2. Recursion maintains a cached scene deck and selects a turn hand from it.
-3. Optional Reasoner Composer synthesizes the hand into sharper writing guidance.
+3. Optional Reasoner Composer synthesizes the hand into sharper scene-reasoning guidance.
 4. Runtime installs a compact prompt packet through controlled SillyTavern prompt integration.
 
-The product promise is better prose, dialogue, emotional continuity, and scene adhesion without adding a second campaign system, lore database, or user-authored card workflow.
+The product promise is better next-turn scene reasoning, dialogue, emotional texture, and scene adhesion without adding a second campaign system, continuity database, lore database, or user-authored card workflow.
 
 ## V1 Scope
 
@@ -63,9 +65,10 @@ Detailed behavior belongs in the companion specs:
 
 ## Explicit Non-Goals
 
-V1 must not become a general memory platform. Specifically, it should not include:
+V1 must not become a general memory or continuity platform. Specifically, it should not include:
 
 - Long-term memory ownership.
+- Continuity-extension ownership or durable canon arbitration.
 - World Info replacement.
 - Vector recall or embedding search.
 - Transcript summarization as a durable source of truth.
@@ -84,7 +87,7 @@ Pre-alpha status means Recursion can update internal structures in place. It doe
 
 Recursion should treat other context extensions as upstream or parallel owners, not rivals.
 
-Memory Books and World Info own durable facts, lore, and authored background. Summaryception owns longer transcript compression. VectFox owns vector-style recall. Recursion should consume the current prompt environment and active chat context, then add only near-term writing guidance that helps the next response stay grounded.
+Memory Books and World Info own durable facts, lore, and authored background. Summaryception owns longer transcript compression. VectFox owns vector-style recall. Recursion should consume the current prompt environment and active chat context, then add only near-term scene-reasoning guidance that helps the next response stay grounded.
 
 The prompt packet should be compact and explicitly current-scene oriented. If another extension already provides broad lore or memory, Recursion should avoid restating it unless that fact is immediately relevant to the scene and likely to improve the next response.
 
@@ -97,7 +100,7 @@ The Utility Arbiter should decide meaning-heavy questions such as relevance, sce
 Important principles:
 
 - Turnkey first: the normal user path should require little setup and no card management.
-- Current scene over durable canon: Recursion optimizes the next response, not the whole story database.
+- Scene implications over durable canon: Recursion optimizes what the next response can infer and use from the active scene, not the whole story database.
 - Compact packets over exhaustive context: omission is a product feature when it protects focus.
 - Observational UI over micromanagement: show decisions, diagnostics, and controls without asking users to operate the internals.
 - Provider-aware execution: Utility and Reasoner work must degrade cleanly when providers are unavailable.
@@ -111,7 +114,7 @@ Recursion V1 succeeds when a user can enable it in SillyTavern and see measurabl
 
 Practical success criteria:
 
-- Generated responses better respect who is present, what just happened, the current emotional posture, and immediate scene constraints.
+- Generated responses better exploit the immediate scene: who is present, what the location affords, what objects and relationships enable, what should remain hidden, and which near-term pressures matter.
 - The prompt packet stays compact, bounded, and inspectable.
 - Utility Arbiter decisions are schema-valid, capped, and recoverable when provider calls fail.
 - Optional Reasoner output improves composition without becoming mandatory or authoritative.

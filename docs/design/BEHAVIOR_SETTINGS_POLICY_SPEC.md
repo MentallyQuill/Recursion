@@ -35,7 +35,7 @@ The robust approach is:
 2. Let runtime enforce mechanical policy.
 3. Keep the policy small, testable, and visible in diagnostics.
 
-Recursion should not implement brittle deterministic relevance scoring. Runtime must not decide that a character is emotionally important, that a plot thread matters, or that a continuity risk is true. Runtime can safely enforce budgets, ordering, caps, boosts, fallback, routing eligibility, and diagnostic labels.
+Recursion should not implement brittle deterministic relevance scoring. Runtime must not decide that a character is emotionally important, that a plot thread matters, or that a scene constraint applies. Runtime can safely enforce budgets, ordering, caps, boosts, fallback, routing eligibility, and diagnostic labels.
 
 ![Behavior policy flow](../../assets/documentation/renders/recursion-behavior-policy.png)
 
@@ -136,7 +136,7 @@ It must not increase `promptFootprint`, section budgets, Reasoning Level, provid
 | --- | --- | --- | --- |
 | Light | Prefer valid cache, avoid churn, select fewer support cards inside the active footprint. | Ask for refresh/regeneration only when relevance or drift risk is clear. | Phrase guidance as gentle, sparse writing support. |
 | Balanced | Default V1 behavior. | Normal refresh, card-job, and lifecycle pressure. | Normal concise brief. |
-| Strong | Be more willing to refresh stale or weak cards, preserve high-risk cards, and use the active footprint fully. | Ask for regeneration when scene drift, continuity risk, or weak coverage is plausible. | Phrase selected constraints firmly and prefer explicit guardrails when evidence supports them. |
+| Strong | Be more willing to refresh stale or weak cards, preserve high-risk cards, and use the active footprint fully. | Ask for regeneration when scene drift, scene-constraint risk, or weak coverage is plausible. | Phrase selected constraints firmly and prefer explicit guardrails when evidence supports them. |
 
 Mechanical effects:
 
@@ -153,7 +153,7 @@ Prohibited effects:
 - Strong must not force Reasoner while Reasoning Level is Low.
 - Strong must not inject raw cards.
 - Strong must not create facts or override the Arbiter's semantic decision.
-- Light must not drop critical continuity guardrails only because the user wants a lighter touch.
+- Light must not drop critical scene constraints only because the user wants a lighter touch.
 
 ## Focus Contract
 
@@ -165,8 +165,8 @@ Focus does not replace Card Scope. Card Scope is the family/sub-item selector. I
 | --- | --- |
 | Balanced | No family boost. |
 | Character | Active Cast, Character Motivation, Relationship, Knowledge. |
-| Continuity | Continuity Risk, Items, Consequences, Scene Frame, Knowledge. |
-| Prose | Prose, Relationship, Environment, Scene Frame. |
+| Continuity | Continuity Risk, Items, Consequences, Scene Frame, Knowledge. This current setting name means scene-constraint focus, not continuity-extension ownership. |
+| Prose | Prose, Relationship, Environment, Scene Frame. This focus should be revisited if Prose is removed from default card generation. |
 | Plot | Open Threads, Consequences, Knowledge, Scene Frame. |
 
 Mechanical effects:
@@ -183,7 +183,7 @@ Prohibited effects:
 - Focus must not suppress critical guardrails from other families.
 - Focus must not turn Auto into a whitelist.
 - Focus must not bypass Manual scope.
-- Focus must not invent character emotions, plot importance, or continuity facts.
+- Focus must not invent character emotions, plot importance, or scene constraints.
 - Prose focus must not become a second style preset that fights the user's SillyTavern preset.
 
 ## Card Budget Contract
@@ -219,7 +219,7 @@ The current code-level section budgets are:
 
 The stored Prompt Footprint setting is the user's baseline preference. Arbiter may still request a current-turn footprint, but runtime must treat that request through the user's selected policy:
 
-- Compact: keep compact unless a safety or hard continuity reason requires temporary expansion.
+- Compact: keep compact unless a safety or hard scene-constraint reason requires temporary expansion.
 - Normal: allow compact or normal freely; allow rich only when the Arbiter gives a clear high-risk reason.
 - Rich: allow rich when useful, but still permit normal or compact for simple turns.
 
@@ -238,7 +238,7 @@ Prohibited effects:
 
 - Footprint must not choose provider lanes.
 - Footprint must not force Reasoner while Reasoning Level is Low.
-- Compact must not remove critical safety or continuity guardrails.
+- Compact must not remove critical safety or scene-constraint guardrails.
 - Rich must not become a transcript summary, lore recap, or broad future plot plan.
 
 ## Runtime Flow
@@ -267,7 +267,7 @@ The Arbiter request should include a short behavior policy block near settings:
 ```text
 Behavior policy:
 - Strength: Strong. Prefer firm current-turn guidance and refresh weak/stale coverage when relevance is plausible. Do not increase footprint size.
-- Focus: Character. Prefer Active Cast, Character Motivation, Relationship, and Knowledge when relevant; do not ignore critical non-character continuity.
+- Focus: Character. Prefer Active Cast, Character Motivation, Relationship, and Knowledge when relevant; do not ignore critical non-character scene constraints.
 - Prompt Footprint: Normal. Compact or Normal are allowed freely; Rich requires a high-risk reason.
 ```
 
@@ -278,7 +278,7 @@ This block must stay compact. It is a policy hint, not a hidden prompt chain.
 The hand selector should sort and omit through this order:
 
 1. Validity and freshness.
-2. Critical guardrails and hard continuity risks.
+2. Critical guardrails and hard scene constraints.
 3. Arbiter-selected emphasis.
 4. Manual card-scope whitelist, if Manual.
 5. Effective card-budget and token pressure.

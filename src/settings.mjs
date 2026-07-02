@@ -8,7 +8,7 @@ const FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const FOCUS = new Set(['balanced', 'character', 'continuity', 'prose', 'plot']);
 const SOURCES = new Set(['host-current-model', 'host-connection-profile', 'openai-compatible']);
 const LANES = new Set(['utility', 'reasoner']);
-const INJECTION_PLACEMENTS = new Set(['default', 'in_prompt', 'in_chat']);
+const INJECTION_PLACEMENTS = new Set(['in_prompt', 'in_chat']);
 const INJECTION_ROLES = new Set(['system', 'user', 'assistant']);
 const UI_PROGRESS_CHILD_MIN = 1;
 const UI_PROGRESS_CHILD_MAX = 20;
@@ -35,9 +35,9 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   focus: 'balanced',
   reasonerUse: 'auto',
   injection: {
-    placement: 'default',
+    placement: 'in_prompt',
     role: 'system',
-    depth: 'default'
+    depth: 4
   },
   diagnostics: {
     maxJournalEntries: 100,
@@ -118,14 +118,15 @@ export function normalizeCardBudgetSettings(value = {}) {
 }
 
 function normalizeInjectionDepth(value) {
-  if (value === null || value === undefined) return 'default';
-  if (Array.isArray(value) || typeof value === 'boolean' || typeof value === 'object') return 'default';
+  const fallback = DEFAULT_RECURSION_SETTINGS.injection.depth;
+  if (value === null || value === undefined) return fallback;
+  if (Array.isArray(value) || typeof value === 'boolean' || typeof value === 'object') return fallback;
   if (typeof value === 'string') {
     const trimmed = value.trim().toLowerCase();
-    if (!trimmed || trimmed === 'default') return 'default';
+    if (!trimmed || trimmed === 'default') return fallback;
   }
   const number = Number(value);
-  if (!Number.isFinite(number)) return 'default';
+  if (!Number.isFinite(number)) return fallback;
   return Math.round(Math.min(10, Math.max(0, number)));
 }
 

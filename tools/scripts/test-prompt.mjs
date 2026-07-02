@@ -238,8 +238,8 @@ assertDeepEqual(
   })),
   [
     { id: 'sceneBrief', promptKey: 'recursion.sceneBrief', title: 'Recursion Scene Brief', section: 'sceneBrief', placement: 'in_prompt', depth: 4, role: 'system', sourceIds: ['c1', 'c3', 'c4'] },
-    { id: 'turnBrief', promptKey: 'recursion.turnBrief', title: 'Recursion Turn Brief', section: 'turnBrief', placement: 'in_chat', depth: 2, role: 'system', sourceIds: ['c5'] },
-    { id: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', section: 'guardrails', placement: 'in_prompt', depth: 1, role: 'system', sourceIds: ['c2'] }
+    { id: 'turnBrief', promptKey: 'recursion.turnBrief', title: 'Recursion Turn Brief', section: 'turnBrief', placement: 'in_prompt', depth: 4, role: 'system', sourceIds: ['c5'] },
+    { id: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', section: 'guardrails', placement: 'in_prompt', depth: 4, role: 'system', sourceIds: ['c2'] }
   ],
   'prompt blocks preserve injection ids, placement, depth, role, and source ids'
 );

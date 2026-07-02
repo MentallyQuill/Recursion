@@ -496,6 +496,10 @@ assert(/\.recursion-hand-dropdown\s*>\s*\.recursion-empty\s*\{[\s\S]*?margin:\s*
 assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]\s*\{[\s\S]*?appearance:\s*none !important;[\s\S]*?background:[\s\S]*?var\(--SmartThemeBlurTintColor/.test(recursionCss), 'production settings checkbox uses a Recursion-scoped selector strong enough to beat SillyTavern globals');
 assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]\[hidden\]\s*\{[\s\S]*?display:\s*none !important;/.test(recursionCss), 'hidden provider state checkboxes stay hidden despite Recursion checkbox skin');
 assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]:checked\s*\{[\s\S]*?background:[\s\S]*?var\(--recursion-accent\)/.test(recursionCss), 'production settings checkbox uses Recursion cyan when checked');
+assert(!/input\.recursion-checkbox\[type="checkbox"\]:checked::before/.test(recursionCss), 'production settings checkbox does not draw a pseudo-element artifact inside checked boxes');
+assert(/\.recursion-settings-disclosure-body\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'settings disclosure bodies stay hidden despite author display rules');
+assert(/\.recursion-provider-body\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'provider disclosure bodies stay hidden despite author display rules');
+assert(/\.recursion-provider-field\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'provider source-specific fields stay hidden despite grid display rules');
 assert(/\.recursion-provider-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/.test(recursionCss), 'production Providers pane uses the reference two-column provider grid');
 assert(/\.recursion-provider-context-fields\s*\{[\s\S]*?display:\s*contents;/.test(recursionCss), 'production provider source-specific field groups keep the reference provider grid');
 assert(/\.recursion-provider-context-fields\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'hidden provider source-specific field groups stay hidden despite display contents');
@@ -852,6 +856,7 @@ const previousClearTimeout = globalThis.clearTimeout;
 const previousSetInterval = globalThis.setInterval;
 const previousClearInterval = globalThis.clearInterval;
 const previousInnerWidth = globalThis.innerWidth;
+const previousConnectionManagerRequestService = globalThis.ConnectionManagerRequestService;
 try {
   let timerId = 0;
   const timers = [];
@@ -889,6 +894,14 @@ try {
     clearTimeout: fakeClearTimeout,
     setInterval: fakeSetInterval,
     clearInterval: fakeClearInterval
+  };
+  globalThis.ConnectionManagerRequestService = {
+    getSupportedProfiles() {
+      return [
+        { id: 'quiet-profile-a', label: 'Quiet Utility', model: 'glm-fast' },
+        { profileId: 'deep-profile-b', label: 'Deep Reasoner', model_name: 'o-reasoner' }
+      ];
+    }
   };
   globalThis.innerWidth = 640;
   const copied = [];
@@ -1446,13 +1459,25 @@ try {
   const utilitySource = root.querySelector('[data-recursion-provider-source-utility]');
   const utilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
   const utilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
-  assertEqual(utilitySource.getAttribute('title'), 'Choose provider source. Hidden source-specific fields keep their values until Save Provider.', 'provider Source control exposes context-switch tooltip');
-  assertEqual(root.querySelector('[data-recursion-provider-base-url-utility]').getAttribute('title'), 'OpenAI-compatible /v1 endpoint base URL.', 'provider Base URL exposes endpoint tooltip');
-  assertEqual(root.querySelector('[data-recursion-provider-api-key-utility]').getAttribute('title'), 'Session-only API key. Recursion never persists it.', 'provider API key tooltip explains secret boundary');
+  assertEqual(utilitySource.getAttribute('title'), 'Choose where this lane sends Recursion model calls. Current Host Model follows the active chat model; Host Connection Profile uses a saved SillyTavern profile; OpenAI-Compatible uses the endpoint fields below. Hidden fields keep values until Save Provider.', 'provider Source control explains what each source does and why hidden fields persist');
+  assertEqual(root.querySelector('[data-recursion-provider-base-url-utility]').getAttribute('title'), 'Base /v1 URL for a direct OpenAI-compatible endpoint. Only used when Source is OpenAI-Compatible.', 'provider Base URL explains source-specific endpoint use');
+  assertEqual(root.querySelector('[data-recursion-provider-api-key-utility]').getAttribute('title'), 'Session-only key for the OpenAI-compatible endpoint. Recursion keeps it in memory and never writes it to settings or diagnostics.', 'provider API key tooltip explains secret boundary');
   assert(utilityProfileContext, 'Utility provider renders a profile-specific field context');
   assert(utilityOpenAiContext, 'Utility provider renders an OpenAI-specific field context');
   assertEqual(utilityProfileContext.hidden, true, 'Current Host Model hides Utility profile fields');
   assertEqual(utilityOpenAiContext.hidden, true, 'Current Host Model hides Utility OpenAI endpoint fields');
+  const utilityProfileSelect = root.querySelector('[data-recursion-provider-profile-utility]');
+  assertEqual(utilityProfileSelect.tagName, 'SELECT', 'Host Connection Profile uses a real profile selector, not a free-text id field');
+  assertDeepEqual(
+    utilityProfileSelect.children.map((option) => [option.value, option.textContent]),
+    [
+      ['', 'Select Profile'],
+      ['quiet-profile-a', 'Quiet Utility / glm-fast'],
+      ['deep-profile-b', 'Deep Reasoner / o-reasoner']
+    ],
+    'profile selector is populated from SillyTavern connection profiles'
+  );
+  assertEqual(utilityProfileSelect.getAttribute('title'), 'Saved SillyTavern Connection Profile for this lane. Profiles keep routing, preset, and keys in SillyTavern.', 'profile selector tooltip explains why profiles matter');
   utilitySource.value = 'host-connection-profile';
   for (const listener of utilitySource.eventListeners.change || []) listener({ target: utilitySource });
   assertEqual(utilityProfileContext.hidden, false, 'Host Connection Profile shows Utility profile fields');
@@ -1487,11 +1512,21 @@ try {
   assert(root.querySelector('[data-recursion-setting-injection-placement]'), 'Advanced settings render injection placement control');
   assert(root.querySelector('[data-recursion-setting-injection-role]'), 'Advanced settings render injection role control');
   assert(root.querySelector('[data-recursion-setting-injection-depth]'), 'Advanced settings render injection depth control');
-  assertEqual(root.querySelector('[data-recursion-setting-injection-placement]').getAttribute('title'), 'Where SillyTavern installs the composed Recursion prompt packet.', 'Injection placement exposes tooltip');
-  assertEqual(root.querySelector('[data-recursion-setting-tooltips-enabled]').getAttribute('title'), 'Show or hide Recursion tooltip and hover help text.', 'Tooltip setting explains its effect');
-  assertEqual(root.querySelector('[data-recursion-setting-injection-placement]').value, 'default', 'injection placement defaults to template plan');
+  assertEqual(root.querySelector('[data-recursion-setting-injection-placement]').getAttribute('title'), 'Choose the SillyTavern prompt lane for the composed Recursion packet. In Prompt is the recommended default; In Chat can help presets that weight recent chat harder.', 'Injection placement tooltip explains what it changes and why');
+  assertEqual(root.querySelector('[data-recursion-setting-tooltips-enabled]').getAttribute('title'), 'Show hover help across Recursion. Turn off once the controls are familiar; hidden text never affects model calls.', 'Tooltip setting explains its effect and safety boundary');
+  assertDeepEqual(
+    root.querySelector('[data-recursion-setting-injection-placement]').children.map((option) => option.value),
+    ['in_prompt', 'in_chat'],
+    'injection placement omits the Default sentinel option'
+  );
+  assertDeepEqual(
+    root.querySelector('[data-recursion-setting-injection-depth]').children.map((option) => option.value),
+    Array.from({ length: 11 }, (_, index) => String(index)),
+    'injection depth omits the Default sentinel option'
+  );
+  assertEqual(root.querySelector('[data-recursion-setting-injection-placement]').value, 'in_prompt', 'injection placement defaults to the concrete prompt lane');
   assertEqual(root.querySelector('[data-recursion-setting-injection-role]').value, 'system', 'injection role defaults to system');
-  assertEqual(root.querySelector('[data-recursion-setting-injection-depth]').value, 'default', 'injection depth defaults to template plan');
+  assertEqual(root.querySelector('[data-recursion-setting-injection-depth]').value, '4', 'injection depth defaults to the concrete recommended depth');
   root.querySelector('[data-recursion-reset-scene-cache]').click();
   assertEqual(resetSceneCacheCalls, 1, 'Reset Scene Cache action calls runtime');
   root.querySelector('[data-recursion-clear-run-journal]').click();
@@ -1738,6 +1773,8 @@ try {
   globalThis.clearInterval = previousClearInterval;
   if (previousInnerWidth === undefined) delete globalThis.innerWidth;
   else globalThis.innerWidth = previousInnerWidth;
+  if (previousConnectionManagerRequestService === undefined) delete globalThis.ConnectionManagerRequestService;
+  else globalThis.ConnectionManagerRequestService = previousConnectionManagerRequestService;
 }
 
 console.log('[pass] ui');

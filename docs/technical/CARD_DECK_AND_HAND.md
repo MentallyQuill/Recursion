@@ -1,8 +1,8 @@
 # Card Deck And Hand
 
-The card system is Recursion's scene-local prompt cache. It is implemented by `src/cards.mjs`, coordinated by `src/runtime.mjs`, persisted by `src/storage.mjs`, and inspected through `src/ui.mjs`.
+The card system is Recursion's scene-local reasoning cache. It is implemented by `src/cards.mjs`, coordinated by `src/runtime.mjs`, persisted by `src/storage.mjs`, and inspected through `src/ui.mjs`.
 
-Cards are disposable cache artifacts. They are not memories, lore, canon, or user-authored prompt fragments.
+Cards are disposable cache artifacts. They are not memories, lore, canon, continuity records, or user-authored prompt fragments. Their job is to expand what the current scene implies for the next response, not to preserve facts for their own sake.
 
 ## Fixed V1 Card Families
 
@@ -11,22 +11,42 @@ Cards are disposable cache artifacts. They are not memories, lore, canon, or use
 | Scene Frame | `sceneFrameCard` | Current location, situation, participants, and dramatic direction. | Usually eligible while the scene is active. |
 | Active Cast | `activeCastCard` | Who is present, visible state, and conversational or physical role. | Prevents dropped characters and speaker confusion. |
 | Character Motivation | `characterMotivationCard` | Observable or safely inferred motives, pressures, hesitations, and goals. | Behavior-facing guidance without private thought injection. |
-| Relationship | `dialogueRelationshipCard` | Current tension, relationship texture, promises, conflicts, and voice constraints. | Guides tone, subtext, and relational continuity. |
-| Continuity Risk | `continuityRiskCard` | Facts likely to be contradicted if omitted. | High-priority safety guidance. |
+| Relationship | `dialogueRelationshipCard` | Current tension, relationship texture, promises, conflicts, and voice constraints. | Guides tone, subtext, and active relationship implications. |
+| Continuity Risk | `continuityRiskCard` | Scene constraints likely to make the next response implausible if missed. | High-priority hard-limit, timing, access, and contradiction guidance. |
 | Knowledge | `knowledgeSecretsCard` | Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries. | Guardrail guidance for knowledge state and spoiler-safe reveals. |
 | Consequences | `clocksConsequencesCard` | Deadlines, countdowns, delayed consequences, and escalation triggers. | Keeps near-term pressure visible. |
 | Environment | `environmentAffordancesCard` | Spatial layout, sensory texture, hazards, obstacles, exits, and environmental affordances. | Grounds action and prose. |
 | Items | `possessionsItemsCard` | Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them. | Tracks object ownership and immediate item use. |
-| Prose | `prosePacingCard` | Local craft guidance for density, momentum, specificity, and response shape. | Low-volume style guidance. |
+| Prose | `prosePacingCard` | Legacy local craft guidance for density, momentum, specificity, and response shape. | Candidate for removal from default generation unless narrowed to hard response-shape constraints. |
 | Open Threads | `openThreadsCard` | Unresolved questions, promises, pending actions, and near-term pressures. | Keeps the next response aware of visible obligations. |
 
 Each family also exposes fixed scope facets. Facets do not create separate cards; they define what the Arbiter and card generator should emphasize inside that family. The facet labels and descriptions live in `src/card-scope.mjs` and are reused for Arbiter catalog payloads, card-generation prompt focus, UI hover help, and diagnostics.
+
+## Family Audit
+
+The catalog should converge on scene-implication cards rather than continuity cards:
+
+| Family | Direction |
+| --- | --- |
+| Scene Frame | Keep, but require it to expand active situation and relevance boundaries instead of summarizing. |
+| Active Cast | Keep for presence, visibility, speaker control, and who can plausibly act or interrupt. |
+| Character Motivation | Keep only for observable pressures and behavior-facing uncertainty. |
+| Relationship | Keep, focused on current leverage, tension, promises, refusal, trust, and escalation/softening paths. |
+| Continuity Risk | Reframe or rename as scene constraints; use it for hard limits and plausibility traps, not durable continuity ownership. |
+| Knowledge | Keep for who knows, suspects, misunderstands, can infer, or must not learn something yet. |
+| Consequences | Keep for active near-term pressure, delayed effects, and escalation triggers. |
+| Environment | Keep as a core Recursion family for routes, sightlines, hazards, affordances, sensory grounding, and plausible interruptions. |
+| Items | Keep for access, control, affordance, and risk of important objects in the current beat. |
+| Prose | Cut from default generation unless it is replaced by a narrower hard response-shape constraint owned by another family. |
+| Open Threads | Keep, but limit it to visible unresolved hooks and obligations with next-turn relevance. |
+
+The detailed facet-by-facet audit lives in [Card System Spec](../design/CARD_SYSTEM_SPEC.md#card-facet-audit). Implementation work should treat that table as the source of truth for future catalog edits: `density` and broad `specificityShape` should be cut, `momentum` should be rehomed only as a hard beat constraint, `presentParticipants` should merge toward Active Cast, and `voiceConstraints` should narrow to scene-local speech/address constraints.
 
 ## Card Scope
 
 Card scope is the user-facing focus control over the fixed V1 catalog. It has two modes:
 
-- Auto: selected families and sub-items are the preferred focus, but not a whitelist. The Utility Arbiter still sees the full catalog and may request unselected families when they have high relevance to continuity, scene coherence, or the current user message. Runtime records visible compact `auto-scope-exception:<family>` diagnostics for any unselected family that enters the plan or hand.
+- Auto: selected families and sub-items are the preferred focus, but not a whitelist. The Utility Arbiter still sees the full catalog and may request unselected families when they have high relevance to scene constraints, scene coherence, or the current user message. Runtime records visible compact `auto-scope-exception:<family>` diagnostics for any unselected family that enters the plan or hand.
 - Manual: selected families and sub-items are a strict whitelist. Runtime removes disabled-family card jobs before provider generation and filters disabled cached, provider, and fallback cards before deck and hand selection.
 
 Sub-items are focus facets inside a family, such as `fragileFacts` under Continuity Risk or `pendingActions` under Open Threads. They guide the prompt for that family card and appear in safe diagnostics, but they do not create separate generated cards, separate deck records, or separate prompt-injection lanes.

@@ -394,7 +394,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
         <div class="provider-body">
           <div class="provider-grid">
             <label>Source<select><option selected>Current Host Model</option><option>Host Connection Profile</option><option>OpenAI-Compatible Endpoint</option></select></label>
-            <label class="provider-context-field" data-source-context="profile" hidden>Profile<input placeholder="Host profile id"></label>
+            <label class="provider-context-field" data-source-context="profile" hidden>Profile<select><option selected>Select Profile</option><option>Quiet Utility / glm-fast</option></select></label>
             <div class="provider-context-fields" data-source-context="openai-compatible" hidden>
               <label>Base URL<input placeholder="https://host/v1"></label>
               <label>Model<input placeholder="model"></label>
@@ -415,9 +415,9 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
       <section class="settings-disclosure is-open">
         <button class="settings-disclosure-toggle" type="button" aria-expanded="true">Injection</button>
         <div class="settings-disclosure-body">
-          <label class="settings-row"><span>Placement</span><select><option selected>Default</option><option>In Prompt</option><option>In Chat</option></select></label>
+          <label class="settings-row"><span>Placement</span><select><option selected>In Prompt</option><option>In Chat</option></select></label>
           <label class="settings-row"><span>Role</span><select><option selected>System</option><option>User</option><option>Assistant</option></select></label>
-          <label class="settings-row"><span>Depth</span><select><option selected>Default</option><option>0</option><option>1</option><option>2</option></select></label>
+          <label class="settings-row"><span>Depth</span><select><option>0</option><option>1</option><option>2</option><option selected>4</option></select></label>
         </div>
       </section>
       <section class="settings-disclosure is-open">
@@ -2219,15 +2219,6 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 .settings-row input[type="checkbox"]:checked {
   background: rgba(101, 216, 232, .72);
   border-color: rgba(101, 216, 232, .82);
-}
-
-.settings-row input[type="checkbox"]:checked::before {
-  content: "";
-  width: 4px;
-  height: 8px;
-  border-right: 1.5px solid rgba(255, 255, 255, .88);
-  border-bottom: 1.5px solid rgba(255, 255, 255, .88);
-  transform: translateY(-1px) rotate(45deg);
 }
 
 .provider-section {

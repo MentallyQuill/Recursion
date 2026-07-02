@@ -1,6 +1,6 @@
 # Runtime Architecture
 
-Recursion is a mostly automatic runtime layer for compiling current-scene writing context into a compact prompt packet for the next SillyTavern generation. It observes the active chat, uses the Utility Arbiter to decide what work is worth doing, updates a bounded scene card cache, selects a turn hand, optionally runs a Composer or Reasoner pass, installs prompt guidance, and records diagnostics.
+Recursion is a mostly automatic runtime layer for compiling current-scene reasoning context into a compact prompt packet for the next SillyTavern generation. It observes the active chat, uses the Utility Arbiter to decide what scene implications are worth expanding, updates a bounded scene card cache, selects a turn hand, optionally runs a Composer or Reasoner pass, installs prompt guidance, and records diagnostics.
 
 Recursion should stay host-adapter based. SillyTavern is the first host, but runtime internals should remain host-neutral where that keeps the model, cache, and prompt-planning logic clean.
 
@@ -16,7 +16,7 @@ Related specs:
 
 ## System Boundary
 
-Recursion owns the short-lived runtime loop that improves the next model response. It does not own durable story truth, campaign saves, transcript branching, player state, long-term memory, vector recall, World Info, or Summaryception-style history compression.
+Recursion owns the short-lived runtime loop that improves the next model response. It does not own continuity-extension duties, durable story truth, campaign saves, transcript branching, player state, long-term memory, vector recall, World Info, or Summaryception-style history compression.
 
 The runtime boundary is:
 
@@ -110,7 +110,7 @@ Runtime enforcement:
 - Token and card count caps are enforced after the Arbiter returns.
 - Runtime derives the behavior policy from Strength, Min/Max Cards, Focus, and Prompt Footprint, sends policy lines to the Arbiter, and applies mechanical shaping before cards are selected.
 - Min Cards caps Low's card count, Max Cards raises/caps Ultra's card count, and Medium/High use the floor average.
-- `promptFootprint` is sanitized to `compact`, `normal`, or `rich`, then resolved through the user's stored Prompt Footprint policy. Compact may expand only for safety or hard-continuity evidence, Normal may use Rich only for high-risk evidence, and Rich may still choose smaller effective packets for simple turns. The effective footprint applies only to this run and never mutates stored settings.
+- `promptFootprint` is sanitized to `compact`, `normal`, or `rich`, then resolved through the user's stored Prompt Footprint policy. Compact may expand only for safety or hard scene-constraint evidence, Normal may use Rich only for high-risk evidence, and Rich may still choose smaller effective packets for simple turns. The effective footprint applies only to this run and never mutates stored settings.
 - Strength changes cache/hand pressure and composer assertiveness inside the selected card budget. Focus changes soft family ordering for the hand and diagnostics, but it is not a hard whitelist.
 - Provider lane choices are resolved through the provider spec, not trusted as raw endpoints.
 - Reasoner triggers are advisory. If Reasoner is off, unavailable, too slow, or over budget, generation continues through the deterministic or Utility composer path.
@@ -138,7 +138,7 @@ Scene status is the Arbiter's view of how much the active scene changed:
 - `hard-shift`: begin a new scene cache segment and avoid carrying stale scene-frame cards forward. Examples include a location jump, time jump, cast reset, or clear narrative break.
 - `unknown`: use conservative behavior when the Arbiter cannot classify the shift. Prefer a bounded validation pass, lower prompt footprint, and visible diagnostics rather than aggressive cache reuse or hard deletion.
 
-Hard shifts should not erase useful diagnostics or previous bounded cache history, but they should prevent stale cards from entering the next turn hand. Soft shifts should preserve continuity risks and open threads only when they still apply to the visible scene.
+Hard shifts should not erase useful diagnostics or previous bounded cache history, but they should prevent stale cards from entering the next turn hand. Soft shifts should preserve scene constraints and open threads only when they still apply to the visible scene.
 
 When local heuristics and model judgment disagree, runtime safety wins. The runtime may ask the Utility Arbiter for a scene validation pass, but it should not install contradictory scene guidance while scene status is unresolved.
 

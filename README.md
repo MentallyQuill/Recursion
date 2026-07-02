@@ -1,8 +1,8 @@
 # Recursion
 
-Recursion is a pre-alpha SillyTavern extension that compiles compact, current-scene prompt guidance for the next roleplay generation. It observes the active chat, builds a short-lived scene deck and turn hand, then installs an inspectable prompt packet when Auto or Manual mode is active.
+Recursion is a pre-alpha SillyTavern extension that improves the next roleplay generation by expanding the model's reasoning over the active scene. It observes the current chat, builds a short-lived scene deck and turn hand, then installs an inspectable prompt packet when Auto or Manual mode is active.
 
-Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product. It is a focused prompt compiler for the scene in front of the user.
+Recursion is not a continuity extension, memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product. It is a focused prompt compiler for the scene in front of the user: cards should expand immediate scene implications, affordances, constraints, tensions, and reveal boundaries rather than restate facts or teach broad lore the model already knows.
 
 <Render Needed>: assets/documentation/renders/recursion-bar-desktop.png - Recursion Bar mounted in SillyTavern on desktop, showing power, Auto/Manual mode, Cards scope, Hero Pixel Array, reasoning level, Last Brief dropdown, and options controls.
 

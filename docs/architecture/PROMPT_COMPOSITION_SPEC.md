@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Recursion improves the next SillyTavern generation by composing a compact, inspectable prompt packet from the selected turn hand. It does not inject every selected card directly, and it does not try to own all story context. The packet is a small writing brief that helps the model stay attached to the active scene, recent turn pressure, visible character posture, and immediate continuity risks.
+Recursion improves the next SillyTavern generation by composing a compact, inspectable prompt packet from the selected turn hand. It does not inject every selected card directly, and it does not try to own all story context. The packet is a small reasoning brief that helps the model notice the active scene's immediate implications: recent turn pressure, visible character posture, spatial and social affordances, reveal boundaries, and hard plausibility constraints.
 
 Related specs:
 
@@ -24,14 +24,14 @@ The selected hand is the input to prompt composition, not the final prompt. Card
 
 The composed packet is preferred because it can remove duplicates, resolve emphasis, fit the active footprint budget, and present one coherent instruction instead of a stack of fragmented card text. Compact card references may be retained internally for diagnostics, omission tracing, cache invalidation, and inspector display, but the model-facing prompt should read as a deliberate brief.
 
-Raw or direct card injection is a narrow exception. It is reserved for critical guardrails that would lose force if paraphrased, such as a hard continuity prohibition, an active safety boundary, or a precise style constraint that must remain exact. Raw card injection must be recorded in diagnostics with the reason it bypassed composition.
+Raw or direct card injection is a narrow exception. It is reserved for critical guardrails that would lose force if paraphrased, such as a hard scene constraint, an active safety boundary, or a precise response-shape constraint that must remain exact. Raw card injection must be recorded in diagnostics with the reason it bypassed composition.
 
 Composition must not:
 
 - dump hidden internal reasoning;
 - reveal spoilers, private motives, or future plot plans;
 - rewrite or summarize the user's latest message as if it were an instruction to obey instead of story input;
-- expand into general lore, world memory, transcript summary, or vector recall;
+- expand into general lore, world memory, transcript summary, continuity database behavior, or vector recall;
 - compete with SillyTavern character prompts, author notes, World Info, Memory Books, Summaryception, VectFox, or other context providers.
 
 ## Prompt Packet Contract
@@ -61,7 +61,7 @@ The Scene Brief is reusable while the scene fingerprint remains valid. It descri
 
 - immediate location or situation;
 - active cast and visible relationship posture;
-- important recent facts that shape this scene;
+- important recent scene implications that shape this response;
 - unresolved near-term pressures;
 - sensory or spatial constraints that improve prose grounding.
 
@@ -72,7 +72,7 @@ The Scene Brief should be stable enough to survive several turns but not so broa
 The Turn Brief is regenerated for the current generation attempt. It captures what the next response must respect now:
 
 - the user's latest move or request, without rewriting it;
-- immediate continuity risks;
+- immediate scene constraints and plausibility traps;
 - active dialogue, emotional, pacing, or action cues;
 - response-shaping priorities selected by the Utility Arbiter;
 - any short-lived instruction needed only for this turn.
@@ -157,7 +157,7 @@ The Reasoner Composer is optional. It can fuse the selected hand into sharper, m
 
 Reasoner Composer triggers may include:
 
-- high continuity risk;
+- high scene-constraint risk;
 - dense active cast or relationship tension;
 - conflicting candidate cards;
 - rapid scene shift;
@@ -165,7 +165,7 @@ Reasoner Composer triggers may include:
 - user-enabled strong guidance mode;
 - repeated diagnostics showing weak previous composition.
 
-Reasoner output is not authoritative by itself. Runtime must validate, cap, and merge it into the packet. The Reasoner must echo the packet's frozen `snapshotHash`; missing or mismatched hashes are stale output and must be rejected. The Reasoner must not invent lore, future plot, hidden motivations, or private analysis. It should transform selected evidence into concise writing guidance, then return structured output that the Utility Composer or runtime validator can accept, trim, or reject.
+Reasoner output is not authoritative by itself. Runtime must validate, cap, and merge it into the packet. The Reasoner must echo the packet's frozen `snapshotHash`; missing or mismatched hashes are stale output and must be rejected. The Reasoner must not invent lore, future plot, hidden motivations, or private analysis. It should transform selected evidence into concise scene-reasoning guidance, then return structured output that the Utility Composer or runtime validator can accept, trim, or reject.
 
 If the Reasoner fails, times out, returns invalid schema, returns the wrong snapshot hash, or exceeds safety limits, Recursion falls back to Utility Composer output and records the fallback in diagnostics.
 
@@ -189,13 +189,13 @@ Recommended depth behavior:
 
 ### User-Controlled Final Prompt Injection
 
-V1 must include an advanced user setting group for the conditioned final prompt packet. The default setting preserves Recursion's recommended per-section injection plan, but advanced users can override where the composed packet lands when a model or preset responds better to a different lane.
+V1 must include an advanced user setting group for the conditioned final prompt packet. The recommended concrete defaults are placement `in_prompt`, role `system`, and depth `4`, but advanced users can choose where the composed packet lands when a model or preset responds better to a different lane.
 
 Settings contract:
 
-- `injection.placement`: `default`, `in_prompt`, or `in_chat`. `default` keeps the packet template lanes. Explicit values override the placement for composed Recursion packet blocks.
+- `injection.placement`: `in_prompt` or `in_chat`. The selected value applies to composed Recursion packet blocks.
 - `injection.role`: `system`, `user`, or `assistant`. Default is `system`; unsupported host roles fall back to `system` and record a compact warning.
-- `injection.depth`: `default` or an integer from `0` to `10`. `default` keeps section-specific depths. Explicit numeric depth overrides the depth for composed Recursion packet blocks.
+- `injection.depth`: an integer from `0` to `10`. Default is `4`; the selected numeric depth applies to composed Recursion packet blocks.
 
 These settings apply only after Utility/Reasoner composition has produced the packet. They do not change card generation, Arbiter scoring, selected-hand contents, raw card storage, or external memory/lore behavior. They also do not create a per-card injection matrix; Recursion remains a composed-packet system, not a card micromanagement UI.
 
@@ -252,7 +252,7 @@ Budgeting is part of the product contract. Recursion should prefer a smaller, sh
 Budget order:
 
 1. Critical Guardrails.
-2. Turn Brief continuity risks.
+2. Turn Brief scene constraints and plausibility traps.
 3. Current user focus and response cues.
 4. Scene Brief essentials.
 5. Active cast and relationship posture.
@@ -317,7 +317,7 @@ Runtime guardrails:
 
 ## External Extension Coexistence
 
-Recursion is a near-term writing context compiler. It must coexist with, not replace, other SillyTavern context systems.
+Recursion is a near-term scene-reasoning compiler. It must coexist with, not replace, other SillyTavern context systems.
 
 Memory Books and World Info own durable facts, lore, and authored background. Summaryception owns long transcript compression. VectFox owns vector-style recall. SillyTavern character prompts, author notes, presets, and instruct templates own the host's baseline generation behavior.
 
@@ -332,7 +332,7 @@ Recursion should:
 - avoid requiring users to disable other context tools;
 - degrade to compact footprint when the prompt environment is already crowded.
 
-If external context conflicts with selected hand evidence, Recursion should not silently override it. The Utility Arbiter may flag a continuity risk, but the composed packet should stay conservative unless the active chat clearly resolves the conflict.
+If external context conflicts with selected hand evidence, Recursion should not silently override it. The Utility Arbiter may flag a scene-constraint risk, but the composed packet should stay conservative unless the active chat clearly resolves the conflict.
 
 ## Prompt Packet Diagnostics
 

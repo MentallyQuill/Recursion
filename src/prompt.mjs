@@ -347,8 +347,8 @@ function buildInjectionPlan(sectionSources, budgets, injectionSettings = {}) {
   const injection = normalizeInjectionSettings(injectionSettings);
   return INJECTION_TEMPLATE.map((block) => ({
     ...block,
-    placement: injection.placement === 'default' ? block.placement : injection.placement,
-    depth: injection.depth === 'default' ? block.depth : injection.depth,
+    placement: injection.placement,
+    depth: injection.depth,
     role: injection.role,
     section: block.id,
     sourceIds: [...(sectionSources?.[block.id] || [])],

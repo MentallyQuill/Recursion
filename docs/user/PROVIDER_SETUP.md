@@ -16,7 +16,7 @@ Each lane can use one provider source when the host supports it.
 | Source | Use When | Notes |
 | --- | --- | --- |
 | Current Host Model | You want Recursion to use the model currently active in SillyTavern. | Smallest setup surface. Availability depends on host APIs. |
-| Host Connection Profile | You want Recursion to use a named SillyTavern connection profile. | If the host cannot expose profiles, the option should be unavailable with a clear status. |
+| Host Connection Profile | You want Recursion to use a saved SillyTavern connection profile. | Recursion lists detected host profiles in a selector. If the host cannot expose profiles, the selector should be unavailable with a clear status. |
 | OpenAI-Compatible Endpoint | You want a direct endpoint with base URL, model, and session API key. | Session key is memory-only and must be re-entered after session loss. |
 
 ## Utility Setup
@@ -26,10 +26,11 @@ Each lane can use one provider source when the host supports it.
 3. Select the `Utility` provider card.
 4. Choose a provider source.
 5. Fill the required fields for that source.
-6. For OpenAI-compatible endpoints, enter base URL, model, and session API key.
-7. Adjust temperature, top-p, and max tokens only when needed.
-8. Save provider settings.
-9. Run `Test Provider`.
+6. For Host Connection Profile, select one of the saved SillyTavern profiles from the profile selector.
+7. For OpenAI-compatible endpoints, enter base URL, model, and session API key.
+8. Adjust temperature, top-p, and max tokens only when needed.
+9. Save provider settings.
+10. Run `Test Provider`.
 
 Utility is healthy when the test passes and the bar or provider card shows a ready state. If Utility is missing or unhealthy, Recursion may reuse valid cache, skip injection, or continue without Recursion guidance.
 

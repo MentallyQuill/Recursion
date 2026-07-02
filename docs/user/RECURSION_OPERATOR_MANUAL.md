@@ -117,7 +117,7 @@ Operator settings should stay broad. Mode and Reasoning Level live in the compac
 
 - Play / Behavior: Strength `Light | Balanced | Strong`, Prompt Footprint `Compact | Normal | Rich`, and Focus `Balanced | Character | Continuity | Prose | Plot`.
 - Providers: collapsible Utility and Reasoner setup in the settings panel.
-- Advanced / Injection: final-prompt injection compatibility controls: Placement `Default | In Prompt | In Chat`, Role `System | User | Assistant`, and Depth `Default | 0..10`.
+- Advanced / Injection: final-prompt injection compatibility controls: Placement `In Prompt | In Chat`, Role `System | User | Assistant`, and Depth `0..10`.
 - Advanced / UI: progress row limits.
 - Advanced / Diagnostics: journal limits, safe excerpts, Reset Scene Cache, Clear Run Journal, and Export Diagnostics.
 
@@ -125,7 +125,7 @@ Behavior controls have distinct jobs. Prompt Footprint controls the size and det
 
 ![Behavior policy overview](../../assets/documentation/renders/recursion-behavior-policy.png)
 
-Default injection settings preserve Recursion's section template. Explicit injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
+Default injection settings use Recursion's recommended concrete plan: `In Prompt`, `System`, depth `4`. Injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
 
 ## Provider Controls
 

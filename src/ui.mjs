@@ -94,7 +94,6 @@ const PROVIDER_SOURCE_OPTIONS = Object.freeze([
   ['openai-compatible', 'OpenAI-Compatible Endpoint']
 ]);
 const INJECTION_PLACEMENT_OPTIONS = Object.freeze([
-  ['default', 'Default'],
   ['in_prompt', 'In Prompt'],
   ['in_chat', 'In Chat']
 ]);
@@ -104,9 +103,39 @@ const INJECTION_ROLE_OPTIONS = Object.freeze([
   ['assistant', 'Assistant']
 ]);
 const INJECTION_DEPTH_OPTIONS = Object.freeze([
-  ['default', 'Default'],
   ...Array.from({ length: 11 }, (_, index) => [String(index), String(index)])
 ]);
+const SETTINGS_TOOLTIPS = Object.freeze({
+  behavior: 'Controls how strongly Recursion shapes the next prompt packet. These settings affect card pressure, focus, and prompt size without changing provider credentials.',
+  strength: 'Bias strength for the composed prompt packet. Light stays subtle, Balanced is the normal default, and Strong gives Recursion more room to steer scene adhesion.',
+  minCards: 'Low Reasoning Level card target. Use fewer cards for faster, cheaper turns or more cards when sparse scenes need extra grounding.',
+  maxCards: 'Ultra Reasoning Level card target. Medium and High use the average, so this also sets the upper range for busier scenes.',
+  focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, continuity, prose, or plot without becoming a hard whitelist.',
+  footprint: 'Prompt budget for the composed Recursion packet. Compact spends fewer tokens, Rich preserves more scene detail when the moment is complex.',
+  injection: 'Compatibility controls for where the final composed Recursion packet lands in SillyTavern. These do not create per-card prompt controls.',
+  injectionPlacement: 'Choose the SillyTavern prompt lane for the composed Recursion packet. In Prompt is the recommended default; In Chat can help presets that weight recent chat harder.',
+  injectionRole: 'Role SillyTavern assigns to Recursion prompt blocks. System is safest for instruction-like scene guidance; User or Assistant exist for preset compatibility.',
+  injectionDepth: 'Insertion depth for the composed packet. Lower values sit closer to generation; higher values sit farther back and usually feel less forceful.',
+  ui: 'Display preferences for Recursion chrome. These affect local visibility and hover help only, not prompts or provider calls.',
+  tooltips: 'Show hover help across Recursion. Turn off once the controls are familiar; hidden text never affects model calls.',
+  progressChildLimit: 'Maximum visible sub-rows under one progress step before that child list scrolls. Useful when many card calls run in one turn.',
+  progressListLimit: 'Maximum combined progress rows before the whole progress menu scrolls. Keeps long model-call runs readable without growing over the chat.',
+  diagnostics: 'Local troubleshooting controls. Diagnostics are sanitized by default and are for understanding Recursion behavior, not feeding the model.',
+  journalEntries: 'Maximum sanitized run-journal entries retained for inspection. Higher values help debugging but cost more local storage.',
+  includeExcerpts: 'Include short sanitized excerpts in exported diagnostics. Leave off for privacy unless a bug report needs bounded text evidence.',
+  resetSceneCache: 'Clear cached scene cards for the current chat so Recursion rebuilds its hand from fresh context.',
+  clearRunJournal: 'Clear local Recursion activity history for this chat. This does not change cards, settings, or SillyTavern messages.',
+  exportDiagnostics: 'Copy sanitized Recursion diagnostics for debugging. API keys, raw provider prompts, and hidden reasoning are excluded.',
+  providerSource: 'Choose where this lane sends Recursion model calls. Current Host Model follows the active chat model; Host Connection Profile uses a saved SillyTavern profile; OpenAI-Compatible uses the endpoint fields below. Hidden fields keep values until Save Provider.',
+  providerProfile: 'Saved SillyTavern Connection Profile for this lane. Profiles keep routing, preset, and keys in SillyTavern.',
+  providerBaseUrl: 'Base /v1 URL for a direct OpenAI-compatible endpoint. Only used when Source is OpenAI-Compatible.',
+  providerModel: 'Model id sent to the direct OpenAI-compatible endpoint. Only used with the OpenAI-Compatible source.',
+  providerApiKey: 'Session-only key for the OpenAI-compatible endpoint. Recursion keeps it in memory and never writes it to settings or diagnostics.',
+  providerMaxTokens: 'Maximum response tokens for structured Recursion calls on this lane. Raise only when valid JSON is being cut off.',
+  providerSave: 'Save this provider lane configuration. Source-specific fields keep their values so you can switch sources without retyping.',
+  providerTest: 'Send a small structured test call through this lane to verify routing, credentials, and JSON output before using it in chat.',
+  providerClearKey: 'Remove the in-memory session key for this lane. Saved endpoint, model, and profile settings stay unchanged.'
+});
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -649,7 +678,7 @@ function disclosureDataset(prefix, id) {
   return { [`${prefix}${datasetSuffix(id)}`]: '' };
 }
 
-function settingsDisclosureSection(id, title, children, { defaultOpen = true } = {}) {
+function settingsDisclosureSection(id, title, children, { defaultOpen = true, tooltip = '', tooltipsEnabled = true } = {}) {
   const open = Boolean(defaultOpen);
   const section = el('section', {
     className: `recursion-settings-disclosure${open ? ' is-open' : ''}`,
@@ -663,7 +692,8 @@ function settingsDisclosureSection(id, title, children, { defaultOpen = true } =
     text: title,
     attrs: {
       type: 'button',
-      'aria-expanded': open ? 'true' : 'false'
+      'aria-expanded': open ? 'true' : 'false',
+      ...tooltipAttrs(tooltipsEnabled, tooltip)
     },
     dataset: {
       recursionSettingsSectionToggle: id,
@@ -1349,12 +1379,12 @@ function renderHighLevelSettings(panel, settings) {
   const group = el('section', { className: 'recursion-settings-group' });
   const tooltipsEnabled = asObject(settings.ui).tooltipsEnabled !== false;
   group.appendChild(settingsDisclosureSection('play-behavior', 'Behavior', [
-    settingsSelectRow('Strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS, 'How strongly Recursion should bias the next prompt packet.', tooltipsEnabled),
-    settingsNumberRow('Min Cards', 'recursionSettingMinCards', integerInRange(settings.minCards, DEFAULT_RECURSION_SETTINGS.minCards, 0, 20), { tooltip: 'Low Reasoning Level card budget.', tooltipsEnabled }),
-    settingsNumberRow('Max Cards', 'recursionSettingMaxCards', integerInRange(settings.maxCards, DEFAULT_RECURSION_SETTINGS.maxCards, 0, 20), { tooltip: 'Ultra Reasoning Level card budget. Medium and High use the average.', tooltipsEnabled }),
-    settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS, 'Broad focus for card selection and brief composition.', tooltipsEnabled),
-    settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS, 'How much prompt budget Recursion may spend.', tooltipsEnabled)
-  ]));
+    settingsSelectRow('Strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS, SETTINGS_TOOLTIPS.strength, tooltipsEnabled),
+    settingsNumberRow('Min Cards', 'recursionSettingMinCards', integerInRange(settings.minCards, DEFAULT_RECURSION_SETTINGS.minCards, 0, 20), { tooltip: SETTINGS_TOOLTIPS.minCards, tooltipsEnabled }),
+    settingsNumberRow('Max Cards', 'recursionSettingMaxCards', integerInRange(settings.maxCards, DEFAULT_RECURSION_SETTINGS.maxCards, 0, 20), { tooltip: SETTINGS_TOOLTIPS.maxCards, tooltipsEnabled }),
+    settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS, SETTINGS_TOOLTIPS.focus, tooltipsEnabled),
+    settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS, SETTINGS_TOOLTIPS.footprint, tooltipsEnabled)
+  ], { tooltip: SETTINGS_TOOLTIPS.behavior, tooltipsEnabled }));
   panel.appendChild(group);
 }
 
@@ -1372,6 +1402,8 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     resetSceneCache.disabled = true;
     resetSceneCache.setAttribute('disabled', 'disabled');
     resetSceneCache.setAttribute('title', 'Planned diagnostic command; not wired in this V1 surface yet.');
+  } else {
+    setTooltip(resetSceneCache, tooltipsEnabled, SETTINGS_TOOLTIPS.resetSceneCache);
   }
   group.appendChild(settingsDisclosureSection('injection', 'Injection', [
     settingsSelectRow(
@@ -1379,7 +1411,7 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
       'recursionSettingInjectionPlacement',
       cleanText(injection.placement, defaultInjection.placement),
       INJECTION_PLACEMENT_OPTIONS,
-      'Where SillyTavern installs the composed Recursion prompt packet.',
+      SETTINGS_TOOLTIPS.injectionPlacement,
       tooltipsEnabled
     ),
     settingsSelectRow(
@@ -1387,7 +1419,7 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
       'recursionSettingInjectionRole',
       cleanText(injection.role, defaultInjection.role),
       INJECTION_ROLE_OPTIONS,
-      'Role used for explicit prompt injection overrides.',
+      SETTINGS_TOOLTIPS.injectionRole,
       tooltipsEnabled
     ),
     settingsSelectRow(
@@ -1395,16 +1427,16 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
       'recursionSettingInjectionDepth',
       String(injection.depth ?? defaultInjection.depth),
       INJECTION_DEPTH_OPTIONS,
-      'Depth used for explicit prompt injection overrides.',
+      SETTINGS_TOOLTIPS.injectionDepth,
       tooltipsEnabled
     )
-  ]));
+  ], { tooltip: SETTINGS_TOOLTIPS.injection, tooltipsEnabled }));
   const tooltipsControl = checkboxControl({
     checked: ui.tooltipsEnabled !== false,
     dataset: { recursionSettingTooltipsEnabled: '' },
     ariaLabel: 'Enable hover tooltips'
   });
-  setTooltip(tooltipsControl, tooltipsEnabled, 'Show or hide Recursion tooltip and hover help text.');
+  setTooltip(tooltipsControl, tooltipsEnabled, SETTINGS_TOOLTIPS.tooltips);
   const progressChildControl = inputControl({
     value: integerInRange(ui.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20),
     type: 'number',
@@ -1414,7 +1446,7 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     dataset: { recursionSettingProgressChildLimit: '' },
     ariaLabel: 'Visible sub-tier progress rows'
   });
-  setTooltip(progressChildControl, tooltipsEnabled, 'Visible child rows per progress parent before the child list scrolls.');
+  setTooltip(progressChildControl, tooltipsEnabled, SETTINGS_TOOLTIPS.progressChildLimit);
   const progressListControl = inputControl({
     value: integerInRange(ui.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80),
     type: 'number',
@@ -1424,33 +1456,37 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     dataset: { recursionSettingProgressListLimit: '' },
     ariaLabel: 'Visible progress rows before scrolling'
   });
-  setTooltip(progressListControl, tooltipsEnabled, 'Combined visible progress rows before the whole progress menu scrolls.');
+  setTooltip(progressListControl, tooltipsEnabled, SETTINGS_TOOLTIPS.progressListLimit);
   group.appendChild(settingsDisclosureSection('ui', 'UI', [
     controlRow('Tooltips', tooltipsControl),
     controlRow('Sub-tier Rows', progressChildControl),
     controlRow('Progress Rows', progressListControl)
-  ]));
+  ], { tooltip: SETTINGS_TOOLTIPS.ui, tooltipsEnabled }));
+  const journalLimitControl = inputControl({
+    value: integerInRange(diagnostics.maxJournalEntries, 100, 10, 500),
+    type: 'number',
+    min: 10,
+    max: 500,
+    step: 10,
+    dataset: { recursionSettingJournalLimit: '' },
+    ariaLabel: 'Maximum diagnostic journal entries'
+  });
+  setTooltip(journalLimitControl, tooltipsEnabled, SETTINGS_TOOLTIPS.journalEntries);
+  const excerptsControl = checkboxControl({
+    checked: diagnostics.includeExcerpts === true,
+    dataset: { recursionSettingIncludeExcerpts: '' },
+    ariaLabel: 'Include sanitized excerpts in diagnostics'
+  });
+  setTooltip(excerptsControl, tooltipsEnabled, SETTINGS_TOOLTIPS.includeExcerpts);
   group.appendChild(settingsDisclosureSection('diagnostics', 'Diagnostics', [
-    controlRow('Journal Entries', inputControl({
-      value: integerInRange(diagnostics.maxJournalEntries, 100, 10, 500),
-      type: 'number',
-      min: 10,
-      max: 500,
-      step: 10,
-      dataset: { recursionSettingJournalLimit: '' },
-      ariaLabel: 'Maximum diagnostic journal entries'
-    })),
-    controlRow('Include Excerpts', checkboxControl({
-      checked: diagnostics.includeExcerpts === true,
-      dataset: { recursionSettingIncludeExcerpts: '' },
-      ariaLabel: 'Include sanitized excerpts in diagnostics'
-    })),
+    controlRow('Journal Entries', journalLimitControl),
+    controlRow('Include Excerpts', excerptsControl),
     el('div', { className: 'recursion-provider-actions' }, [
       resetSceneCache,
-      button('Clear Run Journal', 'recursionClearRunJournal', 'Clear Recursion run journal'),
-      button('Export Diagnostics', 'recursionExportDiagnostics', 'Export sanitized Recursion diagnostics')
+      button('Clear Run Journal', 'recursionClearRunJournal', SETTINGS_TOOLTIPS.clearRunJournal),
+      button('Export Diagnostics', 'recursionExportDiagnostics', SETTINGS_TOOLTIPS.exportDiagnostics)
     ])
-  ]));
+  ], { tooltip: SETTINGS_TOOLTIPS.diagnostics, tooltipsEnabled }));
   panel.appendChild(group);
 }
 
@@ -1510,6 +1546,93 @@ function normalizeProviderSource(value) {
   return PROVIDER_SOURCE_OPTIONS.some(([candidate]) => candidate === source) ? source : 'host-current-model';
 }
 
+function profileId(profile = {}) {
+  return String(profile.id || profile.name || profile.profileId || profile.uuid || profile.profile_id || profile.label || '').trim();
+}
+
+function profileLabel(profile = {}, fallback = '') {
+  return cleanText(profile.name || profile.label || profile.profileName || profile.title || fallback);
+}
+
+function profileModel(profile = {}) {
+  return cleanText(profile.model || profile.modelId || profile.model_name || profile.settings?.model || '');
+}
+
+function collectProfileArrays(root, keys = []) {
+  if (!root || typeof root !== 'object') return [];
+  const arrays = [];
+  const seen = new Set();
+  function visit(value, depth = 0) {
+    if (!value || typeof value !== 'object' || seen.has(value) || depth > 3) return;
+    seen.add(value);
+    for (const key of keys) {
+      if (Array.isArray(value[key])) arrays.push(value[key]);
+    }
+    for (const key of ['settings', 'state', 'data', 'connectionManager', 'ConnectionManager']) {
+      if (value[key] && typeof value[key] === 'object') visit(value[key], depth + 1);
+    }
+  }
+  visit(root);
+  return arrays;
+}
+
+function listConnectionProfiles() {
+  let supportedProfiles = [];
+  try {
+    const service = globalThis.ConnectionManagerRequestService;
+    if (typeof service?.getSupportedProfiles === 'function') {
+      const result = service.getSupportedProfiles();
+      if (Array.isArray(result)) supportedProfiles = result;
+    }
+  } catch {
+    supportedProfiles = [];
+  }
+  let context = null;
+  try {
+    context = globalThis.SillyTavern?.getContext?.() || null;
+  } catch {
+    context = null;
+  }
+  const roots = [
+    { profiles: supportedProfiles },
+    context,
+    globalThis.connectionManager,
+    globalThis.ConnectionManager,
+    globalThis.extension_settings,
+    globalThis.power_user
+  ];
+  const seen = new Set();
+  const profiles = [];
+  for (const array of roots.flatMap((root) => collectProfileArrays(root, ['connectionProfiles', 'connection_profiles', 'profileList', 'profiles', 'connectionManagerProfiles']))) {
+    for (const item of array) {
+      if (!item || typeof item !== 'object') continue;
+      const id = profileId(item);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const label = profileLabel(item, id);
+      const model = profileModel(item);
+      profiles.push({
+        id,
+        label: model ? `${label} / ${model}` : label
+      });
+    }
+  }
+  return profiles;
+}
+
+function connectionProfileOptions(selectedId = '') {
+  const selected = cleanText(selectedId);
+  const profiles = listConnectionProfiles();
+  const options = [
+    ['', profiles.length ? 'Select Profile' : 'No connection profiles found'],
+    ...profiles.map((profile) => [profile.id, profile.label])
+  ];
+  if (selected && !profiles.some((profile) => profile.id === selected)) {
+    options.push([selected, `${selected} (saved)`]);
+  }
+  return options;
+}
+
 function syncProviderSourceVisibility(container, lane) {
   const selected = normalizeProviderSource(container?.querySelector?.(providerSelector('source', lane))?.value);
   for (const field of container?.querySelectorAll?.('[data-recursion-provider-context]') || []) {
@@ -1533,7 +1656,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
     attrs: {
       type: 'button',
       'aria-expanded': open ? 'true' : 'false',
-      ...tooltipAttrs(tooltipsEnabled, `${title}: ${statusText}`)
+      ...tooltipAttrs(tooltipsEnabled, `${title} settings. Choose the model source for this lane, then save and test it before relying on it during generation. Current status: ${statusText}.`)
     },
     dataset: {
       recursionProviderToggle: lane,
@@ -1569,16 +1692,21 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
       dataset: providerDataset('Source', lane),
       ariaLabel: `${title} source`
   });
-  setTooltip(sourceControl, tooltipsEnabled, 'Choose provider source. Hidden source-specific fields keep their values until Save Provider.');
+  setTooltip(sourceControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerSource);
   sourceControl.addEventListener?.('change', () => syncProviderSourceVisibility(grid, lane));
   grid.appendChild(providerField('Source', sourceControl));
-  const profileControl = inputControl({
-      value: source.hostConnectionProfileId || '',
+  const profileOptions = connectionProfileOptions(source.hostConnectionProfileId);
+  const profileControl = selectControl({
+      value: cleanText(source.hostConnectionProfileId),
+      options: profileOptions,
       dataset: providerDataset('Profile', lane),
-      ariaLabel: `${title} host connection profile`,
-      placeholder: 'Host profile id'
+      ariaLabel: `${title} host connection profile`
   });
-  setTooltip(profileControl, tooltipsEnabled, 'SillyTavern connection profile id for this provider lane.');
+  if (profileOptions.length <= 1 && !source.hostConnectionProfileId) {
+    profileControl.disabled = true;
+    profileControl.setAttribute('disabled', 'disabled');
+  }
+  setTooltip(profileControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerProfile);
   grid.appendChild(providerField('Profile', profileControl, {
       lane,
       context: 'profile',
@@ -1590,14 +1718,14 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
     ariaLabel: `${title} OpenAI-compatible base URL`,
     placeholder: 'https://host/v1'
   });
-  setTooltip(baseUrlControl, tooltipsEnabled, 'OpenAI-compatible /v1 endpoint base URL.');
+  setTooltip(baseUrlControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerBaseUrl);
   const modelControl = inputControl({
     value: source.openAICompatible?.model || '',
     dataset: providerDataset('Model', lane),
     ariaLabel: `${title} model`,
     placeholder: 'model'
   });
-  setTooltip(modelControl, tooltipsEnabled, 'Model name for the OpenAI-compatible endpoint.');
+  setTooltip(modelControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerModel);
   const apiKeyControl = inputControl({
     value: '',
     type: 'password',
@@ -1605,7 +1733,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
     ariaLabel: `${title} session API key`,
     placeholder: source.openAICompatible?.sessionApiKeyPresent ? 'Session key loaded' : 'Session API key'
   });
-  setTooltip(apiKeyControl, tooltipsEnabled, 'Session-only API key. Recursion never persists it.');
+  setTooltip(apiKeyControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerApiKey);
   const openAiFields = el('div', {
     className: 'recursion-provider-context-fields',
     dataset: {
@@ -1628,7 +1756,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
       dataset: providerDataset('MaxTokens', lane),
       ariaLabel: `${title} max tokens`
   });
-  setTooltip(maxTokensControl, tooltipsEnabled, 'Maximum tokens for structured Recursion provider calls.');
+  setTooltip(maxTokensControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerMaxTokens);
   grid.appendChild(providerField('Max Tokens', maxTokensControl));
   syncProviderSourceVisibility(grid, lane);
   body.appendChild(grid);
@@ -1639,7 +1767,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
       attrs: {
         type: 'button',
         'aria-label': `Save ${title}`,
-        ...tooltipAttrs(tooltipsEnabled, `Save ${title} settings.`)
+        ...tooltipAttrs(tooltipsEnabled, SETTINGS_TOOLTIPS.providerSave)
       },
       dataset: {
         recursionProviderSave: '',
@@ -1653,7 +1781,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
       attrs: {
         type: 'button',
         'aria-label': `Test ${title}`,
-        ...tooltipAttrs(tooltipsEnabled, `Run a structured JSON connectivity test for ${title}.`)
+        ...tooltipAttrs(tooltipsEnabled, SETTINGS_TOOLTIPS.providerTest)
       },
       dataset: {
         recursionProviderTest: '',
@@ -1667,7 +1795,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
       attrs: {
         type: 'button',
         'aria-label': `Clear ${title} session key`,
-        ...tooltipAttrs(tooltipsEnabled, `Clear the in-memory ${title} session API key.`)
+        ...tooltipAttrs(tooltipsEnabled, SETTINGS_TOOLTIPS.providerClearKey)
       },
       dataset: {
         recursionProviderClearKey: '',
@@ -1684,15 +1812,20 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null) {
   panel.replaceChildren();
   const settings = asObject(view.settings);
   const tooltipsEnabled = asObject(settings.ui).tooltipsEnabled !== false;
+  const tabTooltips = {
+    play: 'Everyday behavior controls for card pressure, focus, and prompt size.',
+    providers: 'Configure Utility and Reasoner model lanes, sources, connection profiles, endpoints, and session keys.',
+    advanced: 'Compatibility, display, and diagnostics controls that most users only touch when tuning a setup.'
+  };
   panel.appendChild(el('div', { className: 'recursion-settings-header' }, [
     el('h2', { text: 'Settings' }),
-    button('x', 'recursionSettingsClose', 'Close Recursion settings')
+    button('x', 'recursionSettingsClose', 'Close Recursion settings without changing unsaved controls')
   ]));
   panel.appendChild(el('div', { className: 'recursion-settings-tabs', dataset: { recursionSettingsTabs: '' } }, [
     ...['play', 'providers', 'advanced'].map((tab) => el('button', {
       className: `recursion-tab-button${activeTab === tab ? ' is-selected' : ''}`,
       text: titleCase(tab),
-      attrs: { type: 'button' },
+      attrs: { type: 'button', ...tooltipAttrs(tooltipsEnabled, tabTooltips[tab]) },
       dataset: {
         recursionSettingsTab: tab,
         [`recursionSettingsTab${titleCase(tab)}`]: ''
@@ -2725,9 +2858,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       injection: {
         placement: controlValue(sourceRoot, '[data-recursion-setting-injection-placement]') || defaultInjection.placement,
         role: controlValue(sourceRoot, '[data-recursion-setting-injection-role]') || defaultInjection.role,
-        depth: injectionDepth === 'default' || !injectionDepth
-          ? defaultInjection.depth
-          : integerInRange(injectionDepth, defaultInjection.depth, 0, 10)
+        depth: integerInRange(injectionDepth, defaultInjection.depth, 0, 10)
       }
     };
   }

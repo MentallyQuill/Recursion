@@ -31,13 +31,13 @@ Settings shape:
 
 ```js
 injection: {
-  placement: 'default', // 'default' | 'in_prompt' | 'in_chat'
+  placement: 'in_prompt', // 'in_prompt' | 'in_chat'
   role: 'system',       // 'system' | 'user' | 'assistant'
-  depth: 'default'      // 'default' | integer 0..10
+  depth: 4              // integer 0..10
 }
 ```
 
-Default behavior must match the current V1 packet plan: Scene Brief in prompt depth 4 as system, Turn Brief in chat depth 2 as system, and Guardrails in prompt depth 1 as system. Explicit overrides apply after Utility/Reasoner composition and before prompt install. They must not affect Arbiter planning, card generation, hand selection, storage records, or raw card injection policy.
+Default behavior uses the concrete recommended plan: composed packet blocks install in prompt at depth 4 as system. Injection settings apply after Utility/Reasoner composition and before prompt install. They must not affect Arbiter planning, card generation, hand selection, storage records, or raw card injection policy.
 
 ## File Structure
 

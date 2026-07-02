@@ -1281,6 +1281,18 @@
   padding: 8px;
 }
 
+.recursion-settings-disclosure-body[hidden] {
+  display: none !important;
+}
+
+.recursion-provider-body[hidden] {
+  display: none !important;
+}
+
+.recursion-provider-field[hidden] {
+  display: none !important;
+}
+
 .recursion-provider-card {
   align-items: center;
   background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 2.6%, transparent);
@@ -1405,15 +1417,6 @@
 .recursion-root input.recursion-checkbox[type="checkbox"]:checked {
   background: color-mix(in srgb, var(--recursion-accent) 72%, #0b2024) !important;
   border-color: color-mix(in srgb, var(--recursion-accent) 82%, transparent) !important;
-}
-
-.recursion-root input.recursion-checkbox[type="checkbox"]:checked::before {
-  border-bottom: 1.5px solid color-mix(in srgb, #fff 88%, var(--recursion-accent));
-  border-right: 1.5px solid color-mix(in srgb, #fff 88%, var(--recursion-accent));
-  content: "";
-  height: 8px;
-  transform: translateY(-1px) rotate(45deg);
-  width: 4px;
 }
 
 .recursion-provider-actions {

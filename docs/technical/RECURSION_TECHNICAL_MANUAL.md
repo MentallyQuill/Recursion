@@ -1,10 +1,10 @@
 # Recursion Technical Manual
 
-Recursion is a SillyTavern extension that compiles compact, current-scene writing guidance for the next generation. It observes the active chat, runs Utility-led structured work, maintains a disposable scene deck, selects a turn hand, composes an inspectable prompt packet, and installs Recursion-owned prompt entries only when the mode allows injection.
+Recursion is a SillyTavern extension that compiles compact, current-scene reasoning guidance for the next generation. It observes the active chat, runs Utility-led structured work, maintains a disposable scene deck, selects a turn hand, composes an inspectable prompt packet, and installs Recursion-owned prompt entries only when the mode allows injection.
 
 ## Product Boundary
 
-Recursion owns the current-scene prompt compiler. It does not own durable memory, World Info, Memory Books, Summaryception, VectFox, transcript archives, vector recall, campaign saves, branching, character databases, or user-authored card catalogs.
+Recursion owns the current-scene prompt compiler. It does not own continuity-extension duties, durable memory, World Info, Memory Books, Summaryception, VectFox, transcript archives, vector recall, campaign saves, branching, character databases, or user-authored card catalogs.
 
 The V1 contract is one coherent pre-alpha shape. When a source contract changes, docs, schemas, tests, and examples should move together instead of preserving old internal data shapes.
 
@@ -55,7 +55,7 @@ Power-off clears or avoids Recursion prompt entries and does not inspect chat fo
 
 Manual captures the current turn and follows the normal prompt-install path, but it constrains card generation and cached-card reuse to the selected card families. Disabled families are omitted before provider card jobs run and filtered again before deck and hand selection.
 
-Auto mode runs the full pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the Utility Arbiter or local fallback path produces useful guidance. User-selected card families and sub-items are preferred in Auto, but the Utility Arbiter still sees the full fixed catalog and can request unselected families when they have high relevance to continuity, scene coherence, or the current user message.
+Auto mode runs the full pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the Utility Arbiter or local fallback path produces useful guidance. User-selected card families and sub-items are preferred in Auto, but the Utility Arbiter still sees the full fixed catalog and can request unselected families when they have high relevance to scene constraints, scene coherence, or the current user message.
 
 Settings and provider changes supersede the active run, abort stale provider work where possible, and await prompt cleanup before their operation results resolve. `updateSettings` returns updated settings plus the prompt-clear result; `updateProvider` and `clearProviderKey` return updated provider settings plus the prompt-clear result. Clear failure leaves the setting or provider change applied, returns `ok: false`, and surfaces the sanitized prompt-clear warning.
 
@@ -76,6 +76,8 @@ The fixed V1 card catalog is Scene Frame, Active Cast, Character Motivation, Rel
 
 Cards are disposable scene-local cache artifacts. The scene deck stores active, stowed, stale, and discarded records for one scene. The turn hand is rebuilt for each composition event from active cards under max-card and token caps. A valid card can stay in the deck without entering the hand.
 
+Cards expand scene implications rather than preserve facts for their own sake. For example, a location card should derive routes, sightlines, plausible interruptions, usable local details, and relevance boundaries from the active location instead of restating the place name or dumping broad setting lore.
+
 Character Motivation cards are behavior-facing. They can describe visible pressure, established goals, and likely posture, but they cannot inject private internal-thought dumps or hidden motives as fact.
 
 ## Prompt Packet
@@ -85,8 +87,8 @@ The model-facing artifact is the prompt packet, not the raw scene deck. V1 packe
 | Section | Use |
 | --- | --- |
 | Scene Brief | Stable current-scene frame, cast, relationship posture, and grounding details while the scene remains valid. |
-| Turn Brief | Immediate next-generation guidance, latest visible user pressure, continuity risks, and response cues. |
-| Guardrails | Compact constraints that protect continuity, player intent, privacy, and scope. |
+| Turn Brief | Immediate next-generation guidance, latest visible user pressure, scene constraints, and response cues. |
+| Guardrails | Compact constraints that protect scene plausibility, player intent, privacy, and scope. |
 
 Prompt packets include selected-card references, omissions, injection metadata, diagnostics, section hashes, and composition lane status. The Last Brief Prompt Packet panel and Full Viewer show the final injected packet text with bounded redaction so users can inspect what Recursion actually installed.
 
@@ -141,4 +143,4 @@ Live smoke is opt-in and must use dedicated `recursion-soak-*` users. Automated 
 
 ## Non-Goals
 
-Recursion V1 excludes durable memory, lore authority, vector recall, transcript summarization, campaign saves, branching, character database extraction, user-defined card families, per-card editing workflows, raw provider logs, hidden chain-of-thought storage, and broad plot planning.
+Recursion V1 excludes continuity-extension ownership, durable memory, lore authority, vector recall, transcript summarization, campaign saves, branching, character database extraction, user-defined card families, per-card editing workflows, raw provider logs, hidden chain-of-thought storage, and broad plot planning.

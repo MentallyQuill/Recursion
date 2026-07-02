@@ -1,6 +1,6 @@
 # Recursion Extension Spec
 
-This is the top-level design and implementation contract for Recursion, a SillyTavern extension that improves roleplay writing quality by compiling a compact, current-scene prompt packet for the next generation.
+This is the top-level design and implementation contract for Recursion, a SillyTavern extension that improves roleplay writing quality by compiling a compact, current-scene reasoning packet for the next generation.
 
 Recursion's core design is:
 
@@ -8,7 +8,7 @@ Recursion's core design is:
 Utility Arbiter -> Scene Deck -> Turn Hand -> Optional Reasoner Composer -> Prompt Packet -> SillyTavern Injection
 ```
 
-The extension should be mostly automatic. It should improve prose, dialogue, emotional continuity, and scene adhesion without becoming a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product.
+The extension should be mostly automatic. It should improve prose, dialogue, emotional texture, and scene adhesion by expanding the immediate implications of the active scene. It must not become a continuity extension, memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product.
 
 ## Document Map
 
@@ -40,7 +40,7 @@ Current V1 decisions:
 - Build provider settings, provider contracts, and structured call contracts before the card loop depends on them.
 - The first working loop must support both Utility Composer and Reasoner Composer, with Utility Composer as the default and fail-soft path.
 - Support all three provider sources for both lanes where the host permits it: current host model, host connection profile, and OpenAI-compatible endpoint.
-- Advanced users can control where the conditioned final prompt packet is injected by setting placement, role, and depth; defaults preserve Recursion's recommended packet template.
+- Advanced users can control where the conditioned final prompt packet is injected by setting placement, role, and depth; defaults use the recommended concrete `in_prompt`, `system`, depth `4` plan.
 - Use Directive-style runtime discipline for retries, timeouts, aborts, fallbacks, structured validation, and sanitized model-call diagnostics without importing Directive's campaign architecture.
 - Do not store raw provider prompts or raw provider responses by default.
 - Recursion lives in its own chat-attached top bar. It should sit as the lowest bar in the top-bar stack when the host layout makes that possible.
@@ -49,7 +49,7 @@ Current V1 decisions:
 
 ## Product Boundary
 
-Recursion owns a narrow short-lived writing-context loop:
+Recursion owns a narrow short-lived reasoning-context loop:
 
 - observe the active chat and current generation context;
 - ask the Utility Arbiter what current-scene work matters;
@@ -61,6 +61,7 @@ Recursion owns a narrow short-lived writing-context loop:
 
 Recursion does not own:
 
+- continuity-extension duties;
 - durable canon;
 - long-term memory;
 - transcript summarization;
@@ -116,6 +117,8 @@ V1 uses a fixed internal catalog:
 - Open Threads
 
 The catalog is visible only as high-level Cards scope, where users can focus or whitelist fixed families and sub-items. It is not a user-authored card system, not a card editor, and not a prompt-injection checklist. The Arbiter receives the fixed catalog plus the current scope and decides which cards need to exist for the current scene within Auto or Manual rules.
+
+Cards must expand current scene implications rather than simply restate remembered facts. For example, a location card should not merely say that a character is near a library, and it should not dump broad library lore. It should derive what that location means for the next beat: nearby routes, visibility, plausible interruptions, social exposure, usable details, and what is outside the current scene's relevance.
 
 Character Motivation cards replace raw internal-thought dumps. They may express visible motivation, likely pressure, or behavior-facing guidance, but private diagnostic notes must never be injected.
 

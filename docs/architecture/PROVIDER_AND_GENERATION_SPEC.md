@@ -128,12 +128,12 @@ Generation roles describe why a model call exists. They are not the same thing a
 | `activeCastCard` | Utility, Reasoner at High/Ultra when healthy | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
 | `characterMotivationCard` | Utility, Reasoner at High/Ultra when healthy | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
 | `dialogueRelationshipCard` | Utility, Reasoner at Ultra when healthy | Capture current conversational tension, relationship texture, promises, conflicts, and voice constraints | Omit card with diagnostic |
-| `continuityRiskCard` | Utility, Reasoner at High/Ultra when healthy | Identify likely contradictions or fragile facts for the next generation | Omit card with diagnostic |
+| `continuityRiskCard` | Utility, Reasoner at High/Ultra when healthy | Identify hard scene constraints, contradiction traps, timing, access, and plausibility risks for the next generation | Omit card with diagnostic |
 | `knowledgeSecretsCard` | Utility, Reasoner at High/Ultra when healthy | Capture concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries | Omit card with diagnostic |
 | `clocksConsequencesCard` | Utility, Reasoner at High/Ultra when healthy | Capture deadlines, countdowns, delayed consequences, and escalation triggers | Omit card with diagnostic |
 | `environmentAffordancesCard` | Utility, Reasoner at Ultra when healthy | Capture spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances | Omit card with diagnostic |
 | `possessionsItemsCard` | Utility, Reasoner at Ultra when healthy | Capture important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them | Omit card with diagnostic |
-| `prosePacingCard` | Utility, Reasoner at Ultra when healthy | Capture local craft guidance for density, momentum, specificity, and response shape | Omit card with diagnostic |
+| `prosePacingCard` | Utility, Reasoner at Ultra when healthy | Legacy local craft role for density, momentum, specificity, and response shape; candidate for removal from default generation per the card audit | Omit card with diagnostic |
 | `openThreadsCard` | Utility, Reasoner at Ultra when healthy | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
 | `briefUtilityComposer` | Utility | Compose the normal compact prompt brief from accepted cards and budgets | Compose from available cards; omit invalid cards |
 | `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility-only composition |
@@ -305,7 +305,7 @@ Auto lane selection follows this order:
 
 Auto must be Utility-first. Enabling Reasoner only makes Reasoner eligible; it must not cause every run to use Reasoner.
 
-Advanced job routing may expose `Default`, `Utility Provider`, and `Reasoner Provider` for internal roles, but v1 should keep that surface secondary to the main Utility and Reasoner provider cards.
+Advanced job routing may expose `Auto Route`, `Utility Provider`, and `Reasoner Provider` for internal roles, but v1 should keep that surface secondary to the main Utility and Reasoner provider cards.
 
 ## First Working Loop Contract
 

@@ -10,7 +10,7 @@ Recursion injects a composed packet, not the full raw scene deck.
 | --- | --- | --- | --- |
 | Scene Brief | `recursion.sceneBrief` | `in_prompt`, depth 4 | Stable current-scene frame, cast, environmental affordances, and possessions. |
 | Turn Brief | `recursion.turnBrief` | `in_chat`, depth 2 | Immediate next-response guidance from the current turn hand. |
-| Guardrails | `recursion.guardrails` | `in_prompt`, depth 1 | Compact constraints for continuity, player intent, privacy, and scope. |
+| Guardrails | `recursion.guardrails` | `in_prompt`, depth 1 | Compact constraints for scene plausibility, player intent, privacy, and scope. |
 
 ```mermaid
 flowchart TD
@@ -52,7 +52,7 @@ Cards are normalized before composition. Unsafe evidence refs, unsupported famil
 Utility composition is the default path. It maps card families to sections:
 
 - Scene Brief: Scene Frame, Active Cast, Environment, Items
-- Guardrails: Continuity Risk, Knowledge, plus static guardrails
+- Guardrails: scene constraints from Continuity Risk, Knowledge, plus static guardrails
 - Turn Brief: Character Motivation, Relationship, Consequences, Prose, Open Threads, and other turn-facing guidance
 
 Utility composition removes unsafe text, enforces section budgets, records source ids, and creates omission records when budget prevents inclusion.
@@ -77,7 +77,7 @@ Prompt Footprint is the size/detail owner for the final composed packet. Strengt
 | Normal | balanced section caps | Default roleplay turn. |
 | Rich | expanded Scene Brief and Turn Brief with bounded guardrails | High complexity or high drift risk. |
 
-Budget order favors critical guardrails, immediate turn continuity, current user focus, scene essentials, cast and relationship posture, environment texture, prose craft, and lower-priority open threads. Omission is part of the contract.
+Budget order favors critical guardrails, immediate scene constraints, current user focus, scene essentials, cast and relationship posture, environment affordances, and lower-priority open threads. Omission is part of the contract.
 
 ## Omissions
 
@@ -94,7 +94,7 @@ The broader architecture spec defines additional policy-level omission reasons. 
 
 ## Raw Critical Guardrail Exceptions
 
-The architecture contract allows exact raw critical guardrail exceptions only when exact wording is required to preserve a hard continuity prohibition or safety boundary. The current implementation installs three composed sections and validates against hidden-thought and forward-plan wording. Raw exceptions should remain rare, visible in diagnostics, and bounded by Recursion-owned prompt keys.
+The architecture contract allows exact raw critical guardrail exceptions only when exact wording is required to preserve a hard scene constraint or safety boundary. The current implementation installs three composed sections and validates against hidden-thought and forward-plan wording. Raw exceptions should remain rare, visible in diagnostics, and bounded by Recursion-owned prompt keys.
 
 ## Injection Lanes And Cleanup
 
@@ -110,13 +110,13 @@ flowchart LR
 
 The SillyTavern adapter accepts only prompt keys starting with `recursion.` and currently installs the three V1 keys. It clears known Recursion keys before install, tracks installed keys, and rolls back known keys if a partial install fails.
 
-Advanced user settings can override the composed packet's effective insertion lane without changing packet content:
+Advanced user settings control the composed packet's effective insertion lane without changing packet content. The V1 recommended defaults are `in_prompt`, `system`, and depth `4`.
 
-- `injection.placement`: `default`, `in_prompt`, or `in_chat`
+- `injection.placement`: `in_prompt` or `in_chat`
 - `injection.role`: `system`, `user`, or `assistant`
-- `injection.depth`: `default` or integer `0..10`
+- `injection.depth`: integer `0..10`
 
-`default` preserves the section template shown above. Explicit overrides apply to the composed Recursion packet blocks after Utility/Reasoner composition and before host install. They are intended for model/preset compatibility, not per-card prompt engineering. Invalid or unsupported host combinations must normalize to the default safe system-role plan and emit a compact activity warning.
+These settings apply to the composed Recursion packet blocks after Utility/Reasoner composition and before host install. They are intended for model/preset compatibility, not per-card prompt engineering. Invalid or unsupported host combinations must normalize to the concrete safe system-role plan and emit a compact activity warning.
 
 Power-off, extension disable, delete, and runtime teardown clear Recursion prompt keys best-effort.
 

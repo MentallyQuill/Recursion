@@ -53,7 +53,7 @@ Snapshot hashes and fingerprints are used to reject stale work. A newer run supe
 
 Runtime derives the behavior influence policy from normalized settings before the Arbiter call. [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) owns this contract: Strength controls intervention pressure, Min/Max Cards control Reasoning Level card-count bounds, Focus controls soft family priority, and Prompt Footprint controls packet size/detail. The Arbiter still owns semantic relevance; runtime enforces mechanical policy through prompt lines, budget shaping, hand-selection tie-breakers, composer inputs, and diagnostics.
 
-The Utility Arbiter receives safe settings, provider health, the bounded snapshot, and card-scope payload. In Auto, the payload includes the full available catalog plus selected focus preferences; selected families and sub-items are preferred, but unselected families can still be requested when they have high relevance to continuity, scene coherence, or the current user message. In Manual, the payload is a strict whitelist and disabled families are not offered to the Arbiter. It returns the V1 `recursion.utilityArbiter.v1` plan shape:
+The Utility Arbiter receives safe settings, provider health, the bounded snapshot, and card-scope payload. In Auto, the payload includes the full available catalog plus selected focus preferences; selected families and sub-items are preferred, but unselected families can still be requested when they have high relevance to scene constraints, scene coherence, or the current user message. In Manual, the payload is a strict whitelist and disabled families are not offered to the Arbiter. It returns the V1 `recursion.utilityArbiter.v1` plan shape:
 
 - `snapshotHash`: exact echo of the frozen request snapshot hash
 - `action`: `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`
@@ -75,7 +75,7 @@ In Manual mode, runtime enforces the whitelist after the Arbiter returns. Disabl
 
 Utility card calls are batched when the provider router supports batching. Each accepted provider result is converted into a normalized V1 card, then sanitized before entering the deck.
 
-Runtime can create local fallback Scene Frame and Continuity Risk cards from the latest visible messages after a valid or locally recoverable plan exists. These local cards keep the first loop useful when card generation is unavailable, but they are not used to mask a missing or transport-failing Utility provider.
+Runtime can create local fallback Scene Frame and Continuity Risk role cards from the latest visible messages after a valid or locally recoverable plan exists. These local cards keep the first loop useful by deriving basic scene frame and hard-constraint guidance when card generation is unavailable, but they are not used to mask a missing or transport-failing Utility provider.
 
 After cache, provider, and fallback cards are known, runtime emits sanitized `cardProgress` activity events for the Hero Pixel Array progress menu. These events are child rows under `utility-card-batch`: generated provider cards use `state: done` and `source: generated`, cache-reused cards use `state: cached` and `source: cache`, and local fallback cards use `state: warning` and `source: fallback`. The event detail is limited to parent step id, role/family, source, state, and safe card id; it must not include card prompt text, raw provider output, transcript text, or secrets.
 

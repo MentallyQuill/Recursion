@@ -191,7 +191,7 @@ Build:
 - Last Brief dropdown.
 - Full viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers.
 - High-level settings controls.
-- Advanced conditioned final-prompt injection controls for placement, role, and depth, defaulted to the template plan.
+- Advanced conditioned final-prompt injection controls for placement, role, and depth, defaulted to `in_prompt`, `system`, depth `4`.
 - Provider controls.
 - Cards scope selector with fixed family and sub-item focus controls.
 - SillyTavern-native graphite styling.

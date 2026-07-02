@@ -424,6 +424,7 @@ assert(/\.recursion-step-row\.running \.recursion-step-icon::after/.test(recursi
 assert(/\.recursion-status-head\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?padding:\s*7px 9px;/.test(recursionCss), 'production progress popover header uses the reference 34px density');
 assert(!/\.recursion-status-subtitle\s*\{[^}]*margin-left:\s*auto;/.test(recursionCss), 'production progress subtitle stays beside the title instead of pinning to the right edge');
 assert(!/\.recursion-settings-panel\.is-beside-progress/.test(recursionCss), 'production settings panel no longer carries obsolete side-by-side progress styling');
+assert(!/\.recursion-settings-panel\s*\{[\s\S]*?left:\s*360px;/.test(recursionCss), 'production settings panel CSS fallback is full-width, not side-by-side');
 assert(/\.recursion-status-foot \.recursion-mini-chip\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*2px 5px 3px;/.test(recursionCss), 'production progress footer Live chip uses the reference tiny-chip density');
 assert(/\.recursion-hand-dropdown\s*\{[\s\S]*?display:\s*block;[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production Last Brief dropdown removes the old padded grid shell');
 assert(/\.recursion-hand-dropdown::before/.test(recursionCss), 'production Last Brief dropdown keeps the reference top accent line');
@@ -480,6 +481,7 @@ assert(/const progressTop = rect\.bottom \+ 3;/.test(recursionUi), 'production p
 assert(/const settingsTop = rect\.bottom \+ 5;/.test(recursionUi), 'production settings and brief popovers use the reference desktop vertical gap');
 assert(/setFixedPanelGeometry\(settingsPanel,[\s\S]*?zIndex:\s*10022/.test(recursionUi), 'production settings panel stays above progress when compact layouts overlap');
 assert(/setFixedPanelGeometry\(settingsPanel,\s*\{\s*left:\s*rootLeft,\s*top:\s*settingsTop,\s*width:\s*rootWidth,\s*zIndex:\s*10022\s*\}\)/.test(recursionUi), 'production settings panel spans the full Recursion Bar width');
+assert(!/is-beside-progress/.test(recursionUi), 'production UI no longer toggles obsolete side-by-side settings class');
 assert(/function eventWithin\(event, elements\)/.test(recursionUi), 'outside-click handling keeps original event path for rerendered popover controls');
 assert(/!eventWithin\(event, \[/.test(recursionUi), 'document click handling uses event path containment before closing popovers');
 assert(/recursionSettingsTab[\s\S]*?event\?\.stopPropagation\?\.\(\)/.test(recursionUi), 'settings tab clicks do not bubble into outside-click closers after rerender');

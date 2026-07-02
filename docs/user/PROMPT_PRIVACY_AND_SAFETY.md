@@ -113,7 +113,7 @@ Forbidden by default:
 
 Redaction should remove sensitive field names such as `apiKey`, `authorization`, `cookie`, `token`, `password`, `secret`, and `sessionKey`, plus forbidden diagnostic payload fields such as `rawPrompt`, `rawResponse`, `providerPrompt`, `providerResponse`, `hiddenReasoning`, `privateStoryPlan`, `privatePlan`, and `sessionId`. It should also cap strings in diagnostics and artifacts while preserving safe counters such as `tokenCount` and `sessionCount`.
 
-<Render Needed>: assets/documentation/renders/recursion-redaction-boundary.png - Redaction boundary diagram showing allowed hashes and metadata versus forbidden secrets, raw provider payloads, hidden reasoning, and transcript text.
+![Redaction boundary diagram](../../assets/documentation/renders/recursion-redaction-boundary.png)
 
 ## External Extension Coexistence
 
@@ -129,7 +129,7 @@ Recursion coexists with other SillyTavern context systems. It should not replace
 
 Recursion should mark omitted candidates with reasons such as `external_owner` or `already_in_external_context` when the host exposes enough information. If external context conflicts with selected-hand evidence, Recursion should stay conservative and flag a continuity risk rather than silently override another system.
 
-<Render Needed>: assets/documentation/renders/recursion-external-coexistence.png - Coexistence diagram showing Recursion-owned prompt lanes beside SillyTavern character prompts, World Info, Memory Books, Summaryception, VectFox, and author notes.
+![External context coexistence diagram](../../assets/documentation/renders/recursion-external-coexistence.png)
 
 ## Diagnostics And Artifact Posture
 

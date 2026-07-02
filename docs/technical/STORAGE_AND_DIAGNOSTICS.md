@@ -103,7 +103,7 @@ flowchart TD
 
 ![Storage key map visual](../../assets/documentation/renders/recursion-storage-key-map.png)
 
-<Render Needed>: assets/documentation/renders/recursion-storage-redaction-boundary.png - Redaction boundary visual showing allowed metadata, blocked secrets, blocked raw provider payloads, and sanitized UI/artifact outputs.
+![Storage redaction boundary](../../assets/documentation/renders/recursion-storage-redaction-boundary.png)
 
 ## Invalidation
 

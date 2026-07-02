@@ -52,7 +52,7 @@ sequenceDiagram
     Entry-->>ST: original chat continues
 ```
 
-<Render Needed>: assets/documentation/renders/recursion-host-adapter-boundary.png - Host adapter boundary visual showing SillyTavern context, generation interceptor, prompt adapter, settings adapter, storage adapter, UI mount, and host-neutral runtime.
+![Host adapter boundary](../../assets/documentation/renders/recursion-host-adapter-boundary.png)
 
 ## Prompt Adapter
 

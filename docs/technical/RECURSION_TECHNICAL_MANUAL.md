@@ -98,7 +98,7 @@ Settings stay in `extension_settings.recursion`. Larger records use logical JSON
 
 Diagnostics are bounded and sanitized. Normal records may include hashes, ids, card families, statuses, token estimates, provider lane labels, durations, and compact errors. They must not include API keys, raw provider prompts, raw provider responses, full transcripts, hidden reasoning, private story plans, or unbounded local paths.
 
-<Render Needed>: assets/documentation/renders/recursion-diagnostics-boundary.png - Diagnostic boundary visual showing settings, scene cache, run journal, activity, artifacts, redaction, and forbidden raw provider data.
+![Diagnostics boundary](../../assets/documentation/renders/recursion-diagnostics-boundary.png)
 
 ## Host Adapter
 

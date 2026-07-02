@@ -1890,8 +1890,6 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const progressTop = rect.bottom + 3;
     const settingsTop = rect.bottom + 5;
     const progressWidth = Math.min(352, rootWidth);
-    settingsPanel.classList.toggle('is-beside-progress', false);
-
     setFixedPanelGeometry(statusPopover, { left: rootLeft, top: progressTop, width: progressWidth, zIndex: 10020 });
     setFixedPanelGeometry(handPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10010 });
     setFixedPanelGeometry(settingsPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10022 });

@@ -88,13 +88,13 @@ A safe provider test should:
 
 Provider tests should not store raw prompt bodies, raw responses, API keys, or unbounded error text.
 
-<Render Needed>: assets/documentation/renders/recursion-provider-test-flow.png - Provider test flow showing Utility pass, Reasoner off, Reasoner pass, and sanitized failure status without exposed secrets.
+![Provider test flow](../../assets/documentation/renders/recursion-provider-test-flow.png)
 
 ## Fallback Behavior
 
 Fallbacks should be visible in the Recursion Bar, Hero Pixel Array progress menu, and Full Viewer Activity section.
 
-<Render Needed>: assets/documentation/renders/recursion-provider-fallback-states.png - Provider fallback states showing Utility unavailable, Reasoner timeout, invalid structured output, Utility fallback composition, and prompt skipped state.
+![Provider fallback states](../../assets/documentation/renders/recursion-provider-fallback-states.png)
 
 Expected fallback behavior:
 

@@ -118,7 +118,7 @@ Advanced user settings can override the composed packet's effective insertion la
 
 Power-off, extension disable, delete, and runtime teardown clear Recursion prompt keys best-effort.
 
-<Render Needed>: assets/documentation/renders/recursion-prompt-injection-lanes.png - Injection visual showing Recursion prompt keys, clear-before-install, rollback on failure, and host prompt boundary.
+![Prompt injection lanes](../../assets/documentation/renders/recursion-prompt-injection-lanes.png)
 
 ## Privacy Guardrails
 

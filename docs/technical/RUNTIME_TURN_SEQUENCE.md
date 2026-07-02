@@ -114,7 +114,7 @@ flowchart TD
     Stale --> NoMutate["Do not mutate active prompt or cache"]
 ```
 
-<Render Needed>: assets/documentation/renders/recursion-stale-result-discard.png - Stale-result discard visual showing active run supersession, abort signal, and late provider result being ignored.
+![Stale result discard](../../assets/documentation/renders/recursion-stale-result-discard.png)
 
 ## Failure Branches
 

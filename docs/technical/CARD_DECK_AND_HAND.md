@@ -119,4 +119,4 @@ The UI can show:
 
 The inspector is read-oriented. V1 actions stay broad: refresh scene, copy prompt packet metadata, open settings, test providers, clear session keys, and inspect diagnostics.
 
-<Render Needed>: assets/documentation/renders/recursion-card-family-matrix.png - Card family matrix showing the eight fixed families, prompt use, lifecycle state, emphasis, and inspector visibility.
+![Card family matrix](../../assets/documentation/renders/recursion-card-family-matrix.png)

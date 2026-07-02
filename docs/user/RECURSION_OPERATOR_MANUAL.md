@@ -10,13 +10,13 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 <Render Needed>: assets/documentation/renders/recursion-operator-mode-controls.png - Power toggle, Auto/Semi-Auto mode controls, Reasoning Level, and prompt cleanup behavior.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-bar-states.png - Recursion Bar ready, working, warning, disabled, provider issue, prompt-ready states, Hero Pixel Array, and current-step text.
+![Recursion Bar states](../../assets/documentation/renders/recursion-operator-bar-states.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-progress-menu-states.png - Hero Pixel Array progress menu showing snapshot, Utility planning, card generation child rows, cached rows, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states.
+![Hero Pixel Array progress menu states](../../assets/documentation/renders/recursion-operator-progress-menu-states.png)
 
 <Render Needed>: assets/documentation/renders/recursion-operator-options-menu.png - Options/settings menu with Play, Providers, Advanced, Reasoning Level, provider controls, diagnostics limits, disabled planned commands, and Full Viewer entry point.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-last-brief-states.png - Last Brief dropdown with compact selected cards, category glyphs, meta chips, expandable text, Prompt Packet button, empty brief, stale brief, and error state.
+![Last Brief dropdown states](../../assets/documentation/renders/recursion-operator-last-brief-states.png)
 
 <Render Needed>: assets/documentation/renders/recursion-operator-full-viewer-sections.png - Full Viewer showing Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections.
 
@@ -26,7 +26,7 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 <Render Needed>: assets/documentation/renders/recursion-operator-prompt-packet-inspection.png - Prompt Packet inspection showing Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and redaction-safe diagnostics.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-fail-soft-states.png - Fail-soft states for Utility unavailable, Reasoner timeout, invalid structured output, storage write failure, injection failure, and stale async result.
+![Fail-soft states](../../assets/documentation/renders/recursion-operator-fail-soft-states.png)
 
 <Render Needed>: assets/documentation/renders/recursion-operator-mobile-behavior.png - Mobile layout showing Recursion Bar wrap behavior, menu access, viewer layout, and touch-safe controls.
 

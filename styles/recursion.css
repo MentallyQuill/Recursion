@@ -1308,7 +1308,7 @@
 }
 
 .recursion-settings-panel {
-  left: 360px;
+  left: 0;
   right: 0;
   max-height: min(70vh, 680px);
   overflow: auto;

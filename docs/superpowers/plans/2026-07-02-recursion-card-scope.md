@@ -761,7 +761,7 @@ Expected output:
 [pass] ui
 ```
 
-- [ ] Commit this slice.
+- [x] Commit this slice.
 
 Commands:
 
@@ -852,7 +852,7 @@ Expected output:
 [pass] live-harness
 ```
 
-- [ ] Commit this slice.
+- [x] Commit this slice.
 
 Commands:
 

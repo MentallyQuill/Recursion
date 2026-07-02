@@ -3225,29 +3225,32 @@ for (const scenario of [
   assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['cache-aware-card'], 'cache-aware plan reuses selected cached card');
 }
 
-{
+for (const scenario of [
+  { label: 'card-catalog', versionPatch: { cardCatalogHash: 'old-catalog-contract' } },
+  { label: 'provider-contract', versionPatch: { providerContractHash: 'old-provider-contract' } }
+]) {
   const adapter = createMemoryStorageAdapter();
   const storage = createStorageRepository({ storage: adapter });
   const contractMessages = [
-    { mesid: 1, role: 'assistant', text: 'The cache contract should be current.', visible: true },
-    { mesid: 2, role: 'user', text: 'Try to reuse a stale contract cache card.', visible: true }
+    { mesid: 1, role: 'assistant', text: `The ${scenario.label} cache contract should be current.`, visible: true },
+    { mesid: 2, role: 'user', text: `Try to reuse a stale ${scenario.label} contract cache card.`, visible: true }
   ];
   const sourceHash = sourceWindowHash(contractMessages, 1, 2);
-  await storage.saveSceneCache('contract-stale-chat', 'contract-stale-scene', {
+  await storage.saveSceneCache(`contract-stale-${scenario.label}-chat`, `contract-stale-${scenario.label}-scene`, {
     versions: {
       ...cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-      cardCatalogHash: 'old-catalog-contract'
+      ...scenario.versionPatch
     },
     cards: [{
-      id: 'contract-stale-card',
+      id: `contract-stale-${scenario.label}-card`,
       family: 'Scene Frame',
       status: 'active',
-      promptText: 'Stale contract cache card must not reach the prompt.',
-      summary: 'Stale contract card',
+      promptText: `Stale ${scenario.label} contract cache card must not reach the prompt.`,
+      summary: `Stale ${scenario.label} contract card`,
       tokenEstimate: 12,
       evidenceRefs: ['message:2'],
       source: {
-        chatId: 'contract-stale-chat',
+        chatId: `contract-stale-${scenario.label}-chat`,
         firstMesId: 1,
         lastMesId: 2,
         fingerprint: sourceHash,
@@ -3256,8 +3259,8 @@ for (const scenario of [
       freshness: { sourceFingerprint: sourceHash }
     }],
     latestHand: {
-      handId: 'contract-stale-hand',
-      cards: [{ id: 'contract-stale-card', family: 'Scene Frame' }]
+      handId: `contract-stale-${scenario.label}-hand`,
+      cards: [{ id: `contract-stale-${scenario.label}-card`, family: 'Scene Frame' }]
     }
   });
   let arbiterPrompt = '';
@@ -3265,11 +3268,11 @@ for (const scenario of [
     settings: { mode: 'auto', reasonerUse: 'off' },
     storage,
     snapshot: {
-      chatId: 'contract-stale-chat',
-      chatKey: 'contract-stale-chat',
-      sceneKey: 'contract-stale-scene',
-      sceneFingerprint: 'contract-stale-scene-fp',
-      turnFingerprint: 'contract-stale-turn-fp',
+      chatId: `contract-stale-${scenario.label}-chat`,
+      chatKey: `contract-stale-${scenario.label}-chat`,
+      sceneKey: `contract-stale-${scenario.label}-scene`,
+      sceneFingerprint: `contract-stale-${scenario.label}-scene-fp`,
+      turnFingerprint: `contract-stale-${scenario.label}-turn-fp`,
       latestMesId: 2,
       messages: contractMessages
     },
@@ -3283,23 +3286,23 @@ for (const scenario of [
             schema: UTILITY_ARBITER_SCHEMA,
             snapshotHash: request.snapshotHash,
             action: 'reuse-cache',
-            lifecycle: [{ action: 'select', cardId: 'contract-stale-card', reason: 'stale contract should be ignored' }],
+            lifecycle: [{ action: 'select', cardId: `contract-stale-${scenario.label}-card`, reason: 'stale contract should be ignored' }],
             budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: ['contract-stale-reuse']
+            diagnostics: [`contract-stale-${scenario.label}-reuse`]
           }
         };
       }
     }
   });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Try to reuse a stale contract cache card.' });
+  const result = await runtime.prepareForGeneration({ userMessage: `Try to reuse a stale ${scenario.label} contract cache card.` });
   const serialized = JSON.stringify({ result, view: runtime.view() });
-  assertEqual(result.ok, true, 'contract-mismatched reuse-cache remains fail-soft');
-  assertEqual(result.skipped, true, 'contract-mismatched cache is treated as unavailable');
-  assertEqual(result.reason, 'cache-unavailable', 'contract-mismatched cache returns unavailable reason');
-  assertEqual(installed.length, 0, 'contract-mismatched cache card does not install prompt');
-  assert(!arbiterPrompt.includes('contract-stale-card'), 'contract-mismatched cache is hidden from Arbiter prompt');
-  assert(!arbiterPrompt.includes('Stale contract card'), 'contract-mismatched cache summary is hidden from Arbiter prompt');
-  assert(!serialized.includes('Stale contract cache card must not reach the prompt'), 'contract-mismatched cache prompt text is not exposed');
+  assertEqual(result.ok, true, `${scenario.label} contract-mismatched reuse-cache remains fail-soft`);
+  assertEqual(result.skipped, true, `${scenario.label} contract-mismatched cache is treated as unavailable`);
+  assertEqual(result.reason, 'cache-unavailable', `${scenario.label} contract-mismatched cache returns unavailable reason`);
+  assertEqual(installed.length, 0, `${scenario.label} contract-mismatched cache card does not install prompt`);
+  assert(!arbiterPrompt.includes(`contract-stale-${scenario.label}-card`), `${scenario.label} contract-mismatched cache is hidden from Arbiter prompt`);
+  assert(!arbiterPrompt.includes(`Stale ${scenario.label} contract card`), `${scenario.label} contract-mismatched cache summary is hidden from Arbiter prompt`);
+  assert(!serialized.includes(`Stale ${scenario.label} contract cache card must not reach the prompt`), `${scenario.label} contract-mismatched cache prompt text is not exposed`);
 }
 
 {

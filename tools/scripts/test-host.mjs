@@ -381,7 +381,7 @@ const connectionProfileHost = createSillyTavernHost({
     ConnectionManagerRequestService: {
       async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
         connectionProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
-        return { text: '{"schema":"recursion.host.connectionProfile","ok":true}' };
+        return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
       }
     }
   }),
@@ -430,12 +430,12 @@ const currentModelHost = createSillyTavernHost({
     chat: [],
     generateRaw: async (request) => {
       currentModelRawCalls.push(request);
-      return { text: '{"schema":"recursion.host.currentModel","ok":true}' };
+      return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
     },
     ConnectionManagerRequestService: {
       async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
         currentModelProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
-        return { text: '{"schema":"recursion.host.unexpectedProfile","ok":true}' };
+        return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
       }
     }
   }),
@@ -517,7 +517,7 @@ const rawResponse = await host.generation.generate({
 assertEqual(rawResponse.text, '{"schema":"x"}', 'raw generation result preserved');
 context.generateRaw = async (request) => {
   rawCalls.push(request);
-  return { text: '{"schema":"recursion.host.v1","ok":true}' };
+  return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
 };
 const routed = await createGenerationRouter({ client: host.providerClient }).generate('utilityArbiter', { prompt: 'Route through provider client' });
 assertEqual(routed.ok, true, 'provider client routes through host generation');
@@ -533,7 +533,7 @@ const profileHost = createSillyTavernHost({
     chat: [],
     generateRaw: async (request) => {
       profileCalls.push(request);
-      return { text: '{"schema":"recursion.host.profile","ok":true}' };
+      return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
     }
   }),
   settingsRoot: {

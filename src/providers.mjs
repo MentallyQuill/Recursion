@@ -37,17 +37,25 @@ export const UTILITY_ROLE_IDS = Object.freeze([
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
 export const PROVIDER_CONTRACT_VERSION = 1;
+const ROLE_RESPONSE_SCHEMAS = Object.freeze({
+  utilityArbiter: 'recursion.utilityArbiter.v1',
+  sceneFrameCard: 'recursion.card.v1',
+  activeCastCard: 'recursion.card.v1',
+  characterMotivationCard: 'recursion.card.v1',
+  dialogueRelationshipCard: 'recursion.card.v1',
+  continuityRiskCard: 'recursion.card.v1',
+  environmentItemsCard: 'recursion.card.v1',
+  prosePacingCard: 'recursion.card.v1',
+  openThreadsCard: 'recursion.card.v1',
+  briefUtilityComposer: 'recursion.briefUtilityComposer.v1',
+  reasonerComposer: 'recursion.reasonerComposer.v1',
+  providerTest: 'recursion.providerTest.v1'
+});
 export const PROVIDER_CONTRACT_HASH = hashJson({
   providerContractVersion: PROVIDER_CONTRACT_VERSION,
   utilityRoles: UTILITY_ROLE_IDS,
   reasonerRoles: REASONER_ROLE_IDS,
-  responseSchemas: {
-    card: 'recursion.card.v1',
-    utilityArbiter: 'recursion.utilityArbiter.v1',
-    briefUtilityComposer: 'recursion.briefUtilityComposer.v1',
-    reasonerComposer: 'recursion.reasonerComposer.v1',
-    providerTest: 'recursion.providerTest.v1'
-  }
+  responseSchemas: ROLE_RESPONSE_SCHEMAS
 });
 const UTILITY_ROLES = new Set(UTILITY_ROLE_IDS);
 const REASONER_ROLES = new Set(REASONER_ROLE_IDS);
@@ -140,7 +148,41 @@ function shouldAllowReasoner(settings, config) {
 
 function requestLane(roleId, request = {}) {
   if (LANES.has(request?.lane)) return request.lane;
-  return roleLane(roleId);
+  return roleLane(roleId) || 'utility';
+}
+
+function isProviderRole(roleId) {
+  const id = String(roleId || '').trim();
+  return UTILITY_ROLES.has(id) || REASONER_ROLES.has(id);
+}
+
+function unsupportedRoleError(roleId) {
+  const id = String(roleId || '').trim();
+  if (!id) {
+    return providerError('RECURSION_PROVIDER_ROLE_MISSING', 'Provider request is missing roleId.', { retryable: false });
+  }
+  return providerError(
+    'RECURSION_PROVIDER_ROLE_UNSUPPORTED',
+    `Unsupported provider role: ${id}.`,
+    { retryable: false }
+  );
+}
+
+function expectedResponseSchema(roleId) {
+  return ROLE_RESPONSE_SCHEMAS[String(roleId || '').trim()] || '';
+}
+
+function validateRoleResponseSchema(roleId, data) {
+  const expected = expectedResponseSchema(roleId);
+  if (!expected) throw unsupportedRoleError(roleId);
+  const actual = String(data?.schema || '').trim();
+  if (actual !== expected) {
+    throw providerError(
+      'RECURSION_PROVIDER_SCHEMA_MISMATCH',
+      'Provider output schema did not match the requested role.',
+      { retryable: false }
+    );
+  }
 }
 
 function normalizeBatchRequest(entry) {
@@ -543,7 +585,7 @@ export function roleLane(roleId) {
   const id = String(roleId || '').trim();
   if (REASONER_ROLES.has(id)) return 'reasoner';
   if (UTILITY_ROLES.has(id)) return 'utility';
-  return 'utility';
+  return '';
 }
 
 export function parseStructuredOutput(text) {
@@ -566,6 +608,9 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
     const resolvedRoleId = String(roleId || '').trim();
     if (!resolvedRoleId) {
       throw providerError('RECURSION_PROVIDER_ROLE_MISSING', 'Provider request is missing roleId.', { retryable: false });
+    }
+    if (!isProviderRole(resolvedRoleId)) {
+      throw unsupportedRoleError(resolvedRoleId);
     }
 
     const lane = laneName(requestLane(resolvedRoleId, request));
@@ -738,6 +783,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
   }
 
   async function generate(roleId, request = {}, options = {}) {
+    const providerRoleKnown = isProviderRole(roleId);
     const lane = laneName(requestLane(roleId, request));
     const started = Date.now();
     const startedAt = nowIso();
@@ -777,6 +823,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         });
 
         try {
+          if (!providerRoleKnown) throw unsupportedRoleError(roleId);
           const raw = await withTimeout(
             (requestWithSignal) => client.generate(roleId, requestWithSignal),
             request,
@@ -784,6 +831,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
             composedExternalSignal.signal || null
           );
           const data = parseProviderStructuredOutput(raw.text);
+          validateRoleResponseSchema(roleId, data);
           const latencyMs = Date.now() - started;
           const diagnostics = sanitize({
             ...lastDiagnostics,
@@ -923,7 +971,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         label: `${lane === 'reasoner' ? 'Reasoner' : 'Utility'} provider batch call started.`,
         detail: diagnostics
       });
-      return { index, roleId, request, lane, started, startedAt, diagnostics };
+      return { index, roleId, request, lane, started, startedAt, diagnostics, providerRoleKnown: isProviderRole(roleId) };
     });
     const results = new Array(entries.length);
 
@@ -954,6 +1002,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     async function successResult(entry, raw, retryCount = 0) {
       const data = parseProviderStructuredOutput(raw?.text);
+      validateRoleResponseSchema(entry.roleId, data);
       const diagnostics = sanitize({
         ...entry.diagnostics,
         providerSource: raw?.providerSource,
@@ -1007,6 +1056,10 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     const pendingEntries = [];
     for (const entry of entries) {
+      if (!entry.providerRoleKnown) {
+        results[entry.index] = await failureResult(entry, unsupportedRoleError(entry.roleId));
+        continue;
+      }
       if (entry.request.signal?.aborted) {
         results[entry.index] = await failureResult(entry, abortError());
         continue;

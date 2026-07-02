@@ -31,8 +31,20 @@ function assertNoProviderMarker(value, marker, message) {
   assert(!JSON.stringify(value).includes(marker), message);
 }
 
+function responseSchemaForRole(roleId) {
+  if (roleId === 'reasonerComposer') return 'recursion.reasonerComposer.v1';
+  if (roleId === 'utilityArbiter') return 'recursion.utilityArbiter.v1';
+  if (roleId === 'briefUtilityComposer') return 'recursion.briefUtilityComposer.v1';
+  if (roleId === 'providerTest') return 'recursion.providerTest.v1';
+  return 'recursion.card.v1';
+}
+
+function responseTextForRole(roleId, fields = {}) {
+  return JSON.stringify({ schema: responseSchemaForRole(roleId), ok: true, ...fields });
+}
+
 assertEqual(parseStructuredOutput('```json\n{"schema":"x"}\n```').schema, 'x', 'structured parser accepts fenced json');
-assertEqual(roleLane('unknownRole'), 'utility', 'unknown roles default to utility lane');
+assertEqual(roleLane('unknownRole'), '', 'unknown roles have no provider lane');
 assertEqual(roleLane('reasonerComposer'), 'reasoner', 'reasonerComposer uses reasoner lane');
 const expectedUtilityRoles = [
   'utilityArbiter',
@@ -64,7 +76,7 @@ const host = {
   generation: {
     async generate(request) {
       calls.push(request);
-      return { text: '{"schema":"recursion.test.v1","ok":true}', providerId: 'fake-host', model: 'fake-model' };
+      return { text: responseTextForRole(request.roleId), providerId: 'fake-host', model: 'fake-model' };
     },
     async batch(requests) {
       return Promise.all(requests.map((request) => this.generate(request)));
@@ -90,6 +102,49 @@ assertEqual(calls.at(-1).lane, 'reasoner', 'reasoner lane selected');
 const utilityOverride = await router.generate('reasonerComposer', { lane: 'utility', prompt: 'Use utility override' });
 assertEqual(utilityOverride.ok, true, 'reasoner role can be explicitly routed to utility');
 assertEqual(calls.at(-1).lane, 'utility', 'explicit utility lane override applied');
+
+const callsBeforeUnknownRole = calls.length;
+const unknownRole = await router.generate('unknownRole', { lane: 'utility', prompt: 'Do not route unknown roles.' });
+assertEqual(unknownRole.ok, false, 'unknown provider role fails');
+assertEqual(unknownRole.error.code, 'RECURSION_PROVIDER_ROLE_UNSUPPORTED', 'unknown provider role uses stable error code');
+assertEqual(calls.length, callsBeforeUnknownRole, 'unknown provider role does not call host generation');
+
+const batchCallsBeforeUnknownRole = calls.length;
+const unknownRoleBatch = await router.batch([
+  { roleId: 'utilityArbiter', prompt: 'Known role still runs.' },
+  { roleId: 'unknownRole', prompt: 'Unknown role should fail.' }
+]);
+assertEqual(unknownRoleBatch[0].ok, true, 'batch with unknown role keeps known slot successful');
+assertEqual(unknownRoleBatch[1].ok, false, 'batch with unknown role fails unknown slot');
+assertEqual(unknownRoleBatch[1].error.code, 'RECURSION_PROVIDER_ROLE_UNSUPPORTED', 'batch unknown role uses stable error code');
+assertEqual(calls.length, batchCallsBeforeUnknownRole + 1, 'batch unknown role does not call host for unknown slot');
+
+const wrongSchemaRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return { text: '{"schema":"wrong.schema","ok":true}', providerId: 'fake-host', model: 'fake-model' };
+    },
+    async batch(requests) {
+      return requests.map((request) => ({
+        text: request.roleId === 'utilityArbiter'
+          ? '{"schema":"recursion.utilityArbiter.v1","snapshotHash":"hash-ok"}'
+          : '{"schema":"wrong.schema","ok":true}',
+        providerId: 'fake-host',
+        model: 'fake-model'
+      }));
+    }
+  }
+});
+const wrongSchema = await wrongSchemaRouter.generate('providerTest', { prompt: 'Wrong schema.' });
+assertEqual(wrongSchema.ok, false, 'known provider role rejects mismatched schema');
+assertEqual(wrongSchema.error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'known provider role schema mismatch uses stable error code');
+const wrongSchemaBatch = await wrongSchemaRouter.batch([
+  { roleId: 'utilityArbiter', prompt: 'Known valid schema.' },
+  { roleId: 'providerTest', prompt: 'Known wrong schema.' }
+]);
+assertEqual(wrongSchemaBatch[0].ok, true, 'batch schema validation keeps valid slot successful');
+assertEqual(wrongSchemaBatch[1].ok, false, 'batch schema validation fails wrong-schema slot');
+assertEqual(wrongSchemaBatch[1].error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'batch wrong-schema slot uses stable error code');
 
 const reasonerOverrideStore = createStore();
 const reasonerOverrideRouter = createGenerationRouter({
@@ -130,7 +185,7 @@ const retryHost = {
         error.retryable = true;
         throw error;
       }
-      return { text: '{"schema":"recursion.retry.v1","ok":true}' };
+      return { text: responseTextForRole('utilityArbiter') };
     }
   }
 };
@@ -192,7 +247,7 @@ const requestSignalRetry = await createGenerationRouter({
         error.retryable = true;
         throw error;
       }
-      return { text: '{"schema":"request.signal.retry","ok":true}' };
+      return { text: responseTextForRole('utilityArbiter') };
     }
   }
 }).generate('utilityArbiter', {
@@ -337,12 +392,12 @@ const routerHostBatchRouter = createGenerationRouter({
       generation: {
         async generate(request) {
           routerHostGenerateCallCount += 1;
-          return { text: `{"schema":"single.${request.roleId}","lane":"${request.lane}"}` };
+          return { text: responseTextForRole(request.roleId, { lane: request.lane }) };
         },
         async batch(requests) {
           routerHostBatchCallCount += 1;
           routerHostBatchCalls.push(requests);
-          return requests.map((request) => ({ text: `{"schema":"batch.${request.roleId}","lane":"${request.lane}"}` }));
+          return requests.map((request) => ({ text: responseTextForRole(request.roleId, { lane: request.lane }) }));
         }
       }
     },
@@ -357,7 +412,11 @@ assertEqual(routerHostBatchCallCount, 1, 'router batch calls host/client batch o
 assertEqual(routerHostGenerateCallCount, 0, 'router batch does not call host/client single generate when batch is available');
 assertDeepEqual(routerHostBatchCalls[0].map((request) => request.roleId), ['utilityArbiter', 'providerTest'], 'router batch sends enriched role ids to host batch');
 assertDeepEqual(routerHostBatchResults.map((entry) => entry.ok), [true, true], 'router batch returns router-style success results');
-assertDeepEqual(routerHostBatchResults.map((entry) => entry.data.schema), ['batch.utilityArbiter', 'batch.providerTest'], 'router batch parses each response');
+assertDeepEqual(
+  routerHostBatchResults.map((entry) => entry.data.schema),
+  ['recursion.utilityArbiter.v1', 'recursion.providerTest.v1'],
+  'router batch validates each response schema'
+);
 
 const suppliedBatchRunId = 'provider-batch-run-test';
 const routerRunIdBatch = await routerHostBatchRouter.batch([
@@ -380,7 +439,7 @@ const transientBatch = await createGenerationRouter({
         error.code = 'ECONNRESET';
         throw error;
       }
-      return requests.map((request) => ({ text: `{"schema":"retry.${request.roleId}","lane":"${request.lane}"}` }));
+      return requests.map((request) => ({ text: responseTextForRole(request.roleId, { lane: request.lane }) }));
     }
   }
 }).batch([
@@ -442,7 +501,7 @@ const routerMalformedSlot = await createGenerationRouter({
     },
     async batch() {
       return [
-        { text: '{"schema":"batch.valid","ok":true}', roleId: 'utilityArbiter', lane: 'utility', providerId: 'fake-host', model: 'fake-model' },
+        { text: responseTextForRole('utilityArbiter'), roleId: 'utilityArbiter', lane: 'utility', providerId: 'fake-host', model: 'fake-model' },
         { text: 'not-json', roleId: 'providerTest', lane: 'utility', providerId: 'fake-host', model: 'fake-model' }
       ];
     }
@@ -464,7 +523,7 @@ const routerBatchLeak = await createGenerationRouter({
     },
     async batch() {
       return [
-        { text: '{"schema":"batch.safe","ok":true}', roleId: 'utilityArbiter', lane: 'utility', providerId: 'fake-host', model: 'fake-model' },
+        { text: responseTextForRole('utilityArbiter'), roleId: 'utilityArbiter', lane: 'utility', providerId: 'fake-host', model: 'fake-model' },
         { text: 'RAW_BATCH_RESPONSE_MARKER_42 not json', roleId: 'providerTest', lane: 'utility', providerId: 'fake-host', model: 'fake-model' }
       ];
     }
@@ -532,7 +591,7 @@ const routerSequentialFallback = await createGenerationRouter({
   client: {
     async generate(roleId, request) {
       routerSequentialFallbackCalls += 1;
-      return { text: `{"schema":"fallback.${roleId}","lane":"${request.lane || 'utility'}"}` };
+      return { text: responseTextForRole(roleId, { lane: request.lane || 'utility' }) };
     }
   }
 }).batch([
@@ -540,7 +599,11 @@ const routerSequentialFallback = await createGenerationRouter({
   { roleId: 'providerTest', prompt: 'B' }
 ]);
 assertEqual(routerSequentialFallbackCalls, 2, 'router batch falls back to sequential generate when client batch is absent');
-assertDeepEqual(routerSequentialFallback.map((entry) => entry.data.schema), ['fallback.utilityArbiter', 'fallback.providerTest'], 'router batch sequential fallback still parses results');
+assertDeepEqual(
+  routerSequentialFallback.map((entry) => entry.data.schema),
+  ['recursion.utilityArbiter.v1', 'recursion.providerTest.v1'],
+  'router batch sequential fallback validates response schemas'
+);
 
 const badHostBatchClient = createProviderClient({
   host: {
@@ -583,7 +646,7 @@ const openAiRouter = createGenerationRouter({
         json: async () => ({
           id: 'chatcmpl-test',
           model: 'utility-model',
-          choices: [{ message: { content: '{"schema":"recursion.openai.v1","ok":true}' } }]
+          choices: [{ message: { content: responseTextForRole('utilityArbiter') } }]
         })
       };
     }
@@ -789,7 +852,7 @@ const redactionRouter = createGenerationRouter({
       ok: true,
       json: async () => ({
         model: 'redaction-model',
-        choices: [{ message: { content: '{"schema":"recursion.redaction.v1","ok":true}' } }]
+        choices: [{ message: { content: responseTextForRole('utilityArbiter') } }]
       })
     })
   }),
@@ -844,7 +907,7 @@ const asyncOrderRouter = createGenerationRouter({
     host: {
       generation: {
         async generate() {
-          return { text: '{"schema":"recursion.asyncJournal.v1","ok":true}' };
+          return { text: responseTextForRole('utilityArbiter') };
         }
       }
     },
@@ -998,7 +1061,7 @@ const retryableTimeoutRouter = createGenerationRouter({
         request.signal?.addEventListener('abort', () => {});
         return new Promise(() => {});
       }
-      return { text: '{"schema":"recursion.timeoutRetry.v1","ok":true}' };
+      return { text: responseTextForRole('utilityArbiter') };
     }
   },
   timeoutMs: 5

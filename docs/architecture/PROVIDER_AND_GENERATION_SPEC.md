@@ -126,6 +126,8 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 Card names should align with [Card System Spec](../design/CARD_SYSTEM_SPEC.md). Prompt installation and depth decisions belong to [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md), not provider routing.
 
+The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Utility Composer uses `recursion.briefUtilityComposer.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`.
+
 ## Utility Arbiter Call
 
 The Utility Arbiter is the first model call when Recursion needs model help for a turn. Its job is to make the run plan, not to write prose.

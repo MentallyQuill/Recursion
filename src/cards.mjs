@@ -573,7 +573,8 @@ function cardIdFor(input, catalog, promptText, context) {
     role: catalog.role,
     promptText,
     sceneId: context.sceneId,
-    snapshotHash: context.snapshotHash
+    snapshotHash: context.snapshotHash,
+    sourceRevisionHash: context.sourceRevisionHash
   })}`;
   return safeId(input.id, seed);
 }
@@ -589,12 +590,20 @@ function sourceContext(input, context) {
       ?? freshness.sourceFingerprint
       ?? ''
   );
+  const sourceRevisionHash = String(
+    context.sourceRevisionHash
+      ?? input.sourceRevisionHash
+      ?? source.sourceRevisionHash
+      ?? freshness.sourceRevisionHash
+      ?? snapshotHash
+  );
   return {
     sceneId: String(context.sceneId ?? input.sceneId ?? 'scene').trim() || 'scene',
     chatId: String(context.chatId ?? source.chatId ?? input.chatId ?? '').trim(),
     firstMesId: numberInRange(context.firstMesId ?? source.firstMesId ?? input.firstMesId, 0, 0, Number.MAX_SAFE_INTEGER),
     lastMesId: numberInRange(context.lastMesId ?? source.lastMesId ?? input.lastMesId, 0, 0, Number.MAX_SAFE_INTEGER),
-    snapshotHash
+    snapshotHash,
+    sourceRevisionHash
   };
 }
 
@@ -667,7 +676,8 @@ function effectiveMaxCardsForPolicy(maxCards, policy) {
 function normalizeDeckCard(card, { preserveId = false } = {}) {
   const normalized = normalizeCard(card, {
     sceneId: card?.sceneId,
-    snapshotHash: card?.source?.snapshotHash || card?.source?.fingerprint || card?.freshness?.sourceFingerprint || card?.sourceFingerprint
+    snapshotHash: card?.source?.snapshotHash || card?.source?.fingerprint || card?.freshness?.sourceFingerprint || card?.sourceFingerprint,
+    sourceRevisionHash: card?.source?.sourceRevisionHash || card?.freshness?.sourceRevisionHash || card?.sourceRevisionHash
   });
   if (preserveId && typeof card?.id === 'string' && card.id) normalized.id = card.id;
   return normalized;
@@ -700,7 +710,8 @@ export function normalizeCard(input = {}, context = {}) {
       firstMesId: normalizedSource.firstMesId,
       lastMesId: normalizedSource.lastMesId,
       fingerprint: normalizedSource.snapshotHash,
-      snapshotHash: normalizedSource.snapshotHash
+      snapshotHash: normalizedSource.snapshotHash,
+      sourceRevisionHash: normalizedSource.sourceRevisionHash
     },
     promptText,
     summary: cleanText(source.summary || promptText, SUMMARY_LIMIT),
@@ -711,6 +722,7 @@ export function normalizeCard(input = {}, context = {}) {
     freshness: {
       generatedAt: String(freshness.generatedAt ?? source.generatedAt ?? nowIso()),
       sourceFingerprint: String(normalizedSource.snapshotHash || freshness.sourceFingerprint || ''),
+      sourceRevisionHash: String(normalizedSource.sourceRevisionHash || freshness.sourceRevisionHash || ''),
       expiresAfterMesId
     },
     arbiter: {

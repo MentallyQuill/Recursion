@@ -103,11 +103,18 @@ function messageTextHash(message) {
 function sourceWindowHash(messages, firstMesId, lastMesId) {
   return hashJson((Array.isArray(messages) ? messages : [])
     .filter((message) => message?.visible !== false)
-    .map((message, index) => ({
-      mesid: Number(message?.mesid ?? message?.id ?? message?.messageId ?? index),
-      role: String(message?.role ?? (message?.is_user === true ? 'user' : (message?.is_system === true ? 'system' : 'assistant'))),
-      textHash: String(message?.textHash || messageTextHash(message))
-    }))
+    .map((message, index) => {
+      const swipeId = Number(message?.swipeId ?? message?.swipe_id);
+      const swipeCount = Number(message?.swipeCount ?? (Array.isArray(message?.swipes) ? message.swipes.length : NaN));
+      return {
+        mesid: Number(message?.mesid ?? message?.id ?? message?.messageId ?? index),
+        role: String(message?.role ?? (message?.is_user === true ? 'user' : (message?.is_system === true ? 'system' : 'assistant'))),
+        textHash: String(message?.textHash || messageTextHash(message)),
+        ...(Number.isFinite(swipeId) ? { swipeId } : {}),
+        ...(Number.isFinite(swipeCount) ? { swipeCount } : {}),
+        ...(message?.activeSwipeTextHash ? { activeSwipeTextHash: String(message.activeSwipeTextHash) } : {})
+      };
+    })
     .filter((message) => message.mesid >= firstMesId && message.mesid <= lastMesId));
 }
 
@@ -121,6 +128,9 @@ function runtimeSnapshotHash(snapshot) {
     role: String(message?.role ?? (message?.is_user === true ? 'user' : (message?.is_system === true ? 'system' : 'assistant'))),
     text: String(message?.text ?? message?.mes ?? message?.content ?? ''),
     textHash: String(message?.textHash || messageTextHash(message)),
+    ...(Number.isFinite(Number(message?.swipeId ?? message?.swipe_id)) ? { swipeId: Number(message?.swipeId ?? message?.swipe_id) } : {}),
+    ...(Number.isFinite(Number(message?.swipeCount ?? (Array.isArray(message?.swipes) ? message.swipes.length : NaN))) ? { swipeCount: Number(message?.swipeCount ?? (Array.isArray(message?.swipes) ? message.swipes.length : NaN)) } : {}),
+    ...(message?.activeSwipeTextHash ? { activeSwipeTextHash: String(message.activeSwipeTextHash) } : {}),
     visible: message?.visible === false || message?.hidden === true ? false : true
   }));
   const latest = messages.at(-1);
@@ -133,6 +143,29 @@ function runtimeSnapshotHash(snapshot) {
     latestMesId: Number(snapshot.latestMesId ?? latest?.mesid ?? 0),
     messages
   });
+}
+
+function swipeSnapshot({ text, swipeId, label = 'swipe' }) {
+  const messages = [{
+    mesid: 2,
+    role: 'assistant',
+    text,
+    visible: true,
+    swipeId,
+    swipeCount: 2,
+    activeSwipeTextHash: hashJson(text)
+  }];
+  const sourceRevisionHash = sourceWindowHash(messages, 2, 2);
+  return {
+    chatId: 'swipe-runtime-chat',
+    chatKey: 'swipe-runtime-chat',
+    sceneKey: 'swipe-runtime-scene',
+    sceneFingerprint: 'swipe-runtime-scene-fp',
+    turnFingerprint: hashJson({ label, swipeId, sourceRevisionHash }),
+    sourceRevisionHash,
+    latestMesId: 2,
+    messages
+  };
 }
 
 function isAbortSignal(value) {
@@ -383,6 +416,96 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(handSelected.details?.truncated, false, 'hand selection journal records truncation state');
   assert(handSelected.hashes?.promptPacketHash, 'hand selection journal records prompt packet hash');
   assert(!JSON.stringify(handSelected).includes(view.lastHand.cards[0].promptText), 'hand selection journal omits prompt text');
+}
+
+{
+  let activeSwipe = 'a';
+  let arbiterCalls = 0;
+  let swipeACardId = '';
+  const snapshots = {
+    a: swipeSnapshot({ text: 'Swipe A answer keeps the candle lit.', swipeId: 0, label: 'a' }),
+    b: swipeSnapshot({ text: 'Swipe B answer lets the candle gutter out.', swipeId: 1, label: 'b' })
+  };
+  const { runtime, installed, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => snapshots[activeSwipe],
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          arbiterCalls += 1;
+          if (arbiterCalls === 3) {
+            return {
+              ok: true,
+              data: {
+                schema: UTILITY_ARBITER_SCHEMA,
+                snapshotHash: request.snapshotHash,
+                action: 'reuse-cache',
+                lifecycle: [{ action: 'select', cardId: swipeACardId, reason: 'active swipe returned to cached A variant' }],
+                budgets: { targetBriefTokens: 500, maxCards: 6 },
+                diagnostics: ['swipe-a-return-reuse']
+              }
+            };
+          }
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              diagnostics: [`swipe-${activeSwipe}-compose`]
+            }
+          };
+        }
+        assertEqual(roleId, 'sceneFrameCard', 'swipe variant test only generates scene frame cards');
+        const label = activeSwipe.toUpperCase();
+        return {
+          ok: true,
+          roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: 'sceneFrameCard',
+            family: 'Scene Frame',
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: `Swipe ${label} cached card guidance.`,
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 8
+            }]
+          }
+        };
+      }
+    }
+  });
+  const userMessage = 'Continue.';
+  const first = await runtime.prepareForGeneration({ userMessage });
+  assertEqual(first.ok, true, 'swipe A setup installs');
+  const preparedSwipeARevision = runtime.view().lastSnapshot.sourceRevisionHash;
+  swipeACardId = runtime.view().lastHand.cards[0]?.id || '';
+  assert(swipeACardId, 'swipe A setup selects a card');
+  assert(JSON.stringify(installed.at(-1)).includes('Swipe A cached card guidance.'), 'swipe A prompt uses A card');
+  activeSwipe = 'b';
+  await runtime.handleSourceChanged({ eventName: 'message_swiped', messageId: 2 });
+  const second = await runtime.prepareForGeneration({ userMessage });
+  assertEqual(second.ok, true, 'swipe B run installs');
+  assert(JSON.stringify(installed.at(-1)).includes('Swipe B cached card guidance.'), 'swipe B prompt uses B card');
+  assert(!JSON.stringify(installed.at(-1)).includes('Swipe A cached card guidance.'), 'swipe B prompt does not reuse A card');
+  activeSwipe = 'a';
+  await runtime.handleSourceChanged({ eventName: 'message_swiped', messageId: 2 });
+  const third = await runtime.prepareForGeneration({ userMessage });
+  assertEqual(third.ok, true, 'swipe A return installs');
+  assertEqual(third.skipped, undefined, 'swipe A return can reuse active variant');
+  assert(JSON.stringify(installed.at(-1)).includes('Swipe A cached card guidance.'), 'swipe A return reuses A card');
+  assert(!JSON.stringify(installed.at(-1)).includes('Swipe B cached card guidance.'), 'swipe A return does not leak B card');
+  const cache = await storage.loadSceneCache(snapshots.a.chatKey, snapshots.a.sceneKey);
+  const preparedSwipeBRevision = sourceWindowHash([
+    ...snapshots.b.messages,
+    { mesid: 3, role: 'user', text: userMessage, textHash: hashJson(userMessage), visible: true }
+  ], 2, 3);
+  assertEqual(cache.activeSourceRevisionHash, preparedSwipeARevision, 'scene cache marks active swipe revision');
+  assert(cache.variants[preparedSwipeARevision], 'scene cache keeps A source variant');
+  assert(cache.variants[preparedSwipeBRevision], 'scene cache keeps B source variant');
 }
 
 {

@@ -22,6 +22,7 @@ Highest-priority invariants:
 - Auto mode may install prompt packets only through Recursion-owned SillyTavern prompt keys.
 - Prompt packet installation is replace-or-clear by Recursion metadata, not blind append.
 - Stale provider results cannot update the active scene cache or active prompt packet.
+- SillyTavern swipe changes clear stale Recursion prompts and cannot reuse cards from a different active source revision.
 - Utility is the default provider lane for Arbiter and composition work.
 - Reasoner composition is optional and must fall back to Utility or local composition on timeout, failure, off state, or invalid schema.
 - Direct endpoint API keys are session-only and never written to settings, cache, journals, reports, screenshots, artifacts, or prompt packets.
@@ -47,6 +48,7 @@ The gate calls the focused local suite rather than duplicating test logic. Cover
 - settings normalization and session-only secret handling;
 - logical storage key safety;
 - scene cache schema validation;
+- source-revision and swipe A/B/A cache-variant behavior;
 - run journal redaction and ring-buffer pruning;
 - provider lane routing, provider-payload normalization, and structured response parsing/repair;
 - Utility Arbiter Auto Control Plan validation;

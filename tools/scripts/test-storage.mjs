@@ -181,6 +181,81 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
 {
   const adapter = createMemoryStorageAdapter();
   const repo = createStorageRepository({ storage: adapter });
+  await repo.saveSceneCache('Swipe Variant Chat', 'Scene One', {
+    activeSourceRevisionHash: 'source-rev-b',
+    variantOrder: ['source-rev-a', 'source-rev-b'],
+    variants: {
+      'source-rev-a': {
+        sourceRevisionHash: 'source-rev-a',
+        cards: [{
+          id: 'variant-a-card',
+          family: 'Scene Frame',
+          summary: 'variant A summary',
+          promptText: 'Variant A card guidance.',
+          evidenceRefs: ['message:2'],
+          source: {
+            chatId: 'Swipe Variant Chat',
+            firstMesId: 2,
+            lastMesId: 2,
+            fingerprint: 'source-rev-a',
+            snapshotHash: 'source-rev-a',
+            sourceRevisionHash: 'source-rev-a'
+          },
+          freshness: { sourceFingerprint: 'source-rev-a' }
+        }],
+        latestHand: { handId: 'hand-a', cardIds: ['variant-a-card'], promptPacketHash: 'packet-a' }
+      },
+      'source-rev-b': {
+        sourceRevisionHash: 'source-rev-b',
+        cards: [{
+          id: 'variant-b-card',
+          family: 'Scene Frame',
+          summary: 'variant B summary',
+          promptText: 'Variant B card guidance.',
+          evidenceRefs: ['message:2'],
+          source: {
+            chatId: 'Swipe Variant Chat',
+            firstMesId: 2,
+            lastMesId: 2,
+            fingerprint: 'source-rev-b',
+            snapshotHash: 'source-rev-b',
+            sourceRevisionHash: 'source-rev-b'
+          },
+          freshness: { sourceFingerprint: 'source-rev-b' }
+        }],
+        latestHand: { handId: 'hand-b', cardIds: ['variant-b-card'], promptPacketHash: 'packet-b' }
+      }
+    }
+  });
+  const cache = await repo.loadSceneCache('Swipe Variant Chat', 'Scene One');
+  assertEqual(cache.activeSourceRevisionHash, 'source-rev-b', 'scene cache records active source revision');
+  assertDeepEqual(cache.variantOrder, ['source-rev-a', 'source-rev-b'], 'scene cache preserves bounded variant order');
+  assertEqual(cache.variants['source-rev-a'].cards[0].source.sourceRevisionHash, 'source-rev-a', 'variant cards preserve source revision');
+  assertEqual(cache.variants['source-rev-b'].latestHand.handId, 'hand-b', 'variant latest hand is normalized');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  await repo.saveSceneCache('Swipe Variant Bound Chat', 'Scene One', {
+    activeSourceRevisionHash: 'source-rev-e',
+    variantOrder: ['source-rev-a', 'source-rev-b', 'source-rev-c', 'source-rev-d', 'source-rev-e'],
+    variants: {
+      'source-rev-a': { sourceRevisionHash: 'source-rev-a', cards: [] },
+      'source-rev-b': { sourceRevisionHash: 'source-rev-b', cards: [] },
+      'source-rev-c': { sourceRevisionHash: 'source-rev-c', cards: [] },
+      'source-rev-d': { sourceRevisionHash: 'source-rev-d', cards: [] },
+      'source-rev-e': { sourceRevisionHash: 'source-rev-e', cards: [] }
+    }
+  });
+  const cache = await repo.loadSceneCache('Swipe Variant Bound Chat', 'Scene One');
+  assertDeepEqual(cache.variantOrder, ['source-rev-b', 'source-rev-c', 'source-rev-d', 'source-rev-e'], 'scene cache keeps only four newest source variants');
+  assert(!cache.variants['source-rev-a'], 'scene cache prunes oldest source variant');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
   await repo.saveSceneCache('Card Metadata Privacy Chat', 'Scene One', {
     latestHand: {
       handId: 'hand-safe',
@@ -611,7 +686,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   const persisted = adapter.dump()[key];
   assertDeepEqual(
     Object.keys(persisted.source).sort(),
-    ['chatIdHash', 'chatWindowHash', 'firstMesId', 'lastMesId', 'latestMesId', 'sceneFingerprint', 'sourceRefs'].sort(),
+    ['chatIdHash', 'chatWindowHash', 'firstMesId', 'lastMesId', 'latestMesId', 'sceneFingerprint', 'sceneStatus', 'sourceRefs', 'sourceRevisionHash', 'sourceWindowHash'].sort(),
     'scene cache source keeps only allowlisted source metadata fields'
   );
   assertEqual(persisted.source.chatIdHash, 'chat-hash-safe', 'scene source keeps safe chat hash');

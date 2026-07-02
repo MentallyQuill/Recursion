@@ -39,9 +39,15 @@ Scene cache records contain:
 - card records
 - latest hand metadata
 - source hashes and scene fingerprint
+- active source revision hash
+- bounded source variants
 - contract version metadata
 
 Cards are truncated, normalized, redacted, and bounded before write. Scene caches can be deleted and rebuilt from the active chat snapshot plus Utility outputs.
+
+Source variants let Recursion survive SillyTavern swipe A/B/A flows without reusing the wrong cards. A cache has one `activeSourceRevisionHash`, a bounded `variantOrder`, and up to four `variants`. Each variant owns the cards, latest hand metadata, source range, and source revision for one exact visible source state. The top-level `cards` and `latestHand` mirror the active variant for simple inspection, but runtime reuse reads only the exact active source variant when variants exist.
+
+The source revision is not raw transcript text. It is a hash over visible message identity, role, text hash, and swipe metadata such as active swipe id, swipe count, and active swipe text hash. Inactive swipe text does not affect the revision until it becomes the active SillyTavern swipe.
 
 ## Run Journal
 
@@ -131,7 +137,7 @@ When `storageSchemaVersion`, `runtimeCacheContractVersion`, `cardCatalogHash`, `
 
 Soft invalidation asks the Arbiter to review when the user refreshes, provider settings change, freshness caps expire, the source window advances, token budgets change, or cards fail validation.
 
-The storage repository exposes `invalidateSceneCache(chatKey, sceneKey, options)` for soft invalidation. When the scene cache exists, the repository preserves `cards`, `latestHand`, `source`, and `versions`, sets `cacheState: 'stale'` by default, writes sanitized `invalidation` metadata, keeps the scene cache index entry current, and appends a run journal entry:
+The storage repository exposes `invalidateSceneCache(chatKey, sceneKey, options)` for soft invalidation. When the scene cache exists, the repository preserves `cards`, `latestHand`, `source`, `versions`, and source variants, sets `cacheState: 'stale'` by default, writes sanitized `invalidation` metadata, keeps the scene cache index entry current, and appends a run journal entry:
 
 ```ts
 {
@@ -146,7 +152,7 @@ The storage repository exposes `invalidateSceneCache(chatKey, sceneKey, options)
 
 The journal entry uses `event: 'cache.invalidated'`, `severity: 'info'`, the sanitized `sceneKey`, optional `runId`, and redacted reason/details. If no cache file exists, `invalidateSceneCache` returns `{ ok: false, reason: 'missing-cache', key }` and does not create a stale cache.
 
-Runtime V1 reasons are `user-refresh`, `settings-changed`, `provider-changed`, `provider-key-cleared`, `chat-changed`, and `source-changed`. Chat-change invalidation is best-effort against the previously active scene cache when a cache reference exists; it does not create a new cache for the newly selected chat. Source-change invalidation is best-effort when SillyTavern reports a message delete, update, or swipe event; runtime clears the stale prompt immediately and leaves later source-window validation to reject any cached card whose evidence no longer matches. Details must not persist API keys, bearer tokens, `sk-...` tokens, private secrets, raw provider payloads, hidden reasoning, or raw message text.
+Runtime V1 reasons are `user-refresh`, `settings-changed`, `provider-changed`, `provider-key-cleared`, `chat-changed`, and `source-changed`. Chat-change invalidation is best-effort against the previously active scene cache when a cache reference exists; it does not create a new cache for the newly selected chat. Source-change invalidation is best-effort when SillyTavern reports a message delete, update, or swipe event; runtime clears the stale prompt immediately and leaves later source-window validation to reject any cached card whose evidence no longer matches. On a later swipe back to an earlier source revision, runtime may reuse that exact source variant if contracts and card evidence still validate. Details must not persist API keys, bearer tokens, `sk-...` tokens, private secrets, raw provider payloads, hidden reasoning, or raw message text.
 
 Pre-alpha records can be invalidated and rebuilt instead of migrated through compatibility shims.
 

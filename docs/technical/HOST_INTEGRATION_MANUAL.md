@@ -8,6 +8,7 @@ The SillyTavern adapter:
 
 - reads the active SillyTavern context
 - captures chat id, chat messages, message ids, roles, visibility, scene fingerprint, scene key, and turn fingerprint
+- captures active swipe id/count metadata and a source revision hash for the current visible source
 - exposes settings through `extension_settings.recursion`
 - bridges host generation APIs to provider routing
 - installs and clears Recursion prompt blocks
@@ -41,6 +42,8 @@ When SillyTavern exposes `eventSource` plus `event_types.CHAT_CHANGED`, the entr
 Chat-change cleanup clears volatile Recursion state, clears Recursion-owned prompt keys, and best-effort marks the previously active scene cache stale with reason `chat-changed`. It does not run provider calls or compile a new packet for the newly selected chat.
 
 The entrypoint also subscribes to source mutation events when available: `MESSAGE_DELETED`, `MESSAGE_UPDATED`, and `MESSAGE_SWIPED`. Those handlers call `runtime.handleSourceChanged()` so edits, deletes, and swipe changes do not leave an old Recursion prompt installed. The cleanup records only compact event metadata such as event name and message id.
+
+For swiped assistant messages, the SillyTavern adapter records the active `swipe_id`, swipe count, and active-swipe text hash in the normalized message. The source revision hash includes the active swipe metadata, not inactive swipe bodies. Changing inactive swipe text does not invalidate the source revision until that swipe becomes active.
 
 The entrypoint subscribes to SillyTavern's player Stop signal through `event_types.GENERATION_STOPPED`, with `generation_stopped` as a fallback event name. That handler calls `runtime.handleHostGenerationStopped()`. Runtime aborts active Recursion provider signals, prevents stale packet installation, clears Recursion-owned prompt keys, marks any active scene cache stale with reason `host-generation-stopped`, and surfaces the progress outcome as skipped rather than warning or failure.
 

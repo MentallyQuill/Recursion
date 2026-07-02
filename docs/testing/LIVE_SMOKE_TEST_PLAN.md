@@ -62,6 +62,17 @@ node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts
 
 This command authenticates the dedicated user, compares the served Recursion manifest, entrypoint, static import graph, and stylesheet against the checkout, runs the Recursion-owned storage probe, opens SillyTavern with Playwright, verifies the Recursion Bar, Hero Pixel Array progress menu, Last Brief dropdown, settings/options menu, Full Viewer access, and bridge hooks, then writes screenshots, trace, live log, served-extension comparison, storage probe, browser snapshot, summary, and report artifacts. It does not send chat messages or call providers.
 
+Live swipe smoke:
+
+```powershell
+$env:SILLYTAVERN_BASE_URL='http://127.0.0.1:8000'
+$env:RECURSION_SILLYTAVERN_USER='recursion-soak-a'
+$env:RECURSION_LIVE_SWIPE='1'
+node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts
+```
+
+This command uses the no-generation browser smoke path, then creates a temporary in-page chat state with an assistant message that has two swipes. It emits SillyTavern's real `MESSAGE_SWIPED` event path, verifies Recursion clears seeded prompt text, verifies the activity ribbon reports source cleanup, and records hashed A/B/A source revision evidence. It restores the original chat after the proof and does not call providers.
+
 Generation-enabled Utility smoke target:
 
 ```powershell
@@ -89,6 +100,7 @@ Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIV
 | --- | --- | --- | --- |
 | Mount smoke | no | no | Recursion extension loads, Recursion Bar renders, Hero Pixel Array progress menu can open, settings/options can open, viewer can open. |
 | Mode smoke | no | no | Disabled power, Auto, Manual, and return-to-disabled controls update runtime state, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
+| Swipe smoke | temporary in-page only | no | Real `MESSAGE_SWIPED` path clears Recursion prompts, changes active source revision A -> B, and returns to the same A revision on swipe back. |
 | Storage probe | files only | no | Dedicated user can write/read/delete Recursion-owned files and records are isolated from other users. |
 | Manual smoke | optional | Utility | Manual applies as a distinct mode, installs prompts, and records sanitized proof for the Manual branch. |
 | Utility provider smoke | yes | Utility | Arbiter/card/composer work runs, progress menu reports it, prompt packet installs, and generation continues. |

@@ -36,6 +36,7 @@ const DEFAULT_LOW_REASONING_MAX_CARDS = 3;
 const DEFAULT_NORMAL_REASONING_MAX_CARDS = 6;
 const DEFAULT_ULTRA_REASONING_MAX_CARDS = 10;
 const HIGH_REASONER_CARD_PRIORITY = 88;
+const MAX_SCENE_CACHE_VARIANTS = 4;
 const REASONING_LEVEL_POLICIES = Object.freeze({
   low: {
     level: 'low',
@@ -208,6 +209,8 @@ function normalizeMessage(message, index) {
   const source = asObject(message);
   const mesid = numberOr(source.mesid ?? source.id ?? source.messageId, index);
   const rawText = source.text ?? source.mes ?? source.content ?? '';
+  const swipeId = Number(source.swipeId ?? source.swipe_id);
+  const swipeCount = Number(source.swipeCount ?? (Array.isArray(source.swipes) ? source.swipes.length : NaN));
   const role = cleanString(
     source.role ?? (source.is_user === true ? 'user' : (source.is_system === true ? 'system' : 'assistant')),
     'assistant'
@@ -217,6 +220,9 @@ function normalizeMessage(message, index) {
     role,
     text: safeText(rawText, 1200),
     textHash: hashJson(String(rawText ?? '')),
+    ...(Number.isFinite(swipeId) ? { swipeId: Math.max(0, Math.round(swipeId)) } : {}),
+    ...(Number.isFinite(swipeCount) ? { swipeCount: Math.max(0, Math.round(swipeCount)) } : {}),
+    ...(source.activeSwipeTextHash ? { activeSwipeTextHash: safeText(source.activeSwipeTextHash, 180) } : {}),
     visible: source.visible === false || source.hidden === true ? false : true
   };
 }
@@ -231,7 +237,7 @@ function normalizeSnapshot(rawSnapshot = {}) {
   const chatId = safeIdentifier(source.chatId ?? source.chatKey, DEFAULT_CHAT_ID);
   const chatKey = safeIdentifier(source.chatKey ?? source.chatId, chatId);
   const sceneFingerprint = safeIdentifier(source.sceneFingerprint, hashJson(messages));
-  return {
+  const normalized = {
     chatId,
     chatKey,
     sceneKey: safeIdentifier(source.sceneKey ?? source.sceneFingerprint, DEFAULT_SCENE_KEY),
@@ -242,6 +248,10 @@ function normalizeSnapshot(rawSnapshot = {}) {
     ),
     latestMesId,
     messages
+  };
+  return {
+    ...normalized,
+    sourceRevisionHash: safeText(source.sourceRevisionHash || sourceWindowFingerprint(normalized), 180)
   };
 }
 
@@ -271,6 +281,7 @@ function providerSafeSnapshot(snapshot = {}) {
     sceneKey: safeText(source.sceneKey || DEFAULT_SCENE_KEY, 120) || DEFAULT_SCENE_KEY,
     sceneFingerprint: safeText(source.sceneFingerprint || '', 180),
     turnFingerprint: safeText(source.turnFingerprint || '', 180),
+    sourceRevisionHash: safeText(source.sourceRevisionHash || '', 180),
     latestMesId: numberOr(source.latestMesId, 0),
     messages
   };
@@ -288,6 +299,7 @@ function viewSnapshot(snapshot) {
     sceneKey: safeText(source.sceneKey || DEFAULT_SCENE_KEY, 160) || DEFAULT_SCENE_KEY,
     sceneFingerprint: safeText(source.sceneFingerprint || '', 180),
     turnFingerprint: safeText(source.turnFingerprint || '', 180),
+    sourceRevisionHash: safeText(source.sourceRevisionHash || '', 180),
     latestMesId: numberOr(source.latestMesId, 0),
     messages
   };
@@ -354,12 +366,17 @@ function snapshotWithPendingUserMessage(snapshot, userMessage) {
       visible: true
     }
   ];
-  return {
+  const nextSnapshot = {
     ...snapshot,
     latestMesId: pendingMesId,
     messages: nextMessages,
+    sourceRevisionHash: sourceWindowFingerprint({ ...snapshot, latestMesId: pendingMesId, messages: nextMessages })
+  };
+  return {
+    ...nextSnapshot,
     turnFingerprint: hashJson({
       latestMesId: pendingMesId,
+      sourceRevisionHash: nextSnapshot.sourceRevisionHash,
       messages: nextMessages.slice(-3)
     })
   };
@@ -788,7 +805,10 @@ function promptInstallFreshnessSignature(snapshot) {
         .map((message) => ({
           mesid: numberOr(message?.mesid, 0),
           role: safeProviderRole(message?.role),
-          textHash: String(message?.textHash || hashJson(String(message?.text ?? '')))
+          textHash: String(message?.textHash || hashJson(String(message?.text ?? ''))),
+          ...(Number.isFinite(Number(message?.swipeId)) ? { swipeId: Math.max(0, Math.round(Number(message.swipeId))) } : {}),
+          ...(Number.isFinite(Number(message?.swipeCount)) ? { swipeCount: Math.max(0, Math.round(Number(message.swipeCount))) } : {}),
+          ...(message?.activeSwipeTextHash ? { activeSwipeTextHash: safeText(message.activeSwipeTextHash, 180) } : {})
         }))
     : [];
   return {
@@ -796,6 +816,7 @@ function promptInstallFreshnessSignature(snapshot) {
     sceneKey: safeText(source.sceneKey || DEFAULT_SCENE_KEY, 160) || DEFAULT_SCENE_KEY,
     sceneFingerprint: safeText(source.sceneFingerprint || '', 180),
     latestMesId: numberOr(source.latestMesId, 0),
+    sourceRevisionHash: safeText(source.sourceRevisionHash || sourceWindowFingerprint(source), 180),
     visibleMessagesHash: hashJson(visibleMessages)
   };
 }
@@ -811,7 +832,10 @@ function sourceWindowMessages(snapshot, firstMesId = null, lastMesId = null) {
     .map((message) => ({
       mesid: numberOr(message?.mesid, 0),
       role: safeProviderRole(message?.role),
-      textHash: String(message?.textHash || hashJson(String(message?.text ?? '')))
+      textHash: String(message?.textHash || hashJson(String(message?.text ?? ''))),
+      ...(Number.isFinite(Number(message?.swipeId)) ? { swipeId: Math.max(0, Math.round(Number(message.swipeId))) } : {}),
+      ...(Number.isFinite(Number(message?.swipeCount)) ? { swipeCount: Math.max(0, Math.round(Number(message.swipeCount))) } : {}),
+      ...(message?.activeSwipeTextHash ? { activeSwipeTextHash: safeText(message.activeSwipeTextHash, 180) } : {})
     }))
     .filter((message) => message.mesid >= first && message.mesid <= last);
 }
@@ -836,7 +860,8 @@ function cardSourceContext(snapshot, overrides = {}) {
     chatId: snapshot.chatId,
     firstMesId,
     lastMesId,
-    snapshotHash: sourceWindowFingerprint(snapshot, firstMesId, lastMesId)
+    snapshotHash: sourceWindowFingerprint(snapshot, firstMesId, lastMesId),
+    sourceRevisionHash: sourceWindowFingerprint(snapshot, firstMesId, lastMesId)
   };
 }
 
@@ -844,6 +869,7 @@ function snapshotsMatchForPromptInstall(expected, current) {
   const expectedSignature = promptInstallFreshnessSignature(expected);
   const currentSignature = promptInstallFreshnessSignature(current);
   return expectedSignature.chatKey === currentSignature.chatKey
+    && expectedSignature.sourceRevisionHash === currentSignature.sourceRevisionHash
     && expectedSignature.visibleMessagesHash === currentSignature.visibleMessagesHash;
 }
 
@@ -853,6 +879,7 @@ function promptSnapshotMetadataMatches(expected, current) {
     && expected?.sceneKey === current?.sceneKey
     && expected?.sceneFingerprint === current?.sceneFingerprint
     && expected?.turnFingerprint === current?.turnFingerprint
+    && expected?.sourceRevisionHash === current?.sourceRevisionHash
     && expected?.latestMesId === current?.latestMesId;
 }
 
@@ -883,19 +910,67 @@ function sceneCacheLatestHand(hand, packet = null) {
   };
 }
 
-function sceneCachePayload(snapshot, deck, hand, plan, packet = null, settings = {}) {
+function activeSourceRevisionHash(snapshot) {
+  return safeText(snapshot?.sourceRevisionHash || sourceWindowFingerprint(snapshot), 180);
+}
+
+function cloneCacheVariants(cache) {
+  const source = asObject(cache);
+  const variants = asObject(source.variants);
+  const output = {};
+  for (const [key, value] of Object.entries(variants)) {
+    const variantKey = safeText(value?.sourceRevisionHash || key, 180);
+    if (!variantKey) continue;
+    output[variantKey] = {
+      ...asObject(value),
+      sourceRevisionHash: variantKey,
+      cards: Array.isArray(value?.cards) ? value.cards : [],
+      latestHand: value?.latestHand || null
+    };
+  }
+  return output;
+}
+
+function sceneCachePayload(snapshot, deck, hand, plan, packet = null, settings = {}, previousCache = null) {
+  const sourceRevisionHash = activeSourceRevisionHash(snapshot);
+  const range = sourceWindowRange(snapshot);
+  const variants = cloneCacheVariants(previousCache);
+  const existingOrder = Array.isArray(previousCache?.variantOrder)
+    ? previousCache.variantOrder.map((key) => safeText(key, 180)).filter(Boolean)
+    : Object.keys(variants);
+  const latestHand = sceneCacheLatestHand(hand, packet);
+  const source = {
+    chatIdHash: hashJson(snapshot.chatId),
+    firstMesId: range.firstMesId,
+    lastMesId: range.lastMesId,
+    latestMesId: snapshot.latestMesId,
+    sceneFingerprint: snapshot.sceneFingerprint,
+    chatWindowHash: hashJson(snapshot.messages),
+    sourceRevisionHash,
+    sourceWindowHash: sourceWindowFingerprint(snapshot, range.firstMesId, range.lastMesId),
+    sceneStatus: plan.sceneStatus
+  };
+  variants[sourceRevisionHash] = {
+    sourceRevisionHash,
+    source,
+    cards: deck.cards,
+    latestHand,
+    updatedAt: nowIso()
+  };
+  const variantOrder = [...existingOrder.filter((key) => key !== sourceRevisionHash), sourceRevisionHash]
+    .filter((key) => variants[key])
+    .slice(-MAX_SCENE_CACHE_VARIANTS);
+  const prunedVariants = {};
+  for (const key of variantOrder) prunedVariants[key] = variants[key];
   return {
     cacheState: 'active',
     versions: cacheContractVersions(settings),
-    source: {
-      chatIdHash: hashJson(snapshot.chatId),
-      latestMesId: snapshot.latestMesId,
-      sceneFingerprint: snapshot.sceneFingerprint,
-      chatWindowHash: hashJson(snapshot.messages),
-      sceneStatus: plan.sceneStatus
-    },
+    source,
+    activeSourceRevisionHash: sourceRevisionHash,
+    variantOrder,
+    variants: prunedVariants,
     cards: deck.cards,
-    latestHand: sceneCacheLatestHand(hand, packet)
+    latestHand
   };
 }
 
@@ -1111,17 +1186,47 @@ function compactCacheCardForArbiter(card, snapshot) {
   return output;
 }
 
+function activeSceneCacheVariant(cache, snapshot) {
+  const source = asObject(cache);
+  const sourceRevisionHash = activeSourceRevisionHash(snapshot);
+  const variants = asObject(source.variants);
+  const exact = asObject(variants[sourceRevisionHash]);
+  if (exact && Array.isArray(exact.cards)) {
+    return {
+      sourceRevisionHash,
+      cards: exact.cards,
+      latestHand: exact.latestHand || null,
+      exact: true
+    };
+  }
+  if (!Object.keys(variants).length && Array.isArray(source.cards)) {
+    return {
+      sourceRevisionHash: safeText(source.activeSourceRevisionHash || '', 180),
+      cards: source.cards,
+      latestHand: source.latestHand || null,
+      exact: false
+    };
+  }
+  return {
+    sourceRevisionHash,
+    cards: [],
+    latestHand: null,
+    exact: false
+  };
+}
+
 function compactSceneCacheForArbiter(cache, snapshot) {
   const source = asObject(cache);
   const cacheState = ['active', 'stale', 'retired', 'invalid'].includes(source.cacheState) ? source.cacheState : 'active';
   const invalidation = asObject(source.invalidation);
   const invalidationReason = safeText(invalidation.reason || '', 120);
   const invalidationDetectedAt = safeText(invalidation.detectedAt || '', 80);
-  const cards = (Array.isArray(source.cards) ? source.cards : [])
+  const activeVariant = activeSceneCacheVariant(cache, snapshot);
+  const cards = activeVariant.cards
     .map((card) => compactCacheCardForArbiter(card, snapshot))
     .filter(Boolean)
     .slice(0, 32);
-  const latestHand = asObject(source.latestHand);
+  const latestHand = asObject(activeVariant.latestHand);
   const handCards = Array.isArray(latestHand.cardIds)
     ? latestHand.cardIds.map((cardId) => arbiterSafeRef(cardId || '', 'card')).filter(Boolean).slice(0, 16)
     : [];
@@ -1130,6 +1235,9 @@ function compactSceneCacheForArbiter(cache, snapshot) {
     available: cards.length > 0,
     sceneKey: safeText(snapshot?.sceneKey || DEFAULT_SCENE_KEY, 160) || DEFAULT_SCENE_KEY,
     sceneFingerprint: safeText(snapshot?.sceneFingerprint || '', 180),
+    sourceRevisionHash: activeVariant.sourceRevisionHash,
+    variantCount: Object.keys(asObject(source.variants)).length,
+    activeVariantAvailable: activeVariant.exact || (!Object.keys(asObject(source.variants)).length && cards.length > 0),
     cacheState,
     ...(invalidationReason
       ? {
@@ -2533,8 +2641,11 @@ export function createRecursionRuntime({
     const freshness = asObject(card?.freshness);
     return [
       card?.sourceFingerprint,
+      card?.sourceRevisionHash,
       source.fingerprint,
       source.snapshotHash,
+      source.sourceRevisionHash,
+      freshness.sourceRevisionHash,
       freshness.sourceFingerprint
     ]
       .map((value) => String(value ?? '').trim())
@@ -2613,6 +2724,7 @@ export function createRecursionRuntime({
           sceneId: snapshot.sceneKey,
           chatId: snapshot.chatId,
           snapshotHash: hashJson(snapshot),
+          sourceRevisionHash: activeSourceRevisionHash(snapshot),
           lastMesId: snapshot.latestMesId
         });
         const staleReason = staleCacheCardReason(sanitized, normalized, snapshot);
@@ -2967,7 +3079,8 @@ export function createRecursionRuntime({
         );
         return scoped.cards;
       };
-      const cacheCards = filterScopedCards(sanitizedCacheCards(runId, sceneSnapshot, cache?.cards));
+      const activeCache = activeSceneCacheVariant(cache, sceneSnapshot);
+      const cacheCards = filterScopedCards(sanitizedCacheCards(runId, sceneSnapshot, activeCache.cards));
       const reuseCacheOnly = action === 'reuse-cache' && cacheCards.length > 0;
       const providerCards = reuseCacheOnly ? [] : filterScopedCards(
         (await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, settings, signal })).map(sanitizeGeneratedCard)
@@ -3068,7 +3181,7 @@ export function createRecursionRuntime({
       await runStorageSaveSection(runId, () => saveSceneCacheSafe(
         runId,
         promptSnapshot,
-        sceneCachePayload(promptSnapshot, promptDeck, hand, plan, null, settings)
+        sceneCachePayload(promptSnapshot, promptDeck, hand, plan, null, settings, cache)
       ));
       if (!isActiveRun(runId)) return supersededResult(runId);
 
@@ -3135,7 +3248,7 @@ export function createRecursionRuntime({
           await runStorageSaveSection(runId, () => saveSceneCacheSafe(
             runId,
             promptSnapshot,
-            sceneCachePayload(promptSnapshot, promptDeck, hand, plan, null, settings)
+            sceneCachePayload(promptSnapshot, promptDeck, hand, plan, null, settings, cache)
           ));
           if (!isActiveRun(runId)) return supersededResult(runId);
           packet = await composePromptPacket({
@@ -3168,7 +3281,7 @@ export function createRecursionRuntime({
         await runStorageSaveSection(runId, () => saveSceneCacheSafe(
           runId,
           promptSnapshot,
-          sceneCachePayload(promptSnapshot, promptDeck, hand, plan, packet, settings)
+          sceneCachePayload(promptSnapshot, promptDeck, hand, plan, packet, settings, cache)
         ));
         if (!isActiveRun(runId)) return supersededResult(runId);
         settleRuntimeActivity({

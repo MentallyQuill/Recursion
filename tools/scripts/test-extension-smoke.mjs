@@ -271,14 +271,14 @@ if (lifecycleFailures.length) {
     assert(fake.promptState.get(key), `source-change setup installs ${key}`);
   }
   const clearStart = fake.promptWrites.length;
-  await eventSource.emit('message_updated', 0);
+  await eventSource.emit('message_swiped', 0);
   const cleanupWrites = fake.promptWrites.slice(clearStart);
   for (const key of RECURSION_PROMPT_KEYS) {
     assert(
       cleanupWrites.some((entry) => entry.key === key && entry.text === ''),
-      `source-change event clears ${key}`
+      `swipe source-change event clears ${key}`
     );
-    assertEqual(fake.promptState.get(key), '', `source-change event leaves ${key} empty`);
+    assertEqual(fake.promptState.get(key), '', `swipe source-change event leaves ${key} empty`);
   }
   await globalThis.recursionOnDelete();
   assertEqual(eventSource.listenerCount('message_deleted'), 0, 'teardown unsubscribes from message deleted event');

@@ -4,6 +4,7 @@ const RECURSION_VERSION = '0.1.0-pre-alpha.1';
 const MAX_JOURNAL_ENTRIES = 500;
 const DEFAULT_MAX_SCENE_CACHES_PER_CHAT = 3;
 const DEFAULT_MAX_SCENE_CACHES_TOTAL = 24;
+const MAX_SCENE_CACHE_VARIANTS = 4;
 const SCENE_CACHE_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
 const RUN_JOURNAL_KEY_PATTERN = /^recursion-run-journal-[A-Za-z0-9_.-]+\.v1\.json$/;
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
@@ -252,6 +253,9 @@ function normalizeSceneSource(value) {
     latestMesId: normalizeNonNegativeInteger(source.latestMesId),
     sceneFingerprint: safeMetadataText(source.sceneFingerprint || '', 160, ''),
     chatWindowHash: safeMetadataText(source.chatWindowHash || '', 160, ''),
+    sourceRevisionHash: safeMetadataText(source.sourceRevisionHash || '', 180, ''),
+    sourceWindowHash: safeMetadataText(source.sourceWindowHash || '', 180, ''),
+    sceneStatus: safeMetadataText(source.sceneStatus || '', 80, ''),
     sourceRefs: Array.isArray(source.sourceRefs)
       ? source.sourceRefs.map(normalizeSourceRef).filter(Boolean).slice(0, 32)
       : []
@@ -266,6 +270,10 @@ function normalizeSceneCard(card) {
   const sourceFingerprint = safeMetadataText(
     card.sourceFingerprint || source.snapshotHash || source.fingerprint || freshness.sourceFingerprint || '',
     160
+  );
+  const sourceRevisionHash = safeMetadataText(
+    card.sourceRevisionHash || source.sourceRevisionHash || freshness.sourceRevisionHash || sourceFingerprint,
+    180
   );
   const firstMesId = Number(source.firstMesId ?? card.firstMesId ?? 0);
   const lastMesId = Number(source.lastMesId ?? card.lastMesId ?? 0);
@@ -290,11 +298,13 @@ function normalizeSceneCard(card) {
       firstMesId: Number.isFinite(firstMesId) ? Math.max(0, Math.round(firstMesId)) : 0,
       lastMesId: Number.isFinite(lastMesId) ? Math.max(0, Math.round(lastMesId)) : 0,
       fingerprint: safeMetadataText(source.fingerprint || sourceFingerprint, 160),
-      snapshotHash: safeMetadataText(source.snapshotHash || sourceFingerprint, 160)
+      snapshotHash: safeMetadataText(source.snapshotHash || sourceFingerprint, 160),
+      sourceRevisionHash
     },
     freshness: {
       generatedAt: timestampValue(freshness.generatedAt || card.generatedAt),
       sourceFingerprint,
+      sourceRevisionHash,
       ...(Number.isFinite(expiresAfterMesId) ? { expiresAfterMesId: Math.round(expiresAfterMesId) } : {})
     },
     arbiter: {
@@ -327,8 +337,53 @@ function normalizeLatestHand(value) {
   }));
 }
 
+function normalizeVariantKey(value) {
+  return safeMetadataText(value, 180, '');
+}
+
+function normalizeSceneCacheVariant(key, value = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const sourceRevisionHash = normalizeVariantKey(source.sourceRevisionHash || key);
+  if (!sourceRevisionHash) return null;
+  const variant = {
+    sourceRevisionHash,
+    source: normalizeSceneSource({
+      ...(source.source || {}),
+      sourceRevisionHash
+    }),
+    cards: Array.isArray(source.cards) ? source.cards.map(normalizeSceneCard).filter(Boolean) : [],
+    latestHand: normalizeLatestHand(source.latestHand),
+    updatedAt: timestampValue(source.updatedAt)
+  };
+  if (!variant.source.sourceRevisionHash) variant.source.sourceRevisionHash = sourceRevisionHash;
+  return variant;
+}
+
+function normalizeSceneCacheVariants(source) {
+  const variantsSource = source && typeof source.variants === 'object' && !Array.isArray(source.variants)
+    ? source.variants
+    : {};
+  const normalized = {};
+  const requestedOrder = Array.isArray(source?.variantOrder)
+    ? source.variantOrder.map(normalizeVariantKey).filter(Boolean)
+    : [];
+  for (const [key, value] of Object.entries(variantsSource)) {
+    const variant = normalizeSceneCacheVariant(key, value);
+    if (variant) normalized[variant.sourceRevisionHash] = variant;
+  }
+  const discoveredOrder = Object.keys(normalized).filter((key) => !requestedOrder.includes(key));
+  const boundedOrder = [...requestedOrder, ...discoveredOrder]
+    .filter((key, index, list) => key && normalized[key] && list.indexOf(key) === index)
+    .slice(-MAX_SCENE_CACHE_VARIANTS);
+  const bounded = {};
+  for (const key of boundedOrder) bounded[key] = normalized[key];
+  return { variants: bounded, variantOrder: boundedOrder };
+}
+
 function normalizeSceneCache(chatKey, sceneKey, value = {}) {
   const source = value && typeof value === 'object' ? value : {};
+  const normalizedVariants = normalizeSceneCacheVariants(source);
+  const activeSourceRevisionHash = normalizeVariantKey(source.activeSourceRevisionHash || normalizedVariants.variantOrder.at(-1) || '');
   return baseRecord('recursion.sceneCache', {
     createdAt: source.createdAt,
     chatKey: safeId(chatKey, 'chat'),
@@ -337,6 +392,9 @@ function normalizeSceneCache(chatKey, sceneKey, value = {}) {
     cards: Array.isArray(source.cards) ? source.cards.map(normalizeSceneCard).filter(Boolean) : [],
     latestHand: normalizeLatestHand(source.latestHand),
     source: normalizeSceneSource(source.source),
+    activeSourceRevisionHash,
+    variants: normalizedVariants.variants,
+    variantOrder: normalizedVariants.variantOrder,
     versions: sanitizedJsonValue(source.versions, {}),
     ...(source.invalidation === undefined ? {} : { invalidation: normalizeInvalidation(source.invalidation) })
   });

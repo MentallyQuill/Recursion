@@ -79,6 +79,8 @@ The fixed V1 card catalog is Scene Frame, Active Cast, Character Motivation, Rel
 
 Cards are disposable scene-local cache artifacts. The scene deck stores active, stowed, stale, and discarded records for one scene. The turn hand is rebuilt for each composition event from active cards under max-card and token caps. A valid card can stay in the deck without entering the hand.
 
+Scene caches are source-revision aware. Runtime hashes the visible message source, including active SillyTavern swipe metadata, and stores up to four source variants inside a scene cache. Cached cards are reusable only from the exact active source variant when variants exist, so swiping from A to B cannot leak B cards when the user swipes back to A.
+
 Cards expand scene implications rather than preserve facts for their own sake. For example, a location card should derive routes, sightlines, plausible interruptions, usable local details, and relevance boundaries from the active location instead of restating the place name or dumping broad setting lore.
 
 Character Motivation cards are behavior-facing. They can describe visible pressure, established goals, and likely posture, but they cannot inject private internal-thought dumps or hidden motives as fact.
@@ -129,6 +131,7 @@ The UI is an observatory, not a card editor. It shows what Recursion did without
 - Prompt install failure records a warning and generation continues without Recursion.
 - Storage failure keeps in-memory work for the current turn when possible and reports a warning.
 - Stale async results cannot mutate the active cache or prompt packet.
+- Swipe changes are prompt-safe source changes: Recursion clears stale prompts immediately and reuses cached cards only when the active source revision matches.
 - Prompt install is replace-or-clear from Recursion's perspective.
 - Player Stop / host generation stop aborts active Recursion work, clears owned prompt keys, marks any canceled cache stale, and reports skipped progress instead of warning/failure.
 

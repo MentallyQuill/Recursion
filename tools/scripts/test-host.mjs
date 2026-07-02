@@ -19,6 +19,39 @@ const snap = await host.snapshot();
 assertEqual(snap.chatId, 'chat-file', 'chat id read');
 assertEqual(snap.messages[0].text, 'Hello', 'message text read');
 
+const swipeContext = {
+  chatId: 'swipe-chat',
+  chat: [
+    {
+      mesid: 0,
+      is_user: false,
+      mes: 'Swipe A text.',
+      swipe_id: 0,
+      swipes: ['Swipe A text.', 'Swipe B text.']
+    }
+  ],
+  extension_prompt_types: { IN_CHAT: 1, IN_PROMPT: 2, BEFORE_PROMPT: 0 },
+  extension_prompt_roles: { SYSTEM: 0 },
+  setExtensionPrompt() {}
+};
+const swipeHost = createSillyTavernHost({ contextFactory: () => swipeContext, settingsRoot: {} });
+const swipeSnapA = await swipeHost.snapshot();
+assertEqual(swipeSnapA.messages[0].swipeId, 0, 'snapshot records active swipe id');
+assertEqual(swipeSnapA.messages[0].swipeCount, 2, 'snapshot records swipe count');
+assertEqual(typeof swipeSnapA.messages[0].activeSwipeTextHash, 'string', 'snapshot records active swipe text hash');
+assertEqual(typeof swipeSnapA.sourceRevisionHash, 'string', 'snapshot records source revision hash');
+const inactiveHash = swipeSnapA.sourceRevisionHash;
+swipeContext.chat[0].swipes[1] = 'Swipe B text changed while inactive.';
+assertEqual((await swipeHost.snapshot()).sourceRevisionHash, inactiveHash, 'inactive swipe text does not affect active source revision');
+swipeContext.chat[0].swipe_id = 1;
+swipeContext.chat[0].mes = swipeContext.chat[0].swipes[1];
+const swipeSnapB = await swipeHost.snapshot();
+assert(swipeSnapB.sourceRevisionHash !== inactiveHash, 'active swipe change affects source revision');
+assert(swipeSnapB.turnFingerprint !== swipeSnapA.turnFingerprint, 'active swipe change affects turn fingerprint');
+swipeContext.chat[0].swipes.push('Swipe C text.');
+const swipeSnapC = await swipeHost.snapshot();
+assert(swipeSnapC.sourceRevisionHash !== swipeSnapB.sourceRevisionHash, 'swipe count change affects source revision');
+
 const packet = {
   injectionPlan: { blocks: [{ id: 'turnBrief', promptKey: 'recursion.turnBrief', placement: 'in_chat', depth: 2, role: 'system' }] },
   sections: { turnBrief: 'Use the alley scene.', sceneBrief: '', guardrails: '' }
@@ -663,6 +696,14 @@ const rawResponse = await host.generation.generate({
   signal: 'signal-token'
 });
 assertEqual(rawResponse.text, '{"schema":"x"}', 'raw generation result preserved');
+const structuredContent = { schema: 'recursion.utilityArbiter.v1', ok: true };
+context.generateRaw = async () => ({ content: structuredContent, reasoning: { hidden: 'not prompt text' } });
+const structuredContentResponse = await host.generation.generate({ prompt: 'Return extracted JSON object' });
+assertEqual(
+  structuredContentResponse.text,
+  JSON.stringify(structuredContent),
+  'object-shaped host generation content is preserved as parseable JSON text'
+);
 context.generateRaw = async (request) => {
   rawCalls.push(request);
   return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };

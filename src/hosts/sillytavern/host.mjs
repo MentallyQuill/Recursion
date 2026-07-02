@@ -127,11 +127,28 @@ function messageText(message) {
   return stringValue(message?.mes ?? message?.text ?? message?.content);
 }
 
+function finiteNonNegativeInteger(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Math.max(0, Math.round(numeric));
+}
+
+function activeSwipeText(source, fallbackText) {
+  const swipeId = finiteNonNegativeInteger(source?.swipe_id);
+  if (swipeId === null || !Array.isArray(source?.swipes)) return fallbackText;
+  const active = source.swipes[swipeId];
+  return active === undefined || active === null ? fallbackText : stringValue(active);
+}
+
 function normalizeMessage(message, index) {
   const source = asObject(message);
   const mesId = numericMessageId(source, index);
   const role = messageRole(source);
   const visible = source.visible === false || source.hidden === true || source.is_system === true ? false : true;
+  const text = messageText(source);
+  const swipeId = finiteNonNegativeInteger(source.swipe_id);
+  const swipeCount = Array.isArray(source.swipes) ? source.swipes.length : null;
+  const activeText = activeSwipeText(source, text);
   return {
     id: stringValue(source.mesid ?? source.id ?? source.index ?? index),
     mesId,
@@ -141,13 +158,29 @@ function normalizeMessage(message, index) {
     isSystem: role === 'system',
     visible,
     sender: stringValue(source.name),
-    text: messageText(source)
+    text,
+    ...(swipeId !== null ? { swipeId } : {}),
+    ...(swipeCount !== null ? { swipeCount } : {}),
+    ...(swipeId !== null || swipeCount !== null ? { activeSwipeTextHash: hashJson(activeText) } : {})
   };
 }
 
 function latestMessageId(messages) {
   if (messages.length === 0) return -1;
   return messages.reduce((latest, message) => Math.max(latest, message.mesId), -1);
+}
+
+function sourceRevisionMessages(messages) {
+  return (Array.isArray(messages) ? messages : [])
+    .filter((message) => message?.visible !== false)
+    .map((message) => ({
+      mesid: message.mesId,
+      role: message.role,
+      textHash: hashJson(String(message.text ?? '')),
+      ...(Number.isFinite(message.swipeId) ? { swipeId: message.swipeId } : {}),
+      ...(Number.isFinite(message.swipeCount) ? { swipeCount: message.swipeCount } : {}),
+      ...(message.activeSwipeTextHash ? { activeSwipeTextHash: message.activeSwipeTextHash } : {})
+    }));
 }
 
 function fallbackPromptBlocks(packet) {
@@ -245,9 +278,25 @@ function scanValue(block) {
   return false;
 }
 
+function generationResponseText(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return stringValue(value);
+      }
+    }
+    return stringValue(value);
+  }
+  return '';
+}
+
 function normalizeGenerationResponse(response) {
   if (response && typeof response === 'object') {
-    return { ...response, text: stringValue(response.text ?? response.content ?? response.message) };
+    return { ...response, text: generationResponseText(response.text, response.content, response.message) };
   }
   return { text: stringValue(response) };
 }
@@ -400,6 +449,7 @@ export function createSillyTavernHost({
     const chatKey = safeId(chatId, 'chat');
     const messages = (Array.isArray(context.chat) ? context.chat : []).map((message, index) => normalizeMessage(message, index));
     const latestMesId = latestMessageId(messages);
+    const sourceRevisionHash = hashJson(sourceRevisionMessages(messages));
     const sceneFingerprint = hashJson({
       chatKey,
       sceneAnchor: sceneAnchor(context)
@@ -407,6 +457,7 @@ export function createSillyTavernHost({
     const turnFingerprint = hashJson({
       chatKey,
       latestMesId,
+      sourceRevisionHash,
       latestMessage: messages.at(-1) || null
     });
     const sceneKey = safeId(`${chatKey}-${sceneFingerprint}`, 'scene');
@@ -417,6 +468,7 @@ export function createSillyTavernHost({
       chatKey,
       sceneFingerprint,
       sceneKey,
+      sourceRevisionHash,
       turnFingerprint,
       latestMesId,
       messages

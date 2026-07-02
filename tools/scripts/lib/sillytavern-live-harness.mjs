@@ -860,6 +860,7 @@ function browserSnapshotScript() {
       })(),
       viewerOpened: globalThis.__recursionSmokeViewerOpened === true,
       modeSmoke: globalThis.__recursionSmokeModeSmoke || null,
+      swipeProof: globalThis.__recursionSmokeSwipeProof || null,
       generation: globalThis.__recursionSmokeGeneration || null,
       bridge: {
         interceptor: typeof globalThis.recursionGenerationInterceptor === 'function',
@@ -1080,6 +1081,176 @@ function generationRecorderInstallScript() {
       events: sharedEvents
     };
     return globalThis.__recursionSmokePromptRecorder;
+  };
+}
+
+function swipeProofScript() {
+  return async (waitMs = 30000) => {
+    const hashText = (value) => {
+      let hash = 0x811c9dc5;
+      for (const char of String(value || '')) {
+        hash ^= char.codePointAt(0);
+        hash = Math.imul(hash, 0x01000193);
+      }
+      return (hash >>> 0).toString(16).padStart(8, '0');
+    };
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const proof = {
+      requested: true,
+      ok: false,
+      eventName: '',
+      messageId: 1,
+      sourceRevisionA: '',
+      sourceRevisionB: '',
+      sourceRevisionA2: '',
+      promptSeeded: false,
+      promptCleared: false,
+      ribbonCleanup: false,
+      swipeIdA: null,
+      swipeIdB: null,
+      swipeCount: null,
+      error: ''
+    };
+    globalThis.__recursionSmokeSwipeProof = proof;
+    if (!context) {
+      proof.error = 'SillyTavern context unavailable';
+      return proof;
+    }
+    const eventTypes = context.event_types || context.eventTypes || globalThis.event_types || globalThis.eventTypes || {};
+    const eventName = String(eventTypes.MESSAGE_SWIPED || 'message_swiped');
+    proof.eventName = eventName;
+    const eventSource = context.eventSource || globalThis.eventSource;
+    const originalChat = Array.isArray(context.chat) ? context.chat.slice() : null;
+    const originalChatLength = Array.isArray(context.chat) ? context.chat.length : null;
+    const originalGenerateRaw = context.generateRaw;
+    const originalGenerateQuietPrompt = context.generateQuietPrompt;
+    const originalSetExtensionPrompt = context.setExtensionPrompt;
+    if (!Array.isArray(globalThis.__recursionSmokePromptEvents)) globalThis.__recursionSmokePromptEvents = [];
+    const promptEvents = globalThis.__recursionSmokePromptEvents;
+    const installedPromptKeys = new Set();
+    if (typeof originalSetExtensionPrompt === 'function') {
+      context.setExtensionPrompt = (...args) => {
+        const [key, text, position, depth, scan, role] = args;
+        const promptKey = String(key || '');
+        if (promptKey.startsWith('recursion.')) {
+          const promptText = String(text || '');
+          promptEvents.push({
+            key: promptKey,
+            cleared: promptText.length === 0,
+            textHash: hashText(promptText),
+            position: String(position ?? ''),
+            depth: Number(depth) || 0,
+            scan: Boolean(scan),
+            role: String(role ?? '')
+          });
+          if (promptText.length > 0) installedPromptKeys.add(promptKey);
+          else installedPromptKeys.delete(promptKey);
+        }
+        return originalSetExtensionPrompt.apply(context, args);
+      };
+    }
+    const emitSwipe = async () => {
+      const payload = { messageId: 1, mesid: 1 };
+      if (typeof eventSource?.emit === 'function') return await eventSource.emit(eventName, payload);
+      if (typeof eventSource?.trigger === 'function') return eventSource.trigger(eventName, payload);
+      if (typeof eventSource?.dispatchEvent === 'function') return eventSource.dispatchEvent(new CustomEvent(eventName, { detail: payload }));
+      throw new Error('MESSAGE_SWIPED event source unavailable');
+    };
+    const waitForPromptClear = async () => {
+      const deadline = Date.now() + Math.max(0, Math.min(Number(waitMs) || 30000, 180000));
+      while (Date.now() < deadline) {
+        if (promptEvents.some((event) => event.cleared === true && event.key === 'recursion.turnBrief')) return true;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return promptEvents.some((event) => event.cleared === true && event.key === 'recursion.turnBrief') || installedPromptKeys.size === 0;
+    };
+    try {
+      if (typeof globalThis.recursionOnEnable === 'function') await globalThis.recursionOnEnable();
+      const module = await import('/scripts/extensions/third-party/Recursion/src/hosts/sillytavern/host.mjs');
+      const host = module.createSillyTavernHost({
+        contextFactory: () => context,
+        settingsRoot: globalThis.extension_settings || context.extensionSettings || {}
+      });
+      const chat = Array.isArray(context.chat) ? context.chat : [];
+      chat.splice(0, chat.length, {
+        mesid: 0,
+        is_user: true,
+        name: 'Recursion Swipe Smoke',
+        mes: 'Recursion live swipe source probe.'
+      }, {
+        mesid: 1,
+        is_user: false,
+        name: 'Recursion Swipe Smoke',
+        mes: 'Swipe A source state.',
+        swipe_id: 0,
+        swipes: ['Swipe A source state.', 'Swipe B source state.']
+      });
+      context.generateRaw = async () => ({
+        text: JSON.stringify({
+          schema: 'recursion.utilityArbiter.v1',
+          action: 'compose-brief',
+          cardJobs: [],
+          budgets: { targetBriefTokens: 500, maxCards: 6 },
+          reasonerDecision: { mode: 'skip', reason: 'live swipe smoke' },
+          diagnostics: ['live-swipe-smoke']
+        })
+      });
+      context.generateQuietPrompt = undefined;
+      const snapA = await host.snapshot();
+      proof.sourceRevisionA = hashText(snapA.sourceRevisionHash);
+      proof.swipeIdA = snapA.messages?.[1]?.swipeId ?? null;
+      proof.swipeCount = snapA.messages?.[1]?.swipeCount ?? null;
+      if (typeof context.setExtensionPrompt !== 'function') throw new Error('setExtensionPrompt unavailable');
+      context.setExtensionPrompt('recursion.turnBrief', 'Recursion swipe smoke stale prompt.', 'IN_PROMPT', 4, false, 'SYSTEM');
+      proof.promptSeeded = promptEvents.some((event) => event.cleared === false && event.key === 'recursion.turnBrief');
+      chat[1].swipe_id = 1;
+      chat[1].mes = chat[1].swipes[1];
+      await emitSwipe();
+      proof.promptCleared = await waitForPromptClear();
+      const snapB = await host.snapshot();
+      proof.sourceRevisionB = hashText(snapB.sourceRevisionHash);
+      proof.swipeIdB = snapB.messages?.[1]?.swipeId ?? null;
+      const ribbon = String(document.querySelector('[data-recursion-ribbon-label]')?.textContent || '');
+      proof.ribbonCleanup = /Source messages changed|prompt cleared/i.test(ribbon);
+      chat[1].swipe_id = 0;
+      chat[1].mes = chat[1].swipes[0];
+      await emitSwipe();
+      await waitForPromptClear();
+      const snapA2 = await host.snapshot();
+      proof.sourceRevisionA2 = hashText(snapA2.sourceRevisionHash);
+      proof.ok = proof.promptSeeded === true
+        && proof.promptCleared === true
+        && proof.ribbonCleanup === true
+        && proof.swipeIdA === 0
+        && proof.swipeIdB === 1
+        && proof.swipeCount === 2
+        && Boolean(snapA.sourceRevisionHash)
+        && snapA.sourceRevisionHash !== snapB.sourceRevisionHash
+        && snapA.sourceRevisionHash === snapA2.sourceRevisionHash;
+      if (!proof.ok) proof.error = 'swipe proof assertions failed';
+      return proof;
+    } catch (error) {
+      proof.error = String(error?.message || error || 'live swipe proof failed');
+      return proof;
+    } finally {
+      if (originalChat && Array.isArray(context.chat)) {
+        context.chat.splice(0, context.chat.length, ...originalChat);
+      } else if (Array.isArray(context.chat) && Number.isFinite(originalChatLength)) {
+        context.chat.splice(originalChatLength);
+      }
+      if (originalGenerateRaw === undefined) delete context.generateRaw;
+      else context.generateRaw = originalGenerateRaw;
+      if (originalGenerateQuietPrompt === undefined) delete context.generateQuietPrompt;
+      else context.generateQuietPrompt = originalGenerateQuietPrompt;
+      if (originalSetExtensionPrompt === undefined) delete context.setExtensionPrompt;
+      else context.setExtensionPrompt = originalSetExtensionPrompt;
+    }
   };
 }
 
@@ -1706,7 +1877,8 @@ async function runBrowserUiSmoke({
   timeoutMs = 30000,
   env = {},
   generationRequested = false,
-  reasonerRequested = false
+  reasonerRequested = false,
+  swipeRequested = false
 } = {}) {
   const consoleMessages = [];
   const pageErrors = [];
@@ -1810,6 +1982,19 @@ async function runBrowserUiSmoke({
         failed.status = 'fail';
         failed.result = 'browser-mode-smoke-failed';
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ modeSmoke }));
+        throw failed;
+      }
+    }
+
+    let swipeProof = null;
+    if (swipeRequested) {
+      await page.evaluate(generationRecorderInstallScript());
+      swipeProof = await page.evaluate(swipeProofScript(), timeoutMs);
+      if (!swipeProof?.ok) {
+        const failed = new Error('Recursion live swipe proof failed.');
+        failed.status = 'fail';
+        failed.result = 'live-swipe-proof-failed';
+        failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ swipeProof }));
         throw failed;
       }
     }
@@ -2166,6 +2351,7 @@ async function runBrowserUiSmoke({
       status: 'pass',
       result: generationRequested ? 'generation-smoke-pass' : 'browser-smoke-pass',
       snapshot,
+      swipeProof,
       cleanup,
       consoleMessages: consoleMessages.slice(-20),
       pageErrors: pageErrors.slice(-20),
@@ -2392,6 +2578,7 @@ export function createBaseReport({ scriptName, args = {}, env = {}, runId = crea
       passwordConfigured: Boolean(env.RECURSION_SILLYTAVERN_PASSWORD),
       liveGeneration: env.RECURSION_LIVE_GENERATION === '1',
       liveReasoner: env.RECURSION_LIVE_REASONER === '1',
+      liveSwipe: env.RECURSION_LIVE_SWIPE === '1',
       artifactDirConfigured: Boolean(env.RECURSION_ARTIFACT_DIR)
     },
     warnings: [],
@@ -3362,6 +3549,7 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
         } else {
           const generationRequested = env.RECURSION_LIVE_GENERATION === '1' || env.RECURSION_LIVE_REASONER === '1';
           const reasonerRequested = env.RECURSION_LIVE_REASONER === '1';
+          const swipeRequested = env.RECURSION_LIVE_SWIPE === '1';
           const browserResult = await runBrowserUiSmoke({
             baseUrl: env.SILLYTAVERN_BASE_URL,
             cookies: session.playwrightCookies(),
@@ -3369,7 +3557,8 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
             timeoutMs,
             env,
             generationRequested,
-            reasonerRequested
+            reasonerRequested,
+            swipeRequested
           });
           lastBrowserResult = browserResult;
           report.browser = browserResult;
@@ -3399,6 +3588,17 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
               actionMenuOpen: browserResult.snapshot?.actionMenuOpen,
               settingsPanelOpen: browserResult.snapshot?.settingsPanelOpen,
               providerTestVisible: browserResult.snapshot?.providerTestVisible,
+              swipeProof: browserResult.snapshot?.swipeProof
+                ? {
+                    requested: browserResult.snapshot.swipeProof.requested === true,
+                    ok: browserResult.snapshot.swipeProof.ok === true,
+                    promptCleared: browserResult.snapshot.swipeProof.promptCleared === true,
+                    ribbonCleanup: browserResult.snapshot.swipeProof.ribbonCleanup === true,
+                    swipeIdA: browserResult.snapshot.swipeProof.swipeIdA,
+                    swipeIdB: browserResult.snapshot.swipeProof.swipeIdB,
+                    swipeCount: browserResult.snapshot.swipeProof.swipeCount
+                  }
+                : null,
               generation: browserResult.snapshot?.generation
                 ? {
                     requested: browserResult.snapshot.generation.requested,
@@ -3446,6 +3646,17 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
             actionMenuOpen: browserResult.snapshot?.actionMenuOpen,
             settingsPanelOpen: browserResult.snapshot?.settingsPanelOpen,
             providerTestVisible: browserResult.snapshot?.providerTestVisible,
+            swipeProof: browserResult.snapshot?.swipeProof
+              ? {
+                  requested: browserResult.snapshot.swipeProof.requested === true,
+                  ok: browserResult.snapshot.swipeProof.ok === true,
+                  promptCleared: browserResult.snapshot.swipeProof.promptCleared === true,
+                  ribbonCleanup: browserResult.snapshot.swipeProof.ribbonCleanup === true,
+                  swipeIdA: browserResult.snapshot.swipeProof.swipeIdA,
+                  swipeIdB: browserResult.snapshot.swipeProof.swipeIdB,
+                  swipeCount: browserResult.snapshot.swipeProof.swipeCount
+                }
+              : null,
             generation: browserResult.snapshot?.generation
               ? {
                   requested: browserResult.snapshot.generation.requested,
@@ -3514,6 +3725,28 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
               : generationEvidence?.promptInstalled
                 ? 'Generation-enabled Recursion bridge smoke passed. Inspect sanitized prompt-key, host-continuation, prompt-metadata, and activity evidence before treating this as host-quality proof.'
                 : 'Inspect generation bridge evidence, prompt recorder status, prompt metadata, activity latest-run, and console/page errors.';
+          } else if (browserResult.status === 'pass' && swipeRequested) {
+            const swipeProof = browserResult.snapshot?.swipeProof || null;
+            const swipeProofStatus = swipeProof?.ok === true ? 'pass' : 'fail';
+            addCheck(report, {
+              name: 'swipe-live-smoke',
+              status: swipeProofStatus,
+              summary: swipeProof?.ok === true
+                ? 'Live SillyTavern MESSAGE_SWIPED path cleared Recursion prompt and changed active source revision.'
+                : 'Live SillyTavern swipe proof did not pass.',
+              details: {
+                releaseProof: swipeProofStatus === 'pass',
+                swipeProof
+              }
+            });
+            event('swipe-live-smoke', swipeProofStatus, browserResult.result, {
+              releaseProof: swipeProofStatus === 'pass',
+              swipeProof
+            });
+            setReportStatus(report, swipeProofStatus, swipeProofStatus === 'pass' ? 'live-swipe-smoke-pass' : 'live-swipe-smoke-failed');
+            report.nextAction = swipeProofStatus === 'pass'
+              ? 'Live swipe smoke passed. Generation-enabled smoke remains separate and requires configured Utility provider.'
+              : 'Inspect live swipe proof evidence, browser snapshot, and console/page errors.';
           } else {
             setReportStatus(report, browserResult.status, browserResult.result);
             if (generationRequested) {

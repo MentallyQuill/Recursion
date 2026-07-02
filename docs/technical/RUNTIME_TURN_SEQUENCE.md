@@ -83,6 +83,8 @@ After cache, provider, and fallback cards are known, runtime emits sanitized `ca
 
 Lifecycle actions from the plan can select, emphasize, stow, discard, or mark cards stale. If a selection exists, untouched cards are stowed for the current hand. Refresh is a two-part contract. The Arbiter requests new work through `cardJobs`, optionally naming `refreshOfCardId` for the cached card being replaced. Lifecycle `regenerate` marks the old cached card stale; by itself it does not create a replacement card. This keeps generation work explicit and prevents runtime from inventing semantic refreshes. The updated deck is saved as a scene cache record.
 
+Scene cache reads are source-revision aware. Runtime derives a `sourceRevisionHash` from visible message hashes plus active swipe metadata, then asks the Arbiter only about cards from that exact active variant when variants exist. Saving a deck updates the active variant and preserves up to three other recent variants. This makes swipe A/B/A flows fast without allowing cards generated for B to condition A.
+
 ## Hand Selection
 
 The hand selector considers only active cards. It sorts by emphasis, catalog priority, and id, then applies max-card and token caps. Omitted cards receive reasons such as `inactive`, `max-cards`, or `token-budget`.
@@ -115,7 +117,7 @@ Runtime keeps one active run id and an abort controller. Settings changes, provi
 
 When the SillyTavern entrypoint receives `event_types.CHAT_CHANGED`, runtime aborts active provider work, clears volatile packet/hand/plan/snapshot state, best-effort marks the previously active scene cache stale with reason `chat-changed`, clears Recursion prompt keys, and journals the prompt-clear result against the previous chat when known. It does not call Utility or Reasoner for the newly selected chat until the next generation or explicit refresh.
 
-When the entrypoint receives source mutation events such as `MESSAGE_DELETED`, `MESSAGE_UPDATED`, or `MESSAGE_SWIPED`, runtime follows the same prompt-safe cleanup path with reason `source-changed`. It clears the stale prompt immediately and stores only compact event metadata such as event name and message id; it does not persist changed message text.
+When the entrypoint receives source mutation events such as `MESSAGE_DELETED`, `MESSAGE_UPDATED`, or `MESSAGE_SWIPED`, runtime follows the same prompt-safe cleanup path with reason `source-changed`. It clears the stale prompt immediately and stores only compact event metadata such as event name and message id; it does not persist changed message text. The next generation reads the current active source revision. If the user swiped back to an earlier revision and that exact variant still exists and validates, runtime can reuse it; otherwise it regenerates or skips according to the Arbiter plan.
 
 When the player cancels SillyTavern generation, the entrypoint receives `event_types.GENERATION_STOPPED` (`generation_stopped`). Runtime treats that as `host-generation-stopped`: it aborts the active run controller so in-flight Utility/Reasoner calls receive an abort signal, clears volatile packet/hand/plan/snapshot state, clears Recursion prompt keys, and refuses to install any late packet from the canceled run. If a scene cache had already been written for that canceled attempt, runtime marks it stale with reason `host-generation-stopped`. The progress outcome is `skipped`/neutral so user cancellation is not displayed as a provider warning or failure.
 

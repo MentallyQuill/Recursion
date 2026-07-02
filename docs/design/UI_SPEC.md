@@ -50,7 +50,7 @@ Canonical desktop layout:
 ```text
 [power] | [cards] | [blocks] Selecting turn hand...               [reasoning] v | ...
 [power] | [cards] | [blocks] Installing prompt...                 [reasoning] v | ...
-[power] | [cards] | [blocks] Semi-Auto card subset pending...     [reasoning] v | ...
+[power] | [cards] | [blocks] Manual scope active...               [reasoning] Cards v | ...
 [power-off] | [cards] |                                           [reasoning] v | ...
 ```
 
@@ -59,7 +59,7 @@ The first control is a dedicated icon-only power toggle. It uses the same power 
 The mode control is a single icon-only button beside the power toggle. It shows the stacked-cards icon for both current V1 modes:
 
 - Stacked cards: `Auto`.
-- Stacked cards: `Semi-Auto`.
+- Stacked cards: `Manual`.
 
 Do not duplicate the mode controls on the right side of the bar. The mode icon should expose tooltip and accessible label text for the current mode and can open a compact mode selector.
 
@@ -68,7 +68,7 @@ Clicking the mode icon opens a compact mode selector menu. The selected mode cha
 Mode selector rows:
 
 - Stacked cards icon, `Auto`: Recursion selects cards, composes the prompt packet, and injects it automatically when ready.
-- Stacked cards icon, `Semi-Auto`: Recursion constrains card generation to selected card types. Until the backend subset selector lands, it follows the same generation/install path as Auto.
+- Stacked cards icon, `Manual`: Recursion uses the selected card scope as a strict whitelist when planning, selecting, composing, and injecting context.
 
 Each mode row should show the icon, short name, and a hover/focus tip with the longer explanation. The menu should use native SillyTavern popup density and close on selection, outside click, or `Esc`.
 
@@ -96,10 +96,12 @@ Reference mode selector shape:
     </span>
   </button>
   <button class="recursion-mode-choice"
-          data-mode="semi-auto"
-          title="Constrains card generation to selected card types.">...</button>
+          data-mode="manual"
+          title="Uses only selected card scope.">...</button>
 </div>
 ```
+
+Card scope is not a mode. The compact right-side `Cards` button opens a full-bar-width dropdown with the fixed V1 card families and their sub-item focus toggles. Its label is `Cards` when all sub-items are enabled and `selected/total` when scope is partial. Auto treats this scope as preference/focus, while Manual treats it as a strict whitelist. The UI must prevent disabling the final selected sub-item and show `Keep at least one card focus enabled.` when that guard is hit.
 
 Reference mode selector CSS:
 
@@ -1050,15 +1052,13 @@ The menu uses three tabs:
 
 Switching between settings tabs is internal panel navigation. A tab click must keep the settings menu open, even though the tab switch re-renders the floating panel content; outside-click closers must ignore that handled tab-switch event.
 
-Play is the default tab. It contains controls users are expected to understand during normal play:
+Play is the default tab. It contains one open `Behavior` disclosure for controls users are expected to tune during normal play:
 
-- Mode: Auto, Semi-Auto.
-- Reasoning Level: Low, Medium, High, Ultra.
 - Strength: Light, Balanced, Strong.
 - Focus: Balanced, Character, Continuity, Prose, Plot.
 - Prompt Footprint: Compact, Normal, Rich.
 
-Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual. The Play tab may use that compact chain or a native select, depending on available width and SillyTavern theme constraints:
+Mode and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
 
 - Low: Utility-only bias, reduced card pressure, compact packet preference.
 - Medium: mostly Utility, Reasoner eligible for brief composition when useful.
@@ -1067,27 +1067,20 @@ Reasoning Level is the user-facing provider-bias control. The compact bar uses t
 
 `reasoningLevel` is persisted as `low | medium | high | ultra`, default `high`. It is the authoritative user-facing provider-bias setting. Runtime may still carry an internal `reasonerUse` route value, but that value is always derived from `reasoningLevel`: Low maps to `off`, Medium/High map to `auto`, and Ultra maps to `always`. If the Reasoner provider is unavailable while High or Ultra is selected, the UI should keep the selected level and show fallback status rather than blocking the user.
 
-Providers contains the complete provider setup surface:
+Providers contains the complete provider setup surface in collapsible lane sections:
 
-- Utility Provider, always enabled.
-- Reasoner Provider, optional.
+- Utility Provider, always enabled and open by default.
+- Reasoner Provider, optional and collapsed by default unless it is configured.
 - Source, profile, endpoint, model, session key, max tokens.
 - Save Provider, Test Provider, Clear Session Key.
 - Status, resolved provider, and resolved model.
 - Temperature and top-p stay internal/defaulted in the compact V1 menu so the provider pane matches the mockup and does not become a dense admin form.
 
-Advanced contains low-frequency controls:
+Advanced contains low-frequency controls grouped into collapsible sections:
 
-- Injection Placement: `Default`, `In Prompt`, or `In Chat`. Default preserves the packet template.
-- Injection Role: `System`, `User`, or `Assistant`. Default is `System`.
-- Injection Depth: `Default` or integer `0..10`. Default preserves each packet section's template depth.
-- Sub-tier Rows: numeric control for `ui.progressChildVisibleLimit`; default 5, minimum 1, maximum 20.
-- Progress Rows: numeric control for `ui.progressListVisibleLimit`; default 15, minimum 5, maximum 80.
-- Diagnostics journal size.
-- Include sanitized excerpts.
-- Reset scene cache.
-- Export sanitized diagnostics.
-- Clear run journal.
+- Injection: placement, role, and depth controls for the composed prompt packet.
+- UI: Sub-tier Rows and Progress Rows.
+- Diagnostics: journal size, safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
 
 Injection controls apply to the final conditioned prompt packet after Utility or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the composed Recursion brief to land in a different host lane or depth.
 
@@ -1116,7 +1109,7 @@ Each provider card should support:
 - Clear Session Key.
 - Status and resolved model.
 
-The compact Providers tab shows Utility details and keeps Reasoner as a collapsed optional summary row in the V1 mock. Temperature and top-p remain normalized provider settings with safe defaults, but they are not visible controls in the compact top-bar menu.
+The compact Providers tab shows Utility details by default and keeps Reasoner as a collapsed optional lane until the user opens or configures it. Temperature and top-p remain normalized provider settings with safe defaults, but they are not visible controls in the compact top-bar menu.
 
 API keys are session-only. They must not be written to extension settings, scene caches, prompt packets, run journals, diagnostics, reports, or artifacts.
 

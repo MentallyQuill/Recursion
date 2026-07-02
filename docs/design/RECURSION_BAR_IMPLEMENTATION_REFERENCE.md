@@ -147,7 +147,7 @@ Runtime toggles:
           </span>
         </button>
 
-        <button class="mode-choice" type="button" data-mode="semi-auto" title="Constrains card generation to selected card types.">
+        <button class="mode-choice" type="button" data-mode="manual" title="Uses only selected card scope.">
           <span class="mode-choice-icon">
             <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true">
               <rect x="3" y="5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".45"></rect>
@@ -156,8 +156,8 @@ Runtime toggles:
             </svg>
           </span>
           <span>
-            <span class="mode-choice-name">Semi-Auto</span>
-            <span class="mode-choice-tip">Constrains card generation to selected card types.</span>
+            <span class="mode-choice-name">Manual</span>
+            <span class="mode-choice-tip">Uses only selected card scope.</span>
           </span>
         </button>
       </div>
@@ -184,6 +184,10 @@ Runtime toggles:
         <button class="reasoning-node is-lit is-selected" type="button" role="radio" aria-checked="true" data-level="high" title="High: mixed Utility and Reasoner checks."></button>
         <button class="reasoning-node" type="button" role="radio" aria-checked="false" data-level="ultra" title="Ultra: Reasoner-heavy synthesis with a larger card bias."></button>
       </div>
+      <button class="cards-button" id="cards-button" aria-label="Open card scope selector" aria-expanded="false">
+        <span class="cards-button-icon" aria-hidden="true"><!-- stacked cards --></span>
+        <span class="cards-button-label">Cards</span>
+      </button>
       <button class="icon-button brief-arrow" id="brief-arrow" aria-label="Open last brief preview" aria-expanded="false">
         <span class="arrow-down" aria-hidden="true"></span>
       </button>
@@ -368,33 +372,61 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     </div>
 
     <div class="settings-pane is-selected" data-pane="play">
-      <label class="settings-row"><span>Mode</span><select><option selected>Auto</option><option>Semi-Auto</option></select></label>
-      <label class="settings-row"><span>Reasoning Level</span><div class="mini-chain" data-selected="high"><span></span><i></i><i></i><i class="on"></i><i></i></div></label>
-      <label class="settings-row"><span>Strength</span><select><option>Light</option><option selected>Balanced</option><option>Strong</option></select></label>
-      <label class="settings-row"><span>Focus</span><select><option selected>Balanced</option><option>Character</option><option>Continuity</option><option>Prose</option><option>Plot</option></select></label>
-      <label class="settings-row"><span>Prompt Footprint</span><select><option>Compact</option><option selected>Normal</option><option>Rich</option></select></label>
+      <section class="settings-disclosure is-open">
+        <button class="settings-disclosure-toggle" type="button" aria-expanded="true">Behavior</button>
+        <div class="settings-disclosure-body">
+          <label class="settings-row"><span>Strength</span><select><option>Light</option><option selected>Balanced</option><option>Strong</option></select></label>
+          <label class="settings-row"><span>Focus</span><select><option selected>Balanced</option><option>Character</option><option>Continuity</option><option>Prose</option><option>Plot</option></select></label>
+          <label class="settings-row"><span>Prompt Footprint</span><select><option>Compact</option><option selected>Normal</option><option>Rich</option></select></label>
+        </div>
+      </section>
     </div>
 
     <div class="settings-pane" data-pane="providers">
-      <div class="provider-card"><span class="provider-card-title">Utility Provider</span><span class="provider-status pass">not run</span></div>
-      <div class="provider-grid">
-        <label>Source<select><option selected>Current Host Model</option><option>Host Connection Profile</option><option>OpenAI-Compatible Endpoint</option></select></label>
-        <label>Profile<input placeholder="Host profile id"></label>
-        <label>Base URL<input placeholder="https://host/v1"></label>
-        <label>Model<input placeholder="model"></label>
-        <label>Session Key<input type="password" placeholder="Session API key"></label>
-        <label>Max Tokens<input type="number" value="4096"></label>
-      </div>
-      <div class="provider-actions"><button>Save Provider</button><button>Test Provider</button><button>Clear Session Key</button></div>
-      <div class="provider-card"><span class="provider-card-title">Reasoner Provider</span><span class="provider-status">optional</span></div>
+      <section class="provider-section is-open">
+        <button class="provider-card" type="button" aria-expanded="true"><span class="provider-card-title">Utility Provider</span><span class="provider-status pass">not run</span></button>
+        <div class="provider-body">
+          <div class="provider-grid">
+            <label>Source<select><option selected>Current Host Model</option><option>Host Connection Profile</option><option>OpenAI-Compatible Endpoint</option></select></label>
+            <label>Profile<input placeholder="Host profile id"></label>
+            <label>Base URL<input placeholder="https://host/v1"></label>
+            <label>Model<input placeholder="model"></label>
+            <label>Session Key<input type="password" placeholder="Session API key"></label>
+            <label>Max Tokens<input type="number" value="4096"></label>
+          </div>
+          <div class="provider-actions"><button>Save Provider</button><button>Test Provider</button><button>Clear Session Key</button></div>
+        </div>
+      </section>
+      <section class="provider-section">
+        <button class="provider-card" type="button" aria-expanded="false"><span class="provider-card-title">Reasoner Provider</span><span class="provider-status">optional</span></button>
+        <div class="provider-body" hidden></div>
+      </section>
     </div>
 
     <div class="settings-pane" data-pane="advanced">
-      <label class="settings-row"><span>Sub-tier Rows</span><input type="number" value="5"></label>
-      <label class="settings-row"><span>Progress Rows</span><input type="number" value="15"></label>
-      <label class="settings-row"><span>Journal Entries</span><input type="number" value="100"></label>
-      <label class="settings-row"><span>Include Excerpts</span><input type="checkbox"></label>
-      <div class="provider-actions"><button>Reset Scene Cache</button><button>Clear Run Journal</button><button>Export Diagnostics</button></div>
+      <section class="settings-disclosure is-open">
+        <button class="settings-disclosure-toggle" type="button" aria-expanded="true">Injection</button>
+        <div class="settings-disclosure-body">
+          <label class="settings-row"><span>Placement</span><select><option selected>Default</option><option>In Prompt</option><option>In Chat</option></select></label>
+          <label class="settings-row"><span>Role</span><select><option selected>System</option><option>User</option><option>Assistant</option></select></label>
+          <label class="settings-row"><span>Depth</span><select><option selected>Default</option><option>0</option><option>1</option><option>2</option></select></label>
+        </div>
+      </section>
+      <section class="settings-disclosure is-open">
+        <button class="settings-disclosure-toggle" type="button" aria-expanded="true">UI</button>
+        <div class="settings-disclosure-body">
+          <label class="settings-row"><span>Sub-tier Rows</span><input type="number" value="5"></label>
+          <label class="settings-row"><span>Progress Rows</span><input type="number" value="15"></label>
+        </div>
+      </section>
+      <section class="settings-disclosure is-open">
+        <button class="settings-disclosure-toggle" type="button" aria-expanded="true">Diagnostics</button>
+        <div class="settings-disclosure-body">
+          <label class="settings-row"><span>Journal Entries</span><input type="number" value="100"></label>
+          <label class="settings-row"><span>Include Excerpts</span><input type="checkbox"></label>
+          <div class="provider-actions"><button>Reset Scene Cache</button><button>Clear Run Journal</button><button>Export Diagnostics</button></div>
+        </div>
+      </section>
     </div>
 
     <footer class="settings-foot"><button>Save Settings</button></footer>
@@ -2090,6 +2122,49 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   display: grid;
 }
 
+.settings-disclosure {
+  border: 1px solid rgba(255, 255, 255, .075);
+  border-radius: 6px;
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.settings-disclosure-toggle {
+  appearance: none;
+  background: rgba(255, 255, 255, .026);
+  border: 0;
+  color: rgba(238, 238, 238, .76);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  min-height: 29px;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.settings-disclosure-toggle::before {
+  color: rgba(224, 224, 224, .52);
+  content: ">";
+  display: inline-block;
+  margin-right: 7px;
+  transform: rotate(0deg);
+  transition: transform .14s ease;
+}
+
+.settings-disclosure.is-open .settings-disclosure-toggle::before {
+  transform: rotate(90deg);
+}
+
+.settings-disclosure-body {
+  border-top: 1px solid rgba(255, 255, 255, .06);
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+}
+
 .settings-row {
   display: grid;
   grid-template-columns: 112px minmax(0, 1fr);
@@ -2143,48 +2218,41 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   transform: translateY(-1px) rotate(45deg);
 }
 
-.mini-chain {
-  position: relative;
+.provider-section {
   display: grid;
-  grid-template-columns: repeat(4, 14px);
-  align-items: center;
-  gap: 8px;
-  width: max-content;
-  height: 22px;
-}
-
-.mini-chain span {
-  position: absolute;
-  left: 7px;
-  right: 7px;
-  top: 10px;
-  height: 1px;
-  background: rgba(220, 220, 210, .32);
-}
-
-.mini-chain i {
-  position: relative;
-  width: 8px;
-  height: 8px;
-  border: 1px solid rgba(220, 220, 210, .45);
-  border-radius: 2px;
-  background: rgba(255, 255, 255, .035);
-}
-
-.mini-chain i:nth-of-type(-n + 3) {
-  background: rgba(220, 220, 210, .62);
-  box-shadow: 0 0 9px rgba(220, 220, 210, .22);
+  gap: 7px;
+  min-width: 0;
 }
 
 .provider-card {
+  appearance: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
+  min-height: 29px;
   padding: 6px 7px;
   border: 1px solid rgba(255, 255, 255, .075);
   border-radius: 6px;
   background: rgba(255, 255, 255, .026);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.provider-card::before {
+  color: rgba(224, 224, 224, .52);
+  content: ">";
+  display: inline-block;
+  flex: 0 0 auto;
+  transform: rotate(0deg);
+  transition: transform .14s ease;
+}
+
+.provider-section.is-open .provider-card::before {
+  transform: rotate(90deg);
 }
 
 .provider-card-title {
@@ -2200,6 +2268,11 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
 .provider-status.pass {
   color: rgba(123, 216, 143, .84);
+}
+
+.provider-body {
+  display: grid;
+  gap: 7px;
 }
 
 .provider-grid {

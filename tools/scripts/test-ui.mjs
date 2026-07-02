@@ -1,4 +1,11 @@
 import { readFileSync } from 'node:fs';
+import {
+  CARD_SCOPE_CATALOG,
+  CARD_SCOPE_TOTAL_SUB_ITEMS,
+  defaultCardScope,
+  setFamilyEnabled,
+  setSubItemEnabled
+} from '../../src/card-scope.mjs';
 import { activityLabel, createRecursionViewModel, mountRecursionUi } from '../../src/ui.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -341,7 +348,6 @@ const heroBlockActiveCss = barImplementationReference.match(/@keyframes hero-blo
 const reasoningChainCss = barImplementationReference.match(/\.reasoning-chain\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const reasoningNodeCss = barImplementationReference.match(/\.reasoning-node\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const reasoningLitNodeCss = barImplementationReference.match(/\.reasoning-node\.is-lit\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
-const settingsReasoningLitNodeCss = recursionCss.match(/\.recursion-settings-reasoning-node\.is-lit\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 assert(/padding:\s*0 8px 0 2px;/.test(barImplementationReference), 'recursion bar uses a tighter left inset than right controls');
 assert(/--hero-running:\s*var\(--cyan\);/.test(barImplementationReference), 'hero pixel running blocks use the active blue token');
 assert(/--hero-done:\s*var\(--green\);/.test(barImplementationReference), 'hero pixel done blocks use the success green token');
@@ -354,7 +360,8 @@ assert(/class="power-toggle is-on"/.test(barImplementationReference), 'reference
 assert(/class="activity-trigger status-array-button"/.test(barImplementationReference), 'hero pixel array and current status share one activity trigger after mode');
 assert(!/class="brand-stage/.test(barImplementationReference), 'reference bar no longer renders the Recursion wordmark stage');
 assert(/\.power-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*24px;/.test(barImplementationReference), 'reference power toggle keeps compact 24px control geometry');
-assert(/data-mode="semi-auto"/.test(barImplementationReference), 'reference mode menu includes Semi-Auto');
+assert(/data-mode="manual"/.test(barImplementationReference), 'reference mode menu includes Manual');
+assert(!/data-mode="semi-auto"/.test(barImplementationReference), 'reference mode menu removes Semi-Auto');
 assert(!/data-mode="observe"/.test(barImplementationReference), 'reference mode menu removes Observe only');
 assert(!/data-mode="off"/.test(barImplementationReference), 'reference mode menu removes Off');
 assert(/\.hero-pixel-array\s*\{[\s\S]*?position:\s*relative;[\s\S]*?width:\s*max\(0px,/.test(barImplementationReference), 'hero pixel blocks render inline after mode with a zero-width reset state');
@@ -380,8 +387,8 @@ assert(!/rgba\(101,\s*216,\s*232/.test(reasoningLitNodeCss), 'lit reasoning node
 assert(/\.reasoning-line-fill\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.52\)/.test(barImplementationReference), 'reasoning chain fill uses SillyTavern grey-white theme color');
 assert(/\.reasoning-node\.is-lit\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.62\)/.test(barImplementationReference), 'lit reasoning nodes use muted SillyTavern grey-white fill');
 assert(/\.recursion-reasoning-line-fill\s*\{[\s\S]*?var\(--SmartThemeBodyColor/.test(recursionCss), 'production reasoning fill derives from SillyTavern body color');
-assert(/\.recursion-settings-reasoning-line-fill\s*\{[\s\S]*?var\(--SmartThemeBodyColor/.test(recursionCss), 'settings reasoning fill derives from SillyTavern body color');
-assert(!/var\(--recursion-accent/.test(settingsReasoningLitNodeCss), 'settings reasoning nodes do not use cyan after moving to SillyTavern grey-white theme');
+assert(!/recursion-settings-reasoning/.test(recursionCss), 'settings panel does not keep a duplicate reasoning chain stylesheet');
+assert(!/settingsReasoningLevelRow|recursionSettingReasoningChoice|MODE_OPTIONS/.test(recursionUi), 'settings panel does not keep duplicate mode or reasoning handlers');
 assert(/\.reasoning-chain::before/.test(barImplementationReference), 'reasoning nodes are connected by a chain line');
 assert(/--chain-start:\s*5px;/.test(reasoningChainCss), 'reasoning chain defines the first node center');
 assert(/--chain-step:\s*15px;/.test(reasoningChainCss), 'reasoning chain defines exact node-center spacing');
@@ -474,6 +481,7 @@ assert(/\.recursion-options-button:hover,[\s\S]*?\.recursion-options-button\[ari
 assert(/select\.recursion-input\.recursion-select\s*\{[\s\S]*?background-image:[\s\S]*?linear-gradient\(45deg,[\s\S]*?padding-right:\s*24px\s*!important;/.test(recursionCss), 'production settings selects draw their own dropdown chevron under SillyTavern globals');
 assert(/\.recursion-hand-dropdown\s*>\s*\.recursion-empty\s*\{[\s\S]*?margin:\s*0;[\s\S]*?padding:\s*8px 9px 7px;/.test(recursionCss), 'production empty Last Brief state keeps aligned native dropdown padding');
 assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]\s*\{[\s\S]*?appearance:\s*none !important;[\s\S]*?background:[\s\S]*?var\(--SmartThemeBlurTintColor/.test(recursionCss), 'production settings checkbox uses a Recursion-scoped selector strong enough to beat SillyTavern globals');
+assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]\[hidden\]\s*\{[\s\S]*?display:\s*none !important;/.test(recursionCss), 'hidden provider state checkboxes stay hidden despite Recursion checkbox skin');
 assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]:checked\s*\{[\s\S]*?background:[\s\S]*?var\(--recursion-accent\)/.test(recursionCss), 'production settings checkbox uses Recursion cyan when checked');
 assert(/\.recursion-provider-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/.test(recursionCss), 'production Providers pane uses the reference two-column provider grid');
 assert(/\.recursion-provider-status\.pass\s*\{[\s\S]*?var\(--recursion-success\)/.test(recursionCss), 'production provider success status uses the defined success token');
@@ -529,7 +537,7 @@ assertEqual(activeModel.composerLabel, 'Reasoner', 'reasoner composer label buil
 assertEqual(activeModel.reasonerState, 'Disabled', 'disabled reasoner state built');
 
 const settledWarningModel = createRecursionViewModel({
-  settings: { mode: 'semi-auto' },
+  settings: { mode: 'manual' },
   activity: { phase: 'settled', severity: 'warning', label: 'Observe fallback ready.' },
   progressRun: {
     title: 'Needs attention',
@@ -892,6 +900,7 @@ try {
     settings: {
       mode: 'auto',
       enabled: true,
+      cardScope: defaultCardScope(),
       strength: 'balanced',
       promptFootprint: 'normal',
       focus: 'balanced',
@@ -1105,16 +1114,17 @@ try {
   assert(root.querySelector('[data-recursion-mode-menu]'), 'compact bar renders the mode selector menu');
   assert(root.querySelector('[data-recursion-mode-icon]').querySelector('svg'), 'mode button renders the reference inline SVG icon');
   assertEqual(root.querySelector('[data-recursion-mode-icon]').querySelectorAll('rect').length, 3, 'Auto mode button uses the reference stacked-cards SVG');
-  assertEqual(root.querySelectorAll('[data-recursion-mode-choice-icon]').length, 2, 'mode selector renders icons only for Auto and Semi-Auto');
-  assertEqual(root.querySelectorAll('[data-recursion-mode-choice-tip]').length, 2, 'mode selector renders tips only for Auto and Semi-Auto');
+  assertEqual(root.querySelectorAll('[data-recursion-mode-choice-icon]').length, 2, 'mode selector renders icons only for Auto and Manual');
+  assertEqual(root.querySelectorAll('[data-recursion-mode-choice-tip]').length, 2, 'mode selector renders tips only for Auto and Manual');
   assertEqual(root.querySelector('[data-recursion-mode-choice-auto]').querySelectorAll('rect').length, 3, 'Auto mode row uses the reference stacked-cards SVG');
-  assert(root.querySelector('[data-recursion-mode-choice-semi-auto]').querySelectorAll('rect').length >= 2, 'Semi-Auto mode row uses the reference stacked-cards SVG');
+  assert(root.querySelector('[data-recursion-mode-choice-manual]').querySelectorAll('rect').length >= 2, 'Manual mode row uses the reference stacked-cards SVG');
+  assert(!root.querySelector('[data-recursion-mode-choice-semi-auto]'), 'Semi-Auto mode is removed from the compact mode menu');
   assert(!root.querySelector('[data-recursion-mode-choice-observe]'), 'Observe only mode is removed from the compact mode menu');
   assert(!root.querySelector('[data-recursion-mode-choice-off]'), 'Off mode is removed from the compact mode menu');
   assertDeepEqual(
     root.querySelectorAll('[data-recursion-mode-choice]').map((choice) => choice.dataset.recursionModeChoice),
-    ['auto', 'semi-auto'],
-    'mode selector uses the Auto/Semi-Auto mode order'
+    ['auto', 'manual'],
+    'mode selector uses the Auto/Manual mode order'
   );
   assertEqual(
     root.querySelector('[data-recursion-mode-button]').getAttribute('aria-label'),
@@ -1127,8 +1137,8 @@ try {
     'Auto mode tooltip matches the reference copy'
   );
   assert(
-    fakeDocument.textTree(root.querySelector('[data-recursion-mode-choice-semi-auto]')).includes('Constrains card generation to selected card types.'),
-    'Semi-Auto mode tip explains future card-type subset constraints'
+    fakeDocument.textTree(root.querySelector('[data-recursion-mode-choice-manual]')).includes('Uses only selected card scope.'),
+    'Manual mode tip explains strict card scope constraints'
   );
   assert(
     root.querySelector('[data-recursion-mode-choice-auto]').className.includes('is-selected'),
@@ -1150,6 +1160,9 @@ try {
   assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('title'), 'High: mixed Utility and Reasoner checks.', 'High reasoning tooltip matches the reference copy');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('title'), 'Ultra: Reasoner-heavy synthesis with a larger card bias.', 'Ultra reasoning tooltip matches the reference copy');
   assert(root.querySelector('[data-recursion-brief-arrow]'), 'compact bar renders a dedicated last-brief dropdown arrow');
+  assert(root.querySelector('[data-recursion-cards-button]'), 'compact bar renders the Cards scope button');
+  assertEqual(root.querySelector('[data-recursion-cards-label]').textContent, 'Cards', 'Cards button labels the full default scope as Cards');
+  assertEqual(root.querySelector('[data-recursion-cards-button]').getAttribute('aria-expanded'), 'false', 'Cards button starts collapsed');
   assert(root.querySelector('[data-recursion-arrow-down]'), 'last-brief dropdown arrow uses a drawn icon instead of text');
   assert(root.querySelector('[data-recursion-options-button]'), 'compact bar renders a dedicated ellipsis options button');
   assert(root.querySelector('[data-recursion-ellipsis]'), 'options button uses drawn ellipsis dots instead of text');
@@ -1186,11 +1199,13 @@ try {
   assertEqual(root.querySelector('[data-recursion-hand-count]').textContent, 'Hand 1', 'rendered hand count');
   assertEqual(root.querySelector('[data-recursion-composer]').textContent, 'Utility', 'rendered composer');
 
+  root.querySelector('[data-recursion-mode-button]').setBoundingClientRect({ left: 39, top: 3, width: 24, height: 24, right: 63, bottom: 27 });
   root.querySelector('[data-recursion-mode-button]').click();
   assertEqual(root.querySelector('[data-recursion-mode-menu]').hidden, false, 'mode button opens mode selector');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'true', 'mode button reflects open menu');
-  root.querySelector('[data-recursion-mode-choice-semi-auto]').querySelector('[data-recursion-mode-choice-name]').click();
-  assertDeepEqual(settingsUpdates.at(-1), { mode: 'semi-auto' }, 'mode menu updates Semi-Auto from nested row content clicks');
+  assertEqual(root.querySelector('[data-recursion-mode-menu]').style.left, '45px', 'mode menu follows reference 6px inset from mode cluster');
+  root.querySelector('[data-recursion-mode-choice-manual]').querySelector('[data-recursion-mode-choice-name]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { mode: 'manual' }, 'mode menu updates Manual from nested row content clicks');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode button reflects closed menu after selection');
   root.querySelector('[data-recursion-power-toggle]').click();
   assertDeepEqual(settingsUpdates.at(-1), { enabled: false }, 'power toggle disables Recursion without changing mode');
@@ -1215,6 +1230,45 @@ try {
   assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'mode menu closes progress popover to avoid left-lane overlap');
   assertEqual(root.querySelector('[data-recursion-mode-menu]').hidden, false, 'mode menu opens after closing progress popover');
   root.querySelector('[data-recursion-mode-choice-auto]').click();
+  root.querySelector('[data-recursion-cards-button]').click();
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').hidden, false, 'Cards button opens card scope dropdown');
+  assertEqual(root.querySelector('[data-recursion-cards-button]').getAttribute('aria-expanded'), 'true', 'Cards button reflects open scope dropdown');
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').style.left, '0px', 'Cards dropdown aligns to the full bar left edge');
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').style.width, '640px', 'Cards dropdown spans the full bar width');
+  assertEqual(root.querySelectorAll('[data-recursion-card-scope-family]').length, CARD_SCOPE_CATALOG.length, 'Cards dropdown renders every fixed V1 family');
+  assertEqual(root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]').length, CARD_SCOPE_TOTAL_SUB_ITEMS, 'Cards dropdown renders every fixed V1 sub-item');
+  const sceneFamilyToggle = root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
+    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame');
+  assert(sceneFamilyToggle, 'Cards dropdown exposes Scene Frame family toggle');
+  sceneFamilyToggle.click();
+  assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].enabled, false, 'family toggle disables the selected family scope');
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-cards-label]').textContent, '21/24', 'Cards button shows selected/total after partial scope change');
+  root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
+    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame')
+    .click();
+  ui.update();
+  const locationToggle = root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
+    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame' && node.dataset.recursionCardScopeSubItem === 'locationSituation');
+  assert(locationToggle, 'Cards dropdown exposes Scene Frame location/situation sub-item toggle');
+  locationToggle.click();
+  assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].subItems.locationSituation, false, 'sub-item toggle disables one selected focus item');
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-cards-label]').textContent, '23/24', 'Cards button tracks partial sub-item scope');
+  let singleScope = defaultCardScope();
+  for (const family of CARD_SCOPE_CATALOG.filter((entry) => entry.family !== 'Scene Frame')) {
+    singleScope = setFamilyEnabled(singleScope, family.family, false).scope;
+  }
+  singleScope = setSubItemEnabled(singleScope, 'Scene Frame', 'presentParticipants', false).scope;
+  singleScope = setSubItemEnabled(singleScope, 'Scene Frame', 'immediateDirection', false).scope;
+  view = { ...view, settings: { ...view.settings, cardScope: singleScope } };
+  ui.update();
+  const updatesBeforeZeroGuard = settingsUpdates.length;
+  root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
+    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame' && node.dataset.recursionCardScopeSubItem === 'locationSituation')
+    .click();
+  assertEqual(settingsUpdates.length, updatesBeforeZeroGuard, 'card scope zero-selection guard blocks the final sub-item disable');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('Keep at least one card focus enabled.'), 'Cards dropdown renders zero-selection guard copy');
   assertEqual(
     root.querySelector('[data-recursion-progress-list]').style.props['--recursion-progress-list-limit'],
     '15',
@@ -1249,18 +1303,40 @@ try {
   assert(root.querySelector('[data-recursion-settings-advanced]'), 'settings menu renders Advanced pane');
   assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, false, 'Play pane is the default settings tab');
   assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, true, 'Providers pane starts tucked behind a tab');
-  assert(root.querySelector('[data-recursion-setting-reasoning-chain]'), 'settings play tab renders the compact reasoning level chain');
-  assertEqual(root.querySelector('[data-recursion-setting-reasoning-level]').getAttribute('type'), 'hidden', 'settings reasoning level stores a hidden form value');
-  assertEqual(root.querySelectorAll('[data-recursion-setting-reasoning-choice]').length, 4, 'settings reasoning chain renders four selectable levels');
-  root.querySelector('[data-recursion-setting-reasoning-choice-ultra]').click();
-  assertEqual(root.querySelector('[data-recursion-setting-reasoning-level]').value, 'ultra', 'settings reasoning chain updates the saved value');
+  assert(!root.querySelector('[data-recursion-setting-mode]'), 'Play settings remove redundant mode control owned by compact bar');
+  assert(!root.querySelector('[data-recursion-setting-reasoning-chain]'), 'Play settings remove redundant reasoning control owned by compact bar');
+  assert(root.querySelector('[data-recursion-settings-section-play-behavior]'), 'Play settings groups behavior controls in one disclosure section');
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-play-behavior]').hidden, false, 'Play behavior section defaults open');
+  root.querySelector('[data-recursion-settings-section-toggle-play-behavior]').click();
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-play-behavior]').hidden, true, 'Play behavior section collapses');
+  root.querySelector('[data-recursion-settings-section-toggle-play-behavior]').click();
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-play-behavior]').hidden, false, 'Play behavior section expands');
   root.querySelector('[data-recursion-settings-tab-providers]').click();
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open');
   assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, true, 'clicking Providers hides Play pane');
   assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, false, 'clicking Providers shows provider controls');
+  assertEqual(root.querySelector('[data-recursion-provider-body-utility]').hidden, false, 'Utility provider section defaults open');
+  assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, true, 'Reasoner provider section defaults collapsed');
+  root.querySelector('[data-recursion-provider-toggle-utility]').click();
+  assertEqual(root.querySelector('[data-recursion-provider-body-utility]').hidden, true, 'Utility provider section collapses');
+  root.querySelector('[data-recursion-provider-toggle-utility]').click();
+  assertEqual(root.querySelector('[data-recursion-provider-body-utility]').hidden, false, 'Utility provider section expands');
+  root.querySelector('[data-recursion-provider-toggle-reasoner]').click();
+  assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, false, 'Reasoner provider section expands');
+  assert(root.querySelector('[data-recursion-provider-model-reasoner]'), 'Reasoner provider expansion exposes model setting');
   root.querySelector('[data-recursion-settings-tab-advanced]').click({ ignoreStopPropagation: true });
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open even when document outside-click also receives the rerendered event');
   assertEqual(root.querySelector('[data-recursion-settings-advanced]').hidden, false, 'clicking Advanced shows advanced controls');
+  assert(root.querySelector('[data-recursion-settings-section-injection]'), 'Advanced settings groups injection controls');
+  assert(root.querySelector('[data-recursion-settings-section-ui]'), 'Advanced settings groups UI controls');
+  assert(root.querySelector('[data-recursion-settings-section-diagnostics]'), 'Advanced settings groups diagnostics controls');
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, false, 'Injection section defaults open');
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-ui]').hidden, false, 'UI section defaults open');
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-diagnostics]').hidden, false, 'Diagnostics section defaults open');
+  root.querySelector('[data-recursion-settings-section-toggle-injection]').click();
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, true, 'Injection section collapses');
+  root.querySelector('[data-recursion-settings-section-toggle-injection]').click();
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, false, 'Injection section expands');
   assertEqual(root.querySelector('[data-recursion-clear-run-journal]').disabled, false, 'Clear Run Journal is enabled when runtime handler exists');
   assertEqual(root.querySelector('[data-recursion-export-diagnostics]').disabled, false, 'Export Diagnostics is enabled when runtime handler exists');
   assertEqual(root.querySelector('[data-recursion-reset-scene-cache]').disabled, false, 'Reset Scene Cache is enabled when runtime handler exists');
@@ -1280,14 +1356,9 @@ try {
   assert(copied.at(-1).includes('recursion.diagnosticsExport.v1'), 'Export Diagnostics copies sanitized diagnostics JSON');
   assert(root.querySelector('[data-recursion-provider-grid]'), 'Providers pane renders the compact reference provider grid');
   assertEqual(root.querySelectorAll('[data-recursion-provider-section]').length, 2, 'Providers pane renders Utility plus collapsed Reasoner sections');
-  assert(!root.querySelector('[data-recursion-provider-model-reasoner]'), 'Reasoner provider stays collapsed to the reference summary row');
+  assert(root.querySelector('[data-recursion-provider-model-reasoner]'), 'Reasoner provider section owns complete provider settings when expanded');
   assertEqual(root.querySelector('[data-recursion-provider-temperature-utility]').getAttribute('type'), 'hidden', 'provider temperature stays hidden from the compact mockup UI');
   assertEqual(root.querySelector('[data-recursion-provider-top-p-utility]').getAttribute('type'), 'hidden', 'provider top-p stays hidden from the compact mockup UI');
-  assertDeepEqual(
-    root.querySelector('[data-recursion-setting-mode]').children.map((child) => child.textContent),
-    ['Auto', 'Semi-Auto'],
-    'mode settings options use the Auto/Semi-Auto reference order'
-  );
   root.querySelector('[data-recursion-settings-close]').click();
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, true, 'settings close button closes options panel');
   assertEqual(root.querySelector('[data-recursion-actions]').getAttribute('aria-expanded'), 'false', 'options button reflects closed settings state');
@@ -1360,8 +1431,6 @@ try {
   for (const listener of rerenderedChildren.eventListeners.scroll || []) listener({ target: rerenderedChildren });
   assert(rerenderedChildren.className.includes('is-at-end'), 'child progress fade clears at scroll end');
 
-  root.querySelector('[data-recursion-setting-mode]').value = 'semi-auto';
-  root.querySelector('[data-recursion-setting-reasoning-level]').value = 'medium';
   root.querySelector('[data-recursion-setting-strength]').value = 'strong';
   root.querySelector('[data-recursion-setting-footprint]').value = 'rich';
   root.querySelector('[data-recursion-setting-focus]').value = 'character';
@@ -1374,12 +1443,9 @@ try {
   root.querySelector('[data-recursion-setting-injection-depth]').value = '7';
   root.querySelector('[data-recursion-settings-save]').click();
   assertDeepEqual(settingsUpdates.at(-1), {
-    mode: 'semi-auto',
-    reasoningLevel: 'medium',
     strength: 'strong',
     promptFootprint: 'rich',
     focus: 'character',
-    reasonerUse: 'auto',
     ui: {
       progressChildVisibleLimit: 7,
       progressListVisibleLimit: 22

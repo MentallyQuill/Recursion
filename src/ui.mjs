@@ -1,4 +1,15 @@
 import { redact } from './core.mjs';
+import {
+  CARD_SCOPE_CATALOG,
+  cardScopeCounts,
+  cardScopeLabel,
+  defaultCardScope,
+  enabledSubItemsForFamily,
+  familyState,
+  normalizeCardScope,
+  setFamilyEnabled,
+  setSubItemEnabled
+} from './card-scope.mjs';
 import { packetToPromptBlocks } from './prompt.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from './progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
@@ -33,10 +44,6 @@ const REASONER_ACTIVE_PHASES = new Set(['reasonerComposing']);
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SVG_TAGS = new Set(['svg', 'rect', 'path', 'circle']);
-const MODE_OPTIONS = Object.freeze([
-  ['auto', 'Auto'],
-  ['semi-auto', 'Semi-Auto']
-]);
 const MODE_MENU_OPTIONS = Object.freeze([
   {
     value: 'auto',
@@ -45,10 +52,10 @@ const MODE_MENU_OPTIONS = Object.freeze([
     tip: 'Selects cards and injects composed prompt context automatically.'
   },
   {
-    value: 'semi-auto',
-    label: 'Semi-Auto',
-    title: 'Constrains card generation to selected card types.',
-    tip: 'Constrains card generation to selected card types.'
+    value: 'manual',
+    label: 'Manual',
+    title: 'Uses only selected card scope.',
+    tip: 'Uses only selected card scope.'
   }
 ]);
 const STRENGTH_OPTIONS = Object.freeze([
@@ -164,18 +171,18 @@ function laneLabel(value, fallback = 'Utility') {
 
 function modeLabel(value) {
   const mode = cleanText(value, 'auto').toLowerCase();
-  if (mode === 'semi-auto') return 'Semi-Auto';
+  if (mode === 'manual') return 'Manual';
   if (mode === 'auto') return 'Auto';
   return 'Auto';
 }
 
 function normalizeMode(value) {
-  return cleanText(value, 'auto').toLowerCase() === 'semi-auto' ? 'semi-auto' : 'auto';
+  return cleanText(value, 'auto').toLowerCase() === 'manual' ? 'manual' : 'auto';
 }
 
 function modeIcon(value) {
   const mode = normalizeMode(value);
-  if (mode === 'auto' || mode === 'semi-auto') return 'cards';
+  if (mode === 'auto' || mode === 'manual') return 'cards';
   return 'cards';
 }
 
@@ -428,6 +435,7 @@ export function createRecursionViewModel(view = {}) {
   const activity = asObject(source.activity);
   const enabled = settings.enabled !== false;
   const mode = normalizeMode(settings.mode);
+  const cardScope = normalizeCardScope(settings.cardScope || defaultCardScope());
   const cards = Array.isArray(source.lastHand?.cards) ? source.lastHand.cards : [];
   const composerLane = source.lastPacket?.diagnostics?.composerLane || activity.composerLane || activity.providerLane || 'utility';
   const progressRun = createProgressRunModel(source);
@@ -445,6 +453,9 @@ export function createRecursionViewModel(view = {}) {
     mode,
     enabled,
     modeLabel: modeLabel(mode),
+    cardScope,
+    cardScopeLabel: cardScopeLabel(cardScope),
+    cardScopeCounts: cardScopeCounts(cardScope),
     runtimeHealthLabel: enabled ? runtimeHealthLabel(activity, progressRun) : 'Off',
     handCount: cards.length,
     activityLabel: activityLabel(activity),
@@ -510,6 +521,50 @@ function controlRow(label, control, note = '') {
   ]);
   if (note) row.appendChild(el('span', { className: 'recursion-control-note', text: note }));
   return row;
+}
+
+function disclosureDataset(prefix, id) {
+  return { [`${prefix}${datasetSuffix(id)}`]: '' };
+}
+
+function settingsDisclosureSection(id, title, children, { defaultOpen = true } = {}) {
+  const open = Boolean(defaultOpen);
+  const section = el('section', {
+    className: `recursion-settings-disclosure${open ? ' is-open' : ''}`,
+    dataset: {
+      recursionSettingsSection: id,
+      ...disclosureDataset('recursionSettingsSection', id)
+    }
+  });
+  const header = el('button', {
+    className: 'recursion-settings-disclosure-toggle',
+    text: title,
+    attrs: {
+      type: 'button',
+      'aria-expanded': open ? 'true' : 'false'
+    },
+    dataset: {
+      recursionSettingsSectionToggle: id,
+      ...disclosureDataset('recursionSettingsSectionToggle', id)
+    }
+  });
+  const body = el('div', {
+    className: 'recursion-settings-disclosure-body',
+    dataset: {
+      recursionSettingsSectionBody: id,
+      ...disclosureDataset('recursionSettingsSectionBody', id)
+    }
+  }, children);
+  body.hidden = !open;
+  section.appendChild(header);
+  section.appendChild(body);
+  return section;
+}
+
+function hiddenCheckedControl({ checked, dataset, ariaLabel }) {
+  const input = checkboxControl({ checked, dataset, ariaLabel });
+  input.hidden = true;
+  return input;
 }
 
 function selectControl({ value, options, dataset, ariaLabel }) {
@@ -871,26 +926,6 @@ function renderReasoningChain(root, reasoningLevel) {
   }
 }
 
-function updateSettingsReasoningChain(root, reasoningLevel) {
-  const level = normalizeReasoningLevel(reasoningLevel);
-  const selectedIndex = REASONING_LEVELS.indexOf(level);
-  const hidden = root.querySelector('[data-recursion-setting-reasoning-level]');
-  const chain = root.querySelector('[data-recursion-setting-reasoning-chain]');
-  if (hidden) hidden.value = level;
-  if (!chain) return;
-  chain.dataset.recursionSettingReasoningSelected = level;
-  for (const node of chain.querySelectorAll('[data-recursion-setting-reasoning-choice]')) {
-    const nodeIndex = REASONING_LEVELS.indexOf(node.dataset.recursionSettingReasoningChoice);
-    const selected = node.dataset.recursionSettingReasoningChoice === level;
-    node.className = [
-      'recursion-settings-reasoning-node',
-      nodeIndex >= 0 && nodeIndex <= selectedIndex ? 'is-lit' : '',
-      selected ? 'is-selected' : ''
-    ].filter(Boolean).join(' ');
-    node.setAttribute('aria-checked', selected ? 'true' : 'false');
-  }
-}
-
 function briefCardDomId(card, index) {
   const source = asObject(card);
   return cleanText(source.id || source.cardId || source.refId || `${cardFamily(source)}-${index}`, `card-${index}`);
@@ -1029,6 +1064,91 @@ function renderHandDropdown(panel, view, model) {
   ]));
 }
 
+function cardScopeSelectedCount(scope, family) {
+  return enabledSubItemsForFamily(scope, family).length;
+}
+
+function renderCardsPanel(panel, view, model, notice = '') {
+  panel.replaceChildren();
+  const scope = model.cardScope || normalizeCardScope(view.settings?.cardScope || defaultCardScope());
+  const counts = model.cardScopeCounts || cardScopeCounts(scope);
+  const summary = counts.selectedSubItems === counts.totalSubItems
+    ? 'All card focus enabled'
+    : `${counts.selectedSubItems}/${counts.totalSubItems} focus items enabled`;
+
+  panel.appendChild(el('div', { className: 'recursion-cards-head' }, [
+    el('span', { className: 'recursion-dropdown-title', text: 'Cards' }),
+    el('span', { className: 'recursion-cards-summary', text: summary })
+  ]));
+  const noticeNode = el('div', {
+    className: 'recursion-card-scope-notice',
+    text: notice,
+    attrs: { role: 'status' },
+    dataset: { recursionCardScopeError: '' }
+  });
+  noticeNode.hidden = !notice;
+  panel.appendChild(noticeNode);
+
+  const list = el('div', { className: 'recursion-card-scope-list', dataset: { recursionCardScopeList: '' } });
+  for (const family of CARD_SCOPE_CATALOG) {
+    const state = familyState(scope, family.family);
+    const selected = cardScopeSelectedCount(scope, family.family);
+    const row = el('section', {
+      className: `recursion-card-scope-family is-${state}`,
+      dataset: {
+        recursionCardScopeFamily: '',
+        recursionCardScopeFamilyName: family.family
+      }
+    });
+    row.appendChild(el('button', {
+      className: 'recursion-card-scope-family-toggle',
+      attrs: {
+        type: 'button',
+        'aria-pressed': state === 'mixed' ? 'mixed' : (state === 'on' ? 'true' : 'false'),
+        title: family.description
+      },
+      dataset: {
+        recursionCardScopeFamilyToggle: '',
+        recursionCardScopeFamilyName: family.family
+      }
+    }, [
+      el('span', {
+        className: 'recursion-card-scope-icon',
+        attrs: { 'aria-hidden': 'true' }
+      }, [cardFamilyIconSvg(family.family)]),
+      el('span', { className: 'recursion-card-scope-family-name', text: family.family }),
+      el('span', { className: 'recursion-card-scope-family-count', text: `${selected}/${family.subItems.length}` })
+    ]));
+
+    row.appendChild(el('div', { className: 'recursion-card-scope-subitems' }, family.subItems.map((item) => {
+      const on = enabledSubItemsForFamily(scope, family.family).includes(item.key);
+      const lastSelected = on && counts.selectedSubItems === 1;
+      return el('button', {
+        className: `recursion-card-scope-subitem${on ? ' is-on' : ' is-off'}${lastSelected ? ' is-required' : ''}`,
+        attrs: {
+          type: 'button',
+          'aria-pressed': on ? 'true' : 'false',
+          title: lastSelected ? 'Keep at least one card focus enabled.' : item.label
+        },
+        dataset: {
+          recursionCardScopeSubItemToggle: '',
+          recursionCardScopeFamilyName: family.family,
+          recursionCardScopeSubItem: item.key
+        }
+      }, [
+        el('span', { className: 'recursion-card-scope-check', attrs: { 'aria-hidden': 'true' } }),
+        el('span', { text: item.label })
+      ]);
+    })));
+    list.appendChild(row);
+  }
+  panel.appendChild(list);
+  panel.appendChild(el('div', { className: 'recursion-cards-foot' }, [
+    el('span', { text: 'Auto treats scope as preference. Manual uses scope as a strict whitelist.' }),
+    el('span', { className: 'recursion-mini-chip', text: 'Esc' })
+  ]));
+}
+
 function settingsSelectRow(label, datasetName, value, options) {
   return controlRow(label, selectControl({
     value,
@@ -1038,48 +1158,13 @@ function settingsSelectRow(label, datasetName, value, options) {
   }));
 }
 
-function settingsReasoningLevelRow(value) {
-  const level = normalizeReasoningLevel(value);
-  const selectedIndex = REASONING_LEVELS.indexOf(level);
-  const hidden = el('input', {
-    attrs: { type: 'hidden', value: level },
-    dataset: { recursionSettingReasoningLevel: '' }
-  });
-  hidden.value = level;
-  const chain = el('div', {
-    className: 'recursion-settings-reasoning-chain',
-    attrs: { role: 'radiogroup', 'aria-label': 'Reasoning Level' },
-    dataset: { recursionSettingReasoningChain: '', recursionSettingReasoningSelected: level }
-  }, [
-    el('span', { className: 'recursion-settings-reasoning-line-fill', attrs: { 'aria-hidden': 'true' } }),
-    ...REASONING_LEVEL_OPTIONS.map(([candidate], index) => el('button', {
-      className: [
-        'recursion-settings-reasoning-node',
-        index <= selectedIndex ? 'is-lit' : '',
-        candidate === level ? 'is-selected' : ''
-      ].filter(Boolean).join(' '),
-      attrs: {
-        type: 'button',
-        role: 'radio',
-        'aria-checked': candidate === level ? 'true' : 'false',
-        title: REASONING_LEVEL_TIPS[candidate] || `${candidate} reasoning`
-      },
-      dataset: {
-        recursionSettingReasoningChoice: candidate,
-        [`recursionSettingReasoningChoice${titleCase(candidate)}`]: ''
-      }
-    }))
-  ]);
-  return controlRow('Reasoning Level', el('span', { className: 'recursion-settings-reasoning-control' }, [hidden, chain]));
-}
-
 function renderHighLevelSettings(panel, settings) {
   const group = el('section', { className: 'recursion-settings-group' });
-  group.appendChild(settingsSelectRow('Mode', 'recursionSettingMode', normalizeMode(settings.mode), MODE_OPTIONS));
-  group.appendChild(settingsReasoningLevelRow(settings.reasoningLevel));
-  group.appendChild(settingsSelectRow('Strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS));
-  group.appendChild(settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS));
-  group.appendChild(settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS));
+  group.appendChild(settingsDisclosureSection('play-behavior', 'Behavior', [
+    settingsSelectRow('Strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS),
+    settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS),
+    settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS)
+  ]));
   panel.appendChild(group);
 }
 
@@ -1091,66 +1176,72 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
   const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
   const defaultInjection = DEFAULT_RECURSION_SETTINGS.injection;
   group.appendChild(el('h3', { text: 'Advanced' }));
-  group.appendChild(settingsSelectRow(
-    'Injection Placement',
-    'recursionSettingInjectionPlacement',
-    cleanText(injection.placement, defaultInjection.placement),
-    INJECTION_PLACEMENT_OPTIONS
-  ));
-  group.appendChild(settingsSelectRow(
-    'Injection Role',
-    'recursionSettingInjectionRole',
-    cleanText(injection.role, defaultInjection.role),
-    INJECTION_ROLE_OPTIONS
-  ));
-  group.appendChild(settingsSelectRow(
-    'Injection Depth',
-    'recursionSettingInjectionDepth',
-    String(injection.depth ?? defaultInjection.depth),
-    INJECTION_DEPTH_OPTIONS
-  ));
-  group.appendChild(controlRow('Sub-tier Rows', inputControl({
-    value: integerInRange(ui.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20),
-    type: 'number',
-    min: 1,
-    max: 20,
-    step: 1,
-    dataset: { recursionSettingProgressChildLimit: '' },
-    ariaLabel: 'Visible sub-tier progress rows'
-  })));
-  group.appendChild(controlRow('Progress Rows', inputControl({
-    value: integerInRange(ui.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80),
-    type: 'number',
-    min: 5,
-    max: 80,
-    step: 1,
-    dataset: { recursionSettingProgressListLimit: '' },
-    ariaLabel: 'Visible progress rows before scrolling'
-  })));
-  group.appendChild(controlRow('Journal Entries', inputControl({
-    value: integerInRange(diagnostics.maxJournalEntries, 100, 10, 500),
-    type: 'number',
-    min: 10,
-    max: 500,
-    step: 10,
-    dataset: { recursionSettingJournalLimit: '' },
-    ariaLabel: 'Maximum diagnostic journal entries'
-  })));
-  group.appendChild(controlRow('Include Excerpts', checkboxControl({
-    checked: diagnostics.includeExcerpts === true,
-    dataset: { recursionSettingIncludeExcerpts: '' },
-    ariaLabel: 'Include sanitized excerpts in diagnostics'
-  })));
   const resetSceneCache = button('Reset Scene Cache', 'recursionResetSceneCache', 'Reset Recursion scene cache');
   if (asObject(capabilities).resetSceneCache !== true) {
     resetSceneCache.disabled = true;
     resetSceneCache.setAttribute('disabled', 'disabled');
     resetSceneCache.setAttribute('title', 'Planned diagnostic command; not wired in this V1 surface yet.');
   }
-  group.appendChild(el('div', { className: 'recursion-provider-actions' }, [
-    resetSceneCache,
-    button('Clear Run Journal', 'recursionClearRunJournal', 'Clear Recursion run journal'),
-    button('Export Diagnostics', 'recursionExportDiagnostics', 'Export sanitized Recursion diagnostics')
+  group.appendChild(settingsDisclosureSection('injection', 'Injection', [
+    settingsSelectRow(
+      'Placement',
+      'recursionSettingInjectionPlacement',
+      cleanText(injection.placement, defaultInjection.placement),
+      INJECTION_PLACEMENT_OPTIONS
+    ),
+    settingsSelectRow(
+      'Role',
+      'recursionSettingInjectionRole',
+      cleanText(injection.role, defaultInjection.role),
+      INJECTION_ROLE_OPTIONS
+    ),
+    settingsSelectRow(
+      'Depth',
+      'recursionSettingInjectionDepth',
+      String(injection.depth ?? defaultInjection.depth),
+      INJECTION_DEPTH_OPTIONS
+    )
+  ]));
+  group.appendChild(settingsDisclosureSection('ui', 'UI', [
+    controlRow('Sub-tier Rows', inputControl({
+      value: integerInRange(ui.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20),
+      type: 'number',
+      min: 1,
+      max: 20,
+      step: 1,
+      dataset: { recursionSettingProgressChildLimit: '' },
+      ariaLabel: 'Visible sub-tier progress rows'
+    })),
+    controlRow('Progress Rows', inputControl({
+      value: integerInRange(ui.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80),
+      type: 'number',
+      min: 5,
+      max: 80,
+      step: 1,
+      dataset: { recursionSettingProgressListLimit: '' },
+      ariaLabel: 'Visible progress rows before scrolling'
+    }))
+  ]));
+  group.appendChild(settingsDisclosureSection('diagnostics', 'Diagnostics', [
+    controlRow('Journal Entries', inputControl({
+      value: integerInRange(diagnostics.maxJournalEntries, 100, 10, 500),
+      type: 'number',
+      min: 10,
+      max: 500,
+      step: 10,
+      dataset: { recursionSettingJournalLimit: '' },
+      ariaLabel: 'Maximum diagnostic journal entries'
+    })),
+    controlRow('Include Excerpts', checkboxControl({
+      checked: diagnostics.includeExcerpts === true,
+      dataset: { recursionSettingIncludeExcerpts: '' },
+      ariaLabel: 'Include sanitized excerpts in diagnostics'
+    })),
+    el('div', { className: 'recursion-provider-actions' }, [
+      resetSceneCache,
+      button('Clear Run Journal', 'recursionClearRunJournal', 'Clear Recursion run journal'),
+      button('Export Diagnostics', 'recursionExportDiagnostics', 'Export sanitized Recursion diagnostics')
+    ])
   ]));
   panel.appendChild(group);
 }
@@ -1191,11 +1282,20 @@ function renderProviderSettings(panel, lane, provider) {
   const source = asObject(provider);
   const title = lane === 'reasoner' ? 'Reasoner Provider' : 'Utility Provider';
   const statusText = lane === 'reasoner' ? 'optional' : providerStatusText(source).toLowerCase();
+  const open = lane === 'utility' || source.openAICompatible?.sessionApiKeyPresent === true || Boolean(source.openAICompatible?.model);
   const group = el('section', {
-    className: 'recursion-provider-section',
+    className: `recursion-provider-section${open ? ' is-open' : ''}`,
     dataset: { recursionProviderSection: '', recursionProviderLane: lane }
   });
-  group.appendChild(el('div', { className: 'recursion-provider-card' }, [
+  group.appendChild(el('button', {
+    className: 'recursion-provider-card',
+    attrs: { type: 'button', 'aria-expanded': open ? 'true' : 'false' },
+    dataset: {
+      recursionProviderToggle: lane,
+      recursionProviderLane: lane,
+      ...providerDataset('Toggle', lane)
+    }
+  }, [
     el('span', { className: 'recursion-provider-card-title', text: title }),
     el('span', {
       className: providerStatusClass(statusText),
@@ -1203,20 +1303,17 @@ function renderProviderSettings(panel, lane, provider) {
       dataset: providerDataset('Status', lane)
     })
   ]));
-  renderProviderHiddenDefaults(group, lane, source);
-  if (lane === 'reasoner') {
-    group.appendChild(inputControl({
-      value: source.enabled === true ? 'true' : 'false',
-      type: 'hidden',
-      dataset: providerDataset('Enabled', lane),
-      ariaLabel: `${title} enabled`
-    }));
-    panel.appendChild(group);
-    return;
-  }
-  group.appendChild(inputControl({
-    value: 'true',
-    type: 'hidden',
+  const body = el('div', {
+    className: 'recursion-provider-body',
+    dataset: {
+      recursionProviderBody: lane,
+      ...providerDataset('Body', lane)
+    }
+  });
+  body.hidden = !open;
+  renderProviderHiddenDefaults(body, lane, source);
+  body.appendChild(hiddenCheckedControl({
+    checked: lane === 'utility' ? true : source.enabled === true,
     dataset: providerDataset('Enabled', lane),
     ariaLabel: `${title} enabled`
   }));
@@ -1278,8 +1375,8 @@ function renderProviderSettings(panel, lane, provider) {
       ariaLabel: `${title} max tokens`
     })
   ]));
-  group.appendChild(grid);
-  group.appendChild(el('div', { className: 'recursion-provider-actions' }, [
+  body.appendChild(grid);
+  body.appendChild(el('div', { className: 'recursion-provider-actions' }, [
     el('button', {
       className: 'recursion-button',
       text: 'Save Provider',
@@ -1311,6 +1408,7 @@ function renderProviderSettings(panel, lane, provider) {
       }
     })
   ]));
+  group.appendChild(body);
   panel.appendChild(group);
 }
 
@@ -1687,6 +1785,14 @@ function buildRoot() {
         }))
       ]),
       el('button', {
+        className: 'recursion-cards-button',
+        attrs: { type: 'button', 'aria-label': 'Open card scope selector', 'aria-expanded': 'false' },
+        dataset: { recursionCardsButton: '' }
+      }, [
+        el('span', { className: 'recursion-cards-button-icon', attrs: { 'aria-hidden': 'true' } }, [modeIconSvg('cards')]),
+        el('span', { className: 'recursion-cards-button-label', text: 'Cards', dataset: { recursionCardsLabel: '' } })
+      ]),
+      el('button', {
         className: 'recursion-icon-button recursion-brief-arrow',
         attrs: { type: 'button', 'aria-label': 'Open last brief preview', 'aria-expanded': 'false' },
         dataset: { recursionHandToggle: '', recursionBriefArrow: '' }
@@ -1724,6 +1830,13 @@ function buildRoot() {
   });
   hand.hidden = true;
 
+  const cardsPanel = el('div', {
+    className: 'recursion-cards-panel',
+    attrs: { 'aria-label': 'Card scope selector' },
+    dataset: { recursionCardsPanel: '' }
+  });
+  cardsPanel.hidden = true;
+
   const settingsPanel = el('div', {
     className: 'recursion-settings-panel',
     attrs: { 'aria-label': 'Recursion options' },
@@ -1753,6 +1866,7 @@ function buildRoot() {
   root.appendChild(statusPopover);
   root.appendChild(ribbon);
   root.appendChild(hand);
+  root.appendChild(cardsPanel);
   root.appendChild(settingsPanel);
   root.appendChild(hiddenViewerToggle);
   root.appendChild(viewer);
@@ -1800,11 +1914,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const root = buildRoot();
   insertRoot(root, mountPoint);
   const handPanel = root.querySelector('[data-recursion-hand-dropdown]');
+  const cardsPanel = root.querySelector('[data-recursion-cards-panel]');
   const settingsPanel = root.querySelector('[data-recursion-settings-panel]');
   const statusPopover = root.querySelector('[data-recursion-status-popover]');
   const actionsButton = root.querySelector('[data-recursion-actions]');
   const powerButton = root.querySelector('[data-recursion-power-toggle]');
   const handButton = root.querySelector('[data-recursion-hand-toggle]');
+  const cardsButton = root.querySelector('[data-recursion-cards-button]');
   const modeButton = root.querySelector('[data-recursion-mode-button]');
   const statusButton = root.querySelector('[data-recursion-status-trigger]');
   const modeMenu = root.querySelector('[data-recursion-mode-menu]');
@@ -1818,6 +1934,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let ribbonSuccessTimer = null;
   let ribbonSuccessTimerKey = '';
   let collapsedSuccessKey = '';
+  let cardScopeNotice = '';
 
   function clearRibbonRevealTimer() {
     if (ribbonRevealTimer !== null && typeof clearTimeout === 'function') clearTimeout(ribbonRevealTimer);
@@ -1928,11 +2045,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const progressWidth = Math.min(352, rootWidth);
     setFixedPanelGeometry(statusPopover, { left: rootLeft, top: progressTop, width: progressWidth, zIndex: 10020 });
     setFixedPanelGeometry(handPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10010 });
+    setFixedPanelGeometry(cardsPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10016 });
     setFixedPanelGeometry(settingsPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10022 });
     if (modeMenu?.style) {
       const modeRect = root.querySelector('[data-recursion-mode-button]')?.getBoundingClientRect?.();
       if (modeRect) setFixedPanelGeometry(modeMenu, {
-        left: Math.min(modeRect.left, viewportWidth - 222),
+        left: Math.max(0, Math.min(modeRect.left + 6, viewportWidth - 222)),
         top: progressTop,
         width: 222,
         zIndex: 10018
@@ -1958,12 +2076,14 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function setProgressPopoverOpen(open) {
     if (open) setModeMenuOpen(false);
     if (open && settingsPanel.hidden === false) setSettingsPanelOpen(false);
+    if (open && cardsPanel.hidden === false) setCardsPanelOpen(false);
     statusPopover.hidden = !open;
     statusButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     syncFloatingPanelGeometry();
   }
 
   function setHandPanelOpen(open) {
+    if (open && cardsPanel.hidden === false) setCardsPanelOpen(false);
     handPanel.hidden = !open;
     handButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     syncFloatingPanelGeometry();
@@ -1971,6 +2091,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function setSettingsPanelOpen(open) {
     if (open && statusPopover.hidden === false) setProgressPopoverOpen(false);
+    if (open && cardsPanel.hidden === false) setCardsPanelOpen(false);
     settingsPanel.hidden = !open;
     actionsButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
@@ -1980,6 +2101,38 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       update();
     }
     syncFloatingPanelGeometry();
+  }
+
+  function setCardsPanelOpen(open) {
+    if (open) {
+      setProgressPopoverOpen(false);
+      setHandPanelOpen(false);
+      setSettingsPanelOpen(false);
+      setModeMenuOpen(false);
+    }
+    cardsPanel.hidden = !open;
+    cardsButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (!open) cardScopeNotice = '';
+    if (open) renderCardsPanel(cardsPanel, currentView(), createRecursionViewModel(currentView()), cardScopeNotice);
+    syncFloatingPanelGeometry();
+  }
+
+  function applyCardScopeResult(result) {
+    if (result?.blocked) {
+      cardScopeNotice = 'Keep at least one card focus enabled.';
+      renderCardsPanel(cardsPanel, currentView(), createRecursionViewModel(currentView()), cardScopeNotice);
+      return;
+    }
+    cardScopeNotice = '';
+    runAction(runtime?.updateSettings?.({ cardScope: result?.scope || defaultCardScope() }));
+  }
+
+  function setDisclosureOpen(toggle, body, section, open) {
+    if (!toggle || !body) return;
+    const nextOpen = Boolean(open);
+    toggle.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+    body.hidden = !nextOpen;
+    section?.classList?.toggle?.('is-open', nextOpen);
   }
 
   actionsButton?.addEventListener('click', (event) => {
@@ -1993,6 +2146,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   });
   handButton?.addEventListener('click', () => {
     setHandPanelOpen(handPanel.hidden);
+  });
+  cardsButton?.addEventListener('click', () => {
+    setCardsPanelOpen(cardsPanel.hidden);
   });
   modeButton?.addEventListener('click', () => {
     const open = modeMenu?.hidden !== false;
@@ -2029,6 +2185,20 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const packetText = promptPacketText(view.lastPacket, view.lastHand);
       runAction(globalThis.navigator?.clipboard?.writeText?.(packetText));
     }
+    const settingsDisclosure = control('recursionSettingsSectionToggle');
+    if (settingsDisclosure) {
+      const id = cleanText(settingsDisclosure.dataset.recursionSettingsSectionToggle);
+      const body = id ? root.querySelector(`[data-recursion-settings-section-body-${id}]`) : null;
+      const section = id ? root.querySelector(`[data-recursion-settings-section-${id}]`) : null;
+      setDisclosureOpen(settingsDisclosure, body, section, body?.hidden === true);
+    }
+    const providerDisclosure = control('recursionProviderToggle');
+    if (providerDisclosure) {
+      const lane = providerLaneFromDataset(providerDisclosure.dataset);
+      const body = root.querySelector(`[data-recursion-provider-body-${lane}]`);
+      const section = closestDatasetElement(providerDisclosure, 'recursionProviderSection', root);
+      setDisclosureOpen(providerDisclosure, body, section, body?.hidden === true);
+    }
     if (control('recursionResetSceneCache')) {
       runAction(runtime?.resetSceneCache?.(), () => {
         settingsPanelRendered = false;
@@ -2052,6 +2222,22 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       runAction(runtime?.updateSettings?.({ mode: modeChoice.dataset.recursionModeChoice }));
       setModeMenuOpen(false);
     }
+    const familyToggle = control('recursionCardScopeFamilyToggle');
+    if (familyToggle) {
+      const view = currentView();
+      const scope = normalizeCardScope(view.settings?.cardScope || defaultCardScope());
+      const family = familyToggle.dataset.recursionCardScopeFamilyName;
+      applyCardScopeResult(setFamilyEnabled(scope, family, familyState(scope, family) !== 'on'));
+    }
+    const subItemToggle = control('recursionCardScopeSubItemToggle');
+    if (subItemToggle) {
+      const view = currentView();
+      const scope = normalizeCardScope(view.settings?.cardScope || defaultCardScope());
+      const family = subItemToggle.dataset.recursionCardScopeFamilyName;
+      const subItem = subItemToggle.dataset.recursionCardScopeSubItem;
+      const enabled = subItemToggle.getAttribute('aria-pressed') !== 'true';
+      applyCardScopeResult(setSubItemEnabled(scope, family, subItem, enabled));
+    }
     const reasoningNode = control('recursionReasoningLevelNode');
     if (reasoningNode) {
       const reasoningLevel = normalizeReasoningLevel(reasoningNode.dataset.recursionReasoningLevelNode);
@@ -2059,10 +2245,6 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         reasoningLevel,
         reasonerUse: reasonerUseForReasoningLevel(reasoningLevel)
       }));
-    }
-    const settingsReasoningChoice = control('recursionSettingReasoningChoice');
-    if (settingsReasoningChoice) {
-      updateSettingsReasoningChain(root, settingsReasoningChoice.dataset.recursionSettingReasoningChoice);
     }
     const settingsTabControl = control('recursionSettingsTab');
     if (settingsTabControl) {
@@ -2117,6 +2299,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       powerButton,
       handButton,
       handPanel,
+      cardsButton,
+      cardsPanel,
       actionsButton,
       settingsPanel
     ])) {
@@ -2128,12 +2312,17 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (handPanel.hidden === false && !eventWithin(event, [handPanel, handButton, statusPopover])) {
       setHandPanelOpen(false);
     }
+    if (cardsPanel.hidden === false && !eventWithin(event, [cardsPanel, cardsButton])) {
+      setCardsPanelOpen(false);
+    }
     if (settingsPanel.hidden === false && !eventWithin(event, [
       settingsPanel,
       actionsButton,
       statusPopover,
       statusButton,
-      powerButton
+      powerButton,
+      cardsButton,
+      cardsPanel
     ])) {
       setSettingsPanelOpen(false);
     }
@@ -2144,6 +2333,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     setModeMenuOpen(false);
     setProgressPopoverOpen(false);
     setHandPanelOpen(false);
+    setCardsPanelOpen(false);
     setSettingsPanelOpen(false);
   }
 
@@ -2177,15 +2367,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function readSettingsPatch(sourceRoot) {
     const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
     const defaultInjection = DEFAULT_RECURSION_SETTINGS.injection;
-    const reasoningLevel = normalizeReasoningLevel(controlValue(sourceRoot, '[data-recursion-setting-reasoning-level]'));
     const injectionDepth = controlValue(sourceRoot, '[data-recursion-setting-injection-depth]');
     return {
-      mode: controlValue(sourceRoot, '[data-recursion-setting-mode]'),
-      reasoningLevel,
       strength: controlValue(sourceRoot, '[data-recursion-setting-strength]'),
       promptFootprint: controlValue(sourceRoot, '[data-recursion-setting-footprint]'),
       focus: controlValue(sourceRoot, '[data-recursion-setting-focus]'),
-      reasonerUse: reasonerUseForReasoningLevel(reasoningLevel),
       ui: {
         progressChildVisibleLimit: integerInRange(
           controlNumber(sourceRoot, '[data-recursion-setting-progress-child-limit]', defaultUi.progressChildVisibleLimit),
@@ -2285,6 +2471,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     renderProgressPopover(statusPopover, model.progressRun, model);
     renderReasoningChain(root, normalizeReasoningLevel(view.settings?.reasoningLevel));
     renderHandDropdown(handPanel, view, model);
+    setText(root, '[data-recursion-cards-label]', model.cardScopeLabel);
+    if (!cardsPanel.hidden) renderCardsPanel(cardsPanel, view, model, cardScopeNotice);
     if (!settingsPanel.hidden && !settingsPanelRendered) {
       renderSettingsPanel(settingsPanel, view, settingsTab, runtime);
       settingsPanelRendered = true;

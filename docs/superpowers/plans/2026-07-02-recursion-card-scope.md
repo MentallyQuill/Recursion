@@ -592,7 +592,7 @@ git commit -m "feat(runtime): enforce manual card scope"
 - Modify: `styles/recursion.css`
 - Modify: `tools/scripts/test-ui.mjs`
 
-- [ ] Update fake DOM tests for mode menu.
+- [x] Update fake DOM tests for mode menu.
 
 Required assertions:
 
@@ -608,7 +608,7 @@ assertDeepEqual(settingsUpdates.at(-1), { mode: 'manual' }, 'mode menu updates M
 assert(!root.textContent.includes('Semi-Auto'), 'UI does not render Semi-Auto');
 ```
 
-- [ ] Update fake DOM tests for the Cards button and dropdown.
+- [x] Update fake DOM tests for the Cards button and dropdown.
 
 Required assertions:
 
@@ -630,7 +630,7 @@ root.querySelector('[data-recursion-card-subitem-toggle]').click();
 assertEqual(root.querySelector('[data-recursion-card-scope-error]').textContent, 'At least one card focus must remain enabled.', 'zero-selection guard explains blocked action');
 ```
 
-- [ ] Update `MODE_OPTIONS` and `MODE_MENU_OPTIONS`.
+- [x] Update `MODE_OPTIONS` and `MODE_MENU_OPTIONS`.
 
 Required values:
 
@@ -656,7 +656,7 @@ const MODE_MENU_OPTIONS = Object.freeze([
 ]);
 ```
 
-- [ ] Add card-scope imports and model fields.
+- [x] Add card-scope imports and model fields.
 
 Required import shape:
 
@@ -682,7 +682,7 @@ const cardScopeModeCopy = settings.mode === 'manual'
   : 'Selected cards guide focus. Critical continuity may still appear.';
 ```
 
-- [ ] Add Cards button to `buildRoot()` inside `.recursion-right-tools`, before Last Brief.
+- [x] Add Cards button to `buildRoot()` inside `.recursion-right-tools`, before Last Brief.
 
 Required data attributes:
 
@@ -696,7 +696,7 @@ dataset: { recursionCardSubitemToggle: item.key, recursionCardFamilyKey: family.
 dataset: { recursionCardScopeError: '' }
 ```
 
-- [ ] Render `renderCardsPanel(panel, view)` with:
+- [x] Render `renderCardsPanel(panel, view)` with:
   - one compact header line with Auto/Manual enforcement copy;
   - family rows with checkbox, family name, mixed/on/off state, description;
   - sub-item checkbox rows under each family;
@@ -704,13 +704,13 @@ dataset: { recursionCardScopeError: '' }
   - no custom family creation;
   - no per-card text editor.
 
-- [ ] Wire panel open/close behavior:
+- [x] Wire panel open/close behavior:
   - clicking Cards closes mode menu, progress popover, Last Brief, and settings;
   - outside click and `Esc` close Cards;
   - `aria-expanded` mirrors panel visibility;
   - updates rerender the panel if open.
 
-- [ ] Wire scope updates:
+- [x] Wire scope updates:
 
 ```js
 function applyCardScopeUpdate(nextResult) {
@@ -724,8 +724,8 @@ function applyCardScopeUpdate(nextResult) {
 }
 ```
 
-- [ ] Keep settings mode row if still useful, but it must show only Auto/Manual. Do not duplicate card selection controls in settings.
-- [ ] Update CSS with compact dark menu classes:
+- [x] Keep settings mode row if still useful, but it must show only Auto/Manual. Do not duplicate card selection controls in settings.
+- [x] Update CSS with compact dark menu classes:
 
 ```css
 .recursion-cards-panel {
@@ -747,7 +747,7 @@ function applyCardScopeUpdate(nextResult) {
 
 Use existing color tokens and typography from `.recursion-settings-panel` and `.recursion-hand-dropdown`; avoid a new visual theme.
 
-- [ ] Run UI tests.
+- [x] Run UI tests.
 
 Commands:
 

@@ -27,6 +27,7 @@ const PLACEMENT_TYPES = Object.freeze({
   in_prompt: 'IN_PROMPT',
   in_chat: 'IN_CHAT'
 });
+const PROMPT_ROLES = new Set(['system', 'user', 'assistant']);
 const UNSAFE_PROMPT_TEXT_PATTERN = /\bhidden\s+chain[-\s]of[-\s]thought\b|\bchain[-\s]of[-\s]thought\b|\b(hidden|private|secret|undisclosed)\s+(internal\s+)?thoughts?\b|\b(private|hidden|secret|undisclosed)\s+(character\s+)?motives?\b|\b(secret|hidden|private|undisclosed)\s+future\s+(plans?|plot|story)\b|\breveal\s+future\s+plans?\b|\bfuture[-\s]plot\b|\b(hidden|private|secret|undisclosed)\s+spoilers?\b|\breveal\s+spoilers?\b/i;
 
 function asObject(value) {
@@ -212,10 +213,29 @@ function promptPosition(context, placement) {
   return types[key] ?? key;
 }
 
-function promptRole(context, role) {
-  const key = String(role || 'system').trim().toUpperCase();
+function resolvePromptRole(context, role) {
+  const requested = String(role || 'system').trim().toLowerCase();
+  const requestedRole = PROMPT_ROLES.has(requested) ? requested : 'system';
+  const key = requestedRole.toUpperCase();
   const roles = asObject(context.extension_prompt_roles);
-  return roles[key] ?? key;
+  if (Object.prototype.hasOwnProperty.call(roles, key)) {
+    return {
+      value: roles[key],
+      requestedRole,
+      usedRole: requestedRole,
+      fallback: false
+    };
+  }
+  return {
+    value: Object.prototype.hasOwnProperty.call(roles, 'SYSTEM') ? roles.SYSTEM : 'SYSTEM',
+    requestedRole,
+    usedRole: 'system',
+    fallback: requestedRole !== 'system'
+  };
+}
+
+function promptRole(context, role) {
+  return resolvePromptRole(context, role).value;
 }
 
 function scanValue(block) {
@@ -386,9 +406,19 @@ export function createSillyTavernHost({
         throw error;
       }
       const attemptedPromptKeys = new Set();
+      const warnings = [];
       try {
         for (const block of blocks) {
           const key = stringValue(block.promptKey).trim();
+          const roleResolution = resolvePromptRole(context, block.role);
+          if (roleResolution.fallback) {
+            warnings.push({
+              code: 'RECURSION_PROMPT_ROLE_FALLBACK',
+              promptKey: key,
+              requestedRole: roleResolution.requestedRole,
+              fallbackRole: roleResolution.usedRole
+            });
+          }
           attemptedPromptKeys.add(key);
           context.setExtensionPrompt(
             key,
@@ -396,7 +426,7 @@ export function createSillyTavernHost({
             promptPosition(context, block.placement),
             Number(block.depth) || 0,
             scanValue(block),
-            promptRole(context, block.role)
+            roleResolution.value
           );
           installedPromptKeys.add(key);
         }
@@ -412,7 +442,11 @@ export function createSillyTavernHost({
         installedPromptKeys.clear();
         throw error;
       }
-      return { ok: true, installed: [...installedPromptKeys] };
+      return {
+        ok: true,
+        installed: [...installedPromptKeys],
+        ...(warnings.length ? { warnings } : {})
+      };
     },
     async clear() {
       const context = currentContext(contextFactory);

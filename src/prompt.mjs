@@ -1,4 +1,5 @@
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
+import { normalizeInjectionSettings } from './settings.mjs';
 
 export const PROMPT_PACKET_VERSION = 1;
 const PACKET_VERSION = PROMPT_PACKET_VERSION;
@@ -7,6 +8,8 @@ const VALID_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const VALID_REASONER_USE = new Set(['off', 'auto', 'always']);
 const VALID_REASONER_DROP_REASONS = new Set(['duplicate', 'lower-priority', 'budget-exceeded', 'unsupported']);
 const SECTION_KEYS = Object.freeze(['sceneBrief', 'turnBrief', 'guardrails']);
+const VALID_INJECTION_PLACEMENTS = new Set(['in_prompt', 'in_chat']);
+const VALID_INJECTION_ROLES = new Set(['system', 'user', 'assistant']);
 const SCENE_BRIEF_FAMILIES = new Set(['Scene Frame', 'Active Cast', 'Environment/Items']);
 const GUARDRAIL_FAMILIES = new Set(['Continuity Risk']);
 const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
@@ -312,9 +315,13 @@ function truncateSection(value, limit) {
   return truncate(String(value ?? '').replace(/\r\n/g, '\n').trim(), limit);
 }
 
-function buildInjectionPlan(sectionSources, budgets) {
+function buildInjectionPlan(sectionSources, budgets, injectionSettings = {}) {
+  const injection = normalizeInjectionSettings(injectionSettings);
   return INJECTION_TEMPLATE.map((block) => ({
     ...block,
+    placement: injection.placement === 'default' ? block.placement : injection.placement,
+    depth: injection.depth === 'default' ? block.depth : injection.depth,
+    role: injection.role,
     section: block.id,
     sourceIds: [...(sectionSources?.[block.id] || [])],
     maxChars: budgets[block.id]
@@ -364,6 +371,7 @@ function buildPacket({
   omissions,
   sections,
   sectionSources,
+  injectionSettings,
   diagnostics,
   composedAt
 }) {
@@ -379,7 +387,7 @@ function buildPacket({
     sections,
     selectedCardRefs: cards.map((card) => selectedCardRef(card)),
     omissions,
-    injectionPlan: buildInjectionPlan(sectionSources, budgets),
+    injectionPlan: buildInjectionPlan(sectionSources, budgets, injectionSettings),
     diagnostics: diagnostics || baseDiagnostics({ runId, snapshotHash: sourceSnapshotHash, footprint, budgets, cards, omissions }),
     composedAt
   });
@@ -508,6 +516,7 @@ async function applyReasonerPatch({
   packet,
   cards,
   budgets,
+  injectionSettings,
   generationRouter,
   activity
 }) {
@@ -562,7 +571,7 @@ async function applyReasonerPatch({
     const reasonerPacket = withSectionHashes({
       ...packet,
       sections,
-      injectionPlan: buildInjectionPlan(sectionSources, budgets),
+      injectionPlan: buildInjectionPlan(sectionSources, budgets, injectionSettings),
       diagnostics: {
         ...packet.diagnostics,
         composerLane: 'reasoner',
@@ -638,11 +647,13 @@ function validateInjectionPlan(packet) {
     if (block.section !== block.id) throw new Error('injectionPlan.section must match id.');
     if (block.promptKey !== expected.promptKey) throw new Error('injectionPlan.promptKey is invalid.');
     if (block.title !== expected.title) throw new Error('injectionPlan.title is invalid.');
-    if (block.placement !== expected.placement) throw new Error('injectionPlan.placement is invalid.');
-    if (block.role !== expected.role) throw new Error('injectionPlan.role is invalid.');
+    if (!VALID_INJECTION_PLACEMENTS.has(block.placement)) throw new Error('injectionPlan.placement is invalid.');
+    if (!VALID_INJECTION_ROLES.has(block.role)) throw new Error('injectionPlan.role is invalid.');
+    if (Array.isArray(block.depth) || typeof block.depth === 'boolean' || typeof block.depth === 'object') {
+      throw new Error('injectionPlan.depth is invalid.');
+    }
     const depth = Number(block.depth);
     if (!Number.isInteger(depth) || depth < 0 || depth > 10) throw new Error('injectionPlan.depth is invalid.');
-    if (depth !== expected.depth) throw new Error('injectionPlan.depth does not match template.');
     const maxChars = Number(block.maxChars);
     if (!Number.isInteger(maxChars) || maxChars < 0 || maxChars > 100000) throw new Error('injectionPlan.maxChars is invalid.');
     assertArray(block?.sourceIds, 'injectionPlan.sourceIds');
@@ -667,6 +678,7 @@ export async function composePromptPacket({
 } = {}) {
   const footprint = normalizeFootprint(settings);
   const budgets = FOOTPRINT_BUDGETS[footprint];
+  const injectionSettings = normalizeInjectionSettings(settings?.injection);
   const cards = normalizeCards(hand);
   const promptRunId = safePromptId(runId, 'prompt-run') || makeId('prompt-run');
   const handOmissions = normalizeOmissions(hand);
@@ -684,6 +696,7 @@ export async function composePromptPacket({
     omissions,
     sections: utility.sections,
     sectionSources: utility.sectionSources,
+    injectionSettings,
     composedAt
   });
 
@@ -695,6 +708,7 @@ export async function composePromptPacket({
       packet,
       cards,
       budgets,
+      injectionSettings,
       generationRouter,
       activity: activityTarget
     });

@@ -7,6 +7,8 @@ const FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const FOCUS = new Set(['balanced', 'character', 'continuity', 'prose', 'plot']);
 const SOURCES = new Set(['host-current-model', 'host-connection-profile', 'openai-compatible']);
 const LANES = new Set(['utility', 'reasoner']);
+const INJECTION_PLACEMENTS = new Set(['default', 'in_prompt', 'in_chat']);
+const INJECTION_ROLES = new Set(['system', 'user', 'assistant']);
 const UI_PROGRESS_CHILD_MIN = 1;
 const UI_PROGRESS_CHILD_MAX = 20;
 const UI_PROGRESS_LIST_MIN = 5;
@@ -25,6 +27,11 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   promptFootprint: 'normal',
   focus: 'balanced',
   reasonerUse: 'auto',
+  injection: {
+    placement: 'default',
+    role: 'system',
+    depth: 'default'
+  },
   diagnostics: {
     maxJournalEntries: 100,
     includeExcerpts: false
@@ -77,6 +84,27 @@ function numberInRange(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, number));
+}
+
+function normalizeInjectionDepth(value) {
+  if (value === null || value === undefined) return 'default';
+  if (Array.isArray(value) || typeof value === 'boolean' || typeof value === 'object') return 'default';
+  if (typeof value === 'string') {
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed || trimmed === 'default') return 'default';
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 'default';
+  return Math.round(Math.min(10, Math.max(0, number)));
+}
+
+export function normalizeInjectionSettings(value = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  return {
+    placement: enumValue(source.placement, INJECTION_PLACEMENTS, DEFAULT_RECURSION_SETTINGS.injection.placement),
+    role: enumValue(source.role, INJECTION_ROLES, DEFAULT_RECURSION_SETTINGS.injection.role),
+    depth: normalizeInjectionDepth(source.depth)
+  };
 }
 
 function isPlainObject(value) {
@@ -164,6 +192,7 @@ export function normalizeSettings(value = {}, secretStore = null) {
     promptFootprint: enumValue(source.promptFootprint, FOOTPRINTS, DEFAULT_RECURSION_SETTINGS.promptFootprint),
     focus: enumValue(source.focus, FOCUS, DEFAULT_RECURSION_SETTINGS.focus),
     reasonerUse: reasonerUseForReasoningLevel(reasoningLevel),
+    injection: normalizeInjectionSettings(source.injection),
     diagnostics: {
       maxJournalEntries: Math.round(numberInRange(source.diagnostics?.maxJournalEntries, 100, 10, 500)),
       includeExcerpts: source.diagnostics?.includeExcerpts === true

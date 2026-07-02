@@ -29,6 +29,36 @@ assertEqual(installResult.ok, true, 'prompt install returns ok result');
 assert(installResult.installed.includes('recursion.turnBrief'), 'prompt install returns installed keys');
 assertEqual(prompts.find((entry) => entry.text === 'Use the alley scene.').key, 'recursion.turnBrief', 'prompt installed with Recursion key');
 
+const roleFallbackPrompts = [];
+const roleFallbackHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'role-fallback-chat',
+    chat: [],
+    setExtensionPrompt(key, text, position, depth, scan, role) {
+      roleFallbackPrompts.push({ key, text, position, depth, scan, role });
+    },
+    extension_prompt_types: { IN_CHAT: 1, IN_PROMPT: 2, BEFORE_PROMPT: 0 },
+    extension_prompt_roles: { SYSTEM: 0 }
+  }),
+  settingsRoot: {}
+});
+const roleFallbackResult = await roleFallbackHost.prompt.install({
+  injectionPlan: { blocks: [{ id: 'turnBrief', promptKey: 'recursion.turnBrief', placement: 'in_chat', depth: 2, role: 'assistant' }] },
+  sections: { turnBrief: 'Install assistant role through system fallback.', sceneBrief: '', guardrails: '' }
+});
+const roleFallbackWrite = roleFallbackPrompts.find((entry) => entry.text === 'Install assistant role through system fallback.');
+assertEqual(roleFallbackWrite.role, 0, 'unsupported prompt role falls back to SillyTavern system role enum');
+assertDeepEqual(
+  roleFallbackResult.warnings,
+  [{
+    code: 'RECURSION_PROMPT_ROLE_FALLBACK',
+    promptKey: 'recursion.turnBrief',
+    requestedRole: 'assistant',
+    fallbackRole: 'system'
+  }],
+  'prompt install returns compact role fallback warning metadata'
+);
+
 await host.prompt.clear();
 assert(prompts.some((entry) => entry.key === 'recursion.turnBrief' && entry.text === ''), 'prompt clear removes installed key');
 assert(prompts.some((entry) => entry.key === 'recursion.sceneBrief' && entry.text === ''), 'prompt clear removes known scene key');

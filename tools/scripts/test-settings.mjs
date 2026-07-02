@@ -5,7 +5,7 @@ import {
   normalizeProviderSettings,
   normalizeSettings
 } from '../../src/settings.mjs';
-import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
+import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 function assertThrows(fn, pattern, message) {
   try {
@@ -28,6 +28,28 @@ const normalized = normalizeSettings({
     reasoner: { enabled: true, source: 'host-current-model' }
   }
 });
+assertDeepEqual(
+  normalizeSettings({}).injection,
+  { placement: 'default', role: 'system', depth: 'default' },
+  'injection defaults preserve the packet template plan'
+);
+assertDeepEqual(
+  normalizeSettings({ injection: { placement: 'IN_CHAT', role: 'Assistant', depth: '3.6' } }).injection,
+  { placement: 'in_chat', role: 'assistant', depth: 4 },
+  'injection placement, role, and numeric-like depth normalize'
+);
+assertDeepEqual(
+  normalizeSettings({ injection: { placement: 'bad', role: 'developer', depth: 'deep' } }).injection,
+  { placement: 'default', role: 'system', depth: 'default' },
+  'invalid injection values fall back safely'
+);
+assertEqual(normalizeSettings({ injection: { depth: -9 } }).injection.depth, 0, 'injection depth clamps low');
+assertEqual(normalizeSettings({ injection: { depth: 99 } }).injection.depth, 10, 'injection depth clamps high');
+assertEqual(normalizeSettings({ injection: { depth: '' } }).injection.depth, 'default', 'blank injection depth falls back');
+assertEqual(normalizeSettings({ injection: { depth: null } }).injection.depth, 'default', 'null injection depth falls back');
+assertEqual(normalizeSettings({ injection: { depth: true } }).injection.depth, 'default', 'boolean injection depth falls back');
+assertEqual(normalizeSettings({ injection: { depth: [] } }).injection.depth, 'default', 'array injection depth falls back');
+assertEqual(normalizeSettings({ injection: { depth: {} } }).injection.depth, 'default', 'object injection depth falls back');
 assertEqual(normalized.mode, 'auto', 'mode preserved');
 assertEqual(normalized.reasoningLevel, 'ultra', 'reasoning level preserved');
 assertEqual(normalized.reasonerUse, 'always', 'ultra reasoning derives always-on reasoner routing');
@@ -145,6 +167,12 @@ store.update({ ui: { progressChildVisibleLimit: 7 } });
 store.update({ ui: { progressListVisibleLimit: 22 } });
 assertEqual(root.recursion.ui.progressChildVisibleLimit, 7, 'partial UI update preserves sub-tier limit');
 assertEqual(root.recursion.ui.progressListVisibleLimit, 22, 'partial UI update changes progress list limit');
+
+store.update({ injection: { placement: 'in_chat', role: 'assistant', depth: 8 } });
+store.update({ injection: { depth: 2 } });
+assertEqual(root.recursion.injection.placement, 'in_chat', 'partial injection update preserves placement');
+assertEqual(root.recursion.injection.role, 'assistant', 'partial injection update preserves role');
+assertEqual(root.recursion.injection.depth, 2, 'partial injection update changes depth');
 
 assertThrows(
   () => store.updateProvider('bad-lane', { apiKey: 'x' }),

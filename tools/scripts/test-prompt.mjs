@@ -182,6 +182,35 @@ for (const block of blocks) {
   assert(block.text.length <= packet.diagnostics.sectionBudgets[block.section], `${block.id} text fits section budget`);
 }
 
+const overriddenPacket = await composePromptPacket({
+  hand: baseHand(),
+  snapshot: baseSnapshot(),
+  settings: {
+    promptFootprint: 'normal',
+    reasonerUse: 'off',
+    injection: { placement: 'in_chat', role: 'assistant', depth: 7 }
+  }
+});
+validatePromptPacket(overriddenPacket);
+assertDeepEqual(
+  overriddenPacket.injectionPlan.map((block) => ({ id: block.id, placement: block.placement, depth: block.depth, role: block.role })),
+  [
+    { id: 'sceneBrief', placement: 'in_chat', depth: 7, role: 'assistant' },
+    { id: 'turnBrief', placement: 'in_chat', depth: 7, role: 'assistant' },
+    { id: 'guardrails', placement: 'in_chat', depth: 7, role: 'assistant' }
+  ],
+  'explicit injection settings override composed packet blocks'
+);
+assertDeepEqual(
+  packetToPromptBlocks(overriddenPacket).map((block) => ({ id: block.id, placement: block.placement, depth: block.depth, role: block.role })),
+  [
+    { id: 'sceneBrief', placement: 'in_chat', depth: 7, role: 'assistant' },
+    { id: 'turnBrief', placement: 'in_chat', depth: 7, role: 'assistant' },
+    { id: 'guardrails', placement: 'in_chat', depth: 7, role: 'assistant' }
+  ],
+  'prompt blocks emit overridden placement, depth, and role'
+);
+
 const fallbackFootprint = await composePromptPacket({
   hand: baseHand(),
   snapshot: baseSnapshot(),
@@ -377,6 +406,41 @@ const reasonerPacket = await composePromptPacket({
 });
 assertEqual(alwaysReasonerCalls, 1, 'reasonerUse always uses router on normal footprint');
 assertEqual(reasonerPacket.diagnostics.composerLane, 'reasoner', 'reasoner composer used');
+
+const reasonerOverrideSnapshot = baseSnapshot();
+const reasonerOverridePacket = await composePromptPacket({
+  hand: baseHand(),
+  snapshot: reasonerOverrideSnapshot,
+  settings: {
+    promptFootprint: 'normal',
+    reasonerUse: 'always',
+    injection: { placement: 'in_prompt', role: 'user', depth: 0 }
+  },
+  generationRouter: {
+    async generate() {
+      return {
+        ok: true,
+        data: {
+          schema: 'recursion.reasonerComposer.v1',
+          snapshotHash: hashJson(reasonerOverrideSnapshot),
+          instructionPatch: 'Keep the signal response anchored to visible scene facts.',
+          keptCardIds: ['c5'],
+          droppedCardIds: []
+        }
+      };
+    }
+  }
+});
+assertEqual(reasonerOverridePacket.diagnostics.composerLane, 'reasoner', 'reasoner override packet still uses reasoner composition');
+assertDeepEqual(
+  reasonerOverridePacket.injectionPlan.map((block) => ({ id: block.id, placement: block.placement, depth: block.depth, role: block.role })),
+  [
+    { id: 'sceneBrief', placement: 'in_prompt', depth: 0, role: 'user' },
+    { id: 'turnBrief', placement: 'in_prompt', depth: 0, role: 'user' },
+    { id: 'guardrails', placement: 'in_prompt', depth: 0, role: 'user' }
+  ],
+  'explicit injection settings apply after reasoner composition rebuilds the plan'
+);
 
 const invalidReasonerEvents = [];
 const invalidReasonerPacket = await composePromptPacket({
@@ -580,6 +644,19 @@ assertThrows(
   /placement/,
   'validation rejects invalid injection placement'
 );
+assertEqual(
+  validatePromptPacket({
+    ...packet,
+    injectionPlan: [{ ...packet.injectionPlan[0], placement: 'in_chat', role: 'user', depth: 9 }, packet.injectionPlan[1], packet.injectionPlan[2]]
+  }).injectionPlan[0].depth,
+  9,
+  'validation accepts valid injection overrides'
+);
+assertThrows(
+  () => validatePromptPacket({ ...packet, injectionPlan: [{ ...packet.injectionPlan[0], role: 'developer' }, packet.injectionPlan[1], packet.injectionPlan[2]] }),
+  /role/,
+  'validation rejects invalid injection role'
+);
 assertThrows(
   () => validatePromptPacket({ ...packet, injectionPlan: [packet.injectionPlan[0], packet.injectionPlan[0], packet.injectionPlan[2]] }),
   /Duplicate/,
@@ -591,9 +668,24 @@ assertThrows(
   'validation rejects drifted injection title'
 );
 assertThrows(
-  () => validatePromptPacket({ ...packet, injectionPlan: [{ ...packet.injectionPlan[0], depth: 9 }, packet.injectionPlan[1], packet.injectionPlan[2]] }),
+  () => validatePromptPacket({ ...packet, injectionPlan: [{ ...packet.injectionPlan[0], depth: 11 }, packet.injectionPlan[1], packet.injectionPlan[2]] }),
   /depth/,
-  'validation rejects drifted injection depth'
+  'validation rejects invalid injection depth'
+);
+assertThrows(
+  () => validatePromptPacket({ ...packet, injectionPlan: [{ ...packet.injectionPlan[0], depth: true }, packet.injectionPlan[1], packet.injectionPlan[2]] }),
+  /depth/,
+  'validation rejects boolean injection depth'
+);
+assertThrows(
+  () => validatePromptPacket({ ...packet, injectionPlan: [{ ...packet.injectionPlan[0], depth: [] }, packet.injectionPlan[1], packet.injectionPlan[2]] }),
+  /depth/,
+  'validation rejects array injection depth'
+);
+assertThrows(
+  () => validatePromptPacket({ ...packet, injectionPlan: [{ ...packet.injectionPlan[0], depth: {} }, packet.injectionPlan[1], packet.injectionPlan[2]] }),
+  /depth/,
+  'validation rejects object injection depth'
 );
 await assertRejects(
   async () => composePromptPacket({

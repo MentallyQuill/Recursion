@@ -338,6 +338,7 @@ Soft invalidation marks the cache stale and asks the Utility Arbiter to review:
 
 - manual scene refresh is invoked by runtime/tooling, recorded as reason `user-refresh`;
 - host chat-change events clear the active runtime scene state and best-effort mark the previously active scene cache stale as `chat-changed`;
+- host message delete, update, or swipe events clear the active runtime scene state and best-effort mark the previously active scene cache stale as `source-changed`;
 - provider settings, model, route, strength, focus, prompt footprint, or Reasoner mode changes;
 - freshness cap is reached;
 - source window advances beyond the card evidence range;

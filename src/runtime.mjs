@@ -1667,8 +1667,15 @@ export function createRecursionRuntime({
     });
   }
 
-  async function handleChatChanged() {
-    const runId = makeId('chat-change');
+  async function clearForHostEvent({
+    idPrefix,
+    reason,
+    invalidationDetails = {},
+    startLabel,
+    successLabel,
+    chips
+  }) {
+    const runId = makeId(idPrefix);
     supersedeActiveRun();
     return trackRuntimeMutation(async () => {
       const clearContext = promptClearContext();
@@ -1677,16 +1684,14 @@ export function createRecursionRuntime({
         phase: 'promptClearing',
         mode: 'review',
         severity: 'info',
-        label: 'Clearing Recursion prompt after chat change...',
-        chips: ['Chat', 'Prompt']
+        label: startLabel,
+        chips
       });
-      await invalidateActiveSceneCacheBestEffort('chat-changed', {
-        source: 'host-event'
-      });
+      await invalidateActiveSceneCacheBestEffort(reason, invalidationDetails);
       clearVolatileSceneState();
       const clear = await runPromptMutationSection(null, async () => {
         const clearResult = await clearPromptBestEffort(host);
-        await appendPromptClearedJournal(runId, clearContext, clearResult, 'chat-changed');
+        await appendPromptClearedJournal(runId, clearContext, clearResult, reason);
         return clearResult;
       });
       if (clear?.ok === false) {
@@ -1698,10 +1703,39 @@ export function createRecursionRuntime({
         outcome: 'success',
         phase: 'settled',
         severity: 'success',
-        label: 'Chat changed. Recursion prompt cleared.',
-        chips: ['Chat', 'Prompt']
+        label: successLabel,
+        chips
       });
       return { ok: true, clear };
+    });
+  }
+
+  async function handleChatChanged() {
+    return clearForHostEvent({
+      idPrefix: 'chat-change',
+      reason: 'chat-changed',
+      invalidationDetails: { source: 'host-event' },
+      startLabel: 'Clearing Recursion prompt after chat change...',
+      successLabel: 'Chat changed. Recursion prompt cleared.',
+      chips: ['Chat', 'Prompt']
+    });
+  }
+
+  async function handleSourceChanged(details = {}) {
+    const source = asObject(details);
+    const eventName = safeText(source.eventName || source.event || '', 80);
+    const messageId = finiteNumberOrNull(source.messageId ?? source.mesid ?? source.id);
+    return clearForHostEvent({
+      idPrefix: 'source-change',
+      reason: 'source-changed',
+      invalidationDetails: {
+        source: 'host-event',
+        ...(eventName ? { eventName } : {}),
+        ...(messageId !== null ? { messageId } : {})
+      },
+      startLabel: 'Clearing Recursion prompt after source message change...',
+      successLabel: 'Source messages changed. Recursion prompt cleared.',
+      chips: ['Source', 'Prompt']
     });
   }
 
@@ -2748,6 +2782,7 @@ export function createRecursionRuntime({
       return prepareForGeneration({ refreshReason: 'user-refresh' });
     },
     handleChatChanged,
+    handleSourceChanged,
     updateSettings,
     updateProvider,
     clearProviderKey,

@@ -40,6 +40,8 @@ When SillyTavern exposes `eventSource` plus `event_types.CHAT_CHANGED`, the entr
 
 Chat-change cleanup clears volatile Recursion state, clears Recursion-owned prompt keys, and best-effort marks the previously active scene cache stale with reason `chat-changed`. It does not run provider calls or compile a new packet for the newly selected chat.
 
+The entrypoint also subscribes to source mutation events when available: `MESSAGE_DELETED`, `MESSAGE_UPDATED`, and `MESSAGE_SWIPED`. Those handlers call `runtime.handleSourceChanged()` so edits, deletes, and swipe changes do not leave an old Recursion prompt installed. The cleanup records only compact event metadata such as event name and message id.
+
 ## Generation Interceptor Boundary
 
 The generation interceptor calls `runtime.prepareForGeneration()` before returning the chat to SillyTavern. It catches and logs sanitized failures so the host generation can continue.

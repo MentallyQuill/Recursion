@@ -68,13 +68,46 @@ function subscribeHostEvent(eventSource, eventName, handler) {
   return null;
 }
 
-function resolveChatChangedEvent(context) {
-  const eventTypes = context?.event_types
+function hostEventTypes(context) {
+  return context?.event_types
     || context?.eventTypes
     || globalThis.event_types
     || globalThis.eventTypes
     || {};
-  return eventTypes.CHAT_CHANGED || '';
+}
+
+function resolveChatChangedEvent(context) {
+  return hostEventTypes(context).CHAT_CHANGED || '';
+}
+
+function resolveSourceChangedEvents(context) {
+  const eventTypes = hostEventTypes(context);
+  return [
+    eventTypes.MESSAGE_DELETED,
+    eventTypes.MESSAGE_UPDATED,
+    eventTypes.MESSAGE_SWIPED
+  ].filter(Boolean);
+}
+
+function sourceEventDetails(eventName, payload) {
+  const source = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  const rawId = Number(source.messageId ?? source.mesid ?? source.id ?? source.message_id ?? payload);
+  return {
+    eventName: String(eventName || ''),
+    ...(Number.isFinite(rawId) ? { messageId: rawId } : {})
+  };
+}
+
+function registerRuntimeHostEvent(eventSource, eventName, handler) {
+  const unsubscribe = subscribeHostEvent(eventSource, eventName, handler);
+  if (typeof unsubscribe === 'function') hostEventUnsubscribers.push(unsubscribe);
+}
+
+function invokeRuntimeCleanup(methodName, label, ...args) {
+  const activeRuntime = runtime;
+  return Promise.resolve(activeRuntime?.[methodName]?.(...args)).catch((error) => {
+    warn(label, error);
+  });
 }
 
 function registerHostEvents(nextRuntime) {
@@ -82,13 +115,16 @@ function registerHostEvents(nextRuntime) {
   const context = getSillyTavernContextSafe();
   const eventSource = context.eventSource || globalThis.eventSource;
   const chatChangedEvent = resolveChatChangedEvent(context);
-  const unsubscribe = subscribeHostEvent(eventSource, chatChangedEvent, () => {
-    const activeRuntime = runtime || nextRuntime;
-    return Promise.resolve(activeRuntime?.handleChatChanged?.()).catch((error) => {
-      warn('Chat change cleanup failed.', error);
-    });
+  registerRuntimeHostEvent(eventSource, chatChangedEvent, () => {
+    runtime ||= nextRuntime;
+    return invokeRuntimeCleanup('handleChatChanged', 'Chat change cleanup failed.');
   });
-  if (typeof unsubscribe === 'function') hostEventUnsubscribers.push(unsubscribe);
+  for (const eventName of resolveSourceChangedEvents(context)) {
+    registerRuntimeHostEvent(eventSource, eventName, (payload) => {
+      runtime ||= nextRuntime;
+      return invokeRuntimeCleanup('handleSourceChanged', 'Source change cleanup failed.', sourceEventDetails(eventName, payload));
+    });
+  }
 }
 
 function createProviderJournal(storage, currentHost) {

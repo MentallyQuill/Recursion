@@ -4751,6 +4751,67 @@ for (const scenario of [
 
 {
   let releaseArbiter;
+  const { runtime, calls } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'source-change regression only needs utility arbiter');
+        await new Promise((resolve) => {
+          releaseArbiter = resolve;
+        });
+        assertEqual(request.signal?.aborted, true, 'source change aborts in-flight provider signal');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'compose-brief',
+            diagnostics: ['source-change-regression']
+          }
+        };
+      }
+    }
+  });
+  const pending = runtime.prepareForGeneration({ userMessage: 'Message changes before install.' });
+  await waitUntil(() => typeof releaseArbiter === 'function', 'source-change run did not enter arbiter');
+  assertEqual(typeof runtime.handleSourceChanged, 'function', 'runtime exposes source-change cleanup');
+  const sourceChange = runtime.handleSourceChanged({ eventName: 'message_updated', messageId: 2 });
+  releaseArbiter();
+  const [sourceChangeResult, pendingResult] = await Promise.all([sourceChange, pending]);
+  assertEqual(pendingResult.superseded, true, 'source change supersedes in-flight generation preparation');
+  assertEqual(sourceChangeResult.ok, true, 'source change cleanup succeeds');
+  assertEqual(calls.clear, 1, 'source change clears host prompt');
+  const view = runtime.view();
+  assertEqual(view.activeRunId, null, 'source change clears active run id');
+  assertEqual(view.lastPacket, null, 'source change clears in-memory prompt packet');
+  assertEqual(view.lastHand.cards.length, 0, 'source change clears in-memory hand');
+  assertEqual(view.lastPlan, null, 'source change clears in-memory plan');
+  assertEqual(view.lastSnapshot, null, 'source change clears in-memory snapshot');
+  assertEqual(view.activity.label, 'Source messages changed. Recursion prompt cleared.', 'source change surfaces prompt cleanup');
+}
+
+{
+  const { runtime, calls, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' }
+  });
+  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare prompt before source edit.' });
+  assertEqual(setup.ok, true, 'source-change setup prepares generation');
+  const setupSnapshot = runtime.view().lastSnapshot;
+  const result = await runtime.handleSourceChanged({ eventName: 'message_deleted', messageId: 2 });
+  assertEqual(result.ok, true, 'source change cleanup returns ok');
+  assertEqual(calls.clear, 1, 'source change clears installed prompt');
+  const cache = await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey);
+  assertEqual(cache.cacheState, 'stale', 'source change marks previous active scene cache stale');
+  assertEqual(cache.invalidation.reason, 'source-changed', 'source change records cache invalidation reason');
+  assertEqual(cache.invalidation.details.eventName, 'message_deleted', 'source change stores safe event name');
+  assertEqual(cache.invalidation.details.messageId, 2, 'source change stores safe message id');
+  const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
+  assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'source-changed'), 'source change records prompt clear journal');
+  assertEqual(runtime.view().lastSnapshot, null, 'source change clears previous snapshot after journaling');
+}
+
+{
+  let releaseArbiter;
   const { runtime, installed } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {

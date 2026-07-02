@@ -205,6 +205,47 @@ if (lifecycleFailures.length) {
 }
 
 {
+  const fake = createFakeSillyTavernContext('source-change-event');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    CHAT_CHANGED: 'chat_changed',
+    MESSAGE_DELETED: 'message_deleted',
+    MESSAGE_UPDATED: 'message_updated',
+    MESSAGE_SWIPED: 'message_swiped'
+  };
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionGenerationInterceptor('source-change-event-payload'), 'source-change-event-payload', 'source-change event setup keeps original chat');
+  assertEqual(eventSource.listenerCount('message_deleted'), 1, 'bootstrap subscribes to message deleted event');
+  assertEqual(eventSource.listenerCount('message_updated'), 1, 'bootstrap subscribes to message updated event');
+  assertEqual(eventSource.listenerCount('message_swiped'), 1, 'bootstrap subscribes to message swiped event');
+  for (const key of RECURSION_PROMPT_KEYS) {
+    assert(fake.promptState.get(key), `source-change setup installs ${key}`);
+  }
+  const clearStart = fake.promptWrites.length;
+  await eventSource.emit('message_updated', 0);
+  const cleanupWrites = fake.promptWrites.slice(clearStart);
+  for (const key of RECURSION_PROMPT_KEYS) {
+    assert(
+      cleanupWrites.some((entry) => entry.key === key && entry.text === ''),
+      `source-change event clears ${key}`
+    );
+    assertEqual(fake.promptState.get(key), '', `source-change event leaves ${key} empty`);
+  }
+  await globalThis.recursionOnDelete();
+  assertEqual(eventSource.listenerCount('message_deleted'), 0, 'teardown unsubscribes from message deleted event');
+  assertEqual(eventSource.listenerCount('message_updated'), 0, 'teardown unsubscribes from message updated event');
+  assertEqual(eventSource.listenerCount('message_swiped'), 0, 'teardown unsubscribes from message swiped event');
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const prompts = [];
   globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
   globalThis.SillyTavern = {

@@ -1114,11 +1114,13 @@ try {
   assert(root.querySelector('[data-recursion-mode-button]'), 'compact bar renders an icon-only mode button');
   assert(root.querySelector('[data-recursion-mode-menu]'), 'compact bar renders the mode selector menu');
   assert(root.querySelector('[data-recursion-mode-icon]').querySelector('svg'), 'mode button renders the reference inline SVG icon');
-  assertEqual(root.querySelector('[data-recursion-mode-icon]').querySelectorAll('rect').length, 3, 'Auto mode button uses the reference stacked-cards SVG');
+  assert(root.querySelector('[data-recursion-mode-icon]').querySelector('[data-recursion-mode-arrow-fan]'), 'Auto mode button uses the divergent three-arrow mode icon');
+  assertEqual(root.querySelector('[data-recursion-mode-icon]').querySelectorAll('[data-recursion-mode-arrow]').length, 3, 'Auto mode icon keeps three equal-weight arrows');
   assertEqual(root.querySelectorAll('[data-recursion-mode-choice-icon]').length, 2, 'mode selector renders icons only for Auto and Manual');
   assertEqual(root.querySelectorAll('[data-recursion-mode-choice-tip]').length, 2, 'mode selector renders tips only for Auto and Manual');
-  assertEqual(root.querySelector('[data-recursion-mode-choice-auto]').querySelectorAll('rect').length, 3, 'Auto mode row uses the reference stacked-cards SVG');
-  assert(root.querySelector('[data-recursion-mode-choice-manual]').querySelectorAll('rect').length >= 2, 'Manual mode row uses the reference stacked-cards SVG');
+  assert(root.querySelector('[data-recursion-mode-choice-auto]').querySelector('[data-recursion-mode-arrow-fan]'), 'Auto mode row uses the divergent three-arrow icon');
+  assert(root.querySelector('[data-recursion-mode-choice-manual]').querySelector('[data-recursion-mode-arrow-parallel]'), 'Manual mode row uses the parallel three-arrow icon');
+  assertEqual(root.querySelector('[data-recursion-mode-choice-manual]').querySelectorAll('[data-recursion-mode-arrow]').length, 3, 'Manual mode row keeps three equal-weight arrows');
   assert(!root.querySelector(`[data-recursion-mode-choice-${removedModeValue}]`), 'old named mode is removed from the compact mode menu');
   assert(!root.querySelector('[data-recursion-mode-choice-observe]'), 'Observe only mode is removed from the compact mode menu');
   assert(!root.querySelector('[data-recursion-mode-choice-off]'), 'Off mode is removed from the compact mode menu');
@@ -1162,6 +1164,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('title'), 'Ultra: Reasoner-heavy synthesis with a larger card bias.', 'Ultra reasoning tooltip matches the reference copy');
   assert(root.querySelector('[data-recursion-brief-arrow]'), 'compact bar renders a dedicated last-brief dropdown arrow');
   assert(root.querySelector('[data-recursion-cards-button]'), 'compact bar renders the Cards scope button');
+  assertEqual(root.querySelector('[data-recursion-cards-button]').querySelectorAll('rect').length, 3, 'Cards scope button owns the stacked-cards SVG');
   assertEqual(root.querySelector('[data-recursion-cards-label]').textContent, 'Cards', 'Cards button labels the full default scope as Cards');
   assertEqual(root.querySelector('[data-recursion-cards-button]').getAttribute('aria-expanded'), 'false', 'Cards button starts collapsed');
   assert(root.querySelector('[data-recursion-arrow-down]'), 'last-brief dropdown arrow uses a drawn icon instead of text');
@@ -1208,6 +1211,9 @@ try {
   root.querySelector('[data-recursion-mode-choice-manual]').querySelector('[data-recursion-mode-choice-name]').click();
   assertDeepEqual(settingsUpdates.at(-1), { mode: 'manual' }, 'mode menu updates Manual from nested row content clicks');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode button reflects closed menu after selection');
+  ui.update();
+  assert(root.querySelector('[data-recursion-mode-icon]').querySelector('[data-recursion-mode-arrow-parallel]'), 'Manual mode button uses the parallel three-arrow mode icon after selection');
+  assertEqual(root.querySelector('[data-recursion-mode-icon]').querySelectorAll('[data-recursion-mode-arrow]').length, 3, 'Manual mode icon keeps three equal-weight arrows');
   root.querySelector('[data-recursion-power-toggle]').click();
   assertDeepEqual(settingsUpdates.at(-1), { enabled: false }, 'power toggle disables Recursion without changing mode');
   assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'power toggle does not open progress popover');

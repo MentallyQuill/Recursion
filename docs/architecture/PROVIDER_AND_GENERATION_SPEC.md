@@ -91,6 +91,8 @@ Provider setup uses the same control-plane helpers as generation:
 - `providerModelStatus()` resolves the selected source into a compact readiness label before a test call runs, including selected connection profile model labels when the host exposes them.
 - `fetchOpenAICompatibleModels()` discovers direct endpoint models by normalizing the configured base URL to `/models` and parsing OpenAI-style `data[]` or `models[]` responses.
 
+Connection profile discovery must stay scoped to provider/connection-profile seams. It must not traverse SillyTavern character, character-card, persona, avatar, group, or Recursion card containers while searching for profiles. The Providers pane should reuse one detected profile list while rendering Utility and Reasoner controls instead of asking the host repeatedly during a single render.
+
 Model discovery is read-only. It may use the currently typed session key, but it must not save settings, persist secrets, write diagnostics, clear prompts, or invalidate scene cache. Fetch failures are compact UI status, not runtime generation failures.
 
 The Providers settings pane shows a compact route summary derived from Reasoning Level. Recursion does not expose Directive-style deep per-role routing controls in V1; Reasoning Level remains the operator-facing route control, and runtime owns the detailed role-to-lane policy.
@@ -432,7 +434,8 @@ Timeouts and aborts:
 
 - provider calls must receive an abort signal from the runtime;
 - user disable, chat change, settings change, and host generation stop should abort in-flight Recursion calls when their output would be stale;
-- aborted calls should not install prompt packets.
+- aborted calls should not install prompt packets;
+- player Stop / `GENERATION_STOPPED` should settle Recursion progress as skipped instead of provider warning or failure.
 
 ## Retry and Fallback Policy
 

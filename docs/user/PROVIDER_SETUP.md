@@ -7,7 +7,7 @@ Recursion uses two provider lanes:
 
 Reasoner is not a better default Utility. Utility remains the normal path and the fallback path.
 
-<Render Needed>: assets/documentation/renders/recursion-provider-controls-utility-reasoner.png - Provider controls showing collapsible Utility and Reasoner lanes with source selector, model fields, session key state, Test Provider, and Clear Session Key.
+<Render Needed>: assets/documentation/renders/recursion-provider-controls-utility-reasoner.png - Provider controls showing collapsible Utility and Reasoner lanes with source selector, model fields, session key state, Test Provider, and OpenAI-only Clear Session Key.
 
 ## Source Options
 
@@ -16,7 +16,7 @@ Each lane can use one provider source when the host supports it.
 | Source | Use When | Notes |
 | --- | --- | --- |
 | Current Host Model | You want Recursion to use the model currently active in SillyTavern. | Smallest setup surface. Availability depends on host APIs. |
-| Host Connection Profile | You want Recursion to use a saved SillyTavern connection profile. | Recursion lists detected host profiles from SillyTavern context and host state. If the host cannot expose profiles, the selector should be unavailable with a clear status. |
+| Host Connection Profile | You want Recursion to use a saved SillyTavern connection profile. | Recursion lists detected host profiles from SillyTavern profile/connection seams without scanning character cards or Recursion cards. If the host cannot expose profiles, the selector should be unavailable with a clear status. |
 | OpenAI-Compatible Endpoint | You want a direct endpoint with base URL, model, and session API key. | Use `Fetch Models` to query `/models`. Session key is memory-only and must be re-entered after session loss. |
 
 ## Utility Setup
@@ -30,8 +30,7 @@ Each lane can use one provider source when the host supports it.
 7. For OpenAI-compatible endpoints, enter base URL and session API key, then use `Fetch Models` if the endpoint exposes a model list.
 8. Select a fetched model or type the model id manually.
 9. Adjust temperature, top-p, and max tokens only when needed.
-10. Save provider settings.
-11. Run `Test Provider`.
+10. Run `Test Provider`.
 
 Utility is healthy when the test passes and the bar or provider card shows a ready state. If Utility is missing or unhealthy, Recursion may reuse valid cache, skip injection, or continue without Recursion guidance.
 
@@ -41,9 +40,8 @@ Utility is healthy when the test passes and the bar or provider card shows a rea
 2. Enable Reasoner only if you want the optional composer lane.
 3. Choose a provider source.
 4. Fill the required fields.
-5. Save provider settings.
-6. Run `Test Provider`.
-7. Use the compact-bar Reasoning Level chain for broad provider bias; leave it at the default unless you are deliberately testing lower Utility-only or higher Reasoner-heavy routing.
+5. Run `Test Provider`.
+6. Use the compact-bar Reasoning Level chain for broad provider bias; leave it at the default unless you are deliberately testing lower Utility-only or higher Reasoner-heavy routing.
 
 Reasoner is eligible only when enabled, healthy, and selected by Recursion for a useful reason such as crowded hand, conflicting cards, high continuity risk, or complex active cast.
 
@@ -72,7 +70,9 @@ Recursion must not persist:
 - hidden reasoning;
 - secrets in errors, diagnostics, journals, prompt packets, cache records, browser local storage, SillyTavern file storage, reports, or test artifacts.
 
-Clearing a session key should immediately mark that lane untestable until a key is re-entered.
+Clear Session Key appears only when the lane source is OpenAI-Compatible Endpoint. Clearing a session key should immediately mark that lane untestable until a key is re-entered.
+
+Provider field changes auto-save on commit. Source, profile, base URL, model, and max token changes apply immediately. Session keys are accepted into browser-session memory only and are not written to persisted settings.
 
 ## Test Provider Flow
 

@@ -134,6 +134,14 @@ function resolveSourceChangedEvents(context) {
   ].filter(Boolean);
 }
 
+function resolveGenerationStoppedEvents(context) {
+  const eventTypes = hostEventTypes(context);
+  return [...new Set([
+    eventTypes.GENERATION_STOPPED,
+    'generation_stopped'
+  ].filter(Boolean))];
+}
+
 function sourceEventDetails(eventName, payload) {
   const source = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
   const rawId = Number(source.messageId ?? source.mesid ?? source.id ?? source.message_id ?? payload);
@@ -168,6 +176,12 @@ function registerHostEvents(nextRuntime) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
       runtime ||= nextRuntime;
       return invokeRuntimeCleanup('handleSourceChanged', 'Source change cleanup failed.', sourceEventDetails(eventName, payload));
+    });
+  }
+  for (const eventName of resolveGenerationStoppedEvents(context)) {
+    registerRuntimeHostEvent(eventSource, eventName, (payload) => {
+      runtime ||= nextRuntime;
+      return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', sourceEventDetails(eventName, payload));
     });
   }
 }

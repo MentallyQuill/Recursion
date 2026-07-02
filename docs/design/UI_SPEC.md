@@ -154,6 +154,7 @@ The Hero Pixel Array sits to the right of the card scope selector separator and 
 - Purple filled blocks: cards or deck rows read from cache instead of generated this turn.
 - Yellow filled blocks: finished with errors, fallback, JSON repair, or other repairable caution.
 - Red filled blocks: blocked or failed progress items.
+- Muted grey filled blocks: skipped or player-canceled progress items.
 
 Blocks build down from the top of a three-row column, then start the next column to the right. The array sits after the Cards separator and before the compact current-step text. On the next user message, old blocks wipe away before the next run starts building.
 
@@ -187,6 +188,7 @@ Color grammar:
 - `Issue`, provider failures, and prompt-install failures use red only when blocked or failed.
 - Review, fallback, stale, and warning states use amber.
 - Disabled-but-normal states use muted neutral treatment on the power toggle.
+- Player-canceled generation uses muted skipped treatment, not green, amber, or red.
 
 ## Hero Pixel Array Progress Menu
 
@@ -200,7 +202,7 @@ The progress menu footer summarizes the visible provider lanes represented by th
 
 When runtime activity is `idle`, or when an explicit progress title is `Ready`/`Idle`, a `progressRun` that contains only pending/waiting rows is stale planned work and must be discarded before rendering. Keep completed, cached, warning, or failed rows visible, but never show a `Ready` progress menu with a leftover pending-only task such as `Clearing Recursion prompt`.
 
-When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt install done/failed, or prompt clear done/failed), the progress menu must stop adding pending plan rows for future steps that never ran. Material rows such as generated cards, cached cards, warnings, failures, and completed setup steps stay visible; unrun rows like `Composing prompt packet waiting` or `Clearing Recursion prompt waiting` must not remain as empty Hero Pixel blocks after the final outcome.
+When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt install done/failed, prompt clear done/failed, or player-canceled generation), the progress menu must stop adding pending plan rows for future steps that never ran. Material rows such as generated cards, cached cards, warnings, failures, skipped/canceled rows, and completed setup steps stay visible; unrun rows like `Composing prompt packet waiting` or `Clearing Recursion prompt waiting` must not remain as empty Hero Pixel blocks after the final outcome.
 
 `progressRun.steps[]` shape:
 
@@ -274,7 +276,7 @@ The array layout is deterministic:
 - Blocks build top-to-bottom through three rows, then begin the next column to the right.
 - Each block carries `row`, `column`, `columnCount`, `delayMs`, `state`, and a stable state class.
 - The compact Hero Pixel Array caps at 12 columns, for 36 represented blocks at three rows.
-- If a run has more than 36 top-level progress rows, the progress menu still shows every row, but the Hero Pixel Array uses its final block as an overflow aggregate. The aggregate state is selected from represented overflow rows in this priority order: running, failed, warning, pending, cached, done, skipped.
+- If a run has more than 36 top-level progress rows, the progress menu still shows every row, but the Hero Pixel Array uses its final block as an overflow aggregate. The aggregate state is selected from represented overflow rows in this priority order: running, failed, warning, skipped, pending, cached, done.
 - The renderer sets `--columns` from `columnCount`, `grid-row` from `row + 1`, `grid-column` from `column + 1`, and `--block-index` from the block index.
 - Entry delay is slight, roughly 24ms per block, so a 12-step run visibly builds without feeling slow.
 - The Hero Pixel Array sits to the right of the Cards separator and to the left of the current-step status text.
@@ -357,6 +359,7 @@ Hero Pixel Array block states:
 - Running: animated blue block.
 - Done: filled green block.
 - Cached: filled purple block.
+- Skipped: muted grey block.
 - Finished with errors: filled yellow block.
 - Failed: filled red block.
 
@@ -1071,7 +1074,7 @@ The menu uses three tabs:
 - Providers.
 - Advanced.
 
-Play and Advanced setting controls auto-save on change. The compact settings menu must not render a broad `Save Settings` button; closing the menu should never discard changed Strength, card limits, Focus, Prompt Footprint, Injection, UI, or Diagnostics values. Provider lane configuration keeps its provider-specific Save Provider action because source-specific fields and session keys follow the Providers contract below.
+Play, Provider, and Advanced setting controls auto-save on committed changes. The compact settings menu must not render a broad `Save Settings` button, and provider lanes must not render a separate `Save Provider` button. Closing the menu should never discard changed Strength, card limits, Focus, Prompt Footprint, provider source/profile/endpoint/model/max tokens, Injection, UI, or Diagnostics values. Provider session keys remain session-only even when entered through autosave.
 
 Switching between settings tabs is internal panel navigation. A tab click must keep the settings menu open, even though the tab switch re-renders the floating panel content; outside-click closers must ignore that handled tab-switch event.
 
@@ -1102,7 +1105,7 @@ Providers contains the complete provider setup surface in collapsible lane secti
 - Source, profile, endpoint, model, session key, max tokens.
 - Readiness text for the selected source before running a provider test.
 - Fetch Models for OpenAI-compatible endpoints, with a fetched model selector that writes the chosen id into the model field.
-- Save Provider, Test Provider, Clear Session Key.
+- Test Provider. Clear Session Key appears only for OpenAI-compatible endpoints.
 - Status, resolved provider, and resolved model.
 - Temperature and top-p stay internal/defaulted in the compact V1 menu so the provider pane matches the mockup and does not become a dense admin form.
 
@@ -1111,8 +1114,9 @@ Provider Source changes the field context inside each lane immediately, matching
 - Current Host Model shows no connection-specific option boxes; it uses the active SillyTavern model context.
 - Host Connection Profile shows Profile and hides OpenAI-compatible endpoint, model, and session key fields.
 - OpenAI-Compatible Endpoint shows Base URL, Model, and Session Key and hides Profile.
+- Clear Session Key appears only for OpenAI-compatible endpoints.
 - Max Tokens and provider actions remain visible for every Source.
-- Switching Source is a UI-only context switch until Save Provider is clicked. Hidden field values are preserved so a user can compare sources without losing typed-but-unsaved settings.
+- Provider lane fields auto-save on committed changes. Hidden alternate-source field values are preserved so a user can compare sources without losing typed settings, but the selected source/profile/endpoint/model/max tokens apply immediately. Session API keys are accepted by autosave into session memory only; they must not persist.
 
 Advanced contains low-frequency controls grouped into collapsible sections:
 
@@ -1142,14 +1146,15 @@ Each provider card should support:
 - Base URL, model, Fetch Models, and fetched-model selector for OpenAI-compatible endpoints.
 - Session API key field.
 - Max tokens.
-- Save Provider.
 - Test Provider.
-- Clear Session Key.
+- Clear Session Key for OpenAI-compatible endpoints.
 - Status and resolved model.
 
 The compact Providers tab shows Utility details by default and keeps Reasoner as a collapsed optional lane until the user opens or configures it. Temperature and top-p remain normalized provider settings with safe defaults, but they are not visible controls in the compact top-bar menu.
 
-Provider cards must not sprawl by rendering profile and OpenAI endpoint fields together. The selected Source owns the visible option context, while hidden alternate-source values remain available to Save Provider if the user switches back before saving.
+The Providers tab should build Utility and Reasoner profile selectors from one connection-profile lookup per render. Profile discovery must not walk character-card, persona, group, avatar, or Recursion card collections; those collections can be large enough to make native dropdown expansion feel blocked.
+
+Provider cards must not sprawl by rendering profile and OpenAI endpoint fields together. The selected Source owns the visible option context, while hidden alternate-source values remain available if the user switches back.
 
 API keys are session-only. They must not be written to extension settings, scene caches, prompt packets, run journals, diagnostics, reports, or artifacts.
 

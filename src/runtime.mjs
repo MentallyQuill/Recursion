@@ -1009,6 +1009,7 @@ function safeSettingsView(settings) {
     },
     ui: {
       viewerOpen: source.ui?.viewerOpen === true,
+      tooltipsEnabled: source.ui?.tooltipsEnabled !== false,
       progressChildVisibleLimit: numberOr(source.ui?.progressChildVisibleLimit, 5),
       progressListVisibleLimit: numberOr(source.ui?.progressListVisibleLimit, 15)
     }
@@ -1986,7 +1987,9 @@ export function createRecursionRuntime({
     invalidationDetails = {},
     startLabel,
     successLabel,
-    chips
+    chips,
+    outcome = 'success',
+    settleSeverity = 'success'
   }) {
     const runId = makeId(idPrefix);
     supersedeActiveRun();
@@ -2013,9 +2016,9 @@ export function createRecursionRuntime({
       }
       settleRuntimeActivity({
         runId,
-        outcome: 'success',
+        outcome,
         phase: 'settled',
-        severity: 'success',
+        severity: settleSeverity,
         label: successLabel,
         chips
       });
@@ -2049,6 +2052,24 @@ export function createRecursionRuntime({
       startLabel: 'Clearing Recursion prompt after source message change...',
       successLabel: 'Source messages changed. Recursion prompt cleared.',
       chips: ['Source', 'Prompt']
+    });
+  }
+
+  async function handleHostGenerationStopped(details = {}) {
+    const source = asObject(details);
+    const eventName = safeText(source.eventName || source.event || 'generation_stopped', 80);
+    return clearForHostEvent({
+      idPrefix: 'host-stop',
+      reason: 'host-generation-stopped',
+      invalidationDetails: {
+        source: 'host-event',
+        ...(eventName ? { eventName } : {})
+      },
+      startLabel: 'Stopping Recursion after generation cancel...',
+      successLabel: 'Generation canceled. Recursion prompt cleared.',
+      chips: ['Stop', 'Prompt'],
+      outcome: 'skipped',
+      settleSeverity: 'info'
     });
   }
 
@@ -3153,6 +3174,7 @@ export function createRecursionRuntime({
     },
     handleChatChanged,
     handleSourceChanged,
+    handleHostGenerationStopped,
     updateSettings,
     updateProvider,
     clearProviderKey,

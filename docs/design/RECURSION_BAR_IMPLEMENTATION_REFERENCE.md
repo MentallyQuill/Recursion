@@ -10,15 +10,15 @@ Runtime toggles:
 
 - `.power-toggle.is-on` / `.power-toggle.is-off` shows whether Recursion is enabled.
 - `.activity-trigger` opens the progress menu from either the Hero Pixel Array or current status text.
-- `.hero-pixel-array[data-state="pending|running|done|cached|warning|failed"]` controls the compact Hero Pixel Array state.
-- `.hero-block.pending`, `.hero-block.running`, `.hero-block.done`, `.hero-block.cached`, `.hero-block.warning`, and `.hero-block.failed` control each Hero Pixel Array block.
+- `.hero-pixel-array[data-state="pending|running|done|cached|skipped|warning|failed"]` controls the compact Hero Pixel Array state.
+- `.hero-block.pending`, `.hero-block.running`, `.hero-block.done`, `.hero-block.cached`, `.hero-block.skipped`, `.hero-block.warning`, and `.hero-block.failed` control each Hero Pixel Array block.
 - `.mode-menu.is-open` opens the mode menu.
 - `.brief-menu.is-open` opens the Last Brief menu.
 - `.settings-menu.is-open` opens the settings menu full-width under the Recursion Bar; opening it should close competing progress, mode, and brief popovers in production.
 - `.settings-tab.is-selected` and `.settings-pane.is-selected` switch Play, Providers, and Advanced settings groups.
 - `.prompt-packet-panel.is-open` opens the injected prompt packet panel.
 - `.brief-card[aria-expanded="true"]` expands a card row.
-- `.step-row.done`, `.step-row.running`, `.step-row.cached`, `.step-row.queued`, `.step-row.warn`, and `.step-row.fail` control progress-row state.
+- `.step-row.done`, `.step-row.running`, `.step-row.cached`, `.step-row.skipped`, `.step-row.queued`, `.step-row.warn`, and `.step-row.fail` control progress-row state.
 - `.step-children` groups nested child rows below a parent step; `.step-row.child-row` uses the same state colors while rendering as an indented sub-tier.
 - `data-provider="utility"` and `data-provider="reasoner"` control the U/R provider marker tint.
 
@@ -401,7 +401,7 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
             </div>
             <label>Max Tokens<input type="number" value="4096"></label>
           </div>
-          <div class="provider-actions"><button>Save Provider</button><button>Test Provider</button><button>Clear Session Key</button></div>
+          <div class="provider-actions"><button>Test Provider</button></div>
         </div>
       </section>
       <section class="provider-section">
@@ -1156,6 +1156,12 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
   box-shadow: 0 0 5px rgba(167, 139, 250, .24);
 }
 
+.hero-block.skipped {
+  border-color: rgba(224, 224, 224, .34);
+  background: rgba(224, 224, 224, .16);
+  box-shadow: none;
+}
+
 .hero-block.running {
   border-color: var(--hero-running);
   background: var(--hero-running);
@@ -1593,6 +1599,11 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
   border-color: var(--purple);
 }
 
+.step-row.skipped .step-icon {
+  background: rgba(224, 224, 224, .16);
+  border-color: rgba(224, 224, 224, .44);
+}
+
 .step-row.queued .step-icon,
 .step-row.waiting .step-icon {
   background: transparent;
@@ -1639,6 +1650,10 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
 
 .step-row.cached .step-meta {
   color: rgba(199, 181, 255, .80);
+}
+
+.step-row.skipped .step-meta {
+  color: rgba(224, 224, 224, .58);
 }
 
 .step-row.warn .step-meta {

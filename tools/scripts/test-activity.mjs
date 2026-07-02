@@ -17,6 +17,7 @@ const EVENT_KEYS = [
   'logicalStage',
   'mode',
   'severity',
+  'outcome',
   'label',
   'detail',
   'chips',
@@ -180,8 +181,12 @@ const warningRun = outcomeReporter.start({ runId: 'warning-run', label: 'Warning
 outcomeReporter.settle({ runId: warningRun.runId, outcome: 'warning', label: 'Warned' });
 const errorRun = outcomeReporter.start({ runId: 'error-run', label: 'Error run' });
 outcomeReporter.settle({ runId: errorRun.runId, outcome: 'error', label: 'Errored' });
+const skippedRun = outcomeReporter.start({ runId: 'skipped-run', label: 'Skipped run' });
+outcomeReporter.settle({ runId: skippedRun.runId, outcome: 'skipped', label: 'Skipped' });
 assertEqual(outcomes.find((event) => event.runId === 'warning-run' && event.phase === 'settled').severity, 'warning', 'warning outcome maps to warning severity');
 assertEqual(outcomes.find((event) => event.runId === 'error-run' && event.phase === 'settled').severity, 'error', 'error outcome maps to error severity');
+assertEqual(outcomes.find((event) => event.runId === 'skipped-run' && event.phase === 'settled').severity, 'info', 'skipped outcome keeps neutral severity');
+assertEqual(outcomes.find((event) => event.runId === 'skipped-run' && event.phase === 'settled').outcome, 'skipped', 'skipped outcome is preserved');
 
 const throwingReporter = createActivityReporter({
   onEvent: () => {

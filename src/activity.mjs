@@ -3,6 +3,7 @@ import { cloneJson, makeId, nowIso, redact, truncate } from './core.mjs';
 const HISTORY_LIMIT = 100;
 const VALID_MODES = new Set(['foreground', 'background', 'review']);
 const VALID_SEVERITIES = new Set(['info', 'success', 'warning', 'error']);
+const VALID_OUTCOMES = new Set(['success', 'warning', 'error', 'skipped', 'canceled']);
 const VALID_PROVIDER_LANES = new Set(['utility', 'reasoner']);
 const VALID_COMPOSER_LANES = new Set(['utility', 'reasoner', 'local']);
 const OUTCOME_SEVERITY = new Map([
@@ -62,6 +63,7 @@ function normalizeEvent(input = {}, defaults = {}) {
     logicalStage: cleanText(input.logicalStage ?? defaults.logicalStage, 160) ?? null,
     mode: cleanChoice(input.mode ?? defaults.mode, VALID_MODES, defaults.mode ?? 'background'),
     severity: cleanChoice(input.severity ?? defaults.severity, VALID_SEVERITIES, defaults.severity ?? 'info'),
+    outcome: cleanChoice(input.outcome ?? defaults.outcome, VALID_OUTCOMES) ?? null,
     label: cleanText(input.label ?? defaults.label ?? '', 160),
     detail: cleanStructured(input.detail ?? defaults.detail) ?? null,
     chips: cleanChips(input.chips ?? defaults.chips),
@@ -83,6 +85,7 @@ function normalizeIdleEvent() {
     logicalStage: null,
     mode: 'background',
     severity: 'info',
+    outcome: null,
     label: '',
     detail: null,
     chips: [],

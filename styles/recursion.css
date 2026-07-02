@@ -354,6 +354,12 @@
   box-shadow: 0 0 5px color-mix(in srgb, var(--recursion-cached) 24%, transparent);
 }
 
+.hero-block.skipped {
+  background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 24%, transparent);
+  border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 34%, transparent);
+  box-shadow: none;
+}
+
 .hero-block.warning {
   background: var(--recursion-warning);
   border-color: var(--recursion-warning);
@@ -582,6 +588,11 @@
   border-color: #9b7cff;
 }
 
+.recursion-step-row.skipped .recursion-step-icon {
+  background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 24%, transparent);
+  border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 44%, transparent);
+}
+
 .recursion-step-row.warning .recursion-step-icon {
   background: var(--recursion-warning);
   border-color: var(--recursion-warning);
@@ -598,6 +609,10 @@
 
 .recursion-step-row.cached .recursion-step-meta {
   color: color-mix(in srgb, var(--recursion-cached) 80%, transparent);
+}
+
+.recursion-step-row.skipped .recursion-step-meta {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
 }
 
 .recursion-step-row.warning .recursion-step-meta {

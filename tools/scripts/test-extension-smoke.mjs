@@ -291,6 +291,60 @@ if (lifecycleFailures.length) {
 }
 
 {
+  const fake = createFakeSillyTavernContext('generation-stopped-event');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    CHAT_CHANGED: 'chat_changed',
+    GENERATION_STOPPED: 'generation_stopped'
+  };
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionGenerationInterceptor('generation-stopped-event-payload'), 'generation-stopped-event-payload', 'generation stopped event setup keeps original chat');
+  assertEqual(eventSource.listenerCount('generation_stopped'), 1, 'bootstrap subscribes to SillyTavern generation stopped event');
+  for (const key of RECURSION_PROMPT_KEYS) {
+    assert(fake.promptState.get(key), `generation stopped setup installs ${key}`);
+  }
+  const clearStart = fake.promptWrites.length;
+  await eventSource.emit('generation_stopped');
+  const cleanupWrites = fake.promptWrites.slice(clearStart);
+  for (const key of RECURSION_PROMPT_KEYS) {
+    assert(
+      cleanupWrites.some((entry) => entry.key === key && entry.text === ''),
+      `generation stopped event clears ${key}`
+    );
+    assertEqual(fake.promptState.get(key), '', `generation stopped event leaves ${key} empty`);
+  }
+  await globalThis.recursionOnDelete();
+  assertEqual(eventSource.listenerCount('generation_stopped'), 0, 'teardown unsubscribes from SillyTavern generation stopped event');
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const fake = createFakeSillyTavernContext('generation-stopped-fallback-event');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = { CHAT_CHANGED: 'chat_changed' };
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionGenerationInterceptor('generation-stopped-fallback-event-payload'), 'generation-stopped-fallback-event-payload', 'generation stopped fallback setup keeps original chat');
+  assertEqual(eventSource.listenerCount('generation_stopped'), 1, 'bootstrap subscribes to generation stopped fallback event name');
+  await globalThis.recursionOnDelete();
+  assertEqual(eventSource.listenerCount('generation_stopped'), 0, 'teardown unsubscribes from generation stopped fallback event name');
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const prompts = [];
   globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
   globalThis.SillyTavern = {

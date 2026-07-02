@@ -334,6 +334,7 @@ function profileLike(value, path = '') {
 
 function collectProfileCandidates(root, path = '', depth = 0, seen = new Set(), out = []) {
   if (!root || typeof root !== 'object' || seen.has(root) || depth > 6) return out;
+  if (path && NON_PROVIDER_PROFILE_PATH_PATTERN.test(path) && !/connection/i.test(path)) return out;
   seen.add(root);
   if (Array.isArray(root)) {
     if (root.some((entry) => profileLike(entry, path))) {
@@ -485,9 +486,9 @@ export function validateProviderConfiguration(provider = {}, options = {}) {
 
 export function providerModelStatus(provider = {}, options = {}) {
   const source = sourceName(provider.source);
-  const profiles = Array.isArray(options.profiles) ? options.profiles : listProviderConnectionProfiles(options);
-  const validation = validateProviderConfiguration(provider, { ...options, profiles });
   if (source === 'host-connection-profile') {
+    const profiles = Array.isArray(options.profiles) ? options.profiles : listProviderConnectionProfiles(options);
+    const validation = validateProviderConfiguration(provider, { ...options, profiles });
     const selected = profiles.find((entry) => entry.id === textValue(provider.hostConnectionProfileId));
     return {
       ...validation,
@@ -497,6 +498,7 @@ export function providerModelStatus(provider = {}, options = {}) {
       profileLabel: selected?.name || ''
     };
   }
+  const validation = validateProviderConfiguration(provider, options);
   if (source === 'openai-compatible') {
     const model = textValue(provider.openAICompatible?.model);
     return {
@@ -509,7 +511,7 @@ export function providerModelStatus(provider = {}, options = {}) {
   return {
     ...validation,
     model,
-    label: model ? `Current Host Model / ${model}` : 'Current Host Model'
+    label: 'Current Host Model'
   };
 }
 
@@ -717,6 +719,28 @@ function retryableError(error) {
   if (TRANSIENT_CODES.has(error?.code)) return true;
   const status = Number(error?.status);
   return status === 429 || (status >= 500 && status < 600);
+}
+
+function structuredOutputRetryableError(error) {
+  const code = String(error?.code || '');
+  return code === 'RECURSION_JSON_PARSE_FAILED'
+    || code === 'RECURSION_JSON_OBJECT_REQUIRED'
+    || code === 'RECURSION_PROVIDER_SCHEMA_MISMATCH';
+}
+
+function requestWithStructuredRetryPrompt(request = {}, { roleId = '', error = null } = {}) {
+  const expected = expectedResponseSchema(roleId);
+  const correction = [
+    '',
+    'Previous response was rejected by Recursion structured-output validation.',
+    `Return exactly one JSON object with schema "${expected}".`,
+    'Do not include markdown fences, prose, comments, hidden reasoning, or alternate schemas.',
+    `Validation error code: ${String(error?.code || 'RECURSION_PROVIDER_FORMAT_RETRY')}.`
+  ].join('\n');
+  return {
+    ...request,
+    prompt: `${String(request?.prompt ?? '')}${correction}`
+  };
 }
 
 function scrubKnownRequestText(value, request = {}) {
@@ -1232,6 +1256,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
     const effectiveTimeoutMs = options.timeoutMs ?? timeoutMs;
     let runId = String(options.runId || request.runId || makeId('provider'));
     let retryCount = 0;
+    let retryFormatError = null;
     let lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
 
     const activityRunId = activityStart(activity, {
@@ -1255,6 +1280,9 @@ export function createGenerationRouter({ client, activity = null, journal = null
     const composedExternalSignal = composeAbortSignal([options.signal, request.signal]);
     try {
       for (let attempt = 0; attempt < 2; attempt += 1) {
+        const attemptRequest = attempt === 0
+          ? request
+          : requestWithStructuredRetryPrompt(request, { roleId, error: retryFormatError });
         activityStage(activity, {
           runId,
           phase: attempt === 0 ? 'providerCallRunning' : 'providerCallRetrying',
@@ -1269,7 +1297,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
           if (!providerRoleKnown) throw unsupportedRoleError(roleId);
           const raw = await withTimeout(
             (requestWithSignal) => client.generate(roleId, requestWithSignal),
-            request,
+            attemptRequest,
             effectiveTimeoutMs,
             composedExternalSignal.signal || null
           );
@@ -1313,7 +1341,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
             diagnostics
           };
         } catch (error) {
-          const canRetry = attempt === 0 && retryableError(error);
+          const canRetry = attempt === 0 && (retryableError(error) || structuredOutputRetryableError(error));
           let retrySkippedReason = '';
           const latencyMs = Date.now() - started;
           if (canRetry) {
@@ -1329,6 +1357,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
             }, options, [options.signal, request.signal]);
             if (retryFreshness.ok) {
               retryCount = 1;
+              retryFormatError = structuredOutputRetryableError(error) ? error : null;
               continue;
             }
             retrySkippedReason = retryFreshness.reason;

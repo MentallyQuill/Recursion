@@ -147,6 +147,27 @@ assertEqual(controlOnlyWarningProgress.steps.length, 1, 'control-only prompt war
 assertEqual(controlOnlyWarningProgress.steps[0].state, 'warning', 'control-only prompt warning keeps warning state');
 assertEqual(createHeroPixelBlocks(controlOnlyWarningProgress).length, 0, 'control-only prompt warnings still do not create compact hero pixel blocks');
 
+const hostStoppedProgress = createProgressRunModel({
+  activityHistory: [
+    { runId: 'host-stopped-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },
+    { runId: 'host-stopped-progress', phase: 'promptClearing', label: 'Stopping Recursion after generation cancel...', recordedAt: '2' },
+    { runId: 'host-stopped-progress', phase: 'settled', outcome: 'skipped', severity: 'info', label: 'Generation canceled. Recursion prompt cleared.', recordedAt: '3' }
+  ],
+  activity: {
+    runId: 'host-stopped-progress',
+    phase: 'settled',
+    outcome: 'skipped',
+    severity: 'info',
+    label: 'Generation canceled. Recursion prompt cleared.',
+    recordedAt: '3'
+  }
+});
+const hostStoppedSettledStep = hostStoppedProgress.steps.find((step) => step.id === 'recursion-prompt-ready');
+assert(hostStoppedSettledStep, 'host generation stop renders a settled progress row');
+assertEqual(hostStoppedSettledStep.state, 'skipped', 'host generation stop renders cancellation as skipped');
+assertEqual(hostStoppedProgress.heroPixelState, 'skipped', 'host generation stop hero pixel state is skipped');
+assertEqual(createHeroPixelBlocks(hostStoppedProgress).some((block) => block.id === 'recursion-prompt-ready' && block.state === 'done'), false, 'host generation stop does not create a green done pixel for cancellation');
+
 const stalePendingProgress = createProgressRunModel({
   activity: { phase: 'idle' },
   progressRun: {

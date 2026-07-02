@@ -118,7 +118,7 @@ OpenAI-compatible requests read the key only at call time. Error text and diagno
 
 Provider calls receive abort signals from runtime. Timeouts use an internal abort controller. Batch calls combine the runtime signal with per-request signals. Retry guards may be synchronous or asynchronous; when they report that the run is no longer current, the router skips the transient retry and returns sanitized failure results for the pending call or batch entries.
 
-If a run is no longer active, runtime returns a superseded result and refuses to apply late cache, prompt, or activity updates. Aborted calls are recorded as aborted rather than installed.
+If a run is no longer active, runtime returns a superseded result and refuses to apply late cache, prompt, or activity updates. Aborted calls are recorded as aborted rather than installed. When the abort comes from SillyTavern `GENERATION_STOPPED`, runtime performs host-stop cleanup and reports skipped progress so the user sees cancellation, not a provider warning or failure.
 
 ## Operator-Visible Provider States
 

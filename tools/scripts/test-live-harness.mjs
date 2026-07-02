@@ -205,7 +205,6 @@ function recursionSmokeFixtureHtml({
           <button type="button" data-recursion-status-trigger>Status</button>
           <button type="button" data-recursion-actions>Actions</button>
           <button type="button" data-recursion-hand-toggle>Hand</button>
-          <button type="button" data-recursion-viewer-toggle>Open</button>
         </div>
         <div data-recursion-activity-ribbon role="status">
           <span data-recursion-ribbon-label>Ready</span>
@@ -218,10 +217,10 @@ function recursionSmokeFixtureHtml({
           <span data-recursion-cards-label>Cards</span>
         </div>
         <div data-recursion-settings-panel hidden>
+          <button type="button" data-recursion-viewer-toggle>Open Viewer</button>
           <select data-recursion-setting-mode aria-label="Mode"><option value="auto" selected>Auto</option><option value="manual">Manual</option></select>
           <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
           <input type="checkbox" data-recursion-provider-enabled-reasoner aria-label="Reasoner enabled">
-          <button type="button" data-recursion-reasoner-provider-save data-recursion-provider-lane="reasoner">Save Reasoner</button>
           <button type="button" data-recursion-provider-test data-recursion-provider-lane="utility">Test Provider</button>
         </div>
         <dialog data-recursion-viewer aria-label="Recursion Viewer">
@@ -1032,6 +1031,28 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.browser.snapshot.generation.hostGenerationContinued, null, 'direct bridge fallback does not claim host continuation');
     assertEqual(report.browser.snapshot.generation.visibleSend.inputFound, false, 'direct bridge fallback records missing input');
     assertEqual(report.browser.snapshot.generation.visibleSend.buttonFound, false, 'direct bridge fallback records missing button');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer();
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1',
+        RECURSION_LIVE_DIRECT_RECURSION_ONLY: '1'
+      }
+    });
+    assertEqual(report.status, 'pass', 'forced direct Recursion smoke passes without visible host send');
+    assertEqual(report.browser.snapshot.generation.triggerSource, 'direct-bridge', 'forced direct Recursion smoke records direct bridge trigger');
+    assertEqual(report.browser.snapshot.generation.chatMutationSource, 'context-chat', 'forced direct Recursion smoke records context chat mutation');
+    assertEqual(report.browser.snapshot.generation.visibleSend.inputFound, true, 'forced direct Recursion smoke still records visible input presence');
+    assertEqual(report.browser.snapshot.generation.hostGenerationContinued, null, 'forced direct Recursion smoke does not claim host continuation');
   } finally {
     await server.close();
   }

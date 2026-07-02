@@ -147,6 +147,38 @@ assertDeepEqual(
   'connection profile discovery rejects SillyTavern character cards'
 );
 
+const characterCardWithExpensiveData = {
+  id: 'char-expensive',
+  name: 'Character Card That Must Not Be Traversed',
+  get data() {
+    throw new Error('character card data was traversed during connection profile discovery');
+  }
+};
+const profilesBesideExpensiveCharacters = listProviderConnectionProfiles({
+  context: {
+    characters: [characterCardWithExpensiveData],
+    state: {
+      connectionManager: {
+        profiles: [{ id: 'state-profile', label: 'State Profile', model: 'glm-state' }]
+      }
+    }
+  },
+  globals: {
+    extension_settings: {
+      characterCards: {
+        get charExpensive() {
+          throw new Error('extension character card map was traversed during connection profile discovery');
+        }
+      }
+    }
+  }
+});
+assertDeepEqual(
+  profilesBesideExpensiveCharacters.map((profile) => [profile.id, profile.label]),
+  [['state-profile', 'State Profile / glm-state']],
+  'connection profile discovery skips character-card containers instead of walking them'
+);
+
 const profileStatus = providerModelStatus({
   lane: 'utility',
   source: 'host-connection-profile',
@@ -158,6 +190,18 @@ const profileStatus = providerModelStatus({
 assertEqual(profileStatus.ready, true, 'provider status reports selected connection profile ready');
 assertEqual(profileStatus.model, 'glm-fast', 'provider status resolves connection profile model');
 assertEqual(profileStatus.label, 'Context Utility / glm-fast', 'provider status exposes readable profile/model label');
+
+const currentHostStatus = providerModelStatus({
+  lane: 'utility',
+  source: 'host-current-model'
+}, {
+  globals: {
+    power_user: { model: 'gpt-4-turbo' }
+  }
+});
+assertEqual(currentHostStatus.ready, true, 'current host provider status is ready when host model is detected');
+assertEqual(currentHostStatus.model, 'gpt-4-turbo', 'current host provider status keeps the host model as model metadata');
+assertEqual(currentHostStatus.label, 'Current Host Model', 'current host provider status does not present the model as provider identity');
 
 const directValidation = validateProviderConfiguration({
   source: 'openai-compatible',
@@ -334,6 +378,27 @@ const malformedRouter = createGenerationRouter({
 const malformed = await malformedRouter.generate('utilityArbiter', { prompt: 'Return bad JSON' });
 assertEqual(malformed.ok, false, 'malformed json returns failure result');
 assertEqual(malformed.error.code, 'RECURSION_JSON_PARSE_FAILED', 'malformed json exposes useful parse code');
+
+let formatRetryAttempts = 0;
+const formatRetryPrompts = [];
+const formatRetryRouter = createGenerationRouter({
+  client: {
+    async generate(roleId, request) {
+      formatRetryAttempts += 1;
+      formatRetryPrompts.push(request.prompt);
+      if (formatRetryAttempts === 1) {
+        return { text: '{"schema":"wrong.schema","ok":true}', providerId: 'fake-host', model: 'fake-model' };
+      }
+      return { text: responseTextForRole(roleId), providerId: 'fake-host', model: 'fake-model' };
+    }
+  }
+});
+const formatRetried = await formatRetryRouter.generate('utilityArbiter', { prompt: 'Return Utility Arbiter JSON.' });
+assertEqual(formatRetried.ok, true, 'structured-output schema mismatch retries once');
+assertEqual(formatRetryAttempts, 2, 'structured-output retry makes exactly one retry attempt');
+assertEqual(formatRetried.diagnostics.retryCount, 1, 'structured-output retry records retry count');
+assert(formatRetryPrompts[1].includes('Previous response was rejected'), 'structured-output retry adds correction prompt');
+assert(formatRetryPrompts[1].includes('recursion.utilityArbiter.v1'), 'structured-output retry names expected schema');
 
 let retryAttempts = 0;
 const retryHost = {

@@ -125,6 +125,18 @@ const SETTINGS_AUTOSAVE_DATASETS = Object.freeze([
   'recursionSettingJournalLimit',
   'recursionSettingIncludeExcerpts'
 ]);
+const PROVIDER_AUTOSAVE_DATASETS = Object.freeze([
+  'recursionProviderEnabled',
+  'recursionProviderSource',
+  'recursionProviderProfile',
+  'recursionProviderBaseUrl',
+  'recursionProviderModel',
+  'recursionProviderModelList',
+  'recursionProviderApiKey',
+  'recursionProviderTemperature',
+  'recursionProviderTopP',
+  'recursionProviderMaxTokens'
+]);
 const SETTINGS_TOOLTIPS = Object.freeze({
   behavior: 'Controls how strongly Recursion shapes the next prompt packet. These settings affect card pressure, focus, and prompt size without changing provider credentials.',
   strength: 'Bias strength for the composed prompt packet. Light stays subtle, Balanced is the normal default, and Strong gives Recursion more room to steer scene adhesion.',
@@ -146,13 +158,12 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   resetSceneCache: 'Clear cached scene cards for the current chat so Recursion rebuilds its hand from fresh context.',
   clearRunJournal: 'Clear local Recursion activity history for this chat. This does not change cards, settings, or SillyTavern messages.',
   exportDiagnostics: 'Copy sanitized Recursion diagnostics for debugging. API keys, raw provider prompts, and hidden reasoning are excluded.',
-  providerSource: 'Choose where this lane sends Recursion model calls. Current Host Model follows the active chat model; Host Connection Profile uses a saved SillyTavern profile; OpenAI-Compatible uses the endpoint fields below. Hidden fields keep values until Save Provider.',
+  providerSource: 'Choose where this lane sends Recursion model calls. Current Host Model follows the active chat model; Host Connection Profile uses a saved SillyTavern profile; OpenAI-Compatible uses the endpoint fields below. Changes auto-save; hidden alternate-source fields keep their values.',
   providerProfile: 'Saved SillyTavern Connection Profile for this lane. Profiles keep routing, preset, and keys in SillyTavern.',
   providerBaseUrl: 'Base /v1 URL for a direct OpenAI-compatible endpoint. Only used when Source is OpenAI-Compatible.',
   providerModel: 'Model id sent to the direct OpenAI-compatible endpoint. Only used with the OpenAI-Compatible source.',
   providerApiKey: 'Session-only key for the OpenAI-compatible endpoint. Recursion keeps it in memory and never writes it to settings or diagnostics.',
   providerMaxTokens: 'Maximum response tokens for structured Recursion calls on this lane. Raise only when valid JSON is being cut off.',
-  providerSave: 'Save this provider lane configuration. Source-specific fields keep their values so you can switch sources without retyping.',
   providerTest: 'Send a small structured test call through this lane to verify routing, credentials, and JSON output before using it in chat.',
   providerClearKey: 'Remove the in-memory session key for this lane. Saved endpoint, model, and profile settings stay unchanged.'
 });
@@ -673,6 +684,34 @@ function tooltipAttrs(enabled, text) {
 function isSettingsAutoSaveControl(node) {
   const dataset = asObject(node?.dataset);
   return SETTINGS_AUTOSAVE_DATASETS.some((key) => Object.prototype.hasOwnProperty.call(dataset, key));
+}
+
+function isProviderAutoSaveControl(node) {
+  const dataset = asObject(node?.dataset);
+  const keys = Object.keys(dataset);
+  return PROVIDER_AUTOSAVE_DATASETS.some((key) => (
+    keys.includes(`${key}Utility`) || keys.includes(`${key}Reasoner`)
+  ));
+}
+
+function mergeObjectPatch(base, patch) {
+  const result = { ...asObject(base) };
+  for (const [key, value] of Object.entries(asObject(patch))) {
+    const existing = result[key];
+    result[key] = value && typeof value === 'object' && !Array.isArray(value)
+      && existing && typeof existing === 'object' && !Array.isArray(existing)
+      ? mergeObjectPatch(existing, value)
+      : value;
+  }
+  return result;
+}
+
+function viewWithSettingsPatch(view, patch) {
+  const source = asObject(view);
+  return {
+    ...source,
+    settings: mergeObjectPatch(source.settings, patch)
+  };
 }
 
 function clearTooltips(node) {
@@ -1586,21 +1625,22 @@ function normalizeProviderSource(value) {
   return PROVIDER_SOURCE_OPTIONS.some(([candidate]) => candidate === source) ? source : 'host-current-model';
 }
 
-function listConnectionProfiles() {
-  return listProviderConnectionProfiles().map((profile) => ({
+function listConnectionProfiles(profiles = null) {
+  const source = Array.isArray(profiles) ? profiles : listProviderConnectionProfiles();
+  return source.map((profile) => ({
     id: profile.id,
     label: profile.label
   }));
 }
 
-function connectionProfileOptions(selectedId = '') {
+function connectionProfileOptions(selectedId = '', profiles = null) {
   const selected = cleanText(selectedId);
-  const profiles = listConnectionProfiles();
+  const availableProfiles = listConnectionProfiles(profiles);
   const options = [
-    ['', profiles.length ? 'Select Profile' : 'No connection profiles found'],
-    ...profiles.map((profile) => [profile.id, profile.label])
+    ['', availableProfiles.length ? 'Select Profile' : 'No connection profiles found'],
+    ...availableProfiles.map((profile) => [profile.id, profile.label])
   ];
-  if (selected && !profiles.some((profile) => profile.id === selected)) {
+  if (selected && !availableProfiles.some((profile) => profile.id === selected)) {
     options.push([selected, `${selected} (saved)`]);
   }
   return options;
@@ -1615,16 +1655,34 @@ function syncProviderSourceVisibility(container, lane) {
   }
 }
 
-function providerReadinessLabel(provider) {
-  const status = providerModelStatus(provider);
+function providerReadinessLabel(provider, options = {}) {
+  const status = providerModelStatus(provider, options);
+  if (!status.ready) {
+    return {
+      ready: false,
+      text: `${status.sourceLabel}: ${status.message}`
+    };
+  }
+  const parts = [`Source: ${status.sourceLabel}`];
+  if (status.source === 'host-current-model') {
+    if (status.model) parts.push(`Host model: ${status.model}`);
+  } else if (status.source === 'host-connection-profile') {
+    const profile = cleanText(status.profileLabel || status.label);
+    if (profile && profile !== status.sourceLabel) parts.push(`Profile: ${profile}`);
+    if (status.model) parts.push(`Model: ${status.model}`);
+  } else if (status.source === 'openai-compatible') {
+    if (status.model) parts.push(`Model: ${status.model}`);
+  } else if (status.label) {
+    parts.push(status.label);
+  }
   return {
-    ready: status.ready,
-    text: status.ready ? status.label : `${status.sourceLabel}: ${status.message}`
+    ready: true,
+    text: parts.join(' - ')
   };
 }
 
-function providerReadinessNode(provider, lane) {
-  const label = providerReadinessLabel(provider);
+function providerReadinessNode(provider, lane, options = {}) {
+  const label = providerReadinessLabel(provider, options);
   return el('div', {
     className: `recursion-provider-readiness${label.ready ? ' is-ready' : ' is-missing'}`,
     dataset: providerDataset('Readiness', lane)
@@ -1649,10 +1707,10 @@ function providerFromControls(container, lane, savedProvider = {}) {
   };
 }
 
-function syncProviderReadiness(container, lane, savedProvider = {}) {
+function syncProviderReadiness(container, lane, savedProvider = {}, options = {}) {
   const target = container?.querySelector?.(providerSelector('readiness', lane));
   if (!target) return;
-  const label = providerReadinessLabel(providerFromControls(container, lane, savedProvider));
+  const label = providerReadinessLabel(providerFromControls(container, lane, savedProvider), options);
   target.className = `recursion-provider-readiness${label.ready ? ' is-ready' : ' is-missing'}`;
   target.replaceChildren(el('span', { text: label.text }));
 }
@@ -1669,6 +1727,8 @@ function fetchedModelOptions(models = []) {
 function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, options = {}) {
   const source = asObject(provider);
   const fetchState = asObject(asObject(options).modelFetchState);
+  const connectionProfiles = Array.isArray(options.connectionProfiles) ? options.connectionProfiles : null;
+  const readinessOptions = connectionProfiles ? { profiles: connectionProfiles } : {};
   const title = lane === 'reasoner' ? 'Reasoner Provider' : 'Utility Provider';
   const statusText = lane === 'reasoner' ? 'optional' : providerStatusText(source).toLowerCase();
   const open = lane === 'utility' || source.openAICompatible?.sessionApiKeyPresent === true || Boolean(source.openAICompatible?.model);
@@ -1710,7 +1770,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
     dataset: providerDataset('Enabled', lane),
     ariaLabel: `${title} enabled`
   }));
-  body.appendChild(providerReadinessNode(source, lane));
+  body.appendChild(providerReadinessNode(source, lane, readinessOptions));
   const grid = el('div', { className: 'recursion-provider-grid', dataset: { recursionProviderGrid: '' } });
   const sourceControl = selectControl({
       value: cleanText(source.source, 'host-current-model'),
@@ -1720,12 +1780,12 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   });
   setTooltip(sourceControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerSource);
   const syncSourceControls = () => {
-    syncProviderSourceVisibility(grid, lane);
-    syncProviderReadiness(body, lane, source);
+    syncProviderSourceVisibility(body, lane);
+    syncProviderReadiness(body, lane, source, readinessOptions);
   };
   sourceControl.addEventListener?.('change', syncSourceControls);
   grid.appendChild(providerField('Source', sourceControl));
-  const profileOptions = connectionProfileOptions(source.hostConnectionProfileId);
+  const profileOptions = connectionProfileOptions(source.hostConnectionProfileId, connectionProfiles);
   const profileControl = selectControl({
       value: cleanText(source.hostConnectionProfileId),
       options: profileOptions,
@@ -1737,7 +1797,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
     profileControl.setAttribute('disabled', 'disabled');
   }
   setTooltip(profileControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerProfile);
-  profileControl.addEventListener?.('change', () => syncProviderReadiness(body, lane, source));
+  profileControl.addEventListener?.('change', () => syncProviderReadiness(body, lane, source, readinessOptions));
   grid.appendChild(providerField('Profile', profileControl, {
       lane,
       context: 'profile',
@@ -1750,8 +1810,8 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
     placeholder: 'https://host/v1'
   });
   setTooltip(baseUrlControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerBaseUrl);
-  baseUrlControl.addEventListener?.('input', () => syncProviderReadiness(body, lane, source));
-  baseUrlControl.addEventListener?.('change', () => syncProviderReadiness(body, lane, source));
+  baseUrlControl.addEventListener?.('input', () => syncProviderReadiness(body, lane, source, readinessOptions));
+  baseUrlControl.addEventListener?.('change', () => syncProviderReadiness(body, lane, source, readinessOptions));
   const modelControl = inputControl({
     value: source.openAICompatible?.model || '',
     dataset: providerDataset('Model', lane),
@@ -1759,8 +1819,8 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
     placeholder: 'model'
   });
   setTooltip(modelControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerModel);
-  modelControl.addEventListener?.('input', () => syncProviderReadiness(body, lane, source));
-  modelControl.addEventListener?.('change', () => syncProviderReadiness(body, lane, source));
+  modelControl.addEventListener?.('input', () => syncProviderReadiness(body, lane, source, readinessOptions));
+  modelControl.addEventListener?.('change', () => syncProviderReadiness(body, lane, source, readinessOptions));
   const modelListControl = selectControl({
     value: '',
     options: fetchedModelOptions(fetchState.models),
@@ -1770,7 +1830,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   modelListControl.addEventListener?.('change', () => {
     if (modelListControl.value) {
       modelControl.value = modelListControl.value;
-      syncProviderReadiness(body, lane, source);
+      syncProviderReadiness(body, lane, source, readinessOptions);
     }
   });
   const fetchModelsButton = el('button', {
@@ -1807,8 +1867,8 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
     placeholder: source.openAICompatible?.sessionApiKeyPresent ? 'Session key loaded' : 'Session API key'
   });
   setTooltip(apiKeyControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerApiKey);
-  apiKeyControl.addEventListener?.('input', () => syncProviderReadiness(body, lane, source));
-  apiKeyControl.addEventListener?.('change', () => syncProviderReadiness(body, lane, source));
+  apiKeyControl.addEventListener?.('input', () => syncProviderReadiness(body, lane, source, readinessOptions));
+  apiKeyControl.addEventListener?.('change', () => syncProviderReadiness(body, lane, source, readinessOptions));
   const openAiFields = el('div', {
     className: 'recursion-provider-context-fields recursion-provider-openai-fields',
     dataset: {
@@ -1838,20 +1898,6 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   body.appendChild(el('div', { className: 'recursion-provider-actions' }, [
     el('button', {
       className: 'recursion-button',
-      text: 'Save Provider',
-      attrs: {
-        type: 'button',
-        'aria-label': `Save ${title}`,
-        ...tooltipAttrs(tooltipsEnabled, SETTINGS_TOOLTIPS.providerSave)
-      },
-      dataset: {
-        recursionProviderSave: '',
-        [`recursion${titleCase(lane)}ProviderSave`]: '',
-        recursionProviderLane: lane
-      }
-    }),
-    el('button', {
-      className: 'recursion-button',
       text: 'Test Provider',
       attrs: {
         type: 'button',
@@ -1875,10 +1921,13 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
       dataset: {
         recursionProviderClearKey: '',
         [`recursion${titleCase(lane)}ProviderClearKey`]: '',
-        recursionProviderLane: lane
+        recursionProviderLane: lane,
+        recursionProviderContext: 'clear-key',
+        recursionProviderSourceTypes: 'openai-compatible'
       }
     })
   ]));
+  syncProviderSourceVisibility(body, lane);
   group.appendChild(body);
   panel.appendChild(group);
 }
@@ -1893,7 +1942,8 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
     advanced: 'Compatibility, display, and diagnostics controls that most users only touch when tuning a setup.'
   };
   panel.appendChild(el('div', { className: 'recursion-settings-header' }, [
-    el('h2', { text: 'Settings' })
+    el('h2', { text: 'Settings' }),
+    button('Open Viewer', 'recursionViewerToggle', 'Open Recursion viewer')
   ]));
   panel.appendChild(el('div', { className: 'recursion-settings-tabs', dataset: { recursionSettingsTabs: '' } }, [
     ...['play', 'providers', 'advanced'].map((tab) => el('button', {
@@ -1920,11 +1970,14 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
   }, [
     el('span', { text: route.text })
   ]));
+  const connectionProfiles = listProviderConnectionProfiles();
   renderProviderSettings(providersPane, 'utility', settings.providers?.utility || {}, tooltipsEnabled, {
-    modelFetchState: providerModelFetchState.utility
+    modelFetchState: providerModelFetchState.utility,
+    connectionProfiles
   });
   renderProviderSettings(providersPane, 'reasoner', settings.providers?.reasoner || {}, tooltipsEnabled, {
-    modelFetchState: providerModelFetchState.reasoner
+    modelFetchState: providerModelFetchState.reasoner,
+    connectionProfiles
   });
   renderAdvancedSettings(advancedPane, settings, {
     resetSceneCache: typeof runtime?.resetSceneCache === 'function'
@@ -2393,6 +2446,12 @@ function eventWithin(event, elements) {
   return targetWithin(event?.target, elements);
 }
 
+function consumeClickEvent(event) {
+  event?.preventDefault?.();
+  event?.stopImmediatePropagation?.();
+  event?.stopPropagation?.();
+}
+
 export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   if (!canUseDocument()) return noopMount();
 
@@ -2791,14 +2850,31 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const handleSettingsAutoSave = (event) => {
     const target = event?.target;
     if (!isSettingsAutoSaveControl(target)) return;
+    const patch = readSettingsPatch(root);
     const rerenderSettings = Object.prototype.hasOwnProperty.call(asObject(target.dataset), 'recursionSettingTooltipsEnabled');
-    runAction(runtime?.updateSettings?.(readSettingsPatch(root)), () => {
+    if (rerenderSettings) {
+      settingsPanelRendered = false;
+      update(viewWithSettingsPatch(currentView(), patch));
+    }
+    const action = runtime?.updateSettings?.(patch);
+    if (rerenderSettings && action === undefined) return;
+    runAction(action, () => {
       if (rerenderSettings) settingsPanelRendered = false;
+      update();
+    });
+  };
+  const handleProviderAutoSave = (event) => {
+    const target = event?.target;
+    if (!isProviderAutoSaveControl(target)) return;
+    const lane = providerLaneFromDataset(target.dataset);
+    runAction(runtime?.updateProvider?.(lane, readProviderPatch(root, lane)), () => {
+      settingsPanelRendered = false;
       update();
     });
   };
   settingsPanel.addEventListener?.('input', handleSettingsAutoSave);
   settingsPanel.addEventListener?.('change', handleSettingsAutoSave);
+  settingsPanel.addEventListener?.('change', handleProviderAutoSave);
   root.addEventListener('click', (event) => {
     const target = event?.target;
     const control = (key) => closestDatasetElement(target, key, root);
@@ -2900,6 +2976,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     const providerFetchModels = control('recursionProviderFetchModels');
     if (providerFetchModels) {
+      consumeClickEvent(event);
       const lane = providerLaneFromDataset(providerFetchModels.dataset);
       setProviderModelFetchStatus(lane, 'Fetching models...');
       runAction(Promise.resolve(runtime?.fetchProviderModels?.(lane, readProviderPatch(root, lane)))
@@ -2908,15 +2985,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
           error: { message: 'Model fetch is unavailable.' }
         })));
     }
-    const providerSave = control('recursionProviderSave');
-    if (providerSave) {
-      const lane = providerLaneFromDataset(providerSave.dataset);
-      runAction(runtime?.updateProvider?.(lane, readProviderPatch(root, lane)));
-      settingsPanelRendered = false;
-      update();
-    }
     const providerTest = control('recursionProviderTest');
     if (providerTest) {
+      consumeClickEvent(event);
       const lane = providerLaneFromDataset(providerTest.dataset);
       runAction(runtime?.testProvider?.(lane), () => {
         settingsPanelRendered = false;
@@ -2925,6 +2996,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     const providerClearKey = control('recursionProviderClearKey');
     if (providerClearKey) {
+      consumeClickEvent(event);
       const lane = providerLaneFromDataset(providerClearKey.dataset);
       runAction(runtime?.clearProviderKey?.(lane));
       settingsPanelRendered = false;
@@ -3010,7 +3082,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function providerLaneFromDataset(dataset) {
-    return dataset.recursionProviderLane === 'reasoner' ? 'reasoner' : 'utility';
+    if (dataset.recursionProviderLane === 'reasoner') return 'reasoner';
+    for (const key of Object.keys(asObject(dataset))) {
+      if (/Reasoner$/.test(key)) return 'reasoner';
+      if (/Utility$/.test(key)) return 'utility';
+    }
+    return 'utility';
   }
 
   function readSettingsPatch(sourceRoot) {
@@ -3098,8 +3175,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
   }
 
-  function update() {
-    const view = currentView();
+  function update(viewOverride = null) {
+    const view = viewOverride || currentView();
     const model = createRecursionViewModel(view);
     setText(root, '[data-recursion-status]', model.runtimeHealthLabel);
     setText(root, '[data-recursion-mode]', model.modeLabel);

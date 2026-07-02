@@ -483,12 +483,13 @@ assert(/header and footer stay visible/.test(uiSpec), 'UI spec documents mobile 
 assert(/\.recursion-status-list` flex-shrinks/.test(uiSpec), 'UI spec documents the mobile progress list flex-shrink contract');
 assert(/progressChildVisibleLimit:\s*5/.test(uiSpec), 'UI spec documents the sub-tier visible row default');
 assert(/progressListVisibleLimit:\s*15/.test(uiSpec), 'UI spec documents the whole progress list visible row default');
-assert(/Play and Advanced setting controls auto-save on change/.test(uiSpec), 'UI spec documents broad settings autosave instead of a Save Settings button');
+assert(/Play, Provider, and Advanced setting controls auto-save on committed changes/.test(uiSpec), 'UI spec documents broad settings autosave instead of a Save Settings button');
 assert(/bottom fade/.test(uiSpec), 'UI spec documents the sub-tier overflow fade affordance');
 assert(/\.settings-row input\[type="checkbox"\]\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?background:\s*rgba\(255, 255, 255, \.035\);/.test(barImplementationReference), 'reference settings checkbox uses the compact dark mockup skin');
 assert(/Checkboxes inside Recursion settings must use the compact dark Recursion control skin/.test(uiSpec), 'UI spec documents host checkbox override requirement');
 assert(/Provider Source changes the field context inside each lane immediately/.test(uiSpec), 'UI spec documents source-specific provider field contexts');
-assert(/Switching Source is a UI-only context switch until Save Provider is clicked/.test(uiSpec), 'UI spec documents non-destructive provider source switching');
+assert(/Provider lane fields auto-save on committed changes/.test(uiSpec), 'UI spec documents provider autosave instead of a Save Provider button');
+assert(/Clear Session Key appears only for OpenAI-compatible endpoints/.test(uiSpec), 'UI spec documents source-scoped provider key clearing');
 assert(!/array\.innerHTML\s*=\s*steps\.map/.test(barImplementationReference), 'turn animation preview does not recreate all hero blocks on every tick');
 assert(!/list\.innerHTML\s*=\s*rows\.map/.test(barImplementationReference), 'turn animation preview does not recreate all progress rows on every tick');
 assert(!/list\.appendChild\(parentRow\);/.test(barImplementationReference), 'turn animation preview does not unconditionally move parent rows on every refresh');
@@ -927,11 +928,14 @@ try {
     clearInterval: fakeClearInterval
   };
   delete globalThis.ConnectionManagerRequestService;
+  let providerProfileServiceCalls = 0;
   globalThis.SillyTavern = {
     getContext() {
       return {
+        power_user: { model: 'gpt-4-turbo' },
         ConnectionManagerRequestService: {
           getSupportedProfiles() {
+            providerProfileServiceCalls += 1;
             return [
               { id: 'quiet-profile-a', label: 'Quiet Utility', model: 'glm-fast' },
               { profileId: 'deep-profile-b', label: 'Deep Reasoner', model_name: 'o-reasoner' }
@@ -970,6 +974,41 @@ try {
       }
     }
   });
+  function titleAttributes(node, titles = []) {
+    if (!node) return titles;
+    const title = node.getAttribute?.('title');
+    if (title) titles.push(title);
+    for (const child of node.children || []) titleAttributes(child, titles);
+    return titles;
+  }
+  const pendingSettingsUpdates = [];
+  const pendingTooltipUi = mountRecursionUi({
+    runtime: {
+      view: () => ({
+        settings: { mode: 'auto', ui: { tooltipsEnabled: true } },
+        activity: { phase: 'settled', severity: 'success', label: 'Ready' }
+      }),
+      updateSettings: (patch) => {
+        pendingSettingsUpdates.push(patch);
+        return new Promise(() => {});
+      }
+    },
+    mountPoint: fakeDocument.body
+  });
+  const pendingTooltipRoot = fakeDocument.getElementById('recursion-root');
+  pendingTooltipRoot.querySelector('[data-recursion-actions]').click();
+  pendingTooltipRoot.querySelector('[data-recursion-settings-tab-advanced]').click({ ignoreStopPropagation: true });
+  assert(titleAttributes(pendingTooltipRoot).length > 0, 'pending tooltip regression starts with hover titles enabled');
+  const pendingTooltipToggle = pendingTooltipRoot.querySelector('[data-recursion-setting-tooltips-enabled]');
+  pendingTooltipToggle.checked = false;
+  for (const listener of pendingTooltipRoot.querySelector('[data-recursion-settings-panel]').eventListeners.change || []) {
+    listener({ target: pendingTooltipToggle });
+  }
+  assertEqual(pendingSettingsUpdates.length, 1, 'tooltip checkbox still sends one settings update while prompt cleanup is pending');
+  assertEqual(pendingTooltipRoot.dataset.recursionTooltips, 'off', 'tooltip checkbox disables hover help immediately before runtime update resolves');
+  assertDeepEqual(titleAttributes(pendingTooltipRoot), [], 'tooltip checkbox removes hover title attributes immediately before runtime update resolves');
+  pendingTooltipUi.destroy();
+
   let refreshed = 0;
   let closeCount = 0;
   const settingsUpdates = [];
@@ -1202,13 +1241,6 @@ try {
   });
 
   const root = fakeDocument.getElementById('recursion-root');
-  function titleAttributes(node, titles = []) {
-    if (!node) return titles;
-    const title = node.getAttribute?.('title');
-    if (title) titles.push(title);
-    for (const child of node.children || []) titleAttributes(child, titles);
-    return titles;
-  }
   assert(root, 'root is rendered');
   assert(root.querySelector('[data-recursion-bar]'), 'bar selector is rendered');
   root.querySelector('[data-recursion-bar]').setBoundingClientRect({ left: 0, top: 0, width: 640, height: 30, right: 640, bottom: 30 });
@@ -1549,6 +1581,7 @@ try {
   assert(root.querySelector('[data-recursion-settings-play]'), 'settings menu renders Play pane');
   assert(root.querySelector('[data-recursion-settings-providers]'), 'settings menu renders Providers pane');
   assert(root.querySelector('[data-recursion-settings-advanced]'), 'settings menu renders Advanced pane');
+  assert(root.querySelector('[data-recursion-settings-panel]').querySelector('[data-recursion-viewer-toggle]'), 'settings menu renders visible Full Viewer entry point');
   assert(!root.querySelector('[data-recursion-settings-save]'), 'settings menu does not render a Save Settings button');
   assert(!root.querySelector('[data-recursion-settings-close]'), 'settings menu does not render a redundant close button');
   assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, false, 'Play pane is the default settings tab');
@@ -1561,7 +1594,9 @@ try {
   assertEqual(root.querySelector('[data-recursion-settings-section-body-play-behavior]').hidden, true, 'Play behavior section collapses');
   root.querySelector('[data-recursion-settings-section-toggle-play-behavior]').click();
   assertEqual(root.querySelector('[data-recursion-settings-section-body-play-behavior]').hidden, false, 'Play behavior section expands');
+  providerProfileServiceCalls = 0;
   root.querySelector('[data-recursion-settings-tab-providers]').click();
+  assertEqual(providerProfileServiceCalls, 1, 'Providers pane renders both lane profile selectors from one host profile lookup');
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open');
   assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, true, 'clicking Providers hides Play pane');
   assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, false, 'clicking Providers shows provider controls');
@@ -1577,17 +1612,23 @@ try {
   const utilitySource = root.querySelector('[data-recursion-provider-source-utility]');
   const utilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
   const utilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
-  assertEqual(utilitySource.getAttribute('title'), 'Choose where this lane sends Recursion model calls. Current Host Model follows the active chat model; Host Connection Profile uses a saved SillyTavern profile; OpenAI-Compatible uses the endpoint fields below. Hidden fields keep values until Save Provider.', 'provider Source control explains what each source does and why hidden fields persist');
+  const utilityClearKey = root.querySelector('[data-recursion-utility-provider-clear-key]');
+  assertEqual(utilitySource.getAttribute('title'), 'Choose where this lane sends Recursion model calls. Current Host Model follows the active chat model; Host Connection Profile uses a saved SillyTavern profile; OpenAI-Compatible uses the endpoint fields below. Changes auto-save; hidden alternate-source fields keep their values.', 'provider Source control explains autosave and hidden field persistence');
   assertEqual(root.querySelector('[data-recursion-provider-base-url-utility]').getAttribute('title'), 'Base /v1 URL for a direct OpenAI-compatible endpoint. Only used when Source is OpenAI-Compatible.', 'provider Base URL explains source-specific endpoint use');
   assertEqual(root.querySelector('[data-recursion-provider-api-key-utility]').getAttribute('title'), 'Session-only key for the OpenAI-compatible endpoint. Recursion keeps it in memory and never writes it to settings or diagnostics.', 'provider API key tooltip explains secret boundary');
+  assert(utilityClearKey, 'Utility provider renders a clear session key action for OpenAI sources');
   assert(root.querySelector('[data-recursion-provider-readiness-utility]'), 'Utility provider renders compact readiness status before test');
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-provider-readiness-utility]')).includes('Current Host Model'), 'readiness status names the active source');
+  const utilityReadinessText = fakeDocument.textTree(root.querySelector('[data-recursion-provider-readiness-utility]'));
+  assert(utilityReadinessText.includes('Source: Current Host Model'), 'readiness status names the active source as a source');
+  assert(utilityReadinessText.includes('Host model: gpt-4-turbo'), 'readiness status keeps the current host model separate from provider identity');
+  assert(!utilityReadinessText.includes('Current Host Model /'), 'readiness status does not combine source and model with a provider-like slash label');
   assert(root.querySelector('[data-recursion-provider-route-summary]'), 'Providers pane renders compact route summary instead of hidden deep routing');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-provider-route-summary]')).includes('Arbiter'), 'route summary exposes Arbiter routing');
   assert(utilityProfileContext, 'Utility provider renders a profile-specific field context');
   assert(utilityOpenAiContext, 'Utility provider renders an OpenAI-specific field context');
   assertEqual(utilityProfileContext.hidden, true, 'Current Host Model hides Utility profile fields');
   assertEqual(utilityOpenAiContext.hidden, true, 'Current Host Model hides Utility OpenAI endpoint fields');
+  assertEqual(utilityClearKey.hidden, true, 'Current Host Model hides Utility clear session key action');
   const utilityProfileSelect = root.querySelector('[data-recursion-provider-profile-utility]');
   assertEqual(utilityProfileSelect.tagName, 'SELECT', 'Host Connection Profile uses a real profile selector, not a free-text id field');
   assertDeepEqual(
@@ -1604,13 +1645,16 @@ try {
   for (const listener of utilitySource.eventListeners.change || []) listener({ target: utilitySource });
   assertEqual(utilityProfileContext.hidden, false, 'Host Connection Profile shows Utility profile fields');
   assertEqual(utilityOpenAiContext.hidden, true, 'Host Connection Profile hides Utility OpenAI endpoint fields');
+  assertEqual(utilityClearKey.hidden, true, 'Host Connection Profile hides Utility clear session key action');
   utilitySource.value = 'openai-compatible';
   for (const listener of utilitySource.eventListeners.change || []) listener({ target: utilitySource });
   assertEqual(utilityProfileContext.hidden, true, 'OpenAI-Compatible hides Utility profile fields');
   assertEqual(utilityOpenAiContext.hidden, false, 'OpenAI-Compatible shows Utility endpoint/model/key fields');
+  assertEqual(utilityClearKey.hidden, false, 'OpenAI-Compatible shows Utility clear session key action');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-provider-readiness-utility]')).includes('OpenAI-Compatible Endpoint'), 'readiness status follows unsaved provider source changes');
   assert(root.querySelector('[data-recursion-provider-fetch-models-utility]'), 'OpenAI-Compatible settings expose Fetch Models control');
   assert(root.querySelector('[data-recursion-provider-model-list-utility]'), 'OpenAI-Compatible settings expose fetched model selector');
+  assert(!root.querySelector('[data-recursion-utility-provider-save]'), 'Providers pane does not render a needless Save Provider button');
   root.querySelector('[data-recursion-provider-base-url-utility]').value = 'https://models.example/v1';
   root.querySelector('[data-recursion-provider-api-key-utility]').value = 'sk-ui-secret';
   root.querySelector('[data-recursion-provider-fetch-models-utility]').click();
@@ -1814,16 +1858,25 @@ try {
   root.querySelector('[data-recursion-provider-temperature-utility]').value = '0.2';
   root.querySelector('[data-recursion-provider-top-p-utility]').value = '0.8';
   root.querySelector('[data-recursion-provider-max-tokens-utility]').value = '2048';
-  root.querySelector('[data-recursion-utility-provider-save]').click();
-  assertEqual(providerUpdates.at(-1).lane, 'utility', 'utility provider save targets utility lane');
-  assertEqual(providerUpdates.at(-1).patch.source, 'openai-compatible', 'provider save records source');
-  assertEqual(providerUpdates.at(-1).patch.openAICompatible.model, 'utility-model', 'provider save records model');
-  assertEqual(providerUpdates.at(-1).patch.apiKey, 'sk-ui-secret', 'provider save forwards session key without writing it into text');
+  const providerUpdatesBeforeAutoSave = providerUpdates.length;
+  for (const listener of root.querySelector('[data-recursion-settings-panel]').eventListeners.change || []) {
+    listener({ target: root.querySelector('[data-recursion-provider-model-utility]') });
+  }
+  assertEqual(providerUpdates.length, providerUpdatesBeforeAutoSave + 1, 'provider controls auto-save as soon as a committed value changes');
+  assertEqual(providerUpdates.at(-1).lane, 'utility', 'utility provider autosave targets utility lane');
+  assertEqual(providerUpdates.at(-1).patch.source, 'openai-compatible', 'provider autosave records source');
+  assertEqual(providerUpdates.at(-1).patch.openAICompatible.model, 'utility-model', 'provider autosave records model');
+  assertEqual(providerUpdates.at(-1).patch.apiKey, 'sk-ui-secret', 'provider autosave forwards session key without writing it into text');
   assert(!fakeDocument.textTree(root).includes('sk-ui-secret'), 'provider controls do not render session api key text');
 
+  let hostGenerationClicks = 0;
+  fakeDocument.addEventListener('click', (event) => {
+    if (event.target === root.querySelector('[data-recursion-utility-provider-test]')) hostGenerationClicks += 1;
+  });
   root.querySelector('[data-recursion-utility-provider-test]').click();
   await Promise.resolve();
   assertDeepEqual(providerTests, ['utility'], 'utility provider test action calls runtime');
+  assertEqual(hostGenerationClicks, 0, 'utility provider test consumes its click before host generation handlers can see it');
   root.querySelector('[data-recursion-utility-provider-clear-key]').click();
   assertDeepEqual(providerClears, ['utility'], 'utility clear session key action calls runtime');
   if (root.querySelector('[data-recursion-settings-panel]').hidden === false) {

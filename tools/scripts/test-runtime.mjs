@@ -1025,6 +1025,33 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 }
 
 {
+  let releaseClear;
+  let updateResolved = false;
+  const { runtime } = createRuntimeHarness({
+    settings: { ui: { tooltipsEnabled: true } },
+    hostPrompt: {
+      async clear() {
+        await new Promise((resolve) => {
+          releaseClear = resolve;
+        });
+        return { ok: true, cleared: true };
+      }
+    }
+  });
+  const update = runtime.updateSettings({ ui: { tooltipsEnabled: false } });
+  update.then(() => {
+    updateResolved = true;
+  });
+  await waitUntil(() => typeof releaseClear === 'function', 'tooltip setting change did not start prompt clear');
+  assertEqual(updateResolved, false, 'tooltip setting change waits for prompt clear before resolving');
+  assertEqual(runtime.view().settings.ui.tooltipsEnabled, false, 'tooltip setting change updates runtime view immediately');
+  releaseClear();
+  const result = await update;
+  assertEqual(result.settings.ui.tooltipsEnabled, false, 'tooltip setting change returns updated tooltip setting');
+  assertEqual(runtime.view().settings.ui.tooltipsEnabled, false, 'tooltip setting change stays visible after prompt clear resolves');
+}
+
+{
   const disabledSceneScope = setFamilyEnabled(defaultCardScope(), 'Scene Frame', false).scope;
   const { runtime } = createRuntimeHarness({
     settings: { cardScope: disabledSceneScope }
@@ -5315,6 +5342,68 @@ for (const scenario of [
   const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
   assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'chat-changed'), 'chat change records prompt clear journal');
   assertEqual(runtime.view().lastSnapshot, null, 'chat change clears previous snapshot after journaling');
+}
+
+{
+  let releaseArbiter;
+  const { runtime, calls, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'host-stop regression only needs utility arbiter');
+        await new Promise((resolve) => {
+          releaseArbiter = resolve;
+        });
+        assertEqual(request.signal?.aborted, true, 'host generation stop aborts in-flight provider signal');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'compose-brief',
+            diagnostics: ['host-stop-regression']
+          }
+        };
+      }
+    }
+  });
+  const pending = runtime.prepareForGeneration({ userMessage: 'Stop before install.' });
+  await waitUntil(() => typeof releaseArbiter === 'function', 'host-stop run did not enter arbiter');
+  assertEqual(typeof runtime.handleHostGenerationStopped, 'function', 'runtime exposes host generation stop cleanup');
+  const stopped = runtime.handleHostGenerationStopped({ eventName: 'generation_stopped' });
+  releaseArbiter();
+  const [stopResult, pendingResult] = await Promise.all([stopped, pending]);
+  assertEqual(pendingResult.superseded, true, 'host generation stop supersedes in-flight generation preparation');
+  assertEqual(stopResult.ok, true, 'host generation stop cleanup succeeds');
+  assertEqual(calls.clear, 1, 'host generation stop clears host prompt');
+  assertEqual(installed.length, 0, 'host generation stop prevents prompt install');
+  const view = runtime.view();
+  assertEqual(view.activeRunId, null, 'host generation stop clears active run id');
+  assertEqual(view.lastPacket, null, 'host generation stop clears in-memory prompt packet');
+  assertEqual(view.lastHand.cards.length, 0, 'host generation stop clears in-memory hand');
+  assertEqual(view.lastPlan, null, 'host generation stop clears in-memory plan');
+  assertEqual(view.lastSnapshot, null, 'host generation stop clears in-memory snapshot');
+  assertEqual(view.activity.label, 'Generation canceled. Recursion prompt cleared.', 'host generation stop surfaces canceled cleanup');
+  assertEqual(view.activity.outcome, 'skipped', 'host generation stop activity is neutral skipped outcome');
+}
+
+{
+  const { runtime, calls, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' }
+  });
+  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare prompt before Stop.' });
+  assertEqual(setup.ok, true, 'host-stop setup prepares generation');
+  const setupSnapshot = runtime.view().lastSnapshot;
+  const result = await runtime.handleHostGenerationStopped({ eventName: 'generation_stopped' });
+  assertEqual(result.ok, true, 'host generation stop cleanup returns ok');
+  assertEqual(calls.clear, 1, 'host generation stop clears installed prompt');
+  const cache = await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey);
+  assertEqual(cache.cacheState, 'stale', 'host generation stop marks previous active scene cache stale');
+  assertEqual(cache.invalidation.reason, 'host-generation-stopped', 'host generation stop records cache invalidation reason');
+  assertEqual(cache.invalidation.details.eventName, 'generation_stopped', 'host generation stop stores safe event name');
+  const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
+  assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'host-generation-stopped'), 'host generation stop records prompt clear journal');
+  assertEqual(runtime.view().lastSnapshot, null, 'host generation stop clears previous snapshot after journaling');
 }
 
 {

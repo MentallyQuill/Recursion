@@ -141,10 +141,11 @@ Each lane may support:
 - OpenAI-Compatible Endpoint;
 - base URL, model, temperature, top-p, and max token controls;
 - session API key field for direct endpoints;
-- Save Provider;
 - Test Provider;
-- Clear Session Key;
+- Clear Session Key for OpenAI-compatible endpoints;
 - status and resolved model labels.
+
+Provider fields auto-save when changed. Session API keys stay in browser-session memory and are never persisted.
 
 Utility must be configured for normal operation. Reasoner can remain off. See [Provider Setup](PROVIDER_SETUP.md).
 
@@ -229,7 +230,7 @@ Normal diagnostics must not include API keys, authorization headers, cookies, ra
 Recursion storage is cache-oriented. The runtime owns scene cache, run journal, prompt metadata, redaction, pruning, and prompt-lane cleanup. Current operator controls are:
 
 - power-toggle cleanup;
-- Clear Session Key for each provider lane;
+- Clear Session Key for OpenAI-compatible provider lanes;
 - diagnostics row-limit and excerpt settings;
 - Reset Scene Cache, Clear Run Journal, and Export Diagnostics;
 - extension disable when Recursion should be fully inactive.

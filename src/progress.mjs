@@ -212,13 +212,16 @@ function eventStepId(event) {
 function eventState(event, isCurrent) {
   const phase = cleanText(event.phase);
   const severity = cleanText(event.severity, 'info').toLowerCase();
+  const outcome = cleanText(event.outcome).toLowerCase();
   const detail = asObject(event.detail);
   if (phase === 'cardProgress' && detail.state) return normalizeState(detail.state);
   if (phase === 'providerCallSettled' || isProviderSettledEvent(event)) {
-    if (cleanText(event.outcome).toLowerCase() === 'error' || severity === 'error') return 'failed';
-    if (cleanText(event.outcome).toLowerCase() === 'warning' || severity === 'warning') return 'warning';
+    if (outcome === 'skipped' || outcome === 'canceled') return 'skipped';
+    if (outcome === 'error' || severity === 'error') return 'failed';
+    if (outcome === 'warning' || severity === 'warning') return 'warning';
     return 'done';
   }
+  if (outcome === 'skipped' || outcome === 'canceled') return 'skipped';
   if (severity === 'error') return 'failed';
   if (severity === 'warning' || phase === 'providerCallRetrying' || phase === 'promptReasonerFallback') return 'warning';
   if (phase === 'cacheReusing') return 'cached';
@@ -644,6 +647,7 @@ function heroPixelState(steps) {
   if (steps.some((step) => step.state === 'failed')) return 'failed';
   if (steps.some((step) => step.state === 'warning')) return 'warning';
   if (steps.some((step) => step.state === 'running')) return 'running';
+  if (steps.some((step) => step.state === 'skipped')) return 'skipped';
   if (steps.some((step) => step.state === 'cached')) return 'cached';
   if (steps.some((step) => step.state === 'done')) return 'done';
   return 'pending';
@@ -653,6 +657,7 @@ function overflowPixelState(steps) {
   if (steps.some((step) => step.state === 'running')) return 'running';
   if (steps.some((step) => step.state === 'failed')) return 'failed';
   if (steps.some((step) => step.state === 'warning')) return 'warning';
+  if (steps.some((step) => step.state === 'skipped')) return 'skipped';
   if (steps.some((step) => step.state === 'pending')) return 'pending';
   if (steps.some((step) => step.state === 'cached')) return 'cached';
   if (steps.some((step) => step.state === 'done')) return 'done';

@@ -42,6 +42,8 @@ Chat-change cleanup clears volatile Recursion state, clears Recursion-owned prom
 
 The entrypoint also subscribes to source mutation events when available: `MESSAGE_DELETED`, `MESSAGE_UPDATED`, and `MESSAGE_SWIPED`. Those handlers call `runtime.handleSourceChanged()` so edits, deletes, and swipe changes do not leave an old Recursion prompt installed. The cleanup records only compact event metadata such as event name and message id.
 
+The entrypoint subscribes to SillyTavern's player Stop signal through `event_types.GENERATION_STOPPED`, with `generation_stopped` as a fallback event name. That handler calls `runtime.handleHostGenerationStopped()`. Runtime aborts active Recursion provider signals, prevents stale packet installation, clears Recursion-owned prompt keys, marks any active scene cache stale with reason `host-generation-stopped`, and surfaces the progress outcome as skipped rather than warning or failure.
+
 ## Generation Interceptor Boundary
 
 The generation interceptor calls `runtime.prepareForGeneration()` before returning the chat to SillyTavern. It catches and logs sanitized failures so the host generation can continue.

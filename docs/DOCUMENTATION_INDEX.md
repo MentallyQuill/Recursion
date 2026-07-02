@@ -39,7 +39,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Recursion Extension Spec](RECURSION_EXTENSION_SPEC.md) - Top-level V1 design and implementation contract.
 - [Product Scope](design/RECURSION_PRODUCT_SCOPE.md) - Product promise, V1 scope, non-goals, and success criteria.
 - [Card System Spec](design/CARD_SYSTEM_SPEC.md) - Fixed V1 catalog, card lifecycle, Utility Arbiter responsibilities, and turn hand.
-- [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) - Target V1 contract for Strength, Focus, and Prompt Footprint backend effects.
+- [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) - V1 contract for Strength, Focus, and Prompt Footprint backend effects.
 - [UI Spec](design/UI_SPEC.md) - Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, viewer, settings, and provider controls.
 - [Turn Context Compiler Seed Note](design/RECURSION_TURN_CONTEXT_COMPILER.md) - Historical seed note superseded by the V1 spec family.
 - [Design Folder Guide](design/README.md)

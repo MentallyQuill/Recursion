@@ -91,7 +91,7 @@ These assets are promoted and may be embedded directly from `assets/documentatio
 | `recursion-technical-runtime-pipeline.png` | diagram/static | `docs/technical/RECURSION_TECHNICAL_MANUAL.md` | End-to-end runtime spine from SillyTavern snapshot through prompt install and diagnostics. |
 | `recursion-runtime-turn-sequence.png` | diagram/static | `docs/technical/RUNTIME_TURN_SEQUENCE.md` | Power, Auto/Manual lifecycle, cancellation, stale-result discard, and fail-soft branches. |
 | `recursion-stale-result-discard.png` | diagram/static | `docs/technical/RUNTIME_TURN_SEQUENCE.md` | Run-id guard that blocks stale provider, storage, or prompt work from mutating active state. |
-| `recursion-card-family-matrix.png` | diagram/static | `docs/technical/CARD_DECK_AND_HAND.md` | Fixed V1 card families, including Knowledge/Secrets, Clocks/Consequences, Environment/Affordances, and Possessions/Items. |
+| `recursion-card-family-matrix.png` | diagram/static | `docs/technical/CARD_DECK_AND_HAND.md` | Fixed V1 card families, including Knowledge, Consequences, Environment, and Items. |
 | `recursion-card-lifecycle.png` | diagram/static | `docs/technical/CARD_DECK_AND_HAND.md` | Create, refresh, stow, discard, select, omit, and invalidate flow. |
 | `recursion-prompt-packet-stack.png` | diagram/static | `docs/technical/PROMPT_PACKET_AND_INJECTION.md` | Scene Brief, Turn Brief, Guardrails, critical guardrail exception, omissions, and metadata. |
 | `recursion-prompt-injection-lanes.png` | diagram/static | `docs/technical/PROMPT_PACKET_AND_INJECTION.md` | Recursion-owned prompt lanes, placement metadata, stale clear, and host boundary. |

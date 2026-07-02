@@ -991,7 +991,7 @@ try {
             { id: 'motivation-card', label: 'Motivation', providerLane: 'utility', state: 'pending' },
             { id: 'threads-card', label: 'Open Threads', providerLane: 'utility', state: 'pending' },
             { id: 'cast-card', label: 'Active Cast', providerLane: 'utility', state: 'pending' },
-            { id: 'prose-card', label: 'Prose Pacing', providerLane: 'utility', state: 'pending' }
+            { id: 'prose-card', label: 'Prose', providerLane: 'utility', state: 'pending' }
           ]
         }
       ]
@@ -1298,9 +1298,21 @@ try {
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-family]').length, CARD_SCOPE_CATALOG.length, 'Cards dropdown renders every fixed V1 family');
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]').length, CARD_SCOPE_TOTAL_SUB_ITEMS, 'Cards dropdown renders every fixed V1 sub-item');
   const cardScopeText = fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]'));
-  for (const familyName of ['Knowledge/Secrets', 'Clocks/Consequences', 'Environment/Affordances', 'Possessions/Items']) {
+  for (const familyName of ['Knowledge', 'Consequences', 'Environment', 'Items']) {
     assert(cardScopeText.includes(familyName), `Cards dropdown renders ${familyName}`);
   }
+  const proseDensity = root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
+    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Prose'
+      && node.dataset.recursionCardScopeSubItem === 'density');
+  assert(proseDensity, 'Prose density sub-item exists');
+  assert(
+    proseDensity.getAttribute('title').includes('How packed the next response should be'),
+    'density tooltip explains actual Prose density focus'
+  );
+  assert(
+    proseDensity.getAttribute('title').includes('action, dialogue, description, and consequence'),
+    'density tooltip explains why density matters'
+  );
   const sceneFamilyToggle = root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
     .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame');
   assert(sceneFamilyToggle, 'Cards dropdown exposes Scene Frame family toggle');
@@ -1313,6 +1325,16 @@ try {
     'false',
     'family toggle visibly updates immediately without waiting for a host rerender'
   );
+  view = { ...view, settings: { ...view.settings, cardScope: defaultCardScope() } };
+  ui.update();
+  assertEqual(
+    root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
+      .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame')
+      .getAttribute('aria-pressed'),
+    'false',
+    'family toggle stays visually disabled across one stale runtime poll'
+  );
+  view = { ...view, settings: { ...view.settings, cardScope: settingsUpdates.at(-1).cardScope } };
   ui.update();
   assert(!root.querySelector('[data-recursion-cards-label]'), 'Cards button stays icon-only after partial scope change');
   root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
@@ -1560,6 +1582,8 @@ try {
   assert(rerenderedChildren.className.includes('is-at-end'), 'child progress fade clears at scroll end');
 
   root.querySelector('[data-recursion-setting-strength]').value = 'strong';
+  root.querySelector('[data-recursion-setting-min-cards]').value = '4';
+  root.querySelector('[data-recursion-setting-max-cards]').value = '12';
   root.querySelector('[data-recursion-setting-footprint]').value = 'rich';
   root.querySelector('[data-recursion-setting-focus]').value = 'character';
   root.querySelector('[data-recursion-setting-progress-child-limit]').value = '7';
@@ -1573,6 +1597,8 @@ try {
   root.querySelector('[data-recursion-settings-save]').click();
   assertDeepEqual(settingsUpdates.at(-1), {
     strength: 'strong',
+    minCards: 4,
+    maxCards: 12,
     promptFootprint: 'rich',
     focus: 'character',
     ui: {

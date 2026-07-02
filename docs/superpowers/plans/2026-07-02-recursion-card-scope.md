@@ -176,7 +176,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     ]
   },
   {
-    family: 'Dialogue/Relationship',
+    family: 'Relationship',
     role: 'dialogueRelationshipCard',
     description: 'Current conversational tension, relationship texture, promises, conflicts, and voice constraints.',
     subItems: [
@@ -206,7 +206,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     ]
   },
   {
-    family: 'Prose/Pacing',
+    family: 'Prose',
     role: 'prosePacingCard',
     description: 'Local craft guidance for density, momentum, specificity, and response shape.',
     subItems: [
@@ -321,13 +321,13 @@ const normalizedDefaultScope = normalizeSettings({}).cardScope;
 assertEqual(cardScopeCounts(normalizedDefaultScope).selectedSubItems, CARD_SCOPE_TOTAL_SUB_ITEMS, 'settings default enables all card scope');
 
 const partialScope = defaultCardScope();
-partialScope.families['Prose/Pacing'].enabled = false;
-for (const key of Object.keys(partialScope.families['Prose/Pacing'].subItems)) {
-  partialScope.families['Prose/Pacing'].subItems[key] = false;
+partialScope.families['Prose'].enabled = false;
+for (const key of Object.keys(partialScope.families['Prose'].subItems)) {
+  partialScope.families['Prose'].subItems[key] = false;
 }
 const normalizedPartial = normalizeSettings({ mode: 'manual', cardScope: partialScope });
 assertEqual(normalizedPartial.mode, 'manual', 'manual mode survives card-scope normalization');
-assertEqual(normalizedPartial.cardScope.families['Prose/Pacing'].enabled, false, 'disabled family persists');
+assertEqual(normalizedPartial.cardScope.families['Prose'].enabled, false, 'disabled family persists');
 ```
 
 - [x] Change `MODES` from `auto/semi-auto` to `auto/manual`.
@@ -506,7 +506,7 @@ Required assertion:
 ```js
 assertNotEqual(
   cacheContractVersions({ mode: 'auto', cardScope: defaultCardScope() }).settingsHash,
-  cacheContractVersions({ mode: 'manual', cardScope: scopeWithFamilyDisabled('Prose/Pacing') }).settingsHash,
+  cacheContractVersions({ mode: 'manual', cardScope: scopeWithFamilyDisabled('Prose') }).settingsHash,
   'card scope participates in scene cache contract'
 );
 ```
@@ -620,7 +620,7 @@ root.querySelector('[data-recursion-cards-button]').click();
 assertEqual(root.querySelector('[data-recursion-cards-panel]').hidden, false, 'Cards panel opens');
 assertEqual(root.querySelectorAll('[data-recursion-card-family]').length, 8, 'Cards panel renders fixed family tree');
 
-const proseFamily = root.querySelector('[data-recursion-card-family="Prose/Pacing"]');
+const proseFamily = root.querySelector('[data-recursion-card-family="Prose"]');
 proseFamily.querySelector('[data-recursion-card-family-toggle]').click();
 assert(settingsUpdates.at(-1).cardScope, 'family toggle sends cardScope patch');
 

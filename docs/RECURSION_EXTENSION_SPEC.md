@@ -77,7 +77,7 @@ Recursion does not own:
 2. Runtime derives the behavior influence policy for Strength, Focus, and Prompt Footprint.
 3. The Utility Arbiter receives the snapshot, current scene cache metadata, fixed V1 card catalog, provider status, behavior influence policy, and prompt budget context.
 4. The Arbiter returns an Auto Control Plan: action, scene status, prompt footprint, card jobs, card lifecycle decisions, Reasoner decision, and budgets.
-5. Runtime validates the plan, enforces schema and budget caps, applies current Prompt Footprint/card-scope policy, and executes requested card jobs from one frozen snapshot. The broader Strength/Focus behavior policy is tracked as a target design contract.
+5. Runtime validates the plan, enforces schema and budget caps, applies current behavior policy and card-scope policy, and executes requested card jobs from one frozen snapshot.
 6. The scene deck is updated with generated, refreshed, stowed, discarded, or stale cards.
 7. The Arbiter-selected turn hand is passed to prompt composition.
 8. Utility Composer builds the prompt packet, or Reasoner Composer assists when enabled, available, and justified.
@@ -106,13 +106,13 @@ V1 uses a fixed internal catalog:
 - Scene Frame
 - Active Cast
 - Character Motivation
-- Dialogue / Relationship
+- Relationship
 - Continuity Risk
-- Knowledge / Secrets
-- Clocks / Consequences
-- Environment / Affordances
-- Possessions / Items
-- Prose / Pacing
+- Knowledge
+- Consequences
+- Environment
+- Items
+- Prose
 - Open Threads
 
 The catalog is visible only as high-level Cards scope, where users can focus or whitelist fixed families and sub-items. It is not a user-authored card system, not a card editor, and not a prompt-injection checklist. The Arbiter receives the fixed catalog plus the current scope and decides which cards need to exist for the current scene within Auto or Manual rules.

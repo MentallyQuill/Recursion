@@ -4,12 +4,14 @@ import {
   cardScopeSummary,
   filterCardJobsForScope,
   filterCardsForScope,
+  normalizeCardScope,
   scopePayloadForArbiter
 } from './card-scope.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { composePromptPacket, PROMPT_PACKET_VERSION } from './prompt.mjs';
 import { PROVIDER_CONTRACT_HASH } from './providers.mjs';
-import { createSettingsStore, normalizeSettings } from './settings.mjs';
+import { createSettingsStore, normalizeCardBudgetSettings, normalizeSettings } from './settings.mjs';
+import { behaviorPolicyPromptLines, influencePolicyForSettings, runPolicyForEffectivePlan } from './settings-policy.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
@@ -29,9 +31,9 @@ const REASONER_DECISION_MODES = new Set(['use', 'skip']);
 const PROMPT_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const SCENE_STATUSES = new Set(['same-scene', 'soft-shift', 'hard-shift', 'unknown']);
 const PROMPT_NEUTRAL_SETTING_KEYS = new Set(['reasoningLevel', 'reasonerUse']);
-const LOW_REASONING_MAX_CARDS = 3;
-const NORMAL_REASONING_MAX_CARDS = 6;
-const ULTRA_REASONING_MIN_CARDS = 10;
+const DEFAULT_LOW_REASONING_MAX_CARDS = 3;
+const DEFAULT_NORMAL_REASONING_MAX_CARDS = 6;
+const DEFAULT_ULTRA_REASONING_MAX_CARDS = 10;
 const HIGH_REASONER_CARD_PRIORITY = 88;
 const REASONING_LEVEL_POLICIES = Object.freeze({
   low: {
@@ -39,7 +41,7 @@ const REASONING_LEVEL_POLICIES = Object.freeze({
     composer: 'utility',
     arbiterLane: 'utility',
     cardLane: 'utility',
-    maxCardsCap: LOW_REASONING_MAX_CARDS,
+    maxCardsCap: DEFAULT_LOW_REASONING_MAX_CARDS,
     maxCardsFloor: 0,
     prompt: 'Low uses Utility for Arbiter, card generation, and composition. Keep budgets lean and request only the most relevant cards for this scene/message.'
   },
@@ -67,7 +69,7 @@ const REASONING_LEVEL_POLICIES = Object.freeze({
     arbiterLane: 'reasoner',
     cardLane: 'reasoner',
     maxCardsCap: 0,
-    maxCardsFloor: ULTRA_REASONING_MIN_CARDS,
+    maxCardsFloor: DEFAULT_ULTRA_REASONING_MAX_CARDS,
     prompt: 'Ultra uses Reasoner for Arbiter, card generation, and final composition when the lane is healthy. Bias toward a larger relevant hand when the scene supports it.'
   }
 });
@@ -142,6 +144,8 @@ function cacheSettingsSignature(settings = {}) {
     mode: normalized.mode,
     cardScope: normalized.cardScope,
     strength: normalized.strength,
+    minCards: normalized.minCards,
+    maxCards: normalized.maxCards,
     reasoningLevel: normalized.reasoningLevel,
     promptFootprint: normalized.promptFootprint,
     focus: normalized.focus,
@@ -362,12 +366,20 @@ function snapshotWithPendingUserMessage(snapshot, userMessage) {
 
 function localFallbackPlan(snapshot, settings) {
   const snapshotHash = hashJson(snapshot);
+  const behaviorPolicy = influencePolicyForSettings(settings);
+  const footprintPolicy = asObject(behaviorPolicy.footprint);
+  const cardBudget = asObject(behaviorPolicy.cardBudget);
+  const reasoningPolicy = reasoningPolicyForSettings(settings);
+  const promptFootprint = normalizePromptFootprint(footprintPolicy.level, normalizePromptFootprint(settings.promptFootprint, 'normal'));
+  const fallbackMaxCards = reasoningPolicy.maxCardsFloor > 0
+    ? reasoningPolicy.maxCardsFloor
+    : (reasoningPolicy.maxCardsCap > 0 ? reasoningPolicy.maxCardsCap : DEFAULT_NORMAL_REASONING_MAX_CARDS);
   return {
     schema: UTILITY_ARBITER_SCHEMA,
     snapshotHash,
     action: 'compose-brief',
     sceneStatus: 'same-scene',
-    promptFootprint: normalizePromptFootprint(settings.promptFootprint, 'normal'),
+    promptFootprint,
     cardJobs: [],
     reasonerDecision: {
       mode: settings.reasonerUse === 'always' ? 'use' : 'skip',
@@ -375,8 +387,8 @@ function localFallbackPlan(snapshot, settings) {
       signals: []
     },
     budgets: {
-      targetBriefTokens: settings.promptFootprint === 'rich' ? 900 : 500,
-      maxCards: 6
+      targetBriefTokens: promptFootprint === 'rich' ? 900 : (promptFootprint === 'compact' ? 360 : 500),
+      maxCards: fallbackMaxCards
     },
     diagnostics: ['local-fallback-plan'],
     source: { snapshotHash }
@@ -463,7 +475,18 @@ function enforceReasonerAvailability(plan, settings) {
 
 function reasoningPolicyForSettings(settings = {}) {
   const level = safeText(settings?.reasoningLevel || 'high', 40).toLowerCase();
-  return REASONING_LEVEL_POLICIES[level] || REASONING_LEVEL_POLICIES.high;
+  const base = REASONING_LEVEL_POLICIES[level] || REASONING_LEVEL_POLICIES.high;
+  const cardBudget = normalizeCardBudgetSettings(settings);
+  if (base.level === 'low') {
+    return { ...base, maxCardsCap: cardBudget.minCards, maxCardsFloor: 0, cardBudget };
+  }
+  if (base.level === 'medium' || base.level === 'high') {
+    return { ...base, maxCardsCap: cardBudget.normalCards, maxCardsFloor: 0, cardBudget };
+  }
+  if (base.level === 'ultra') {
+    return { ...base, maxCardsCap: cardBudget.maxCards, maxCardsFloor: cardBudget.maxCards, cardBudget };
+  }
+  return { ...base, cardBudget };
 }
 
 function reasonerLaneAvailable(settings) {
@@ -480,11 +503,12 @@ function arbiterLaneForSettings(settings) {
 
 function reasoningPolicyPromptLine(settings) {
   const policy = reasoningPolicyForSettings(settings);
-  return `Reasoning level policy: ${policy.prompt} Runtime-enforced defaults: composer=${policy.composer}; arbiterLane=${policy.arbiterLane}; cardLane=${policy.cardLane}; normalMaxCards=${NORMAL_REASONING_MAX_CARDS}; lowMaxCards=${LOW_REASONING_MAX_CARDS}; ultraMinCards=${ULTRA_REASONING_MIN_CARDS}.`;
+  const budget = policy.cardBudget || normalizeCardBudgetSettings(settings);
+  return `Reasoning level policy: ${policy.prompt} Runtime-enforced card budgets: lowMinCards=${budget.minCards}; normalCards=${budget.normalCards}; ultraMaxCards=${budget.maxCards}. Runtime-enforced routing: composer=${policy.composer}; arbiterLane=${policy.arbiterLane}; cardLane=${policy.cardLane}.`;
 }
 
 function adjustedMaxCardsForPolicy(value, policy) {
-  const current = normalizeBudget(value, NORMAL_REASONING_MAX_CARDS);
+  const current = normalizeBudget(value, DEFAULT_NORMAL_REASONING_MAX_CARDS);
   if (current <= 0) return current;
   let next = current;
   if (policy.maxCardsCap > 0) next = Math.min(next, policy.maxCardsCap);
@@ -503,6 +527,64 @@ function applyReasoningPolicyToPlan(plan, settings) {
       ...budgets,
       maxCards: nextMaxCards
     }
+  };
+}
+
+function hasHighRiskFootprintReason(plan) {
+  const decision = asObject(plan?.reasonerDecision);
+  const evidence = [
+    decision.reason,
+    ...(Array.isArray(decision.signals) ? decision.signals : []),
+    ...(Array.isArray(plan?.diagnostics) ? plan.diagnostics : []),
+    plan?.sceneStatus
+  ].join(' ');
+  return /\b(safety|hard-shift|hard shift|continuity|conflict|contradiction|crowded|high[-\s]*risk|risk)\b/i.test(evidence);
+}
+
+function applyBehaviorPolicyToPlan(plan, settings) {
+  const behaviorPolicy = influencePolicyForSettings(settings);
+  const footprintPolicy = asObject(behaviorPolicy.footprint);
+  const cardBudget = asObject(behaviorPolicy.cardBudget);
+  const allowedFootprints = new Set(Array.isArray(footprintPolicy.allowedProfiles) ? footprintPolicy.allowedProfiles : []);
+  const storedFootprint = normalizePromptFootprint(footprintPolicy.level, normalizePromptFootprint(settings.promptFootprint, 'normal'));
+  const requestedFootprint = normalizePromptFootprint(plan?.promptFootprint, storedFootprint);
+  const diagnostics = [];
+  const promptFootprint = allowedFootprints.has(requestedFootprint) || hasHighRiskFootprintReason(plan)
+    ? requestedFootprint
+    : storedFootprint;
+  if (promptFootprint !== requestedFootprint) diagnostics.push('behavior-footprint-clamped');
+
+  const budgets = asObject(plan?.budgets);
+  const fallbackMaxCards = normalizeBudget(cardBudget.normalCards, DEFAULT_NORMAL_REASONING_MAX_CARDS);
+  const requestedMaxCards = normalizeBudget(budgets.maxCards, fallbackMaxCards);
+  const reasoningFloor = normalizeBudget(reasoningPolicyForSettings(settings).maxCardsFloor, 0);
+  const ceiling = Math.max(normalizeBudget(cardBudget.maxCards, requestedMaxCards), reasoningFloor);
+  const maxCards = requestedMaxCards > 0 && ceiling > 0 ? Math.min(requestedMaxCards, ceiling) : requestedMaxCards;
+  if (maxCards !== requestedMaxCards) diagnostics.push('behavior-max-cards-clamped');
+
+  const clampedReasonerUse = promptFootprint !== requestedFootprint
+    && asObject(plan?.reasonerDecision).mode === 'use'
+    && !hasHighRiskFootprintReason(plan);
+  if (clampedReasonerUse) diagnostics.push('behavior-reasoner-clamped');
+
+  if (!diagnostics.length && promptFootprint === plan?.promptFootprint && maxCards === budgets.maxCards) return plan;
+  return {
+    ...plan,
+    promptFootprint,
+    ...(clampedReasonerUse
+      ? {
+          reasonerDecision: {
+            mode: 'skip',
+            reason: 'Behavior policy clamped non-risk footprint expansion.',
+            signals: ['behavior-footprint-clamped']
+          }
+        }
+      : {}),
+    budgets: {
+      ...budgets,
+      maxCards
+    },
+    diagnostics: mergeDiagnostics(plan.diagnostics, diagnostics)
   };
 }
 
@@ -546,6 +628,8 @@ function normalizePlanCardJobs(value) {
     if (role) output.role = role;
     if (roleId) output.roleId = roleId;
     if (reason) output.reason = reason;
+    const refreshOfCardId = safeIdentifier(source.refreshOfCardId ?? source.replacesCardId ?? '', '', 160);
+    if (refreshOfCardId) output.refreshOfCardId = refreshOfCardId;
     return output;
   }).filter((job) => job.family || job.role || job.roleId);
 }
@@ -647,6 +731,9 @@ function planAction(plan) {
 
 function settingsForPlan(settings, plan) {
   const promptFootprint = normalizePromptFootprint(plan?.promptFootprint, settings.promptFootprint);
+  if (Array.isArray(plan?.diagnostics) && plan.diagnostics.includes('behavior-reasoner-clamped')) {
+    return { ...settings, promptFootprint, reasonerUse: 'off' };
+  }
   if (settings.reasonerUse !== 'off' && reasonerUnavailableReason(settings)) {
     return { ...settings, promptFootprint, reasonerUse: 'off' };
   }
@@ -844,6 +931,8 @@ function arbiterSafeSettings(settings) {
     mode: safeText(source.mode || 'auto', 40),
     cardScope: cardScopeSummary(source.cardScope),
     strength: safeText(source.strength || 'balanced', 40),
+    minCards: normalizeCardBudgetSettings(source).minCards,
+    maxCards: normalizeCardBudgetSettings(source).maxCards,
     reasoningLevel: safeText(source.reasoningLevel || 'high', 40),
     promptFootprint: safeText(source.promptFootprint || 'normal', 40),
     focus: safeText(source.focus || 'balanced', 80),
@@ -896,11 +985,16 @@ function safeProviderSettingsView(provider) {
 
 function safeSettingsView(settings) {
   const source = asObject(settings);
+  const cardScope = normalizeCardScope(source.cardScope);
+  const cardBudget = normalizeCardBudgetSettings(source);
   return {
     enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
-    cardScope: cardScopeSummary(source.cardScope),
+    cardScope,
+    cardScopeSummary: cardScopeSummary(cardScope),
     strength: safeText(source.strength || 'balanced', 40),
+    minCards: cardBudget.minCards,
+    maxCards: cardBudget.maxCards,
     reasoningLevel: safeText(source.reasoningLevel || 'high', 40),
     promptFootprint: safeText(source.promptFootprint || 'normal', 40),
     focus: safeText(source.focus || 'balanced', 80),
@@ -1106,6 +1200,17 @@ function cardScopePolicyLine(cardScope) {
     return 'Manual card scope policy: allowedCatalog is a strict whitelist. Do not request disabled families or sub-items.';
   }
   return 'Auto card scope policy: selected families and sub-items are the preferred focus, not a whitelist. Prefer selected scope when it can satisfy the turn; request unselected families only when they have high relevance to continuity, scene coherence, or the current user message.';
+}
+
+function arbiterCardJobContractLine() {
+  return [
+    'Card job contract:',
+    '- To create or refresh a card, emit a cardJobs entry.',
+    '- For refreshes, include refreshOfCardId when replacing a cached card.',
+    '- Use lifecycle actions only for cached or accepted card ids: select, emphasize, stow, discard, regenerate.',
+    '- Lifecycle regenerate marks an old cached card stale; it does not create a replacement without cardJobs.',
+    '- Do not include raw prompt text, hidden reasoning, provider endpoints, or host prompt instructions in plan fields.'
+  ].join('\n');
 }
 
 function cardProgressDetail(card, source, state) {
@@ -2543,9 +2648,11 @@ export function createRecursionRuntime({
           'Return a Recursion Utility Arbiter plan as strict JSON.',
           `Schema: ${UTILITY_ARBITER_SCHEMA}`,
           `Settings: ${JSON.stringify(arbiterSafeSettings(settings))}`,
+          behaviorPolicyPromptLines(influencePolicyForSettings(settings)),
           `Provider health: ${JSON.stringify(providerHealthForArbiter(settings))}`,
           `Card scope: ${JSON.stringify(cardScope)}`,
           cardScopePolicyLine(cardScope),
+          arbiterCardJobContractLine(),
           reasoningPolicyPromptLine(settings),
           `Catalog: ${JSON.stringify(catalog)}`,
           `Catalog hash: ${hashJson(catalog)}`,
@@ -2692,6 +2799,7 @@ export function createRecursionRuntime({
       });
       plan = enforceReasonerAvailability(plan, settings);
       plan = applyReasoningPolicyToPlan(plan, settings);
+      plan = applyBehaviorPolicyToPlan(plan, settings);
       const scopedCardJobs = filterCardJobsForScope(plan.cardJobs, settings);
       plan = {
         ...plan,
@@ -2806,6 +2914,8 @@ export function createRecursionRuntime({
         )
       });
       if (!isActiveRun(runId)) return supersededResult(runId);
+      const effectiveSettings = settingsForPlan(settings, plan);
+      const behaviorPolicy = runPolicyForEffectivePlan(settings, plan);
 
       stageRuntimeActivity({
         runId,
@@ -2817,7 +2927,8 @@ export function createRecursionRuntime({
       let promptDeck = deck;
       let hand = selectHand(deck.cards, {
         maxCards: budgetOr(plan.budgets?.maxCards, 6),
-        maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700)
+        maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700),
+        behaviorPolicy
       });
 
       const freshness = await recheckPromptInstallSnapshot(runId, sceneSnapshot, plan, pendingUserMessage);
@@ -2840,7 +2951,8 @@ export function createRecursionRuntime({
         };
         hand = selectHand(promptDeck.cards, {
           maxCards: budgetOr(plan.budgets?.maxCards, 6),
-          maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700)
+          maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700),
+          behaviorPolicy
         });
       }
       lastSnapshot = promptSnapshot;
@@ -2855,7 +2967,8 @@ export function createRecursionRuntime({
       let packet = await composePromptPacket({
         hand,
         snapshot: promptSnapshot,
-        settings: settingsForPlan(settings, plan),
+        settings: effectiveSettings,
+        behaviorPolicy,
         generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRun),
         activity,
         runId,
@@ -2908,7 +3021,8 @@ export function createRecursionRuntime({
           };
           hand = selectHand(promptDeck.cards, {
             maxCards: budgetOr(plan.budgets?.maxCards, 6),
-            maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700)
+            maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700),
+            behaviorPolicy
           });
           await runStorageSaveSection(runId, () => saveSceneCacheSafe(
             runId,
@@ -2919,7 +3033,8 @@ export function createRecursionRuntime({
           packet = await composePromptPacket({
             hand,
             snapshot: promptSnapshot,
-            settings: settingsForPlan(settings, plan),
+            settings: effectiveSettings,
+            behaviorPolicy,
             generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRun),
             activity,
             runId,

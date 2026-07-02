@@ -9,6 +9,8 @@ let runtime = null;
 let ui = null;
 let host = null;
 let hostEventUnsubscribers = [];
+let settingsBootstrapUnsubscribers = [];
+let settingsLoadEventObserved = false;
 
 function hasSillyTavernContext() {
   return typeof globalThis.SillyTavern?.getContext === 'function'
@@ -52,6 +54,18 @@ function clearHostEventSubscriptions() {
   }
 }
 
+function clearSettingsBootstrapSubscriptions() {
+  const unsubscribers = settingsBootstrapUnsubscribers;
+  settingsBootstrapUnsubscribers = [];
+  for (const unsubscribe of unsubscribers) {
+    try {
+      unsubscribe();
+    } catch (error) {
+      warn('Settings bootstrap unsubscribe failed.', error);
+    }
+  }
+}
+
 function subscribeHostEvent(eventSource, eventName, handler) {
   if (!eventSource || !eventName || typeof handler !== 'function') return null;
   if (typeof eventSource.on === 'function') {
@@ -66,6 +80,37 @@ function subscribeHostEvent(eventSource, eventName, handler) {
     return () => eventSource.removeEventListener?.(eventName, handler);
   }
   return null;
+}
+
+function hasSettingsRoot(context) {
+  if (globalThis.extension_settings && typeof globalThis.extension_settings === 'object') return true;
+  const root = context?.extensionSettings;
+  if (!root || typeof root !== 'object') return false;
+  if (root.recursion && typeof root.recursion === 'object') return true;
+  return settingsLoadEventObserved && Object.keys(root).length > 0;
+}
+
+function scheduleSettingsBootstrap() {
+  if (settingsBootstrapUnsubscribers.length > 0) return;
+  const context = getSillyTavernContextSafe();
+  const eventSource = context.eventSource || globalThis.eventSource;
+  const eventTypes = hostEventTypes(context);
+  const eventNames = [
+    eventTypes.EXTENSION_SETTINGS_LOADED,
+    eventTypes.SETTINGS_LOADED,
+    eventTypes.APP_READY
+  ].filter(Boolean);
+  const uniqueEventNames = [...new Set(eventNames)];
+  if (!eventSource || uniqueEventNames.length === 0) return;
+  const retryBootstrap = () => {
+    settingsLoadEventObserved = true;
+    if (!hasSettingsRoot(getSillyTavernContextSafe())) return;
+    clearSettingsBootstrapSubscriptions();
+    bootstrapRecursion();
+  };
+  settingsBootstrapUnsubscribers = uniqueEventNames
+    .map((eventName) => subscribeHostEvent(eventSource, eventName, retryBootstrap))
+    .filter((unsubscribe) => typeof unsubscribe === 'function');
 }
 
 function hostEventTypes(context) {
@@ -215,6 +260,12 @@ function latestPendingUserMessageFromPayload(chat) {
 export function bootstrapRecursion() {
   if (runtime) return runtime;
   if (!hasSillyTavernContext()) return null;
+  const context = getSillyTavernContextSafe();
+  if (!hasSettingsRoot(context)) {
+    scheduleSettingsBootstrap();
+    return null;
+  }
+  clearSettingsBootstrapSubscriptions();
 
   try {
     const nextHost = createSillyTavernHost();
@@ -263,7 +314,9 @@ async function clearPromptBestEffort(label) {
 }
 
 async function teardownRecursion(label) {
+  clearSettingsBootstrapSubscriptions();
   clearHostEventSubscriptions();
+  settingsLoadEventObserved = false;
   try {
     await runtime?.dispose?.();
   } catch (error) {

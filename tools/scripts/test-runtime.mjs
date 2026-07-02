@@ -317,7 +317,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(noisyVersions.settingsHash, baselineVersions.settingsHash, 'cache settings hash ignores UI, diagnostics, test labels, and secrets');
   assertNotEqual(
     cacheContractVersions({ mode: 'auto', cardScope: defaultCardScope() }).settingsHash,
-    cacheContractVersions({ mode: 'manual', cardScope: scopeWithFamilyDisabled('Prose/Pacing') }).settingsHash,
+    cacheContractVersions({ mode: 'manual', cardScope: scopeWithFamilyDisabled('Prose') }).settingsHash,
     'card scope participates in scene cache contract'
   );
   const changedProviderVersions = cacheContractVersions({
@@ -992,6 +992,16 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 }
 
 {
+  const disabledSceneScope = setFamilyEnabled(defaultCardScope(), 'Scene Frame', false).scope;
+  const { runtime } = createRuntimeHarness({
+    settings: { cardScope: disabledSceneScope }
+  });
+  const view = runtime.view();
+  assertEqual(view.settings.cardScope.families['Scene Frame'].enabled, false, 'runtime view exposes raw disabled card family scope');
+  assertEqual(view.settings.cardScopeSummary.counts.selectedSubItems, 30, 'runtime view exposes separate card scope summary');
+}
+
+{
   const { runtime, calls } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     hostPrompt: {
@@ -1613,6 +1623,107 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assert(routerCalls.every((call) => call.lane === 'utility'), 'low reasoning routes Arbiter, cards, and composer work through Utility only');
 }
 
+for (const scenario of [
+  { level: 'low', expectedMaxCards: 4, expectedReasonerCall: false },
+  { level: 'medium', expectedMaxCards: 8, expectedReasonerCall: true },
+  { level: 'high', expectedMaxCards: 8, expectedReasonerCall: true },
+  { level: 'ultra', expectedMaxCards: 12, expectedReasonerCall: true }
+]) {
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({
+      mode: 'auto',
+      promptFootprint: 'rich',
+      reasoningLevel: scenario.level,
+      minCards: 4,
+      maxCards: 12
+    }),
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              cardJobs: [
+                { family: 'Scene Frame', reason: 'Scene still matters.' },
+                { family: 'Active Cast', reason: 'Cast still matters.' },
+                { family: 'Continuity Risk', reason: 'Continuity still matters.' },
+                { family: 'Open Threads', reason: 'Thread still matters.' }
+              ],
+              budgets: { targetBriefTokens: 900, maxCards: scenario.level === 'ultra' ? 6 : 20 },
+              reasonerDecision: { mode: 'use', reason: 'reasoning card budget test', signals: ['test'] }
+            }
+          };
+        }
+        if (roleId === 'reasonerComposer') return reasonerComposerResponse(request, `${scenario.level} synthesis.`);
+        return cardProviderResponse(roleId, request);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: `Use custom ${scenario.level} card budget.` });
+  const view = runtime.view();
+  assertEqual(result.ok, true, `${scenario.level} custom card budget run installs`);
+  assertEqual(view.lastPlan.budgets.maxCards, scenario.expectedMaxCards, `${scenario.level} reasoning uses configured card budget`);
+  assertEqual(routerCalls.includes('reasonerComposer'), scenario.expectedReasonerCall, `${scenario.level} custom card budget keeps expected composer routing`);
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({
+      mode: 'auto',
+      strength: 'light',
+      focus: 'character',
+      promptFootprint: 'compact',
+      reasonerUse: 'off',
+      reasoningLevel: 'high'
+    }),
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              promptFootprint: 'rich',
+              cardJobs: [
+                { family: 'Scene Frame', reason: 'Scene still matters.' },
+                { family: 'Active Cast', reason: 'Cast still matters.' },
+                { family: 'Character Motivation', reason: 'Motivation still matters.' },
+                { family: 'Relationship', reason: 'Relationship still matters.' },
+                { family: 'Continuity Risk', reason: 'Continuity still matters.' },
+                { family: 'Open Threads', reason: 'Thread still matters.' }
+              ],
+              budgets: { targetBriefTokens: 1200, maxCards: 9 },
+              reasonerDecision: { mode: 'skip', reason: 'policy test', signals: [] },
+              diagnostics: ['provider-rich-request']
+            }
+          };
+        }
+        return cardProviderResponse(roleId, request);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Keep it lean but character-aware.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'behavior policy run installs');
+  assertEqual(view.lastPlan.promptFootprint, 'compact', 'compact setting clamps Arbiter rich footprint without high-risk reason');
+  assertEqual(view.lastPlan.budgets.maxCards, 6, 'high reasoning uses the configured normal card budget even under compact footprint');
+  assert(view.lastPlan.diagnostics.includes('behavior-footprint-clamped'), 'plan records footprint clamp diagnostic');
+  assert(!view.lastPlan.diagnostics.includes('behavior-max-cards-clamped'), 'compact footprint no longer records a card-count clamp');
+  assertEqual(view.lastHand.cards.length, 5, 'light strength applies lean hand pressure after normal card budget');
+  assertEqual(view.lastPacket.footprint, 'compact', 'packet uses effective compact footprint');
+  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.strength, 'light', 'packet diagnostics record light strength');
+  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.focus, 'character', 'packet diagnostics record character focus');
+  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.effectiveFootprint, 'compact', 'packet diagnostics record compact footprint');
+  assert(view.lastPacket.sections.turnBrief.includes('Strength: Light.'), 'packet turn brief includes light composer line');
+  assert(view.lastPacket.sections.turnBrief.includes('Focus: Character.'), 'packet turn brief includes focus composer line');
+}
+
 {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
@@ -1695,7 +1806,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
               cardJobs: [
                 { family: 'Scene Frame', reason: 'Scene frame.' },
                 { family: 'Open Threads', reason: 'Thread card.' },
-                { family: 'Prose/Pacing', reason: 'Style card.' }
+                { family: 'Prose', reason: 'Style card.' }
               ],
               budgets: { targetBriefTokens: 700, maxCards: 6 },
               reasonerDecision: { mode: 'skip', reason: 'ultra still uses reasoner routes', signals: ['test'] }
@@ -1783,10 +1894,50 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const result = await runtime.prepareForGeneration({ userMessage: 'Use rich footprint with reasoner.' });
   const view = runtime.view();
   assertEqual(result.ok, true, 'arbiter rich footprint run installs');
-  assertEqual(view.lastPlan.promptFootprint, 'rich', 'view plan exposes sanitized arbiter rich footprint');
-  assertEqual(view.lastPacket.footprint, 'rich', 'last packet uses arbiter rich footprint');
-  assert(routerCalls.includes('reasonerComposer'), 'rich arbiter footprint with auto reasoner invokes reasoner composer');
-  assertEqual(view.lastPacket.diagnostics.composerLane, 'reasoner', 'rich arbiter footprint records reasoner composer lane');
+  assertEqual(view.lastPlan.promptFootprint, 'compact', 'compact behavior policy clamps arbiter rich footprint without high-risk reason');
+  assertEqual(view.lastPacket.footprint, 'compact', 'last packet uses clamped compact footprint');
+  assert(!routerCalls.includes('reasonerComposer'), 'non-risk rich Arbiter request does not invoke Reasoner after compact clamp');
+  assertEqual(view.lastPacket.diagnostics.composerLane, 'utility', 'clamped non-risk rich request stays on Utility composer lane');
+  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.storedFootprint, 'compact', 'diagnostics preserve stored compact footprint');
+  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.effectiveFootprint, 'compact', 'diagnostics record compact effective footprint');
+}
+
+{
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'compact', reasonerUse: 'auto' }),
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              promptFootprint: 'rich',
+              reasonerDecision: { mode: 'use', reason: 'high-risk continuity contradiction needs synthesis', signals: ['continuity-risk'] },
+              budgets: { targetBriefTokens: 900, maxCards: 9 },
+              diagnostics: ['footprint-risk-override']
+            }
+          };
+        }
+        if (roleId === 'reasonerComposer') {
+          return reasonerComposerResponse(request, 'Use richer synthesis only for the high-risk continuity conflict.');
+        }
+        return cardProviderResponse(roleId, request);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Resolve the continuity contradiction.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'high-risk footprint override installs');
+  assertEqual(view.lastPlan.promptFootprint, 'rich', 'high-risk Arbiter request can temporarily use rich footprint');
+  assertEqual(view.lastPacket.footprint, 'rich', 'packet uses effective rich footprint for high-risk override');
+  assert(routerCalls.includes('reasonerComposer'), 'high-risk rich override can invoke Reasoner');
+  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.storedFootprint, 'compact', 'diagnostics preserve stored compact footprint during override');
+  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.effectiveFootprint, 'rich', 'diagnostics record effective rich footprint during override');
 }
 
 for (const scenario of [
@@ -2394,6 +2545,8 @@ for (const scenario of [
   const { runtime } = createRuntimeHarness({
     settings: {
       mode: 'auto',
+      strength: 'strong',
+      focus: 'character',
       reasoningLevel: 'medium',
       promptFootprint: 'normal',
       reasonerUse: 'auto',
@@ -2423,6 +2576,19 @@ for (const scenario of [
   assert(arbiterPrompts[0].includes('"mode":"auto"'), 'arbiter prompt includes planning mode');
   assert(arbiterPrompts[0].includes('"reasoningLevel":"medium"'), 'arbiter prompt includes reasoning level');
   assert(arbiterPrompts[0].includes('"promptFootprint":"normal"'), 'arbiter prompt includes prompt footprint');
+  assert(arbiterPrompts[0].includes('Behavior policy:'), 'arbiter prompt includes behavior policy header');
+  assert(arbiterPrompts[0].includes('Strength: Strong.'), 'arbiter prompt includes strength policy');
+  assert(arbiterPrompts[0].includes('Focus: Character.'), 'arbiter prompt includes focus policy');
+  assert(arbiterPrompts[0].includes('Prompt Footprint: Normal.'), 'arbiter prompt includes footprint policy');
+  assert(arbiterPrompts[0].includes('Card job contract:'), 'Arbiter prompt includes card job contract');
+  assert(
+    arbiterPrompts[0].includes('To create or refresh a card, emit a cardJobs entry.'),
+    'Arbiter prompt explains create/refresh card job requirement'
+  );
+  assert(
+    arbiterPrompts[0].includes('Lifecycle regenerate marks an old cached card stale; it does not create a replacement without cardJobs.'),
+    'Arbiter prompt explains regenerate without replacement behavior'
+  );
   assert(!arbiterPrompts[0].includes('lastTest'), 'arbiter prompt omits provider test diagnostics');
   assert(!arbiterPrompts[0].includes('openAICompatible'), 'arbiter prompt omits endpoint settings');
   assert(!arbiterPrompts[0].includes('compactError'), 'arbiter prompt omits provider compact errors');
@@ -3074,7 +3240,7 @@ for (const scenario of [
 }
 
 {
-  const autoNoProse = scopeWithFamilyDisabled('Prose/Pacing');
+  const autoNoProse = scopeWithFamilyDisabled('Prose');
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', cardScope: autoNoProse, reasonerUse: 'off' },
     generationRouter: {
@@ -3086,7 +3252,7 @@ for (const scenario of [
               schema: UTILITY_ARBITER_SCHEMA,
               snapshotHash: request.snapshotHash,
               action: 'compose-brief',
-              cardJobs: [{ family: 'Prose/Pacing', role: 'prosePacingCard', reason: 'High relevance style risk.' }],
+              cardJobs: [{ family: 'Prose', role: 'prosePacingCard', reason: 'High relevance style risk.' }],
               budgets: { targetBriefTokens: 500, maxCards: 4 },
               diagnostics: ['auto-non-continuity-exception-test']
             }
@@ -3118,8 +3284,8 @@ for (const scenario of [
   const view = runtime.view();
   const serializedPlan = JSON.stringify(view.lastPlan);
   assertEqual(result.ok, true, 'auto scoped non-continuity run installs prompt');
-  assert(view.lastHand.cards.some((card) => card.family === 'Prose/Pacing'), 'auto scoped hand can include high-relevance disabled-focus non-continuity card');
-  assert(serializedPlan.includes('auto-scope-exception:Prose/Pacing'), 'auto scoped diagnostics record compact exception for non-continuity family');
+  assert(view.lastHand.cards.some((card) => card.family === 'Prose'), 'auto scoped hand can include high-relevance disabled-focus non-continuity card');
+  assert(serializedPlan.includes('auto-scope-exception:Prose'), 'auto scoped diagnostics record compact exception for non-continuity family');
   assert(!serializedPlan.includes('Keep the response tight'), 'auto non-continuity diagnostics do not include prompt text');
 }
 

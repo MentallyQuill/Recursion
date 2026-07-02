@@ -70,10 +70,10 @@ The Cards surface is a tree of fixed V1 card families and catalog-owned sub-item
 - Scene Frame
 - Active Cast
 - Character Motivation
-- Dialogue/Relationship
+- Relationship
 - Continuity Risk
 - Environment/Items
-- Prose/Pacing
+- Prose
 - Open Threads
 
 Each family has:
@@ -185,7 +185,7 @@ The Cards surface should explain current enforcement in compact copy:
 Progress and brief surfaces should make exceptions understandable:
 
 - Auto exception example: `Continuity Risk added as critical exception.`
-- Manual omission example: `Prose/Pacing omitted: disabled in Manual.`
+- Manual omission example: `Prose omitted: disabled in Manual.`
 
 Diagnostics and journals must remain sanitized. They may record family keys, sub-item keys, omission reasons, exception reasons, and counts, but not raw provider responses, prompt text beyond existing safe surfaces, hidden reasoning, secrets, or full transcript text.
 

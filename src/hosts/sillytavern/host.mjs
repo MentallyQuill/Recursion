@@ -334,15 +334,40 @@ function hostProfileUnsupportedError() {
   return error;
 }
 
+function createLiveSettingsRoot(resolveRoot) {
+  const fallbackRoot = {};
+  function currentRoot() {
+    const root = resolveRoot?.();
+    return root && typeof root === 'object' ? root : fallbackRoot;
+  }
+  return {
+    get recursion() {
+      return currentRoot().recursion;
+    },
+    set recursion(value) {
+      currentRoot().recursion = value;
+    }
+  };
+}
+
 export function createSillyTavernHost({
   contextFactory = null,
-  settingsRoot = globalThis.extension_settings || {},
+  settingsRoot = null,
   saveSettings = null,
   storageAdapter = null,
   fetchImpl = globalThis.fetch
 } = {}) {
   const installedPromptKeys = new Set();
-  const settingsStore = createSettingsStore({ root: settingsRoot, save: saveSettings });
+  const resolvedSettingsRoot = settingsRoot || createLiveSettingsRoot(() => {
+    const context = currentContext(contextFactory);
+    return context.extensionSettings || globalThis.extension_settings || null;
+  });
+  const resolvedSaveSettings = saveSettings || (() => {
+    const context = currentContext(contextFactory);
+    const save = context.saveSettingsDebounced || globalThis.saveSettingsDebounced;
+    if (typeof save === 'function') save();
+  });
+  const settingsStore = createSettingsStore({ root: resolvedSettingsRoot, save: resolvedSaveSettings });
   const storage = storageAdapter || (
     typeof fetchImpl === 'function'
       ? createSillyTavernUserFileStorageAdapter({ contextFactory, fetchImpl })

@@ -104,6 +104,8 @@ Reference mode selector shape:
 
 Card scope is not a mode. The compact left-side stacked-cards icon opens a full-bar-width dropdown with the fixed V1 card families and their sub-item focus toggles. The compact bar control stays icon-only; the dropdown header summarizes whether all focus items are enabled or a partial count is active. Auto treats this scope as preference/focus, while Manual treats it as a strict whitelist. Category and sub-item clicks must visibly update the open dropdown in place without closing it or waiting for a host rerender. The UI must prevent disabling the final selected sub-item and show `Keep at least one card focus enabled.` when that guard is hit.
 
+Card scope family rows use the family description as hover/focus help. Sub-item rows use the canonical sub-item label and description from `src/card-scope.mjs`; they must explain what the focus asks Recursion to emphasize, not repeat the raw label.
+
 Cards Selection button owns the stacked-cards icon. The mode button and mode menu must not reuse the cards icon, because cards now means scope selection rather than automation mode.
 
 Reference mode selector CSS:
@@ -215,11 +217,11 @@ When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt 
       children: [
         { id: "scene-frame-card", label: "Scene Frame", providerLane: "utility", state: "running", meta: "running", sourceRoleId: "sceneFrameCard" },
         { id: "continuity-risk-card", label: "Continuity Risk", providerLane: "utility", state: "cached", meta: "cached", source: "cache", sourceRoleId: "continuityRiskCard" },
-        { id: "knowledge-secrets-card", label: "Knowledge/Secrets", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "knowledgeSecretsCard" },
-        { id: "clocks-consequences-card", label: "Clocks/Consequences", providerLane: "utility", state: "running", meta: "running", sourceRoleId: "clocksConsequencesCard" },
+        { id: "knowledge-secrets-card", label: "Knowledge", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "knowledgeSecretsCard" },
+        { id: "clocks-consequences-card", label: "Consequences", providerLane: "utility", state: "running", meta: "running", sourceRoleId: "clocksConsequencesCard" },
         { id: "character-motivation-card", label: "Character Motivation", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "characterMotivationCard" },
-        { id: "environment-affordances-card", label: "Environment/Affordances", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "environmentAffordancesCard" },
-        { id: "possessions-items-card", label: "Possessions/Items", providerLane: "utility", state: "pending", meta: "waiting", sourceRoleId: "possessionsItemsCard" },
+        { id: "environment-affordances-card", label: "Environment", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "environmentAffordancesCard" },
+        { id: "possessions-items-card", label: "Items", providerLane: "utility", state: "pending", meta: "waiting", sourceRoleId: "possessionsItemsCard" },
         { id: "open-threads-card", label: "Open Threads", providerLane: "utility", state: "warning", meta: "fallback", source: "fallback", sourceRoleId: "openThreadsCard" }
       ]
     },
@@ -763,7 +765,7 @@ Last brief - 8 cards - click row to expand - priority color only
 [target]   Motivation           Mara wants to keep control...         strong | Mara | turn brief
 [people]   Relationship         accusation unresolved...              normal | tension | dialogue
 [cube]     Environment          rain masks movement...                normal | items | local
-[lines]    Prose Pacing         keep motion concrete...               light | style | compiler
+[lines]    Prose                keep motion concrete...               light | style | compiler
 ```
 
 Rows are read-only. Clicking or pressing `Enter` / `Space` expands a row in place to show the full card text. Clicking again collapses it. The dropdown should not become an editor.
@@ -1066,17 +1068,19 @@ Switching between settings tabs is internal panel navigation. A tab click must k
 Play is the default tab. It contains one open `Behavior` disclosure for controls users are expected to tune during normal play:
 
 - Strength: Light, Balanced, Strong.
+- Min Cards: numeric `0..20`, used by Low Reasoning Level.
+- Max Cards: numeric `0..20`, used by Ultra Reasoning Level; Medium and High use the floor average of Min and Max.
 - Focus: Balanced, Character, Continuity, Prose, Plot.
 - Prompt Footprint: Compact, Normal, Rich.
 
-The backend meaning of these three controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). In short: Strength controls intervention pressure, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
+The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). In short: Strength controls intervention pressure, Min/Max Cards control Reasoning Level card-count bounds, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
 
 Mode and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
 
-- Low: Utility-only bias with reduced card pressure.
-- Medium: Utility Arbiter and Utility cards, then Reasoner final brief composition.
-- High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner final brief composition.
-- Ultra: Reasoner-heavy Arbiter, card generation, and final composition with larger card-set pressure.
+- Low: Utility-only bias with card pressure capped at Min Cards.
+- Medium: Utility Arbiter and Utility cards, then Reasoner final brief composition; card pressure capped at Normal Cards.
+- High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner final brief composition; card pressure capped at Normal Cards.
+- Ultra: Reasoner-heavy Arbiter, card generation, and final composition with card pressure raised/capped at Max Cards.
 
 `reasoningLevel` is persisted as `low | medium | high | ultra`, default `high`. It is the authoritative user-facing provider-bias setting. Runtime may still carry an internal `reasonerUse` route value, but that value is always derived from `reasoningLevel`: Low maps to `off`, Medium/High/Ultra map to `always`. If the Reasoner provider is unavailable while Medium, High, or Ultra is selected, the UI should keep the selected level and show fallback status rather than blocking the user.
 

@@ -1,5 +1,7 @@
 import { compact, hashJson, makeId, nowIso, redact, safeId, truncate } from './core.mjs';
+import { CARD_SCOPE_CATALOG } from './card-scope.mjs';
 import { UTILITY_ROLE_IDS } from './providers.mjs';
+import { summarizeBehaviorPolicyForDiagnostics } from './settings-policy.mjs';
 
 const TEXT_LIMIT = 1000;
 const SUMMARY_LIMIT = 400;
@@ -68,7 +70,7 @@ export const CARD_CATALOG = Object.freeze([
     description: 'Observable or safely inferred motives, pressures, hesitations, and goals.'
   }),
   catalogEntry({
-    family: 'Dialogue/Relationship',
+    family: 'Relationship',
     role: 'dialogueRelationshipCard',
     priority: 84,
     description: 'Current conversational tension, relationship texture, promises, conflicts, and voice constraints.'
@@ -80,31 +82,31 @@ export const CARD_CATALOG = Object.freeze([
     description: 'Facts likely to be contradicted if omitted from the next response.'
   }),
   catalogEntry({
-    family: 'Knowledge/Secrets',
+    family: 'Knowledge',
     role: 'knowledgeSecretsCard',
     priority: 92,
     description: 'Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries.'
   }),
   catalogEntry({
-    family: 'Clocks/Consequences',
+    family: 'Consequences',
     role: 'clocksConsequencesCard',
     priority: 90,
     description: 'Deadlines, countdowns, delayed consequences, and escalation triggers.'
   }),
   catalogEntry({
-    family: 'Environment/Affordances',
+    family: 'Environment',
     role: 'environmentAffordancesCard',
     priority: 76,
     description: 'Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances.'
   }),
   catalogEntry({
-    family: 'Possessions/Items',
+    family: 'Items',
     role: 'possessionsItemsCard',
     priority: 78,
     description: 'Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them.'
   }),
   catalogEntry({
-    family: 'Prose/Pacing',
+    family: 'Prose',
     role: 'prosePacingCard',
     priority: 62,
     description: 'Local craft guidance for density, momentum, specificity, and response shape.'
@@ -119,6 +121,7 @@ export const CARD_CATALOG = Object.freeze([
 
 const CATALOG_BY_FAMILY = new Map(CARD_CATALOG.map((entry) => [entry.family, entry]));
 const CATALOG_BY_ROLE = new Map(CARD_CATALOG.map((entry) => [entry.role, entry]));
+const CARD_SCOPE_BY_FAMILY = new Map(CARD_SCOPE_CATALOG.map((entry) => [entry.family, entry]));
 const STATUS = new Set(['candidate', 'active', 'stowed', 'stale', 'discarded']);
 const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
 const DETAIL = new Set(['compact', 'standard', 'expanded']);
@@ -393,6 +396,43 @@ function cleanProviderPromptText(value, limit) {
   return cleanText(scrubProviderPromptSecrets(value), limit);
 }
 
+function scopeCatalogForFamily(family) {
+  return CARD_SCOPE_BY_FAMILY.get(String(family || '').trim()) || null;
+}
+
+function selectedScopeFacetRows(family, selectedSubItems = []) {
+  const scope = scopeCatalogForFamily(family);
+  const selected = new Set((Array.isArray(selectedSubItems) ? selectedSubItems : [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean));
+  if (!scope || selected.size === 0) return [];
+  return scope.subItems
+    .filter((item) => selected.has(item.key))
+    .map((item) => ({
+      key: cleanProviderPromptText(item.key, 80),
+      label: cleanProviderPromptText(item.label, 120),
+      description: cleanProviderPromptText(item.description, 260)
+    }));
+}
+
+function cardScopePromptBlock(catalog, selectedSubItems = []) {
+  const family = cleanProviderPromptText(catalog.family, 120);
+  const rows = selectedScopeFacetRows(family, selectedSubItems);
+  if (!rows.length) {
+    return [
+      `Selected focus facets for ${family}: none selected.`,
+      'Generate this family only because the Arbiter requested it as high-relevance.',
+      'Do not create separate cards per facet.'
+    ].join('\n');
+  }
+  return [
+    `Selected focus facets for ${family}:`,
+    ...rows.map((item) => `- ${item.key} (${item.label}): ${item.description}`),
+    'Use these facets to shape this one family card.',
+    'Do not create separate cards per facet.'
+  ].join('\n');
+}
+
 function cleanOptionalText(value, limit) {
   const text = cleanText(value, limit);
   return text || undefined;
@@ -596,12 +636,38 @@ function catalogPriority(card) {
   return CATALOG_BY_FAMILY.get(card.family)?.priority ?? CATALOG_BY_ROLE.get(card.role)?.priority ?? 0;
 }
 
-function sortCardsForHand(a, b) {
+function behaviorPolicyForHand(policy) {
+  return policy && typeof policy === 'object' && !Array.isArray(policy) ? policy : null;
+}
+
+function boostedFamilySet(policy) {
+  return new Set(Array.isArray(policy?.focus?.boostedFamilies) ? policy.focus.boostedFamilies : []);
+}
+
+function focusDelta(a, b, policy) {
+  const boosted = boostedFamilySet(policy);
+  const aBoosted = boosted.has(a.family) ? 1 : 0;
+  const bBoosted = boosted.has(b.family) ? 1 : 0;
+  return bBoosted - aBoosted;
+}
+
+function sortCardsForHand(a, b, policy = null) {
   const emphasisDelta = (EMPHASIS_PRIORITY[a.emphasis] ?? 1) - (EMPHASIS_PRIORITY[b.emphasis] ?? 1);
   if (emphasisDelta !== 0) return emphasisDelta;
+  const boostedDelta = focusDelta(a, b, policy);
+  if (boostedDelta !== 0) return boostedDelta;
   const priorityDelta = catalogPriority(b) - catalogPriority(a);
   if (priorityDelta !== 0) return priorityDelta;
   return String(a.id || '').localeCompare(String(b.id || ''));
+}
+
+function effectiveMaxCardsForPolicy(maxCards, policy) {
+  const base = numberInRange(maxCards, 6, 0, 64);
+  if (!policy) return base;
+  const ceiling = numberInRange(policy.cardBudget?.maxCards, base, 0, 64);
+  let next = Math.min(base, ceiling);
+  if (policy.strength?.selectionPressure === 'lean' && next > 0) next = Math.max(1, next - 1);
+  return next;
 }
 
 function normalizeDeckCard(card, { preserveId = false } = {}) {
@@ -671,6 +737,7 @@ export function buildCardRequests(plan = {}, context = {}) {
       const catalog = resolveCatalog({ family: source.family, role: source.role ?? source.roleId }, { strict: false });
       if (!catalog) return null;
       const reason = cleanProviderPromptText(source.reason ?? '', ARBITER_REASON_LIMIT);
+      const refreshOfCardId = cleanProviderPromptText(source.refreshOfCardId ?? source.replacesCardId ?? '', 160);
       const sourceSnapshotHash = String(context.snapshotHash ?? source.snapshotHash ?? '');
       const promptSnapshotHash = cleanProviderPromptText(sourceSnapshotHash, TEXT_LIMIT);
       const selectedSubItems = Array.isArray(context.cardScope?.selectedSubItemsByFamily?.[catalog.family])
@@ -686,6 +753,8 @@ export function buildCardRequests(plan = {}, context = {}) {
         },
         prompt: [
           `Create one compact ${catalog.family} card for the current scene.`,
+          cardScopePromptBlock(catalog, selectedSubItems),
+          refreshOfCardId ? `Refreshes cached card: ${refreshOfCardId}` : '',
           'Return one JSON object only. Do not wrap it in markdown.',
           'The JSON object must use schema "recursion.card.v1" and an "items" array with one card object.',
           `Envelope role must be "${catalog.role}".`,
@@ -704,7 +773,8 @@ export function buildCardRequests(plan = {}, context = {}) {
           role: catalog.role,
           catalogKey: safeId(catalog.family),
           priority: catalog.priority,
-          reason
+          reason,
+          ...(refreshOfCardId ? { refreshOfCardId } : {})
         }
       };
     })
@@ -785,8 +855,10 @@ export function applyCardPlan(existingCards = [], plan = {}) {
   };
 }
 
-export function selectHand(cards = [], { maxCards = 6, maxTokens = 700 } = {}) {
-  const cardLimit = numberInRange(maxCards, 6, 0, 64);
+export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behaviorPolicy = null } = {}) {
+  const policy = behaviorPolicyForHand(behaviorPolicy);
+  const requestedCardLimit = numberInRange(maxCards, 6, 0, 64);
+  const cardLimit = effectiveMaxCardsForPolicy(requestedCardLimit, policy);
   const tokenLimit = numberInRange(maxTokens, 700, 0, 20000);
   const active = [];
   const omitted = [];
@@ -806,7 +878,7 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700 } = {}) {
 
   const selected = [];
   let tokenEstimate = 0;
-  for (const card of active.slice().sort(sortCardsForHand)) {
+  for (const card of active.slice().sort((a, b) => sortCardsForHand(a, b, policy))) {
     const cardTokens = numberInRange(card.tokenEstimate, estimateTokens(card.promptText), 1, MAX_TOKEN_ESTIMATE);
     if (selected.length >= cardLimit) {
       omitted.push({
@@ -833,6 +905,20 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700 } = {}) {
     }));
   }
 
+  const behaviorPolicyMetadata = policy
+    ? {
+        ...summarizeBehaviorPolicyForDiagnostics(policy, {
+          effectiveFootprint: policy.footprint?.level,
+          selectedFamilies: selected.map((card) => card.family),
+          planShaping: [
+            policy.focus?.level && policy.focus.level !== 'balanced' ? 'focus-family-ordering' : '',
+            policy.strength?.selectionPressure === 'lean' ? 'light-selection-pressure' : '',
+            policy.cardBudget?.maxCards && policy.cardBudget.maxCards < requestedCardLimit ? 'card-budget-ceiling' : ''
+          ]
+        }),
+        effectiveMaxCards: cardLimit
+      }
+    : null;
   return {
     handId: makeId('hand'),
     cards: selected,
@@ -841,10 +927,12 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700 } = {}) {
     composedAt: nowIso(),
     metadata: {
       maxCards: cardLimit,
+      requestedMaxCards: requestedCardLimit,
       maxTokens: tokenLimit,
       selectedCount: selected.length,
       omittedCount: omitted.length,
-      sourceCardCount: Array.isArray(cards) ? cards.length : 0
+      sourceCardCount: Array.isArray(cards) ? cards.length : 0,
+      ...(behaviorPolicyMetadata ? { behaviorPolicy: behaviorPolicyMetadata } : {})
     }
   };
 }

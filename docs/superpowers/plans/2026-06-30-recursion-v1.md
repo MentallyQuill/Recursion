@@ -1404,10 +1404,10 @@ export const CARD_CATALOG = Object.freeze([
   { family: 'Scene Frame', role: 'sceneFrameCard', priority: 100, description: 'Current location, situation, participants, and immediate dramatic direction.' },
   { family: 'Active Cast', role: 'activeCastCard', priority: 95, description: 'Who is present, visible state, and current role.' },
   { family: 'Character Motivation', role: 'characterMotivationCard', priority: 88, description: 'Observable or safely inferred motives and pressures.' },
-  { family: 'Dialogue/Relationship', role: 'dialogueRelationshipCard', priority: 84, description: 'Conversational tension, relationship texture, and voice constraints.' },
+  { family: 'Relationship', role: 'dialogueRelationshipCard', priority: 84, description: 'Conversational tension, relationship texture, and voice constraints.' },
   { family: 'Continuity Risk', role: 'continuityRiskCard', priority: 98, description: 'Fragile facts likely to be contradicted if omitted.' },
   { family: 'Environment/Items', role: 'environmentItemsCard', priority: 76, description: 'Spatial constraints, sensory details, objects, tools, hazards, and affordances.' },
-  { family: 'Prose/Pacing', role: 'prosePacingCard', priority: 62, description: 'Local craft guidance for density, momentum, specificity, and response shape.' },
+  { family: 'Prose', role: 'prosePacingCard', priority: 62, description: 'Local craft guidance for density, momentum, specificity, and response shape.' },
   { family: 'Open Threads', role: 'openThreadsCard', priority: 72, description: 'Unresolved questions, immediate promises, pending actions, and near-term pressures.' }
 ]);
 

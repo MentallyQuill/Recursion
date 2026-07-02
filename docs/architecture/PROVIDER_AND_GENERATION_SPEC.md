@@ -64,16 +64,16 @@ type RecursionProviderSettings = {
 };
 ```
 
-The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `high`. V1 derives the internal Reasoner route preference from it: Low disables Reasoner use, while Medium, High, and Ultra require Reasoner composition when the lane is healthy.
+The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `high`. V1 derives the internal Reasoner route preference from it: Low disables Reasoner use, while Medium, High, and Ultra require Reasoner composition when the lane is healthy. The companion card-budget settings are `minCards` and `maxCards`; runtime derives `normalCards = floor((minCards + maxCards) / 2)`.
 
 Reasoning Level also controls runtime lane preference and card pressure:
 
 | Level | Arbiter lane | Card lanes | Composer | Card pressure |
 | --- | --- | --- | --- | --- |
-| Low | Utility | Utility | Utility | Cap positive `maxCards` at 3. |
-| Medium | Utility | Utility | Reasoner | Normal `maxCards` pressure. |
-| High | Reasoner when healthy | Reasoner for high-priority families, Utility for lower-priority families | Reasoner | Normal `maxCards` pressure. |
-| Ultra | Reasoner when healthy | Reasoner when healthy | Reasoner | Raise positive `maxCards` to at least 10. |
+| Low | Utility | Utility | Utility | Cap positive `maxCards` at Min Cards. |
+| Medium | Utility | Utility | Reasoner | Cap positive `maxCards` at Normal Cards. |
+| High | Reasoner when healthy | Reasoner for high-priority families, Utility for lower-priority families | Reasoner | Cap positive `maxCards` at Normal Cards. |
+| Ultra | Reasoner when healthy | Reasoner when healthy | Reasoner | Raise and cap positive `maxCards` at Max Cards. |
 
 If the Reasoner lane is disabled, untested, unhealthy, missing credentials, or missing required profile/config fields, runtime falls back to Utility for the affected call instead of blocking the host generation.
 

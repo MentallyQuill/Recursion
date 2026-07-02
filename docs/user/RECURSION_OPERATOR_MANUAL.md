@@ -72,7 +72,7 @@ The ellipsis opens the integrated settings/options menu. It is configuration-fir
 
 Main controls:
 
-- Play: a Behavior section containing Strength, Prompt Footprint, and Focus.
+- Play: a Behavior section containing Strength, Min Cards, Max Cards, Prompt Footprint, and Focus.
 - Providers: collapsible Utility and Reasoner provider setup, test controls, and session key controls.
 - Advanced: collapsible Injection, UI, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, diagnostics settings, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point.
 
@@ -121,7 +121,7 @@ Operator settings should stay broad. Mode and Reasoning Level live in the compac
 - Advanced / UI: progress row limits.
 - Advanced / Diagnostics: journal limits, safe excerpts, Reset Scene Cache, Clear Run Journal, and Export Diagnostics.
 
-Behavior controls have distinct jobs. Prompt Footprint currently controls the size and detail of the final composed prompt packet. Strength and Focus are high-level controls whose target backend effects are defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md): Strength is intended to control intervention pressure, and Focus is intended to control soft card-family priority without becoming a hard whitelist.
+Behavior controls have distinct jobs. Prompt Footprint controls the size and detail of the final composed prompt packet. Min Cards controls Low's selected-card pressure, Max Cards controls Ultra's selected-card pressure, and Medium/High use their average. Strength controls intervention pressure inside that budget. Focus changes soft card-family priority without becoming a hard whitelist. The backend contract is defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
 
 ![Behavior policy overview](../../assets/documentation/renders/recursion-behavior-policy.png)
 

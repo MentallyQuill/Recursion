@@ -1,5 +1,6 @@
 import { hashJson } from '../../src/core.mjs';
 import { composePromptPacket, packetToPromptBlocks, validatePromptPacket } from '../../src/prompt.mjs';
+import { influencePolicyForSettings } from '../../src/settings-policy.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
 function assertThrows(fn, pattern, message) {
@@ -67,7 +68,7 @@ function baseHand(overrides = {}) {
       },
       {
         id: 'c4',
-        family: 'Environment/Affordances',
+        family: 'Environment',
         promptText: 'The alley has slick pavement, a humming sign, and a blocked fire door.',
         emphasis: 'muted',
         tokenEstimate: 10,
@@ -85,7 +86,7 @@ function baseHand(overrides = {}) {
     omitted: [
       {
         cardId: 'omitted-1',
-        family: 'Prose/Pacing',
+        family: 'Prose',
         reason: 'token-budget',
         tokenEstimate: 99,
         privateSecret: 'private-secret'
@@ -130,14 +131,32 @@ assertDeepEqual(
     { cardId: 'c1', family: 'Scene Frame', emphasis: 'normal', tokenEstimate: 12, detailProfile: 'standard', evidenceRefs: ['message:1'] },
     { cardId: 'c2', family: 'Continuity Risk', emphasis: 'emphasized', tokenEstimate: 12, detailProfile: 'expanded', evidenceRefs: ['message:2'] },
     { cardId: 'c3', family: 'Active Cast', emphasis: 'normal', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:3'] },
-    { cardId: 'c4', family: 'Environment/Affordances', emphasis: 'muted', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:4'] },
+    { cardId: 'c4', family: 'Environment', emphasis: 'muted', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:4'] },
     { cardId: 'c5', family: 'Open Threads', emphasis: 'normal', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:5'] }
   ],
   'selected card refs preserve safe prompt-facing metadata'
 );
 assertDeepEqual(packet.omissions, [
-  { cardId: 'omitted-1', family: 'Prose/Pacing', reason: 'token-budget', tokenEstimate: 99 }
+  { cardId: 'omitted-1', family: 'Prose', reason: 'token-budget', tokenEstimate: 99 }
 ], 'omissions preserve safe omission metadata');
+
+const policyPacket = await composePromptPacket({
+  runId: 'policy-run',
+  hand: baseHand(),
+  snapshot: baseSnapshot(),
+  settings: { promptFootprint: 'normal', reasonerUse: 'off' },
+  behaviorPolicy: influencePolicyForSettings({ strength: 'strong', focus: 'character', promptFootprint: 'rich' })
+});
+assertEqual(policyPacket.footprint, 'rich', 'explicit behavior policy controls effective packet footprint');
+assertDeepEqual(policyPacket.diagnostics.sectionBudgets, { sceneBrief: 1600, turnBrief: 1600, guardrails: 1200 }, 'policy footprint controls section budgets');
+assertEqual(policyPacket.diagnostics.behaviorPolicy.strength, 'strong', 'packet diagnostics record strength policy');
+assertEqual(policyPacket.diagnostics.behaviorPolicy.focus, 'character', 'packet diagnostics record focus policy');
+assertEqual(policyPacket.diagnostics.behaviorPolicy.storedFootprint, 'rich', 'packet diagnostics record policy footprint');
+assertEqual(policyPacket.diagnostics.behaviorPolicy.effectiveFootprint, 'rich', 'packet diagnostics record effective footprint');
+assertEqual(policyPacket.diagnostics.behaviorPolicy.selectedBoostedCards, 1, 'packet diagnostics count selected boosted cards');
+assert(policyPacket.sections.turnBrief.includes('Strength: Strong.'), 'utility composer includes strength composer line');
+assert(policyPacket.sections.turnBrief.includes('Focus: Character.'), 'utility composer includes focus composer line');
+assertNoPrivateFields(policyPacket.diagnostics.behaviorPolicy, 'behavior policy diagnostics are sanitized');
 
 const expandedFamilyPacket = await composePromptPacket({
   hand: {
@@ -145,28 +164,28 @@ const expandedFamilyPacket = await composePromptPacket({
     cards: [
       {
         id: 'secret-card',
-        family: 'Knowledge/Secrets',
+        family: 'Knowledge',
         promptText: 'Only Mara knows the vault code, while Ilya merely suspects a hidden access path.',
         tokenEstimate: 10,
         evidenceRefs: ['message:6']
       },
       {
         id: 'clock-card',
-        family: 'Clocks/Consequences',
+        family: 'Consequences',
         promptText: 'The patrol returns in two exchanges unless the door alarm is silenced.',
         tokenEstimate: 10,
         evidenceRefs: ['message:7']
       },
       {
         id: 'item-card',
-        family: 'Possessions/Items',
+        family: 'Items',
         promptText: 'Ilya has the brass keycard; Mara has the cracked datapad.',
         tokenEstimate: 10,
         evidenceRefs: ['message:8']
       },
       {
         id: 'affordance-card',
-        family: 'Environment/Affordances',
+        family: 'Environment',
         promptText: 'The service ladder is reachable from the crate stack.',
         tokenEstimate: 10,
         evidenceRefs: ['message:9']
@@ -183,7 +202,7 @@ assert(expandedFamilyPacket.sections.sceneBrief.includes('brass keycard'), 'poss
 assert(expandedFamilyPacket.sections.sceneBrief.includes('service ladder'), 'environment/affordances cards route to scene brief');
 assertDeepEqual(
   expandedFamilyPacket.selectedCardRefs.map((entry) => entry.family),
-  ['Knowledge/Secrets', 'Clocks/Consequences', 'Possessions/Items', 'Environment/Affordances'],
+  ['Knowledge', 'Consequences', 'Items', 'Environment'],
   'expanded families preserve prompt-facing selected refs'
 );
 
@@ -295,10 +314,10 @@ const hostilePacket = await composePromptPacket({
 assertEqual(hostilePacket.diagnostics.runId, 'outer-run', 'provided runId propagated into diagnostics');
 assertNoPrivateFields(hostilePacket, 'safe packet metadata redacts hostile allowlisted strings');
 assert(hostilePacket.selectedCardRefs[0].cardId.startsWith('card-'), 'unsafe card id is hashed');
-assertEqual(hostilePacket.selectedCardRefs[0].family, 'Prose/Pacing', 'unsafe card family falls back to safe family');
+assertEqual(hostilePacket.selectedCardRefs[0].family, 'Prose', 'unsafe card family falls back to safe family');
 assertDeepEqual(hostilePacket.selectedCardRefs[0].evidenceRefs, ['message:9'], 'unsafe evidence refs are dropped');
 assert(hostilePacket.omissions[0].cardId.startsWith('omitted-'), 'unsafe omission card id is hashed');
-assertEqual(hostilePacket.omissions[0].family, 'Prose/Pacing', 'unsafe omission family falls back');
+assertEqual(hostilePacket.omissions[0].family, 'Prose', 'unsafe omission family falls back');
 assertEqual(hostilePacket.omissions[0].reason, 'unspecified', 'unsafe omission reason is restricted to enum');
 
 const compactHand = baseHand({
@@ -358,6 +377,7 @@ const richReasonerPacket = await composePromptPacket({
   }),
   snapshot: richReasonerSnapshot,
   settings: { promptFootprint: 'rich', reasonerUse: 'auto' },
+  behaviorPolicy: influencePolicyForSettings({ strength: 'strong', focus: 'character', promptFootprint: 'rich' }),
   generationRouter: {
     async generate(roleId, request) {
       richReasonerCalls.push({ roleId, request });
@@ -383,6 +403,8 @@ assert(richReasonerCalls[0].request.prompt.includes('"id": "c1"'), 'reasoner pro
 assert(richReasonerCalls[0].request.prompt.includes('"family": "Scene Frame"'), 'reasoner prompt includes safe card family');
 assert(richReasonerCalls[0].request.prompt.includes('"promptText": "The scene is in a rain-soaked alley with [redacted] in a redacted note."'), 'reasoner prompt includes redacted card prompt text');
 assert(richReasonerCalls[0].request.prompt.includes('"detailProfile": "standard"'), 'reasoner prompt includes safe detail profile');
+assert(richReasonerCalls[0].request.prompt.includes('Strength: Strong.'), 'reasoner prompt includes strength composer policy');
+assert(richReasonerCalls[0].request.prompt.includes('Focus: Character.'), 'reasoner prompt includes focus composer policy');
 assertNoPrivateFields(richReasonerCalls[0].request.prompt, 'reasoner prompt excludes private hand fields');
 assertEqual(richReasonerPacket.diagnostics.composerLane, 'reasoner', 'reasoner composer used on rich auto');
 assertEqual(richReasonerPacket.diagnostics.reasonerStatus, 'used', 'reasoner status used on valid patch');

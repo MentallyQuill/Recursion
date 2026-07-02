@@ -435,6 +435,40 @@ try {
   else globalThis.SillyTavern = previousSillyTavern;
 }
 
+{
+  let saveCount = 0;
+  const contextSettings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  const contextSettingsHost = createSillyTavernHost({
+    contextFactory: () => ({
+      currentChatId: 'context-settings-chat',
+      chat: [],
+      extensionSettings: contextSettings,
+      saveSettingsDebounced: () => {
+        saveCount += 1;
+      }
+    })
+  });
+  contextSettingsHost.settingsStore.update({ mode: 'manual' });
+  assertEqual(contextSettings.recursion.mode, 'manual', 'host defaults to SillyTavern context extensionSettings');
+  assertEqual(saveCount, 1, 'host defaults to SillyTavern context saveSettingsDebounced');
+}
+
+{
+  const liveContext = {
+    currentChatId: 'live-settings-chat',
+    chat: [],
+    extensionSettings: { memory: {} },
+    saveSettingsDebounced: () => {}
+  };
+  const liveSettingsHost = createSillyTavernHost({
+    contextFactory: () => liveContext
+  });
+  liveContext.extensionSettings = { recursion: { mode: 'manual', reasonerUse: 'off' } };
+  assertEqual(liveSettingsHost.settingsStore.get().mode, 'manual', 'host settings root follows late SillyTavern settings replacement');
+  liveSettingsHost.settingsStore.update({ mode: 'auto' });
+  assertEqual(liveContext.extensionSettings.recursion.mode, 'auto', 'host settings writes target the latest SillyTavern settings root');
+}
+
 const quietCalls = [];
 const quietHost = createSillyTavernHost({
   contextFactory: () => ({

@@ -485,12 +485,12 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
         { id: 'character-motivation-card', label: 'Character Motivation', provider: 'utility', state: 'pending', source: 'generated' },
         { id: 'open-threads-card', label: 'Open Threads', provider: 'utility', state: 'pending', source: 'fallback' },
         { id: 'active-cast-card', label: 'Active Cast', provider: 'utility', state: 'pending', source: 'cache' },
-        { id: 'dialogue-relationship-card', label: 'Dialogue/Relationship', provider: 'utility', state: 'pending', source: 'generated' },
-        { id: 'knowledge-secrets-card', label: 'Knowledge/Secrets', provider: 'utility', state: 'pending', source: 'generated' },
-        { id: 'clocks-consequences-card', label: 'Clocks/Consequences', provider: 'utility', state: 'pending', source: 'generated' },
-        { id: 'environment-affordances-card', label: 'Environment/Affordances', provider: 'utility', state: 'pending', source: 'generated' },
-        { id: 'possessions-items-card', label: 'Possessions/Items', provider: 'utility', state: 'pending', source: 'generated' },
-        { id: 'prose-pacing-card', label: 'Prose/Pacing', provider: 'utility', state: 'pending', source: 'generated' }
+        { id: 'dialogue-relationship-card', label: 'Relationship', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'knowledge-secrets-card', label: 'Knowledge', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'clocks-consequences-card', label: 'Consequences', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'environment-affordances-card', label: 'Environment', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'possessions-items-card', label: 'Items', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'prose-pacing-card', label: 'Prose', provider: 'utility', state: 'pending', source: 'generated' }
       ]
     },
     {

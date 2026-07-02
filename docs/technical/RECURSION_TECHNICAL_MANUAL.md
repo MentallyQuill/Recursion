@@ -72,7 +72,7 @@ Each lane can use the current host model, a host connection profile when the hos
 
 ## Card And Hand System
 
-The fixed V1 card catalog is Scene Frame, Active Cast, Character Motivation, Dialogue/Relationship, Continuity Risk, Knowledge/Secrets, Clocks/Consequences, Environment/Affordances, Possessions/Items, Prose/Pacing, and Open Threads.
+The fixed V1 card catalog is Scene Frame, Active Cast, Character Motivation, Relationship, Continuity Risk, Knowledge, Consequences, Environment, Items, Prose, and Open Threads.
 
 Cards are disposable scene-local cache artifacts. The scene deck stores active, stowed, stale, and discarded records for one scene. The turn hand is rebuilt for each composition event from active cards under max-card and token caps. A valid card can stay in the deck without entering the hand.
 

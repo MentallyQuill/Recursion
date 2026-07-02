@@ -42,13 +42,13 @@ const normalizedDefaultScope = normalizeSettings({}).cardScope;
 assertEqual(cardScopeCounts(normalizedDefaultScope).selectedSubItems, CARD_SCOPE_TOTAL_SUB_ITEMS, 'settings default enables all card scope');
 
 const partialScope = defaultCardScope();
-partialScope.families['Prose/Pacing'].enabled = false;
-for (const key of Object.keys(partialScope.families['Prose/Pacing'].subItems)) {
-  partialScope.families['Prose/Pacing'].subItems[key] = false;
+partialScope.families['Prose'].enabled = false;
+for (const key of Object.keys(partialScope.families['Prose'].subItems)) {
+  partialScope.families['Prose'].subItems[key] = false;
 }
 const normalizedPartial = normalizeSettings({ mode: 'manual', cardScope: partialScope });
 assertEqual(normalizedPartial.mode, 'manual', 'manual mode survives card-scope normalization');
-assertEqual(normalizedPartial.cardScope.families['Prose/Pacing'].enabled, false, 'disabled family persists');
+assertEqual(normalizedPartial.cardScope.families['Prose'].enabled, false, 'disabled family persists');
 assertDeepEqual(
   normalizeSettings({}).injection,
   { placement: 'default', role: 'system', depth: 'default' },
@@ -94,10 +94,21 @@ const defaultUi = normalizeSettings({});
 assertEqual(defaultUi.enabled, true, 'power toggle defaults on');
 assertEqual(defaultUi.mode, 'auto', 'mode defaults to auto');
 assertEqual(defaultUi.reasoningLevel, 'high', 'reasoning level defaults to high');
+assertEqual(defaultUi.minCards, 3, 'minimum cards defaults to low reasoning card budget');
+assertEqual(defaultUi.maxCards, 10, 'maximum cards defaults to ultra reasoning card budget');
 assertEqual(defaultUi.ui.progressChildVisibleLimit, 5, 'sub-tier visible item default is five');
 assertEqual(defaultUi.ui.progressListVisibleLimit, 15, 'whole progress list visible item default is fifteen');
 assertEqual(defaultUi.ui.tooltipsEnabled, true, 'tooltips default on');
 assertEqual(normalizeSettings({ ui: { tooltipsEnabled: false } }).ui.tooltipsEnabled, false, 'tooltip setting can disable hover help');
+assertEqual(normalizeSettings({ minCards: '5', maxCards: '11' }).minCards, 5, 'minimum cards numeric strings normalize');
+assertEqual(normalizeSettings({ minCards: '5', maxCards: '11' }).maxCards, 11, 'maximum cards numeric strings normalize');
+assertDeepEqual(
+  { minCards: normalizeSettings({ minCards: 14, maxCards: 4 }).minCards, maxCards: normalizeSettings({ minCards: 14, maxCards: 4 }).maxCards },
+  { minCards: 4, maxCards: 14 },
+  'card budget settings sort inverted min and max'
+);
+assertEqual(normalizeSettings({ minCards: -20, maxCards: 99 }).minCards, 0, 'minimum cards clamps low');
+assertEqual(normalizeSettings({ minCards: -20, maxCards: 99 }).maxCards, 20, 'maximum cards clamps high');
 
 const invalidReasoning = normalizeSettings({ reasoningLevel: 'maximum' });
 assertEqual(invalidReasoning.reasoningLevel, 'high', 'invalid reasoning level falls back to high');
@@ -187,8 +198,12 @@ assertEqual(root.recursion.diagnostics.includeExcerpts, true, 'partial diagnosti
 
 store.update({ reasoningLevel: 'medium' });
 store.update({ strength: 'light' });
+store.update({ minCards: 4 });
+store.update({ maxCards: 12 });
 assertEqual(root.recursion.reasoningLevel, 'medium', 'partial settings update preserves reasoning level');
 assertEqual(root.recursion.strength, 'light', 'partial settings update changes strength');
+assertEqual(root.recursion.minCards, 4, 'partial settings update changes minimum cards');
+assertEqual(root.recursion.maxCards, 12, 'partial settings update preserves minimum cards and changes maximum cards');
 
 store.update({ ui: { progressChildVisibleLimit: 7 } });
 store.update({ ui: { progressListVisibleLimit: 22 } });

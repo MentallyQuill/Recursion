@@ -108,7 +108,10 @@ Runtime enforcement:
 
 - Invalid plans fall back to local `compose-brief`, cache reuse, or `skip`, depending on mode and cache state.
 - Token and card count caps are enforced after the Arbiter returns.
-- `promptFootprint` is sanitized to `compact`, `normal`, or `rich`; invalid or missing Arbiter values fall back to the stored setting. A valid Arbiter footprint overrides only the current turn's Prompt Composition settings, and it does not mutate the stored user setting. The broader Strength/Focus behavior policy remains a target design contract.
+- Runtime derives the behavior policy from Strength, Min/Max Cards, Focus, and Prompt Footprint, sends policy lines to the Arbiter, and applies mechanical shaping before cards are selected.
+- Min Cards caps Low's card count, Max Cards raises/caps Ultra's card count, and Medium/High use the floor average.
+- `promptFootprint` is sanitized to `compact`, `normal`, or `rich`, then resolved through the user's stored Prompt Footprint policy. Compact may expand only for safety or hard-continuity evidence, Normal may use Rich only for high-risk evidence, and Rich may still choose smaller effective packets for simple turns. The effective footprint applies only to this run and never mutates stored settings.
+- Strength changes cache/hand pressure and composer assertiveness inside the selected card budget. Focus changes soft family ordering for the hand and diagnostics, but it is not a hard whitelist.
 - Provider lane choices are resolved through the provider spec, not trusted as raw endpoints.
 - Reasoner triggers are advisory. If Reasoner is off, unavailable, too slow, or over budget, generation continues through the deterministic or Utility composer path.
 

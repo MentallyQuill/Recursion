@@ -199,7 +199,7 @@ The 2026-07-02 first pass promotes source-backed static infographics and defers 
 | Runtime pipeline infographic | Host Snapshot -> Utility Arbiter -> Scene Deck -> Turn Hand -> Composer/Reasoner -> Prompt Packet -> Injection -> Diagnostics. |
 | Turn sequence diagram | Power, Auto/Manual generation lifecycle, prompt install timing, cancellation, and stale result discard. |
 | Card lifecycle diagram | Create, refresh, stow, discard, select, omit, and invalidate cards. |
-| Card family matrix | Scene Frame, Active Cast, Character Motivation, Dialogue/Relationship, Continuity Risk, Knowledge/Secrets, Clocks/Consequences, Environment/Affordances, Possessions/Items, Prose/Pacing, Open Threads. |
+| Card family matrix | Scene Frame, Active Cast, Character Motivation, Relationship, Continuity Risk, Knowledge, Consequences, Environment, Items, Prose, Open Threads. |
 | Prompt packet stack | Scene Brief, Turn Brief, Guardrails, raw critical guardrail exception. |
 | Prompt injection diagram | Recursion-owned prompt lanes, insertion metadata, stale packet clear, and host boundary. |
 | Provider routing diagram | Utility lane, optional Reasoner lane, current host model, connection profile, OpenAI-compatible endpoint, retries, and fallback. |

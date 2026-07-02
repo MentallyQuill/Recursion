@@ -68,7 +68,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     ])
   }),
   Object.freeze({
-    family: 'Dialogue/Relationship',
+    family: 'Relationship',
     role: 'dialogueRelationshipCard',
     description: 'Current conversational tension, relationship texture, promises, conflicts, and voice constraints.',
     subItems: Object.freeze([
@@ -112,7 +112,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     ])
   }),
   Object.freeze({
-    family: 'Knowledge/Secrets',
+    family: 'Knowledge',
     role: 'knowledgeSecretsCard',
     description: 'Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries.',
     subItems: Object.freeze([
@@ -134,7 +134,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     ])
   }),
   Object.freeze({
-    family: 'Clocks/Consequences',
+    family: 'Consequences',
     role: 'clocksConsequencesCard',
     description: 'Deadlines, countdowns, delayed consequences, and escalation triggers.',
     subItems: Object.freeze([
@@ -156,7 +156,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     ])
   }),
   Object.freeze({
-    family: 'Environment/Affordances',
+    family: 'Environment',
     role: 'environmentAffordancesCard',
     description: 'Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances.',
     subItems: Object.freeze([
@@ -178,7 +178,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     ])
   }),
   Object.freeze({
-    family: 'Possessions/Items',
+    family: 'Items',
     role: 'possessionsItemsCard',
     description: 'Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them.',
     subItems: Object.freeze([
@@ -200,7 +200,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     ])
   }),
   Object.freeze({
-    family: 'Prose/Pacing',
+    family: 'Prose',
     role: 'prosePacingCard',
     description: 'Local craft guidance for density, momentum, specificity, and response shape.',
     subItems: Object.freeze([

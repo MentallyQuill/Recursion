@@ -32,7 +32,7 @@ const EXPECTED_SCOPE_CATALOG = Object.freeze([
     subItems: ['visibleGoals', 'pressures', 'hesitationPosture']
   },
   {
-    family: 'Dialogue/Relationship',
+    family: 'Relationship',
     role: 'dialogueRelationshipCard',
     subItems: ['tension', 'promisesConflicts', 'voiceConstraints']
   },
@@ -42,27 +42,27 @@ const EXPECTED_SCOPE_CATALOG = Object.freeze([
     subItems: ['fragileFacts', 'spatialConstraints', 'timelineOrder']
   },
   {
-    family: 'Knowledge/Secrets',
+    family: 'Knowledge',
     role: 'knowledgeSecretsCard',
     subItems: ['concealedFacts', 'knowsSuspects', 'revealBoundaries']
   },
   {
-    family: 'Clocks/Consequences',
+    family: 'Consequences',
     role: 'clocksConsequencesCard',
     subItems: ['deadlinesCountdowns', 'delayedConsequences', 'escalationTriggers']
   },
   {
-    family: 'Environment/Affordances',
+    family: 'Environment',
     role: 'environmentAffordancesCard',
     subItems: ['spatialLayout', 'sensoryTexture', 'hazardsAffordances']
   },
   {
-    family: 'Possessions/Items',
+    family: 'Items',
     role: 'possessionsItemsCard',
     subItems: ['heldCarriedItems', 'itemLocationControl', 'itemAffordancesRisks']
   },
   {
-    family: 'Prose/Pacing',
+    family: 'Prose',
     role: 'prosePacingCard',
     subItems: ['density', 'momentum', 'specificityShape']
   },
@@ -83,6 +83,7 @@ assertDeepEqual(
   EXPECTED_SCOPE_CATALOG,
   'scope catalog membership, roles, and sub-item order match V1 plan'
 );
+assert(CARD_SCOPE_CATALOG.every((family) => !family.family.includes('/')), 'card scope category labels are single-focus names without slashes');
 assert(CARD_SCOPE_CATALOG.every((family) => family.subItems.length >= 2), 'each family has sub-items');
 assertEqual(CARD_SCOPE_TOTAL_SUB_ITEMS, 33, 'scope catalog exposes the expected V1 focus count');
 assertEqual(
@@ -105,7 +106,7 @@ for (const family of CARD_SCOPE_CATALOG) {
 }
 
 const prosePayload = scopePayloadForArbiter({ mode: 'auto', cardScope: defaultCardScope() })
-  .availableCatalog.find((entry) => entry.family === 'Prose/Pacing');
+  .availableCatalog.find((entry) => entry.family === 'Prose');
 assert(
   prosePayload.subItems.find((item) => item.key === 'density').description.includes('packed'),
   'Arbiter catalog payload includes density description'

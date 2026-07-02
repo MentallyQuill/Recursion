@@ -7,19 +7,20 @@ import {
   normalizeCard,
   selectHand
 } from '../../src/cards.mjs';
+import { influencePolicyForSettings } from '../../src/settings-policy.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
 const EXPECTED_CATALOG = Object.freeze([
   { family: 'Scene Frame', role: 'sceneFrameCard', priority: 100 },
   { family: 'Active Cast', role: 'activeCastCard', priority: 95 },
   { family: 'Character Motivation', role: 'characterMotivationCard', priority: 88 },
-  { family: 'Dialogue/Relationship', role: 'dialogueRelationshipCard', priority: 84 },
+  { family: 'Relationship', role: 'dialogueRelationshipCard', priority: 84 },
   { family: 'Continuity Risk', role: 'continuityRiskCard', priority: 98 },
-  { family: 'Knowledge/Secrets', role: 'knowledgeSecretsCard', priority: 92 },
-  { family: 'Clocks/Consequences', role: 'clocksConsequencesCard', priority: 90 },
-  { family: 'Environment/Affordances', role: 'environmentAffordancesCard', priority: 76 },
-  { family: 'Possessions/Items', role: 'possessionsItemsCard', priority: 78 },
-  { family: 'Prose/Pacing', role: 'prosePacingCard', priority: 62 },
+  { family: 'Knowledge', role: 'knowledgeSecretsCard', priority: 92 },
+  { family: 'Consequences', role: 'clocksConsequencesCard', priority: 90 },
+  { family: 'Environment', role: 'environmentAffordancesCard', priority: 76 },
+  { family: 'Items', role: 'possessionsItemsCard', priority: 78 },
+  { family: 'Prose', role: 'prosePacingCard', priority: 62 },
   { family: 'Open Threads', role: 'openThreadsCard', priority: 72 }
 ]);
 
@@ -39,6 +40,7 @@ assertDeepEqual(
   'catalog membership and order match V1 plan'
 );
 for (const entry of CARD_CATALOG) {
+  assert(!entry.family.includes('/'), `${entry.family} uses a single-focus category label`);
   assert(UTILITY_ROLE_IDS.includes(entry.role), `${entry.role} exists in provider utility roles`);
 }
 
@@ -117,7 +119,7 @@ const lifecycleBase = [
   deckCard('Active Cast', 'Mara and Ilya are present.', { id: 'cast-card' }),
   deckCard('Continuity Risk', 'The door was locked.', { id: 'risk-card' }),
   deckCard('Open Threads', 'The distress signal remains unanswered.', { id: 'thread-card' }),
-  deckCard('Prose/Pacing', 'Keep the reply clipped.', { id: 'pace-card' })
+  deckCard('Prose', 'Keep the reply clipped.', { id: 'pace-card' })
 ];
 const transitioned = applyCardPlan(lifecycleBase, {
   lifecycle: [
@@ -204,6 +206,58 @@ const scopedRequests = buildCardRequests({
   }
 });
 assertDeepEqual(scopedRequests[0].cardScope.selectedSubItems, ['fragileFacts', 'timelineOrder'], 'card request carries selected sub-item focus');
+assert(scopedRequests[0].prompt.includes('Selected focus facets for Continuity Risk:'), 'card prompt includes selected focus header');
+assert(scopedRequests[0].prompt.includes('fragileFacts (fragile facts)'), 'card prompt includes selected fragile facts facet');
+assert(scopedRequests[0].prompt.includes('timelineOrder (timeline/order)'), 'card prompt includes selected timeline/order facet');
+assert(scopedRequests[0].prompt.includes('Easy-to-break facts'), 'card prompt includes selected facet description');
+assert(scopedRequests[0].prompt.includes('Event order, cause and effect'), 'card prompt includes timeline facet description');
+assert(scopedRequests[0].prompt.includes('Do not create separate cards per facet.'), 'card prompt keeps one-card contract clear');
+const disabledFocusRequest = buildCardRequests({
+  cardJobs: [{ family: 'Prose', role: 'prosePacingCard', reason: 'High relevance style risk.' }]
+}, {
+  runId: 'disabled-focus-run',
+  snapshotHash: 'disabled-focus-hash',
+  snapshot: {},
+  cardScope: { selectedSubItemsByFamily: {} }
+})[0];
+assertDeepEqual(disabledFocusRequest.cardScope.selectedSubItems, [], 'disabled focus request still records empty selected facets');
+assert(
+  disabledFocusRequest.prompt.includes('Selected focus facets for Prose: none selected.'),
+  'disabled focus request tells provider no facets were selected'
+);
+assert(
+  disabledFocusRequest.prompt.includes('Generate this family only because the Arbiter requested it as high-relevance.'),
+  'disabled focus request explains Auto exception behavior'
+);
+const refreshRequest = buildCardRequests({
+  cardJobs: [{
+    family: 'Continuity Risk',
+    role: 'continuityRiskCard',
+    refreshOfCardId: 'cached-risk-1',
+    reason: 'Cached risk is stale after source drift.'
+  }]
+}, {
+  runId: 'refresh-run',
+  snapshotHash: 'refresh-hash',
+  snapshot: {}
+})[0];
+assertEqual(refreshRequest.metadata.refreshOfCardId, 'cached-risk-1', 'refresh request metadata preserves safe old card id');
+assert(refreshRequest.prompt.includes('Refreshes cached card: cached-risk-1'), 'refresh request prompt tells provider this replaces stale cached card');
+assert(!refreshRequest.prompt.includes('Old risk.'), 'refresh request does not expose old card prompt body by id');
+
+const refreshedDeck = applyCardPlan([
+  deckCard('Continuity Risk', 'Old risk.', { id: 'cached-risk-1', tokenEstimate: 10 })
+], {
+  acceptedCards: [
+    deckCard('Continuity Risk', 'New risk.', { id: 'fresh-risk-1', tokenEstimate: 10 })
+  ],
+  lifecycle: [
+    { action: 'regenerate', cardId: 'cached-risk-1', reason: 'source drift' },
+    { action: 'select', cardId: 'fresh-risk-1', reason: 'fresh replacement' }
+  ]
+});
+assertEqual(refreshedDeck.cards.find((entry) => entry.id === 'cached-risk-1').status, 'stale', 'regenerate marks old cached card stale');
+assertEqual(refreshedDeck.cards.find((entry) => entry.id === 'fresh-risk-1').status, 'active', 'fresh replacement remains active');
 const truncationRequest = buildCardRequests({
   cardJobs: [{
     role: 'sceneFrameCard',
@@ -877,7 +931,7 @@ assertEqual(cardsFromProviderResult({
 }, { expectedRole: 'characterMotivationCard', expectedFamily: 'Character Motivation' }).length, 0, 'provider motivation card with private thought text ignored');
 
 const selectedDeck = [
-  deckCard('Prose/Pacing', 'Keep it brisk.', { id: 'low', tokenEstimate: 20 }),
+  deckCard('Prose', 'Keep it brisk.', { id: 'low', tokenEstimate: 20 }),
   deckCard('Continuity Risk', 'Do not forget the cracked visor.', { id: 'risk', tokenEstimate: 220 }),
   deckCard('Open Threads', 'The signal is unanswered.', { id: 'emph', tokenEstimate: 120, emphasis: 'emphasized' }),
   deckCard('Scene Frame', 'The bay is sealed.', { id: 'scene', tokenEstimate: 80, inspectorNotes: 'private' }),
@@ -895,6 +949,49 @@ assert(budgetHand.omitted.some((entry) => entry.cardId === 'low' && entry.reason
 assert(budgetHand.omitted.some((entry) => entry.cardId === 'stowed' && entry.reason === 'inactive'), 'inactive omissions recorded');
 assertEqual(budgetHand.metadata.maxCards, 2, 'hand metadata includes maxCards');
 assertEqual(budgetHand.metadata.maxTokens, 300, 'hand metadata includes maxTokens');
+
+const characterFocusHand = selectHand([
+  deckCard('Character Motivation', 'Mara seems guarded.', { id: 'motivation-tie', tokenEstimate: 20 }),
+  deckCard('Scene Frame', 'The room stays sealed.', { id: 'scene-tie', tokenEstimate: 20 }),
+  deckCard('Open Threads', 'The unanswered signal waits.', { id: 'thread-tie', tokenEstimate: 20 })
+], {
+  maxCards: 2,
+  maxTokens: 300,
+  behaviorPolicy: influencePolicyForSettings({ focus: 'character' })
+});
+assertDeepEqual(characterFocusHand.cards.map((entry) => entry.id), ['motivation-tie', 'scene-tie'], 'focus boosts matching families before catalog priority');
+assertEqual(characterFocusHand.metadata.behaviorPolicy.focus, 'character', 'hand metadata records focus policy');
+assertEqual(characterFocusHand.metadata.behaviorPolicy.selectedBoostedCards, 1, 'hand metadata counts selected boosted cards');
+
+const compactFootprintHand = selectHand([
+  deckCard('Scene Frame', 'Scene one.', { id: 'scene-compact', tokenEstimate: 20 }),
+  deckCard('Active Cast', 'Cast one.', { id: 'cast-compact', tokenEstimate: 20 }),
+  deckCard('Open Threads', 'Thread one.', { id: 'thread-compact', tokenEstimate: 20 }),
+  deckCard('Prose', 'Prose one.', { id: 'prose-compact', tokenEstimate: 20 }),
+  deckCard('Items', 'Item one.', { id: 'item-compact', tokenEstimate: 20 }),
+  deckCard('Environment', 'Environment one.', { id: 'environment-compact', tokenEstimate: 20 })
+], {
+  maxCards: 10,
+  maxTokens: 500,
+  behaviorPolicy: influencePolicyForSettings({ promptFootprint: 'compact' })
+});
+assertEqual(compactFootprintHand.cards.length, 6, 'compact footprint no longer owns card count after configured card budgets were added');
+assertEqual(compactFootprintHand.metadata.behaviorPolicy.effectiveMaxCards, 10, 'hand metadata records requested card budget when footprint is compact');
+
+const lightStrengthHand = selectHand([
+  deckCard('Scene Frame', 'Scene one.', { id: 'scene-light', tokenEstimate: 20 }),
+  deckCard('Active Cast', 'Cast one.', { id: 'cast-light', tokenEstimate: 20 }),
+  deckCard('Open Threads', 'Thread one.', { id: 'thread-light', tokenEstimate: 20 }),
+  deckCard('Prose', 'Prose one.', { id: 'prose-light', tokenEstimate: 20 }),
+  deckCard('Items', 'Item one.', { id: 'item-light', tokenEstimate: 20 }),
+  deckCard('Environment', 'Environment one.', { id: 'environment-light', tokenEstimate: 20 })
+], {
+  maxCards: 6,
+  maxTokens: 500,
+  behaviorPolicy: influencePolicyForSettings({ strength: 'light', promptFootprint: 'normal' })
+});
+assertEqual(lightStrengthHand.cards.length, 5, 'light strength reduces normal hand pressure by one inside caps');
+assertEqual(lightStrengthHand.metadata.behaviorPolicy.strength, 'light', 'hand metadata records strength policy');
 
 const tokenOnlyHand = selectHand([
   deckCard('Continuity Risk', 'Oversized risk.', { id: 'too-big', tokenEstimate: 301 }),

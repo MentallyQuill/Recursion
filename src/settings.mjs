@@ -14,6 +14,8 @@ const UI_PROGRESS_CHILD_MIN = 1;
 const UI_PROGRESS_CHILD_MAX = 20;
 const UI_PROGRESS_LIST_MIN = 5;
 const UI_PROGRESS_LIST_MAX = 80;
+const CARD_BUDGET_MIN = 0;
+const CARD_BUDGET_MAX = 20;
 
 function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -26,6 +28,8 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   mode: 'auto',
   cardScope: defaultCardScope(),
   strength: 'balanced',
+  minCards: 3,
+  maxCards: 10,
   reasoningLevel: 'high',
   promptFootprint: 'normal',
   focus: 'balanced',
@@ -88,6 +92,29 @@ function numberInRange(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, number));
+}
+
+export function normalizeCardBudgetSettings(value = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  const rawMin = Math.round(numberInRange(
+    source.minCards,
+    DEFAULT_RECURSION_SETTINGS.minCards,
+    CARD_BUDGET_MIN,
+    CARD_BUDGET_MAX
+  ));
+  const rawMax = Math.round(numberInRange(
+    source.maxCards,
+    DEFAULT_RECURSION_SETTINGS.maxCards,
+    CARD_BUDGET_MIN,
+    CARD_BUDGET_MAX
+  ));
+  const minCards = Math.min(rawMin, rawMax);
+  const maxCards = Math.max(rawMin, rawMax);
+  return {
+    minCards,
+    normalCards: Math.floor((minCards + maxCards) / 2),
+    maxCards
+  };
 }
 
 function normalizeInjectionDepth(value) {
@@ -189,11 +216,14 @@ export function normalizeProviderSettings(lane, value = {}, secretStore = null) 
 export function normalizeSettings(value = {}, secretStore = null) {
   const source = value && typeof value === 'object' ? value : {};
   const reasoningLevel = enumValue(source.reasoningLevel, REASONING_LEVELS, DEFAULT_RECURSION_SETTINGS.reasoningLevel);
+  const cardBudget = normalizeCardBudgetSettings(source);
   return {
     enabled: source.enabled !== false,
     mode: enumValue(source.mode, MODES, DEFAULT_RECURSION_SETTINGS.mode),
     cardScope: normalizeCardScope(source.cardScope),
     strength: enumValue(source.strength, STRENGTHS, DEFAULT_RECURSION_SETTINGS.strength),
+    minCards: cardBudget.minCards,
+    maxCards: cardBudget.maxCards,
     reasoningLevel,
     promptFootprint: enumValue(source.promptFootprint, FOOTPRINTS, DEFAULT_RECURSION_SETTINGS.promptFootprint),
     focus: enumValue(source.focus, FOCUS, DEFAULT_RECURSION_SETTINGS.focus),

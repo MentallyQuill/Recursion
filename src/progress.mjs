@@ -26,13 +26,13 @@ const CARD_ROLE_LABELS = Object.freeze({
   sceneFrameCard: 'Scene Frame',
   activeCastCard: 'Active Cast',
   characterMotivationCard: 'Character Motivation',
-  dialogueRelationshipCard: 'Dialogue/Relationship',
+  dialogueRelationshipCard: 'Relationship',
   continuityRiskCard: 'Continuity Risk',
-  knowledgeSecretsCard: 'Knowledge/Secrets',
-  clocksConsequencesCard: 'Clocks/Consequences',
-  environmentAffordancesCard: 'Environment/Affordances',
-  possessionsItemsCard: 'Possessions/Items',
-  prosePacingCard: 'Prose/Pacing',
+  knowledgeSecretsCard: 'Knowledge',
+  clocksConsequencesCard: 'Consequences',
+  environmentAffordancesCard: 'Environment',
+  possessionsItemsCard: 'Items',
+  prosePacingCard: 'Prose',
   openThreadsCard: 'Open Threads'
 });
 

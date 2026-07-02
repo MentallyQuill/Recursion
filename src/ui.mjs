@@ -1,4 +1,4 @@
-import { redact } from './core.mjs';
+import { redact, stableStringify } from './core.mjs';
 import {
   CARD_SCOPE_CATALOG,
   cardScopeCounts,
@@ -1297,7 +1297,9 @@ function renderCardsPanel(panel, view, model, notice = '') {
         attrs: {
           type: 'button',
           'aria-pressed': on ? 'true' : 'false',
-          ...tooltipAttrs(model.tooltipsEnabled, lastSelected ? 'Keep at least one card focus enabled.' : item.label)
+          ...tooltipAttrs(model.tooltipsEnabled, lastSelected
+            ? 'Keep at least one card focus enabled.'
+            : `${item.label}: ${item.description}`)
         },
         dataset: {
           recursionCardScopeSubItemToggle: '',
@@ -1329,11 +1331,27 @@ function settingsSelectRow(label, datasetName, value, options, tooltip = '', too
   return controlRow(label, control);
 }
 
+function settingsNumberRow(label, datasetName, value, { min = 0, max = 20, step = 1, tooltip = '', tooltipsEnabled = true } = {}) {
+  const control = inputControl({
+    value,
+    type: 'number',
+    dataset: { [datasetName]: '' },
+    ariaLabel: label,
+    min,
+    max,
+    step
+  });
+  setTooltip(control, tooltipsEnabled, tooltip);
+  return controlRow(label, control);
+}
+
 function renderHighLevelSettings(panel, settings) {
   const group = el('section', { className: 'recursion-settings-group' });
   const tooltipsEnabled = asObject(settings.ui).tooltipsEnabled !== false;
   group.appendChild(settingsDisclosureSection('play-behavior', 'Behavior', [
     settingsSelectRow('Strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS, 'How strongly Recursion should bias the next prompt packet.', tooltipsEnabled),
+    settingsNumberRow('Min Cards', 'recursionSettingMinCards', integerInRange(settings.minCards, DEFAULT_RECURSION_SETTINGS.minCards, 0, 20), { tooltip: 'Low Reasoning Level card budget.', tooltipsEnabled }),
+    settingsNumberRow('Max Cards', 'recursionSettingMaxCards', integerInRange(settings.maxCards, DEFAULT_RECURSION_SETTINGS.maxCards, 0, 20), { tooltip: 'Ultra Reasoning Level card budget. Medium and High use the average.', tooltipsEnabled }),
     settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS, 'Broad focus for card selection and brief composition.', tooltipsEnabled),
     settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS, 'How much prompt budget Recursion may spend.', tooltipsEnabled)
   ]));
@@ -2369,6 +2387,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function viewWithPendingCardScope(view) {
     if (!pendingCardScope) return view;
+    const viewScope = normalizeCardScope(asObject(asObject(view).settings).cardScope || defaultCardScope());
+    if (cardScopeKey(viewScope) === cardScopeKey(pendingCardScope)) {
+      pendingCardScope = null;
+      return view;
+    }
     const source = asObject(view);
     return {
       ...source,
@@ -2377,6 +2400,14 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         cardScope: pendingCardScope
       }
     };
+  }
+
+  function cardScopeKey(scope) {
+    return stableStringify(normalizeCardScope(scope || defaultCardScope()));
+  }
+
+  function clearPendingCardScope(scope) {
+    if (pendingCardScope && cardScopeKey(pendingCardScope) === cardScopeKey(scope)) pendingCardScope = null;
   }
 
   function renderCardsPanelForView(view, notice = cardScopeNotice) {
@@ -2394,8 +2425,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const nextScope = normalizeCardScope(result?.scope || defaultCardScope());
     pendingCardScope = nextScope;
     renderCardsPanelForView(currentView());
-    pendingCardScope = null;
-    runAction(runtime?.updateSettings?.({ cardScope: nextScope }));
+    const action = runtime?.updateSettings?.({ cardScope: nextScope });
+    if (!action) return;
+    runAction(Promise.resolve(action).catch(() => {
+      clearPendingCardScope(nextScope);
+      renderCardsPanelForView(currentView());
+    }), () => update());
   }
 
   function setDisclosureOpen(toggle, body, section, open) {
@@ -2500,7 +2535,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const familyToggle = control('recursionCardScopeFamilyToggle');
     if (familyToggle) {
       panelRerenderClickEvents?.add(event);
-      const view = currentView();
+      const view = viewWithPendingCardScope(currentView());
       const scope = normalizeCardScope(view.settings?.cardScope || defaultCardScope());
       const family = familyToggle.dataset.recursionCardScopeFamilyName;
       applyCardScopeResult(setFamilyEnabled(scope, family, familyState(scope, family) !== 'on'));
@@ -2508,7 +2543,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const subItemToggle = control('recursionCardScopeSubItemToggle');
     if (subItemToggle) {
       panelRerenderClickEvents?.add(event);
-      const view = currentView();
+      const view = viewWithPendingCardScope(currentView());
       const scope = normalizeCardScope(view.settings?.cardScope || defaultCardScope());
       const family = subItemToggle.dataset.recursionCardScopeFamilyName;
       const subItem = subItemToggle.dataset.recursionCardScopeSubItem;
@@ -2649,6 +2684,18 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const injectionDepth = controlValue(sourceRoot, '[data-recursion-setting-injection-depth]');
     return {
       strength: controlValue(sourceRoot, '[data-recursion-setting-strength]'),
+      minCards: integerInRange(
+        controlNumber(sourceRoot, '[data-recursion-setting-min-cards]', DEFAULT_RECURSION_SETTINGS.minCards),
+        DEFAULT_RECURSION_SETTINGS.minCards,
+        0,
+        20
+      ),
+      maxCards: integerInRange(
+        controlNumber(sourceRoot, '[data-recursion-setting-max-cards]', DEFAULT_RECURSION_SETTINGS.maxCards),
+        DEFAULT_RECURSION_SETTINGS.maxCards,
+        0,
+        20
+      ),
       promptFootprint: controlValue(sourceRoot, '[data-recursion-setting-footprint]'),
       focus: controlValue(sourceRoot, '[data-recursion-setting-focus]'),
       ui: {

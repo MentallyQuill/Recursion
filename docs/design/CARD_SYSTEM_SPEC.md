@@ -26,13 +26,13 @@ V1 should use the full fixed catalog below. The Arbiter receives this predetermi
 | Scene Frame | Current location, situation, participants, and immediate dramatic direction. | Usually eligible for every turn hand while the scene is active. |
 | Active Cast | Who is present, their visible state, and current conversational or physical role. | Helps prevent dropped characters and speaker confusion. |
 | Character Motivation | Observable or safely inferred motives, pressures, hesitations, and goals. | Replaces raw internal-thought injection with bounded writing guidance. |
-| Dialogue/Relationship | Current conversational tension, relationship texture, promises, conflicts, and voice constraints. | Guides reply tone, subtext, and relational continuity. |
+| Relationship | Current conversational tension, relationship texture, promises, conflicts, and voice constraints. | Guides reply tone, subtext, and relational continuity. |
 | Continuity Risk | Facts likely to be contradicted if omitted from the next response. | High-priority safety lane for fragile scene facts. |
-| Knowledge/Secrets | Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries. | Guardrail lane for knowledge state and spoiler-safe reveal control. |
-| Clocks/Consequences | Deadlines, countdowns, delayed consequences, and escalation triggers. | Keeps near-term pressure visible without turning it into durable memory. |
-| Environment/Affordances | Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances. | Keeps action grounded in the current scene. |
-| Possessions/Items | Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them. | Tracks item ownership and immediate object affordances. |
-| Prose/Pacing | Local craft guidance for density, momentum, specificity, and response shape. | Low-volume style guidance, not a replacement for the user's preset. |
+| Knowledge | Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries. | Guardrail lane for knowledge state and spoiler-safe reveal control. |
+| Consequences | Deadlines, countdowns, delayed consequences, and escalation triggers. | Keeps near-term pressure visible without turning it into durable memory. |
+| Environment | Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances. | Keeps action grounded in the current scene. |
+| Items | Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them. | Tracks item ownership and immediate object affordances. |
+| Prose | Local craft guidance for density, momentum, specificity, and response shape. | Low-volume style guidance, not a replacement for the user's preset. |
 | Open Threads | Unresolved questions, immediate promises, pending actions, and near-term pressures. | Keeps the next response aware of visible story obligations. |
 
 Each family also exposes fixed scope facets. Facets do not create separate cards; they define what the Arbiter and card generator should emphasize inside that family. The facet labels and descriptions live in `src/card-scope.mjs` and are reused for Arbiter catalog payloads, card-generation prompt focus, UI hover help, and diagnostics.
@@ -123,13 +123,15 @@ The Arbiter outputs structured decisions:
 - `create`: request a missing card from a catalog slot.
 - `stow`: keep a card in the scene deck but remove it from likely hand selection.
 - `discard`: remove a card that is obsolete, duplicative, misleading, or outside the scene.
-- `regenerate`: replace a stale or low-quality card.
+- `regenerate`: mark a stale or low-quality cached card as stale.
 - `select`: include a card in the next turn hand.
 - `emphasize`: give a selected card higher priority or stronger prompt placement.
 
-The Arbiter also decides whether a catalog slot is already represented by existing cards. For example, it should avoid generating a separate Dialogue/Relationship card if the relevant relationship pressure is already captured cleanly in Active Cast or Character Motivation.
+The Arbiter also decides whether a catalog slot is already represented by existing cards. For example, it should avoid generating a separate Relationship card if the relevant relationship pressure is already captured cleanly in Active Cast or Character Motivation.
 
 Runtime support is allowed but bounded. Deterministic code may deduplicate by ID, enforce maximum card counts, reject malformed outputs, cap tokens, and mark old cards stale. It should not be the primary semantic relevance judge.
+
+Refresh is a two-part contract. The Arbiter requests new work through `cardJobs`, optionally naming `refreshOfCardId` for the cached card being replaced. Lifecycle `regenerate` marks the old cached card stale; by itself it does not create a replacement card. This keeps generation work explicit and prevents runtime from inventing semantic refreshes.
 
 ## Emphasis and Detail Profiles
 

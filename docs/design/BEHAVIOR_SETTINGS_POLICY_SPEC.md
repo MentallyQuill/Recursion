@@ -68,16 +68,17 @@ Recursion should not implement brittle deterministic relevance scoring. Runtime 
 | Mode | Auto versus Manual enforcement. | Provider lane depth, prompt size, or semantic relevance. |
 | Card Scope | Family/sub-item preference in Auto and strict family/sub-item whitelist in Manual. | Final prose style or provider cost. |
 | Reasoning Level | Provider lane policy and Reasoner cost depth. | Prompt size, card family focus, or intervention strength. |
+| Min Cards / Max Cards | Reasoning Level card-count bounds: Low uses Min, Medium/High use the average, Ultra uses Max. | Prompt section size, provider lane routing, or semantic relevance. |
 | Strength | Intervention pressure, refresh pressure, cache reuse posture, and composer assertiveness. | Prompt Footprint size or Reasoning Level lane selection. |
 | Focus | Broad family priority profile. | Hard exclusion, except where Manual card scope already excludes a family. |
-| Prompt Footprint | Packet size, section budgets, detail density, and hand-size pressure. | Provider lane policy or semantic truth. |
+| Prompt Footprint | Packet size, section budgets, and detail density. | Provider lane policy, semantic truth, or card-count bounds. |
 | Advanced Injection | Final composed packet placement, role, and depth. | Card selection, card generation, or composition content. |
 
-## Target Influence Policy Object
+## Influence Policy Object
 
 Runtime should derive one policy object from normalized settings at the start of each run. This keeps Arbiter prompt text, post-Arbiter plan shaping, hand selection, composition, diagnostics, and tests aligned.
 
-Planned source module when this policy is implemented:
+Source module:
 
 ```text
 src/settings-policy.mjs
@@ -102,12 +103,16 @@ type RecursionInfluencePolicy = {
     arbiterLine: string;
     composerLine: string;
   };
+  cardBudget: {
+    minCards: number;
+    normalCards: number;
+    maxCards: number;
+  };
   footprint: {
     level: "compact" | "normal" | "rich";
     allowedProfiles: ("compact" | "normal" | "rich")[];
     preferredProfile: "compact" | "normal" | "rich";
-    maxCardsTarget: number;
-    maxCardsCeiling: number;
+    detailPressure: "compact" | "normal" | "rich";
     sectionBudgets: {
       sceneBrief: number;
       turnBrief: number;
@@ -119,7 +124,7 @@ type RecursionInfluencePolicy = {
 };
 ```
 
-The exact implementation can use a smaller internal object, but the runtime needs equivalent information in one place. The current pre-alpha source does not yet contain `src/settings-policy.mjs`; this document defines the target contract so implementation, tests, docs, and renders can converge on one V1 behavior model.
+The implementation lives in `src/settings-policy.mjs`. Runtime, card selection, prompt composition, tests, docs, and renders should use this single policy contract rather than duplicating Strength, Focus, or Prompt Footprint meaning in separate modules.
 
 ## Strength Contract
 
@@ -137,8 +142,8 @@ Mechanical effects:
 
 - Arbiter prompt includes a short Strength policy line.
 - Local fallback plan uses Strength to choose conservative versus full hand pressure.
-- Post-Arbiter plan shaping can demote marginal support cards on Light and preserve high-priority selected cards on Strong.
-- Hand selection uses Strength as a tie-breaker inside existing max-card and token caps.
+- Post-Arbiter plan shaping keeps Strength inside the active card budget instead of enlarging the hand.
+- Hand selection applies Strength inside existing max-card and token caps; Light uses lean pressure, Balanced uses normal pressure, and Strong uses the active footprint fully without enlarging it.
 - Composer gets a Strength line so Utility and Reasoner composition use matching assertiveness.
 - Diagnostics record the resolved Strength policy and any plan shaping labels.
 
@@ -159,10 +164,10 @@ Focus does not replace Card Scope. Card Scope is the family/sub-item selector. I
 | Focus | Boosted families |
 | --- | --- |
 | Balanced | No family boost. |
-| Character | Active Cast, Character Motivation, Dialogue/Relationship, Knowledge/Secrets. |
-| Continuity | Continuity Risk, Possessions/Items, Clocks/Consequences, Scene Frame, Knowledge/Secrets. |
-| Prose | Prose/Pacing, Dialogue/Relationship, Environment/Affordances, Scene Frame. |
-| Plot | Open Threads, Clocks/Consequences, Knowledge/Secrets, Scene Frame. |
+| Character | Active Cast, Character Motivation, Relationship, Knowledge. |
+| Continuity | Continuity Risk, Items, Consequences, Scene Frame, Knowledge. |
+| Prose | Prose, Relationship, Environment, Scene Frame. |
+| Plot | Open Threads, Consequences, Knowledge, Scene Frame. |
 
 Mechanical effects:
 
@@ -181,9 +186,28 @@ Prohibited effects:
 - Focus must not invent character emotions, plot importance, or continuity facts.
 - Prose focus must not become a second style preset that fights the user's SillyTavern preset.
 
+## Card Budget Contract
+
+Min Cards and Max Cards are high-level behavior settings, not per-card micromanagement. Runtime derives Normal Cards from their average:
+
+```text
+normalCards = floor((minCards + maxCards) / 2)
+```
+
+Reasoning Level applies the values mechanically:
+
+| Reasoning Level | Card budget behavior |
+| --- | --- |
+| Low | Cap positive `maxCards` at Min Cards. |
+| Medium | Cap positive `maxCards` at Normal Cards. |
+| High | Cap positive `maxCards` at Normal Cards. |
+| Ultra | Raise and cap positive `maxCards` at Max Cards. |
+
+Defaults preserve the original V1 pressure: Min Cards `3`, Max Cards `10`, Normal Cards `6`.
+
 ## Prompt Footprint Contract
 
-Prompt Footprint owns size and detail. It controls section budgets, hand-size pressure, and how much card detail survives into the composed packet.
+Prompt Footprint owns packet size and detail. It controls section budgets and how much card detail survives into the composed packet. It no longer owns card-count ceilings; Min Cards and Max Cards own that behavior through Reasoning Level.
 
 The current code-level section budgets are:
 
@@ -192,14 +216,6 @@ The current code-level section budgets are:
 | Compact | 240 | 240 | 520 |
 | Normal | 900 | 900 | 900 |
 | Rich | 1600 | 1600 | 1200 |
-
-Target hand pressure:
-
-| Footprint | Hand pressure | Use |
-| --- | --- | --- |
-| Compact | Small hand, roughly 3-4 selected cards unless critical guardrails require otherwise. | Stable scenes, heavy external context, low next-turn complexity. |
-| Normal | Default hand, roughly 5-6 selected cards. | Most roleplay turns. |
-| Rich | Larger hand, roughly 8-10 selected cards when relevant. | Crowded scenes, high drift risk, active multi-character tension, or complex continuity. |
 
 The stored Prompt Footprint setting is the user's baseline preference. Arbiter may still request a current-turn footprint, but runtime must treat that request through the user's selected policy:
 
@@ -213,8 +229,8 @@ Mechanical effects:
 
 - Arbiter prompt includes the user's footprint policy and allowed profiles.
 - Sanitized Arbiter plan resolves to one effective footprint.
-- Plan budgets are clamped to the effective footprint policy.
-- Hand selection uses the effective footprint's max-card pressure.
+- Plan card counts are clamped by Reasoning Level plus Min/Max Cards.
+- Hand selection uses the configured card budget, then applies Strength and Focus tie-breakers.
 - Prompt composition uses the effective footprint's section budgets.
 - UI and diagnostics show both stored footprint and effective footprint when they differ.
 
@@ -251,7 +267,7 @@ The Arbiter request should include a short behavior policy block near settings:
 ```text
 Behavior policy:
 - Strength: Strong. Prefer firm current-turn guidance and refresh weak/stale coverage when relevance is plausible. Do not increase footprint size.
-- Focus: Character. Prefer Active Cast, Character Motivation, Dialogue/Relationship, and Knowledge/Secrets when relevant; do not ignore critical non-character continuity.
+- Focus: Character. Prefer Active Cast, Character Motivation, Relationship, and Knowledge when relevant; do not ignore critical non-character continuity.
 - Prompt Footprint: Normal. Compact or Normal are allowed freely; Rich requires a high-risk reason.
 ```
 
@@ -265,7 +281,7 @@ The hand selector should sort and omit through this order:
 2. Critical guardrails and hard continuity risks.
 3. Arbiter-selected emphasis.
 4. Manual card-scope whitelist, if Manual.
-5. Effective footprint max-card and token pressure.
+5. Effective card-budget and token pressure.
 6. Focus boosted-family tie-breaker.
 7. Strength selection pressure tie-breaker.
 8. Stable catalog priority and id fallback.
@@ -300,7 +316,7 @@ Diagnostics should expose policy effects without exposing prompt internals:
     "storedFootprint": "normal",
     "effectiveFootprint": "rich",
     "footprintOverrideReason": "high-continuity-risk",
-    "boostedFamilies": ["Active Cast", "Character Motivation", "Dialogue/Relationship", "Knowledge/Secrets"],
+    "boostedFamilies": ["Active Cast", "Character Motivation", "Relationship", "Knowledge"],
     "selectedBoostedCards": 3,
     "planShaping": ["strong-refresh-pressure", "focus-family-ordering"]
   }
@@ -340,7 +356,7 @@ Required focused tests:
 - Focus Character, Continuity, Prose, and Plot reorder boosted families without excluding non-boosted critical cards.
 - Manual mode plus Focus never includes disabled Manual-scope families.
 - Auto mode plus partial Card Scope prefers selected scope but still permits high-relevance exceptions.
-- Compact, Normal, and Rich produce different section budgets and max-card pressure.
+- Compact, Normal, and Rich produce different section budgets and packet detail while Min Cards, Max Cards, and Reasoning Level own card-count pressure.
 - Arbiter footprint override is accepted only when allowed by the stored footprint policy.
 - Invalid Arbiter footprint falls back to stored setting.
 - Reasoner unavailable still produces a Utility-composed packet with policy diagnostics.
@@ -361,7 +377,7 @@ The improvement is complete when:
 
 - Changing Strength changes Arbiter prompt policy, plan shaping, hand-selection pressure, composer assertiveness, and diagnostics.
 - Changing Focus changes boosted family ordering, tie-breakers, selected-hand priority under budget pressure, composer priority, and diagnostics.
-- Changing Prompt Footprint changes effective section budgets, hand-size pressure, packet detail, prompt packet metadata, and diagnostics.
+- Changing Prompt Footprint changes effective section budgets, packet detail, prompt packet metadata, and diagnostics.
 - The settings do not blur ownership: Strength does not own size, Focus does not own strict filtering, Footprint does not own provider lane, and Reasoning Level does not own prompt length.
 - Tests prove each setting has backend effects without relying on creative model output.
 - UI surfaces explain what happened without asking users to edit cards.

@@ -1,5 +1,11 @@
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { normalizeInjectionSettings } from './settings.mjs';
+import {
+  behaviorComposerLines,
+  FOOTPRINT_SECTION_BUDGETS,
+  influencePolicyForSettings,
+  summarizeBehaviorPolicyForDiagnostics
+} from './settings-policy.mjs';
 
 export const PROMPT_PACKET_VERSION = 1;
 const PACKET_VERSION = PROMPT_PACKET_VERSION;
@@ -10,8 +16,8 @@ const VALID_REASONER_DROP_REASONS = new Set(['duplicate', 'lower-priority', 'bud
 const SECTION_KEYS = Object.freeze(['sceneBrief', 'turnBrief', 'guardrails']);
 const VALID_INJECTION_PLACEMENTS = new Set(['in_prompt', 'in_chat']);
 const VALID_INJECTION_ROLES = new Set(['system', 'user', 'assistant']);
-const SCENE_BRIEF_FAMILIES = new Set(['Scene Frame', 'Active Cast', 'Environment/Affordances', 'Possessions/Items']);
-const GUARDRAIL_FAMILIES = new Set(['Continuity Risk', 'Knowledge/Secrets']);
+const SCENE_BRIEF_FAMILIES = new Set(['Scene Frame', 'Active Cast', 'Environment', 'Items']);
+const GUARDRAIL_FAMILIES = new Set(['Continuity Risk', 'Knowledge']);
 const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
 const DETAIL_PROFILES = new Set(['compact', 'standard', 'expanded']);
 const MAX_CARD_TEXT = 1200;
@@ -25,22 +31,18 @@ const VALID_FAMILIES = new Set([
   'Scene Frame',
   'Active Cast',
   'Character Motivation',
-  'Dialogue/Relationship',
+  'Relationship',
   'Continuity Risk',
-  'Knowledge/Secrets',
-  'Clocks/Consequences',
-  'Environment/Affordances',
-  'Possessions/Items',
-  'Prose/Pacing',
+  'Knowledge',
+  'Consequences',
+  'Environment',
+  'Items',
+  'Prose',
   'Open Threads'
 ]);
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|inspector[-_\s]*only|source[-_\s]*should[-_\s]*not[-_\s]*leak|freshness[-_\s]*should[-_\s]*not[-_\s]*leak|arbiter[-_\s]*should[-_\s]*not[-_\s]*leak|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/i;
 
-const FOOTPRINT_BUDGETS = Object.freeze({
-  compact: Object.freeze({ sceneBrief: 240, turnBrief: 240, guardrails: 520 }),
-  normal: Object.freeze({ sceneBrief: 900, turnBrief: 900, guardrails: 900 }),
-  rich: Object.freeze({ sceneBrief: 1600, turnBrief: 1600, guardrails: 1200 })
-});
+const FOOTPRINT_BUDGETS = FOOTPRINT_SECTION_BUDGETS;
 
 const STATIC_GUARDRAILS = Object.freeze([
   'Respect the player message: preserve stated player intent, spoken content, and choices.',
@@ -97,7 +99,7 @@ function safePromptId(value, fallbackPrefix = 'id') {
 
 function safeFamily(value) {
   const family = cleanText(value, 120);
-  return VALID_FAMILIES.has(family) ? family : 'Prose/Pacing';
+  return VALID_FAMILIES.has(family) ? family : 'Prose';
 }
 
 function safeEvidenceRef(value) {
@@ -135,6 +137,29 @@ function normalizeFootprint(settings = {}) {
 function normalizeReasonerUse(settings = {}) {
   const mode = String(settings?.reasonerUse ?? 'auto').trim();
   return VALID_REASONER_USE.has(mode) ? mode : 'auto';
+}
+
+function behaviorPolicyFrom(settings = {}, behaviorPolicy = null) {
+  if (behaviorPolicy && typeof behaviorPolicy === 'object' && !Array.isArray(behaviorPolicy)) return behaviorPolicy;
+  if (settings?.behaviorPolicy && typeof settings.behaviorPolicy === 'object' && !Array.isArray(settings.behaviorPolicy)) {
+    return settings.behaviorPolicy;
+  }
+  return influencePolicyForSettings(settings);
+}
+
+function footprintForPolicy(settings = {}, behaviorPolicy = null) {
+  const policyFootprint = String(behaviorPolicy?.footprint?.effectiveLevel ?? behaviorPolicy?.footprint?.level ?? '').trim();
+  return VALID_FOOTPRINTS.has(policyFootprint) ? policyFootprint : normalizeFootprint(settings);
+}
+
+function budgetsForPolicy(behaviorPolicy, footprint) {
+  const source = asObject(behaviorPolicy?.footprint?.sectionBudgets);
+  const valid = Object.fromEntries(SECTION_KEYS.map((section) => {
+    const value = Number(source[section]);
+    return [section, Number.isFinite(value) && value > 0 ? Math.round(value) : null];
+  }));
+  if (SECTION_KEYS.every((section) => Number.isFinite(valid[section]) && valid[section] > 0)) return valid;
+  return FOOTPRINT_BUDGETS[footprint] || FOOTPRINT_BUDGETS.normal;
 }
 
 function normalizeEvidenceRefs(value) {
@@ -226,10 +251,10 @@ function cardLine(card) {
   return `- [${card.family || 'Card'}${emphasis}] ${card.promptText}`;
 }
 
-function buildUtilitySections(cards, budgets) {
+function buildUtilitySections(cards, budgets, behaviorPolicy = null) {
   const entries = {
     sceneBrief: [],
-    turnBrief: [],
+    turnBrief: behaviorComposerLines(behaviorPolicy).map((text) => ({ text, sourceId: null, family: '' })),
     guardrails: STATIC_GUARDRAILS.map((text) => ({ text, sourceId: null, family: '' }))
   };
 
@@ -339,7 +364,17 @@ function snapshotHash(snapshot) {
   return hashJson(asObject(snapshot));
 }
 
-function baseDiagnostics({ runId, snapshotHash: sourceSnapshotHash, footprint, budgets, cards, omissions, composerLane = 'utility', reasonerStatus = 'skipped' }) {
+function baseDiagnostics({
+  runId,
+  snapshotHash: sourceSnapshotHash,
+  footprint,
+  budgets,
+  cards,
+  omissions,
+  behaviorPolicy = null,
+  composerLane = 'utility',
+  reasonerStatus = 'skipped'
+}) {
   return {
     runId,
     composerLane,
@@ -350,7 +385,11 @@ function baseDiagnostics({ runId, snapshotHash: sourceSnapshotHash, footprint, b
     omissionCount: omissions.length,
     selectedTokenEstimate: cards.reduce((sum, card) => sum + card.tokenEstimate, 0),
     sectionHashes: null,
-    footprint
+    footprint,
+    behaviorPolicy: summarizeBehaviorPolicyForDiagnostics(behaviorPolicy, {
+      effectiveFootprint: footprint,
+      selectedFamilies: cards.map((card) => card.family)
+    })
   };
 }
 
@@ -375,6 +414,7 @@ function buildPacket({
   sections,
   sectionSources,
   injectionSettings,
+  behaviorPolicy,
   diagnostics,
   composedAt
 }) {
@@ -391,7 +431,7 @@ function buildPacket({
     selectedCardRefs: cards.map((card) => selectedCardRef(card)),
     omissions,
     injectionPlan: buildInjectionPlan(sectionSources, budgets, injectionSettings),
-    diagnostics: diagnostics || baseDiagnostics({ runId, snapshotHash: sourceSnapshotHash, footprint, budgets, cards, omissions }),
+    diagnostics: diagnostics || baseDiagnostics({ runId, snapshotHash: sourceSnapshotHash, footprint, budgets, cards, omissions, behaviorPolicy }),
     composedAt
   });
 }
@@ -403,7 +443,7 @@ function shouldUseReasoner(settings, footprint, generationRouter) {
   return reasonerUse === 'always' || footprint === 'rich';
 }
 
-function buildReasonerPrompt({ runId, snapshotHash: sourceSnapshotHash, footprint, cards, sections }) {
+function buildReasonerPrompt({ runId, snapshotHash: sourceSnapshotHash, footprint, cards, sections, behaviorPolicy = null }) {
   return [
     'Compose an optional Recursion prompt packet synthesis.',
     `Return one JSON object only using schema "${REASONER_SCHEMA}".`,
@@ -412,6 +452,7 @@ function buildReasonerPrompt({ runId, snapshotHash: sourceSnapshotHash, footprin
     `Run id: ${runId}`,
     `Snapshot hash: ${sourceSnapshotHash}`,
     `Footprint: ${footprint}`,
+    `Behavior composer policy:\n${behaviorComposerLines(behaviorPolicy).join('\n')}`,
     `Selected cards:\n${JSON.stringify(cards.map((card) => reasonerCard(card)), null, 2)}`,
     `Utility sections:\n${JSON.stringify(sections, null, 2)}`
   ].join('\n\n');
@@ -520,6 +561,7 @@ async function applyReasonerPatch({
   cards,
   budgets,
   injectionSettings,
+  behaviorPolicy,
   generationRouter,
   activity
 }) {
@@ -531,7 +573,8 @@ async function applyReasonerPatch({
       snapshotHash: packet.snapshotHash,
       footprint: packet.footprint,
       cards,
-      sections: packet.sections
+      sections: packet.sections,
+      behaviorPolicy
     });
     const result = await generationRouter.generate('reasonerComposer', { lane: 'reasoner', runId, snapshotHash: packet.snapshotHash, prompt });
     const validated = validateReasonerResult(result, allowedIds, packet.snapshotHash);
@@ -674,20 +717,22 @@ export async function composePromptPacket({
   hand = {},
   snapshot = {},
   settings = {},
+  behaviorPolicy = null,
   generationRouter = null,
   activity = null,
   onActivity = null,
   runId = makeId('prompt-run')
 } = {}) {
-  const footprint = normalizeFootprint(settings);
-  const budgets = FOOTPRINT_BUDGETS[footprint];
+  const policy = behaviorPolicyFrom(settings, behaviorPolicy);
+  const footprint = footprintForPolicy(settings, policy);
+  const budgets = budgetsForPolicy(policy, footprint);
   const injectionSettings = normalizeInjectionSettings(settings?.injection);
   const cards = normalizeCards(hand);
   const promptRunId = safePromptId(runId, 'prompt-run') || makeId('prompt-run');
   const handOmissions = normalizeOmissions(hand);
   const packetId = makeId('prompt-packet');
   const composedAt = nowIso();
-  const utility = buildUtilitySections(cards, budgets);
+  const utility = buildUtilitySections(cards, budgets, policy);
   const omissions = [...handOmissions, ...utility.budgetOmissions];
   let packet = buildPacket({
     packetId,
@@ -700,6 +745,7 @@ export async function composePromptPacket({
     sections: utility.sections,
     sectionSources: utility.sectionSources,
     injectionSettings,
+    behaviorPolicy: policy,
     composedAt
   });
 
@@ -712,6 +758,7 @@ export async function composePromptPacket({
       cards,
       budgets,
       injectionSettings,
+      behaviorPolicy: policy,
       generationRouter,
       activity: activityTarget
     });

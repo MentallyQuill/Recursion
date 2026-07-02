@@ -38,6 +38,10 @@ function stringValue(value, fallback = '') {
   return String(value);
 }
 
+function nonEmptyString(value) {
+  return stringValue(value).trim();
+}
+
 function currentContext(contextFactory) {
   if (typeof contextFactory === 'function') return asObject(contextFactory());
   if (typeof globalThis.SillyTavern?.getContext === 'function') return asObject(globalThis.SillyTavern.getContext());
@@ -45,16 +49,62 @@ function currentContext(contextFactory) {
   return asObject(globalThis);
 }
 
+function chatMetadataObject(context) {
+  return asObject(context?.chatMetadata || context?.chat_metadata || globalThis.chatMetadata);
+}
+
+function firstNonEmpty(values) {
+  for (const value of values) {
+    const text = nonEmptyString(value);
+    if (text) return text;
+  }
+  return '';
+}
+
 async function readChatId(context) {
   for (const key of ['chatId', 'chat_id', 'currentChatId']) {
-    const value = stringValue(context[key]).trim();
+    const value = nonEmptyString(context[key]);
     if (value) return value;
   }
   if (typeof context.getCurrentChatId === 'function') {
-    const value = stringValue(await context.getCurrentChatId()).trim();
+    const value = nonEmptyString(await context.getCurrentChatId());
     if (value) return value;
   }
+  const metadata = chatMetadataObject(context);
+  const metadataChatId = firstNonEmpty([metadata.chat_id, metadata.chatId, metadata.currentChatId]);
+  if (metadataChatId) return metadataChatId;
   return 'unknown-chat';
+}
+
+function sceneAnchor(context) {
+  const metadata = chatMetadataObject(context);
+  const groupId = firstNonEmpty([
+    context?.groupId,
+    context?.group_id,
+    context?.selectedGroupId,
+    globalThis.selected_group
+  ]);
+  if (groupId) return { type: 'group', idHash: hashJson(groupId) };
+
+  const characterId = firstNonEmpty([
+    context?.characterId,
+    context?.character_id,
+    context?.this_chid,
+    context?.selectedCharacterId,
+    globalThis.this_chid
+  ]);
+  if (characterId) return { type: 'character', idHash: hashJson(characterId) };
+
+  const characterName = firstNonEmpty([
+    context?.characterName,
+    context?.name2,
+    metadata.characterName,
+    metadata.name,
+    globalThis.name2
+  ]);
+  if (characterName) return { type: 'character-name', nameHash: hashJson(characterName) };
+
+  return { type: 'chat' };
 }
 
 function numericMessageId(message, index) {
@@ -286,7 +336,8 @@ export function createSillyTavernHost({
     const messages = (Array.isArray(context.chat) ? context.chat : []).map((message, index) => normalizeMessage(message, index));
     const latestMesId = latestMessageId(messages);
     const sceneFingerprint = hashJson({
-      chatKey
+      chatKey,
+      sceneAnchor: sceneAnchor(context)
     });
     const turnFingerprint = hashJson({
       chatKey,

@@ -457,6 +457,33 @@ assertEqual(secondStableScene.chatKey, firstStableScene.chatKey, 'stable scene r
 assertEqual(secondStableScene.sceneKey, firstStableScene.sceneKey, 'ordinary new messages reuse the same scene cache key');
 assert(secondStableScene.turnFingerprint !== firstStableScene.turnFingerprint, 'turn fingerprint still changes across messages');
 
+const metadataChatHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatMetadata: { chat_id: 'Metadata/Chat File.jsonl' },
+    chat: []
+  }),
+  settingsRoot: {}
+});
+const metadataChatSnapshot = await metadataChatHost.snapshot();
+assertEqual(metadataChatSnapshot.chatId, 'Metadata/Chat File.jsonl', 'chatMetadata chat_id is used when direct chat id is missing');
+assertEqual(metadataChatSnapshot.chatKey, 'Metadata-Chat-File.jsonl', 'metadata chat id is normalized into chat key');
+
+const entitySceneContext = {
+  chatId: 'entity-scene-chat',
+  characterId: 'character-a',
+  chat: [{ mesid: 1, is_user: true, mes: 'Scene anchor test.' }]
+};
+const entitySceneHost = createSillyTavernHost({
+  contextFactory: () => entitySceneContext,
+  settingsRoot: {}
+});
+const firstEntityScene = await entitySceneHost.snapshot();
+entitySceneContext.characterId = 'character-b';
+const secondEntityScene = await entitySceneHost.snapshot();
+assertEqual(secondEntityScene.chatKey, firstEntityScene.chatKey, 'entity scene anchor keeps chat key stable');
+assert(secondEntityScene.sceneFingerprint !== firstEntityScene.sceneFingerprint, 'entity change updates host scene fingerprint');
+assert(secondEntityScene.sceneKey !== firstEntityScene.sceneKey, 'entity change updates host scene cache key');
+
 const rawCalls = [];
 const rawResponse = await host.generation.generate({
   prompt: 'Return JSON',

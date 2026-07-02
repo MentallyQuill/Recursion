@@ -16,6 +16,7 @@ Start here, then follow the focused specs:
 
 - [Product Scope](design/RECURSION_PRODUCT_SCOPE.md): product promise, V1 scope, non-goals, success criteria.
 - [Card System Spec](design/CARD_SYSTEM_SPEC.md): scene-local cards, card families, lifecycle, Utility Arbiter responsibilities, turn hand.
+- [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md): Strength, Focus, and Prompt Footprint backend effects.
 - [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md): host boundary, turn pipeline, Auto Control Plan, failure behavior, implementation slices.
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md): Utility and Reasoner lanes, structured calls, validation, session-only secrets, model-call journal.
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md): prompt packet contract, Utility/Reasoner composition, injection lanes, footprint profiles, omissions.
@@ -24,7 +25,7 @@ Start here, then follow the focused specs:
 - [Technical Manuals](technical/README.md): release-facing technical overview, runtime turn sequence, card deck and hand, prompt packet and injection, provider routing, storage/diagnostics, and host integration.
 - [Testing Strategy](testing/TESTING_STRATEGY.md): fast contract suite, Playwright readiness, focused live SillyTavern smoke, dedicated soak users, and pass/fail semantics.
 - [SillyTavern Playwright Harness](testing/SILLYTAVERN_PLAYWRIGHT_HARNESS.md): target harness scripts, environment variables, live preflight, selector rules, and redaction requirements.
-- [Live Smoke Test Plan](testing/LIVE_SMOKE_TEST_PLAN.md): Recursion Bar, Hero Pixel Array progress menu, Observe, Auto, provider, prompt cleanup, fallback, and responsive UI smoke scenarios.
+- [Live Smoke Test Plan](testing/LIVE_SMOKE_TEST_PLAN.md): Recursion Bar, Hero Pixel Array progress menu, power toggle, Auto, Manual, provider, prompt cleanup, fallback, and responsive UI smoke scenarios.
 - [Artifact Contract](testing/ARTIFACT_CONTRACT.md): report, live-log, screenshot, prompt metadata, storage probe, and redaction contract.
 - [Implementation Plan](testing/IMPLEMENTATION_PLAN.md): staged build order and verification gates.
 
@@ -73,14 +74,15 @@ Recursion does not own:
 ## Core Runtime Flow
 
 1. The SillyTavern host adapter captures a stable turn snapshot.
-2. The Utility Arbiter receives the snapshot, current scene cache metadata, fixed V1 card catalog, provider status, and prompt budget context.
-3. The Arbiter returns an Auto Control Plan: action, scene status, prompt footprint, card jobs, card lifecycle decisions, Reasoner decision, and budgets.
-4. Runtime validates the plan, enforces schema and budget caps, and executes requested card jobs from one frozen snapshot.
-5. The scene deck is updated with generated, refreshed, stowed, discarded, or stale cards.
-6. The Arbiter-selected turn hand is passed to prompt composition.
-7. Utility Composer builds the prompt packet, or Reasoner Composer assists when enabled, available, and justified.
-8. Runtime validates the packet and installs it through Recursion-owned SillyTavern prompt keys.
-9. The UI and storage layers receive sanitized diagnostics and latest-hand metadata.
+2. Runtime derives the behavior influence policy for Strength, Focus, and Prompt Footprint.
+3. The Utility Arbiter receives the snapshot, current scene cache metadata, fixed V1 card catalog, provider status, behavior influence policy, and prompt budget context.
+4. The Arbiter returns an Auto Control Plan: action, scene status, prompt footprint, card jobs, card lifecycle decisions, Reasoner decision, and budgets.
+5. Runtime validates the plan, enforces schema and budget caps, applies current Prompt Footprint/card-scope policy, and executes requested card jobs from one frozen snapshot. The broader Strength/Focus behavior policy is tracked as a target design contract.
+6. The scene deck is updated with generated, refreshed, stowed, discarded, or stale cards.
+7. The Arbiter-selected turn hand is passed to prompt composition.
+8. Utility Composer builds the prompt packet, or Reasoner Composer assists when enabled, available, and justified.
+9. Runtime validates the packet and installs it through Recursion-owned SillyTavern prompt keys.
+10. The UI and storage layers receive sanitized diagnostics and latest-hand metadata.
 
 If any optional step fails, Recursion should degrade gracefully. Normal SillyTavern generation should continue.
 
@@ -106,11 +108,14 @@ V1 uses a fixed internal catalog:
 - Character Motivation
 - Dialogue / Relationship
 - Continuity Risk
-- Environment / Items
+- Knowledge / Secrets
+- Clocks / Consequences
+- Environment / Affordances
+- Possessions / Items
 - Prose / Pacing
 - Open Threads
 
-The catalog is not a visible checklist and not a user-authored card system. The Arbiter receives it as a menu and decides which cards need to exist for the current scene.
+The catalog is visible only as high-level Cards scope, where users can focus or whitelist fixed families and sub-items. It is not a user-authored card system, not a card editor, and not a prompt-injection checklist. The Arbiter receives the fixed catalog plus the current scope and decides which cards need to exist for the current scene within Auto or Manual rules.
 
 Character Motivation cards replace raw internal-thought dumps. They may express visible motivation, likely pressure, or behavior-facing guidance, but private diagnostic notes must never be injected.
 
@@ -133,12 +138,13 @@ Advanced Injection settings can override the conditioned final packet's SillyTav
 The primary UI is a Recursion Bar attached to the chat surface:
 
 ```text
-RECURSION | Mode | Hero Pixel Array + current step        Reasoning Level | Last Brief v | Options ...
+RECURSION | Power | Mode | Cards | Hero Pixel Array + current step        Reasoning Level | Last Brief v | Options ...
 ```
 
 It replaces the earlier shelf/drawer idea. The bar is thin, stable, mostly observational, and paired with:
 
 - a Hero Pixel Array progress menu for live status, model-call progress, cache writes, prompt installation, and fallback visibility;
+- an icon-only Cards scope menu that Auto treats as focus and Manual treats as a strict whitelist;
 - an options/settings menu opened from the ellipsis;
 - a Last Brief dropdown opened from the dropdown arrow;
 - a full viewer for deck/activity/prompt/settings/provider inspection;

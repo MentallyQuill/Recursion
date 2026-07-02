@@ -10,8 +10,8 @@ const VALID_REASONER_DROP_REASONS = new Set(['duplicate', 'lower-priority', 'bud
 const SECTION_KEYS = Object.freeze(['sceneBrief', 'turnBrief', 'guardrails']);
 const VALID_INJECTION_PLACEMENTS = new Set(['in_prompt', 'in_chat']);
 const VALID_INJECTION_ROLES = new Set(['system', 'user', 'assistant']);
-const SCENE_BRIEF_FAMILIES = new Set(['Scene Frame', 'Active Cast', 'Environment/Items']);
-const GUARDRAIL_FAMILIES = new Set(['Continuity Risk']);
+const SCENE_BRIEF_FAMILIES = new Set(['Scene Frame', 'Active Cast', 'Environment/Affordances', 'Possessions/Items']);
+const GUARDRAIL_FAMILIES = new Set(['Continuity Risk', 'Knowledge/Secrets']);
 const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
 const DETAIL_PROFILES = new Set(['compact', 'standard', 'expanded']);
 const MAX_CARD_TEXT = 1200;
@@ -27,7 +27,10 @@ const VALID_FAMILIES = new Set([
   'Character Motivation',
   'Dialogue/Relationship',
   'Continuity Risk',
-  'Environment/Items',
+  'Knowledge/Secrets',
+  'Clocks/Consequences',
+  'Environment/Affordances',
+  'Possessions/Items',
   'Prose/Pacing',
   'Open Threads'
 ]);
@@ -530,7 +533,7 @@ async function applyReasonerPatch({
       cards,
       sections: packet.sections
     });
-    const result = await generationRouter.generate('reasonerComposer', { runId, snapshotHash: packet.snapshotHash, prompt });
+    const result = await generationRouter.generate('reasonerComposer', { lane: 'reasoner', runId, snapshotHash: packet.snapshotHash, prompt });
     const validated = validateReasonerResult(result, allowedIds, packet.snapshotHash);
     if (!validated.ok) {
       emitFallbackActivity(activity, { runId, reason: validated.reason });

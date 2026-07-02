@@ -63,6 +63,39 @@ function healthyReasonerSettings(settings = {}) {
   };
 }
 
+function cardProviderResponse(roleId, request = {}) {
+  const catalog = CARD_CATALOG.find((entry) => entry.role === roleId) || CARD_CATALOG[0];
+  return {
+    ok: true,
+    roleId,
+    data: {
+      schema: 'recursion.card.v1',
+      role: catalog.role,
+      family: catalog.family,
+      snapshotHash: request.snapshotHash,
+      items: [{
+        promptText: `${catalog.family} card guidance for this turn.`,
+        evidenceRefs: ['message:2'],
+        tokenEstimate: 12
+      }]
+    }
+  };
+}
+
+function reasonerComposerResponse(request = {}, instructionPatch = 'Fuse the selected Recursion hand for this turn.') {
+  return {
+    ok: true,
+    roleId: 'reasonerComposer',
+    data: {
+      schema: 'recursion.reasonerComposer.v1',
+      snapshotHash: parseReasonerPromptSnapshotHash(request.prompt),
+      instructionPatch,
+      keptCardIds: [],
+      droppedCardIds: []
+    }
+  };
+}
+
 function messageTextHash(message) {
   return hashJson(String(message?.text ?? message?.mes ?? message?.content ?? ''));
 }
@@ -1539,6 +1572,148 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(view.lastHand.cards.length, 1, 'router card budget changes selected hand');
   assertEqual(view.lastPacket.diagnostics.reasonerStatus, 'skipped', 'low reasoning level skips reasoner routing');
   assert(!routerCalls.some((call) => call.roleId === 'reasonerComposer'), 'reasoner composer not called when reasoning level is low');
+}
+
+{
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'low' }),
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        routerCalls.push({ roleId, lane: request.lane || 'utility' });
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              cardJobs: [
+                { family: 'Scene Frame', reason: 'Scene still matters.' },
+                { family: 'Active Cast', reason: 'Cast still matters.' },
+                { family: 'Continuity Risk', reason: 'Continuity still matters.' },
+                { family: 'Open Threads', reason: 'Thread still matters.' }
+              ],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'use', reason: 'low must still suppress reasoner', signals: ['test'] }
+            }
+          };
+        }
+        if (roleId === 'reasonerComposer') {
+          throw new Error('low reasoning must not call reasonerComposer');
+        }
+        return cardProviderResponse(roleId, request);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Keep this lean.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'low reasoning capped run installs');
+  assertEqual(view.lastPlan.budgets.maxCards, 3, 'low reasoning caps max selected cards to the most relevant few');
+  assertEqual(view.lastHand.cards.length, 3, 'low reasoning selects only the capped hand size');
+  assert(routerCalls.every((call) => call.lane === 'utility'), 'low reasoning routes Arbiter, cards, and composer work through Utility only');
+}
+
+{
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'medium' }),
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        routerCalls.push({ roleId, lane: request.lane || 'utility' });
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              cardJobs: [],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'medium still composes with reasoner', signals: ['test'] }
+            }
+          };
+        }
+        if (roleId === 'reasonerComposer') return reasonerComposerResponse(request, 'Medium Reasoner composition.');
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Compose this with the Reasoner.' });
+  assertEqual(result.ok, true, 'medium reasoning installs');
+  assert(routerCalls.some((call) => call.roleId === 'reasonerComposer'), 'medium reasoning invokes Reasoner composer even when Arbiter skips optional reasoner use');
+  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.lane, 'utility', 'medium reasoning keeps Arbiter on Utility');
+}
+
+{
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'high' }),
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        routerCalls.push({ roleId, lane: request.lane || 'utility' });
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              cardJobs: [
+                { family: 'Scene Frame', reason: 'High relevance scene frame.' },
+                { family: 'Open Threads', reason: 'Lower-priority thread card.' }
+              ],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'high still uses reasoner routes', signals: ['test'] }
+            }
+          };
+        }
+        if (roleId === 'reasonerComposer') return reasonerComposerResponse(request, 'High Reasoner synthesis.');
+        return cardProviderResponse(roleId, request);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Use mixed reasoning.' });
+  assertEqual(result.ok, true, 'high reasoning installs');
+  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.lane, 'reasoner', 'high reasoning routes Arbiter through Reasoner');
+  assertEqual(routerCalls.find((call) => call.roleId === 'sceneFrameCard')?.lane, 'reasoner', 'high reasoning routes high-priority cards through Reasoner');
+  assertEqual(routerCalls.find((call) => call.roleId === 'openThreadsCard')?.lane, 'utility', 'high reasoning leaves lower-priority cards on Utility');
+  assert(routerCalls.some((call) => call.roleId === 'reasonerComposer' && call.lane === 'reasoner'), 'high reasoning routes final composition through Reasoner');
+  assertEqual(runtime.view().lastPlan.budgets.maxCards, 6, 'high reasoning keeps normal card budget pressure');
+}
+
+{
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'ultra' }),
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        routerCalls.push({ roleId, lane: request.lane || 'utility' });
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              cardJobs: [
+                { family: 'Scene Frame', reason: 'Scene frame.' },
+                { family: 'Open Threads', reason: 'Thread card.' },
+                { family: 'Prose/Pacing', reason: 'Style card.' }
+              ],
+              budgets: { targetBriefTokens: 700, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'ultra still uses reasoner routes', signals: ['test'] }
+            }
+          };
+        }
+        if (roleId === 'reasonerComposer') return reasonerComposerResponse(request, 'Ultra Reasoner synthesis.');
+        return cardProviderResponse(roleId, request);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Use the broadest reasoning pass.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'ultra reasoning installs');
+  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.lane, 'reasoner', 'ultra reasoning routes Arbiter through Reasoner');
+  assert(routerCalls.filter((call) => call.roleId.endsWith('Card')).every((call) => call.lane === 'reasoner'), 'ultra reasoning routes generated card calls through Reasoner');
+  assert(routerCalls.some((call) => call.roleId === 'reasonerComposer' && call.lane === 'reasoner'), 'ultra reasoning routes final composition through Reasoner');
+  assertEqual(view.lastPlan.budgets.maxCards, 10, 'ultra reasoning raises max card pressure for larger relevant hands');
 }
 
 {

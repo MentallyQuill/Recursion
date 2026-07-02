@@ -19,6 +19,7 @@ These manuals explain how Recursion works behind the SillyTavern UI. They are re
 - [Extension Spec](../RECURSION_EXTENSION_SPEC.md)
 - [Product Scope](../design/RECURSION_PRODUCT_SCOPE.md)
 - [Card System Spec](../design/CARD_SYSTEM_SPEC.md)
+- [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md)
 - [UI Spec](../design/UI_SPEC.md)
 - [Runtime Architecture](../architecture/RUNTIME_ARCHITECTURE.md)
 - [Provider and Generation Spec](../architecture/PROVIDER_AND_GENERATION_SPEC.md)
@@ -27,3 +28,15 @@ These manuals explain how Recursion works behind the SillyTavern UI. They are re
 - [Source Layout](../../src/README.md)
 - [Testing Strategy](../testing/TESTING_STRATEGY.md)
 - [Artifact Contract](../testing/ARTIFACT_CONTRACT.md)
+
+## Module Coverage Map
+
+| Source Area | Primary Manual |
+| --- | --- |
+| `src/runtime.mjs`, `src/activity.mjs`, `src/progress.mjs` | [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md) |
+| `src/cards.mjs`, `src/card-scope.mjs` | [Card Deck And Hand](CARD_DECK_AND_HAND.md) and [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) |
+| `src/prompt.mjs` | [Prompt Packet And Injection](PROMPT_PACKET_AND_INJECTION.md) and [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) |
+| `src/providers.mjs`, provider settings in `src/settings.mjs` | [Model Calls And Provider Routing](MODEL_CALLS_AND_PROVIDER_ROUTING.md) |
+| `src/storage.mjs`, diagnostic journal surfaces | [Storage And Diagnostics](STORAGE_AND_DIAGNOSTICS.md) |
+| `src/hosts/sillytavern/`, `src/extension/index.js` | [Host Integration Manual](HOST_INTEGRATION_MANUAL.md) |
+| `src/ui.mjs`, `styles/recursion.css` | [UI Spec](../design/UI_SPEC.md) and operator docs |

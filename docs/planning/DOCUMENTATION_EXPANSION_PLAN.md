@@ -157,10 +157,14 @@ Capture or plan visuals before writing screenshot-backed prose.
 
 - Create `docs/testing/DOCUMENTATION_RENDER_TRACKING.md`.
 - Add `<Render Needed>` markers to docs as visual gaps are introduced.
-- Capture current SillyTavern-hosted Recursion UI where possible.
-- Use fixture or static diagrams only when live host capture is not required for the claim.
+- Capture current SillyTavern-hosted Recursion UI only after the target surface exists in the real extension and is stable enough to document.
+- Use fixture or static diagrams only when live host capture is not required for the claim; label them as explanatory infographics rather than live UI proof.
 - Promote durable assets into `assets/documentation/renders/`.
 - Keep raw Playwright traces, temporary screenshots, and run reports in `artifacts/`.
+
+### Current Render Pass Status
+
+The 2026-07-02 first pass promotes source-backed static infographics and defers final live UI screenshots. Current inventory: 22 promoted static PNGs, 20 open live-host `<Render Needed>` slots. Static diagrams document runtime, cards, prompt packet, provider routing, storage, diagnostics, host boundary, redaction, fail-soft behavior, verification gates, and behavior settings policy. Live screenshots remain marked with `<Render Needed>` until the current Recursion Bar, options/settings menu, Last Brief, provider setup, prompt packet viewer, and mobile layout are stable in real SillyTavern.
 
 ### README Render Needs
 
@@ -180,7 +184,7 @@ Capture or plan visuals before writing screenshot-backed prose.
 | Recursion Bar | Ready, working, warning, disabled, provider issue, and prompt-ready states. |
 | Hero Pixel Array progress menu | Snapshot, Utility planning, card generation, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states. |
 | Options menu | Copy Last Prompt Packet, Open Settings, Open Viewer, collapsible provider controls, Advanced Injection/UI/Diagnostics sections, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and disabled copy state. |
-| Last Hand dropdown | Compact selected cards, omission hints, prompt packet link, empty hand, stale hand, and error state. |
+| Last Brief dropdown | Compact selected cards, omission hints, prompt packet link, empty hand, stale hand, and error state. |
 | Full Viewer | Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections. |
 | Settings | Play Behavior, Strength, Prompt Footprint, Focus, collapsible Utility and Reasoner provider setup, Advanced Injection/UI/Diagnostics sections, and final prompt injection placement/role/depth. |
 | Provider Controls | Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, fallback warning. |
@@ -195,14 +199,14 @@ Capture or plan visuals before writing screenshot-backed prose.
 | Runtime pipeline infographic | Host Snapshot -> Utility Arbiter -> Scene Deck -> Turn Hand -> Composer/Reasoner -> Prompt Packet -> Injection -> Diagnostics. |
 | Turn sequence diagram | Power, Auto/Manual generation lifecycle, prompt install timing, cancellation, and stale result discard. |
 | Card lifecycle diagram | Create, refresh, stow, discard, select, omit, and invalidate cards. |
-| Card family matrix | Scene Frame, Active Cast, Character Motivation, Dialogue/Relationship, Continuity Risk, Environment/Items, Prose/Pacing, Open Threads. |
+| Card family matrix | Scene Frame, Active Cast, Character Motivation, Dialogue/Relationship, Continuity Risk, Knowledge/Secrets, Clocks/Consequences, Environment/Affordances, Possessions/Items, Prose/Pacing, Open Threads. |
 | Prompt packet stack | Scene Brief, Turn Brief, Guardrails, raw critical guardrail exception. |
 | Prompt injection diagram | Recursion-owned prompt lanes, insertion metadata, stale packet clear, and host boundary. |
 | Provider routing diagram | Utility lane, optional Reasoner lane, current host model, connection profile, OpenAI-compatible endpoint, retries, and fallback. |
 | Storage key map | Settings, system index, scene cache, run journal, prompt metadata, and sanitized artifact boundary. |
 | Redaction boundary diagram | Data that may appear in UI/journals/artifacts versus raw provider payloads and session secrets that must not persist. |
 | Host adapter boundary | SillyTavern context, generation, prompt, settings, file storage, UI lifecycle, and host-neutral runtime interfaces. |
-| Testing gate flow | Unit scripts, alpha gate, Playwright readiness, soak-user preflight, guarded live smoke, and artifact review. |
+| Testing gate flow | Unit scripts, alpha gate, Playwright readiness, soak-user preflight, guarded live smoke, artifact review, and render promotion. Promoted as `assets/documentation/renders/recursion-testing-gates.png`. |
 
 ## Stage 3: README Expansion
 

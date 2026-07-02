@@ -11,6 +11,7 @@ Related documents:
 - [Product Scope](../design/RECURSION_PRODUCT_SCOPE.md)
 - [Runtime Architecture](RUNTIME_ARCHITECTURE.md)
 - [Card System Spec](../design/CARD_SYSTEM_SPEC.md)
+- [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md)
 - [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](STORAGE_AND_DIAGNOSTICS.md)
 - [UI Spec](../design/UI_SPEC.md)
@@ -63,7 +64,18 @@ type RecursionProviderSettings = {
 };
 ```
 
-The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `high`. V1 derives the internal Reasoner route preference from it: Low disables Reasoner use, Medium and High keep Reasoner in Auto, and Ultra prefers Reasoner composition when the lane is healthy.
+The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `high`. V1 derives the internal Reasoner route preference from it: Low disables Reasoner use, while Medium, High, and Ultra require Reasoner composition when the lane is healthy.
+
+Reasoning Level also controls runtime lane preference and card pressure:
+
+| Level | Arbiter lane | Card lanes | Composer | Card pressure |
+| --- | --- | --- | --- | --- |
+| Low | Utility | Utility | Utility | Cap positive `maxCards` at 3. |
+| Medium | Utility | Utility | Reasoner | Normal `maxCards` pressure. |
+| High | Reasoner when healthy | Reasoner for high-priority families, Utility for lower-priority families | Reasoner | Normal `maxCards` pressure. |
+| Ultra | Reasoner when healthy | Reasoner when healthy | Reasoner | Raise positive `maxCards` to at least 10. |
+
+If the Reasoner lane is disabled, untested, unhealthy, missing credentials, or missing required profile/config fields, runtime falls back to Utility for the affected call instead of blocking the host generation.
 
 Source options:
 
@@ -75,7 +87,7 @@ V1 should implement all three source options for Utility and Reasoner when the h
 
 Utility must always have an enabled settings object. If Utility is misconfigured or unhealthy, Recursion degrades to cached/local behavior and does not block the user's normal SillyTavern generation.
 
-Reasoner may be disabled. Disabled Reasoner means all auto decisions must resolve to Utility-only composition, even when the Arbiter reports conflict or crowding.
+Reasoner may be disabled. Disabled or unhealthy Reasoner means Medium, High, and Ultra keep their selected UI level but fall back to Utility composition and Utility Arbiter/card routing where needed.
 
 The first working loop must include:
 
@@ -111,15 +123,18 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 | Role | Default lane | Purpose | Failure behavior |
 | --- | --- | --- | --- |
-| `utilityArbiter` | Utility | Decide whether Recursion should skip, reuse cache, refresh cards, compose a brief, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
-| `sceneFrameCard` | Utility | Produce compact current-scene frame data | Omit card with diagnostic |
-| `activeCastCard` | Utility | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
-| `characterMotivationCard` | Utility | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
-| `dialogueRelationshipCard` | Utility | Capture current conversational tension, relationship texture, promises, conflicts, and voice constraints | Omit card with diagnostic |
-| `continuityRiskCard` | Utility | Identify likely contradictions or fragile facts for the next generation | Omit card with diagnostic |
-| `environmentItemsCard` | Utility | Capture spatial constraints, sensory details, relevant objects, tools, hazards, and nearby affordances | Omit card with diagnostic |
-| `prosePacingCard` | Utility | Capture local craft guidance for density, momentum, specificity, and response shape | Omit card with diagnostic |
-| `openThreadsCard` | Utility | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
+| `utilityArbiter` | Utility, Reasoner at High/Ultra when healthy | Decide whether Recursion should skip, reuse cache, refresh cards, compose a brief, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
+| `sceneFrameCard` | Utility, Reasoner at High/Ultra when healthy | Produce compact current-scene frame data | Omit card with diagnostic |
+| `activeCastCard` | Utility, Reasoner at High/Ultra when healthy | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
+| `characterMotivationCard` | Utility, Reasoner at High/Ultra when healthy | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
+| `dialogueRelationshipCard` | Utility, Reasoner at Ultra when healthy | Capture current conversational tension, relationship texture, promises, conflicts, and voice constraints | Omit card with diagnostic |
+| `continuityRiskCard` | Utility, Reasoner at High/Ultra when healthy | Identify likely contradictions or fragile facts for the next generation | Omit card with diagnostic |
+| `knowledgeSecretsCard` | Utility, Reasoner at High/Ultra when healthy | Capture concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries | Omit card with diagnostic |
+| `clocksConsequencesCard` | Utility, Reasoner at High/Ultra when healthy | Capture deadlines, countdowns, delayed consequences, and escalation triggers | Omit card with diagnostic |
+| `environmentAffordancesCard` | Utility, Reasoner at Ultra when healthy | Capture spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances | Omit card with diagnostic |
+| `possessionsItemsCard` | Utility, Reasoner at Ultra when healthy | Capture important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them | Omit card with diagnostic |
+| `prosePacingCard` | Utility, Reasoner at Ultra when healthy | Capture local craft guidance for density, momentum, specificity, and response shape | Omit card with diagnostic |
+| `openThreadsCard` | Utility, Reasoner at Ultra when healthy | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
 | `briefUtilityComposer` | Utility | Compose the normal compact prompt brief from accepted cards and budgets | Compose from available cards; omit invalid cards |
 | `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility-only composition |
 | `providerTest` | Selected lane | Validate lane connectivity and structured response capability | Mark lane test failed with compact error |
@@ -140,6 +155,7 @@ Inputs:
 - current settings hash;
 - known scene cache metadata;
 - available card types and token budgets;
+- behavior influence policy for Strength, Focus, and Prompt Footprint;
 - Reasoner on/off state and health summary.
 
 The Arbiter should return every auto decision it can in the initial call. Recursion should not spend a separate model call just to decide whether to use Reasoner unless a later version has a concrete, measured reason to do so.

@@ -8,6 +8,7 @@ Related specs:
 
 - [Product Scope](../design/RECURSION_PRODUCT_SCOPE.md)
 - [Card System Spec](../design/CARD_SYSTEM_SPEC.md)
+- [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md)
 - [Runtime Architecture](RUNTIME_ARCHITECTURE.md)
 - [Provider and Generation Spec](PROVIDER_AND_GENERATION_SPEC.md)
 - [Storage and Diagnostics](STORAGE_AND_DIAGNOSTICS.md)
@@ -108,7 +109,7 @@ Core inputs:
 - Utility Arbiter next-turn need assessment;
 - provider availability and Reasoner eligibility;
 - prompt environment summary, including known active external context sources when available;
-- user settings for enablement, intensity, Reasoner use, and diagnostics visibility;
+- user settings for enablement, Strength, Focus, Prompt Footprint, Reasoning Level, and diagnostics visibility;
 - token budget and section caps.
 
 Cards should provide structured fields rather than opaque prompt text wherever possible:
@@ -202,7 +203,7 @@ The runtime architecture owns the exact SillyTavern API calls, prompt identifier
 
 ## Footprint Profiles
 
-Prompt footprint is an automatic current-turn state chosen by the Utility Arbiter based on next-turn need. The user setting is the fallback when the Arbiter omits `promptFootprint` or returns an invalid value; a valid Arbiter value controls the packet being composed without mutating the stored setting.
+Prompt footprint is the size/detail control for the composed packet. The stored user setting is the baseline preference, and the Utility Arbiter may request a current-turn footprint only inside the policy defined by [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md). A valid current-turn footprint controls the packet being composed without mutating the stored setting.
 
 ### Compact
 
@@ -246,7 +247,7 @@ Rich must not become a broad plot plan, transcript summary, or lore recap. It is
 
 ## Budgeting and Omission Reasons
 
-Budgeting is part of the product contract. Recursion should prefer a smaller, sharper packet over exhaustive context. Each section has a soft cap and a hard cap; the packet has a total hard cap selected by footprint profile and user intensity.
+Budgeting is part of the product contract. Recursion should prefer a smaller, sharper packet over exhaustive context. Each section has a soft cap and a hard cap; the packet has a total hard cap selected by the effective footprint profile. Strength can change assertiveness and selection pressure inside that footprint, but Prompt Footprint owns packet size.
 
 Budget order:
 

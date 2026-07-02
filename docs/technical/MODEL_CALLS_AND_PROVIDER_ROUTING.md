@@ -6,10 +6,10 @@ Provider routing is implemented by `src/providers.mjs`, configured by `src/setti
 
 | Lane | Required | Uses | Fallback |
 | --- | --- | --- | --- |
-| Utility | Yes | Utility Arbiter, card generation, provider tests, Utility composition support. | Local fallback plan, cache reuse, prompt clear, or skip. |
-| Reasoner | No | Optional composer synthesis for rich, crowded, conflicted, or subtle hands. | Utility-composed packet. |
+| Utility | Yes | Low/Medium Arbiter, Low/Medium card generation, lower-priority High cards, provider tests, Utility composition support. | Local fallback plan, cache reuse, prompt clear, or skip. |
+| Reasoner | No | Medium+ final composition, High/Ultra Arbiter, high-priority High cards, Ultra card generation. | Utility-composed packet or Utility lane fallback. |
 
-Utility remains the default operational lane. Reasoner is eligible only when enabled and selected by settings or Arbiter state.
+Utility remains the required operational lane. Reasoner is eligible only when enabled and selected by Reasoning Level policy.
 
 ## Provider Sources
 
@@ -27,13 +27,13 @@ Direct endpoint API keys are session-only secrets kept in the in-memory secret s
 
 | Role | Lane | Current use |
 | --- | --- | --- |
-| `utilityArbiter` | Utility | Plan action, scene status, card jobs, Reasoner decision, budgets, and compact diagnostics. |
-| Card roles | Utility | Generate fixed-family card JSON from the frozen snapshot. |
+| `utilityArbiter` | Utility by default; Reasoner at High/Ultra when healthy | Plan action, scene status, card jobs, Reasoner decision, budgets, and compact diagnostics. |
+| Card roles | Utility by default; Reasoner for high-priority High cards and Ultra card calls when healthy | Generate fixed-family card JSON from the frozen snapshot. |
 | `briefUtilityComposer` | Utility | Reserved Utility composition role in the routing contract. |
-| `reasonerComposer` | Reasoner | Optional synthesis patch for the Turn Brief. |
+| `reasonerComposer` | Reasoner | Medium+ synthesis patch for the Turn Brief. |
 | `providerTest` | Selected lane | Connectivity and structured response test for provider settings UI. |
 
-Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `continuityRiskCard`, `environmentItemsCard`, `prosePacingCard`, and `openThreadsCard`.
+Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `continuityRiskCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, `prosePacingCard`, and `openThreadsCard`.
 
 ## Routing Diagram
 
@@ -112,6 +112,6 @@ If a run is no longer active, runtime returns a superseded result and refuses to
 
 ## Operator-Visible Provider States
 
-The compact UI shows Utility provider details with source, profile, endpoint, model, session key state, max tokens, test status, resolved provider, and resolved model. The Reasoner provider appears as an optional collapsed summary row in the top-bar settings menu. Temperature and top-p remain normalized provider settings with defaults, but they are not visible controls in the compact V1 mock. The Recursion Bar shows the active composer lane and Reasoner state.
+The compact UI shows Utility and Reasoner provider details in collapsible lanes with source, profile, endpoint, model, session key state, max tokens, test status, resolved provider, and resolved model. Temperature and top-p remain normalized provider settings with defaults, but they are not visible controls in the compact V1 surface. The Recursion Bar shows current progress, active composition lane, and Reasoning Level bias without exposing raw provider errors.
 
-Visible states are compact: ready, unavailable, disabled, issue, composing, or test failed. Raw provider errors remain out of the bar and ribbon.
+Visible states are compact: ready, unavailable, disabled, issue, composing, or test failed. Raw provider errors remain out of the bar and progress menu.

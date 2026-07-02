@@ -15,8 +15,76 @@ import {
 } from '../../src/card-scope.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
-assertEqual(CARD_SCOPE_CATALOG.length, 8, 'scope catalog mirrors fixed V1 card families');
+const EXPECTED_SCOPE_CATALOG = Object.freeze([
+  {
+    family: 'Scene Frame',
+    role: 'sceneFrameCard',
+    subItems: ['locationSituation', 'presentParticipants', 'immediateDirection']
+  },
+  {
+    family: 'Active Cast',
+    role: 'activeCastCard',
+    subItems: ['presentCharacters', 'visibleState', 'speakerRoles']
+  },
+  {
+    family: 'Character Motivation',
+    role: 'characterMotivationCard',
+    subItems: ['visibleGoals', 'pressures', 'hesitationPosture']
+  },
+  {
+    family: 'Dialogue/Relationship',
+    role: 'dialogueRelationshipCard',
+    subItems: ['tension', 'promisesConflicts', 'voiceConstraints']
+  },
+  {
+    family: 'Continuity Risk',
+    role: 'continuityRiskCard',
+    subItems: ['fragileFacts', 'spatialConstraints', 'timelineOrder']
+  },
+  {
+    family: 'Knowledge/Secrets',
+    role: 'knowledgeSecretsCard',
+    subItems: ['concealedFacts', 'knowsSuspects', 'revealBoundaries']
+  },
+  {
+    family: 'Clocks/Consequences',
+    role: 'clocksConsequencesCard',
+    subItems: ['deadlinesCountdowns', 'delayedConsequences', 'escalationTriggers']
+  },
+  {
+    family: 'Environment/Affordances',
+    role: 'environmentAffordancesCard',
+    subItems: ['spatialLayout', 'sensoryTexture', 'hazardsAffordances']
+  },
+  {
+    family: 'Possessions/Items',
+    role: 'possessionsItemsCard',
+    subItems: ['heldCarriedItems', 'itemLocationControl', 'itemAffordancesRisks']
+  },
+  {
+    family: 'Prose/Pacing',
+    role: 'prosePacingCard',
+    subItems: ['density', 'momentum', 'specificityShape']
+  },
+  {
+    family: 'Open Threads',
+    role: 'openThreadsCard',
+    subItems: ['unresolvedQuestions', 'pendingActions', 'nearTermPressures']
+  }
+]);
+
+assertEqual(CARD_SCOPE_CATALOG.length, 11, 'scope catalog mirrors fixed V1 card families');
+assertDeepEqual(
+  CARD_SCOPE_CATALOG.map((family) => ({
+    family: family.family,
+    role: family.role,
+    subItems: family.subItems.map((item) => item.key)
+  })),
+  EXPECTED_SCOPE_CATALOG,
+  'scope catalog membership, roles, and sub-item order match V1 plan'
+);
 assert(CARD_SCOPE_CATALOG.every((family) => family.subItems.length >= 2), 'each family has sub-items');
+assertEqual(CARD_SCOPE_TOTAL_SUB_ITEMS, 33, 'scope catalog exposes the expected V1 focus count');
 assertEqual(
   CARD_SCOPE_TOTAL_SUB_ITEMS,
   CARD_SCOPE_CATALOG.reduce((sum, family) => sum + family.subItems.length, 0),

@@ -33,7 +33,6 @@ Runtime toggles:
         <path d="M5 3.8a5 5 0 1 0 6 0" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"></path>
       </svg>
     </button>
-    <span class="sep" aria-hidden="true"></span>
 
     <section class="status-popover" id="status-popover" aria-label="Generation status steps">
       <div class="status-head">
@@ -191,9 +190,9 @@ Runtime toggles:
       <div class="reasoning-chain" role="radiogroup" aria-label="Reasoning level" data-selected="high">
         <span class="reasoning-line-fill" aria-hidden="true"></span>
         <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="low" title="Low: Utility-only, reduced cards."></button>
-        <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="medium" title="Medium: mostly Utility, Reasoner eligible for the brief."></button>
-        <button class="reasoning-node is-lit is-selected" type="button" role="radio" aria-checked="true" data-level="high" title="High: mixed Utility and Reasoner checks."></button>
-        <button class="reasoning-node" type="button" role="radio" aria-checked="false" data-level="ultra" title="Ultra: Reasoner-heavy synthesis with a larger card bias."></button>
+        <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="medium" title="Medium: Utility checks, Reasoner final brief."></button>
+        <button class="reasoning-node is-lit is-selected" type="button" role="radio" aria-checked="true" data-level="high" title="High: Reasoner Arbiter, priority cards, and final brief."></button>
+        <button class="reasoning-node" type="button" role="radio" aria-checked="false" data-level="ultra" title="Ultra: Reasoner-heavy calls with a larger card bias."></button>
       </div>
       <button class="icon-button brief-arrow" id="brief-arrow" aria-label="Open last brief preview" aria-expanded="false">
         <span class="arrow-down" aria-hidden="true"></span>
@@ -248,7 +247,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
           </div>
           <div class="card-body">
             <p class="card-text">Doorway remains blocked, the lamp is broken, and movement through the corridor should stay constrained until the scene resolves it. If the model tries to move characters through the blocked door without clearing debris, the prompt should steer back toward the known physical constraint instead of silently accepting the contradiction.</p>
-            <div class="meta-row"><span class="chip critical">critical</span><span class="chip state">fresh</span><span class="chip state">injected</span><span class="chip">scene</span></div>
+            <div class="meta-row"><span class="chip critical">critical</span><span class="chip state">fresh</span><span class="chip state">injected</span><span class="chip" title="More metadata: scene, turn brief">+2</span></div>
           </div>
         </button>
 
@@ -424,6 +423,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
       <section class="settings-disclosure is-open">
         <button class="settings-disclosure-toggle" type="button" aria-expanded="true">UI</button>
         <div class="settings-disclosure-body">
+          <label class="settings-row"><span>Tooltips</span><input type="checkbox" checked></label>
           <label class="settings-row"><span>Sub-tier Rows</span><input type="number" value="5"></label>
           <label class="settings-row"><span>Progress Rows</span><input type="number" value="15"></label>
         </div>
@@ -486,7 +486,10 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
         { id: 'open-threads-card', label: 'Open Threads', provider: 'utility', state: 'pending', source: 'fallback' },
         { id: 'active-cast-card', label: 'Active Cast', provider: 'utility', state: 'pending', source: 'cache' },
         { id: 'dialogue-relationship-card', label: 'Dialogue/Relationship', provider: 'utility', state: 'pending', source: 'generated' },
-        { id: 'environment-items-card', label: 'Environment/Items', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'knowledge-secrets-card', label: 'Knowledge/Secrets', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'clocks-consequences-card', label: 'Clocks/Consequences', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'environment-affordances-card', label: 'Environment/Affordances', provider: 'utility', state: 'pending', source: 'generated' },
+        { id: 'possessions-items-card', label: 'Possessions/Items', provider: 'utility', state: 'pending', source: 'generated' },
         { id: 'prose-pacing-card', label: 'Prose/Pacing', provider: 'utility', state: 'pending', source: 'generated' }
       ]
     },

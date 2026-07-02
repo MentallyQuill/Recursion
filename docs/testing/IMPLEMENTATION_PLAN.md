@@ -173,7 +173,7 @@ Tests:
 - Reasoner timeout, provider failure, or invalid schema falls back to Utility composition.
 - Explicit conditioned final-prompt injection settings override packet block placement, role, and depth after Utility/Reasoner composition.
 - Injection installs, replaces, and clears by Recursion-owned key.
-- Manual mode remains selectable and currently follows the Auto prompt-install path.
+- Manual mode remains selectable and enforces selected card scope as a strict whitelist before prompt installation.
 
 Exit criteria:
 
@@ -193,6 +193,7 @@ Build:
 - High-level settings controls.
 - Advanced conditioned final-prompt injection controls for placement, role, and depth, defaulted to the template plan.
 - Provider controls.
+- Cards scope selector with fixed family and sub-item focus controls.
 - SillyTavern-native graphite styling.
 
 Tests:
@@ -202,6 +203,7 @@ Tests:
 - Quick operations do not flicker the progress surface.
 - Warning/error states persist until dismissed or superseded.
 - Last Brief shows used cards from the prior run.
+- Cards scope selector prevents zero selected focus items and updates Manual/Auto behavior without exposing card-editing workflows.
 - Viewer handles empty/corrupt diagnostics gracefully.
 - Settings save persists conditioned final-prompt injection placement, role, and depth without exposing card-level micromanagement.
 - Mobile/narrow layout does not overlap chat controls.

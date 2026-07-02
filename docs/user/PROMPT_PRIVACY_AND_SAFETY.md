@@ -177,7 +177,7 @@ Before sharing diagnostics or screenshots:
 
 Before disabling Recursion:
 
-1. Set mode to Off or disable the extension.
+1. Turn the power toggle off or disable the extension.
 2. Confirm Recursion prompt lanes are cleared or skipped.
 3. Clear session keys if direct endpoint testing is finished.
 

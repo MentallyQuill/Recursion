@@ -67,8 +67,8 @@ function baseHand(overrides = {}) {
       },
       {
         id: 'c4',
-        family: 'Environment/Items',
-        promptText: 'A brass keycard is half-buried under wet leaves.',
+        family: 'Environment/Affordances',
+        promptText: 'The alley has slick pavement, a humming sign, and a blocked fire door.',
         emphasis: 'muted',
         tokenEstimate: 10,
         evidenceRefs: ['message:4']
@@ -111,7 +111,7 @@ assertEqual(packet.diagnostics.composerLane, 'utility', 'utility composer used b
 assertEqual(packet.diagnostics.reasonerStatus, 'skipped', 'reasoner skipped when disabled');
 assert(packet.sections.sceneBrief.includes('rain-soaked alley'), 'scene frame routes to scene brief');
 assert(packet.sections.sceneBrief.includes('Mara'), 'active cast routes to scene brief');
-assert(packet.sections.sceneBrief.includes('keycard'), 'environment items route to scene brief');
+assert(packet.sections.sceneBrief.includes('blocked fire door'), 'environment affordances route to scene brief');
 assert(packet.sections.turnBrief.includes('unanswered signal'), 'other card families route to turn brief');
 assert(packet.sections.guardrails.includes('lamp'), 'continuity risk becomes guardrail');
 assert(packet.sections.guardrails.includes('Respect the player message'), 'static player-message guardrail included');
@@ -130,7 +130,7 @@ assertDeepEqual(
     { cardId: 'c1', family: 'Scene Frame', emphasis: 'normal', tokenEstimate: 12, detailProfile: 'standard', evidenceRefs: ['message:1'] },
     { cardId: 'c2', family: 'Continuity Risk', emphasis: 'emphasized', tokenEstimate: 12, detailProfile: 'expanded', evidenceRefs: ['message:2'] },
     { cardId: 'c3', family: 'Active Cast', emphasis: 'normal', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:3'] },
-    { cardId: 'c4', family: 'Environment/Items', emphasis: 'muted', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:4'] },
+    { cardId: 'c4', family: 'Environment/Affordances', emphasis: 'muted', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:4'] },
     { cardId: 'c5', family: 'Open Threads', emphasis: 'normal', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:5'] }
   ],
   'selected card refs preserve safe prompt-facing metadata'
@@ -138,6 +138,54 @@ assertDeepEqual(
 assertDeepEqual(packet.omissions, [
   { cardId: 'omitted-1', family: 'Prose/Pacing', reason: 'token-budget', tokenEstimate: 99 }
 ], 'omissions preserve safe omission metadata');
+
+const expandedFamilyPacket = await composePromptPacket({
+  hand: {
+    handId: 'expanded-families',
+    cards: [
+      {
+        id: 'secret-card',
+        family: 'Knowledge/Secrets',
+        promptText: 'Only Mara knows the vault code, while Ilya merely suspects a hidden access path.',
+        tokenEstimate: 10,
+        evidenceRefs: ['message:6']
+      },
+      {
+        id: 'clock-card',
+        family: 'Clocks/Consequences',
+        promptText: 'The patrol returns in two exchanges unless the door alarm is silenced.',
+        tokenEstimate: 10,
+        evidenceRefs: ['message:7']
+      },
+      {
+        id: 'item-card',
+        family: 'Possessions/Items',
+        promptText: 'Ilya has the brass keycard; Mara has the cracked datapad.',
+        tokenEstimate: 10,
+        evidenceRefs: ['message:8']
+      },
+      {
+        id: 'affordance-card',
+        family: 'Environment/Affordances',
+        promptText: 'The service ladder is reachable from the crate stack.',
+        tokenEstimate: 10,
+        evidenceRefs: ['message:9']
+      }
+    ],
+    omitted: []
+  },
+  snapshot: baseSnapshot(),
+  settings: { promptFootprint: 'normal', reasonerUse: 'off' }
+});
+assert(expandedFamilyPacket.sections.guardrails.includes('vault code'), 'knowledge/secrets cards route to guardrails');
+assert(expandedFamilyPacket.sections.turnBrief.includes('patrol returns'), 'clocks/consequences cards route to turn brief');
+assert(expandedFamilyPacket.sections.sceneBrief.includes('brass keycard'), 'possessions/items cards route to scene brief');
+assert(expandedFamilyPacket.sections.sceneBrief.includes('service ladder'), 'environment/affordances cards route to scene brief');
+assertDeepEqual(
+  expandedFamilyPacket.selectedCardRefs.map((entry) => entry.family),
+  ['Knowledge/Secrets', 'Clocks/Consequences', 'Possessions/Items', 'Environment/Affordances'],
+  'expanded families preserve prompt-facing selected refs'
+);
 
 const unsafeSnapshotPacket = await composePromptPacket({
   hand: baseHand(),

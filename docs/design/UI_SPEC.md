@@ -18,6 +18,7 @@ Related docs:
 
 - [Product Scope](RECURSION_PRODUCT_SCOPE.md)
 - [Card System Spec](CARD_SYSTEM_SPEC.md)
+- [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md)
 - [Runtime Architecture](../architecture/RUNTIME_ARCHITECTURE.md)
 - [Prompt Composition Spec](../architecture/PROMPT_COMPOSITION_SPEC.md)
 - [Provider and Generation Spec](../architecture/PROVIDER_AND_GENERATION_SPEC.md)
@@ -30,13 +31,13 @@ Recursion should use its own chat-attached top bar instead of adopting the Direc
 Default desktop shape:
 
 ```text
-[power] | [mode icon] | [Hero Pixel Array] Selecting turn hand...     [reasoning] v | ...
+[power] [mode icon] [cards] | [Hero Pixel Array] Selecting turn hand...     [reasoning] v | ...
 ```
 
 Narrow/mobile shape:
 
 ```text
-[power] | [mode] | [Hero Pixel Array] Selecting...      v | ...
+[power] [mode] [cards] | [Hero Pixel Array] Selecting...      v | ...
 ```
 
 The desktop bar uses one compact row with distinct zones for power, mode, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
@@ -48,15 +49,15 @@ Recursion chrome should use explicit compact font sizing instead of inheriting S
 Canonical desktop layout:
 
 ```text
-[power] | [mode arrows] [cards] | [blocks] Selecting turn hand...  [reasoning] v | ...
-[power] | [mode arrows] [cards] | [blocks] Installing prompt...    [reasoning] v | ...
-[power] | [mode arrows] [cards] | [blocks] Manual scope active...  [reasoning] Cards v | ...
-[power-off] | [mode arrows] [cards] |                              [reasoning] v | ...
+[power] [mode arrows] [cards] | [blocks] Selecting turn hand...  [reasoning] v | ...
+[power] [mode arrows] [cards] | [blocks] Installing prompt...    [reasoning] v | ...
+[power] [mode arrows] [cards] | [blocks] Manual scope active...  [reasoning] Cards v | ...
+[power-off] [mode arrows] [cards] |                              [reasoning] v | ...
 ```
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
 
-The mode control is a single icon-only button beside the power toggle. It uses a matching three-arrow icon pair so Auto and Manual feel equally capable but differently directed:
+The mode control is a single icon-only button beside the power toggle with no separator between Power and Mode. It uses a matching three-arrow icon pair so Auto and Manual feel equally capable but differently directed:
 
 - Divergent three-arrow fan: `Auto`. One origin splits into three directions, meaning Recursion may choose the best route from the current scene.
 - Parallel three-arrow stack: `Manual`. The same three arrows move in one direction, meaning Recursion keeps full force but follows selected constraints.
@@ -101,7 +102,7 @@ Reference mode selector shape:
 </div>
 ```
 
-Card scope is not a mode. The compact right-side `Cards` button opens a full-bar-width dropdown with the fixed V1 card families and their sub-item focus toggles. Its label is `Cards` when all sub-items are enabled and `selected/total` when scope is partial. Auto treats this scope as preference/focus, while Manual treats it as a strict whitelist. The UI must prevent disabling the final selected sub-item and show `Keep at least one card focus enabled.` when that guard is hit.
+Card scope is not a mode. The compact left-side stacked-cards icon opens a full-bar-width dropdown with the fixed V1 card families and their sub-item focus toggles. The compact bar control stays icon-only; the dropdown header summarizes whether all focus items are enabled or a partial count is active. Auto treats this scope as preference/focus, while Manual treats it as a strict whitelist. Category and sub-item clicks must visibly update the open dropdown in place without closing it or waiting for a host rerender. The UI must prevent disabling the final selected sub-item and show `Keep at least one card focus enabled.` when that guard is hit.
 
 Cards Selection button owns the stacked-cards icon. The mode button and mode menu must not reuse the cards icon, because cards now means scope selection rather than automation mode.
 
@@ -154,7 +155,7 @@ Blocks build down from the top of a three-row column, then start the next column
 
 The Hero Pixel Array must respect reduced-motion preferences. It may pulse active blocks while work is running, but it must not animate when `prefers-reduced-motion: reduce` is active.
 
-The bar may show exactly one live generation status: the current in-progress step, rendered as short muted text to the right of the mode separator. The full step list belongs in the Hero Pixel Array menu. The bar may expose last-brief details through tooltip/accessibility text on the preview arrow, but it should not become a row of status chips.
+The bar may show exactly one live generation status: the current in-progress step, rendered as short muted text to the right of the Hero Pixel Array. The full step list belongs in the Hero Pixel Array menu. The bar may expose last-brief details through tooltip/accessibility text on the preview arrow, but it should not become a row of status chips.
 
 Pending or waiting progress rows must not appear as the compact current-step text. They remain visible in the progress menu as empty/waiting rows while the bar stays quiet until work is actually running, warning, or failed.
 
@@ -214,7 +215,11 @@ When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt 
       children: [
         { id: "scene-frame-card", label: "Scene Frame", providerLane: "utility", state: "running", meta: "running", sourceRoleId: "sceneFrameCard" },
         { id: "continuity-risk-card", label: "Continuity Risk", providerLane: "utility", state: "cached", meta: "cached", source: "cache", sourceRoleId: "continuityRiskCard" },
+        { id: "knowledge-secrets-card", label: "Knowledge/Secrets", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "knowledgeSecretsCard" },
+        { id: "clocks-consequences-card", label: "Clocks/Consequences", providerLane: "utility", state: "running", meta: "running", sourceRoleId: "clocksConsequencesCard" },
         { id: "character-motivation-card", label: "Character Motivation", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "characterMotivationCard" },
+        { id: "environment-affordances-card", label: "Environment/Affordances", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "environmentAffordancesCard" },
+        { id: "possessions-items-card", label: "Possessions/Items", providerLane: "utility", state: "pending", meta: "waiting", sourceRoleId: "possessionsItemsCard" },
         { id: "open-threads-card", label: "Open Threads", providerLane: "utility", state: "warning", meta: "fallback", source: "fallback", sourceRoleId: "openThreadsCard" }
       ]
     },
@@ -266,7 +271,7 @@ The array layout is deterministic:
 - If a run has more than 36 top-level progress rows, the progress menu still shows every row, but the Hero Pixel Array uses its final block as an overflow aggregate. The aggregate state is selected from represented overflow rows in this priority order: running, failed, warning, pending, cached, done, skipped.
 - The renderer sets `--columns` from `columnCount`, `grid-row` from `row + 1`, `grid-column` from `column + 1`, and `--block-index` from the block index.
 - Entry delay is slight, roughly 24ms per block, so a 12-step run visibly builds without feeling slow.
-- The Hero Pixel Array sits to the right of the mode separator and to the left of the current-step status text.
+- The Hero Pixel Array sits to the right of the Cards separator and to the left of the current-step status text.
 - The current-step status text shifts smoothly with the array width, keeping a small gap from the growing columns.
 - The compact current-step text uses action wording only, such as `Installing Recursion prompt...`; it must not append row meta like `waiting`, `done`, `generated`, or `cached`.
 - The renderer sets `--columns` and `--block-count` on the activity trigger so the pixel grid and status spacing derive from the same run state.
@@ -355,7 +360,7 @@ Every active progress-row ring must continue to use the same small spinner visua
 
 The inner cutout must not be transparent. It should use the same dark cutout fill and subtle inner border for every active row ring; otherwise active progress rows read as colored dots instead of rings.
 
-The active work also appears inline in the bar as the current status, immediately after the mode separator. Use concise phrases such as `Reading current turn...`, `2 model calls running...`, `Composing prompt packet...`, `Installing prompt...`, and `Saving cache...`. When idle, the text can collapse to empty space or a quiet `Ready`.
+The active work also appears inline in the bar as the current status, immediately after the Hero Pixel Array. Use concise phrases such as `Reading current turn...`, `2 model calls running...`, `Composing prompt packet...`, `Installing prompt...`, and `Saving cache...`. When idle, the text can collapse to empty space or a quiet `Ready`.
 
 The status menu should use friendly stage text, not internal event names. It must not show raw prompts, raw provider responses, stack traces, hidden reasoning, private story plans, or unbounded provider error text.
 
@@ -800,8 +805,10 @@ Metachip rules:
 - Priority is the only strong color. Use red for `critical`, amber for `strong`, and muted neutral for `normal`, `light`, and support levels.
 - State/source chips such as `fresh`, `injected`, `memory`, `compiler`, `scene`, and `turn brief` stay subtle.
 - Compact rows show at most three or four chips. If more metadata exists, collapse extras behind `+N`.
-- Expanded rows may show all chips.
+- Expanded rows may show more detail text, but metadata should still stay restrained; prefer a `+N` chip with hover/focus explanation over spilling every tag into the row.
 - Avoid assigning every tag its own color. Random chip color sprawl is explicitly out of scope.
+
+Hover/focus help should be useful but never required. Icon-only controls, progress rows, provider marks, status indicators, card family icons, compact card rows, metachips, provider source controls, Injection controls, and Diagnostics actions should expose short tooltip/accessibility copy that explains what the thing is, what clicking it does, or why it is in its current state. Card row hover copy may include family, safe summary, selected/omitted reason, source/cache state, and bounded evidence metadata. It must not show raw provider output, hidden reasoning, API keys, stack traces, or raw transcript text. Full card text remains click-to-expand, not hover-only.
 
 Reference DOM shape:
 
@@ -1062,14 +1069,16 @@ Play is the default tab. It contains one open `Behavior` disclosure for controls
 - Focus: Balanced, Character, Continuity, Prose, Plot.
 - Prompt Footprint: Compact, Normal, Rich.
 
+The backend meaning of these three controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). In short: Strength controls intervention pressure, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
+
 Mode and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
 
-- Low: Utility-only bias, reduced card pressure, compact packet preference.
-- Medium: mostly Utility, Reasoner eligible for brief composition when useful.
-- High: mixed Utility/Reasoner bias for crowded or conflicted checks.
-- Ultra: Reasoner-heavy composition bias with a richer card/packet tendency.
+- Low: Utility-only bias with reduced card pressure.
+- Medium: Utility Arbiter and Utility cards, then Reasoner final brief composition.
+- High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner final brief composition.
+- Ultra: Reasoner-heavy Arbiter, card generation, and final composition with larger card-set pressure.
 
-`reasoningLevel` is persisted as `low | medium | high | ultra`, default `high`. It is the authoritative user-facing provider-bias setting. Runtime may still carry an internal `reasonerUse` route value, but that value is always derived from `reasoningLevel`: Low maps to `off`, Medium/High map to `auto`, and Ultra maps to `always`. If the Reasoner provider is unavailable while High or Ultra is selected, the UI should keep the selected level and show fallback status rather than blocking the user.
+`reasoningLevel` is persisted as `low | medium | high | ultra`, default `high`. It is the authoritative user-facing provider-bias setting. Runtime may still carry an internal `reasonerUse` route value, but that value is always derived from `reasoningLevel`: Low maps to `off`, Medium/High/Ultra map to `always`. If the Reasoner provider is unavailable while Medium, High, or Ultra is selected, the UI should keep the selected level and show fallback status rather than blocking the user.
 
 Providers contains the complete provider setup surface in collapsible lane sections:
 
@@ -1091,7 +1100,7 @@ Provider Source changes the field context inside each lane immediately, matching
 Advanced contains low-frequency controls grouped into collapsible sections:
 
 - Injection: placement, role, and depth controls for the composed prompt packet.
-- UI: Sub-tier Rows and Progress Rows.
+- UI: Tooltips, Sub-tier Rows, and Progress Rows. Turning Tooltips off removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
 - Diagnostics: journal size, safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
 
 Injection controls apply to the final conditioned prompt packet after Utility or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the composed Recursion brief to land in a different host lane or depth.

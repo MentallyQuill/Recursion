@@ -9,6 +9,8 @@ Recursion testing should prove the extension is useful and safe without turning 
 | Focused live SillyTavern smoke | Current preflight proves dedicated-user rejection, dry-run behavior, report shape, fail-closed semantics, Recursion-owned storage probes, served-extension freshness, no-generation UI mount/open behavior, and opt-in generation bridge prompt-install evidence. | Current evidence: `check-sillytavern-soak-users` storage-probe reports and `smoke-sillytavern-live` reports, no-generation screenshots/trace, live log, served-extension comparison, storage probe artifact, browser snapshot, prompt-key hashes, hand readiness, and prompt-packet metadata. |
 | Documentation render tracking | Open screenshot, diagram, and static visual needs remain visible until promoted. | [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md), visible `<Render Needed>` markers, and promoted assets under `assets/documentation/renders/`. |
 
+![Recursion verification gates](../../assets/documentation/renders/recursion-testing-gates.png)
+
 The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, offline Playwright readiness, SillyTavern storage probes when dedicated users are available, no-generation SillyTavern UI evidence, and opt-in generation bridge evidence when Recursion is installed for a dedicated user.
 
 ## Core Invariants

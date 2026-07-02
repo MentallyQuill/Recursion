@@ -15,7 +15,10 @@ const EXPECTED_CATALOG = Object.freeze([
   { family: 'Character Motivation', role: 'characterMotivationCard', priority: 88 },
   { family: 'Dialogue/Relationship', role: 'dialogueRelationshipCard', priority: 84 },
   { family: 'Continuity Risk', role: 'continuityRiskCard', priority: 98 },
-  { family: 'Environment/Items', role: 'environmentItemsCard', priority: 76 },
+  { family: 'Knowledge/Secrets', role: 'knowledgeSecretsCard', priority: 92 },
+  { family: 'Clocks/Consequences', role: 'clocksConsequencesCard', priority: 90 },
+  { family: 'Environment/Affordances', role: 'environmentAffordancesCard', priority: 76 },
+  { family: 'Possessions/Items', role: 'possessionsItemsCard', priority: 78 },
   { family: 'Prose/Pacing', role: 'prosePacingCard', priority: 62 },
   { family: 'Open Threads', role: 'openThreadsCard', priority: 72 }
 ]);
@@ -29,7 +32,7 @@ function deckCard(family, promptText, overrides = {}) {
   }, { sceneId: 'scene-budget', snapshotHash: 'hash-budget' });
 }
 
-assertEqual(CARD_CATALOG.length, 8, 'full V1 catalog present');
+assertEqual(CARD_CATALOG.length, 11, 'full V1 catalog present');
 assertDeepEqual(
   CARD_CATALOG.map(({ family, role, priority }) => ({ family, role, priority })),
   EXPECTED_CATALOG,

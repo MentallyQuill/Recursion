@@ -80,10 +80,28 @@ export const CARD_CATALOG = Object.freeze([
     description: 'Facts likely to be contradicted if omitted from the next response.'
   }),
   catalogEntry({
-    family: 'Environment/Items',
-    role: 'environmentItemsCard',
+    family: 'Knowledge/Secrets',
+    role: 'knowledgeSecretsCard',
+    priority: 92,
+    description: 'Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries.'
+  }),
+  catalogEntry({
+    family: 'Clocks/Consequences',
+    role: 'clocksConsequencesCard',
+    priority: 90,
+    description: 'Deadlines, countdowns, delayed consequences, and escalation triggers.'
+  }),
+  catalogEntry({
+    family: 'Environment/Affordances',
+    role: 'environmentAffordancesCard',
     priority: 76,
-    description: 'Spatial constraints, sensory details, relevant objects, tools, hazards, and nearby affordances.'
+    description: 'Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances.'
+  }),
+  catalogEntry({
+    family: 'Possessions/Items',
+    role: 'possessionsItemsCard',
+    priority: 78,
+    description: 'Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them.'
   }),
   catalogEntry({
     family: 'Prose/Pacing',

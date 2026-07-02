@@ -166,7 +166,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
     cards: [{
       id: 'slash-card',
       family: 'Dialogue/Relationship',
-      role: 'Environment/Items',
+      role: 'Environment/Affordances',
       catalogKey: 'Prose/Pacing',
       summary: 'safe summary',
       promptText: 'safe prompt'
@@ -174,7 +174,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   });
   const cache = await repo.loadSceneCache('Slash Metadata Chat', 'Scene One');
   assertEqual(cache.cards[0].family, 'Dialogue/Relationship', 'scene card family preserves category slash');
-  assertEqual(cache.cards[0].role, 'Environment/Items', 'scene card role preserves category slash');
+  assertEqual(cache.cards[0].role, 'Environment/Affordances', 'scene card role preserves category slash');
   assertEqual(cache.cards[0].catalogKey, 'Prose/Pacing', 'scene card catalog key preserves category slash');
 }
 

@@ -13,7 +13,10 @@ Cards are disposable cache artifacts. They are not memories, lore, canon, or use
 | Character Motivation | `characterMotivationCard` | Observable or safely inferred motives, pressures, hesitations, and goals. | Behavior-facing guidance without private thought injection. |
 | Dialogue/Relationship | `dialogueRelationshipCard` | Current tension, relationship texture, promises, conflicts, and voice constraints. | Guides tone, subtext, and relational continuity. |
 | Continuity Risk | `continuityRiskCard` | Facts likely to be contradicted if omitted. | High-priority safety guidance. |
-| Environment/Items | `environmentItemsCard` | Spatial constraints, sensory details, objects, hazards, and affordances. | Grounds action and prose. |
+| Knowledge/Secrets | `knowledgeSecretsCard` | Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries. | Guardrail guidance for knowledge state and spoiler-safe reveals. |
+| Clocks/Consequences | `clocksConsequencesCard` | Deadlines, countdowns, delayed consequences, and escalation triggers. | Keeps near-term pressure visible. |
+| Environment/Affordances | `environmentAffordancesCard` | Spatial layout, sensory texture, hazards, obstacles, exits, and environmental affordances. | Grounds action and prose. |
+| Possessions/Items | `possessionsItemsCard` | Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them. | Tracks object ownership and immediate item use. |
 | Prose/Pacing | `prosePacingCard` | Local craft guidance for density, momentum, specificity, and response shape. | Low-volume style guidance. |
 | Open Threads | `openThreadsCard` | Unresolved questions, promises, pending actions, and near-term pressures. | Keeps the next response aware of visible obligations. |
 

@@ -96,11 +96,15 @@ assertEqual(defaultUi.mode, 'auto', 'mode defaults to auto');
 assertEqual(defaultUi.reasoningLevel, 'high', 'reasoning level defaults to high');
 assertEqual(defaultUi.ui.progressChildVisibleLimit, 5, 'sub-tier visible item default is five');
 assertEqual(defaultUi.ui.progressListVisibleLimit, 15, 'whole progress list visible item default is fifteen');
+assertEqual(defaultUi.ui.tooltipsEnabled, true, 'tooltips default on');
+assertEqual(normalizeSettings({ ui: { tooltipsEnabled: false } }).ui.tooltipsEnabled, false, 'tooltip setting can disable hover help');
 
 const invalidReasoning = normalizeSettings({ reasoningLevel: 'maximum' });
 assertEqual(invalidReasoning.reasoningLevel, 'high', 'invalid reasoning level falls back to high');
 assertEqual(normalizeSettings({ reasoningLevel: 'low', reasonerUse: 'always' }).reasonerUse, 'off', 'low reasoning disables reasoner routing even when stale reasonerUse differs');
-assertEqual(normalizeSettings({ reasoningLevel: 'medium', reasonerUse: 'always' }).reasonerUse, 'auto', 'medium reasoning derives auto reasoner routing');
+assertEqual(normalizeSettings({ reasoningLevel: 'medium', reasonerUse: 'off' }).reasonerUse, 'always', 'medium reasoning requires reasoner composition even when stale reasonerUse differs');
+assertEqual(normalizeSettings({ reasoningLevel: 'high', reasonerUse: 'off' }).reasonerUse, 'always', 'high reasoning requires mixed reasoner routing even when stale reasonerUse differs');
+assertEqual(normalizeSettings({ reasoningLevel: 'ultra', reasonerUse: 'off' }).reasonerUse, 'always', 'ultra reasoning keeps reasoner-heavy routing even when stale reasonerUse differs');
 
 const clampedUi = normalizeSettings({ ui: { progressChildVisibleLimit: 99, progressListVisibleLimit: -10 } });
 assertEqual(clampedUi.ui.progressChildVisibleLimit, 20, 'sub-tier visible item limit clamps high');
@@ -188,8 +192,10 @@ assertEqual(root.recursion.strength, 'light', 'partial settings update changes s
 
 store.update({ ui: { progressChildVisibleLimit: 7 } });
 store.update({ ui: { progressListVisibleLimit: 22 } });
+store.update({ ui: { tooltipsEnabled: false } });
 assertEqual(root.recursion.ui.progressChildVisibleLimit, 7, 'partial UI update preserves sub-tier limit');
 assertEqual(root.recursion.ui.progressListVisibleLimit, 22, 'partial UI update changes progress list limit');
+assertEqual(root.recursion.ui.tooltipsEnabled, false, 'partial UI update changes tooltip setting');
 
 store.update({ injection: { placement: 'in_chat', role: 'assistant', depth: 8 } });
 store.update({ injection: { depth: 2 } });

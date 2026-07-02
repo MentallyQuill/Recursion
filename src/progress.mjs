@@ -15,7 +15,10 @@ const MODEL_CALL_ROLE_IDS = new Set([
   'characterMotivationCard',
   'dialogueRelationshipCard',
   'continuityRiskCard',
-  'environmentItemsCard',
+  'knowledgeSecretsCard',
+  'clocksConsequencesCard',
+  'environmentAffordancesCard',
+  'possessionsItemsCard',
   'prosePacingCard',
   'openThreadsCard'
 ]);
@@ -25,7 +28,10 @@ const CARD_ROLE_LABELS = Object.freeze({
   characterMotivationCard: 'Character Motivation',
   dialogueRelationshipCard: 'Dialogue/Relationship',
   continuityRiskCard: 'Continuity Risk',
-  environmentItemsCard: 'Environment/Items',
+  knowledgeSecretsCard: 'Knowledge/Secrets',
+  clocksConsequencesCard: 'Clocks/Consequences',
+  environmentAffordancesCard: 'Environment/Affordances',
+  possessionsItemsCard: 'Possessions/Items',
   prosePacingCard: 'Prose/Pacing',
   openThreadsCard: 'Open Threads'
 });
@@ -364,7 +370,10 @@ function childIdFromRole(roleId, fallback) {
   if (role === 'characterMotivationCard') return 'character-motivation-card';
   if (role === 'dialogueRelationshipCard') return 'dialogue-relationship-card';
   if (role === 'continuityRiskCard') return 'continuity-risk-card';
-  if (role === 'environmentItemsCard') return 'environment-items-card';
+  if (role === 'knowledgeSecretsCard') return 'knowledge-secrets-card';
+  if (role === 'clocksConsequencesCard') return 'clocks-consequences-card';
+  if (role === 'environmentAffordancesCard') return 'environment-affordances-card';
+  if (role === 'possessionsItemsCard') return 'possessions-items-card';
   if (role === 'prosePacingCard') return 'prose-pacing-card';
   if (role === 'openThreadsCard') return 'open-threads-card';
   if (role === 'reasonerComposer') return 'reasoner-synthesis';

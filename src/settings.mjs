@@ -65,6 +65,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   },
   ui: {
     viewerOpen: false,
+    tooltipsEnabled: true,
     progressChildVisibleLimit: 5,
     progressListVisibleLimit: 15
   }
@@ -77,7 +78,7 @@ function enumValue(value, allowed, fallback) {
 
 function reasonerUseForReasoningLevel(value) {
   if (value === 'low') return 'off';
-  if (value === 'ultra') return 'always';
+  if (value === 'medium' || value === 'high' || value === 'ultra') return 'always';
   return 'auto';
 }
 
@@ -208,6 +209,7 @@ export function normalizeSettings(value = {}, secretStore = null) {
     },
     ui: {
       viewerOpen: source.ui?.viewerOpen === true,
+      tooltipsEnabled: source.ui?.tooltipsEnabled !== false,
       progressChildVisibleLimit: Math.round(numberInRange(
         source.ui?.progressChildVisibleLimit,
         DEFAULT_RECURSION_SETTINGS.ui.progressChildVisibleLimit,

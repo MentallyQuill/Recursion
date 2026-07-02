@@ -29,6 +29,48 @@ const REASONER_DECISION_MODES = new Set(['use', 'skip']);
 const PROMPT_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const SCENE_STATUSES = new Set(['same-scene', 'soft-shift', 'hard-shift', 'unknown']);
 const PROMPT_NEUTRAL_SETTING_KEYS = new Set(['reasoningLevel', 'reasonerUse']);
+const LOW_REASONING_MAX_CARDS = 3;
+const NORMAL_REASONING_MAX_CARDS = 6;
+const ULTRA_REASONING_MIN_CARDS = 10;
+const HIGH_REASONER_CARD_PRIORITY = 88;
+const REASONING_LEVEL_POLICIES = Object.freeze({
+  low: {
+    level: 'low',
+    composer: 'utility',
+    arbiterLane: 'utility',
+    cardLane: 'utility',
+    maxCardsCap: LOW_REASONING_MAX_CARDS,
+    maxCardsFloor: 0,
+    prompt: 'Low uses Utility for Arbiter, card generation, and composition. Keep budgets lean and request only the most relevant cards for this scene/message.'
+  },
+  medium: {
+    level: 'medium',
+    composer: 'reasoner',
+    arbiterLane: 'utility',
+    cardLane: 'utility',
+    maxCardsCap: 0,
+    maxCardsFloor: 0,
+    prompt: 'Medium uses Utility for Arbiter and cards, then Reasoner for final prompt composition. Use normal card budgets.'
+  },
+  high: {
+    level: 'high',
+    composer: 'reasoner',
+    arbiterLane: 'reasoner',
+    cardLane: 'priority',
+    maxCardsCap: 0,
+    maxCardsFloor: 0,
+    prompt: 'High uses Reasoner for Arbiter, high-priority card families, and final composition. Keep lower-priority card families on Utility and use normal card budgets.'
+  },
+  ultra: {
+    level: 'ultra',
+    composer: 'reasoner',
+    arbiterLane: 'reasoner',
+    cardLane: 'reasoner',
+    maxCardsCap: 0,
+    maxCardsFloor: ULTRA_REASONING_MIN_CARDS,
+    prompt: 'Ultra uses Reasoner for Arbiter, card generation, and final composition when the lane is healthy. Bias toward a larger relevant hand when the scene supports it.'
+  }
+});
 const HARD_CACHE_VERSION_FIELDS = Object.freeze([
   'storageSchemaVersion',
   'runtimeCacheContractVersion',
@@ -419,6 +461,78 @@ function enforceReasonerAvailability(plan, settings) {
   };
 }
 
+function reasoningPolicyForSettings(settings = {}) {
+  const level = safeText(settings?.reasoningLevel || 'high', 40).toLowerCase();
+  return REASONING_LEVEL_POLICIES[level] || REASONING_LEVEL_POLICIES.high;
+}
+
+function reasonerLaneAvailable(settings) {
+  return !reasonerUnavailableReason(settings);
+}
+
+function providerLaneForPolicyLane(policyLane, settings) {
+  return policyLane === 'reasoner' && reasonerLaneAvailable(settings) ? 'reasoner' : 'utility';
+}
+
+function arbiterLaneForSettings(settings) {
+  return providerLaneForPolicyLane(reasoningPolicyForSettings(settings).arbiterLane, settings);
+}
+
+function reasoningPolicyPromptLine(settings) {
+  const policy = reasoningPolicyForSettings(settings);
+  return `Reasoning level policy: ${policy.prompt} Runtime-enforced defaults: composer=${policy.composer}; arbiterLane=${policy.arbiterLane}; cardLane=${policy.cardLane}; normalMaxCards=${NORMAL_REASONING_MAX_CARDS}; lowMaxCards=${LOW_REASONING_MAX_CARDS}; ultraMinCards=${ULTRA_REASONING_MIN_CARDS}.`;
+}
+
+function adjustedMaxCardsForPolicy(value, policy) {
+  const current = normalizeBudget(value, NORMAL_REASONING_MAX_CARDS);
+  if (current <= 0) return current;
+  let next = current;
+  if (policy.maxCardsCap > 0) next = Math.min(next, policy.maxCardsCap);
+  if (policy.maxCardsFloor > 0) next = Math.max(next, policy.maxCardsFloor);
+  return next;
+}
+
+function applyReasoningPolicyToPlan(plan, settings) {
+  const policy = reasoningPolicyForSettings(settings);
+  const budgets = asObject(plan?.budgets);
+  const nextMaxCards = adjustedMaxCardsForPolicy(budgets.maxCards, policy);
+  if (nextMaxCards === budgets.maxCards) return plan;
+  return {
+    ...plan,
+    budgets: {
+      ...budgets,
+      maxCards: nextMaxCards
+    }
+  };
+}
+
+function catalogForCardRequest(request) {
+  return catalogForCard({
+    role: request?.role,
+    roleId: request?.roleId || request?.metadata?.role,
+    family: request?.family || request?.metadata?.family
+  });
+}
+
+function cardLaneForRequest(request, settings) {
+  const policy = reasoningPolicyForSettings(settings);
+  if (policy.cardLane === 'utility') return 'utility';
+  if (!reasonerLaneAvailable(settings)) return 'utility';
+  if (policy.cardLane === 'reasoner') return 'reasoner';
+  if (policy.cardLane === 'priority') {
+    const catalog = catalogForCardRequest(request);
+    return numberOr(catalog?.priority, 0) >= HIGH_REASONER_CARD_PRIORITY ? 'reasoner' : 'utility';
+  }
+  return 'utility';
+}
+
+function applyReasoningLaneToCardRequest(request, settings) {
+  return {
+    ...request,
+    lane: cardLaneForRequest(request, settings)
+  };
+}
+
 function normalizePlanCardJobs(value) {
   if (!Array.isArray(value)) return null;
   return value.map((job) => {
@@ -533,6 +647,9 @@ function planAction(plan) {
 
 function settingsForPlan(settings, plan) {
   const promptFootprint = normalizePromptFootprint(plan?.promptFootprint, settings.promptFootprint);
+  if (settings.reasonerUse !== 'off' && reasonerUnavailableReason(settings)) {
+    return { ...settings, promptFootprint, reasonerUse: 'off' };
+  }
   if (settings.reasonerUse === 'auto' && plan?.reasonerDecision?.mode === 'skip') {
     return { ...settings, promptFootprint, reasonerUse: 'off' };
   }
@@ -995,12 +1112,14 @@ function cardProgressDetail(card, source, state) {
   const catalog = catalogForCard(card);
   const roleId = safeText(catalog?.role || card?.role || card?.roleId || '', 120);
   const family = safeText(catalog?.family || card?.family || '', 120);
+  const providerLane = safeText(card?.providerLane || card?.lane || '', 40);
   return {
     parentStepId: 'utility-card-batch',
     roleId,
     family,
     source,
     state,
+    providerLane: providerLane === 'reasoner' ? 'reasoner' : 'utility',
     cardId: safeIdentifier(card?.id || '', 'card', 160)
   };
 }
@@ -1340,12 +1459,13 @@ export function createRecursionRuntime({
     for (const card of list) {
       const detail = cardProgressDetail(card, source, state);
       if (!detail.roleId && !detail.family) continue;
+      const providerLane = source === 'generated' ? detail.providerLane : 'utility';
       stageRuntimeActivity({
         runId,
         phase: 'cardProgress',
         severity,
-        providerLane: 'utility',
-        composerLane: 'utility',
+        providerLane,
+        composerLane: providerLane,
         label: `${detail.family || 'Card'} ${source === 'cache' ? 'reused from cache' : (source === 'fallback' ? 'fell back locally' : 'generated')}.`,
         detail,
         chips: ['Cards', source]
@@ -2402,18 +2522,20 @@ export function createRecursionRuntime({
     if (!generationRouter || typeof generationRouter.generate !== 'function') {
       return markUtilityUnavailable(fallbackPlan, 'utility provider unavailable');
     }
+    const arbiterLane = arbiterLaneForSettings(settings);
     stageRuntimeActivity({
       runId,
       phase: 'arbiterPlanning',
       label: 'Planning card pass...',
-      providerLane: 'utility',
-      chips: ['Utility']
+      providerLane: arbiterLane,
+      chips: [arbiterLane === 'reasoner' ? 'Reasoner' : 'Utility']
     });
     try {
       const cacheView = compactSceneCacheForArbiter(sceneCache, snapshot);
       const cardScope = scopePayloadForArbiter(settings);
       const catalog = cardScope.strictWhitelist ? cardScope.allowedCatalog : cardScope.availableCatalog;
       const result = await generationRouter.generate('utilityArbiter', {
+        lane: arbiterLane,
         runId,
         signal,
         snapshotHash: fallbackPlan.snapshotHash,
@@ -2424,6 +2546,7 @@ export function createRecursionRuntime({
           `Provider health: ${JSON.stringify(providerHealthForArbiter(settings))}`,
           `Card scope: ${JSON.stringify(cardScope)}`,
           cardScopePolicyLine(cardScope),
+          reasoningPolicyPromptLine(settings),
           `Catalog: ${JSON.stringify(catalog)}`,
           `Catalog hash: ${hashJson(catalog)}`,
           `Snapshot hash: ${fallbackPlan.snapshotHash}`,
@@ -2453,16 +2576,22 @@ export function createRecursionRuntime({
       snapshotHash: plan.snapshotHash || hashJson(snapshot),
       snapshot: providerSafeSnapshot(snapshot),
       cardScope
-    });
+    }).map((request) => applyReasoningLaneToCardRequest(request, settings));
     if (!requests.length) return [];
     if (typeof generationRouter.batch !== 'function' && typeof generationRouter.generate !== 'function') return [];
+    const lanes = new Set(requests.map((request) => request.lane));
+    const batchLane = lanes.size === 1 && lanes.has('reasoner') ? 'reasoner' : 'utility';
     stageRuntimeActivity({
       runId,
       phase: 'cardBatchRunning',
       label: 'Generating scene cards...',
       cardCounts: { requested: requests.length },
-      providerLane: 'utility',
-      chips: ['Cards', String(requests.length)]
+      providerLane: batchLane,
+      chips: [
+        'Cards',
+        String(requests.length),
+        ...(lanes.has('utility') && lanes.has('reasoner') ? ['Utility', 'Reasoner'] : [batchLane === 'reasoner' ? 'Reasoner' : 'Utility'])
+      ]
     });
     try {
       const signalRequests = signal
@@ -2488,7 +2617,10 @@ export function createRecursionRuntime({
         expectedSnapshotHash: requests[index]?.snapshotHash,
         expectedRole: requests[index]?.metadata?.role,
         expectedFamily: requests[index]?.metadata?.family
-      }));
+      }).map((card) => ({
+        ...card,
+        providerLane: result?.lane || requests[index]?.lane || 'utility'
+      })));
     } catch {
       return [];
     }
@@ -2559,6 +2691,7 @@ export function createRecursionRuntime({
         signal
       });
       plan = enforceReasonerAvailability(plan, settings);
+      plan = applyReasoningPolicyToPlan(plan, settings);
       const scopedCardJobs = filterCardJobsForScope(plan.cardJobs, settings);
       plan = {
         ...plan,

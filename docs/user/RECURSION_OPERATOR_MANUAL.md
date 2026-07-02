@@ -121,6 +121,10 @@ Operator settings should stay broad. Mode and Reasoning Level live in the compac
 - Advanced / UI: progress row limits.
 - Advanced / Diagnostics: journal limits, safe excerpts, Reset Scene Cache, Clear Run Journal, and Export Diagnostics.
 
+Behavior controls have distinct jobs. Prompt Footprint currently controls the size and detail of the final composed prompt packet. Strength and Focus are high-level controls whose target backend effects are defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md): Strength is intended to control intervention pressure, and Focus is intended to control soft card-family priority without becoming a hard whitelist.
+
+![Behavior policy overview](../../assets/documentation/renders/recursion-behavior-policy.png)
+
 Default injection settings preserve Recursion's section template. Explicit injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
 
 ## Provider Controls
@@ -188,7 +192,7 @@ Expected behavior:
 - Prompt install failure: allow SillyTavern generation to continue without Recursion guidance.
 - Chat, settings, or source change during a run: abort or discard stale results.
 
-Warnings should be visible in the bar, ribbon, viewer, or provider controls without leaking raw provider payloads or secrets.
+Warnings should be visible in the bar, Hero Pixel Array progress menu, Full Viewer, or provider controls without leaking raw provider payloads or secrets.
 
 ## Prompt Packet Inspection
 
@@ -241,7 +245,7 @@ On narrow viewports:
 - the viewer should use one-column sections;
 - controls should be touch-safe;
 - wide tables should be avoided;
-- the bar and ribbon must not cover message input or generation controls.
+- the bar and progress menus must not cover message input or generation controls.
 
 ## Live Smoke Checklist
 

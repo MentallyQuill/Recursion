@@ -71,6 +71,7 @@ Allowed default diagnostics:
 - card ids, families, statuses, emphasis, and token estimates
 - hand selection counts and selected card identity metadata
 - card-scope counts, selected family keys, selected sub-item keys, and compact scope labels
+- current behavior-setting labels, effective footprint, card-scope labels, and compact policy-shaping reasons when implemented
 - source message ranges and hashes
 - prompt packet hashes and omission reasons
 - cache hit, stale, index update, and prune events

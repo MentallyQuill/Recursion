@@ -8,7 +8,7 @@ Recursion injects a composed packet, not the full raw scene deck.
 
 | Section | Prompt key | Placement | Purpose |
 | --- | --- | --- | --- |
-| Scene Brief | `recursion.sceneBrief` | `in_prompt`, depth 4 | Stable current-scene frame, cast, environment, and relationship posture. |
+| Scene Brief | `recursion.sceneBrief` | `in_prompt`, depth 4 | Stable current-scene frame, cast, environmental affordances, and possessions. |
 | Turn Brief | `recursion.turnBrief` | `in_chat`, depth 2 | Immediate next-response guidance from the current turn hand. |
 | Guardrails | `recursion.guardrails` | `in_prompt`, depth 1 | Compact constraints for continuity, player intent, privacy, and scope. |
 
@@ -51,9 +51,9 @@ Cards are normalized before composition. Unsafe evidence refs, unsupported famil
 
 Utility composition is the default path. It maps card families to sections:
 
-- Scene Brief: Scene Frame, Active Cast, Environment/Items
-- Guardrails: Continuity Risk plus static guardrails
-- Turn Brief: Character Motivation, Dialogue/Relationship, Prose/Pacing, Open Threads, and other turn-facing guidance
+- Scene Brief: Scene Frame, Active Cast, Environment/Affordances, Possessions/Items
+- Guardrails: Continuity Risk, Knowledge/Secrets, plus static guardrails
+- Turn Brief: Character Motivation, Dialogue/Relationship, Clocks/Consequences, Prose/Pacing, Open Threads, and other turn-facing guidance
 
 Utility composition removes unsafe text, enforces section budgets, records source ids, and creates omission records when budget prevents inclusion.
 
@@ -68,6 +68,8 @@ Reasoner output cannot invent lore, forward plot, hidden motives, or private ana
 ## Footprint And Budgeting
 
 The V1 footprints are `compact`, `normal`, and `rich`.
+
+Prompt Footprint is the size/detail owner for the final composed packet. Strength may change intervention pressure and composer assertiveness inside the chosen footprint, but it must not silently enlarge the packet. The detailed policy contract lives in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
 
 | Footprint | Section budgets in source | Use |
 | --- | --- | --- |

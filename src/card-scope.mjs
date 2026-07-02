@@ -52,13 +52,43 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     ])
   }),
   Object.freeze({
-    family: 'Environment/Items',
-    role: 'environmentItemsCard',
-    description: 'Spatial constraints, sensory details, relevant objects, tools, hazards, and nearby affordances.',
+    family: 'Knowledge/Secrets',
+    role: 'knowledgeSecretsCard',
+    description: 'Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries.',
+    subItems: Object.freeze([
+      Object.freeze({ key: 'concealedFacts', label: 'concealed facts' }),
+      Object.freeze({ key: 'knowsSuspects', label: 'knows/suspects' }),
+      Object.freeze({ key: 'revealBoundaries', label: 'reveal boundaries' })
+    ])
+  }),
+  Object.freeze({
+    family: 'Clocks/Consequences',
+    role: 'clocksConsequencesCard',
+    description: 'Deadlines, countdowns, delayed consequences, and escalation triggers.',
+    subItems: Object.freeze([
+      Object.freeze({ key: 'deadlinesCountdowns', label: 'deadlines/countdowns' }),
+      Object.freeze({ key: 'delayedConsequences', label: 'delayed consequences' }),
+      Object.freeze({ key: 'escalationTriggers', label: 'escalation triggers' })
+    ])
+  }),
+  Object.freeze({
+    family: 'Environment/Affordances',
+    role: 'environmentAffordancesCard',
+    description: 'Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances.',
     subItems: Object.freeze([
       Object.freeze({ key: 'spatialLayout', label: 'spatial layout' }),
-      Object.freeze({ key: 'relevantObjects', label: 'relevant objects' }),
+      Object.freeze({ key: 'sensoryTexture', label: 'sensory texture' }),
       Object.freeze({ key: 'hazardsAffordances', label: 'hazards/affordances' })
+    ])
+  }),
+  Object.freeze({
+    family: 'Possessions/Items',
+    role: 'possessionsItemsCard',
+    description: 'Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them.',
+    subItems: Object.freeze([
+      Object.freeze({ key: 'heldCarriedItems', label: 'held/carried items' }),
+      Object.freeze({ key: 'itemLocationControl', label: 'location/control' }),
+      Object.freeze({ key: 'itemAffordancesRisks', label: 'affordances/risks' })
     ])
   }),
   Object.freeze({

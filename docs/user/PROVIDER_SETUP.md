@@ -7,7 +7,7 @@ Recursion uses two provider lanes:
 
 Reasoner is not a better default Utility. Utility remains the normal path and the fallback path.
 
-<Render Needed>: assets/documentation/renders/recursion-provider-controls-utility-reasoner.png - Provider controls showing Utility and Reasoner cards with source selector, model fields, session key state, Test Provider, and Clear Session Key.
+<Render Needed>: assets/documentation/renders/recursion-provider-controls-utility-reasoner.png - Provider controls showing collapsible Utility and Reasoner lanes with source selector, model fields, session key state, Test Provider, and Clear Session Key.
 
 ## Source Options
 
@@ -41,7 +41,7 @@ Utility is healthy when the test passes and the bar or provider card shows a rea
 4. Fill the required fields.
 5. Save provider settings.
 6. Run `Test Provider`.
-7. Use Reasoning Level in the Play tab for broad provider bias; leave it at `High` unless you are deliberately testing lower Utility-only or higher Reasoner-heavy routing.
+7. Use the compact-bar Reasoning Level chain for broad provider bias; leave it at the default unless you are deliberately testing lower Utility-only or higher Reasoner-heavy routing.
 
 Reasoner is eligible only when enabled, healthy, and selected by Recursion for a useful reason such as crowded hand, conflicting cards, high continuity risk, or complex active cast.
 

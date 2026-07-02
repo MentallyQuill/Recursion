@@ -8,6 +8,7 @@ Related specs:
 
 - Product scope: [RECURSION_PRODUCT_SCOPE.md](../design/RECURSION_PRODUCT_SCOPE.md)
 - Card system: [CARD_SYSTEM_SPEC.md](../design/CARD_SYSTEM_SPEC.md)
+- Behavior settings policy: [BEHAVIOR_SETTINGS_POLICY_SPEC.md](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md)
 - Provider and generation: [PROVIDER_AND_GENERATION_SPEC.md](PROVIDER_AND_GENERATION_SPEC.md)
 - Prompt composition: [PROMPT_COMPOSITION_SPEC.md](PROMPT_COMPOSITION_SPEC.md)
 - Storage and diagnostics: [STORAGE_AND_DIAGNOSTICS.md](STORAGE_AND_DIAGNOSTICS.md)
@@ -42,7 +43,7 @@ flowchart TD
     Hand --> Packet
     Packet --> Inject["Host Prompt Injection"]
     Inject --> Diag["Diagnostics"]
-    Diag --> Activity["Activity Reporter\nbar ribbon viewer"]
+    Diag --> Activity["Activity Reporter\nbar progress viewer"]
     Arbiter --> Diag
     Jobs --> Diag
     Cache --> Store["Storage"]
@@ -78,11 +79,11 @@ The core pipeline is:
 8. Emit user-visible activity updates for status, fallbacks, and prompt readiness.
 9. Record diagnostics.
 
-Mode controls change how much of the pipeline runs:
+Power and mode controls change how much of the pipeline runs:
 
-- Off: remove or avoid installing Recursion prompt entries. The runtime may keep minimal UI/provider status, but it should not inspect or influence active generations.
-- Auto/Manual: build snapshots, run safe diagnostics, compose the hand, and install prompt packets. Manual uses card scope as a strict whitelist for planning, deck reuse, hand selection, composition, and injection.
-- Auto: run the full automatic pipeline and install prompt packets when the Auto Control Plan says a pass is useful.
+- Power off: remove or avoid installing Recursion prompt entries. Runtime may keep minimal UI/provider status, but it should not inspect or influence active generations.
+- Auto: run the full automatic pipeline and install prompt packets when the Auto Control Plan says a pass is useful. Card scope acts as focus and preference; critical unselected families may still be requested when needed for coherence or safety.
+- Manual: use selected card scope as a strict whitelist for planning, deck reuse, hand selection, composition, and injection.
 
 The Runtime Coordinator should serialize work per chat/generation attempt. A newer turn snapshot supersedes older pending work. If a late provider result arrives after the active snapshot changed, the result is discarded or recorded as stale and must not overwrite the current prompt packet.
 
@@ -107,7 +108,7 @@ Runtime enforcement:
 
 - Invalid plans fall back to local `compose-brief`, cache reuse, or `skip`, depending on mode and cache state.
 - Token and card count caps are enforced after the Arbiter returns.
-- `promptFootprint` is sanitized to `compact`, `normal`, or `rich`; invalid or missing Arbiter values fall back to the stored setting. A valid Arbiter footprint overrides only the current turn's Prompt Composition settings and does not mutate the stored user setting.
+- `promptFootprint` is sanitized to `compact`, `normal`, or `rich`; invalid or missing Arbiter values fall back to the stored setting. A valid Arbiter footprint overrides only the current turn's Prompt Composition settings, and it does not mutate the stored user setting. The broader Strength/Focus behavior policy remains a target design contract.
 - Provider lane choices are resolved through the provider spec, not trusted as raw endpoints.
 - Reasoner triggers are advisory. If Reasoner is off, unavailable, too slow, or over budget, generation continues through the deterministic or Utility composer path.
 
@@ -123,7 +124,7 @@ Plan action controls runtime cost and cache churn.
 
 `compose-brief` means compose a packet from the current hand after any requested cache/card work. Local fallback also uses this action when the Arbiter is unavailable and safe fallback cards can be built from the snapshot.
 
-Action choice should be automatic by default. User controls should stay high level, such as the power toggle, Auto/Manual, refresh, intensity, provider setup, prompt footprint fallback, and optional Reasoner enablement.
+Action choice should be automatic by default. User controls should stay high level, such as the power toggle, Auto/Manual, refresh, Strength, Focus, Reasoning Level, provider setup, Prompt Footprint, and advanced final-packet injection placement.
 
 ## Scene Shift Handling
 
@@ -186,7 +187,7 @@ The Activity Reporter is not a persistence boundary by itself. It is a user-faci
 
 - many internal events become one visible stage;
 - foreground, background, and review activity render differently;
-- stale run ids cannot update the current ribbon after a newer run starts;
+- stale run ids cannot update the current progress surface after a newer run starts;
 - slow work reveals after a short delay, while quick no-op work may only update the bar chip;
 - success settles briefly, while warning and error states persist until dismissed or superseded;
 - activity text is friendly and bounded, while detailed sanitized records belong in the run journal.

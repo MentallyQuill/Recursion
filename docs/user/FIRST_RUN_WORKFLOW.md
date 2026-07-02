@@ -13,9 +13,9 @@ Recursion is a current-scene prompt compiler. It observes the active chat, build
 
 <Render Needed>: assets/documentation/renders/recursion-first-run-install-enable.png - SillyTavern extension settings with Recursion enabled and the Recursion Bar mounted in the active chat.
 
-The bar should expose the power toggle, icon-only mode control, Hero Pixel Array plus current-step text, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, extra details may collapse into compact menus.
+The bar should expose the power toggle, icon-only mode control, Cards selector, Hero Pixel Array plus current-step text, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, extra details may collapse into compact menus.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-bar-mounted.png - Recursion Bar mounted below the SillyTavern chat header with power toggle, mode icon, Hero Pixel Array, Reasoning Level chain, Last Brief dropdown arrow, and options entry visible.
+<Render Needed>: assets/documentation/renders/recursion-first-run-bar-mounted.png - Recursion Bar mounted below the SillyTavern chat header with power toggle, mode icon, Cards selector, Hero Pixel Array, Reasoning Level chain, Last Brief dropdown arrow, and options entry visible.
 
 ## 2. Configure Utility
 

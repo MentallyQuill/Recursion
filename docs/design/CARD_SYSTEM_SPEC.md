@@ -11,6 +11,7 @@ The Utility Arbiter is the primary decision engine for card utility. It makes mo
 Related design docs:
 
 - [Product Scope](RECURSION_PRODUCT_SCOPE.md)
+- [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md)
 - [Runtime Architecture](../architecture/RUNTIME_ARCHITECTURE.md)
 - [Prompt Composition Spec](../architecture/PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](../architecture/STORAGE_AND_DIAGNOSTICS.md)
@@ -27,7 +28,10 @@ V1 should use the full fixed catalog below. The Arbiter receives this predetermi
 | Character Motivation | Observable or safely inferred motives, pressures, hesitations, and goals. | Replaces raw internal-thought injection with bounded writing guidance. |
 | Dialogue/Relationship | Current conversational tension, relationship texture, promises, conflicts, and voice constraints. | Guides reply tone, subtext, and relational continuity. |
 | Continuity Risk | Facts likely to be contradicted if omitted from the next response. | High-priority safety lane for fragile scene facts. |
-| Environment/Items | Spatial constraints, sensory details, relevant objects, tools, hazards, and nearby affordances. | Keeps action grounded in the current scene. |
+| Knowledge/Secrets | Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries. | Guardrail lane for knowledge state and spoiler-safe reveal control. |
+| Clocks/Consequences | Deadlines, countdowns, delayed consequences, and escalation triggers. | Keeps near-term pressure visible without turning it into durable memory. |
+| Environment/Affordances | Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances. | Keeps action grounded in the current scene. |
+| Possessions/Items | Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them. | Tracks item ownership and immediate object affordances. |
 | Prose/Pacing | Local craft guidance for density, momentum, specificity, and response shape. | Low-volume style guidance, not a replacement for the user's preset. |
 | Open Threads | Unresolved questions, immediate promises, pending actions, and near-term pressures. | Keeps the next response aware of visible story obligations. |
 

@@ -29,7 +29,7 @@ flowchart TD
 
 ![Runtime pipeline visual](../../assets/documentation/renders/recursion-technical-runtime-pipeline.png)
 
-The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src/prompt.mjs`, `src/providers.mjs`, `src/storage.mjs`, `src/activity.mjs`, and `src/hosts/sillytavern/host.mjs`.
+The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src/card-scope.mjs`, `src/progress.mjs`, `src/prompt.mjs`, `src/providers.mjs`, `src/storage.mjs`, `src/activity.mjs`, and `src/hosts/sillytavern/host.mjs`.
 
 ## Component Ownership
 
@@ -38,8 +38,10 @@ The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src
 | Core helpers | `src/core.mjs` | Stable hashing, safe ids, truncation, JSON parsing, cloning, timestamps, and redaction. |
 | Settings | `src/settings.mjs` | Mode, Reasoning Level, strength, footprint, focus, provider preferences, and session-only API key handling. |
 | Activity | `src/activity.mjs` | Sanitized user-facing activity events for the bar, progress menu, viewer, and diagnostics. |
+| Progress model | `src/progress.mjs` | Hero Pixel Array blocks, progress-menu rows, nested card/model-call status, and compact current-step text. |
 | Providers | `src/providers.mjs` | Utility and Reasoner lane routing, host and OpenAI-compatible calls, JSON parsing, retries, timeouts, aborts, and model-call diagnostics. |
 | Cards | `src/cards.mjs` | Fixed V1 catalog, card normalization, provider-result conversion, lifecycle application, and hand selection. |
+| Card scope | `src/card-scope.mjs` | Fixed family/sub-item scope catalog, Auto focus payloads, Manual whitelist enforcement helpers, and safe scope summaries. |
 | Prompt | `src/prompt.mjs` | Packet sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
 | Storage | `src/storage.mjs` | Logical scene-cache and run-journal records, key safety, redaction, index maintenance, and bounded retention. |
 | Runtime | `src/runtime.mjs` | Power toggle, Auto/Manual orchestration, snapshot use, Utility Arbiter plan handling, card-scope enforcement, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
@@ -70,7 +72,7 @@ Each lane can use the current host model, a host connection profile when the hos
 
 ## Card And Hand System
 
-The fixed V1 card catalog is Scene Frame, Active Cast, Character Motivation, Dialogue/Relationship, Continuity Risk, Environment/Items, Prose/Pacing, and Open Threads.
+The fixed V1 card catalog is Scene Frame, Active Cast, Character Motivation, Dialogue/Relationship, Continuity Risk, Knowledge/Secrets, Clocks/Consequences, Environment/Affordances, Possessions/Items, Prose/Pacing, and Open Threads.
 
 Cards are disposable scene-local cache artifacts. The scene deck stores active, stowed, stale, and discarded records for one scene. The turn hand is rebuilt for each composition event from active cards under max-card and token caps. A valid card can stay in the deck without entering the hand.
 
@@ -108,7 +110,7 @@ Additional host integrations are reserved behind the adapter boundary and are no
 
 ## UI Observability
 
-The Recursion Bar shows the wordmark, icon-only mode, Hero Pixel Array, current-step text, Reasoning Level chain, Last Brief dropdown arrow, and options entry. The progress menu shows user-safe stages such as reading the turn, planning card work, generating cards, selecting the hand, installing prompt entries, storage warnings, and ready or fallback states. The Full Viewer exposes Now, Deck, Activity, Prompt Packet, Settings, and Providers.
+The Recursion Bar shows the wordmark, power toggle, icon-only mode, Cards scope button, Hero Pixel Array, current-step text, Reasoning Level chain, Last Brief dropdown arrow, and options entry. The progress menu shows user-safe stages such as reading the turn, planning card work, generating cards, selecting the hand, installing prompt entries, storage warnings, and ready or fallback states. The Full Viewer exposes Now, Deck, Activity, Prompt Packet, Settings, and Providers.
 
 The UI is an observatory, not a card editor. It shows what Recursion did without turning the card system into a user-managed memory product.
 

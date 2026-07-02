@@ -16,7 +16,7 @@ Recursion is built for that gap. It helps the model notice what the scene is ask
 
 | What Recursion adds | Why it matters |
 | --- | --- |
-| Scene cards | Breaks the current situation into usable reasoning pieces: motivations, consequences, knowledge, environment, items, and open threads. |
+| Scene cards | Breaks the current situation into usable reasoning pieces: motivations, social subtext, consequences, knowledge, environment, items, and open threads. |
 | Turn hand selection | Chooses the cards that matter for this reply, so the prompt does not become a pile of every possible note. |
 | Utility and Reasoner lanes | Uses a reliable Utility lane for planning, with an optional Reasoner lane when you want deeper synthesis. |
 | Auto and Manual modes | Lets you choose whether Recursion prepares replies automatically or only when you ask it to. |
@@ -33,7 +33,7 @@ Stepped Thinking gives a character a private pre-generation pass. It asks the mo
 
 Recursion goes after a broader failure mode. In long or complex roleplay, the model can have the right text in context and still miss what the scene demands next. It forgets the locked door, ignores the implied threat, reveals a secret too early, treats a major emotional shift as flavor, or misses that an item, relationship, or environmental detail should change the reply.
 
-Instead of generating one stream of character thoughts, Recursion builds a scene deck across motivations, consequences, knowledge, environment, items, and open threads. It then selects a turn hand, giving the prompt details that matter now, helping the model focus on what is important given the context.
+Instead of generating one stream of character thoughts, Recursion builds a scene deck across motivations, social subtext, consequences, knowledge, environment, items, and open threads. It then selects a turn hand, giving the prompt details that matter now, helping the model focus on what is important given the context.
 
 ## What It Does
 
@@ -45,7 +45,7 @@ On a run, Recursion turns the active SillyTavern chat into a short-lived reasoni
 4. It composes a prompt packet with a Scene Brief, Turn Brief, guardrails, card references, omissions, and metadata.
 5. It injects the packet through Recursion-owned SillyTavern prompt entries.
 
-![Full Viewer overview with cards, activity, prompt packet, settings, providers, and diagnostics](assets/documentation/renders/recursion-full-viewer-overview.png)
+![Full Viewer overview with Now, Deck, Activity, Prompt Packet, Settings, and Providers](assets/documentation/renders/recursion-full-viewer-overview.png)
 
 ## Fast Start
 

@@ -14,6 +14,7 @@ const MODEL_CALL_ROLE_IDS = new Set([
   'activeCastCard',
   'characterMotivationCard',
   'dialogueRelationshipCard',
+  'socialSubtextCard',
   'sceneConstraintsCard',
   'knowledgeSecretsCard',
   'clocksConsequencesCard',
@@ -26,6 +27,7 @@ const CARD_ROLE_LABELS = Object.freeze({
   activeCastCard: 'Active Cast',
   characterMotivationCard: 'Character Motivation',
   dialogueRelationshipCard: 'Relationship',
+  socialSubtextCard: 'Social Subtext',
   sceneConstraintsCard: 'Scene Constraints',
   knowledgeSecretsCard: 'Knowledge',
   clocksConsequencesCard: 'Consequences',
@@ -146,17 +148,104 @@ function normalizeChildSource(value) {
   return VALID_CHILD_SOURCES.has(source) ? source : '';
 }
 
-function metaForState(state, source = '') {
+function normalizeRetryCount(value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return Math.min(99, Math.floor(count));
+}
+
+function retryCountFromSource(source) {
+  const input = asObject(source);
+  return normalizeRetryCount(input.retryCount ?? input.providerRetryCount ?? input.diagnostics?.retryCount);
+}
+
+function normalizeStateWithRetry(value, retryCount = 0) {
+  const state = normalizeState(value);
+  if (state === 'done' && normalizeRetryCount(retryCount) > 0) return 'warning';
+  return state;
+}
+
+function reasonMentionsRetry(reason) {
+  return /\bretr(?:y|ied|ies|ying)\b/i.test(String(reason || ''));
+}
+
+function retryReason(retryCount, subject = 'Provider call') {
+  const count = normalizeRetryCount(retryCount);
+  if (!count) return '';
+  const countText = count === 1 ? 'once' : `${count} times`;
+  return `${subject} retried ${countText} before completing.`;
+}
+
+function safeReasonText(value) {
+  return safeDisplayText(value, '', 180);
+}
+
+function reasonFromSource(source, state, retryCount = 0, childSource = '') {
+  const input = asObject(source);
+  const explicit = safeReasonText(
+    input.reason
+    || input.statusReason
+    || input.cautionReason
+    || input.failureReason
+    || input.fallbackReason
+    || input.error?.message
+  );
+  if (explicit) return explicit;
+  if (state === 'warning' && normalizeRetryCount(retryCount) > 0) return retryReason(retryCount);
+  if (state === 'warning' && normalizeChildSource(childSource) === 'fallback') return 'Local fallback was used.';
+  return '';
+}
+
+function maxRetryCount(children = []) {
+  return (Array.isArray(children) ? children : [])
+    .reduce((max, child) => Math.max(max, normalizeRetryCount(child?.retryCount)), 0);
+}
+
+function aggregateReason(children = []) {
+  const list = Array.isArray(children) ? children : [];
+  const material = list.find((child) => ['failed', 'warning'].includes(child?.state) && safeReasonText(child?.reason));
+  return safeReasonText(material?.reason);
+}
+
+function metaForState(state, source = '', reason = '', retryCount = 0) {
   const normalizedSource = normalizeChildSource(source);
   if (state === 'done' && normalizedSource === 'generated') return 'generated';
   if (state === 'done') return 'done';
   if (state === 'cached') return 'cached';
   if (state === 'running') return 'running';
+  if (state === 'warning' && (normalizeRetryCount(retryCount) > 0 || reasonMentionsRetry(reason))) return 'retried';
   if (state === 'warning' && normalizedSource === 'fallback') return 'fallback';
   if (state === 'warning') return 'caution';
   if (state === 'failed') return 'failed';
   if (state === 'skipped') return 'skipped';
   return 'waiting';
+}
+
+function eventRetryCount(event) {
+  const phase = cleanText(event.phase);
+  const detail = asObject(event.detail);
+  if (phase === 'providerCallRetrying') {
+    return normalizeRetryCount(detail.retryCount ?? detail.attempt ?? 1);
+  }
+  return normalizeRetryCount(detail.retryCount ?? event.retryCount ?? detail.diagnostics?.retryCount);
+}
+
+function eventReason(event, state) {
+  const phase = cleanText(event.phase);
+  const detail = asObject(event.detail);
+  const retryCount = eventRetryCount(event);
+  const explicit = safeReasonText(
+    detail.reason
+    || detail.statusReason
+    || detail.cautionReason
+    || detail.failureReason
+    || detail.error?.message
+    || event.fallbackReason
+  );
+  if (explicit) return explicit;
+  if (phase === 'providerCallRetrying') return retryReason(retryCount);
+  if (state === 'warning' && retryCount > 0) return retryReason(retryCount);
+  return '';
 }
 
 function sourceEvents(view) {
@@ -214,11 +303,13 @@ function eventState(event, isCurrent) {
   const severity = cleanText(event.severity, 'info').toLowerCase();
   const outcome = cleanText(event.outcome).toLowerCase();
   const detail = asObject(event.detail);
-  if (phase === 'cardProgress' && detail.state) return normalizeState(detail.state);
+  const retryCount = eventRetryCount(event);
+  if (phase === 'cardProgress' && detail.state) return normalizeStateWithRetry(detail.state, retryCount);
   if (phase === 'providerCallSettled' || isProviderSettledEvent(event)) {
     if (outcome === 'skipped' || outcome === 'canceled') return 'skipped';
     if (outcome === 'error' || severity === 'error') return 'failed';
     if (outcome === 'warning' || severity === 'warning') return 'warning';
+    if (retryCount > 0) return 'warning';
     return 'done';
   }
   if (outcome === 'skipped' || outcome === 'canceled') return 'skipped';
@@ -233,6 +324,8 @@ function eventState(event, isCurrent) {
 function childStepFromEvent(event, state, order = 0) {
   const phase = cleanText(event.phase);
   const detail = asObject(event.detail);
+  const retryCount = eventRetryCount(event);
+  const reason = eventReason(event, state);
   if (phase === 'promptReasonerFallback') {
     return normalizeChildStep({
       id: 'utility-fallback',
@@ -240,6 +333,7 @@ function childStepFromEvent(event, state, order = 0) {
       providerLane: 'utility',
       state: 'warning',
       source: 'fallback',
+      reason: reason || 'Reasoner fallback used Utility composition.',
       sourcePhase: phase,
       order
     }, order);
@@ -252,6 +346,8 @@ function childStepFromEvent(event, state, order = 0) {
       providerLane: event.providerLane || detail.lane || 'utility',
       state,
       source: detail.source || detail.sourceType,
+      retryCount,
+      reason,
       sourcePhase: phase,
       sourceRoleId: roleId,
       order
@@ -264,7 +360,9 @@ function childStepFromEvent(event, state, order = 0) {
       label: roleLabel(roleId, activityLabelText(event)),
       providerLane: event.providerLane || detail.lane,
       state,
-      source: state === 'done' && MODEL_CALL_ROLE_IDS.has(roleId) ? 'generated' : '',
+      source: (state === 'done' || (state === 'warning' && retryCount > 0)) && MODEL_CALL_ROLE_IDS.has(roleId) ? 'generated' : '',
+      retryCount,
+      reason,
       sourcePhase: phase,
       sourceRoleId: roleId,
       order
@@ -300,10 +398,16 @@ function upsertStep(map, step) {
     children: mergeChildren(existing.children, step.children),
     order: existing.order
   };
+  next.retryCount = Math.max(
+    normalizeRetryCount(existing.retryCount),
+    normalizeRetryCount(step.retryCount),
+    maxRetryCount(next.children)
+  );
   next.state = next.children?.length
     ? aggregateParentState(mergeState(existing.state, step.state), next.children)
-    : mergeState(existing.state, step.state);
-  next.meta = metaForState(next.state);
+    : normalizeStateWithRetry(mergeState(existing.state, step.state), next.retryCount);
+  next.reason = safeReasonText(step.reason) || safeReasonText(existing.reason) || aggregateReason(next.children) || reasonFromSource(next, next.state, next.retryCount);
+  next.meta = metaForState(next.state, next.source, next.reason, next.retryCount);
   map.set(step.id, next);
 }
 
@@ -334,9 +438,12 @@ function mergeChildren(existingChildren = [], nextChildren = []) {
       source: child.source || existing.source,
       sourceRoleId: child.sourceRoleId || existing.sourceRoleId,
       sourcePhase: child.sourcePhase || existing.sourcePhase,
+      retryCount: Math.max(normalizeRetryCount(existing.retryCount), normalizeRetryCount(child.retryCount)),
+      reason: safeReasonText(child.reason) || safeReasonText(existing.reason),
       state: mergeState(existing.state, child.state)
     };
-    merged.meta = metaForState(merged.state, merged.source);
+    merged.state = normalizeStateWithRetry(merged.state, merged.retryCount);
+    merged.meta = metaForState(merged.state, merged.source, merged.reason, merged.retryCount);
     children.set(child.id, merged);
   }
   return [...children.values()].sort(compareChildOrder);
@@ -370,6 +477,7 @@ function childIdFromRole(roleId, fallback) {
   if (role === 'activeCastCard') return 'active-cast-card';
   if (role === 'characterMotivationCard') return 'character-motivation-card';
   if (role === 'dialogueRelationshipCard') return 'dialogue-relationship-card';
+  if (role === 'socialSubtextCard') return 'social-subtext-card';
   if (role === 'sceneConstraintsCard') return 'scene-constraints-card';
   if (role === 'knowledgeSecretsCard') return 'knowledge-secrets-card';
   if (role === 'clocksConsequencesCard') return 'clocks-consequences-card';
@@ -389,17 +497,21 @@ function normalizeChildStep(input, index = 0) {
   const id = roleId && !source.id
     ? childIdFromRole(roleId, `child-${index + 1}`)
     : idFromText(rawId, `child-${index + 1}`);
-  const state = normalizeState(source.state);
+  const retryCount = retryCountFromSource(source);
+  const state = normalizeStateWithRetry(source.state, retryCount);
   const childSource = normalizeChildSource(source.source || source.sourceType || (state === 'cached' ? 'cache' : ''));
+  const reason = reasonFromSource(source, state, retryCount, childSource);
   return {
     id,
     label,
     providerLane: normalizeProviderLane(source.providerLane, roleId === 'reasonerComposer' ? 'reasoner' : 'utility'),
     state,
-    meta: metaForState(state, childSource),
+    meta: metaForState(state, childSource, reason, retryCount),
     source: childSource || null,
     sourcePhase: cleanText(source.sourcePhase || source.phase) || null,
     sourceRoleId: roleId || null,
+    retryCount,
+    reason: reason || null,
     order: Number.isFinite(Number(source.order)) ? Number(source.order) : index
   };
 }
@@ -414,17 +526,21 @@ function normalizeStep(input, index = 0) {
   const children = Array.isArray(source.children)
     ? source.children.map((child, childIndex) => normalizeChildStep(child, childIndex)).sort(compareChildOrder)
     : [];
+  const retryCount = Math.max(retryCountFromSource(source), maxRetryCount(children));
   const state = children.length
-    ? aggregateParentState(normalizeState(source.state), children)
-    : normalizeState(source.state);
+    ? aggregateParentState(normalizeStateWithRetry(source.state, retryCount), children)
+    : normalizeStateWithRetry(source.state, retryCount);
+  const reason = reasonFromSource(source, state, retryCount) || aggregateReason(children);
   const step = {
     id,
     label: definition.label || safeDisplayText(source.label, `Step ${index + 1}`, 80),
     providerLane: normalizeProviderLane(source.providerLane, definition.providerLane || 'utility'),
     state,
-    meta: metaForState(state),
+    meta: metaForState(state, source.source || source.sourceType, reason, retryCount),
     sourcePhase: cleanText(source.sourcePhase || source.phase) || null,
     sourceRoleId: safeDisplayText(source.sourceRoleId || source.roleId, '', 80) || null,
+    retryCount,
+    reason: reason || null,
     order: Number.isFinite(Number(source.order)) ? Number(source.order) : index
   };
   if (children.length) step.children = children;
@@ -580,11 +696,15 @@ function deriveProgressRun(view) {
     const eventOrder = order++;
     const state = eventState(event, eventKey === currentKey || providerConcurrent);
     const child = childStepFromEvent(event, state, eventOrder);
+    const retryCount = eventRetryCount(event);
+    const reason = eventReason(event, state);
     upsertStep(steps, normalizeStep({
       id,
       label: definition.label || activityLabelText(event),
       providerLane: event.providerLane || event.composerLane || definition.providerLane,
       state,
+      retryCount,
+      reason,
       sourcePhase: event.phase,
       sourceRoleId: asObject(event.detail).roleId,
       children: child ? [child] : [],

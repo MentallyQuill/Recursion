@@ -1353,11 +1353,28 @@ function arbiterOutputContractLine(snapshotHash) {
   ].join('\n');
 }
 
+function progressRetryCount(value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return Math.min(99, Math.floor(count));
+}
+
+function providerCardRetryReason(retryCount, batched = false) {
+  const count = progressRetryCount(retryCount);
+  if (!count) return '';
+  const countText = count === 1 ? 'once' : `${count} times`;
+  return batched
+    ? `Provider card batch retried ${countText} before this card completed.`
+    : `Provider card call retried ${countText} before this card completed.`;
+}
+
 function cardProgressDetail(card, source, state) {
   const catalog = catalogForCard(card);
   const roleId = safeText(catalog?.role || card?.role || card?.roleId || '', 120);
   const family = safeText(catalog?.family || card?.family || '', 120);
   const providerLane = safeText(card?.providerLane || card?.lane || '', 40);
+  const retryCount = progressRetryCount(card?.providerRetryCount || card?.retryCount);
+  const reason = safeText(card?.providerProgressReason || card?.progressReason || '', 180);
   return {
     parentStepId: 'utility-card-batch',
     roleId,
@@ -1365,7 +1382,9 @@ function cardProgressDetail(card, source, state) {
     source,
     state,
     providerLane: providerLane === 'reasoner' ? 'reasoner' : 'utility',
-    cardId: safeIdentifier(card?.id || '', 'card', 160)
+    cardId: safeIdentifier(card?.id || '', 'card', 160),
+    ...(retryCount ? { retryCount } : {}),
+    ...(reason ? { reason } : {})
   };
 }
 
@@ -1375,7 +1394,7 @@ function sanitizeGeneratedCard(card) {
   const sanitized = {
     ...card,
     id: safeId || undefined,
-    promptText: safeText(card?.promptText || '', 1000),
+    promptText: safeText(card?.promptText || '', Infinity),
     summary: safeText(card?.summary || card?.promptText || '', 400),
     evidenceRefs: Array.isArray(card?.evidenceRefs)
       ? card.evidenceRefs.map((entry) => safeText(entry, 120)).filter(Boolean).slice(0, 12)
@@ -1385,6 +1404,10 @@ function sanitizeGeneratedCard(card) {
       reason: safeText(card?.arbiter?.reason || '', 240)
     }
   };
+  const retryCount = progressRetryCount(card?.providerRetryCount);
+  const progressReason = safeText(card?.providerProgressReason || '', 180);
+  if (retryCount) sanitized.providerRetryCount = retryCount;
+  if (progressReason) sanitized.providerProgressReason = progressReason;
   if (card?.inspectorNotes) sanitized.inspectorNotes = safeText(card.inspectorNotes, 800);
   return sanitized;
 }
@@ -1701,9 +1724,11 @@ export function createRecursionRuntime({
 
   function stageCardProgress(runId, cards, { source, state }) {
     const list = Array.isArray(cards) ? cards : [];
-    const severity = state === 'failed' ? 'error' : (state === 'warning' ? 'warning' : 'success');
     for (const card of list) {
-      const detail = cardProgressDetail(card, source, state);
+      const retryCount = progressRetryCount(card?.providerRetryCount);
+      const cardState = source === 'generated' && state === 'done' && retryCount > 0 ? 'warning' : state;
+      const severity = cardState === 'failed' ? 'error' : (cardState === 'warning' ? 'warning' : 'success');
+      const detail = cardProgressDetail(card, source, cardState);
       if (!detail.roleId && !detail.family) continue;
       const providerLane = source === 'generated' ? detail.providerLane : 'utility';
       stageRuntimeActivity({
@@ -1712,7 +1737,7 @@ export function createRecursionRuntime({
         severity,
         providerLane,
         composerLane: providerLane,
-        label: `${detail.family || 'Card'} ${source === 'cache' ? 'reused from cache' : (source === 'fallback' ? 'fell back locally' : 'generated')}.`,
+        label: `${detail.family || 'Card'} ${source === 'cache' ? 'reused from cache' : (source === 'fallback' ? 'fell back locally' : (retryCount > 0 ? 'generated after retry' : 'generated'))}.`,
         detail,
         chips: ['Cards', source]
       });
@@ -2925,6 +2950,7 @@ export function createRecursionRuntime({
         ? requests.map((request) => ({ ...request, signal }))
         : requests;
       const options = { runId, signal, isCurrent: () => isActiveRun(runId) };
+      const usedBatch = typeof generationRouter.batch === 'function';
       const results = typeof generationRouter.batch === 'function'
         ? await generationRouter.batch(signalRequests, options)
         : [];
@@ -2944,10 +2970,17 @@ export function createRecursionRuntime({
         expectedSnapshotHash: requests[index]?.snapshotHash,
         expectedRole: requests[index]?.metadata?.role,
         expectedFamily: requests[index]?.metadata?.family
-      }).map((card) => ({
-        ...card,
-        providerLane: result?.lane || requests[index]?.lane || 'utility'
-      })));
+      }).map((card) => {
+        const retryCount = progressRetryCount(result?.diagnostics?.retryCount);
+        return {
+          ...card,
+          providerLane: result?.lane || requests[index]?.lane || 'utility',
+          ...(retryCount ? {
+            providerRetryCount: retryCount,
+            providerProgressReason: providerCardRetryReason(retryCount, usedBatch)
+          } : {})
+        };
+      }));
     } catch {
       return [];
     }

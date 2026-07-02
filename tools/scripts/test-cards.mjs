@@ -18,6 +18,7 @@ const EXPECTED_CATALOG = Object.freeze([
   { family: 'Consequences', role: 'clocksConsequencesCard', priority: 90 },
   { family: 'Character Motivation', role: 'characterMotivationCard', priority: 88 },
   { family: 'Relationship', role: 'dialogueRelationshipCard', priority: 84 },
+  { family: 'Social Subtext', role: 'socialSubtextCard', priority: 82 },
   { family: 'Items', role: 'possessionsItemsCard', priority: 78 },
   { family: 'Environment', role: 'environmentAffordancesCard', priority: 76 },
   { family: 'Open Threads', role: 'openThreadsCard', priority: 72 }
@@ -32,7 +33,7 @@ function deckCard(family, promptText, overrides = {}) {
   }, { sceneId: 'scene-budget', snapshotHash: 'hash-budget' });
 }
 
-assertEqual(CARD_CATALOG.length, 10, 'audited V1 catalog present');
+assertEqual(CARD_CATALOG.length, 11, 'audited V1 catalog present');
 assertDeepEqual(
   CARD_CATALOG.map(({ family, role, priority }) => ({ family, role, priority })),
   EXPECTED_CATALOG,
@@ -55,6 +56,15 @@ assertEqual(card.role, 'characterMotivationCard', 'role derived from family');
 assertEqual(card.catalogKey, 'Character-Motivation', 'catalog key derived from family');
 assertEqual(card.source.snapshotHash, 'hash', 'snapshot hash preserved in source');
 assertEqual(card.freshness.sourceFingerprint, 'hash', 'snapshot hash preserved in freshness');
+
+const longCardText = `Long card start ${'detail '.repeat(260)}LAST-BRIEF-END-MARKER`;
+const longCard = normalizeCard({
+  family: 'Scene Constraints',
+  promptText: longCardText
+}, { sceneId: 'scene-long', snapshotHash: 'hash-long' });
+assertEqual(longCard.promptText, longCardText.trim(), 'card normalization preserves full prompt text for Last Brief inspection');
+assert(longCard.promptText.endsWith('LAST-BRIEF-END-MARKER'), 'long card text is not clipped with ellipsis');
+
 await assertRejects(
   async () => normalizeCard({
     family: 'Character Motivation',
@@ -199,6 +209,25 @@ const motivationRequest = buildCardRequests({ cardJobs: [{ family: 'Character Mo
   snapshotHash: 'hash'
 })[0];
 assert(motivationRequest.prompt.includes('Do not include first-person internal monologue'), 'motivation request includes internal-thought safety instruction');
+const socialSubtextRequest = buildCardRequests({ cardJobs: [{ family: 'Social Subtext' }] }, {
+  runId: 'run',
+  snapshotHash: 'hash',
+  cardScope: {
+    selectedSubItemsByFamily: {
+      'Social Subtext': ['humorIrony', 'veiledPressure', 'invitationBoundary', 'statusFace']
+    }
+  }
+})[0];
+assertEqual(socialSubtextRequest.roleId, 'socialSubtextCard', 'social subtext request uses dedicated utility role');
+assert(socialSubtextRequest.prompt.includes('Selected focus facets for Social Subtext:'), 'social subtext prompt includes selected focus header');
+assert(socialSubtextRequest.prompt.includes('humorIrony (humor/irony)'), 'social subtext prompt includes humor/irony facet');
+assert(socialSubtextRequest.prompt.includes('veiledPressure (veiled pressure)'), 'social subtext prompt includes veiled pressure facet');
+assert(socialSubtextRequest.prompt.includes('invitationBoundary (invitation/boundary)'), 'social subtext prompt includes invitation/boundary facet');
+assert(socialSubtextRequest.prompt.includes('statusFace (status/face)'), 'social subtext prompt includes status/face facet');
+assert(
+  socialSubtextRequest.prompt.includes('Do not turn this into generic dialogue style coaching'),
+  'social subtext prompt includes anti-prose-coaching safety instruction'
+);
 const scopedRequests = buildCardRequests({
   schema: 'recursion.utilityArbiterPlan.v1',
   snapshotHash: 'scope-test',

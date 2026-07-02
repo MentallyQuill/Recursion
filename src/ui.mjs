@@ -93,6 +93,7 @@ const REASONING_LEVEL_TIPS = Object.freeze({
   ultra: 'Ultra: Reasoner-heavy calls with a larger card bias.'
 });
 const REASONING_LEVELS = Object.freeze(REASONING_LEVEL_OPTIONS.map(([value]) => value));
+const FOCUSABLE_SELECTORS = Object.freeze(['button', 'input', 'select', 'textarea', '[tabindex]']);
 const PROVIDER_SOURCE_OPTIONS = Object.freeze([
   ['host-current-model', 'Current Host Model'],
   ['host-connection-profile', 'Host Connection Profile'],
@@ -681,6 +682,57 @@ function tooltipAttrs(enabled, text) {
   return enabled && tip ? { title: tip } : {};
 }
 
+function isHiddenFromFocus(node) {
+  let current = node;
+  while (current) {
+    if (current.hidden || current.getAttribute?.('aria-hidden') === 'true') return true;
+    current = current.parentNode;
+  }
+  return false;
+}
+
+function isFocusableNode(node) {
+  if (!node || node.disabled || isHiddenFromFocus(node)) return false;
+  if (node.getAttribute?.('aria-disabled') === 'true') return false;
+  if (String(node.type || '').toLowerCase() === 'hidden') return false;
+  const tabIndex = node.getAttribute?.('tabindex');
+  if (tabIndex !== null && Number(tabIndex) < 0) return false;
+  return typeof node.focus === 'function';
+}
+
+function focusNode(node) {
+  if (!node || typeof node.focus !== 'function') return;
+  try {
+    node.focus({ preventScroll: true });
+  } catch {
+    try {
+      node.focus();
+    } catch {
+      // Ignore focus failures in host/fake DOMs.
+    }
+  }
+}
+
+function focusPanel(panel) {
+  if (!panel) return;
+  const seen = new Set();
+  const focusable = [];
+  for (const selector of FOCUSABLE_SELECTORS) {
+    for (const node of panel.querySelectorAll?.(selector) || []) {
+      if (seen.has(node)) continue;
+      seen.add(node);
+      focusable.push(node);
+    }
+  }
+  const firstFocusable = focusable.find(isFocusableNode);
+  if (firstFocusable) {
+    focusNode(firstFocusable);
+    return;
+  }
+  if (!panel.getAttribute?.('tabindex')) panel.setAttribute?.('tabindex', '-1');
+  focusNode(panel);
+}
+
 function isSettingsAutoSaveControl(node) {
   const dataset = asObject(node?.dataset);
   return SETTINGS_AUTOSAVE_DATASETS.some((key) => Object.prototype.hasOwnProperty.call(dataset, key));
@@ -960,10 +1012,12 @@ function progressStepTooltip(step, child = false) {
   const state = titleCase(step.state || 'pending', 'Pending');
   const meta = cleanText(step.meta);
   const label = cleanText(step.label, 'Step');
+  const reason = cleanText(step.reason);
   const parts = [
     `${label}: ${state}`,
     `${provider} provider`,
     meta && meta.toLowerCase() !== state.toLowerCase() ? meta : '',
+    reason ? `Reason: ${reason}` : '',
     child ? 'Sub-step' : 'Top-level progress item'
   ].filter(Boolean);
   return parts.join(' - ');
@@ -974,11 +1028,13 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   const meta = step.meta || '';
   const state = step.state || 'pending';
   const providerLane = step.providerLane || 'utility';
+  const reason = step.reason || '';
   const firstRender = row.dataset.recursionProgressRendered !== 'true';
   const changed = !firstRender && (
     row.dataset.recursionProgressState !== state
     || row.dataset.recursionProgressLabel !== label
     || row.dataset.recursionProgressMeta !== meta
+    || row.dataset.recursionProgressReason !== reason
     || row.dataset.recursionProgressProvider !== providerLane
   );
   row.className = progressRowClass(step, child, firstRender ? 'is-entering' : (changed ? 'is-updating' : ''));
@@ -987,6 +1043,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   row.dataset.recursionProgressState = state;
   row.dataset.recursionProgressLabel = label;
   row.dataset.recursionProgressMeta = meta;
+  row.dataset.recursionProgressReason = reason;
   row.dataset.recursionProgressProvider = providerLane;
   setText(row, '[data-recursion-progress-provider-mark]', providerMark(providerLane));
   setText(row, '[data-recursion-progress-label]', label);
@@ -1155,6 +1212,7 @@ function renderReasoningChain(root, reasoningLevel) {
       selected ? 'is-selected' : ''
     ].filter(Boolean).join(' ');
     node.setAttribute('aria-checked', selected ? 'true' : 'false');
+    node.setAttribute('tabindex', selected ? '0' : '-1');
   }
 }
 
@@ -1730,7 +1788,9 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   const connectionProfiles = Array.isArray(options.connectionProfiles) ? options.connectionProfiles : null;
   const readinessOptions = connectionProfiles ? { profiles: connectionProfiles } : {};
   const title = lane === 'reasoner' ? 'Reasoner Provider' : 'Utility Provider';
-  const statusText = lane === 'reasoner' ? 'optional' : providerStatusText(source).toLowerCase();
+  const statusText = lane === 'reasoner' && source.enabled !== true
+    ? 'optional'
+    : providerStatusText(source).toLowerCase();
   const open = lane === 'utility' || source.openAICompatible?.sessionApiKeyPresent === true || Boolean(source.openAICompatible?.model);
   const group = el('section', {
     className: `recursion-provider-section${open ? ' is-open' : ''}`,
@@ -2158,7 +2218,26 @@ function safeViewerValue(value, visiting, depth = 0, maxString = 900) {
 
 function isSensitiveViewerKey(key) {
   const normalized = String(key || '').replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
-  return ['sections', 'prompt', 'prompttext', 'rawprompt', 'rawresponse', 'apikey', 'authorization', 'cookie', 'password', 'secret'].includes(normalized);
+  return [
+    'sections',
+    'prompt',
+    'prompttext',
+    'rawprompt',
+    'rawresponse',
+    'providerprompt',
+    'providerresponse',
+    'hiddenreasoning',
+    'stack',
+    'stacktrace',
+    'trace',
+    'traceback',
+    'errorstack',
+    'apikey',
+    'authorization',
+    'cookie',
+    'password',
+    'secret'
+  ].includes(normalized);
 }
 
 function fallbackPromptBlocksFromPacket(packet) {
@@ -2323,7 +2402,14 @@ function buildRoot() {
         el('span', { className: 'recursion-reasoning-line-fill', attrs: { 'aria-hidden': 'true' } }),
         ...REASONING_LEVEL_OPTIONS.map(([level, label]) => el('button', {
           className: 'recursion-reasoning-node',
-          attrs: { type: 'button', role: 'radio', 'aria-checked': 'false', title: REASONING_LEVEL_TIPS[level] || `${label} reasoning` },
+          attrs: {
+            type: 'button',
+            role: 'radio',
+            'aria-checked': 'false',
+            'aria-label': `${label} reasoning level. ${REASONING_LEVEL_TIPS[level] || `${label} reasoning`}`,
+            tabindex: '-1',
+            title: REASONING_LEVEL_TIPS[level] || `${label} reasoning`
+          },
           dataset: {
             recursionReasoningLevelNode: level,
             [`recursionReasoningLevel${titleCase(level)}`]: ''
@@ -2399,6 +2485,8 @@ function buildRoot() {
   viewer.hidden = true;
   const hiddenViewerToggle = button('Open Viewer', 'recursionViewerToggle', 'Open Recursion viewer');
   hiddenViewerToggle.className = 'recursion-visually-hidden';
+  hiddenViewerToggle.setAttribute('tabindex', '-1');
+  hiddenViewerToggle.setAttribute('aria-hidden', 'true');
 
   root.appendChild(bar);
   root.appendChild(statusPopover);
@@ -2467,6 +2555,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const cardsButton = root.querySelector('[data-recursion-cards-button]');
   const modeButton = root.querySelector('[data-recursion-mode-button]');
   const statusButton = root.querySelector('[data-recursion-status-trigger]');
+  const reasoningChain = root.querySelector('[data-recursion-reasoning-chain]');
   const modeMenu = root.querySelector('[data-recursion-mode-menu]');
   const viewer = root.querySelector('[data-recursion-viewer]');
   const ribbon = root.querySelector('[data-recursion-activity-ribbon]');
@@ -2483,10 +2572,23 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let transientCurrentStepTimer = null;
   let cardScopeNotice = '';
   let pendingCardScope = null;
+  const focusOriginByPanel = typeof WeakMap === 'function' ? new WeakMap() : new Map();
   const providerModelFetchState = {
     utility: { models: [], status: '' },
     reasoner: { models: [], status: '' }
   };
+
+  function rememberPanelFocus(panel, trigger) {
+    if (!panel) return;
+    if (trigger) focusOriginByPanel.set(panel, trigger);
+    focusPanel(panel);
+  }
+
+  function restorePanelFocus(panel, fallback = null) {
+    const target = focusOriginByPanel.get(panel) || fallback;
+    focusOriginByPanel.delete(panel);
+    if (target) focusNode(target);
+  }
 
   function clearRibbonRevealTimer() {
     if (ribbonRevealTimer !== null && typeof clearTimeout === 'function') clearTimeout(ribbonRevealTimer);
@@ -2620,16 +2722,19 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function setFixedPanelGeometry(element, { left, top, width, zIndex = 10000 } = {}) {
     if (!element?.style) return;
+    const viewportTop = Number(globalThis.visualViewport?.offsetTop) || 0;
     const viewportHeight = Number(globalThis.visualViewport?.height)
       || Number(globalThis.innerHeight)
       || Number(document.documentElement?.clientHeight)
       || 0;
+    const viewportBottom = viewportTop + viewportHeight;
     const bottomGutter = 14;
-    const maxHeight = Math.max(0, Math.floor(viewportHeight - top - bottomGutter));
+    const resolvedTop = Math.max(viewportTop, Number(top) || 0);
+    const maxHeight = Math.max(0, Math.floor(viewportBottom - resolvedTop - bottomGutter));
     element.style.position = 'fixed';
     element.style.left = `${Math.round(left)}px`;
     element.style.right = 'auto';
-    element.style.top = `${Math.round(top)}px`;
+    element.style.top = `${Math.round(resolvedTop)}px`;
     element.style.width = `${Math.round(width)}px`;
     element.style.zIndex = String(zIndex);
     element.style.maxHeight = `${maxHeight}px`;
@@ -2640,12 +2745,15 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (!bar || typeof bar.getBoundingClientRect !== 'function') return;
     const rect = bar.getBoundingClientRect();
     if (!rect || rect.width <= 0) return;
-    const viewportWidth = Math.max(320, Number(globalThis.visualViewport?.width || globalThis.innerWidth || document.documentElement?.clientWidth || rect.right || 0));
-    const rootLeft = Math.max(0, rect.left);
-    const rootRight = Math.min(viewportWidth, rect.right);
-    const rootWidth = Math.max(280, rootRight - rootLeft);
-    const progressTop = rect.bottom + 3;
-    const settingsTop = rect.bottom + 5;
+    const viewportLeft = Number(globalThis.visualViewport?.offsetLeft) || 0;
+    const viewportTop = Number(globalThis.visualViewport?.offsetTop) || 0;
+    const viewportWidth = Math.max(0, Number(globalThis.visualViewport?.width || globalThis.innerWidth || document.documentElement?.clientWidth || rect.right || 0));
+    const viewportRight = viewportLeft + viewportWidth;
+    const rootLeft = Math.max(viewportLeft, rect.left);
+    const rootRight = Math.min(viewportRight, rect.right);
+    const rootWidth = Math.max(0, rootRight - rootLeft);
+    const progressTop = Math.max(viewportTop, rect.bottom + 3);
+    const settingsTop = Math.max(viewportTop, rect.bottom + 5);
     const progressWidth = Math.min(352, rootWidth);
     setFixedPanelGeometry(statusPopover, { left: rootLeft, top: progressTop, width: progressWidth, zIndex: 10020 });
     setFixedPanelGeometry(handPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10010 });
@@ -2654,9 +2762,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (modeMenu?.style) {
       const modeRect = root.querySelector('[data-recursion-mode-button]')?.getBoundingClientRect?.();
       if (modeRect) setFixedPanelGeometry(modeMenu, {
-        left: Math.max(0, Math.min(modeRect.left + 6, viewportWidth - 222)),
+        left: Math.max(viewportLeft, Math.min(modeRect.left + 6, viewportRight - 222)),
         top: progressTop,
-        width: 222,
+        width: Math.min(222, viewportWidth),
         zIndex: 10018
       });
     }
@@ -2666,6 +2774,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (!modeMenu) return;
     modeMenu.hidden = !open;
     modeButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) rememberPanelFocus(modeMenu, modeButton);
+    else restorePanelFocus(modeMenu, modeButton);
   }
 
   function renderModeMenuSelection(mode) {
@@ -2683,6 +2793,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (open && cardsPanel.hidden === false) setCardsPanelOpen(false);
     statusPopover.hidden = !open;
     statusButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) rememberPanelFocus(statusPopover, statusButton);
+    else restorePanelFocus(statusPopover, statusButton);
     syncFloatingPanelGeometry();
   }
 
@@ -2690,6 +2802,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (open && cardsPanel.hidden === false) setCardsPanelOpen(false);
     handPanel.hidden = !open;
     handButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) rememberPanelFocus(handPanel, handButton);
+    else restorePanelFocus(handPanel, handButton);
     syncFloatingPanelGeometry();
   }
 
@@ -2703,6 +2817,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setModeMenuOpen(false);
       settingsPanelRendered = false;
       update();
+      rememberPanelFocus(settingsPanel, actionsButton);
+    } else {
+      restorePanelFocus(settingsPanel, actionsButton);
     }
     syncFloatingPanelGeometry();
   }
@@ -2717,7 +2834,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     cardsPanel.hidden = !open;
     cardsButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (!open) cardScopeNotice = '';
-    if (open) renderCardsPanelForView(currentView());
+    if (open) {
+      renderCardsPanelForView(currentView());
+      rememberPanelFocus(cardsPanel, cardsButton);
+    } else {
+      restorePanelFocus(cardsPanel, cardsButton);
+    }
     syncFloatingPanelGeometry();
   }
 
@@ -2811,6 +2933,32 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     return result;
   }
 
+  function applyReasoningLevel(reasoningLevel, { focus = false } = {}) {
+    const normalized = normalizeReasoningLevel(reasoningLevel);
+    runAction(runtime?.updateSettings?.({
+      reasoningLevel: normalized,
+      reasonerUse: reasonerUseForReasoningLevel(normalized)
+    }));
+    if (focus) focusNode(root.querySelector(`[data-recursion-reasoning-level-${normalized}]`));
+    showTransientCurrentStepText(`Reasoning Level: ${reasoningLevelLabel(normalized)}`);
+  }
+
+  function handleReasoningKeydown(event) {
+    const target = closestDatasetElement(event?.target, 'recursionReasoningLevelNode', reasoningChain);
+    if (!target) return;
+    const currentIndex = REASONING_LEVELS.indexOf(normalizeReasoningLevel(target.dataset.recursionReasoningLevelNode));
+    if (currentIndex < 0) return;
+    let nextIndex = currentIndex;
+    if (event?.key === 'ArrowRight' || event?.key === 'ArrowDown') nextIndex = Math.min(REASONING_LEVELS.length - 1, currentIndex + 1);
+    else if (event?.key === 'ArrowLeft' || event?.key === 'ArrowUp') nextIndex = Math.max(0, currentIndex - 1);
+    else if (event?.key === 'Home') nextIndex = 0;
+    else if (event?.key === 'End') nextIndex = REASONING_LEVELS.length - 1;
+    else return;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    applyReasoningLevel(REASONING_LEVELS[nextIndex], { focus: true });
+  }
+
   actionsButton?.addEventListener('click', (event) => {
     event?.preventDefault?.();
     event?.stopPropagation?.();
@@ -2847,6 +2995,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   statusButton?.addEventListener('click', () => {
     setProgressPopoverOpen(statusPopover.hidden);
   });
+  reasoningChain?.addEventListener('keydown', handleReasoningKeydown);
   const handleSettingsAutoSave = (event) => {
     const target = event?.target;
     if (!isSettingsAutoSaveControl(target)) return;
@@ -2881,9 +3030,17 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (control('recursionViewerClose')) {
       if (typeof viewer.close === 'function' && viewer.open) viewer.close();
       viewer.hidden = true;
+      restorePanelFocus(viewer);
     }
-    if (control('recursionViewerToggle')) {
-      openViewer();
+    const viewerToggle = control('recursionViewerToggle');
+    if (viewerToggle) {
+      consumeClickEvent(event);
+      setProgressPopoverOpen(false);
+      setHandPanelOpen(false);
+      setCardsPanelOpen(false);
+      setSettingsPanelOpen(false);
+      setModeMenuOpen(false);
+      openViewer(viewerToggle);
     }
     if (control('recursionCopyPromptPacket')) {
       const view = currentView();
@@ -2952,12 +3109,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     const reasoningNode = control('recursionReasoningLevelNode');
     if (reasoningNode) {
-      const reasoningLevel = normalizeReasoningLevel(reasoningNode.dataset.recursionReasoningLevelNode);
-      runAction(runtime?.updateSettings?.({
-        reasoningLevel,
-        reasonerUse: reasonerUseForReasoningLevel(reasoningLevel)
-      }));
-      showTransientCurrentStepText(`Reasoning Level: ${reasoningLevelLabel(reasoningLevel)}`);
+      applyReasoningLevel(reasoningNode.dataset.recursionReasoningLevelNode, { focus: true });
     }
     const settingsTabControl = control('recursionSettingsTab');
     if (settingsTabControl) {
@@ -3073,12 +3225,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     after?.();
   }
 
-  function openViewer() {
+  function openViewer(trigger = null) {
     viewer.hidden = false;
     if (typeof viewer.showModal === 'function') {
       if (!viewer.open) viewer.showModal();
-      return;
     }
+    rememberPanelFocus(viewer, trigger);
   }
 
   function providerLaneFromDataset(dataset) {

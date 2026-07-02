@@ -8,5 +8,5 @@ export { runSoakUsersPreflight };
 
 if (isDirectRun(import.meta.url)) {
   const report = await runSoakUsersPreflight({ argv: process.argv.slice(2) });
-  printReportAndSetExitCode(report);
+  printReportAndSetExitCode(report, { exit: (code) => process.exit(code) });
 }

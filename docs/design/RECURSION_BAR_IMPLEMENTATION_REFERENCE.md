@@ -17,7 +17,7 @@ Runtime toggles:
 - `.settings-menu.is-open` opens the settings menu full-width under the Recursion Bar; opening it should close competing progress, mode, and brief popovers in production.
 - `.settings-tab.is-selected` and `.settings-pane.is-selected` switch Play, Providers, and Advanced settings groups.
 - `.prompt-packet-panel.is-open` opens the injected prompt packet panel.
-- `.brief-card[aria-expanded="true"]` expands a card row.
+- `.brief-card[aria-expanded="true"]` expands a card row to full natural-height text; the parent brief list scrolls, never the card itself.
 - `.step-row.done`, `.step-row.running`, `.step-row.cached`, `.step-row.skipped`, `.step-row.queued`, `.step-row.warn`, and `.step-row.fail` control progress-row state.
 - `.step-children` groups nested child rows below a parent step; `.step-row.child-row` uses the same state colors while rendering as an indented sub-tier.
 - `data-provider="utility"` and `data-provider="reasoner"` control the U/R provider marker tint.
@@ -2015,7 +2015,10 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
 
 .brief-card[aria-expanded="true"] .card-text {
   display: block;
+  max-height: none;
   overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
   -webkit-line-clamp: unset;
 }
 

@@ -1181,7 +1181,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   });
   const view = runtime.view();
   assertEqual(view.settings.cardScope.families['Scene Frame'].enabled, false, 'runtime view exposes raw disabled card family scope');
-  assertEqual(view.settings.cardScopeSummary.counts.selectedSubItems, 27, 'runtime view exposes separate card scope summary');
+  assertEqual(view.settings.cardScopeSummary.counts.selectedSubItems, 31, 'runtime view exposes separate card scope summary');
 }
 
 {
@@ -2960,6 +2960,7 @@ for (const scenario of [
 }
 
 {
+  const longProviderCardText = `Provider long card start ${'scene pressure '.repeat(240)}LAST-BRIEF-RUNTIME-END`;
   const { runtime, storage } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
@@ -2987,7 +2988,7 @@ for (const scenario of [
               snapshotHash: 'hallucinated-card-snapshot-hash',
               source: { snapshotHash: 'hallucinated-source-snapshot-hash' },
               freshness: { sourceFingerprint: 'hallucinated-freshness-hash' },
-              promptText: 'Provider card should keep runtime-owned provenance.',
+              promptText: longProviderCardText,
               evidenceRefs: ['message:2'],
               tokenEstimate: 12
             }]
@@ -2999,14 +3000,17 @@ for (const scenario of [
   const result = await runtime.prepareForGeneration({ userMessage: 'Provider provenance.' });
   const view = runtime.view();
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  const providerCard = cache.cards.find((card) => card.promptText.includes('Provider card should keep runtime-owned provenance.'));
-  const handCard = view.lastHand.cards.find((card) => card.promptText.includes('Provider card should keep runtime-owned provenance.'));
+  const providerCard = cache.cards.find((card) => card.promptText.includes('Provider long card start'));
+  const handCard = view.lastHand.cards.find((card) => card.promptText.includes('Provider long card start'));
   const expectedProviderSourceHash = sourceWindowHash([
     { mesid: 2, role: 'user', text: 'The lamp breaks.', visible: true },
     { mesid: 3, role: 'user', text: 'Provider provenance.', visible: true }
   ], 2, 3);
   assertEqual(result.ok, true, 'provider card provenance run installs');
   assert(handCard, 'provider card is selected into full hand');
+  assertEqual(handCard.promptText, longProviderCardText, 'runtime view preserves full selected card text for expanded Last Brief rows');
+  assert(handCard.promptText.endsWith('LAST-BRIEF-RUNTIME-END'), 'runtime view card text is not clipped with ellipsis');
+  assertEqual(providerCard?.promptText, longProviderCardText, 'scene cache preserves full card text before prompt-packet budgeting');
   assertEqual(handCard.source?.snapshotHash, undefined, 'hand card exposes compact prompt-safe shape only');
   assert(providerCard, 'provider card is persisted to cache');
   assertEqual(providerCard.sourceFingerprint, expectedProviderSourceHash, 'provider card cache fingerprint uses runtime source-window hash');
@@ -3335,6 +3339,56 @@ for (const scenario of [
   const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
   assert(!serialized.includes('Bearer live-token'), 'provider card bearer token redacted before persistence and prompt');
   assert(!serialized.includes('sk-live-runtime'), 'provider card sk token redacted before persistence and prompt');
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request) {
+        if (roleId !== 'utilityArbiter') throw new Error(`unexpected generate role ${roleId}`);
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            cardJobs: [{ role: 'sceneFrameCard', reason: 'Need a scene frame.' }],
+            budgets: { targetBriefTokens: 500, maxCards: 6 },
+            diagnostics: ['retried-card-plan']
+          }
+        };
+      },
+      async batch(requests) {
+        return requests.map((request) => ({
+          ok: true,
+          roleId: request.roleId,
+          lane: 'utility',
+          diagnostics: { retryCount: 1 },
+          data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: 'The room remains tense after the interruption.',
+              summary: 'Scene frame summary.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 18
+            }]
+          }
+        }));
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Generate retried card job.' });
+  const view = runtime.view();
+  const progressEvent = view.activityHistory.find((event) => event.phase === 'cardProgress'
+    && event.detail?.roleId === 'sceneFrameCard');
+  assertEqual(result.ok, true, 'retried provider card still completes the runtime');
+  assertEqual(progressEvent.detail.source, 'generated', 'retried provider card remains a generated card');
+  assertEqual(progressEvent.detail.state, 'warning', 'retried provider card emits caution progress');
+  assertEqual(progressEvent.detail.retryCount, 1, 'retried provider card progress carries retry count');
+  assert(progressEvent.detail.reason.includes('retried once'), 'retried provider card progress explains the caution');
 }
 
 {

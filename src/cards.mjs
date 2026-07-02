@@ -4,6 +4,7 @@ import { UTILITY_ROLE_IDS } from './providers.mjs';
 import { summarizeBehaviorPolicyForDiagnostics } from './settings-policy.mjs';
 
 const TEXT_LIMIT = 1000;
+const CARD_TEXT_LIMIT = Infinity;
 const SUMMARY_LIMIT = 400;
 const EVIDENCE_LIMIT = 12;
 const EVIDENCE_TEXT_LIMIT = 120;
@@ -92,6 +93,12 @@ export const CARD_CATALOG = Object.freeze([
     role: 'dialogueRelationshipCard',
     priority: 84,
     description: 'Current social tension, leverage, promises, conflicts, and speech constraints.'
+  }),
+  catalogEntry({
+    family: 'Social Subtext',
+    role: 'socialSubtextCard',
+    priority: 82,
+    description: 'Scene-observable implied social meaning such as humor, veiled pressure, invitation, boundaries, status, and face.'
   }),
   catalogEntry({
     family: 'Items',
@@ -505,6 +512,9 @@ function providerSnapshotMatches(data, context) {
 }
 
 function cardPromptSafetyInstruction(catalog) {
+  if (catalog.family === 'Social Subtext') {
+    return 'Do not turn this into generic dialogue style coaching. Keep subtext scene-observable, deniable when uncertain, and separate from private desire or hidden motives as fact.';
+  }
   if (catalog.family !== 'Character Motivation') return '';
   return 'Do not include first-person internal monologue, secret thoughts as truth, or instructions to reveal inner thoughts. Keep motives behavior-facing and observable or explicitly inferred.';
 }
@@ -687,7 +697,7 @@ export function normalizeCard(input = {}, context = {}) {
   const source = asObject(input);
   const ctx = asObject(context);
   const catalog = resolveCatalog(source);
-  const promptText = cleanText(source.promptText ?? source.text ?? source.claim, TEXT_LIMIT);
+  const promptText = cleanText(source.promptText ?? source.text ?? source.claim, CARD_TEXT_LIMIT);
   if (!promptText) throw new Error('Card promptText is required.');
   assertCardPromptTextSafe(catalog, promptText);
 

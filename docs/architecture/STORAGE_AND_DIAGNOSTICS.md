@@ -149,7 +149,7 @@ type RecursionCachedCard = {
 
 Contract rules:
 
-- `promptText` is injectable card text, but it is still cache data and must remain compact.
+- `promptText` is injectable card text. Scene cache and Last Brief inspection preserve the safe normalized card text so expanded rows can show the full card; prompt composition remains responsible for budgeted trimming before injection.
 - `summary` supports UI scanning and diagnostics; it is not a second prompt body.
 - `inspectorNotes` are diagnostic-only and must never enter prompt composition or injected prompt logs.
 - `sourceRefs`, card ids, families, roles, catalog keys, source fingerprints, chat ids, and arbiter metadata must pass through the same unsafe-text screening used by diagnostics. Unsafe metadata is dropped or replaced with a neutral fallback before write.
@@ -398,7 +398,7 @@ Required coverage:
 
 - settings persistence stores compact controls and excludes session API keys;
 - logical key builders sanitize `chatKey` and `sceneKey`;
-- scene cache schema accepts valid records and rejects missing version, oversized card text, invalid statuses, and unsafe source refs;
+- scene cache schema accepts valid records and rejects missing version, invalid statuses, and unsafe source refs while preserving safe card text for inspection before prompt-packet budgeting;
 - scene cache writes store source refs/hashes and bounded excerpts only, not full transcript archives;
 - run journal enforces ring-buffer bounds;
 - journal redaction strips secrets, raw prompts, raw responses, headers, cookies, and private notes;

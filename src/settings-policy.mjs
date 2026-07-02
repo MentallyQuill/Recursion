@@ -8,7 +8,7 @@ export const FOOTPRINT_SECTION_BUDGETS = Object.freeze({
 
 export const FOCUS_BOOSTED_FAMILIES = Object.freeze({
   balanced: Object.freeze([]),
-  character: Object.freeze(['Active Cast', 'Character Motivation', 'Relationship', 'Knowledge']),
+  character: Object.freeze(['Active Cast', 'Character Motivation', 'Relationship', 'Social Subtext', 'Knowledge']),
   constraints: Object.freeze(['Scene Constraints', 'Items', 'Consequences', 'Scene Frame', 'Knowledge']),
   scene: Object.freeze(['Scene Frame', 'Environment', 'Items', 'Active Cast']),
   plot: Object.freeze(['Open Threads', 'Consequences', 'Knowledge', 'Scene Frame'])

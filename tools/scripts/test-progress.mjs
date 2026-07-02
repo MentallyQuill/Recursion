@@ -62,14 +62,52 @@ assertEqual(blocks[0].label, 'Checking token: a brass coin', 'hero blocks inheri
 const renamedCardProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'renamed-card-progress', phase: 'cardBatchRunning', label: 'Utility card batch', providerLane: 'utility', cardCounts: { requested: 1 }, recordedAt: '1' },
-    { runId: 'renamed-card-progress', phase: 'providerCallSettled', roleId: 'sceneConstraintsCard', outcome: 'success', providerLane: 'utility', recordedAt: '2' }
+    { runId: 'renamed-card-progress', phase: 'providerCallSettled', roleId: 'sceneConstraintsCard', outcome: 'success', providerLane: 'utility', recordedAt: '2' },
+    { runId: 'renamed-card-progress', phase: 'providerCallSettled', roleId: 'socialSubtextCard', outcome: 'success', providerLane: 'utility', recordedAt: '3' }
   ],
-  activity: { runId: 'renamed-card-progress', phase: 'providerCallSettled', roleId: 'sceneConstraintsCard', outcome: 'success', providerLane: 'utility', recordedAt: '2' }
+  activity: { runId: 'renamed-card-progress', phase: 'providerCallSettled', roleId: 'socialSubtextCard', outcome: 'success', providerLane: 'utility', recordedAt: '3' }
 });
 const progressText = JSON.stringify(renamedCardProgress);
 assert(progressText.includes('Scene Constraints'), 'progress labels Scene Constraints card rows');
+assert(progressText.includes('Social Subtext'), 'progress labels Social Subtext card rows');
+assert(progressText.includes('social-subtext-card'), 'progress gives Social Subtext a stable child id');
 assert(!progressText.includes('Continuity ' + 'Risk'), 'progress no longer labels legacy risk rows');
 assert(!progressText.includes('Pr' + 'ose'), 'progress no longer labels legacy craft cards');
+
+const retriedGeneratedCardProgress = createProgressRunModel({
+  activityHistory: [
+    { runId: 'retried-generated-card', phase: 'cardBatchRunning', label: 'Utility card batch', providerLane: 'utility', cardCounts: { requested: 1 }, recordedAt: '1' },
+    {
+      runId: 'retried-generated-card',
+      phase: 'cardProgress',
+      severity: 'success',
+      detail: {
+        parentStepId: 'utility-card-batch',
+        roleId: 'sceneFrameCard',
+        family: 'Scene Frame',
+        source: 'generated',
+        state: 'done',
+        retryCount: 1,
+        reason: 'Provider batch retried once before this card completed.'
+      },
+      recordedAt: '2'
+    },
+    { runId: 'retried-generated-card', phase: 'settled', label: 'Recursion prompt ready.', severity: 'success', recordedAt: '3' }
+  ],
+  activity: {
+    runId: 'retried-generated-card',
+    phase: 'settled',
+    label: 'Recursion prompt ready.',
+    severity: 'success',
+    recordedAt: '3'
+  }
+});
+const retriedGeneratedBatch = retriedGeneratedCardProgress.steps.find((step) => step.id === 'utility-card-batch');
+const retriedGeneratedChild = retriedGeneratedBatch.children.find((child) => child.id === 'scene-frame-card');
+assertEqual(retriedGeneratedChild.state, 'warning', 'generated card success after retry stays caution-colored');
+assertEqual(retriedGeneratedChild.meta, 'retried', 'generated card retry has visible retried meta');
+assert(retriedGeneratedChild.reason.includes('retried once'), 'generated card retry keeps a safe visible reason');
+assertEqual(retriedGeneratedBatch.state, 'warning', 'retried generated child keeps batch caution-colored');
 
 const controlOnlyPromptProgress = createProgressRunModel({
   settings: { enabled: false, mode: 'auto' },

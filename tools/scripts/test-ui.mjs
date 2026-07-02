@@ -419,6 +419,7 @@ assert(/\.recursion-mode-icon\s*\{[\s\S]*?pointer-events:\s*none;/.test(recursio
 assert(/\.recursion-mode-icon \*\s*\{[\s\S]*?pointer-events:\s*none;/.test(recursionCss), 'production mode icon graphics do not become independent click targets');
 assert(/\.recursion-brief-card\s*\{[\s\S]*?grid-template-columns:\s*138px minmax\(0,\s*1fr\);/.test(recursionCss), 'production Last Brief cards use the reference two-column card grid');
 assert(/\.recursion-card-text\s*\{[\s\S]*?-webkit-line-clamp:\s*1;/.test(recursionCss), 'production Last Brief cards clamp text to one line while compact');
+assert(/\.recursion-brief-card\[aria-expanded="true"\] \.recursion-card-text\s*\{[\s\S]*?max-height:\s*none;[\s\S]*?overflow:\s*visible;[\s\S]*?white-space:\s*normal;[\s\S]*?-webkit-line-clamp:\s*unset;/.test(recursionCss), 'expanded Last Brief cards grow to full text without nested scroll or ellipsis');
 assert(/\.status-popover\s*\{[\s\S]*?left:\s*-3px;/.test(barImplementationReference), 'status popover aligns to the visible left edge of the bar');
 assert(/const PROGRESS_CHILD_VISIBLE_LIMIT = 5;/.test(barImplementationReference), 'turn animation preview defaults to five visible sub-tier rows');
 assert(/const PROGRESS_LIST_VISIBLE_LIMIT = 15;/.test(barImplementationReference), 'turn animation preview defaults to fifteen visible progress items');
@@ -525,8 +526,8 @@ assert(/\.recursion-provider-context-fields\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*
 assert(/\.recursion-provider-openai-fields\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\);/.test(recursionCss), 'OpenAI provider fields align as a stable two-column block');
 assert(/\.recursion-provider-context-fields\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'hidden provider source-specific field groups stay hidden despite grouped provider layout');
 assert(/\.recursion-provider-status\.pass\s*\{[\s\S]*?var\(--recursion-success\)/.test(recursionCss), 'production provider success status uses the defined success token');
-assert(/const progressTop = rect\.bottom \+ 3;/.test(recursionUi), 'production progress popover uses the reference vertical gap below the compact bar');
-assert(/const settingsTop = rect\.bottom \+ 5;/.test(recursionUi), 'production settings and brief popovers use the reference desktop vertical gap');
+assert(/const progressTop = Math\.max\(viewportTop,\s*rect\.bottom \+ 3\);/.test(recursionUi), 'production progress popover uses the reference vertical gap with visual viewport top clamping');
+assert(/const settingsTop = Math\.max\(viewportTop,\s*rect\.bottom \+ 5\);/.test(recursionUi), 'production settings and brief popovers use the reference desktop vertical gap with visual viewport top clamping');
 assert(/globalThis\.visualViewport\?\.height/.test(recursionUi), 'production popover geometry clamps to the mobile visual viewport height');
 assert(/element\.style\.maxHeight = `\$\{maxHeight\}px`;/.test(recursionUi), 'production popover geometry uses pixel max-height instead of layout viewport units');
 assert(!/element\.style\.maxHeight = `calc\(100vh/.test(recursionUi), 'production popover geometry avoids mobile-clipping 100vh max-height');
@@ -648,6 +649,8 @@ const sensitiveView = {
   },
   activity: {
     phase: 'promptInstalling',
+    stack: 'STACK_TRACE_SENTINEL',
+    trace: 'TRACE_SENTINEL',
     detail: { message: 'Bearer activity-token' }
   },
   lastPacket: {
@@ -687,6 +690,7 @@ function createFakeDocument() {
       this.value = '';
       this.checked = false;
       this.disabled = false;
+      this.tabIndex = 0;
       this.rect = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
       this.classList = {
         toggle: (className, force) => {
@@ -744,6 +748,7 @@ function createFakeDocument() {
       if (name === 'aria-label') this.ariaLabel = String(value);
       if (name === 'value') this.value = String(value);
       if (name === 'type') this.type = String(value);
+      if (name === 'tabindex') this.tabIndex = Number(value);
       if (name === 'disabled') this.disabled = true;
       if (name === 'checked') this.checked = true;
       if (name.startsWith('data-')) {
@@ -759,6 +764,10 @@ function createFakeDocument() {
     addEventListener(type, listener) {
       if (!this.eventListeners[type]) this.eventListeners[type] = [];
       this.eventListeners[type].push(listener);
+    }
+
+    focus() {
+      fakeDocument.activeElement = this;
     }
 
     click(eventInit = {}) {
@@ -785,6 +794,33 @@ function createFakeDocument() {
       if (!event.propagationStopped || eventInit.ignoreStopPropagation) {
         for (const listener of documentListeners.click || []) listener(event);
       }
+    }
+
+    keydown(eventInit = {}) {
+      const event = {
+        target: this,
+        key: eventInit.key || '',
+        preventDefault() {
+          this.defaultPrevented = true;
+        },
+        stopPropagation() {
+          this.propagationStopped = true;
+        },
+        stopImmediatePropagation() {
+          this.propagationStopped = true;
+          this.immediatePropagationStopped = true;
+        }
+      };
+      let node = this;
+      while (node) {
+        for (const listener of node.eventListeners.keydown || []) listener(event);
+        if (event.propagationStopped && !eventInit.ignoreStopPropagation) break;
+        node = node.parentNode;
+      }
+      if (!event.propagationStopped || eventInit.ignoreStopPropagation) {
+        for (const listener of documentListeners.keydown || []) listener(event);
+      }
+      return event;
     }
 
     showModal() {
@@ -861,8 +897,9 @@ function createFakeDocument() {
   }
 
   const body = new FakeElement('body');
-  return {
+  const fakeDocument = {
     body,
+    activeElement: body,
     createElement: (tagName) => new FakeElement(tagName),
     getElementById: (id) => findFirst(body, `#${id}`),
     addEventListener(type, listener) {
@@ -875,6 +912,7 @@ function createFakeDocument() {
     },
     textTree
   };
+  return fakeDocument;
 }
 
 const previousDocument = globalThis.document;
@@ -951,6 +989,8 @@ try {
   globalThis.visualViewport = {
     width: 640,
     height: 520,
+    offsetLeft: 0,
+    offsetTop: 0,
     addEventListener(type, listener) {
       if (!visualViewportListeners[type]) visualViewportListeners[type] = [];
       visualViewportListeners[type].push(listener);
@@ -1054,7 +1094,7 @@ try {
           temperature: 0.4,
           topP: 0.95,
           maxTokens: 4096,
-          lastTest: { status: 'not-run' }
+          lastTest: { status: 'pass' }
         }
       }
     },
@@ -1302,6 +1342,12 @@ try {
   assert(root.querySelector('[data-recursion-current-step]'), 'compact bar renders one current-step status text');
   assert(root.querySelector('[data-recursion-reasoning-chain]'), 'compact bar renders the reasoning level chain');
   assert(root.querySelector('[data-recursion-reasoning-level-high]'), 'reasoning chain defaults to the High node');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('aria-label'), 'Low reasoning level. Low: Utility-only, reduced cards.', 'Low reasoning node has explicit accessible label');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-medium]').getAttribute('aria-label'), 'Medium reasoning level. Medium: Utility checks, Reasoner final brief.', 'Medium reasoning node has explicit accessible label');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('aria-label'), 'High reasoning level. High: Reasoner Arbiter, priority cards, and final brief.', 'High reasoning node has explicit accessible label');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('aria-label'), 'Ultra reasoning level. Ultra: Reasoner-heavy calls with a larger card bias.', 'Ultra reasoning node has explicit accessible label');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('tabindex'), '0', 'selected reasoning node is the roving tab stop');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('tabindex'), '-1', 'unselected reasoning node leaves the tab sequence');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('title'), 'Low: Utility-only, reduced cards.', 'Low reasoning tooltip matches the reference copy');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-medium]').getAttribute('title'), 'Medium: Utility checks, Reasoner final brief.', 'Medium reasoning tooltip matches the reference copy');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('title'), 'High: Reasoner Arbiter, priority cards, and final brief.', 'High reasoning tooltip matches the reference copy');
@@ -1339,6 +1385,8 @@ try {
   assertEqual(root.querySelector('[data-recursion-hand-toggle]').getAttribute('title'), 'Open last brief preview', 'brief dropdown trigger exposes hover tip copy');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode menu trigger starts collapsed');
   assertEqual(root.querySelector('[data-recursion-options-button]').getAttribute('title'), 'Open Recursion settings', 'options button exposes hover tip copy');
+  assertEqual(root.querySelector('[data-recursion-viewer-toggle]').getAttribute('tabindex'), '-1', 'hidden viewer toggle is not an invisible tab stop');
+  assertEqual(root.querySelector('[data-recursion-viewer-toggle]').getAttribute('aria-hidden'), 'true', 'hidden viewer toggle is removed from assistive navigation');
   assertEqual(root.dataset.recursionRoot, '', 'root exposes stable recursion capture selector');
   assert(root.querySelector('[data-recursion-activity-ribbon]'), 'activity ribbon selector is rendered');
   assert(!root.querySelector('[data-recursion-action-menu]'), 'legacy action menu is not rendered');
@@ -1384,13 +1432,57 @@ try {
   root.querySelector('[data-recursion-status-trigger]').click();
   assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, false, 'activity trigger opens progress popover');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'true', 'activity trigger reflects open progress popover');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-status-popover]'), 'opening progress moves focus into the progress popover');
   root.querySelector('[data-recursion-status-trigger]').click();
   assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'activity trigger closes progress popover');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'false', 'activity trigger reflects closed progress popover');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-status-trigger]'), 'closing progress restores focus to the trigger');
   root.querySelector('[data-recursion-status-trigger]').click();
   assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, false, 'activity trigger opens progress popover');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'true', 'activity trigger reflects open progress popover');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-status-popover]')).includes('Utility card batch'), 'progress popover renders progress rows');
+  const originalActivity = view.activity;
+  const originalProgressRun = view.progressRun;
+  const retryReason = 'Provider card batch retried once before this card completed.';
+  view = {
+    ...view,
+    activity: { phase: 'settled', severity: 'warning', label: 'Recursion prompt ready.' },
+    progressRun: {
+      runId: 'ui-progress-retried',
+      title: 'Needs attention',
+      steps: [
+        {
+          id: 'utility-card-batch',
+          label: 'Utility card batch',
+          providerLane: 'utility',
+          state: 'warning',
+          children: [
+            {
+              id: 'scene-frame-card',
+              label: 'Scene Frame',
+              providerLane: 'utility',
+              state: 'warning',
+              source: 'generated',
+              retryCount: 1,
+              reason: retryReason
+            }
+          ]
+        }
+      ]
+    }
+  };
+  ui.update();
+  const retriedProgressRow = root.querySelectorAll('[data-recursion-progress-row]')
+    .find((row) => row.dataset.recursionProgressStepId === 'scene-frame-card');
+  assert(fakeDocument.textTree(retriedProgressRow).includes('retried'), 'retried generated card row shows visible retried meta');
+  assertEqual(retriedProgressRow.dataset.recursionProgressReason, retryReason, 'retried generated card row carries safe reason metadata');
+  assert(retriedProgressRow.getAttribute('title').includes(`Reason: ${retryReason}`), 'retried generated card row tooltip explains why it is yellow');
+  view = {
+    ...view,
+    activity: originalActivity,
+    progressRun: originalProgressRun
+  };
+  ui.update();
   root.querySelector('[data-recursion-actions]').click();
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'narrow options click opens settings panel');
   assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'narrow options click closes progress instead of hiding it behind settings');
@@ -1414,9 +1506,27 @@ try {
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.left, '0px', 'Cards dropdown aligns to the full bar left edge');
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.width, '640px', 'Cards dropdown spans the full bar width');
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.maxHeight, '471px', 'Cards dropdown clamps to mobile visual viewport height with bottom gutter');
+  assertEqual(
+    fakeDocument.activeElement,
+    root.querySelectorAll('[data-recursion-card-scope-family-toggle]')[0],
+    'opening Cards moves focus to the first enabled dropdown control'
+  );
   globalThis.visualViewport.height = 360;
   globalThis.visualViewport.emit('resize');
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.maxHeight, '311px', 'Cards dropdown reclamps when mobile visual viewport height changes');
+  globalThis.visualViewport.offsetTop = 40;
+  globalThis.visualViewport.height = 360;
+  globalThis.visualViewport.emit('scroll');
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').style.top, '40px', 'Cards dropdown top clamps to visualViewport offsetTop');
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').style.maxHeight, '346px', 'Cards dropdown includes visualViewport offsetTop in mobile clipping');
+  globalThis.visualViewport.offsetLeft = 12;
+  globalThis.visualViewport.width = 320;
+  globalThis.visualViewport.emit('scroll');
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').style.left, '12px', 'Cards dropdown left edge clamps to visualViewport offsetLeft');
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').style.width, '320px', 'Cards dropdown right edge clamps inside the offset visual viewport');
+  globalThis.visualViewport.offsetLeft = 0;
+  globalThis.visualViewport.offsetTop = 0;
+  globalThis.visualViewport.width = 640;
   globalThis.visualViewport.height = 520;
   globalThis.visualViewport.emit('resize');
   assert(root.querySelector('[data-recursion-card-scope-all]'), 'Cards dropdown renders an All scope action');
@@ -1426,7 +1536,7 @@ try {
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-family]').length, CARD_SCOPE_CATALOG.length, 'Cards dropdown renders every fixed V1 family');
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]').length, CARD_SCOPE_TOTAL_SUB_ITEMS, 'Cards dropdown renders every fixed V1 sub-item');
   const cardScopeText = fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]'));
-  for (const familyName of ['Scene Frame', 'Active Cast', 'Scene Constraints', 'Knowledge', 'Consequences', 'Environment', 'Items', 'Open Threads']) {
+  for (const familyName of ['Scene Frame', 'Active Cast', 'Character Motivation', 'Relationship', 'Social Subtext', 'Scene Constraints', 'Knowledge', 'Consequences', 'Environment', 'Items', 'Open Threads']) {
     assert(cardScopeText.includes(familyName), `Cards dropdown renders ${familyName}`);
   }
   for (const removed of ['den' + 'sity', 'specificity/shape', 'present participants']) {
@@ -1514,6 +1624,15 @@ try {
     .click();
   assertEqual(settingsUpdates.length, updatesBeforeZeroGuard, 'card scope zero-selection guard blocks the final sub-item disable');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('Keep at least one card focus enabled.'), 'Cards dropdown renders zero-selection guard copy');
+  root.querySelector('[data-recursion-reasoning-level-high]').keydown({ key: 'ArrowRight' });
+  assertEqual(settingsUpdates.at(-1).reasoningLevel, 'ultra', 'ArrowRight advances reasoning roving selection');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-reasoning-level-ultra]'), 'ArrowRight moves focus to the next reasoning node');
+  view = { ...view, settings: { ...view.settings, reasoningLevel: 'ultra' } };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('tabindex'), '0', 'roving tab stop follows selected reasoning level after update');
+  root.querySelector('[data-recursion-reasoning-level-ultra]').keydown({ key: 'Home' });
+  assertEqual(settingsUpdates.at(-1).reasoningLevel, 'low', 'Home moves reasoning roving selection to Low');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-reasoning-level-low]'), 'Home moves focus to the Low reasoning node');
   assertEqual(
     root.querySelector('[data-recursion-progress-list]').style.props['--recursion-progress-list-limit'],
     '15',
@@ -1600,6 +1719,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open');
   assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, true, 'clicking Providers hides Play pane');
   assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, false, 'clicking Providers shows provider controls');
+  assert(root.querySelector('[data-recursion-provider-status-reasoner]').textContent.toLowerCase().includes('pass'), 'enabled Reasoner provider renders its test status instead of optional');
   assertEqual(root.querySelector('[data-recursion-provider-body-utility]').hidden, false, 'Utility provider section defaults open');
   assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, true, 'Reasoner provider section defaults collapsed');
   root.querySelector('[data-recursion-provider-toggle-utility]').click();
@@ -1734,10 +1854,12 @@ try {
   fakeDocument.body.click();
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, true, 'outside click closes settings panel without a header close button');
   assertEqual(root.querySelector('[data-recursion-actions]').getAttribute('aria-expanded'), 'false', 'options button reflects closed settings state');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-actions]'), 'outside click close restores focus to the settings trigger');
 
   root.querySelector('[data-recursion-hand-toggle]').click();
   assertEqual(root.querySelector('[data-recursion-hand-dropdown]').hidden, false, 'brief dropdown button opens Last Brief');
   assertEqual(root.querySelector('[data-recursion-hand-toggle]').getAttribute('aria-expanded'), 'true', 'brief dropdown trigger reflects open state');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-prompt-packet-button]'), 'opening Last Brief moves focus to its first control');
   const briefCard = root.querySelector('[data-recursion-brief-card]');
   assert(briefCard.dataset.recursionBriefCardId, 'brief card keeps per-card id for expansion persistence');
   assertEqual(briefCard.getAttribute('aria-expanded'), 'false', 'brief card starts compact');
@@ -1906,6 +2028,7 @@ try {
   };
   root.querySelector('[data-recursion-viewer-toggle]').click();
   assertEqual(showModalCount, 1, 'viewer toggle opens dialog once per click');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-viewer-close]'), 'opening viewer focuses the close control');
   viewer.close = () => {
     closeCount += 1;
     viewer.open = false;
@@ -1954,6 +2077,8 @@ try {
   assert(!viewerText.includes('sk-ui-packet'), 'viewer redacts packet secrets');
   assert(!viewerText.includes('private-secret'), 'viewer redacts private secret text');
   assert(!viewerText.includes('Bearer ui-token'), 'viewer redacts settings secrets');
+  assert(!viewerText.includes('STACK_TRACE_SENTINEL'), 'viewer redacts stack traces from activity surfaces');
+  assert(!viewerText.includes('TRACE_SENTINEL'), 'viewer redacts trace payloads from activity surfaces');
   assert(!viewerText.includes('plain-private-key'), 'viewer redacts privateKey values');
   assert(!viewerText.includes('plain-session-key'), 'viewer redacts sessionKey values');
   assert(!viewerText.includes('plain-auth-header'), 'viewer redacts authHeader values');

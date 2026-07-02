@@ -35,6 +35,7 @@ V1 uses the audited fixed catalog below. The Arbiter receives this predetermined
 | Active Cast | Who is present, their visible state, and current conversational or physical role. | Helps prevent dropped characters and speaker confusion. |
 | Character Motivation | Observable or safely inferred motives, pressures, hesitations, and goals. | Replaces raw internal-thought injection with bounded behavior guidance. |
 | Relationship | Current conversational tension, relationship texture, promises, conflicts, and voice constraints. | Guides reply tone, subtext, and active relationship implications. |
+| Social Subtext | Scene-observable implied social meaning such as humor, veiled pressure, invitation, boundaries, status, and face. | Helps prevent literal reads of deniable, indirect, or socially loaded cues. |
 | Scene Constraints | Hard limits, contradiction traps, timing, access, visibility, and plausibility constraints. | High-priority safety lane for scene constraints. |
 | Knowledge | Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries. | Guardrail lane for knowledge state and spoiler-safe reveal control. |
 | Consequences | Deadlines, countdowns, delayed consequences, and escalation triggers. | Keeps near-term pressure visible without turning it into durable memory. |
@@ -56,6 +57,7 @@ The implemented catalog follows this direction:
 | Active Cast | Keep | Expand who can plausibly act, speak, observe, interrupt, or be forgotten because they are silent but present. | Character roster recap or durable relationship tracking. |
 | Character Motivation | Keep, safety-bound | Expand visible goals, pressures, hesitation, and likely behavior vectors from observable evidence. | Hidden thoughts, private plans, mind-reading, or future plot steering. |
 | Relationship | Keep, reframe | Expand social affordances: leverage, tension, debts, promises, refusals, trust, threat, address, and what would escalate or soften the exchange. | Generic dialogue-tone advice or long relationship history. |
+| Social Subtext | Add, safety-bound | Expand implied social meaning the next response could miss: dry humor, veiled pressure, flirtation or refusal cues, status moves, and face-saving dynamics. | Generic prose coaching, certainty about private desire, or turning subtext into blunt narration. |
 | Scene Constraints | Keep | Use as scene constraints: hard limits, contradiction traps, cause/effect, timing, access, visibility, or state that would make the next response implausible if missed. | Continuity-extension posture, durable canon arbitration, or collecting facts just because they are true. |
 | Knowledge | Keep | Expand knowledge asymmetry: who knows, suspects, misunderstands, can infer, must not learn, or can safely reveal something now. | Spoiler storage, secret-lore dumps, or revealing hidden facts as narration. |
 | Consequences | Keep | Expand near-term pressures from choices already in motion: deadlines, delayed effects, escalation triggers, windows of opportunity, and likely fallout. | Long plot planning or future-story scripting. |
@@ -83,6 +85,10 @@ This is the implemented sub-item catalog for `src/card-scope.mjs`. Facets are no
 | Relationship | `tension` | Keep | Expand current friction, trust, leverage, intimacy, threat, or subtext into usable social affordances. | Generic tone labels. |
 | Relationship | `promisesConflicts` | Keep | Preserve active promises, refusals, debts, threats, disagreements, and obligations because they shape what can be said or done next. | Long relationship history or continuity ledger behavior. |
 | Relationship | `voiceConstraints` | Conditional, reframe | Keep only as scene-local address/speech constraints, such as formality, taboo wording, secrecy, or who can safely say what. | Replacing the preset, generic style coaching, or broad voice imitation. |
+| Social Subtext | `humorIrony` | Keep | Capture dry humor, sarcasm, teasing, understatement, or gallows humor when it signals deflection, intimacy, contempt, nervousness, or pressure relief. | Making the response generically funnier or explaining every joke. |
+| Social Subtext | `veiledPressure` | Keep | Capture polite threats, friendly warnings, coercion, intimidation, or consequences carried through implication instead of open hostility. | Flattening indirect danger into blunt threats or inventing intent. |
+| Social Subtext | `invitationBoundary` | Keep | Capture flirtation, charged compliments, testing interest, permission seeking, discomfort, soft refusal, or cues not to push further. | Claiming private desire as fact or escalating beyond observable consent cues. |
+| Social Subtext | `statusFace` | Keep | Capture dominance, deference, rank assertion, saving face, public embarrassment, or who is being made to yield in the exchange. | Generic power-level summaries or unrelated relationship history. |
 | Scene Constraints | `hardLimits` | Keep | Treat as hard scene constraints and plausibility traps: injuries, locked routes, missing objects, stated choices, or visible limits. | Collecting facts merely because they are true. |
 | Scene Constraints | `spatialConstraints` | Keep | Preserve movement, reach, visibility, blocked route, distance, and access limits that affect the next beat. | General map summary better handled by Environment. |
 | Scene Constraints | `timelineOrder` | Keep | Track immediate cause/effect, sequence, reveal order, and what has not happened yet. | Long timeline management or durable canon arbitration. |
@@ -102,7 +108,7 @@ This is the implemented sub-item catalog for `src/card-scope.mjs`. Facets are no
 | Open Threads | `pendingActions` | Keep | Preserve attempted, requested, promised, interrupted, or awaited actions that should influence the next response. | Task-list behavior detached from the scene. |
 | Open Threads | `nearTermPressures` | Keep | Capture immediate obligations, looming problems, choices, or hooks that shape the next beat. | Duplicating Consequences without added next-turn value. |
 
-Net facet direction: every implemented sub-item must act as an implication expander. Broad craft guidance belongs to the user's preset and behavior settings; hard beat constraints live under Scene Frame. The riskiest keep is `voiceConstraints`, which must remain scene-local speech/address constraints rather than a style-preset substitute.
+Net facet direction: every implemented sub-item must act as an implication expander. Broad craft guidance belongs to the user's preset and behavior settings; hard beat constraints live under Scene Frame. The riskiest keeps are `voiceConstraints` and Social Subtext facets, which must remain scene-local speech/address or observable subtext constraints rather than a style-preset substitute.
 
 ## Card Data Contract
 

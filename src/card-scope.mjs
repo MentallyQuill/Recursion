@@ -90,6 +90,33 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     ])
   }),
   Object.freeze({
+    family: 'Social Subtext',
+    role: 'socialSubtextCard',
+    description: 'Scene-observable implied social meaning that is easy to read too literally, underplay, or overstate.',
+    subItems: Object.freeze([
+      Object.freeze({
+        key: 'humorIrony',
+        label: 'humor/irony',
+        description: 'Dry humor, sarcasm, teasing, understatement, or gallows humor when it signals deflection, intimacy, contempt, nervousness, or pressure relief.'
+      }),
+      Object.freeze({
+        key: 'veiledPressure',
+        label: 'veiled pressure',
+        description: 'Polite threats, friendly warnings, coercion, intimidation, or consequences carried through implication instead of open hostility.'
+      }),
+      Object.freeze({
+        key: 'invitationBoundary',
+        label: 'invitation/boundary',
+        description: 'Flirtation, charged compliments, testing interest, permission seeking, discomfort, soft refusal, or a cue not to push further.'
+      }),
+      Object.freeze({
+        key: 'statusFace',
+        label: 'status/face',
+        description: 'Dominance, deference, rank assertion, saving face, public embarrassment, or who is being made to yield in the exchange.'
+      })
+    ])
+  }),
+  Object.freeze({
     family: 'Scene Constraints',
     role: 'sceneConstraintsCard',
     description: 'Hard limits, contradiction traps, timing, access, visibility, and plausibility constraints.',

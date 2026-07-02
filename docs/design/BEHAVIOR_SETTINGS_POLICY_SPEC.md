@@ -164,7 +164,7 @@ Focus does not replace Card Scope. Card Scope is the family/sub-item selector. I
 | Focus | Boosted families |
 | --- | --- |
 | Balanced | No family boost. |
-| Character | Active Cast, Character Motivation, Relationship, Knowledge. |
+| Character | Active Cast, Character Motivation, Relationship, Social Subtext, Knowledge. |
 | Constraints | Scene Constraints, Items, Consequences, Scene Frame, Knowledge. |
 | Scene | Scene Frame, Environment, Items, Active Cast. |
 | Plot | Open Threads, Consequences, Knowledge, Scene Frame. |
@@ -267,7 +267,7 @@ The Arbiter request should include a short behavior policy block near settings:
 ```text
 Behavior policy:
 - Strength: Strong. Prefer firm current-turn guidance and refresh weak/stale coverage when relevance is plausible. Do not increase footprint size.
-- Focus: Character. Prefer Active Cast, Character Motivation, Relationship, and Knowledge when relevant; do not ignore critical non-character scene constraints.
+- Focus: Character. Prefer Active Cast, Character Motivation, Relationship, Social Subtext, and Knowledge when relevant; do not ignore critical non-character scene constraints.
 - Prompt Footprint: Normal. Compact or Normal are allowed freely; Rich requires a high-risk reason.
 ```
 
@@ -316,7 +316,7 @@ Diagnostics should expose policy effects without exposing prompt internals:
     "storedFootprint": "normal",
     "effectiveFootprint": "rich",
     "footprintOverrideReason": "high-scene-constraint-risk",
-    "boostedFamilies": ["Active Cast", "Character Motivation", "Relationship", "Knowledge"],
+    "boostedFamilies": ["Active Cast", "Character Motivation", "Relationship", "Social Subtext", "Knowledge"],
     "selectedBoostedCards": 3,
     "planShaping": ["strong-refresh-pressure", "focus-family-ordering"]
   }

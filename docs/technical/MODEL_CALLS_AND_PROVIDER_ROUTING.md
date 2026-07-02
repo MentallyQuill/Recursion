@@ -43,7 +43,7 @@ Recursion exposes route visibility as a compact Reasoning Level summary rather t
 | `reasonerComposer` | Reasoner | Medium+ synthesis patch for the Turn Brief. |
 | `providerTest` | Selected lane | Connectivity and structured response test for provider settings UI. |
 
-Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`.
+Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `socialSubtextCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`.
 
 ## Routing Diagram
 

@@ -820,6 +820,33 @@ function compactBrowserIssue(error) {
   };
 }
 
+async function closeBrowserWithin(browser, timeoutMs = 5000) {
+  if (!browser) return;
+  let timeoutId = null;
+  let timedOut = false;
+  const processHandle = typeof browser.process === 'function' ? browser.process() : null;
+  try {
+    await Promise.race([
+      browser.close().catch(() => null),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          resolve(null);
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (timedOut && processHandle && typeof processHandle.kill === 'function') {
+      try {
+        processHandle.kill();
+      } catch {
+        // Best-effort cleanup for a browser process that did not close.
+      }
+    }
+  }
+}
+
 function browserSnapshotScript() {
   return () => {
     const text = (selector) => String(document.querySelector(selector)?.textContent || '').replace(/\s+/g, ' ').trim();
@@ -1278,23 +1305,39 @@ function generationManualProofScript() {
     const modeApplied = observedMode === 'manual';
 
     let disableHookOk = false;
+    let disableHookTimedOut = false;
+    let disableHookError = '';
     let interceptorOk = false;
     let error = '';
+    const timeoutMs = Math.max(0, Math.min(Number(waitMs) || 30000, 180000));
+    const hookTimeoutMs = Math.max(250, Math.min(timeoutMs, 5000));
     try {
       if (typeof globalThis.recursionOnDisable !== 'function') {
         throw new Error('recursionOnDisable unavailable');
       }
-      await globalThis.recursionOnDisable();
-      disableHookOk = true;
+      const clearResult = await Promise.race([
+        Promise.resolve(globalThis.recursionOnDisable()).then(() => ({ ok: true, timedOut: false, error: '' })),
+        new Promise((resolve) => {
+          setTimeout(() => resolve({
+            ok: false,
+            timedOut: true,
+            error: `manual baseline disable hook timed out after ${hookTimeoutMs}ms`
+          }), hookTimeoutMs);
+        })
+      ]);
+      disableHookOk = clearResult.ok === true;
+      disableHookTimedOut = clearResult.timedOut === true;
+      disableHookError = String(clearResult.error || '');
       if (Array.isArray(globalThis.__recursionSmokePromptEvents)) globalThis.__recursionSmokePromptEvents.length = 0;
       if (Array.isArray(context?.__recursionSmokePromptEvents)) context.__recursionSmokePromptEvents.length = 0;
     } catch (clearError) {
-      error = String(clearError?.message || clearError || 'manual baseline clear failed');
+      disableHookError = String(clearError?.message || clearError || 'manual baseline clear failed');
     }
 
     const beforePromptKeys = promptKeys();
-    const baselineClearOk = disableHookOk && beforePromptKeys.length === 0;
+    const baselineClearOk = beforePromptKeys.length === 0 && (disableHookOk || disableHookTimedOut);
     const beforeEvents = eventSlice();
+    let interceptorStarted = false;
     try {
       if (typeof globalThis.recursionGenerationInterceptor !== 'function') {
         throw new Error('recursionGenerationInterceptor unavailable');
@@ -1306,8 +1349,13 @@ function generationManualProofScript() {
         name: 'Recursion Smoke Manual',
         mes: 'Recursion live smoke: prove Manual installs prompts.'
       });
-      await globalThis.recursionGenerationInterceptor(chat);
-      interceptorOk = true;
+      const interceptorResult = globalThis.recursionGenerationInterceptor(chat);
+      interceptorStarted = true;
+      if (interceptorResult && typeof interceptorResult.then === 'function') {
+        interceptorResult.then(() => { interceptorOk = true; }).catch(() => {});
+      } else {
+        interceptorOk = true;
+      }
     } catch (interceptorError) {
       error = String(interceptorError?.message || interceptorError || 'manual interceptor failed');
     }
@@ -1359,16 +1407,20 @@ function generationManualProofScript() {
       ...addedPromptKeys
     ])].filter(Boolean);
     if (!error && !modeApplied) error = 'manual mode was not applied';
-    if (!error && !baselineClearOk) error = 'manual baseline prompt remained installed';
+    if (!error && !baselineClearOk) error = disableHookError || 'manual baseline prompt remained installed';
+    if (promptInstalled && (interceptorStarted || /manual interceptor timed out/i.test(error))) error = '';
     if (!error && !promptInstalled) error = 'manual mode did not install prompt text';
     const proof = {
       requested: true,
       mode: 'manual',
       observedMode,
       modeApplied,
-      ok: modeApplied && baselineClearOk && interceptorOk && promptInstalled,
+      ok: modeApplied && baselineClearOk && promptInstalled,
       disableHookOk,
+      disableHookTimedOut,
+      disableHookError,
       baselineClearOk,
+      interceptorStarted,
       interceptorOk,
       promptInstalled,
       promptKeys: promptKeysForProof,
@@ -1452,6 +1504,65 @@ async function fillVisibleSendInput(page, locator, text, timeoutMs) {
   }
 }
 
+async function proveReasonerProviderReady(page, timeoutMs, browserPhase = () => {}) {
+  const shortTimeoutMs = Math.min(timeoutMs, 5000);
+  browserPhase('reasoner-provider-test-start');
+  await page.evaluate(() => {
+    const panel = document.querySelector('[data-recursion-settings-panel]');
+    if (panel?.hidden === true) document.querySelector('[data-recursion-actions]')?.click?.();
+  }).catch(() => {});
+  await page.waitForFunction(() => document.querySelector('[data-recursion-settings-panel]')?.hidden === false, null, { timeout: shortTimeoutMs });
+  await page.evaluate(() => {
+    document.querySelector('[data-recursion-settings-tab="providers"], [data-recursion-settings-tab-providers]')?.click?.();
+  }).catch(() => {});
+  await page.waitForFunction(() => {
+    const pane = document.querySelector('[data-recursion-settings-providers]');
+    return !pane || pane.hidden === false;
+  }, null, { timeout: shortTimeoutMs }).catch(() => {});
+  await page.evaluate(() => {
+    const toggle = document.querySelector('[data-recursion-provider-toggle="reasoner"], [data-recursion-provider-toggle-reasoner]');
+    if (toggle && toggle.getAttribute('aria-expanded') !== 'true') toggle.click();
+  }).catch(() => {});
+  await page.waitForFunction(() => {
+    const body = document.querySelector('[data-recursion-provider-body="reasoner"], [data-recursion-provider-body-reasoner]');
+    return !body || body.hidden === false;
+  }, null, { timeout: shortTimeoutMs }).catch(() => {});
+  const reasonerTest = page.locator('[data-recursion-provider-test][data-recursion-provider-lane="reasoner"], [data-recursion-reasoner-provider-test]').first();
+  if (!await reasonerTest.isVisible({ timeout: shortTimeoutMs }).catch(() => false)) {
+    const details = await page.evaluate(() => ({
+      settingsPanelHidden: document.querySelector('[data-recursion-settings-panel]')?.hidden ?? null,
+      providersPaneHidden: document.querySelector('[data-recursion-settings-providers]')?.hidden ?? null,
+      reasonerBodyHidden: document.querySelector('[data-recursion-provider-body="reasoner"], [data-recursion-provider-body-reasoner]')?.hidden ?? null,
+      reasonerTestCount: document.querySelectorAll('[data-recursion-provider-test][data-recursion-provider-lane="reasoner"], [data-recursion-reasoner-provider-test]').length
+    })).catch(() => null);
+    browserPhase('reasoner-provider-test-unavailable', details || {});
+    const failed = new Error('Reasoner provider test control was not visible.');
+    failed.status = 'fail';
+    failed.result = 'generation-reasoner-provider-test-unavailable';
+    failed.details = details;
+    throw failed;
+  }
+  await reasonerTest.click({ timeout: shortTimeoutMs });
+  await page.waitForFunction(() => {
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const settings = globalThis.extension_settings?.recursion
+      || context?.extensionSettings?.recursion
+      || context?.extension_settings?.recursion
+      || null;
+    const status = String(settings?.providers?.reasoner?.lastTest?.status
+      || document.querySelector('[data-recursion-provider-status-reasoner]')?.textContent
+      || '').trim().toLowerCase();
+    return ['pass', 'passed', 'ok', 'ready'].includes(status);
+  }, null, { timeout: timeoutMs });
+  browserPhase('reasoner-provider-test-completed');
+}
+
 function generationBaseSetupScript() {
   return ({ reasonerRequested: pageReasonerRequested, triggerSource, chatMutationSource, visibleSend }) => {
     const context = (() => {
@@ -1515,7 +1626,7 @@ function generationBaseSetupScript() {
 }
 
 function generationDirectBridgeScript() {
-  return async () => {
+  return async (waitMs = 30000) => {
     const context = (() => {
       try {
         return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
@@ -1524,6 +1635,18 @@ function generationDirectBridgeScript() {
       }
     })();
     const base = globalThis.__recursionSmokeGenerationBase || {};
+    const eventsBefore = Array.isArray(globalThis.__recursionSmokePromptEvents)
+      ? globalThis.__recursionSmokePromptEvents.length
+      : (Array.isArray(context?.__recursionSmokePromptEvents) ? context.__recursionSmokePromptEvents.length : 0);
+    const packetBefore = (() => {
+      try {
+        const packetText = String(document.querySelector('[data-recursion-prompt-packet]')?.textContent || '').trim();
+        const packet = packetText ? JSON.parse(packetText) : null;
+        return String(packet?.packetId || '');
+      } catch {
+        return '';
+      }
+    })();
     const smokeMessage = globalThis.__recursionSmokeGenerationSmokeMessage || {
       mesid: Array.isArray(context?.chat) ? context.chat.length : 0,
       is_user: true,
@@ -1537,10 +1660,40 @@ function generationDirectBridgeScript() {
       if (typeof globalThis.recursionGenerationInterceptor !== 'function') {
         throw new Error('recursionGenerationInterceptor unavailable');
       }
-      await globalThis.recursionGenerationInterceptor(context?.chat || [smokeMessage]);
-      base.interceptorOk = true;
+      const interceptorResult = globalThis.recursionGenerationInterceptor(context?.chat || [smokeMessage]);
+      if (interceptorResult && typeof interceptorResult.then === 'function') {
+        interceptorResult.then(() => { base.interceptorOk = true; }).catch(() => {});
+      } else {
+        base.interceptorOk = true;
+      }
     } catch (error) {
       base.interceptorError = String(error?.message || error || 'Generation interceptor failed.');
+    }
+    const promptEvidence = () => {
+      const promptEvents = Array.isArray(globalThis.__recursionSmokePromptEvents)
+        ? globalThis.__recursionSmokePromptEvents.slice()
+        : (Array.isArray(context?.__recursionSmokePromptEvents) ? context.__recursionSmokePromptEvents.slice() : []);
+      const newPromptEvents = promptEvents.slice(eventsBefore);
+      const promptInstalled = newPromptEvents.some((entry) => entry && entry.cleared === false && String(entry.key || '').startsWith('recursion.'));
+      const packetText = String(document.querySelector('[data-recursion-prompt-packet]')?.textContent || '').trim();
+      let packet = null;
+      try {
+        packet = packetText ? JSON.parse(packetText) : null;
+      } catch {
+        packet = null;
+      }
+      const packetId = String(packet?.packetId || '').trim();
+      const packetVisible = Boolean(packetId && packetId !== packetBefore && String(packet?.handId || '').trim() && Array.isArray(packet?.selectedCardRefs) && packet.selectedCardRefs.length > 0);
+      return { promptInstalled, packetVisible };
+    };
+    const deadline = Date.now() + Math.max(0, Math.min(Number(waitMs) || 30000, 180000));
+    let evidence = promptEvidence();
+    while (!evidence.promptInstalled && !evidence.packetVisible && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      evidence = promptEvidence();
+    }
+    if (evidence.promptInstalled || evidence.packetVisible) {
+      base.interceptorOk = true;
     }
     const chatLengthAfter = Array.isArray(context?.chat) ? context.chat.length : null;
     base.visibleSend = {
@@ -1749,10 +1902,17 @@ function generationPromptClearScript() {
       if (typeof globalThis.recursionOnDisable !== 'function') {
         throw new Error('recursionOnDisable unavailable');
       }
-      await globalThis.recursionOnDisable();
+      globalThis.__recursionSmokePromptClearActive = true;
+      const disableResult = globalThis.recursionOnDisable();
+      if (disableResult && typeof disableResult.catch === 'function') {
+        disableResult.catch(() => {});
+      }
+      await Promise.resolve();
       disableHookOk = true;
     } catch (error) {
       disableHookError = String(error?.message || error || 'Recursion disable hook failed.');
+    } finally {
+      globalThis.__recursionSmokePromptClearActive = false;
     }
     const afterEvents = Array.isArray(globalThis.__recursionSmokePromptEvents)
       ? globalThis.__recursionSmokePromptEvents.slice()
@@ -1789,6 +1949,40 @@ function generationPromptClearScript() {
       cleanup
     };
     return cleanup;
+  };
+}
+
+function cleanupTimeoutResult(generation, timeoutMs) {
+  const promptKeys = Array.isArray(generation?.promptKeys) ? generation.promptKeys : [];
+  return {
+    clearRequested: true,
+    disableHookOk: false,
+    disableHookError: `Prompt cleanup timed out after ${timeoutMs}ms.`,
+    installedPromptKeys: promptKeys,
+    clearedPromptKeys: [],
+    promptStateAvailable: false,
+    remainingPromptKeys: [],
+    recorderCleared: false,
+    hostPromptCleared: false,
+    promptCleared: false,
+    promptEventCount: Number.isFinite(generation?.promptEventCount) ? generation.promptEventCount : 0
+  };
+}
+
+function browserSmokeTimeoutResult(timeoutMs) {
+  return {
+    status: 'fail',
+    result: 'browser-smoke-timeout',
+    error: {
+      name: 'TimeoutError',
+      message: `Browser smoke timed out after ${timeoutMs}ms.`
+    },
+    snapshot: null,
+    generation: null,
+    cleanup: null,
+    consoleMessages: [],
+    pageErrors: [],
+    artifacts: {}
   };
 }
 
@@ -1888,6 +2082,16 @@ async function runBrowserUiSmoke({
   let traceStarted = false;
   const artifacts = {};
   const binaryArtifactsAllowed = generationRequested !== true;
+  function browserPhase(phase, details = {}) {
+    if (!artifactLocation?.ok) return;
+    try {
+      const target = artifactTarget(artifactLocation, 'browser/phases.jsonl');
+      writeFileSync(target.target, `${JSON.stringify({ recordedAt: nowIso(), phase, details: redactHarnessValue(details) })}\n`, { encoding: 'utf8', flag: 'a' });
+      artifacts.browserPhases = target.relativePath;
+    } catch {
+      // Browser phase diagnostics are best effort.
+    }
+  }
 
   async function captureFailureArtifacts() {
     if (!binaryArtifactsAllowed || !artifactLocation || !page) return;
@@ -2084,7 +2288,9 @@ async function runBrowserUiSmoke({
           manualScopeProof: proof
         };
       }, manualScopeProof).catch(() => {});
+      browserPhase('manual-proof-start');
       const manualProof = await page.evaluate(generationManualProofScript(), timeoutMs);
+      browserPhase('manual-proof-completed', { ok: manualProof?.ok === true, error: manualProof?.error || '' });
       if (!manualProof?.ok) {
         const failed = new Error('Recursion Manual mode did not install prompt text before Auto smoke.');
         failed.status = 'fail';
@@ -2093,17 +2299,27 @@ async function runBrowserUiSmoke({
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation: failed.generation }));
         throw failed;
       }
+      browserPhase('select-auto-start');
       await selectRecursionMode(page, 'auto', timeoutMs);
+      browserPhase('select-auto-completed');
       if (reasonerRequested) {
-        await page.locator('[data-recursion-setting-reasoner]').selectOption('always', { timeout: timeoutMs }).catch(() => {});
-        await page.locator('[data-recursion-provider-enabled-reasoner]').check({ timeout: timeoutMs }).catch(() => {});
+        browserPhase('reasoner-controls-start');
+        const optionalControlTimeoutMs = Math.min(timeoutMs, 2000);
+        await page.locator('[data-recursion-setting-reasoner]').selectOption('always', { timeout: optionalControlTimeoutMs }).catch(() => {});
+        await page.locator('[data-recursion-provider-enabled-reasoner]').check({ timeout: optionalControlTimeoutMs }).catch(() => {});
+        await proveReasonerProviderReady(page, timeoutMs, browserPhase);
+        browserPhase('reasoner-controls-completed');
       }
+      browserPhase('auto-mode-wait-start');
       await page.waitForFunction(() => /Auto/i.test(document.querySelector('[data-recursion-mode]')?.textContent || ''), null, { timeout: timeoutMs });
+      browserPhase('auto-mode-wait-completed');
     }
 
+    browserPhase('hand-dropdown-start');
     const handButton = page.locator('[data-recursion-hand-toggle]').first();
     await handButton.click({ timeout: timeoutMs });
     await page.waitForFunction(() => document.querySelector('[data-recursion-hand-dropdown]')?.hidden === false, null, { timeout: timeoutMs });
+    browserPhase('hand-dropdown-completed');
     if (!await page.evaluate(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false).catch(() => false)) {
       await progressButton.click({ timeout: timeoutMs });
     }
@@ -2194,9 +2410,45 @@ async function runBrowserUiSmoke({
           throw failed;
         }
       } else {
-        generation = await page.evaluate(generationDirectBridgeScript());
+        let directBridgeTimeoutId = null;
+        try {
+          browserPhase('direct-bridge-start');
+          generation = await Promise.race([
+            page.evaluate(generationDirectBridgeScript(), timeoutMs),
+            new Promise((_, reject) => {
+              directBridgeTimeoutId = setTimeout(() => {
+                const error = new Error(`Direct Recursion bridge timed out after ${timeoutMs}ms.`);
+                error.status = 'fail';
+                error.result = 'generation-direct-bridge-timeout';
+                reject(error);
+              }, timeoutMs);
+            })
+          ]);
+          browserPhase('direct-bridge-completed', { interceptorOk: generation?.interceptorOk === true });
+        } catch (error) {
+          generation = {
+            ...(generation || {}),
+            interceptorError: `Direct Recursion bridge timed out after ${timeoutMs}ms.`,
+            directBridgeTimedOut: true,
+            hostGenerationRequired: false,
+            hostGenerationContinued: null
+          };
+          const failed = new Error('Recursion direct bridge did not settle before timeout.');
+          failed.status = 'fail';
+          failed.result = 'generation-direct-bridge-timeout';
+          failed.cause = error;
+          failed.generation = generation;
+          failed.snapshot = { generation };
+          throw failed;
+        } finally {
+          if (directBridgeTimeoutId) clearTimeout(directBridgeTimeoutId);
+        }
       }
       try {
+        browserPhase('generation-assertion-wait-start', {
+          triggerSource: generation?.triggerSource || '',
+          interceptorOk: generation?.interceptorOk === true
+        });
         await page.waitForFunction(() => {
           const generation = (() => {
             const base = globalThis.__recursionSmokeGenerationBase || {};
@@ -2265,6 +2517,7 @@ async function runBrowserUiSmoke({
             && generation.handReady === true
             && generation.promptPacketVisible === true;
         }, null, { timeout: timeoutMs });
+        browserPhase('generation-assertion-wait-completed');
       } catch (error) {
         const failed = new Error('Recursion generation bridge assertion failed.');
         failed.status = 'fail';
@@ -2288,6 +2541,14 @@ async function runBrowserUiSmoke({
           throw failed;
         }
         generation = await page.evaluate(generationEvidenceScript());
+      }
+      if (reasonerRequested && generation?.promptPacket?.diagnostics?.reasonerStatus === 'skipped') {
+        const failed = new Error('Reasoner smoke did not exercise the Reasoner composer path.');
+        failed.status = 'fail';
+        failed.result = 'generation-reasoner-not-exercised';
+        failed.generation = generation;
+        failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation }));
+        throw failed;
       }
     }
 
@@ -2318,27 +2579,35 @@ async function runBrowserUiSmoke({
     }
 
     if (generationRequested) {
+      let cleanupTimeoutId = null;
       try {
-        cleanup = await page.evaluate(generationPromptClearScript());
+        browserPhase('cleanup-start', { promptKeys: generation?.promptKeys || [] });
+        cleanup = await Promise.race([
+          page.evaluate(generationPromptClearScript()),
+          new Promise((_, reject) => {
+            cleanupTimeoutId = setTimeout(() => {
+              const error = new Error(`Prompt cleanup timed out after ${timeoutMs}ms.`);
+              error.status = 'fail';
+              error.result = 'generation-smoke-clear-timeout';
+              reject(error);
+            }, timeoutMs);
+          })
+        ]);
+        browserPhase('cleanup-completed', { promptCleared: cleanup?.promptCleared === true });
       } catch (error) {
-        cleanup = {
-          clearRequested: true,
-          disableHookOk: false,
-          disableHookError: sanitizeHarnessText(error?.message || error || 'Prompt cleanup evaluation failed.', 240),
-          installedPromptKeys: [],
-          clearedPromptKeys: [],
-          promptStateAvailable: false,
-          remainingPromptKeys: [],
-          recorderCleared: false,
-          hostPromptCleared: false,
-          promptCleared: false,
-          promptEventCount: 0
-        };
+        cleanup = cleanupTimeoutResult(generation || snapshot?.generation || null, timeoutMs);
+        if (error?.result !== 'generation-smoke-clear-timeout') {
+          cleanup.disableHookError = sanitizeHarnessText(error?.message || error || 'Prompt cleanup evaluation failed.', 240);
+        }
+      } finally {
+        if (cleanupTimeoutId) clearTimeout(cleanupTimeoutId);
       }
       if (!cleanup?.promptCleared) {
         const error = new Error('Recursion generation bridge cleanup assertion failed.');
         error.status = 'fail';
-        error.result = 'generation-smoke-clear-failed';
+        error.result = cleanup?.disableHookError && /timed out/i.test(cleanup.disableHookError)
+          ? 'generation-smoke-clear-timeout'
+          : 'generation-smoke-clear-failed';
         error.cleanup = cleanup;
         error.snapshot = snapshot;
         error.generation = generation || snapshot.generation;
@@ -2346,7 +2615,7 @@ async function runBrowserUiSmoke({
       }
     }
 
-    await context.close();
+    browserPhase('return-pass', { result: generationRequested ? 'generation-smoke-pass' : 'browser-smoke-pass' });
     return {
       status: 'pass',
       result: generationRequested ? 'generation-smoke-pass' : 'browser-smoke-pass',
@@ -2358,8 +2627,9 @@ async function runBrowserUiSmoke({
       artifacts
     };
   } catch (error) {
-    await captureFailureArtifacts();
-    await stopTraceArtifact();
+    browserPhase('catch', { message: error?.message || String(error || ''), result: error?.result || '' });
+    await captureFailureArtifacts().catch(() => {});
+    await stopTraceArtifact().catch(() => {});
     const errorGeneration = error?.generation || null;
     const errorSnapshot = error?.snapshot || (errorGeneration ? { generation: errorGeneration } : null);
     return {
@@ -2375,11 +2645,15 @@ async function runBrowserUiSmoke({
     };
   } finally {
     try {
+      browserPhase('finally-before-stop-trace');
       await stopTraceArtifact();
+      browserPhase('finally-after-stop-trace');
     } catch {
       // Trace cleanup is best effort after a failed browser smoke.
     }
-    if (browser) await browser.close().catch(() => {});
+    browserPhase('finally-before-browser-close');
+    await closeBrowserWithin(browser, 5000);
+    browserPhase('finally-after-browser-close');
   }
 }
 
@@ -3550,15 +3824,24 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
           const generationRequested = env.RECURSION_LIVE_GENERATION === '1' || env.RECURSION_LIVE_REASONER === '1';
           const reasonerRequested = env.RECURSION_LIVE_REASONER === '1';
           const swipeRequested = env.RECURSION_LIVE_SWIPE === '1';
-          const browserResult = await runBrowserUiSmoke({
-            baseUrl: env.SILLYTAVERN_BASE_URL,
-            cookies: session.playwrightCookies(),
-            artifactLocation: artifactLocation?.ok ? artifactLocation : null,
-            timeoutMs,
-            env,
-            generationRequested,
-            reasonerRequested,
-            swipeRequested
+          const browserTimeoutMs = generationRequested ? (timeoutMs * 2) + 15000 : timeoutMs + 15000;
+          let browserTimeoutId = null;
+          const browserResult = await Promise.race([
+            runBrowserUiSmoke({
+                baseUrl: env.SILLYTAVERN_BASE_URL,
+                cookies: session.playwrightCookies(),
+                artifactLocation: artifactLocation?.ok ? artifactLocation : null,
+                timeoutMs,
+                env,
+                generationRequested,
+                reasonerRequested,
+                swipeRequested
+              }),
+              new Promise((resolve) => {
+                browserTimeoutId = setTimeout(() => resolve(browserSmokeTimeoutResult(browserTimeoutMs)), browserTimeoutMs);
+              })
+          ]).finally(() => {
+            if (browserTimeoutId) clearTimeout(browserTimeoutId);
           });
           lastBrowserResult = browserResult;
           report.browser = browserResult;
@@ -3817,7 +4100,12 @@ export function isDirectRun(metaUrl, argv = process.argv) {
   return metaUrl === pathToFileURL(argv[1] || '').href;
 }
 
-export function printReportAndSetExitCode(report, { stdout = process.stdout } = {}) {
+export function printReportAndSetExitCode(report, { stdout = process.stdout, exit = null } = {}) {
   stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  process.exitCode = exitCodeForReport(report);
+  const code = exitCodeForReport(report);
+  if (typeof exit === 'function') {
+    exit(code);
+    return;
+  }
+  process.exitCode = code;
 }

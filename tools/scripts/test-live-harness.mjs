@@ -9,6 +9,7 @@ import {
   exitCodeForReport,
   finalizeReport,
   normalizeSoakUserHandle,
+  printReportAndSetExitCode,
   rejectUnsafeLiveUser,
   reportToSummary,
   runPlaywrightReadiness,
@@ -164,15 +165,20 @@ function recursionSmokeFixtureHtml({
   omitHostGenerationContinuation = false,
   sendControlsDisabled = false,
   manualSkipsPrompt = false,
+  manualInterceptorNeverResolves = false,
   manualModeSave = 'sync',
   unclearedPromptOnDisable = false,
+  disableHookNeverResolves = false,
   staleModeChip = false,
   reasonerFallback = false,
+  directBridgeNeverResolves = false,
   sendSurface = 'complete'
 } = {}) {
   const disableHookScript = missingDisableHook
     ? ''
-      : "globalThis.recursionOnDisable = function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.sceneBrief', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.turnBrief', '', 'IN_CHAT', 2, false, 'SYSTEM'); } return true; };";
+      : disableHookNeverResolves
+        ? "globalThis.recursionOnDisable = async function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.sceneBrief', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.turnBrief', '', 'IN_CHAT', 2, false, 'SYSTEM'); } if (globalThis.__recursionSmokePromptClearActive === true) await new Promise(() => {}); return true; };"
+        : "globalThis.recursionOnDisable = function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.sceneBrief', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.turnBrief', '', 'IN_CHAT', 2, false, 'SYSTEM'); } return true; };";
   const reasonerFallbackFlag = reasonerFallback ? 'true' : 'false';
   const promptPacketMetadataExpression = omitPromptPacketMetadata
     ? "JSON.stringify({ packetId: '', handId: '', selectedCardRefs: [] })"
@@ -222,6 +228,9 @@ function recursionSmokeFixtureHtml({
           <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
           <input type="checkbox" data-recursion-provider-enabled-reasoner aria-label="Reasoner enabled">
           <button type="button" data-recursion-provider-test data-recursion-provider-lane="utility">Test Provider</button>
+          <button type="button" data-recursion-provider-toggle="reasoner" aria-expanded="true">Reasoner Provider</button>
+          <span data-recursion-provider-status-reasoner>optional</span>
+          <button type="button" data-recursion-provider-test data-recursion-provider-lane="reasoner">Test Reasoner Provider</button>
         </div>
         <dialog data-recursion-viewer aria-label="Recursion Viewer">
           <button type="button" data-recursion-viewer-close>Close</button>
@@ -254,6 +263,9 @@ function recursionSmokeFixtureHtml({
       globalThis.recursionGenerationInterceptor = async function recursionGenerationInterceptor(chat) {
         const sourceChat = Array.isArray(chat) ? chat : smokeContext.chat;
         const activeMode = smokeContext.mode || document.querySelector('[data-recursion-setting-mode]')?.value || 'auto';
+        if (${directBridgeNeverResolves ? 'true' : 'false'} && activeMode !== 'manual') {
+          await new Promise(() => {});
+        }
         const activeModeLabel = activeMode === 'manual' ? 'Manual' : 'Auto';
         const renderGenerationUi = () => {
           document.querySelector('[data-recursion-status]').textContent = 'Ready';
@@ -275,6 +287,9 @@ function recursionSmokeFixtureHtml({
         smokeContext.setExtensionPrompt('recursion.turnBrief', 'Recursion smoke turn brief.', 'IN_CHAT', 2, false, 'SYSTEM');
         if (${asyncUiGeneration ? 'true' : 'false'}) setTimeout(renderGenerationUi, 650);
         else renderGenerationUi();
+        if (activeMode === 'manual' && ${manualInterceptorNeverResolves ? 'true' : 'false'}) {
+          await new Promise(() => {});
+        }
         return sourceChat;
       };
       globalThis.recursionOnEnable = function recursionOnEnable() { return true; };
@@ -358,6 +373,9 @@ function recursionSmokeFixtureHtml({
       document.querySelector('[data-recursion-setting-mode]').addEventListener('change', (event) => {
         applyModeChange(event.target?.value || 'auto');
       });
+      document.querySelector('[data-recursion-provider-test][data-recursion-provider-lane="reasoner"]')?.addEventListener('click', () => {
+        document.querySelector('[data-recursion-provider-status-reasoner]').textContent = 'pass';
+      });
       document.querySelectorAll('[data-recursion-mode-choice]').forEach((button) => {
         button.addEventListener('click', () => {
           applyModeChange(button.getAttribute('data-recursion-mode-choice') || 'auto');
@@ -398,10 +416,13 @@ async function createSillyTavernSmokeFixtureServer({
   omitHostGenerationContinuation = false,
   sendControlsDisabled = false,
   manualSkipsPrompt = false,
+  manualInterceptorNeverResolves = false,
   manualModeSave = 'sync',
   unclearedPromptOnDisable = false,
+  disableHookNeverResolves = false,
   staleModeChip = false,
   reasonerFallback = false,
+  directBridgeNeverResolves = false,
   sendSurface = 'complete'
 } = {}) {
   const sessions = new Map();
@@ -553,10 +574,13 @@ async function createSillyTavernSmokeFixtureServer({
         omitHostGenerationContinuation,
         sendControlsDisabled,
         manualSkipsPrompt,
+        manualInterceptorNeverResolves,
         manualModeSave,
         unclearedPromptOnDisable,
+        disableHookNeverResolves,
         staleModeChip,
         reasonerFallback,
+        directBridgeNeverResolves,
         sendSurface
       }));
       return;
@@ -1062,6 +1086,28 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
+  const server = await createSillyTavernSmokeFixtureServer({ directBridgeNeverResolves: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1',
+        RECURSION_LIVE_DIRECT_RECURSION_ONLY: '1',
+        RECURSION_LIVE_TIMEOUT_MS: '1000'
+      }
+    });
+    assertEqual(report.status, 'fail', 'forced direct Recursion smoke fails when bridge never resolves');
+    assertEqual(report.result, 'generation-direct-bridge-timeout', 'forced direct Recursion smoke timeout uses explicit result');
+    assertEqual(report.browser.snapshot.generation.triggerSource, 'direct-bridge', 'direct bridge timeout preserves trigger source');
+    assert(/timed out/i.test(report.browser.snapshot.generation.interceptorError || ''), 'direct bridge timeout records timeout error');
+  } finally {
+    await server.close();
+  }
+}
+
+{
   const server = await createSillyTavernSmokeFixtureServer({ sendSurface: 'none' });
   const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-strict-direct-bridge-smoke-'));
   try {
@@ -1231,6 +1277,28 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
+  const server = await createSillyTavernSmokeFixtureServer({ manualInterceptorNeverResolves: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1',
+        RECURSION_LIVE_DIRECT_RECURSION_ONLY: '1',
+        RECURSION_LIVE_TIMEOUT_MS: '1000'
+      }
+    });
+    assertEqual(report.status, 'pass', 'generation smoke proceeds when Manual prompt evidence appears before interceptor settles');
+    assertEqual(report.result, 'generation-smoke-pass', 'Manual stalled interceptor with prompt evidence still completes generation smoke');
+    assertEqual(report.browser.snapshot.generation.manualProof?.ok, true, 'Manual proof accepts prompt evidence without interceptor settlement');
+    assertEqual(report.browser.snapshot.generation.manualProof?.promptInstalled, true, 'Manual proof records installed prompt evidence');
+  } finally {
+    await server.close();
+  }
+}
+
+{
   const server = await createSillyTavernSmokeFixtureServer({ unclearedPromptOnDisable: true });
   const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-manual-baseline-fail-'));
   try {
@@ -1261,6 +1329,28 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assert(!promptMetadata.includes('Recursion stale disabled baseline prompt'), 'Manual baseline failure omits raw prompt text');
   } finally {
     rmSync(artifactRoot, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ disableHookNeverResolves: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1',
+        RECURSION_LIVE_DIRECT_RECURSION_ONLY: '1',
+        RECURSION_LIVE_TIMEOUT_MS: '1000'
+      }
+    });
+    assertEqual(report.status, 'pass', 'generation smoke passes when prompt cleanup clears prompts before hook promise stalls');
+    assertEqual(report.result, 'generation-smoke-pass', 'prompt cleanup success does not wait for stalled hook promise');
+    assertEqual(report.browser.cleanup?.promptCleared, true, 'prompt cleanup records cleared status from prompt evidence');
+    assertEqual(report.browser.cleanup?.disableHookOk, true, 'prompt cleanup records hook invocation success without waiting forever');
+  } finally {
     await server.close();
   }
 }
@@ -1298,6 +1388,25 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     });
     assertEqual(report.status, 'pass', 'generation smoke waits for asynchronous Manual mode application');
     assertEqual(report.browser.snapshot.generation.manualProof?.observedMode, 'manual', 'async Manual proof records observed mode');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer();
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_REASONER: '1'
+      }
+    });
+    assertEqual(report.status, 'fail', 'Reasoner smoke fails when prompt composition skips Reasoner');
+    assertEqual(report.result, 'generation-reasoner-not-exercised', 'Reasoner skipped result is explicit');
+    assertEqual(report.browser.snapshot.generation.promptPacket?.diagnostics?.reasonerStatus, 'skipped', 'skipped packet diagnostics are preserved');
   } finally {
     await server.close();
   }
@@ -1585,6 +1694,19 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
   assert(!summary.includes('abc123'), 'summary redacts token-like values');
   assert(!summary.includes('nav-12345'), 'summary redacts sid-like values');
   assert(summary.includes('[redacted]'), 'summary keeps redaction marker');
+}
+
+{
+  const report = createBaseReport({ scriptName: 'print-report-exit', args: {}, env: {} });
+  setReportStatus(report, 'pass', 'print-report-pass');
+  const writes = [];
+  let observedExitCode = null;
+  printReportAndSetExitCode(report, {
+    stdout: { write: (chunk) => writes.push(String(chunk)) },
+    exit: (code) => { observedExitCode = code; }
+  });
+  assert(writes.join('').includes('"print-report-pass"'), 'print report writes JSON before exiting');
+  assertEqual(observedExitCode, 0, 'print report can force direct CLI exit after writing JSON');
 }
 
 {

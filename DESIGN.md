@@ -217,7 +217,7 @@ Do not introduce large rounded cards or soft marketing panels. Keep cards at 8px
 
 **Progress menu:** A compact Codex-like task list attached to the Hero Pixel Array. Rows update in place, support nested card-generation children, and share the same normalized `progressRun.steps[]` model as the pixel array.
 
-**Last Brief dropdown:** A read-only trust surface. Rows use category icons, compact one-line card text, and subtle metachips. Priority is the only strong chip color.
+**Last Brief dropdown:** A read-only trust surface. Collapsed rows use category icons, compact one-line card text, and subtle metachips. Expanded rows show the full card text at natural height with no character cap, ellipsis, or nested card scroll; the dropdown/list remains the single scroll surface. Priority is the only strong chip color.
 
 **Settings panel:** Three tabs: Play, Providers, Advanced. Keep normal-play controls high level in a Play Behavior disclosure, provider lanes collapsible, and Advanced grouped into Injection, UI, and Diagnostics disclosures. Disable advanced commands that have no V1 runtime handler instead of showing fake working controls.
 

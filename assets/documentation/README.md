@@ -9,7 +9,6 @@ Promoted PNGs live in [renders/](renders/). These files are documentation assets
 Current asset classes:
 
 - `diagram/static`: source-backed explanatory infographics generated from docs, tests, schemas, or source contracts.
-- `fixture/static`: deterministic UI-state composites used as explanatory visuals.
 - `live host`: reviewed, redaction-safe screenshots from live-served Recursion UI in SillyTavern.
 
 Raw captures, Playwright traces, temporary screenshots, browser profiles, and renderer scratch output must stay under `artifacts/` or `.recursion-doc-renderer/`. Only reviewed, redacted, final PNGs move into this folder.

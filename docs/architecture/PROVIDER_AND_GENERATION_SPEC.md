@@ -155,6 +155,7 @@ Generation roles describe why a model call exists. They are not the same thing a
 | `activeCastCard` | Utility, Reasoner at High/Ultra when healthy | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
 | `characterMotivationCard` | Utility, Reasoner at High/Ultra when healthy | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
 | `dialogueRelationshipCard` | Utility, Reasoner at Ultra when healthy | Capture current conversational tension, relationship texture, promises, conflicts, and voice constraints | Omit card with diagnostic |
+| `socialSubtextCard` | Utility, Reasoner at Ultra when healthy | Capture scene-observable implied social meaning such as humor, veiled pressure, invitation, boundaries, status, and face | Omit card with diagnostic |
 | `sceneConstraintsCard` | Utility, Reasoner at High/Ultra when healthy | Identify hard scene constraints, contradiction traps, timing, access, and plausibility risks for the next generation | Omit card with diagnostic |
 | `knowledgeSecretsCard` | Utility, Reasoner at High/Ultra when healthy | Capture concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries | Omit card with diagnostic |
 | `clocksConsequencesCard` | Utility, Reasoner at High/Ultra when healthy | Capture deadlines, countdowns, delayed consequences, and escalation triggers | Omit card with diagnostic |
@@ -400,6 +401,8 @@ Journal entries may include:
 - schema id;
 - retry count;
 - compact error code and compact error message.
+
+Successful calls with a nonzero retry count are success-with-caution for visible progress. Runtime may accept their data, but the progress row should remain amber with compact `retried` meta and a sanitized reason instead of turning green.
 
 Normalized provider error codes include:
 

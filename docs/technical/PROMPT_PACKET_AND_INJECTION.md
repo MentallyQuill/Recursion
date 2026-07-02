@@ -45,7 +45,7 @@ The composer receives:
 - generation router when Reasoner can run
 - activity reporter for fallback events
 
-Cards are normalized before composition. Unsafe evidence refs, unsupported families, secret-looking ids, oversized text, hidden-thought wording, and invalid omission reasons are cleaned or rejected.
+Cards are normalized before composition. Unsafe evidence refs, unsupported families, secret-looking ids, hidden-thought wording, and invalid omission reasons are cleaned or rejected. Safe full card text may remain available for Last Brief inspection, but composition applies its own section budgets before injection.
 
 ## Utility Composition
 
@@ -53,7 +53,7 @@ Utility composition is the default path. It maps card families to sections:
 
 - Scene Brief: Scene Frame, Active Cast, Environment, Items
 - Guardrails: Scene Constraints, Knowledge, plus static guardrails
-- Turn Brief: Character Motivation, Relationship, Consequences, Open Threads, and other turn-facing guidance
+- Turn Brief: Character Motivation, Relationship, Social Subtext, Consequences, Open Threads, and other turn-facing guidance
 
 Utility composition removes unsafe text, enforces section budgets, records source ids, and creates omission records when budget prevents inclusion.
 

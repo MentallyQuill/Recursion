@@ -1228,7 +1228,10 @@
 
 .recursion-brief-card[aria-expanded="true"] .recursion-card-text {
   display: block;
+  max-height: none;
   overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
   -webkit-line-clamp: unset;
 }
 

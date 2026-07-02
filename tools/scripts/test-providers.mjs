@@ -58,6 +58,7 @@ const expectedUtilityRoles = [
   'activeCastCard',
   'characterMotivationCard',
   'dialogueRelationshipCard',
+  'socialSubtextCard',
   'sceneConstraintsCard',
   'knowledgeSecretsCard',
   'clocksConsequencesCard',

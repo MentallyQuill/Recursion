@@ -36,7 +36,7 @@ assertDeepEqual(
 
 assertDeepEqual(
   influencePolicyForSettings({ focus: 'character' }).focus.boostedFamilies,
-  FOCUS_BOOSTED_FAMILIES.character,
+  ['Active Cast', 'Character Motivation', 'Relationship', 'Social Subtext', 'Knowledge'],
   'character focus boosts expected families'
 );
 assertDeepEqual(

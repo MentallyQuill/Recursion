@@ -12,6 +12,7 @@ Cards are disposable cache artifacts. They are not memories, lore, canon, contin
 | Active Cast | `activeCastCard` | Who is present, visible state, and conversational or physical role. | Prevents dropped characters and speaker confusion. |
 | Character Motivation | `characterMotivationCard` | Observable or safely inferred motives, pressures, hesitations, and goals. | Behavior-facing guidance without private thought injection. |
 | Relationship | `dialogueRelationshipCard` | Current tension, relationship texture, promises, conflicts, and voice constraints. | Guides tone, subtext, and active relationship implications. |
+| Social Subtext | `socialSubtextCard` | Scene-observable implied social meaning such as humor, veiled pressure, invitation, boundaries, status, and face. | Prevents literal reads of indirect or socially loaded cues. |
 | Scene Constraints | `sceneConstraintsCard` | Hard limits, contradiction traps, timing, access, visibility, and plausibility constraints. | High-priority hard-limit, timing, access, and contradiction guidance. |
 | Knowledge | `knowledgeSecretsCard` | Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries. | Guardrail guidance for knowledge state and spoiler-safe reveals. |
 | Consequences | `clocksConsequencesCard` | Deadlines, countdowns, delayed consequences, and escalation triggers. | Keeps near-term pressure visible. |
@@ -31,6 +32,7 @@ The catalog should converge on scene-implication cards rather than continuity ca
 | Active Cast | Keep for presence, visibility, speaker control, and who can plausibly act or interrupt. |
 | Character Motivation | Keep only for observable pressures and behavior-facing uncertainty. |
 | Relationship | Keep, focused on current leverage, tension, promises, refusal, trust, and escalation/softening paths. |
+| Social Subtext | Keep for dry humor, veiled pressure, invitation/boundary cues, status moves, and face dynamics that change the next beat. |
 | Scene Constraints | Keep for hard limits and plausibility traps, not durable continuity ownership. |
 | Knowledge | Keep for who knows, suspects, misunderstands, can infer, or must not learn something yet. |
 | Consequences | Keep for active near-term pressure, delayed effects, and escalation triggers. |
@@ -38,7 +40,7 @@ The catalog should converge on scene-implication cards rather than continuity ca
 | Items | Keep for access, control, affordance, and risk of important objects in the current beat. |
 | Open Threads | Keep, but limit it to visible unresolved hooks and obligations with next-turn relevance. |
 
-The detailed facet-by-facet audit lives in [Card System Spec](../design/CARD_SYSTEM_SPEC.md#card-facet-audit). Implementation work should treat that table as the source of truth for future catalog edits: broad craft guidance stays outside cards, hard beat constraints live under Scene Frame, and `voiceConstraints` should remain scene-local speech/address constraints.
+The detailed facet-by-facet audit lives in [Card System Spec](../design/CARD_SYSTEM_SPEC.md#card-facet-audit). Implementation work should treat that table as the source of truth for future catalog edits: broad craft guidance stays outside cards, hard beat constraints live under Scene Frame, and `voiceConstraints` plus Social Subtext facets should remain scene-local observable cues.
 
 ## Card Scope
 

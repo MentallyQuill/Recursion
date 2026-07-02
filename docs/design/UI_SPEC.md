@@ -152,7 +152,7 @@ The Hero Pixel Array sits to the right of the card scope selector separator and 
 - Green filled blocks: completed progress items.
 - Blue animated blocks: currently running model calls, prompt work, or cache writes.
 - Purple filled blocks: cards or deck rows read from cache instead of generated this turn.
-- Yellow filled blocks: finished with errors, fallback, JSON repair, or other repairable caution.
+- Yellow filled blocks: completed only after retry, fallback, JSON repair, or other repairable caution.
 - Red filled blocks: blocked or failed progress items.
 - Muted grey filled blocks: skipped or player-canceled progress items.
 
@@ -204,6 +204,8 @@ When runtime activity is `idle`, or when an explicit progress title is `Ready`/`
 
 When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt install done/failed, prompt clear done/failed, or player-canceled generation), the progress menu must stop adding pending plan rows for future steps that never ran. Material rows such as generated cards, cached cards, warnings, failures, skipped/canceled rows, and completed setup steps stay visible; unrun rows like `Composing prompt packet waiting` or `Clearing Recursion prompt waiting` must not remain as empty Hero Pixel blocks after the final outcome.
 
+Successful provider work that required a retry is not plain green success. A successful retry is `warning` / amber with visible `retried` row meta and a safe reason such as `Provider card batch retried once before this card completed.` in tooltip/accessibility text. Parent rows follow the normal aggregation rule, so a batch containing retried-but-successful cards stays amber until superseded by a later clean run.
+
 `progressRun.steps[]` shape:
 
 ```js
@@ -223,7 +225,8 @@ When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt 
         { id: "scene-constraints-card", label: "Scene Constraints", providerLane: "utility", state: "cached", meta: "cached", source: "cache", sourceRoleId: "sceneConstraintsCard" },
         { id: "knowledge-secrets-card", label: "Knowledge", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "knowledgeSecretsCard" },
         { id: "clocks-consequences-card", label: "Consequences", providerLane: "utility", state: "running", meta: "running", sourceRoleId: "clocksConsequencesCard" },
-        { id: "character-motivation-card", label: "Character Motivation", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "characterMotivationCard" },
+        { id: "character-motivation-card", label: "Character Motivation", providerLane: "utility", state: "warning", meta: "retried", source: "generated", sourceRoleId: "characterMotivationCard", retryCount: 1, reason: "Provider card batch retried once before this card completed." },
+        { id: "social-subtext-card", label: "Social Subtext", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "socialSubtextCard" },
         { id: "environment-affordances-card", label: "Environment", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "environmentAffordancesCard" },
         { id: "possessions-items-card", label: "Items", providerLane: "utility", state: "pending", meta: "waiting", sourceRoleId: "possessionsItemsCard" },
         { id: "open-threads-card", label: "Open Threads", providerLane: "utility", state: "warning", meta: "fallback", source: "fallback", sourceRoleId: "openThreadsCard" }
@@ -260,7 +263,9 @@ Parent row aggregation:
 
 The Hero Pixel Array continues to allocate blocks only for top-level rows. A grouped parent's block uses the aggregated parent state; child rows never create additional Hero Pixel Array blocks unless they are intentionally promoted into top-level rows.
 
-Runtime card child rows come from sanitized `cardProgress` activity events. Event detail may include only `parentStepId`, `roleId`, `family`, `source`, `state`, and a safe card id. It must not include card prompt text, raw provider output, transcript text, stack traces, hidden reasoning, or secrets.
+Runtime card child rows come from sanitized `cardProgress` activity events. Event detail may include only `parentStepId`, `roleId`, `family`, `source`, `state`, a safe card id, retry count, and one sanitized progress reason. It must not include card prompt text, raw provider output, transcript text, stack traces, hidden reasoning, or secrets.
+
+When the progress state is warning or failed, rows should expose why in the compact list without leaking internals: use terse visible meta such as `retried`, `fallback`, `caution`, or `failed`, and put one sanitized explanatory sentence in the tooltip/title. For generated cards that completed after retry, `cardProgress` may also include `retryCount` and `reason`; it must still omit raw provider errors and raw model payloads.
 
 On each new `runId`, the Hero Pixel Array clears the previous turn's blocks, creates empty blocks for the known visible rows, and fills each block as its paired row settles. If Utility Arbiter reveals additional planned work, append new empty blocks with the same short entry animation used for initial blocks.
 
@@ -770,16 +775,17 @@ The dropdown uses the full width of the Recursion Bar so card text has room to b
 Example:
 
 ```text
-Last brief - 8 cards - click row to expand - priority color only
+Last brief - 9 cards - click row to expand - priority color only
 
 [warning]  Scene Constraints   doorway blocked, lamp broken...      critical | fresh | injected | scene
 [target]   Motivation           Mara wants to keep control...         strong | Mara | turn brief
 [people]   Relationship         accusation unresolved...              normal | tension | dialogue
+[spark]    Social Subtext      joke lands like a warning...           normal | veiled pressure | turn brief
 [cube]     Environment          rain masks movement...                normal | items | local
 [map]      Scene Frame          answer before time skip...             light | beat | compiler
 ```
 
-Rows are read-only. Clicking or pressing `Enter` / `Space` expands a row in place to show the full card text. Clicking again collapses it. The dropdown should not become an editor.
+Rows are read-only. Clicking or pressing `Enter` / `Space` expands a row in place to show the full card text at natural height. Expanded rows must not apply a character cap, line clamp, ellipsis, `max-height`, or per-card scroll; if the content is tall, the parent Last Brief list is the single scroll surface. Clicking again collapses it. The dropdown should not become an editor.
 
 If the last brief has more than roughly five compact rows, the list region becomes scrollable while the header and footer remain stable. The scroll area must use a restrained SillyTavern-like scrollbar and avoid covering the chat input.
 
@@ -806,6 +812,7 @@ Category icons replace generic card-stack icons in the list:
 - Scene constraints: warning triangle.
 - Motivation: target or focus reticle.
 - Relationship: paired people or link icon.
+- Social subtext: spark, quote, or message icon.
 - Environment / items: cube, box, or scene icon.
 - Scene frame beat constraint: map or boundary icon.
 - Scene objective: flag.
@@ -1002,7 +1009,10 @@ Reference CSS contract:
 
 .recursion-brief-card[aria-expanded="true"] .recursion-card-text {
   display: block;
+  max-height: none;
   overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
   -webkit-line-clamp: unset;
 }
 

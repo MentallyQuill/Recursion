@@ -256,7 +256,7 @@ Budget order:
 3. Current user focus and response cues.
 4. Scene Brief essentials.
 5. Active cast and relationship posture.
-6. Environment texture and prose craft guidance.
+6. Environment texture, item affordances, and social subtext.
 7. Lower-priority open threads.
 
 Cards with higher emphasis are considered earlier, but emphasis does not override safety, freshness, ownership, or hard token caps. Detail profiles decide how much survives:

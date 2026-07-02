@@ -113,8 +113,8 @@ function cloneJsonValue(value, fallback) {
   }
 }
 
-function sanitizedJsonValue(value, fallback) {
-  return redact(redactSecretText(cloneJsonValue(value, fallback)));
+function sanitizedJsonValue(value, fallback, options = {}) {
+  return redact(redactSecretText(cloneJsonValue(value, fallback)), options);
 }
 
 function stringValue(value, fallback = '') {
@@ -170,7 +170,7 @@ function optionalStringValue(value) {
 }
 
 function sanitizedTextValue(value, limit) {
-  return stringValue(sanitizedJsonValue(value, ''), '').slice(0, limit);
+  return stringValue(sanitizedJsonValue(value, '', { maxString: limit }), '').slice(0, limit);
 }
 
 function sanitizedOptionalTextValue(value, limit) {
@@ -286,7 +286,7 @@ function normalizeSceneCard(card) {
     catalogKey: safeMetadataText(card.catalogKey || '', 160),
     status: ['candidate', 'active', 'stowed', 'stale', 'discarded'].includes(card.status) ? card.status : 'active',
     summary: sanitizedTextValue(card.summary || '', 400),
-    promptText: sanitizedTextValue(card.promptText || '', 1000),
+    promptText: sanitizedTextValue(card.promptText || '', Infinity),
     evidenceRefs: safeMetadataList(card.evidenceRefs, 160, 12),
     tokenEstimate: Math.max(0, Math.min(1000, Number(card.tokenEstimate) || 0)),
     emphasis: ['normal', 'emphasized', 'muted'].includes(card.emphasis) ? card.emphasis : 'normal',

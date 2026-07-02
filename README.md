@@ -33,39 +33,26 @@ Stepped Thinking gives a character a private pre-generation pass. It asks the mo
 
 Recursion goes after a broader failure mode. In long or complex roleplay, the model can have the right text in context and still miss what the scene demands next. It forgets the locked door, ignores the implied threat, reveals a secret too early, treats a major emotional shift as flavor, or misses that an item, relationship, or environmental detail should change the reply.
 
-Instead of generating one stream of character thoughts, Recursion builds a scene deck across motivations, consequences, knowledge, environment, items, and open threads. It then selects a turn hand, which means the prompt gets the details that matter now rather than every generated note. That selection step is the heart of the difference: Recursion is not just adding text before a reply, it is deciding what the model should pay attention to.
-
-Recursion is also more productized and easier to inspect. You do not need to design a full thought-prompt system before it becomes useful; Recursion already owns the card families, behavior policy, provider lanes, prompt packet, progress states, fallback behavior, and diagnostics. Last Brief, Prompt Packet, selected cards, omissions, Activity, provider health, and fail-soft states make the reasoning visible instead of leaving it behind a single pre-generation output.
-
-Use Stepped Thinking when you want a character to think before speaking. Use Recursion when you want the next reply to respect the whole scene: pressure, constraints, consequences, secrets, relationships, items, environment, and unresolved threads.
-
-The short version: Stepped Thinking helps a character think. Recursion helps the scene make sense.
+Instead of generating one stream of character thoughts, Recursion builds a scene deck across motivations, consequences, knowledge, environment, items, and open threads. It then selects a turn hand, giving the prompt details that matter now, helping the model focus on what is important given the context.
 
 ## What It Does
 
 On a run, Recursion turns the active SillyTavern chat into a short-lived reasoning brief for the next generation:
 
-1. It observes the active chat through the SillyTavern host adapter.
-2. It builds a bounded snapshot of the current scene.
-3. It uses the Utility provider to plan, update scene cards, and select the turn hand.
-4. It can use the Reasoner provider for deeper synthesis at higher reasoning levels.
-5. It composes a prompt packet with a Scene Brief, Turn Brief, guardrails, card references, omissions, and metadata.
-6. It installs the packet through Recursion-owned SillyTavern prompt entries.
-7. It keeps the result inspectable through Last Brief, Prompt Packet, Activity, diagnostics, and the Full Viewer.
-
-The boundary matters. Recursion is strongest when it improves the next reply by reasoning about the active scene. Durable canon, broad world knowledge, and long-term memory belong in other systems.
+1. It builds a bounded snapshot of the current scene.
+2. It uses the Utility provider to plan, update scene cards, and select the turn hand.
+3. It can use the Reasoner provider for deeper synthesis at higher reasoning levels.
+4. It composes a prompt packet with a Scene Brief, Turn Brief, guardrails, card references, omissions, and metadata.
+5. It injects the packet through Recursion-owned SillyTavern prompt entries.
 
 ![Full Viewer overview with cards, activity, prompt packet, settings, providers, and diagnostics](assets/documentation/renders/recursion-full-viewer-overview.png)
 
 ## Fast Start
 
-1. Install or serve Recursion as a SillyTavern extension.
-2. Enable `Recursion` in SillyTavern.
-3. Configure and test the Utility provider.
-4. Add the optional Reasoner provider if you want Medium, High, or Ultra reasoning to use the deeper synthesis lane.
-5. Turn Recursion on from the chat bar.
-6. Use `Manual` for an explicit first pass, then switch to `Auto` when you want Recursion to prepare the next reply on its own.
-7. Open `Last Brief` or the Full Viewer whenever you want to see what Recursion prepared.
+1. Install as a SillyTavern extension and refresh your browser.
+2. Configure and test the Utility provider, and optional Reasoner provider for a deeper sythesis lane.
+3. Use `Auto` when you want Recursion to prepare the next reply on its own. Use `Manual` for explicit card selection.
+4. Open `Last Brief` or the Full Viewer whenever you want to see what Recursion prepared.
 
 For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md). For the full surface-by-surface guide, use the [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md).
 
@@ -82,12 +69,6 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 
 ![Recursion Bar in a phone-width SillyTavern viewport](assets/documentation/renders/recursion-bar-mobile.png)
 
-## Current State
-
-Recursion is pre-alpha at `0.1.0-pre-alpha.1` and targets SillyTavern `1.12.0` or newer. The current V1 slice includes settings, behavior policy, provider lanes, scene cards, runtime coordination, SillyTavern host integration, prompt packet composition and injection, Recursion Bar UI surfaces, diagnostics, documentation renders, and focused automated tests.
-
-Live SillyTavern smoke is guarded. Scripts that mutate live state or call providers must use a dedicated `recursion-soak-*` user, never `default-user`.
-
 ## Documentation
 
 - [Documentation Index](docs/DOCUMENTATION_INDEX.md) - Canonical map for user, technical, design, testing, release, and planning docs.
@@ -101,33 +82,9 @@ Live SillyTavern smoke is guarded. Scripts that mutate live state or call provid
 
 ## Security And Privacy
 
-Recursion treats provider secrets and raw model I/O as sensitive. OpenAI-compatible direct keys are session-only and must not persist to settings, scene cache, prompt packets, run journals, diagnostics, browser local storage, SillyTavern file storage, or test artifacts.
+Recursion treats provider secrets and raw model I/O as sensitive. OpenAI-compatible direct keys are session-only and don't persist to settings, scene cache, prompt packets, run journals, diagnostics, browser local storage, SillyTavern file storage, or test artifacts.
 
 Normal diagnostics use hashes, compact statuses, bounded metadata, and sanitized activity instead of raw prompts, raw provider responses, hidden reasoning, or full transcript text.
-
-## Verification
-
-Local gate:
-
-```powershell
-npm.cmd test
-node tools\scripts\run-alpha-gate.mjs
-```
-
-Optional readiness and live smoke checks:
-
-```powershell
-node tools\scripts\check-playwright-readiness.mjs --write-artifacts
-node tools\scripts\check-sillytavern-soak-users.mjs --live --write-artifacts
-node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts --strict
-```
-
-Render and documentation evidence:
-
-```powershell
-rg -n "^<Render Needed>:" README.md docs --glob "*.md" --glob "!docs/planning/DOCUMENTATION_EXPANSION_PLAN.md"
-node .recursion-doc-renderer/check-doc-images.mjs
-```
 
 ## License
 

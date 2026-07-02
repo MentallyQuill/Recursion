@@ -90,6 +90,26 @@ assertEqual(
   CARD_SCOPE_CATALOG.reduce((sum, family) => sum + family.subItems.length, 0),
   'scope total matches catalog sub-items'
 );
+for (const family of CARD_SCOPE_CATALOG) {
+  assert(
+    typeof family.description === 'string' && family.description.length >= 24,
+    `${family.family} family has useful description`
+  );
+  for (const item of family.subItems) {
+    assert(
+      typeof item.description === 'string' && item.description.length >= 40,
+      `${family.family}/${item.key} has useful sub-item description`
+    );
+    assert(!/\bTBD\b|\bTODO\b/i.test(item.description), `${family.family}/${item.key} description is final copy`);
+  }
+}
+
+const prosePayload = scopePayloadForArbiter({ mode: 'auto', cardScope: defaultCardScope() })
+  .availableCatalog.find((entry) => entry.family === 'Prose/Pacing');
+assert(
+  prosePayload.subItems.find((item) => item.key === 'density').description.includes('packed'),
+  'Arbiter catalog payload includes density description'
+);
 
 const all = defaultCardScope();
 const allCounts = cardScopeCounts(all);

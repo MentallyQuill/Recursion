@@ -6,9 +6,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'sceneFrameCard',
     description: 'Current location, situation, participants, and immediate dramatic direction.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'locationSituation', label: 'location/situation' }),
-      Object.freeze({ key: 'presentParticipants', label: 'present participants' }),
-      Object.freeze({ key: 'immediateDirection', label: 'immediate direction' })
+      Object.freeze({
+        key: 'locationSituation',
+        label: 'location/situation',
+        description: 'Current place, immediate setup, and active problem the next response must not drift away from.'
+      }),
+      Object.freeze({
+        key: 'presentParticipants',
+        label: 'present participants',
+        description: 'Characters or groups visibly present in the scene and relevant to the next beat.'
+      }),
+      Object.freeze({
+        key: 'immediateDirection',
+        label: 'immediate direction',
+        description: 'The near next action, pressure, or dramatic vector the response should continue.'
+      })
     ])
   }),
   Object.freeze({
@@ -16,9 +28,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'activeCastCard',
     description: 'Who is present, visible state, and current conversational or physical role.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'presentCharacters', label: 'present characters' }),
-      Object.freeze({ key: 'visibleState', label: 'visible state' }),
-      Object.freeze({ key: 'speakerRoles', label: 'speaker roles' })
+      Object.freeze({
+        key: 'presentCharacters',
+        label: 'present characters',
+        description: 'Who is in the scene now, including characters who should not be dropped or invented.'
+      }),
+      Object.freeze({
+        key: 'visibleState',
+        label: 'visible state',
+        description: 'Observable condition, posture, injury, mood, constraint, or capability that affects action.'
+      }),
+      Object.freeze({
+        key: 'speakerRoles',
+        label: 'speaker roles',
+        description: 'Who can speak, who is being addressed, and who currently drives the exchange.'
+      })
     ])
   }),
   Object.freeze({
@@ -26,9 +50,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'characterMotivationCard',
     description: 'Observable or safely inferred motives, pressures, hesitations, and goals.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'visibleGoals', label: 'visible goals' }),
-      Object.freeze({ key: 'pressures', label: 'pressures' }),
-      Object.freeze({ key: 'hesitationPosture', label: 'hesitation/posture' })
+      Object.freeze({
+        key: 'visibleGoals',
+        label: 'visible goals',
+        description: 'Goals shown or established in-scene, phrased as behavior-facing guidance.'
+      }),
+      Object.freeze({
+        key: 'pressures',
+        label: 'pressures',
+        description: 'External, social, tactical, or emotional pressures shaping likely behavior.'
+      }),
+      Object.freeze({
+        key: 'hesitationPosture',
+        label: 'hesitation/posture',
+        description: 'Visible reluctance, guardedness, confidence, uncertainty, or restraint without private mind-reading.'
+      })
     ])
   }),
   Object.freeze({
@@ -36,9 +72,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'dialogueRelationshipCard',
     description: 'Current conversational tension, relationship texture, promises, conflicts, and voice constraints.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'tension', label: 'tension' }),
-      Object.freeze({ key: 'promisesConflicts', label: 'promises/conflicts' }),
-      Object.freeze({ key: 'voiceConstraints', label: 'voice constraints' })
+      Object.freeze({
+        key: 'tension',
+        label: 'tension',
+        description: 'Current conversational pressure, emotional friction, or unresolved subtext.'
+      }),
+      Object.freeze({
+        key: 'promisesConflicts',
+        label: 'promises/conflicts',
+        description: 'Promises, refusals, disagreements, debts, threats, or relational obligations still active.'
+      }),
+      Object.freeze({
+        key: 'voiceConstraints',
+        label: 'voice constraints',
+        description: 'Scene-local tone, address, or speech constraints that should guide dialogue without replacing the preset.'
+      })
     ])
   }),
   Object.freeze({
@@ -46,9 +94,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'continuityRiskCard',
     description: 'Facts likely to be contradicted if omitted from the next response.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'fragileFacts', label: 'fragile facts' }),
-      Object.freeze({ key: 'spatialConstraints', label: 'spatial constraints' }),
-      Object.freeze({ key: 'timelineOrder', label: 'timeline/order' })
+      Object.freeze({
+        key: 'fragileFacts',
+        label: 'fragile facts',
+        description: 'Easy-to-break facts such as injuries, locked doors, missing items, stated choices, or visible constraints.'
+      }),
+      Object.freeze({
+        key: 'spatialConstraints',
+        label: 'spatial constraints',
+        description: 'Position, distance, blocked routes, visibility, reach, or movement limits that must stay consistent.'
+      }),
+      Object.freeze({
+        key: 'timelineOrder',
+        label: 'timeline/order',
+        description: 'Event order, cause and effect, reveal order, and what has or has not happened yet.'
+      })
     ])
   }),
   Object.freeze({
@@ -56,9 +116,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'knowledgeSecretsCard',
     description: 'Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'concealedFacts', label: 'concealed facts' }),
-      Object.freeze({ key: 'knowsSuspects', label: 'knows/suspects' }),
-      Object.freeze({ key: 'revealBoundaries', label: 'reveal boundaries' })
+      Object.freeze({
+        key: 'concealedFacts',
+        label: 'concealed facts',
+        description: 'Hidden truths that may guide guardrails but should not be revealed as dialogue or narration unless earned.'
+      }),
+      Object.freeze({
+        key: 'knowsSuspects',
+        label: 'knows/suspects',
+        description: 'Who knows, suspects, misunderstands, or should not know a fact.'
+      }),
+      Object.freeze({
+        key: 'revealBoundaries',
+        label: 'reveal boundaries',
+        description: 'What the next response must not reveal, confirm, or imply too early.'
+      })
     ])
   }),
   Object.freeze({
@@ -66,9 +138,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'clocksConsequencesCard',
     description: 'Deadlines, countdowns, delayed consequences, and escalation triggers.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'deadlinesCountdowns', label: 'deadlines/countdowns' }),
-      Object.freeze({ key: 'delayedConsequences', label: 'delayed consequences' }),
-      Object.freeze({ key: 'escalationTriggers', label: 'escalation triggers' })
+      Object.freeze({
+        key: 'deadlinesCountdowns',
+        label: 'deadlines/countdowns',
+        description: 'Time pressure, countdowns, scheduled events, or windows of opportunity still active.'
+      }),
+      Object.freeze({
+        key: 'delayedConsequences',
+        label: 'delayed consequences',
+        description: 'Effects from earlier choices that should arrive later or remain pending.'
+      }),
+      Object.freeze({
+        key: 'escalationTriggers',
+        label: 'escalation triggers',
+        description: 'Conditions that would make the scene worsen, shift phase, or demand action.'
+      })
     ])
   }),
   Object.freeze({
@@ -76,9 +160,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'environmentAffordancesCard',
     description: 'Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'spatialLayout', label: 'spatial layout' }),
-      Object.freeze({ key: 'sensoryTexture', label: 'sensory texture' }),
-      Object.freeze({ key: 'hazardsAffordances', label: 'hazards/affordances' })
+      Object.freeze({
+        key: 'spatialLayout',
+        label: 'spatial layout',
+        description: 'Where important places, barriers, exits, cover, and actors are in relation to each other.'
+      }),
+      Object.freeze({
+        key: 'sensoryTexture',
+        label: 'sensory texture',
+        description: 'Concrete sensory details that ground prose without turning into decorative filler.'
+      }),
+      Object.freeze({
+        key: 'hazardsAffordances',
+        label: 'hazards/affordances',
+        description: 'Usable objects, obstacles, threats, exits, cover, tools, and environmental opportunities.'
+      })
     ])
   }),
   Object.freeze({
@@ -86,9 +182,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'possessionsItemsCard',
     description: 'Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'heldCarriedItems', label: 'held/carried items' }),
-      Object.freeze({ key: 'itemLocationControl', label: 'location/control' }),
-      Object.freeze({ key: 'itemAffordancesRisks', label: 'affordances/risks' })
+      Object.freeze({
+        key: 'heldCarriedItems',
+        label: 'held/carried items',
+        description: 'Important objects currently held, worn, carried, hidden, missing, stolen, or controlled.'
+      }),
+      Object.freeze({
+        key: 'itemLocationControl',
+        label: 'location/control',
+        description: 'Where an item is and who can realistically access, use, move, or withhold it.'
+      }),
+      Object.freeze({
+        key: 'itemAffordancesRisks',
+        label: 'affordances/risks',
+        description: 'What an item can do now, what it enables, and what risk or limit it carries.'
+      })
     ])
   }),
   Object.freeze({
@@ -96,9 +204,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'prosePacingCard',
     description: 'Local craft guidance for density, momentum, specificity, and response shape.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'density', label: 'density' }),
-      Object.freeze({ key: 'momentum', label: 'momentum' }),
-      Object.freeze({ key: 'specificityShape', label: 'specificity/shape' })
+      Object.freeze({
+        key: 'density',
+        label: 'density',
+        description: 'How packed the next response should be with action, dialogue, description, and consequence.'
+      }),
+      Object.freeze({
+        key: 'momentum',
+        label: 'momentum',
+        description: 'Whether the response should advance the beat, hold tension, slow down, or avoid skipping necessary payoff.'
+      }),
+      Object.freeze({
+        key: 'specificityShape',
+        label: 'specificity/shape',
+        description: 'Concrete detail choice and response structure for this beat, avoiding generic prose and shapeless recap.'
+      })
     ])
   }),
   Object.freeze({
@@ -106,9 +226,21 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
     role: 'openThreadsCard',
     description: 'Unresolved questions, immediate promises, pending actions, and near-term pressures.',
     subItems: Object.freeze([
-      Object.freeze({ key: 'unresolvedQuestions', label: 'unresolved questions' }),
-      Object.freeze({ key: 'pendingActions', label: 'pending actions' }),
-      Object.freeze({ key: 'nearTermPressures', label: 'near-term pressures' })
+      Object.freeze({
+        key: 'unresolvedQuestions',
+        label: 'unresolved questions',
+        description: 'Questions raised by the scene that remain visible and may affect the next response.'
+      }),
+      Object.freeze({
+        key: 'pendingActions',
+        label: 'pending actions',
+        description: 'Promised, attempted, interrupted, or requested actions that should not be forgotten.'
+      }),
+      Object.freeze({
+        key: 'nearTermPressures',
+        label: 'near-term pressures',
+        description: 'Immediate obligations, looming problems, or choices that should shape the next beat.'
+      })
     ])
   })
 ]);
@@ -161,7 +293,11 @@ function catalogPayload(entry, selected = null) {
     family: entry.family,
     role: entry.role,
     description: entry.description,
-    subItems: entry.subItems.map((item) => ({ key: item.key, label: item.label }))
+    subItems: entry.subItems.map((item) => ({
+      key: item.key,
+      label: item.label,
+      description: item.description
+    }))
   };
   return Array.isArray(selected) ? { ...base, selectedSubItems: selected.slice() } : base;
 }

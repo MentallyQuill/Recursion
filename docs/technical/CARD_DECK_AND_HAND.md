@@ -20,6 +20,8 @@ Cards are disposable cache artifacts. They are not memories, lore, canon, or use
 | Prose/Pacing | `prosePacingCard` | Local craft guidance for density, momentum, specificity, and response shape. | Low-volume style guidance. |
 | Open Threads | `openThreadsCard` | Unresolved questions, promises, pending actions, and near-term pressures. | Keeps the next response aware of visible obligations. |
 
+Each family also exposes fixed scope facets. Facets do not create separate cards; they define what the Arbiter and card generator should emphasize inside that family. The facet labels and descriptions live in `src/card-scope.mjs` and are reused for Arbiter catalog payloads, card-generation prompt focus, UI hover help, and diagnostics.
+
 ## Card Scope
 
 Card scope is the user-facing focus control over the fixed V1 catalog. It has two modes:

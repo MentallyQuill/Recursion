@@ -35,6 +35,8 @@ V1 should use the full fixed catalog below. The Arbiter receives this predetermi
 | Prose/Pacing | Local craft guidance for density, momentum, specificity, and response shape. | Low-volume style guidance, not a replacement for the user's preset. |
 | Open Threads | Unresolved questions, immediate promises, pending actions, and near-term pressures. | Keeps the next response aware of visible story obligations. |
 
+Each family also exposes fixed scope facets. Facets do not create separate cards; they define what the Arbiter and card generator should emphasize inside that family. The facet labels and descriptions live in `src/card-scope.mjs` and are reused for Arbiter catalog payloads, card-generation prompt focus, UI hover help, and diagnostics.
+
 V1 should not support arbitrary user-defined card families. Custom families can wait until the fixed catalog proves insufficient.
 
 ## Card Data Contract

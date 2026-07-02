@@ -298,8 +298,11 @@ git commit -m "feat(cards): add card scope contract"
 **Files:**
 - Modify: `src/settings.mjs`
 - Modify: `tools/scripts/test-settings.mjs`
+- Modify: `src/runtime.mjs`
+- Modify: `tools/scripts/test-runtime.mjs`
+- Modify: `tools/scripts/test-live-harness.mjs`
 
-- [ ] Update settings tests before implementation.
+- [x] Update settings tests before implementation.
 
 Required assertions:
 
@@ -327,7 +330,7 @@ assertEqual(normalizedPartial.mode, 'manual', 'manual mode survives card-scope n
 assertEqual(normalizedPartial.cardScope.families['Prose/Pacing'].enabled, false, 'disabled family persists');
 ```
 
-- [ ] Change `MODES` from `auto/semi-auto` to `auto/manual`.
+- [x] Change `MODES` from `auto/semi-auto` to `auto/manual`.
 
 Required implementation pattern:
 
@@ -355,9 +358,9 @@ export function normalizeSettings(value = {}, secretStore = null) {
 }
 ```
 
-- [ ] Ensure partial updates preserve existing `cardScope` through `mergePlainObjects()`.
-- [ ] Do not add a compatibility alias for `semi-auto`; invalid/removed modes normalize to `auto` because Recursion is pre-alpha.
-- [ ] Run settings tests.
+- [x] Ensure partial updates preserve existing `cardScope` through `mergePlainObjects()`.
+- [x] Do not add a compatibility alias for `semi-auto`; invalid/removed modes normalize to `auto` because Recursion is pre-alpha.
+- [x] Run settings tests.
 
 Commands:
 
@@ -371,12 +374,12 @@ Expected output:
 [pass] settings
 ```
 
-- [ ] Commit this slice.
+- [x] Commit this slice.
 
 Commands:
 
 ```powershell
-git add src/settings.mjs tools/scripts/test-settings.mjs
+git add src/settings.mjs tools/scripts/test-settings.mjs src/runtime.mjs tools/scripts/test-runtime.mjs tools/scripts/test-live-harness.mjs docs/superpowers/plans/2026-07-02-recursion-card-scope.md
 git commit -m "feat(settings): persist card scope"
 ```
 
@@ -390,7 +393,7 @@ git commit -m "feat(settings): persist card scope"
 - Modify: `tools/scripts/test-cards.mjs`
 - Modify: `tools/scripts/test-runtime.mjs`
 
-- [ ] Add or update `tools/scripts/test-cards.mjs` coverage if `buildCardRequests()` receives scope focus.
+- [x] Add or update `tools/scripts/test-cards.mjs` coverage if `buildCardRequests()` receives scope focus.
 
 Required behavior:
 
@@ -414,7 +417,7 @@ const scopedRequests = buildCardRequests({
 assertDeepEqual(scopedRequests[0].cardScope.selectedSubItems, ['fragileFacts', 'timelineOrder'], 'card request carries selected sub-item focus');
 ```
 
-- [ ] Update `buildCardRequests(plan, context)` so every request includes safe scope focus for that family when `context.cardScope` is supplied.
+- [x] Update `buildCardRequests(plan, context)` so every request includes safe scope focus for that family when `context.cardScope` is supplied.
 
 Required request field:
 
@@ -427,7 +430,7 @@ cardScope: {
 }
 ```
 
-- [ ] Add runtime tests for Manual strict filtering.
+- [x] Add runtime tests for Manual strict filtering.
 
 Required scenarios:
 
@@ -487,7 +490,7 @@ const runtime = createRecursionRuntime({
 });
 ```
 
-- [ ] Add runtime tests for Auto focus payload.
+- [x] Add runtime tests for Auto focus payload.
 
 Required behavior:
 
@@ -496,7 +499,7 @@ Required behavior:
 - Auto does not hard reject disabled-family card jobs in `filterCardJobsForScope()`.
 - If runtime records an Auto exception, the event/journal stores family/sub-item keys and reason only, not prompt text.
 
-- [ ] Add cache drift coverage.
+- [x] Add cache drift coverage.
 
 Required assertion:
 
@@ -508,7 +511,7 @@ assertNotEqual(
 );
 ```
 
-- [ ] Implement runtime scope integration.
+- [x] Implement runtime scope integration.
 
 Required import shape:
 
@@ -549,13 +552,13 @@ manual-scope-omitted:<family>
 auto-scope-exception:<family>
 ```
 
-- [ ] Replace user-facing runtime copy and chips:
+- [x] Replace user-facing runtime copy and chips:
 
 ```js
 const modeChip = settings.mode === 'manual' ? 'Manual' : 'Auto';
 ```
 
-- [ ] Run focused tests.
+- [x] Run focused tests.
 
 Commands:
 
@@ -571,12 +574,12 @@ Expected output:
 [pass] runtime
 ```
 
-- [ ] Commit this slice.
+- [x] Commit this slice.
 
 Commands:
 
 ```powershell
-git add src/cards.mjs src/runtime.mjs tools/scripts/test-cards.mjs tools/scripts/test-runtime.mjs
+git add src/settings.mjs tools/scripts/test-settings.mjs src/cards.mjs src/runtime.mjs tools/scripts/test-cards.mjs tools/scripts/test-runtime.mjs tools/scripts/test-live-harness.mjs docs/superpowers/plans/2026-07-02-recursion-card-scope.md
 git commit -m "feat(runtime): enforce manual card scope"
 ```
 

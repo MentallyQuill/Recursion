@@ -185,6 +185,22 @@ const motivationRequest = buildCardRequests({ cardJobs: [{ family: 'Character Mo
   snapshotHash: 'hash'
 })[0];
 assert(motivationRequest.prompt.includes('Do not include first-person internal monologue'), 'motivation request includes internal-thought safety instruction');
+const scopedRequests = buildCardRequests({
+  schema: 'recursion.utilityArbiterPlan.v1',
+  snapshotHash: 'scope-test',
+  cardJobs: [{ family: 'Continuity Risk', role: 'continuityRiskCard' }],
+  budgets: { targetBriefTokens: 500, maxCards: 4 }
+}, {
+  runId: 'scope-run',
+  snapshotHash: 'scope-test',
+  snapshot: {},
+  cardScope: {
+    selectedSubItemsByFamily: {
+      'Continuity Risk': ['fragileFacts', 'timelineOrder']
+    }
+  }
+});
+assertDeepEqual(scopedRequests[0].cardScope.selectedSubItems, ['fragileFacts', 'timelineOrder'], 'card request carries selected sub-item focus');
 const truncationRequest = buildCardRequests({
   cardJobs: [{
     role: 'sceneFrameCard',

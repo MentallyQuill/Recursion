@@ -395,6 +395,7 @@ async function createSillyTavernSmokeFixtureServer({
   const moduleFiles = [
     'src/extension/index.js',
     'src/activity.mjs',
+    'src/card-scope.mjs',
     'src/cards.mjs',
     'src/core.mjs',
     'src/hosts/sillytavern/host.mjs',

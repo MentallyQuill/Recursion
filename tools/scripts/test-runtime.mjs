@@ -4,6 +4,7 @@ import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
 import { createGenerationRouter } from '../../src/providers.mjs';
 import { CARD_CATALOG, cardsFromProviderResult } from '../../src/cards.mjs';
+import { defaultCardScope, setFamilyEnabled } from '../../src/card-scope.mjs';
 import { hashJson } from '../../src/core.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
@@ -27,6 +28,12 @@ function assertNoSecretText(value, label) {
   assert(!/\bsk-[a-z0-9_-]+/i.test(serialized), `${label} redacts sk text`);
   assert(!/private[-_\s]*secret/i.test(serialized), `${label} redacts private secret text`);
   return serialized;
+}
+
+function assertNotEqual(actual, expected, message) {
+  if (actual === expected) {
+    throw new Error(`${message}: did not expect ${expected}`);
+  }
 }
 
 function parsePromptJsonSection(prompt, label) {
@@ -69,6 +76,10 @@ function sourceWindowHash(messages, firstMesId, lastMesId) {
       textHash: String(message?.textHash || messageTextHash(message))
     }))
     .filter((message) => message.mesid >= firstMesId && message.mesid <= lastMesId));
+}
+
+function scopeWithFamilyDisabled(family) {
+  return setFamilyEnabled(defaultCardScope(), family, false).scope;
 }
 
 function runtimeSnapshotHash(snapshot) {
@@ -271,6 +282,11 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
     }
   });
   assertEqual(noisyVersions.settingsHash, baselineVersions.settingsHash, 'cache settings hash ignores UI, diagnostics, test labels, and secrets');
+  assertNotEqual(
+    cacheContractVersions({ mode: 'auto', cardScope: defaultCardScope() }).settingsHash,
+    cacheContractVersions({ mode: 'manual', cardScope: scopeWithFamilyDisabled('Prose/Pacing') }).settingsHash,
+    'card scope participates in scene cache contract'
+  );
   const changedProviderVersions = cacheContractVersions({
     ...view.settings,
     providers: {
@@ -858,30 +874,30 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 
 {
   const { runtime, calls, installed, storage } = createRuntimeHarness({
-    settings: { mode: 'semi-auto', reasonerUse: 'off' }
+    settings: { mode: 'manual', reasonerUse: 'off' }
   });
   const result = await runtime.prepareForGeneration({
-    userMessage: 'Semi-Auto with Bearer live-token, sk-live-runtime, and private-secret.'
+    userMessage: 'Manual with Bearer live-token, sk-live-runtime, and private-secret.'
   });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'semi-auto mode returns ok');
-  assertEqual(result.observe, undefined, 'semi-auto is not an observe-only preview path');
-  assertEqual(calls.snapshot, 3, 'semi-auto reads snapshot and rechecks before compose and install');
-  assertEqual(installed.length, 1, 'semi-auto installs one prompt until card subset constraints are implemented');
-  assert(view.lastPacket, 'semi-auto builds packet');
-  assert(view.lastHand.cards.length > 0, 'semi-auto builds hand');
-  assertEqual(view.activity.label, 'Recursion prompt ready.', 'semi-auto activity settles as prompt ready');
-  assert(view.activityHistory.some((event) => event.chips?.includes('Semi-Auto')), 'semi-auto activity history carries the mode chip');
-  assertEqual(view.activeRunId, null, 'active run cleared after semi-auto');
+  assertEqual(result.ok, true, 'manual mode returns ok');
+  assertEqual(result.observe, undefined, 'manual is not an observe-only preview path');
+  assertEqual(calls.snapshot, 3, 'manual reads snapshot and rechecks before compose and install');
+  assertEqual(installed.length, 1, 'manual installs one prompt until card subset constraints are implemented');
+  assert(view.lastPacket, 'manual builds packet');
+  assert(view.lastHand.cards.length > 0, 'manual builds hand');
+  assertEqual(view.activity.label, 'Recursion prompt ready.', 'manual activity settles as prompt ready');
+  assert(view.activityHistory.some((event) => event.chips?.includes('Manual')), 'manual activity history carries the mode chip');
+  assertEqual(view.activeRunId, null, 'active run cleared after manual');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
-  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.installed'], 'semi-auto journals hand before prompt install');
+  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.installed'], 'manual journals hand before prompt install');
   const handSelected = journal.entries.find((entry) => entry.event === 'hand.selected');
   const promptInstalled = journal.entries.find((entry) => entry.event === 'prompt.installed');
-  assert(handSelected, 'semi-auto appends hand selection journal');
-  assert(promptInstalled, 'semi-auto appends prompt install journal');
-  assert(!JSON.stringify(handSelected).includes(view.lastHand.cards[0].promptText), 'semi-auto hand journal omits prompt text');
-  assertNoSecretText(handSelected, 'semi-auto hand journal');
-  assertNoSecretText(promptInstalled, 'semi-auto prompt install journal');
+  assert(handSelected, 'manual appends hand selection journal');
+  assert(promptInstalled, 'manual appends prompt install journal');
+  assert(!JSON.stringify(handSelected).includes(view.lastHand.cards[0].promptText), 'manual hand journal omits prompt text');
+  assertNoSecretText(handSelected, 'manual hand journal');
+  assertNoSecretText(promptInstalled, 'manual prompt install journal');
 }
 
 {
@@ -965,7 +981,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 
 {
   const { runtime, calls } = createRuntimeHarness({
-    settings: { mode: 'semi-auto', reasoningLevel: 'high', reasonerUse: 'auto' }
+    settings: { mode: 'manual', reasoningLevel: 'high', reasonerUse: 'auto' }
   });
   const result = await runtime.updateSettings({ reasoningLevel: 'ultra', reasonerUse: 'always' });
   const view = runtime.view();
@@ -2755,6 +2771,130 @@ for (const scenario of [
 }
 
 {
+  const manualNoScene = scopeWithFamilyDisabled('Scene Frame');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'manual', cardScope: manualNoScene, reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          const cardScope = parsePromptJsonSection(request.prompt, 'Card scope');
+          const allowedCatalog = parsePromptJsonSection(request.prompt, 'Catalog');
+          assertEqual(cardScope.strictWhitelist, true, 'Manual Arbiter prompt is strict');
+          assert(!allowedCatalog.some((entry) => entry.family === 'Scene Frame'), 'Manual allowed catalog omits disabled family');
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [
+                { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Disabled family must be omitted.' },
+                { family: 'Open Threads', role: 'openThreadsCard', reason: 'Keep pending action visible.' }
+              ],
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['manual-scope-test']
+            }
+          };
+        }
+        throw new Error(`Manual disabled-family test expected batch routing, got generate ${roleId}`);
+      },
+      async batch(requests) {
+        routerCalls.push(...requests.map((request) => request.roleId));
+        assertDeepEqual(requests.map((request) => request.roleId), ['openThreadsCard'], 'disabled Scene Frame request is never generated');
+        return requests.map((request) => ({
+          ok: true,
+          roleId: request.roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: 'Keep pending action visible.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 18
+            }]
+          }
+        }));
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Manual scope.' });
+  const view = runtime.view();
+  const serializedPlan = JSON.stringify(view.lastPlan);
+  assertEqual(result.ok, true, 'manual scoped run installs prompt');
+  assert(routerCalls.includes('utilityArbiter'), 'manual scoped run calls Arbiter');
+  assert(routerCalls.includes('openThreadsCard'), `manual scoped run generates enabled card: ${JSON.stringify(routerCalls)}`);
+  assert(!routerCalls.includes('sceneFrameCard'), 'manual scoped run does not generate disabled card');
+  assertDeepEqual(view.lastPlan.cardJobs.map((job) => job.family || job.role), ['Open Threads'], 'manual scoped plan keeps only enabled card jobs');
+  assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'manual scoped hand includes enabled provider card');
+  assert(!view.lastHand.cards.some((card) => card.family === 'Scene Frame'), 'manual scoped hand excludes disabled Scene Frame');
+  assert(serializedPlan.includes('manual-scope-omitted:Scene Frame'), 'manual scoped diagnostics record omitted family');
+}
+
+{
+  const autoNoContinuity = scopeWithFamilyDisabled('Continuity Risk');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', cardScope: autoNoContinuity, reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          const cardScope = parsePromptJsonSection(request.prompt, 'Card scope');
+          const availableCatalog = parsePromptJsonSection(request.prompt, 'Catalog');
+          assertEqual(cardScope.strictWhitelist, false, 'Auto Arbiter prompt is focus, not strict');
+          assert(availableCatalog.some((entry) => entry.family === 'Continuity Risk'), 'Auto catalog keeps disabled-focus continuity available');
+          assertDeepEqual(cardScope.selectedSubItemsByFamily['Continuity Risk'], undefined, 'Auto scope preference omits disabled continuity sub-items');
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ family: 'Continuity Risk', role: 'continuityRiskCard', reason: 'Critical risk exception.' }],
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['auto-scope-test']
+            }
+          };
+        }
+        throw new Error(`Auto focus test expected batch routing, got generate ${roleId}`);
+      },
+      async batch(requests) {
+        routerCalls.push(...requests.map((request) => request.roleId));
+        assertDeepEqual(requests.map((request) => request.roleId), ['continuityRiskCard'], 'Auto keeps disabled-focus critical card job available');
+        assertDeepEqual(requests[0].cardScope.selectedSubItems, [], 'Auto request carries empty selected sub-item focus for disabled family');
+        return requests.map((request) => ({
+          ok: true,
+          roleId: request.roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: 'Do not contradict the broken lamp.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 18
+            }]
+          }
+        }));
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Auto focus.' });
+  const view = runtime.view();
+  const serializedPlan = JSON.stringify(view.lastPlan);
+  assertEqual(result.ok, true, 'auto scoped run installs prompt');
+  assert(routerCalls.includes('continuityRiskCard'), 'auto scoped run generates disabled-focus critical card');
+  assert(view.lastHand.cards.some((card) => card.family === 'Continuity Risk'), 'auto scoped hand can include critical disabled-focus exception');
+  assert(serializedPlan.includes('auto-scope-exception:Continuity Risk'), 'auto scoped diagnostics record compact exception family');
+  assert(!serializedPlan.includes('Do not contradict'), 'auto scope diagnostics do not include prompt text');
+}
+
+{
   const routerCalls = [];
   const cardSnapshots = [];
   const cardStarts = [];
@@ -3313,7 +3453,7 @@ for (const scenario of [
   ];
   const sourceHash = sourceWindowHash(softSettingsMessages, 1, 2);
   await storage.saveSceneCache('settings-drift-chat', 'settings-drift-scene', {
-    versions: cacheContractVersions({ mode: 'semi-auto' }),
+    versions: cacheContractVersions({ mode: 'manual' }),
     cards: [{
       id: 'settings-drift-card',
       family: 'Scene Frame',
@@ -4184,7 +4324,7 @@ for (const scenario of [
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'semi-auto', reasonerUse: 'off' },
+    settings: { mode: 'manual', reasonerUse: 'off' },
     snapshot: {
       messages: null
     }
@@ -4198,7 +4338,7 @@ for (const scenario of [
   assertEqual(view.lastSnapshot.latestMesId, 0, 'missing latest message id normalized');
   assertDeepEqual(view.lastSnapshot.messages, [], 'missing messages normalized to empty array');
   assertEqual(view.lastPacket.chatId, 'chat', 'packet gets normalized chat id');
-  assertEqual(view.activeRunId, null, 'active run cleared after normalized semi-auto');
+  assertEqual(view.activeRunId, null, 'active run cleared after normalized manual');
 }
 
 {
@@ -5001,7 +5141,7 @@ for (const scenario of [
     }
   };
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'semi-auto', reasonerUse: 'off' },
+    settings: { mode: 'manual', reasonerUse: 'off' },
     storage: deferredStorage,
     snapshot: () => ({
       chatId: 'concurrent-chat',

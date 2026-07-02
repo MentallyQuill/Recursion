@@ -1,5 +1,11 @@
 import { createActivityReporter } from './activity.mjs';
 import { CARD_CATALOG, applyCardPlan, buildCardRequests, cardsFromProviderResult, normalizeCard, selectHand } from './cards.mjs';
+import {
+  cardScopeSummary,
+  filterCardJobsForScope,
+  filterCardsForScope,
+  scopePayloadForArbiter
+} from './card-scope.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { composePromptPacket, PROMPT_PACKET_VERSION } from './prompt.mjs';
 import { PROVIDER_CONTRACT_HASH } from './providers.mjs';
@@ -92,6 +98,7 @@ function cacheSettingsSignature(settings = {}) {
   return {
     enabled: normalized.enabled,
     mode: normalized.mode,
+    cardScope: normalized.cardScope,
     strength: normalized.strength,
     reasoningLevel: normalized.reasoningLevel,
     promptFootprint: normalized.promptFootprint,
@@ -718,6 +725,7 @@ function arbiterSafeSettings(settings) {
   return {
     enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
+    cardScope: cardScopeSummary(source.cardScope),
     strength: safeText(source.strength || 'balanced', 40),
     reasoningLevel: safeText(source.reasoningLevel || 'high', 40),
     promptFootprint: safeText(source.promptFootprint || 'normal', 40),
@@ -774,6 +782,7 @@ function safeSettingsView(settings) {
   return {
     enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
+    cardScope: cardScopeSummary(source.cardScope),
     strength: safeText(source.strength || 'balanced', 40),
     reasoningLevel: safeText(source.reasoningLevel || 'high', 40),
     promptFootprint: safeText(source.promptFootprint || 'normal', 40),
@@ -956,6 +965,23 @@ function catalogForCard(card) {
   const role = safeText(card?.role || card?.roleId || '', 120);
   const family = safeText(card?.family || '', 120);
   return CARD_CATALOG.find((entry) => entry.role === role || entry.family === family) || null;
+}
+
+function scopeOmissionReasons(omissions) {
+  return (Array.isArray(omissions) ? omissions : [])
+    .map((entry) => safeText(entry?.reason || '', 180))
+    .filter(Boolean);
+}
+
+function autoScopeExceptionReasons(entries, settings) {
+  const scope = scopePayloadForArbiter(settings);
+  if (scope.strictWhitelist) return [];
+  const selected = new Set(scope.selectedFamilies);
+  const exceptions = new Set(scope.autoExceptionFamilies);
+  return [...new Set((Array.isArray(entries) ? entries : [])
+    .map((entry) => catalogForCard(entry)?.family || safeText(entry?.family || '', 120))
+    .filter((family) => family && !selected.has(family) && exceptions.has(family))
+    .map((family) => `auto-scope-exception:${family}`))];
 }
 
 function cardProgressDetail(card, source, state) {
@@ -2378,6 +2404,8 @@ export function createRecursionRuntime({
     });
     try {
       const cacheView = compactSceneCacheForArbiter(sceneCache, snapshot);
+      const cardScope = scopePayloadForArbiter(settings);
+      const catalog = cardScope.strictWhitelist ? cardScope.allowedCatalog : cardScope.availableCatalog;
       const result = await generationRouter.generate('utilityArbiter', {
         runId,
         signal,
@@ -2387,8 +2415,9 @@ export function createRecursionRuntime({
           `Schema: ${UTILITY_ARBITER_SCHEMA}`,
           `Settings: ${JSON.stringify(arbiterSafeSettings(settings))}`,
           `Provider health: ${JSON.stringify(providerHealthForArbiter(settings))}`,
-          `Catalog: ${JSON.stringify(CARD_CATALOG)}`,
-          `Catalog hash: ${hashJson(CARD_CATALOG)}`,
+          `Card scope: ${JSON.stringify(cardScope)}`,
+          `Catalog: ${JSON.stringify(catalog)}`,
+          `Catalog hash: ${hashJson(catalog)}`,
           `Snapshot hash: ${fallbackPlan.snapshotHash}`,
           `User message hash: ${hashJson(userMessage)}`,
           `Scene cache: ${JSON.stringify(cacheView)}`,
@@ -2408,12 +2437,14 @@ export function createRecursionRuntime({
     }
   }
 
-  async function generatePlanCards({ runId, plan, snapshot, signal }) {
+  async function generatePlanCards({ runId, plan, snapshot, settings, signal }) {
     if (!generationRouter) return [];
+    const cardScope = scopePayloadForArbiter(settings);
     const requests = buildCardRequests(plan, {
       runId,
       snapshotHash: plan.snapshotHash || hashJson(snapshot),
-      snapshot: providerSafeSnapshot(snapshot)
+      snapshot: providerSafeSnapshot(snapshot),
+      cardScope
     });
     if (!requests.length) return [];
     if (typeof generationRouter.batch !== 'function' && typeof generationRouter.generate !== 'function') return [];
@@ -2481,7 +2512,7 @@ export function createRecursionRuntime({
     const pendingUserMessage = normalizePendingUserMessage(userMessage);
     const runId = makeId('run');
     const signal = startRun(runId);
-    const modeChip = settings.mode === 'semi-auto' ? 'Semi-Auto' : 'Auto';
+    const modeChip = settings.mode === 'manual' ? 'Manual' : 'Auto';
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: [modeChip] });
     try {
       const snapshot = snapshotWithPendingUserMessage(await readSnapshot(), pendingUserMessage);
@@ -2520,6 +2551,16 @@ export function createRecursionRuntime({
         signal
       });
       plan = enforceReasonerAvailability(plan, settings);
+      const scopedCardJobs = filterCardJobsForScope(plan.cardJobs, settings);
+      plan = {
+        ...plan,
+        cardJobs: scopedCardJobs.cardJobs,
+        diagnostics: mergeDiagnostics(
+          plan.diagnostics,
+          scopeOmissionReasons(scopedCardJobs.omitted),
+          autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings)
+        )
+      };
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastPlan = plan;
       const sceneSnapshot = snapshotForPlan(snapshot, plan);
@@ -2560,12 +2601,30 @@ export function createRecursionRuntime({
         ? initialCache
         : await loadSceneCacheSafe(runId, sceneSnapshot, settings);
       if (!isActiveRun(runId)) return supersededResult(runId);
-      const cacheCards = sanitizedCacheCards(runId, sceneSnapshot, cache?.cards);
+      const scopedCardOmissionDiagnostics = [];
+      const filterScopedCards = (cards) => {
+        const scoped = filterCardsForScope(cards, settings);
+        scopedCardOmissionDiagnostics.push(
+          ...scopeOmissionReasons(scoped.omitted),
+          ...autoScopeExceptionReasons(scoped.cards, settings)
+        );
+        return scoped.cards;
+      };
+      const cacheCards = filterScopedCards(sanitizedCacheCards(runId, sceneSnapshot, cache?.cards));
       const reuseCacheOnly = action === 'reuse-cache' && cacheCards.length > 0;
-      const providerCards = reuseCacheOnly ? [] : (await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, signal })).map(sanitizeGeneratedCard);
+      const providerCards = reuseCacheOnly ? [] : filterScopedCards(
+        (await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, settings, signal })).map(sanitizeGeneratedCard)
+      );
       if (!isActiveRun(runId)) return supersededResult(runId);
       const useLocalFallbackCards = !reuseCacheOnly && !cacheCards.length && !providerCards.length;
-      const generatedCards = useLocalFallbackCards ? localCards(sceneSnapshot).map(sanitizeGeneratedCard) : [];
+      const generatedCards = useLocalFallbackCards ? filterScopedCards(localCards(sceneSnapshot).map(sanitizeGeneratedCard)) : [];
+      if (scopedCardOmissionDiagnostics.length) {
+        plan = {
+          ...plan,
+          diagnostics: mergeDiagnostics(plan.diagnostics, scopedCardOmissionDiagnostics)
+        };
+        lastPlan = plan;
+      }
       stageCardProgress(runId, cacheCards, { source: 'cache', state: 'cached' });
       stageCardProgress(runId, providerCards, { source: 'generated', state: 'done' });
       stageCardProgress(runId, generatedCards, { source: 'fallback', state: 'warning' });

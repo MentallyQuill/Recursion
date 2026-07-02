@@ -655,10 +655,17 @@ export function buildCardRequests(plan = {}, context = {}) {
       const reason = cleanProviderPromptText(source.reason ?? '', ARBITER_REASON_LIMIT);
       const sourceSnapshotHash = String(context.snapshotHash ?? source.snapshotHash ?? '');
       const promptSnapshotHash = cleanProviderPromptText(sourceSnapshotHash, TEXT_LIMIT);
+      const selectedSubItems = Array.isArray(context.cardScope?.selectedSubItemsByFamily?.[catalog.family])
+        ? context.cardScope.selectedSubItemsByFamily[catalog.family].map((item) => String(item))
+        : [];
       return {
         roleId: catalog.role,
         runId: cleanProviderPromptText(context.runId ?? source.runId ?? '', TEXT_LIMIT),
         snapshotHash: promptSnapshotHash,
+        cardScope: {
+          family: catalog.family,
+          selectedSubItems
+        },
         prompt: [
           `Create one compact ${catalog.family} card for the current scene.`,
           'Return one JSON object only. Do not wrap it in markdown.',

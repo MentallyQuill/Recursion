@@ -5,6 +5,11 @@ import {
   normalizeProviderSettings,
   normalizeSettings
 } from '../../src/settings.mjs';
+import {
+  CARD_SCOPE_TOTAL_SUB_ITEMS,
+  cardScopeCounts,
+  defaultCardScope
+} from '../../src/card-scope.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 function assertThrows(fn, pattern, message) {
@@ -30,8 +35,21 @@ const normalized = normalizeSettings({
   }
 });
 const semiAutoNormalized = normalizeSettings({ mode: 'semi-auto' });
-assertEqual(semiAutoNormalized.mode, 'semi-auto', 'semi-auto mode preserved');
+assertEqual(normalizeSettings({ mode: 'manual' }).mode, 'manual', 'manual mode is valid');
+assertEqual(semiAutoNormalized.mode, 'auto', 'removed semi-auto normalizes to auto');
+assertEqual(normalizeSettings({ mode: 'observe' }).mode, 'auto', 'invalid mode normalizes to auto');
 assertEqual(normalized.enabled, false, 'power toggle disabled state preserved');
+const normalizedDefaultScope = normalizeSettings({}).cardScope;
+assertEqual(cardScopeCounts(normalizedDefaultScope).selectedSubItems, CARD_SCOPE_TOTAL_SUB_ITEMS, 'settings default enables all card scope');
+
+const partialScope = defaultCardScope();
+partialScope.families['Prose/Pacing'].enabled = false;
+for (const key of Object.keys(partialScope.families['Prose/Pacing'].subItems)) {
+  partialScope.families['Prose/Pacing'].subItems[key] = false;
+}
+const normalizedPartial = normalizeSettings({ mode: 'manual', cardScope: partialScope });
+assertEqual(normalizedPartial.mode, 'manual', 'manual mode survives card-scope normalization');
+assertEqual(normalizedPartial.cardScope.families['Prose/Pacing'].enabled, false, 'disabled family persists');
 assertDeepEqual(
   normalizeSettings({}).injection,
   { placement: 'default', role: 'system', depth: 'default' },

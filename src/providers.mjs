@@ -839,6 +839,54 @@ function normalizeProviderResponse(response, enriched) {
   };
 }
 
+function batchCapabilityDiagnostics(capability = {}) {
+  const source = plainObject(capability) ? capability : {};
+  const mode = String(source.mode || '').trim();
+  const maxConcurrency = Number(source.maxConcurrency);
+  return sanitize({
+    ...(mode ? { batchMode: mode } : {}),
+    ...(Number.isFinite(maxConcurrency) ? { concurrencyLimit: Math.max(1, Math.round(maxConcurrency)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(source, 'slotIsolation') ? { slotIsolation: source.slotIsolation === true } : {}),
+    ...(Object.prototype.hasOwnProperty.call(source, 'supportsAbortSignal') ? { supportsAbortSignal: source.supportsAbortSignal === true } : {}),
+    ...(source.source ? { batchCapabilitySource: String(source.source).slice(0, 120) } : {})
+  }, 200);
+}
+
+function batchDiagnosticsFromResponse(response = {}) {
+  const source = plainObject(response) ? response : {};
+  return sanitize({
+    ...(source.batchMode ? { batchMode: String(source.batchMode).slice(0, 80) } : {}),
+    ...(Number.isFinite(Number(source.concurrencyLimit)) ? { concurrencyLimit: Math.max(1, Math.round(Number(source.concurrencyLimit))) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(source, 'slotIsolation') ? { slotIsolation: source.slotIsolation === true } : {}),
+    ...(Object.prototype.hasOwnProperty.call(source, 'supportsAbortSignal') ? { supportsAbortSignal: source.supportsAbortSignal === true } : {}),
+    ...(source.batchCapabilitySource ? { batchCapabilitySource: String(source.batchCapabilitySource).slice(0, 120) } : {})
+  }, 200);
+}
+
+function normalizeProviderSlotFailure(response = {}, enriched = {}, batchDiagnostics = {}) {
+  const rawError = plainObject(response.error) ? response.error : {};
+  const code = String(rawError.code || 'RECURSION_PROVIDER_BATCH_SLOT_FAILED').trim()
+    || 'RECURSION_PROVIDER_BATCH_SLOT_FAILED';
+  const message = String(rawError.message || 'Provider batch slot failed.').replace(/\s+/g, ' ').trim()
+    || 'Provider batch slot failed.';
+  return {
+    ...batchDiagnostics,
+    text: '',
+    roleId: enriched.roleId,
+    lane: enriched.lane,
+    providerSource: enriched.providerSource,
+    providerId: enriched.providerSource,
+    model: '',
+    providerConfig: enriched.providerConfig,
+    slotError: sanitize({
+      code: code.slice(0, 120),
+      message: message.slice(0, 300),
+      retryable: rawError.retryable === true,
+      ...(rawError.status !== undefined ? { status: rawError.status } : {})
+    }, 300)
+  };
+}
+
 function responseTextHash(text) {
   return hashJson(String(text ?? ''));
 }
@@ -1377,13 +1425,22 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
       && enriched.every((request) => HOST_SOURCES.has(request.providerSource));
 
     if (canUseHostBatch) {
+      const batchDiagnostics = batchCapabilityDiagnostics(host.generation.capabilities?.batch);
       const responses = await host.generation.batch(enriched);
       if (!Array.isArray(responses) || responses.length !== enriched.length) {
         throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Host batch response shape did not match request batch.', {
           retryable: false
         });
       }
-      return responses.map((response, index) => normalizeProviderResponse(response, enriched[index]));
+      return responses.map((response, index) => {
+        const responseObject = response && typeof response === 'object' && !Array.isArray(response)
+          ? response
+          : { text: String(response ?? '') };
+        if (responseObject.ok === false && responseObject.error) {
+          return normalizeProviderSlotFailure(responseObject, enriched[index], batchDiagnostics);
+        }
+        return normalizeProviderResponse({ ...batchDiagnostics, ...responseObject }, enriched[index]);
+      });
     }
 
     return Promise.all(normalized.map(({ roleId, request }) => generate(roleId, request)));
@@ -1732,6 +1789,16 @@ export function createGenerationRouter({ client, activity = null, journal = null
     });
 
     async function successResult(entry, raw, retryCount = 0) {
+      if (raw?.slotError) {
+        throw providerError(
+          raw.slotError.code || 'RECURSION_PROVIDER_BATCH_SLOT_FAILED',
+          raw.slotError.message || 'Provider batch slot failed.',
+          {
+            retryable: raw.slotError.retryable === true,
+            status: raw.slotError.status
+          }
+        );
+      }
       const parsed = parseProviderStructuredOutput(raw?.text);
       const data = parsed.data;
       validateRoleResponseSchema(entry.roleId, data);
@@ -1745,6 +1812,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         responseId: raw?.responseId,
         responseHash: responseTextHash(raw?.text),
         schema: data.schema,
+        ...batchDiagnosticsFromResponse(raw),
         retryCount,
         latencyMs: Date.now() - entry.started,
         completedAt: nowIso()
@@ -1888,7 +1956,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       try {
         results[entry.index] = await successResult(entry, raw, batchRetryCount);
       } catch (error) {
-        results[entry.index] = await failureResult(entry, error, batchRetryCount);
+        results[entry.index] = await failureResult(entry, error, batchRetryCount, batchDiagnosticsFromResponse(raw));
       }
     }
 

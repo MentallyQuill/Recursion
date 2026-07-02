@@ -518,6 +518,82 @@ const quietResponse = await quietHost.generation.generate({ prompt: 'Fallback pr
 assertEqual(quietResponse.text, 'quiet text', 'quiet generation result normalized');
 assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
 
+{
+  const batchCalls = [];
+  let releaseFirst = null;
+  const concurrentBatchHost = createSillyTavernHost({
+    contextFactory: () => ({
+      currentChatId: 'concurrent-batch-chat',
+      chat: [],
+      generateRaw: async (request) => {
+        batchCalls.push(request.prompt);
+        if (request.prompt === 'slow first') {
+          await new Promise((resolve) => {
+            releaseFirst = resolve;
+          });
+        }
+        return { text: `batch:${request.prompt}` };
+      }
+    }),
+    settingsRoot: {}
+  });
+  assertDeepEqual(
+    concurrentBatchHost.generation.capabilities?.batch,
+    {
+      mode: 'concurrent',
+      maxConcurrency: 4,
+      slotIsolation: true,
+      supportsAbortSignal: true,
+      source: 'sillytavern-host-adapter'
+    },
+    'host batch advertises concurrent slot-isolated capability'
+  );
+  const pendingBatch = concurrentBatchHost.generation.batch([
+    { roleId: 'utilityArbiter', prompt: 'slow first', responseSchema: 'recursion.utilityArbiter.v1' },
+    { roleId: 'providerTest', prompt: 'fast second', responseSchema: 'recursion.providerTest.v1' }
+  ]);
+  await Promise.resolve();
+  const submittedBeforeFirstSettled = [...batchCalls];
+  releaseFirst();
+  const batchResults = await pendingBatch;
+  assertDeepEqual(
+    submittedBeforeFirstSettled,
+    ['slow first', 'fast second'],
+    'host batch submits sibling requests before first request settles'
+  );
+  assertDeepEqual(
+    batchResults.map((entry) => entry.text),
+    [
+      'batch:slow first',
+      'batch:fast second'
+    ],
+    'host batch preserves response order after concurrent submission'
+  );
+
+  const isolatedFailureHost = createSillyTavernHost({
+    contextFactory: () => ({
+      currentChatId: 'isolated-batch-chat',
+      chat: [],
+      generateRaw: async (request) => {
+        if (request.prompt === 'bad second') {
+          const error = new Error('isolated host slot failed');
+          error.code = 'RECURSION_TEST_HOST_SLOT_FAILED';
+          throw error;
+        }
+        return { text: `batch:${request.prompt}` };
+      }
+    }),
+    settingsRoot: {}
+  });
+  const isolatedFailureBatch = await isolatedFailureHost.generation.batch([
+    { roleId: 'utilityArbiter', prompt: 'good first', responseSchema: 'recursion.utilityArbiter.v1' },
+    { roleId: 'providerTest', prompt: 'bad second', responseSchema: 'recursion.providerTest.v1' }
+  ]);
+  assertEqual(isolatedFailureBatch[0].text, 'batch:good first', 'host batch keeps successful slot when sibling fails');
+  assertEqual(isolatedFailureBatch[1].ok, false, 'host batch returns per-slot failure envelope');
+  assertEqual(isolatedFailureBatch[1].error.code, 'RECURSION_TEST_HOST_SLOT_FAILED', 'host batch preserves per-slot failure code');
+}
+
 const quietProfileHost = createSillyTavernHost({
   contextFactory: () => ({
     currentChatId: 'quiet-profile-chat',

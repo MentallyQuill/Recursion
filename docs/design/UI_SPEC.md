@@ -31,16 +31,16 @@ Recursion should use its own chat-attached top bar instead of adopting the Direc
 Default desktop shape:
 
 ```text
-[power] [mode icon] [cards] | [Hero Pixel Array] Selecting turn hand...     [reasoning] v | ...
+[power] [pipeline icon] [mode icon] [cards] | [Hero Pixel Array] Selecting turn hand...     [reasoning] v | ...
 ```
 
 Narrow/mobile shape:
 
 ```text
-[power] [mode] [cards] | [Hero Pixel Array] Selecting...      v | ...
+[power] [pipeline] [mode] [cards] | [Hero Pixel Array] Selecting...      v | ...
 ```
 
-The desktop bar uses one compact row with distinct zones for power, mode, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
+The desktop bar uses one compact row with distinct zones for power, pipeline, mode, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
 
 The exact copyable HTML/CSS snapshot for this V1 bar lives in `docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md`. Treat that file as the implementation reference for reproducing the current mock in SillyTavern: it captures the final class names, inline SVG icons, Hero Pixel Array, progress menu, mode menu, Last Brief dropdown, Prompt Packet panel, metachips, and 12px active progress spinner treatment.
 
@@ -49,15 +49,22 @@ Recursion chrome should use explicit compact font sizing instead of inheriting S
 Canonical desktop layout:
 
 ```text
-[power] [mode arrows] [cards] | [blocks] Selecting turn hand...  [reasoning] v | ...
-[power] [mode arrows] [cards] | [blocks] Installing prompt...    [reasoning] v | ...
-[power] [mode arrows] [cards] | [blocks] Manual scope active...  [reasoning] Cards v | ...
-[power-off] [mode arrows] [cards] |                              [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] | [blocks] Selecting turn hand...  [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] | [blocks] Installing prompt...    [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] | [blocks] Manual scope active...  [reasoning] Cards v | ...
+[power-off] [pipeline] [mode arrows] [cards] |                              [reasoning] v | ...
 ```
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
 
-The mode control is a single icon-only button beside the power toggle with no separator between Power and Mode. It uses a matching three-arrow icon pair so Auto and Manual feel equally capable but differently directed:
+The pipeline control is a single icon-only button immediately to the left of the Mode button. It is not duplicated in Settings. It opens a compact dropdown with two choices:
+
+- Full-route/workflow icon, `Standard`: runs the full foreground Arbiter, card, compose, and install path on send.
+- Lightning/fast-lane icon, `Rapid`: warms provider-generated scene guidance in the background and uses a short provider delta on send.
+
+The selected pipeline changes the compact button icon immediately after selection. The dropdown follows the Mode menu pattern: icon, short name, hover/focus tip, native SillyTavern popup compactness, and close on selection, outside click, or `Esc`.
+
+The mode control is a single icon-only button beside the pipeline button with no separator between Pipeline and Mode. It uses a matching three-arrow icon pair so Auto and Manual feel equally capable but differently directed:
 
 - Divergent three-arrow fan: `Auto`. One origin splits into three directions, meaning Recursion may choose the best route from the current scene.
 - Parallel three-arrow stack: `Manual`. The same three arrows move in one direction, meaning Recursion keeps full force but follows selected constraints.
@@ -180,7 +187,7 @@ The bar should visually align with nearby SillyTavern chrome. Its height, border
 
 Color grammar:
 
-- The power and mode controls use muted SillyTavern foreground text, not bright brand color.
+- The power, pipeline, and mode controls use muted SillyTavern foreground text, not bright brand color.
 - Reasoning level controls use muted SillyTavern foreground grey-white, so they read as chrome rather than runtime state.
 - The Hero Pixel Array owns compact state color.
 - The bar itself should remain mostly neutral; amber/red should appear only in the array or disclosed menus for attention or blocking conditions.
@@ -1100,7 +1107,7 @@ Play is the default tab. It contains one open `Behavior` disclosure for controls
 
 The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). In short: Strength controls intervention pressure, Min/Max Cards control Reasoning Level card-count bounds, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
 
-Mode and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
+Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Pipeline is selected from its bar dropdown only; Settings may persist the value but must not render a separate Standard/Rapid toggle. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
 
 - Low: Utility-only bias with card pressure capped at Min Cards.
 - Medium: Utility Arbiter and Utility cards, then Reasoner final brief composition; card pressure capped at Normal Cards.

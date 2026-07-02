@@ -656,6 +656,15 @@ const hostBatchClient = createProviderClient({
       async batch(requests) {
         hostBatchCalls.push(...requests);
         return requests.map((request) => ({ text: `{"schema":"${request.roleId}","lane":"${request.lane}"}` }));
+      },
+      capabilities: {
+        batch: {
+          mode: 'concurrent',
+          maxConcurrency: 4,
+          slotIsolation: true,
+          supportsAbortSignal: true,
+          source: 'fake-host-batch'
+        }
       }
     }
   },
@@ -668,6 +677,18 @@ const hostBatchResults = await hostBatchClient.batch([
 assertEqual(hostBatchResults.length, 2, 'host batch returns all responses');
 assertDeepEqual(hostBatchCalls.map((request) => request.roleId), ['utilityArbiter', 'providerTest'], 'host batch receives enriched role ids');
 assertDeepEqual(hostBatchCalls.map((request) => request.lane), ['utility', 'utility'], 'host batch receives enriched lanes');
+assertDeepEqual(
+  hostBatchResults.map((entry) => ({
+    batchMode: entry.batchMode,
+    concurrencyLimit: entry.concurrencyLimit,
+    slotIsolation: entry.slotIsolation
+  })),
+  [
+    { batchMode: 'concurrent', concurrencyLimit: 4, slotIsolation: true },
+    { batchMode: 'concurrent', concurrencyLimit: 4, slotIsolation: true }
+  ],
+  'host batch response metadata carries batch capability diagnostics'
+);
 
 let routerHostBatchCallCount = 0;
 let routerHostGenerateCallCount = 0;
@@ -684,6 +705,15 @@ const routerHostBatchRouter = createGenerationRouter({
           routerHostBatchCallCount += 1;
           routerHostBatchCalls.push(requests);
           return requests.map((request) => ({ text: responseTextForRole(request.roleId, { lane: request.lane }) }));
+        },
+        capabilities: {
+          batch: {
+            mode: 'concurrent',
+            maxConcurrency: 4,
+            slotIsolation: true,
+            supportsAbortSignal: true,
+            source: 'fake-router-host-batch'
+          }
         }
       }
     },
@@ -703,6 +733,60 @@ assertDeepEqual(
   ['recursion.utilityArbiter.v1', 'recursion.providerTest.v1'],
   'router batch validates each response schema'
 );
+assertDeepEqual(
+  routerHostBatchResults.map((entry) => ({
+    batchMode: entry.diagnostics.batchMode,
+    concurrencyLimit: entry.diagnostics.concurrencyLimit,
+    slotIsolation: entry.diagnostics.slotIsolation
+  })),
+  [
+    { batchMode: 'concurrent', concurrencyLimit: 4, slotIsolation: true },
+    { batchMode: 'concurrent', concurrencyLimit: 4, slotIsolation: true }
+  ],
+  'router batch diagnostics preserve host batch capability metadata'
+);
+
+const routerHostSlotFailure = await createGenerationRouter({
+  client: createProviderClient({
+    host: {
+      generation: {
+        async batch(requests) {
+          return requests.map((request) => {
+            if (request.roleId === 'providerTest') {
+              return {
+                ok: false,
+                error: {
+                  code: 'RECURSION_TEST_HOST_SLOT_FAILED',
+                  message: 'isolated host slot failed',
+                  retryable: false
+                }
+              };
+            }
+            return { text: responseTextForRole(request.roleId, { lane: request.lane }) };
+          });
+        },
+        capabilities: {
+          batch: {
+            mode: 'concurrent',
+            maxConcurrency: 4,
+            slotIsolation: true,
+            supportsAbortSignal: true,
+            source: 'fake-router-slot-failure'
+          }
+        }
+      }
+    },
+    settingsStore: createStore()
+  })
+}).batch([
+  { roleId: 'utilityArbiter', prompt: 'A' },
+  { roleId: 'providerTest', prompt: 'B' }
+], { runId: 'provider-batch-host-slot-failure' });
+assertEqual(routerHostSlotFailure[0].ok, true, 'router host batch keeps successful slot when sibling host slot fails');
+assertEqual(routerHostSlotFailure[1].ok, false, 'router host batch returns failure only for failed host slot');
+assertEqual(routerHostSlotFailure[1].error.code, 'RECURSION_TEST_HOST_SLOT_FAILED', 'router host batch preserves failed slot code');
+assertEqual(routerHostSlotFailure[1].diagnostics.batchMode, 'concurrent', 'router host batch failure diagnostics preserve batch mode');
+assertEqual(routerHostSlotFailure[1].diagnostics.slotIsolation, true, 'router host batch failure diagnostics preserve slot isolation');
 
 const suppliedBatchRunId = 'provider-batch-run-test';
 const routerRunIdBatch = await routerHostBatchRouter.batch([

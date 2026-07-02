@@ -301,6 +301,23 @@ function normalizeGenerationResponse(response) {
   return { text: stringValue(response) };
 }
 
+function normalizeGenerationFailure(error) {
+  const code = stringValue(error?.code || error?.name || 'RECURSION_HOST_GENERATION_FAILED').trim()
+    || 'RECURSION_HOST_GENERATION_FAILED';
+  const message = stringValue(error?.message || error || 'Host generation failed.').replace(/\s+/g, ' ').trim()
+    || 'Host generation failed.';
+  return {
+    ok: false,
+    text: '',
+    error: {
+      code: code.slice(0, 120),
+      message: message.slice(0, 300),
+      retryable: error?.retryable === true,
+      ...(error?.status !== undefined ? { status: error.status } : {})
+    }
+  };
+}
+
 function requestProviderSource(request = {}) {
   return stringValue(request.providerSource ?? request.providerConfig?.source).trim();
 }
@@ -627,9 +644,21 @@ export function createSillyTavernHost({
       throw new Error('SillyTavern generation API is unavailable.');
     },
     async batch(requests = []) {
-      const responses = [];
-      for (const request of requests) responses.push(await this.generate(request));
-      return responses;
+      const settled = await Promise.allSettled(requests.map((request) => Promise.resolve().then(() => this.generate(request))));
+      return settled.map((result) => (
+        result.status === 'fulfilled'
+          ? result.value
+          : normalizeGenerationFailure(result.reason)
+      ));
+    }
+  };
+  generation.capabilities = {
+    batch: {
+      mode: 'concurrent',
+      maxConcurrency: 4,
+      slotIsolation: true,
+      supportsAbortSignal: true,
+      source: 'sillytavern-host-adapter'
     }
   };
 

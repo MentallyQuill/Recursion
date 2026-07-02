@@ -2,12 +2,13 @@
 
 ## Purpose
 
-Recursion needs an opt-in model evaluation harness that can answer two questions with real model calls:
+Recursion needs an opt-in model evaluation harness that can answer three questions with real model calls and systematic feature traversal:
 
 - Is Recursion choosing the right scene cards for the active turn, or is it repeatedly biasing the same families and near-identical cards?
 - Does the selected hand compile into a useful prompt packet that improves the next assistant response without leaking hidden information, over-constraining the scene, or wasting prompt budget?
+- Do Recursion's main functions and user-visible features hold together when exercised as a product, and can defects found by the run be reproduced, isolated, fixed, and rechecked?
 
-The existing deterministic suite should remain the release contract gate for schemas, redaction, prompt installation, storage, and runtime fail-soft behavior. This harness is a separate effectiveness gate. It uses synthetic scenario fixtures, real provider calls, and a second model as an automated judge.
+The existing deterministic suite should remain the release contract gate for schemas, redaction, prompt installation, storage, and runtime fail-soft behavior. This harness is a separate effectiveness and defect-discovery gate. The full exercise mode uses Playwright inside live SillyTavern, dedicated `recursion-soak-*` users, real provider calls, scripted synthetic chats, and a second model as an automated judge. Offline synthetic harnesses are useful for development, but they are not substitutes for the full exercise gate.
 
 ## Existing Context
 
@@ -93,19 +94,40 @@ Recommended approach: Option C.
 
 ## High-Level Process
 
-Each evaluation run should execute a fixed scenario pack against one or more Recursion settings profiles. For each scenario, the harness runs a baseline path and a Recursion path, then asks a separate judge model to score internal artifacts and final outputs.
+Each evaluation run should execute a fixed scenario pack against one or more Recursion settings profiles. A full exercise run is a live SillyTavern Playwright run with real model calls. It has two lanes:
 
-The normal scenario flow is:
+- functional traversal: drive Recursion's features, state transitions, and failure paths to find implementation defects;
+- model effectiveness: run baseline and Recursion generation paths, then ask a separate judge model to score internal artifacts and final outputs.
+
+The lanes can run separately for fast iteration, but the `core` pre-release process should run both in live SillyTavern. Functional traversal failures should be repaired before treating model-effectiveness scores as meaningful, because a broken UI control, prompt-clear path, provider configuration, or storage path can invalidate the model-facing result.
+
+The full exercise flow is:
+
+1. Run deterministic preflight checks or verify they were run for the same checkout.
+2. Run a functional traversal pack through Playwright against a guarded live SillyTavern host.
+3. Record defects with severity, reproduction data, layer, likely owner, and artifact links.
+4. Stop immediately on critical safety failures such as secret leakage, prompt-key contamination, or Manual-scope violations.
+5. Run model-effectiveness scenarios only when blocking traversal failures are absent.
+6. Generate baseline and Recursion target-model outputs for the selected scenarios.
+7. Ask the judge model to score card selection, card quality, prompt-packet compilation, and blind final-output comparison.
+8. Aggregate traversal defects, objective metrics, judge scores, and final-output comparisons.
+9. Feed each confirmed defect into the repair workflow.
+
+The normal live scenario flow is:
 
 1. Load a synthetic scenario fixture.
-2. Create a fake host snapshot from the fixture transcript and pending user message.
-3. Run Recursion with real provider calls for Arbiter, card generation, and optional Reasoner composition.
-4. Capture the sanitized plan, generated cards, deck states, selected hand, omissions, prompt packet metadata, prompt sections, provider-call metadata, and activity stages.
-5. Generate a baseline target-model response without Recursion prompt blocks.
-6. Generate a Recursion target-model response with the same base prompt plus the Recursion prompt packet.
-7. Ask the judge model to score card selection, card quality, prompt-packet compilation, and blind final-output comparison.
-8. Write machine-readable artifacts and a short summary.
-9. Aggregate metrics across scenarios and repeated runs.
+2. Use Playwright to open SillyTavern as a dedicated `recursion-soak-*` user.
+3. Create or reset a synthetic evaluation chat for the scenario.
+4. Install the scenario transcript and pending user turn through visible host controls or a guarded harness bridge that records its trigger source.
+5. Configure Recursion provider settings for real Utility, Reasoner, target, and judge calls.
+6. Run Recursion through the visible bar, Cards surface, progress menu, Last Brief, and Full Viewer.
+7. Let Recursion make real provider calls for Arbiter, card generation, and optional Reasoner composition.
+8. Capture the sanitized plan, generated cards, deck states, selected hand, omissions, prompt packet metadata, prompt sections, provider-call metadata, and activity stages.
+9. Generate a baseline target-model response without Recursion prompt blocks.
+10. Generate a Recursion target-model response with the same base prompt plus the Recursion prompt packet.
+11. Ask the judge model to score card selection, card quality, prompt-packet compilation, and blind final-output comparison.
+12. Write machine-readable artifacts and a short summary.
+13. Aggregate metrics across scenarios and repeated runs.
 
 The target model and judge model must be configured separately. They may use the same provider source during local experimentation, but the maintained evaluation profile should use a judge model that is distinct from the target generation model.
 
@@ -117,13 +139,15 @@ Scenario fixtures should be checked in under:
 tests/evaluation/scenarios/
 ```
 
+Fixtures are synthetic, but the full exercise runner should materialize them inside live SillyTavern chats for dedicated soak users. The fixture is the source data; live SillyTavern is the execution surface.
+
 The first implementation should support three packs:
 
 - `smoke`: 6 scenarios, 1 run each. Cheap sanity proof for the harness and judge schema.
 - `core`: 20 to 30 scenarios, 3 runs each. Main effectiveness signal.
 - `stress`: 40 to 60 scenarios, 3 to 5 runs each. Broader distribution, harder conflicts, and repetition pressure.
 
-Each scenario should be synthetic and safe to store. It should not use private live chats.
+Each scenario should be synthetic and safe to store. It should not use private chats.
 
 Recommended scenario axes:
 
@@ -176,6 +200,208 @@ Scenario fixture shape:
 
 The oracle is not a script for the target model. It is evaluation metadata for deterministic metrics and judge prompts.
 
+## Functional Traversal Packs
+
+Functional traversal packs exercise Recursion as a product. The primary traversal path uses Playwright against live SillyTavern with synthetic evaluation chats and real provider calls. Fake storage, fake providers, fake prompt install adapters, and DOM-only harnesses may exist for narrow deterministic regressions, but they do not count as the full exercise proof.
+
+Traversal packs should live under:
+
+```text
+tests/evaluation/traversals/
+```
+
+The first implementation should support three traversal packs:
+
+- `traversal-smoke`: fast Playwright pass through live SillyTavern core controls and one real model-call prompt install/clear cycle.
+- `traversal-core`: broad live SillyTavern product traversal over runtime, UI, storage, providers, prompt injection, real model calls, and fail-soft behavior.
+- `traversal-regression`: narrow non-live or live repros for specific defects after they are isolated.
+
+The traversal runner should support two execution styles:
+
+- `collect`: continue after non-critical defects so one run can build a useful defect list.
+- `fail-fast`: stop at the first failure, useful for focused regression repair.
+
+Critical failures always stop the run. Critical failures include API-key leakage, raw provider prompt or response persistence, hidden-reasoning leakage, prompt keys outside the `recursion.` namespace, Manual-scope prompt injection, live `default-user` mutation, and prompt cleanup failure after disable or teardown.
+
+## Playwright SillyTavern Execution Contract
+
+The full exercise runner must use Playwright to operate the same Recursion surfaces a user sees in SillyTavern.
+
+Required preflight:
+
+- `SILLYTAVERN_BASE_URL` is configured and reachable.
+- The selected user matches `recursion-soak-*`.
+- `default-user`, empty users, and ambiguous aliases are rejected before mutation.
+- The served extension manifest and selected source files match the checkout under test.
+- Playwright readiness passes in the current environment.
+- The dedicated user can write, verify, read, and delete a Recursion-owned storage probe.
+- Real Utility provider configuration is present and tested.
+- Real target-model configuration is present.
+- Real judge-model configuration is present.
+- Reasoner configuration is present when the selected profile requires Reasoner.
+
+Playwright should prefer visible controls:
+
+- open SillyTavern;
+- select or create the synthetic evaluation chat;
+- mount and enable Recursion;
+- use the Recursion Bar power, mode, Cards, progress, Last Brief, options, and viewer controls;
+- enter or verify provider configuration through the provider surface when feasible;
+- send scenario messages through visible SillyTavern input and send controls;
+- inspect Recursion prompt metadata through Recursion-owned exposed state and prompt-key wrappers.
+
+Guarded harness bridges are allowed only for operations that cannot be performed safely through visible controls, such as creating a synthetic scenario chat or wrapping prompt-key writes for metadata capture. Each bridge use must record `triggerSource`, `bridgeName`, reason, and whether a strict run permits it.
+
+Generation-enabled Playwright runs must not write screenshots or traces after chat/model text appears. They may write text and JSON artifacts that pass redaction checks. No-generation UI preflights may write screenshots and traces.
+
+## Functional Feature Matrix
+
+The traversal lane should cover these Recursion features.
+
+### Runtime And Mode Control
+
+- Power off does not inspect chat, call providers, update cards, write cache, or install prompts.
+- Power on allows Auto and Manual preparation.
+- Auto mode treats card scope as focus and records high-relevance exceptions.
+- Manual mode treats card scope as a strict whitelist from Arbiter plan through prompt packet.
+- Reasoning levels route Arbiter, card calls, and composer work according to provider health.
+- Prompt Footprint changes section budgets without silently changing card scope.
+- Strength and Focus affect card pressure and composition metadata without overwriting prompt safety.
+
+### Card Scope And Selection
+
+- Cards surface preserves the ten V1 families and thirty facets.
+- Family toggles disable and restore sub-items.
+- Partial family state is mixed.
+- Zero-selection is blocked.
+- Manual disabled families cannot be requested, generated, selected, composed, or injected.
+- Auto disabled-focus families can appear only with visible `auto-scope-exception:<family>` diagnostics.
+- Last Brief and viewer surfaces show selected and omitted families accurately.
+
+### Provider And Model Calls
+
+- Utility provider setup, status, model discovery, and Test Provider work without persisting session keys.
+- Reasoner provider setup, status, model discovery, and Test Provider work when enabled.
+- Host-current-model, host-connection-profile, and openai-compatible sources are represented in traversal fixtures where feasible.
+- Provider failures, malformed JSON, token-limit output, reasoning-only output, timeouts, and auth failures degrade Recursion without blocking host generation.
+- Batch card calls preserve one frozen snapshot hash and shared run id.
+- Stale provider results cannot update active cache, hand, packet, or prompt install state.
+
+### Prompt Packet And Injection
+
+- Prompt packet composition creates Scene Brief, Turn Brief, and Guardrails.
+- Packet sections route selected families to the expected sections.
+- Packet sections record source ids or valid omission reasons.
+- `packetToPromptBlocks` emits only known Recursion prompt keys.
+- Prompt install replaces or clears known Recursion keys rather than appending duplicates.
+- Prompt install failure rolls back or reports warning without blocking host generation.
+- Power-off, chat change, source change, disable, reset, and teardown clear Recursion-owned prompt keys.
+
+### Storage, Cache, And Diagnostics
+
+- Scene cache stores bounded card metadata and latest-hand metadata without raw provider prompts or API keys.
+- Cache contract versions invalidate hard drift and mark settings drift stale.
+- Cached cards with stale source ranges, hidden messages, mismatched fingerprints, or out-of-window evidence cannot enter the hand.
+- Manual refresh invalidates cache without adding synthetic chat content.
+- Reset scene cache clears memory state, storage state, and prompt keys.
+- Run journal entries are bounded, sanitized, and ordered.
+- Diagnostics export omits secrets, full transcripts, raw provider prompts, raw responses, hidden reasoning, and inspector-only notes.
+
+### UI And Operator Surfaces
+
+- Recursion Bar mounts and exposes power, mode, Cards, progress, Last Brief, and options controls.
+- Hero Pixel Array progress shows reading, Arbiter planning, card batch, card progress, hand selection, prompt composition, install, fallback, warning, and settled states.
+- Last Brief dropdown reflects the most recent hand and omissions.
+- Full Viewer opens Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics views.
+- Provider cards show ready, unavailable, disabled, issue, composing, and test-failed states without raw error leakage.
+- Desktop and phone viewports do not overlap controls or hide required controls.
+
+### Live Host Boundaries
+
+Full exercise traversal must run in live SillyTavern and must use the existing dedicated-user guardrails:
+
+- `SILLYTAVERN_BASE_URL` must be configured and reachable.
+- The active user must match `recursion-soak-*`.
+- `default-user` and ambiguous aliases are rejected before mutation.
+- Served extension files must match the checkout or the run is `stale-extension`.
+- Storage probes must prove Recursion-owned write/read/delete behavior for the dedicated user.
+- Generation-enabled live traversal must not capture screenshots or traces that may contain model text.
+
+## Defect Records
+
+Every traversal failure should produce a structured defect record. Defect records belong in the evaluation report and can also be emitted as standalone JSON under the run artifact root.
+
+Defect record shape:
+
+```json
+{
+  "recordType": "recursion.evalDefect",
+  "schemaVersion": 1,
+  "id": "defect-example",
+  "scenarioId": "core-airlock-access-001",
+  "traversalId": "providers-openai-auth-failure",
+  "severity": "critical | high | medium | low",
+  "layer": "runtime | ui | provider | prompt | storage | live-host | judge | artifact",
+  "status": "open",
+  "summary": "One sentence defect summary.",
+  "reproduction": {
+    "command": "node tools\\scripts\\eval-recursion-models.mjs --traversal providers-openai-auth-failure --fail-fast",
+    "profile": "auto-normal",
+    "artifact": "scenario-results/example/sample-1.json"
+  },
+  "expected": "Bounded expected behavior.",
+  "actual": "Bounded actual behavior.",
+  "suspectedOwner": "src/providers.mjs",
+  "regressionTarget": "tools/scripts/test-providers.mjs",
+  "blocking": true
+}
+```
+
+Severity semantics:
+
+- `critical`: safety, privacy, prompt-key contamination, live unsafe-user mutation, or host generation blockage.
+- `high`: core runtime, provider, prompt install, scope, or storage behavior is wrong.
+- `medium`: user-visible feature, diagnostics, progress, viewer, or artifact behavior is wrong but fail-soft generation still works.
+- `low`: copy, polish, non-blocking artifact metadata, or minor report quality issue.
+
+## Repair Workflow
+
+The evaluation process should include a repair loop. The runner itself should not modify source code, but it should produce enough reproduction data for a developer or Codex implementation pass to repair defects without rediscovery.
+
+For each confirmed defect:
+
+1. Reproduce the defect with the narrowest traversal, scenario, or focused command.
+2. Classify the layer and severity.
+3. Identify whether the defect is deterministic, model-dependent, live-host dependent, or judge-dependent.
+4. Add or update the narrowest deterministic regression test when the behavior can be isolated without real model calls.
+5. If the defect is only visible with real model calls, add a synthetic eval scenario or traversal assertion that captures the failure without private data.
+6. Fix the implementation, docs, schemas, tests, or examples in place. Recursion is pre-alpha, so prefer the clean current contract over compatibility shims.
+7. Run the focused regression command.
+8. Rerun the failed traversal or scenario in `fail-fast` mode.
+9. Rerun the affected pack in `collect` mode.
+10. If the defect touched live-host behavior, rerun the guarded live smoke or live traversal with a dedicated `recursion-soak-*` user.
+11. Update the defect record to `fixed`, `wont-fix`, `duplicate`, or `needs-human-review`.
+
+Repair completion requires evidence. A fixed defect must cite:
+
+- original failing run id and defect id;
+- reproduction command;
+- changed files;
+- focused regression command and result;
+- rerun traversal or scenario command and result;
+- live proof command and result when applicable.
+
+The harness summary should keep a defect ledger:
+
+- `openCriticalCount`
+- `openHighCount`
+- `fixedCount`
+- `regressionAddedCount`
+- `requiresLiveProofCount`
+- `requiresHumanReviewCount`
+
+Model-effectiveness scores should not hide open traversal defects. If critical or high traversal defects remain open, the aggregate report status should be `fail` or `inconclusive` even if judge scores are good.
+
 ## Settings Profiles
 
 The harness should run each pack against named Recursion profiles:
@@ -194,8 +420,10 @@ The harness should capture enough internal state to diagnose decisions without s
 
 Per scenario run, capture:
 
-- scenario id, pack, tags, settings profile, model labels, provider sources, and run id;
+- scenario id, pack, tags, settings profile, model labels, provider sources, SillyTavern base URL hash, dedicated user, trigger source, and run id;
 - Recursion settings hash, card catalog hash, provider contract hash, and prompt packet version;
+- served extension freshness status and checked file hashes;
+- Playwright action timeline with visible-control, bridge, and assertion steps;
 - Arbiter action, scene status, prompt footprint, requested card jobs, lifecycle actions, budgets, and sanitized diagnostics;
 - generated card metadata: id, family, role, status, emphasis, detail profile, token estimate, evidence refs, source range, provider lane, and prompt text for synthetic scenarios;
 - rejected card counts grouped by rejection reason when available;
@@ -205,7 +433,7 @@ Per scenario run, capture:
 - final baseline and Recursion candidate outputs for synthetic scenarios;
 - judge model scores and rationales.
 
-Because the standard fixtures are synthetic, the harness may persist full card prompt text, prompt packet text, and candidate output text under `artifacts/model-evals/`. This permission is limited to checked-in synthetic evaluation scenarios. Live SillyTavern evaluation must keep the stricter live-smoke artifact policy and persist hashes or bounded excerpts only.
+Because the standard fixtures are synthetic, the harness may persist full card prompt text, prompt packet text, and candidate output text under `artifacts/model-evals/` after redaction checks. This permission applies only to checked-in synthetic evaluation scenarios run against dedicated soak users. Manual exploratory live chats and private chats must keep the stricter live-smoke artifact policy and persist hashes or bounded excerpts only.
 
 No evaluation artifact may store API keys, authorization headers, cookies, raw hidden reasoning, unredacted provider request envelopes, or private live transcripts.
 
@@ -250,6 +478,19 @@ Objective checks should flag:
 - output length outside configured bounds.
 
 These checks are intentionally shallow. The judge model owns semantic scoring.
+
+### Defect Discovery Metrics
+
+- `criticalDefectCount`: safety, privacy, prompt-key contamination, unsafe-user, or cleanup failures.
+- `highDefectCount`: core runtime, provider, prompt install, scope, or storage defects.
+- `mediumDefectCount`: user-visible feature, progress, viewer, diagnostics, or report defects.
+- `lowDefectCount`: minor copy, metadata, or non-blocking artifact quality defects.
+- `featureCoverage`: percentage of the functional feature matrix exercised by the run.
+- `visibleControlCoverage`: percentage of required Playwright-visible controls used successfully.
+- `bridgeUsageCount`: number of harness bridge actions used instead of visible controls.
+- `realModelCallCoverage`: required Utility, Reasoner when profiled, target, and judge calls completed with real providers.
+- `repairReadyDefectRate`: share of defects with reproduction command, artifact link, expected behavior, actual behavior, and regression target.
+- `regressionBackfillRate`: share of fixed defects that received deterministic regression coverage or a synthetic eval scenario.
 
 ## Judge Model Review
 
@@ -387,6 +628,8 @@ Evaluation status should use:
 - `pass`: thresholds met and no critical failures.
 - `fail`: Recursion behavior violates a defined evaluation threshold.
 - `environment-fail`: provider, filesystem, configuration, or network conditions prevented a valid run.
+- `unsafe-user`: live run attempted to use `default-user`, an empty user, or a non-dedicated user.
+- `stale-extension`: live SillyTavern served extension files do not match the checkout under test.
 - `judge-fail`: judge model could not return valid review JSON after retry.
 - `inconclusive`: run completed but too many judge preferences were unstable or too many provider calls were skipped.
 - `skipped`: pack or profile intentionally not run.
@@ -404,6 +647,7 @@ Suggested pre-alpha thresholds for the `core` pack:
 - Recursion output should beat or tie baseline in at least 70 percent of stable blind comparisons.
 - Recursion output should lose to baseline by 2 or more aggregate score points in no more than 10 percent of stable comparisons.
 - Any forbidden reveal, manual-scope violation, hidden-thought leak, or API-key leak is a hard fail.
+- A `core` full exercise run is not valid unless Playwright drove live SillyTavern and real model calls were made for Utility, target output, and judge review.
 
 These thresholds should be versioned in the scenario pack config so they can tighten over time without rewriting old reports.
 
@@ -420,6 +664,8 @@ Required files:
 - `report.json`: aggregate machine-readable results.
 - `summary.md`: short operational summary with failures first.
 - `trace.jsonl`: bounded stage log.
+- `playwright/actions.jsonl`: bounded visible-control and bridge-action log.
+- `live/preflight.json`: SillyTavern user, served-extension, storage-probe, and provider-readiness preflight.
 - `scenario-results/<scenario-id>/<sample-id>.json`: per-scenario run trace.
 - `judge/<scenario-id>/<sample-id>-cards.json`: card judge result.
 - `judge/<scenario-id>/<sample-id>-packet.json`: packet judge result.
@@ -441,6 +687,12 @@ Report shape:
     "target": "provider/model",
     "judge": "provider/model"
   },
+  "live": {
+    "baseUrlHash": "sha256-example",
+    "user": "recursion-soak-a",
+    "servedStatus": "served-extension-match",
+    "triggerSource": "ui-send"
+  },
   "scenarioCount": 20,
   "sampleCount": 60,
   "metrics": {},
@@ -457,25 +709,33 @@ The redaction scan must run before reporting success. It should fail on obvious 
 The first implementation should add:
 
 ```powershell
-node tools\scripts\eval-recursion-models.mjs --pack smoke --profile auto-normal --runs 1 --write-artifacts
-node tools\scripts\eval-recursion-models.mjs --pack core --profile auto-normal --runs 3 --write-artifacts
+node tools\scripts\eval-recursion-models.mjs --live --pack smoke --profile auto-normal --runs 1 --write-artifacts
+node tools\scripts\eval-recursion-models.mjs --live --pack core --profile auto-normal --runs 3 --write-artifacts
 ```
 
 Useful flags:
 
+- `--live`
+- `--base-url <url>`
+- `--user recursion-soak-a`
 - `--pack smoke|core|stress`
+- `--traversal traversal-smoke|traversal-core|traversal-regression`
 - `--profile auto-normal|manual-focused|auto-rich-reasoner|low-lean|ultra-wide`
 - `--scenario <id>`
 - `--runs <count>`
+- `--collect`
+- `--fail-fast`
 - `--max-provider-calls <count>`
 - `--max-estimated-cost <amount>`
+- `--utility-model <model-id>`
+- `--reasoner-model <model-id>`
 - `--target-model <model-id>`
 - `--judge-model <model-id>`
 - `--write-artifacts`
 - `--dry-run`
 - `--strict`
 
-The runner should refuse to run without an explicit eval flag or provider configuration. It should print the estimated number of target, Recursion, and judge model calls before making calls.
+The runner should refuse a full exercise run without `--live`, a reachable base URL, a dedicated soak user, served-extension freshness proof, and provider configuration for real Utility, target, and judge calls. It should print the estimated number of Utility, Reasoner, target, and judge model calls before making calls.
 
 ## Cost And Reproducibility
 
@@ -492,7 +752,7 @@ Provider outputs are not perfectly reproducible even with fixed settings, so eve
 - run id and sample id;
 - request and response hashes for provider calls, not raw provider envelopes.
 
-The `smoke` pack should stay cheap enough to run frequently. The `core` pack should be the normal effectiveness gate. The `stress` pack is for pre-release confidence and investigation.
+The `smoke` pack should stay cheap enough to run frequently in live SillyTavern. The `core` pack should be the normal effectiveness and defect-discovery gate. The `stress` pack is for pre-release confidence and investigation.
 
 ## Failure Triage
 
@@ -516,11 +776,11 @@ This harness should not be part of `npm.cmd test` or `node tools\scripts\run-alp
 
 Recommended integration stages:
 
-1. Add the harness and `smoke` pack as opt-in only.
-2. Run `smoke` after deterministic gates when provider credentials are available.
-3. Add `core` as a manual pre-release gate once judge stability is acceptable.
+1. Add the live Playwright harness and `traversal-smoke` plus `smoke` scenario pack as opt-in only.
+2. Run live `smoke` after deterministic gates when provider credentials and a dedicated soak user are available.
+3. Add live `traversal-core` plus `core` as a manual pre-release gate once judge stability is acceptable.
 4. Promote only stable objective regressions into deterministic tests.
-5. Keep live SillyTavern smoke focused on host integration, not quality scoring.
+5. Keep the existing live SillyTavern smoke focused on host integration; this new harness owns product traversal, real model-call effectiveness, and repair-loop evidence.
 
 ## Non-Goals
 
@@ -529,7 +789,7 @@ The harness should not attempt to certify:
 - long campaign quality;
 - general writing style;
 - campaign memory or durable continuity;
-- live private chat quality;
+- private chat quality or private user data;
 - external extension interaction;
 - provider price or latency benchmarking beyond basic diagnostics;
 - exact deterministic model output;
@@ -541,10 +801,14 @@ Recursion is a current-scene prompt compiler. The evaluation should stay focused
 
 - A design doc defines the model-evaluation harness as separate from deterministic tests and live smoke.
 - The process uses real provider calls for Recursion and final target responses.
+- The full exercise process uses Playwright in live SillyTavern with a dedicated `recursion-soak-*` user.
 - A second model performs automated card, packet, and blind final-output review.
+- Functional traversal packs exercise Recursion's main controls, provider setup, storage, prompt injection, cleanup, progress, Last Brief, Full Viewer, and fail-soft paths.
+- Defects produce structured defect records with severity, layer, reproduction command, expected behavior, actual behavior, and regression target.
+- The repair loop requires reproduction, focused regression where possible, implementation fix, focused rerun, affected-pack rerun, and live proof when applicable.
 - Synthetic scenario fixtures define oracle metadata for expected families, discouraged families, must-use facts, and forbidden reveals.
 - Metrics detect repeated family bias, near-duplicate cards, irrelevant-family persistence, scope violations, composition loss, and final-output regression.
 - Artifacts are written under `artifacts/model-evals/<run-id>/` and scanned for secrets before success.
-- The standard evaluation does not require live SillyTavern or private chats.
+- The standard full exercise evaluation requires live SillyTavern but does not use private chats.
 - The CLI supports cheap smoke runs and broader core runs with explicit provider-call and cost caps.
 - The harness remains opt-in until judge stability and thresholds are proven.

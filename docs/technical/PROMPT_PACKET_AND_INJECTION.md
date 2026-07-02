@@ -108,6 +108,14 @@ flowchart LR
 
 The SillyTavern adapter accepts only prompt keys starting with `recursion.` and currently installs the three V1 keys. It clears known Recursion keys before install, tracks installed keys, and rolls back known keys if a partial install fails.
 
+Advanced user settings can override the composed packet's effective insertion lane without changing packet content:
+
+- `injection.placement`: `default`, `in_prompt`, or `in_chat`
+- `injection.role`: `system`, `user`, or `assistant`
+- `injection.depth`: `default` or integer `0..10`
+
+`default` preserves the section template shown above. Explicit overrides apply to the composed Recursion packet blocks after Utility/Reasoner composition and before host install. They are intended for model/preset compatibility, not per-card prompt engineering. Invalid or unsupported host combinations must normalize to the default safe system-role plan and emit a compact activity warning.
+
 Off mode, Observe only mode, disable, delete, and runtime teardown clear Recursion prompt keys best-effort.
 
 <Render Needed>: assets/documentation/renders/recursion-prompt-injection-lanes.png - Injection visual showing Recursion prompt keys, clear-before-install, rollback on failure, and host prompt boundary.

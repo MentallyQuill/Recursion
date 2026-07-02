@@ -14,6 +14,31 @@
 
 This plan covers all Recursion V1 subsystems because they form one end-to-end runtime loop: settings, host adapter, provider lanes, storage, card deck, prompt composition, UI, and smoke tests. Each task produces a working checkpoint and can be implemented independently, but the final V1 proof is the whole loop from SillyTavern generation start to prompt packet install.
 
+## Plan Addendum: Final Prompt Injection Settings
+
+Add an advanced user-settings contract for where the conditioned final prompt packet is installed. This is a composed-packet setting, not a per-card injection matrix.
+
+Implementation scope:
+
+- `F:\git\Recursion\src\settings.mjs`: add `injection` settings with `placement`, `role`, and `depth`.
+- `F:\git\Recursion\tools\scripts\test-settings.mjs`: verify defaults, enum normalization, numeric depth clamping, and partial update preservation.
+- `F:\git\Recursion\src\prompt.mjs`: apply explicit injection overrides when building `injectionPlan`; `default` keeps the current Scene Brief, Turn Brief, and Guardrails template.
+- `F:\git\Recursion\tools\scripts\test-prompt.mjs`: verify default packet blocks are unchanged, explicit placement/role/depth overrides affect only composed packet blocks, and invalid values normalize safely.
+- `F:\git\Recursion\src\hosts\sillytavern\host.mjs`: continue translating packet block `placement`, `role`, and `depth` through the host adapter; unsupported roles must fall back safely and surface a compact warning.
+- `F:\git\Recursion\docs\technical\PROMPT_PACKET_AND_INJECTION.md`: document the final prompt injection settings and the default safe behavior.
+
+Settings shape:
+
+```js
+injection: {
+  placement: 'default', // 'default' | 'in_prompt' | 'in_chat'
+  role: 'system',       // 'system' | 'user' | 'assistant'
+  depth: 'default'      // 'default' | integer 0..10
+}
+```
+
+Default behavior must match the current V1 packet plan: Scene Brief in prompt depth 4 as system, Turn Brief in chat depth 2 as system, and Guardrails in prompt depth 1 as system. Explicit overrides apply after Utility/Reasoner composition and before prompt install. They must not affect Arbiter planning, card generation, hand selection, storage records, or raw card injection policy.
+
 ## File Structure
 
 - `manifest.json` - SillyTavern extension manifest.

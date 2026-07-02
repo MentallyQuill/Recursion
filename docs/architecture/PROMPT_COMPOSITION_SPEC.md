@@ -186,6 +186,18 @@ Recommended depth behavior:
 - Scene Brief should sit behind the Turn Brief as stable scene context, lower than strict guardrails but high enough to influence prose and continuity.
 - Raw critical guardrails should be minimal, rare, and placed only as high as needed to protect the next response.
 
+### User-Controlled Final Prompt Injection
+
+V1 must include an advanced user setting group for the conditioned final prompt packet. The default setting preserves Recursion's recommended per-section injection plan, but advanced users can override where the composed packet lands when a model or preset responds better to a different lane.
+
+Settings contract:
+
+- `injection.placement`: `default`, `in_prompt`, or `in_chat`. `default` keeps the packet template lanes. Explicit values override the placement for composed Recursion packet blocks.
+- `injection.role`: `system`, `user`, or `assistant`. Default is `system`; unsupported host roles fall back to `system` and record a compact warning.
+- `injection.depth`: `default` or an integer from `0` to `10`. `default` keeps section-specific depths. Explicit numeric depth overrides the depth for composed Recursion packet blocks.
+
+These settings apply only after Utility/Reasoner composition has produced the packet. They do not change card generation, Arbiter scoring, selected-hand contents, raw card storage, or external memory/lore behavior. They also do not create a per-card injection matrix; Recursion remains a composed-packet system, not a card micromanagement UI.
+
 The runtime architecture owns the exact SillyTavern API calls, prompt identifiers, ordering, and cleanup behavior. This spec owns what Recursion is allowed to install and the policy constraints for that installation.
 
 ## Footprint Profiles

@@ -13,6 +13,7 @@ Recursion storage is cache-oriented. It makes current-scene prompt compilation f
 - prompt footprint
 - focus
 - Reasoner use
+- final prompt injection placement, role, and depth controls
 - provider preferences without secrets
 - diagnostics limits
 - small UI preferences

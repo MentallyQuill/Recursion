@@ -32,6 +32,7 @@ Every persisted record is cache-oriented. If it is stale, corrupt, too large, or
 
 - enabled mode: off, observe, or auto;
 - strength, prompt footprint, focus, and Reasoner-use settings;
+- final prompt injection placement, role, and depth controls;
 - provider lane preferences without secrets;
 - advanced routing choices that are part of the current settings contract;
 - diagnostic toggles such as journal size and artifact detail;

@@ -179,7 +179,7 @@ Capture or plan visuals before writing screenshot-backed prose.
 | Mode controls | Power toggle, Auto, Semi-Auto, Reasoning Level, and prompt cleanup behavior. |
 | Recursion Bar | Ready, working, warning, disabled, provider issue, and prompt-ready states. |
 | Hero Pixel Array progress menu | Snapshot, Utility planning, card generation, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states. |
-| Options menu | Copy Last Prompt Packet, Open Settings, Open Viewer, provider controls, final prompt injection placement/role/depth controls, Clear Run Journal, Export Diagnostics, disabled Reset Scene Cache, and disabled copy state. |
+| Options menu | Copy Last Prompt Packet, Open Settings, Open Viewer, provider controls, final prompt injection placement/role/depth controls, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and disabled copy state. |
 | Last Hand dropdown | Compact selected cards, omission hints, prompt packet link, empty hand, stale hand, and error state. |
 | Full Viewer | Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections. |
 | Settings | Mode, Strength, Prompt Footprint, Focus, Reasoner Use, final prompt injection placement/role/depth, Utility provider setup, and Reasoner provider setup. |

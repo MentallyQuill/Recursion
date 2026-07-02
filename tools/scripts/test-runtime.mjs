@@ -4942,6 +4942,32 @@ for (const scenario of [
 }
 
 {
+  const { runtime, calls, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' }
+  });
+  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare cache before scene reset.' });
+  assertEqual(setup.ok, true, 'scene reset setup prepares generation');
+  const setupView = runtime.view();
+  assert(setupView.lastPacket, 'scene reset setup has prompt packet before reset');
+  assert(setupView.lastHand.cards.length > 0, 'scene reset setup has hand cards before reset');
+  const setupSnapshot = setupView.lastSnapshot;
+  assert(await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey), 'scene cache exists before reset');
+  const result = await runtime.resetSceneCache();
+  assertEqual(result.ok, true, 'scene cache reset succeeds');
+  assertEqual(result.chatKey, setupSnapshot.chatKey, 'scene cache reset targets current chat');
+  assertEqual(result.sceneKey, setupSnapshot.sceneKey, 'scene cache reset targets current scene');
+  assertEqual(result.clear.ok, true, 'scene cache reset clears host prompt');
+  assertEqual(calls.clear, 1, 'scene cache reset calls host prompt clear');
+  assertEqual(await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey), null, 'scene cache reset deletes current cache');
+  const resetView = runtime.view();
+  assertEqual(resetView.lastPacket, null, 'scene cache reset clears in-memory prompt packet');
+  assertEqual(resetView.lastHand.cards.length, 0, 'scene cache reset clears in-memory hand');
+  assertEqual(resetView.lastPlan, null, 'scene cache reset clears in-memory plan');
+  assertEqual(resetView.activity.label, 'Scene cache reset. Prompt cleared.', 'scene cache reset surfaces success activity');
+  assertEqual(resetView.activity.severity, 'success', 'scene cache reset success is visible');
+}
+
+{
   const adapter = createMemoryStorageAdapter();
   const repository = createStorageRepository({ storage: adapter });
   let releaseRefreshInvalidation;

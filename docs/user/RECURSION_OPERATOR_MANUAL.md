@@ -14,7 +14,7 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 ![Hero Pixel Array progress menu states](../../assets/documentation/renders/recursion-operator-progress-menu-states.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-options-menu.png - Options/settings menu with Play, Providers, Advanced, Reasoning Level, provider controls, prompt injection placement/role/depth, diagnostics limits, Clear Run Journal, Export Diagnostics, disabled Reset Scene Cache, and Full Viewer entry point.
+<Render Needed>: assets/documentation/renders/recursion-operator-options-menu.png - Options/settings menu with Play, Providers, Advanced, Reasoning Level, provider controls, prompt injection placement/role/depth, diagnostics limits, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and Full Viewer entry point.
 
 ![Last Brief dropdown states](../../assets/documentation/renders/recursion-operator-last-brief-states.png)
 
@@ -74,7 +74,7 @@ Main controls:
 
 - Play: Mode, Reasoning Level, Strength, Prompt Footprint, and Focus.
 - Providers: Utility and Reasoner provider setup, test controls, and session key controls.
-- Advanced: final prompt injection placement/role/depth, progress row limits, diagnostics settings, Clear Run Journal, Export Diagnostics, disabled Reset Scene Cache, and the Full Viewer entry point.
+- Advanced: final prompt injection placement/role/depth, progress row limits, diagnostics settings, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 
@@ -229,8 +229,7 @@ Recursion storage is cache-oriented. The runtime owns scene cache, run journal, 
 - power-toggle cleanup;
 - Clear Session Key for each provider lane;
 - diagnostics row-limit and excerpt settings;
-- Clear Run Journal and Export Diagnostics;
-- disabled Reset Scene Cache until a dedicated runtime handler exists;
+- Reset Scene Cache, Clear Run Journal, and Export Diagnostics;
 - extension disable when Recursion should be fully inactive.
 
 These controls must touch only Recursion-owned settings, scene caches, journals, prompt lanes, and diagnostics. They must not delete SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or other extension records.

@@ -885,6 +885,7 @@ try {
   const providerUpdates = [];
   const providerTests = [];
   const providerClears = [];
+  let resetSceneCacheCalls = 0;
   let clearRunJournalCalls = 0;
   let exportDiagnosticsCalls = 0;
   let view = {
@@ -1070,6 +1071,10 @@ try {
           }
         };
         return view.settings.providers[lane];
+      },
+      resetSceneCache: () => {
+        resetSceneCacheCalls += 1;
+        return { ok: true };
       },
       clearRunJournal: () => {
         clearRunJournalCalls += 1;
@@ -1258,13 +1263,15 @@ try {
   assertEqual(root.querySelector('[data-recursion-settings-advanced]').hidden, false, 'clicking Advanced shows advanced controls');
   assertEqual(root.querySelector('[data-recursion-clear-run-journal]').disabled, false, 'Clear Run Journal is enabled when runtime handler exists');
   assertEqual(root.querySelector('[data-recursion-export-diagnostics]').disabled, false, 'Export Diagnostics is enabled when runtime handler exists');
-  assertEqual(root.querySelector('[data-recursion-reset-scene-cache]').disabled, true, 'Reset Scene Cache stays disabled until runtime handler exists');
+  assertEqual(root.querySelector('[data-recursion-reset-scene-cache]').disabled, false, 'Reset Scene Cache is enabled when runtime handler exists');
   assert(root.querySelector('[data-recursion-setting-injection-placement]'), 'Advanced settings render injection placement control');
   assert(root.querySelector('[data-recursion-setting-injection-role]'), 'Advanced settings render injection role control');
   assert(root.querySelector('[data-recursion-setting-injection-depth]'), 'Advanced settings render injection depth control');
   assertEqual(root.querySelector('[data-recursion-setting-injection-placement]').value, 'default', 'injection placement defaults to template plan');
   assertEqual(root.querySelector('[data-recursion-setting-injection-role]').value, 'system', 'injection role defaults to system');
   assertEqual(root.querySelector('[data-recursion-setting-injection-depth]').value, 'default', 'injection depth defaults to template plan');
+  root.querySelector('[data-recursion-reset-scene-cache]').click();
+  assertEqual(resetSceneCacheCalls, 1, 'Reset Scene Cache action calls runtime');
   root.querySelector('[data-recursion-clear-run-journal]').click();
   assertEqual(clearRunJournalCalls, 1, 'Clear Run Journal action calls runtime');
   root.querySelector('[data-recursion-export-diagnostics]').click();

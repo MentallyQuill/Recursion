@@ -1585,6 +1585,80 @@ export function createRecursionRuntime({
     });
   }
 
+  async function resetSceneCache() {
+    const runId = makeId('scene-reset');
+    supersedeActiveRun();
+    return trackRuntimeMutation(async () => {
+      startRuntimeActivity({
+        runId,
+        phase: 'storageProgress',
+        mode: 'review',
+        severity: 'info',
+        label: 'Resetting Recursion scene cache...',
+        chips: ['Cache']
+      });
+      try {
+        await storageSaveTail.catch(() => {});
+      } catch {
+        // Storage save failures are already reported by their source.
+      }
+      let snapshot = null;
+      try {
+        snapshot = await readSnapshot();
+      } catch {
+        snapshot = lastSnapshot ? normalizeSnapshot(lastSnapshot) : normalizeSnapshot({});
+      }
+      lastSnapshot = snapshot;
+      const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 160) || DEFAULT_CHAT_ID;
+      const sceneKey = safeText(snapshot.sceneKey || DEFAULT_SCENE_KEY, 160) || DEFAULT_SCENE_KEY;
+      const result = typeof storage.clearSceneCache === 'function'
+        ? await storage.clearSceneCache(chatKey, sceneKey)
+        : { ok: false, reason: 'unsupported' };
+      if (result?.ok === false) {
+        settleRuntimeActivity({
+          runId,
+          outcome: 'warning',
+          phase: 'storageWarning',
+          severity: 'warning',
+          label: 'Scene cache reset failed.',
+          chips: ['Cache'],
+          detail: redact(result)
+        });
+        return { ok: false, chatKey, sceneKey, result: redact(result), clear: null };
+      }
+      lastPacket = null;
+      lastHand = { cards: [], omitted: [] };
+      lastPlan = null;
+      lastSavedSceneCacheRef = null;
+      stageRuntimeActivity({
+        runId,
+        phase: 'promptClearing',
+        mode: 'review',
+        severity: 'info',
+        label: 'Clearing Recursion prompt after scene cache reset...',
+        chips: ['Cache', 'Prompt']
+      });
+      const clear = await runPromptMutationSection(null, async () => {
+        const clearResult = await clearPromptBestEffort(host);
+        await appendPromptClearedJournal(runId, promptClearContext(snapshot), clearResult, 'scene-cache-reset');
+        return clearResult;
+      });
+      if (clear?.ok === false) {
+        reportClearWarning(runId, clear);
+        return { ok: false, chatKey, sceneKey, result: redact(result), clear };
+      }
+      settleRuntimeActivity({
+        runId,
+        outcome: 'success',
+        phase: 'settled',
+        severity: 'success',
+        label: 'Scene cache reset. Prompt cleared.',
+        chips: ['Cache', 'Prompt']
+      });
+      return { ok: true, chatKey, sceneKey, result: redact(result), clear };
+    });
+  }
+
   function providerTestPrompt(lane) {
     return [
       'Return strict JSON for a Recursion provider connectivity test.',
@@ -2631,6 +2705,7 @@ export function createRecursionRuntime({
     updateProvider,
     clearProviderKey,
     testProvider,
+    resetSceneCache,
     clearRunJournal,
     exportDiagnostics,
     view() {

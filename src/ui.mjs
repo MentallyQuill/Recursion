@@ -1083,7 +1083,7 @@ function renderHighLevelSettings(panel, settings) {
   panel.appendChild(group);
 }
 
-function renderAdvancedSettings(panel, settings) {
+function renderAdvancedSettings(panel, settings, capabilities = {}) {
   const group = el('section', { className: 'recursion-settings-group' });
   const ui = asObject(settings.ui);
   const diagnostics = asObject(settings.diagnostics);
@@ -1142,9 +1142,11 @@ function renderAdvancedSettings(panel, settings) {
     ariaLabel: 'Include sanitized excerpts in diagnostics'
   })));
   const resetSceneCache = button('Reset Scene Cache', 'recursionResetSceneCache', 'Reset Recursion scene cache');
-  resetSceneCache.disabled = true;
-  resetSceneCache.setAttribute('disabled', 'disabled');
-  resetSceneCache.setAttribute('title', 'Planned diagnostic command; not wired in this V1 surface yet.');
+  if (asObject(capabilities).resetSceneCache !== true) {
+    resetSceneCache.disabled = true;
+    resetSceneCache.setAttribute('disabled', 'disabled');
+    resetSceneCache.setAttribute('title', 'Planned diagnostic command; not wired in this V1 surface yet.');
+  }
   group.appendChild(el('div', { className: 'recursion-provider-actions' }, [
     resetSceneCache,
     button('Clear Run Journal', 'recursionClearRunJournal', 'Clear Recursion run journal'),
@@ -1312,7 +1314,7 @@ function renderProviderSettings(panel, lane, provider) {
   panel.appendChild(group);
 }
 
-function renderSettingsPanel(panel, view, activeTab = 'play') {
+function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null) {
   panel.replaceChildren();
   const settings = asObject(view.settings);
   panel.appendChild(el('div', { className: 'recursion-settings-header' }, [
@@ -1336,7 +1338,9 @@ function renderSettingsPanel(panel, view, activeTab = 'play') {
   renderHighLevelSettings(playPane, settings);
   renderProviderSettings(providersPane, 'utility', settings.providers?.utility || {});
   renderProviderSettings(providersPane, 'reasoner', settings.providers?.reasoner || {});
-  renderAdvancedSettings(advancedPane, settings);
+  renderAdvancedSettings(advancedPane, settings, {
+    resetSceneCache: typeof runtime?.resetSceneCache === 'function'
+  });
   playPane.hidden = activeTab !== 'play';
   providersPane.hidden = activeTab !== 'providers';
   advancedPane.hidden = activeTab !== 'advanced';
@@ -2025,6 +2029,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const packetText = promptPacketText(view.lastPacket, view.lastHand);
       runAction(globalThis.navigator?.clipboard?.writeText?.(packetText));
     }
+    if (control('recursionResetSceneCache')) {
+      runAction(runtime?.resetSceneCache?.(), () => {
+        settingsPanelRendered = false;
+        update();
+      });
+    }
     if (control('recursionClearRunJournal')) {
       runAction(runtime?.clearRunJournal?.(), () => {
         settingsPanelRendered = false;
@@ -2063,7 +2073,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       settingsTab = ['play', 'providers', 'advanced'].includes(settingsTabControl.dataset.recursionSettingsTab)
         ? settingsTabControl.dataset.recursionSettingsTab
         : 'play';
-      renderSettingsPanel(settingsPanel, currentView(), settingsTab);
+      renderSettingsPanel(settingsPanel, currentView(), settingsTab, runtime);
       settingsPanelRendered = true;
       syncFloatingPanelGeometry();
     }
@@ -2276,7 +2286,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     renderReasoningChain(root, normalizeReasoningLevel(view.settings?.reasoningLevel));
     renderHandDropdown(handPanel, view, model);
     if (!settingsPanel.hidden && !settingsPanelRendered) {
-      renderSettingsPanel(settingsPanel, view, settingsTab);
+      renderSettingsPanel(settingsPanel, view, settingsTab, runtime);
       settingsPanelRendered = true;
     }
     renderViewer(viewer, view, model);

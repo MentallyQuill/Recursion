@@ -387,6 +387,8 @@ function numberInRange(value, fallback, min, max) {
 }
 
 function optionalNumber(value) {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'string' && value.trim() === '') return undefined;
   const number = Number(value);
   return Number.isFinite(number) ? Math.round(number) : undefined;
 }
@@ -405,8 +407,27 @@ function normalizeEvidenceRefs(value) {
     .slice(0, EVIDENCE_LIMIT);
 }
 
-function hasMessageEvidenceRef(value) {
-  return normalizeEvidenceRefs(value).some((entry) => /\bmessage:\d+\b/i.test(entry));
+function evidenceRefEntries(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null || value === '') return [];
+  return [value];
+}
+
+function messageEvidenceRefs(value) {
+  return evidenceRefEntries(value)
+    .flatMap((entry) => [...String(entry ?? '').matchAll(/\bmessage:(\d+)\b/gi)].map((match) => Number(match[1])))
+    .filter((entry) => Number.isSafeInteger(entry));
+}
+
+function hasValidMessageEvidenceRefs(value, context = {}) {
+  const refs = messageEvidenceRefs(value);
+  if (refs.length === 0) return false;
+  const firstMesId = optionalNumber(context.firstMesId);
+  const lastMesId = optionalNumber(context.lastMesId);
+  if (firstMesId === undefined || lastMesId === undefined) return true;
+  const minMesId = Math.min(firstMesId, lastMesId);
+  const maxMesId = Math.max(firstMesId, lastMesId);
+  return refs.every((entry) => entry >= minMesId && entry <= maxMesId);
 }
 
 function assertCardPromptTextSafe(catalog, promptText) {
@@ -678,7 +699,7 @@ export function cardsFromProviderResult(result, context = {}) {
   return items.flatMap((item) => {
     const source = asObject(item);
     if (!itemMatchesProviderCatalog(source, catalog)) return [];
-    if (!hasMessageEvidenceRef(source.evidenceRefs ?? source.evidence)) return [];
+    if (!hasValidMessageEvidenceRefs(source.evidenceRefs ?? source.evidence, context)) return [];
     try {
       return [normalizeCard({
         ...source,

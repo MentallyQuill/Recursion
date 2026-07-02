@@ -697,6 +697,133 @@ const requestHashContextCards = cardsFromProviderResult({
 });
 assertEqual(requestHashContextCards.length, 1, 'provider card validates request hash separately from source hash');
 assertEqual(requestHashContextCards[0].source.snapshotHash, 'source-window-hash', 'provider card provenance keeps runtime source hash');
+const sourceWindowCards = cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'request-frozen-hash',
+    items: [{ promptText: 'In-window evidence should validate.', evidenceRefs: ['message:1', 'message:2'] }]
+  }
+}, {
+  sceneId: 'scene-provider',
+  chatId: 'chat-provider',
+  firstMesId: 1,
+  lastMesId: 2,
+  snapshotHash: 'source-window-hash',
+  expectedSnapshotHash: 'request-frozen-hash',
+  expectedRole: 'sceneFrameCard',
+  expectedFamily: 'Scene Frame'
+});
+assertEqual(sourceWindowCards.length, 1, 'provider card with evidence inside frozen source window accepted');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'request-frozen-hash',
+    items: [{ promptText: 'Nullish bounds should not create a fake source window.', evidenceRefs: ['message:1'] }]
+  }
+}, {
+  sceneId: 'scene-provider',
+  chatId: 'chat-provider',
+  firstMesId: null,
+  lastMesId: '',
+  snapshotHash: 'source-window-hash',
+  expectedSnapshotHash: 'request-frozen-hash',
+  expectedRole: 'sceneFrameCard',
+  expectedFamily: 'Scene Frame'
+}).length, 1, 'provider card with nullish source bounds keeps old no-window behavior');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'request-frozen-hash',
+    items: [{ promptText: 'Out-of-window evidence must be ignored.', evidenceRefs: ['message:99'] }]
+  }
+}, {
+  sceneId: 'scene-provider',
+  chatId: 'chat-provider',
+  firstMesId: 1,
+  lastMesId: 2,
+  snapshotHash: 'source-window-hash',
+  expectedSnapshotHash: 'request-frozen-hash',
+  expectedRole: 'sceneFrameCard',
+  expectedFamily: 'Scene Frame'
+}).length, 0, 'provider card with evidence outside frozen source window ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'request-frozen-hash',
+    items: [{ promptText: 'Mixed in-window and out-of-window evidence must be ignored.', evidenceRefs: ['message:1', 'message:99'] }]
+  }
+}, {
+  sceneId: 'scene-provider',
+  chatId: 'chat-provider',
+  firstMesId: 1,
+  lastMesId: 2,
+  snapshotHash: 'source-window-hash',
+  expectedSnapshotHash: 'request-frozen-hash',
+  expectedRole: 'sceneFrameCard',
+  expectedFamily: 'Scene Frame'
+}).length, 0, 'provider card with mixed out-of-window evidence ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'request-frozen-hash',
+    items: [{
+      promptText: 'Out-of-window evidence after normalized display limit must still be ignored.',
+      evidenceRefs: [...Array.from({ length: 12 }, () => 'message:1'), 'message:99']
+    }]
+  }
+}, {
+  sceneId: 'scene-provider',
+  chatId: 'chat-provider',
+  firstMesId: 1,
+  lastMesId: 2,
+  snapshotHash: 'source-window-hash',
+  expectedSnapshotHash: 'request-frozen-hash',
+  expectedRole: 'sceneFrameCard',
+  expectedFamily: 'Scene Frame'
+}).length, 0, 'provider card with out-of-window evidence past normalized ref limit ignored');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'request-frozen-hash',
+    items: [{
+      promptText: 'Out-of-window evidence past normalized text limit must still be ignored.',
+      evidenceRefs: [`message:1 ${'x'.repeat(140)} message:99`]
+    }]
+  }
+}, {
+  sceneId: 'scene-provider',
+  chatId: 'chat-provider',
+  firstMesId: 1,
+  lastMesId: 2,
+  snapshotHash: 'source-window-hash',
+  expectedSnapshotHash: 'request-frozen-hash',
+  expectedRole: 'sceneFrameCard',
+  expectedFamily: 'Scene Frame'
+}).length, 0, 'provider card with out-of-window evidence past normalized text limit ignored');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',

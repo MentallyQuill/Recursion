@@ -19,7 +19,7 @@ const EXPECTED_SCOPE_CATALOG = Object.freeze([
   {
     family: 'Scene Frame',
     role: 'sceneFrameCard',
-    subItems: ['locationSituation', 'presentParticipants', 'immediateDirection']
+    subItems: ['locationSituation', 'immediateDirection', 'beatConstraint']
   },
   {
     family: 'Active Cast',
@@ -37,9 +37,9 @@ const EXPECTED_SCOPE_CATALOG = Object.freeze([
     subItems: ['tension', 'promisesConflicts', 'voiceConstraints']
   },
   {
-    family: 'Continuity Risk',
-    role: 'continuityRiskCard',
-    subItems: ['fragileFacts', 'spatialConstraints', 'timelineOrder']
+    family: 'Scene Constraints',
+    role: 'sceneConstraintsCard',
+    subItems: ['hardLimits', 'spatialConstraints', 'timelineOrder']
   },
   {
     family: 'Knowledge',
@@ -62,18 +62,13 @@ const EXPECTED_SCOPE_CATALOG = Object.freeze([
     subItems: ['heldCarriedItems', 'itemLocationControl', 'itemAffordancesRisks']
   },
   {
-    family: 'Prose',
-    role: 'prosePacingCard',
-    subItems: ['density', 'momentum', 'specificityShape']
-  },
-  {
     family: 'Open Threads',
     role: 'openThreadsCard',
     subItems: ['unresolvedQuestions', 'pendingActions', 'nearTermPressures']
   }
 ]);
 
-assertEqual(CARD_SCOPE_CATALOG.length, 11, 'scope catalog mirrors fixed V1 card families');
+assertEqual(CARD_SCOPE_CATALOG.length, 10, 'scope catalog mirrors audited V1 scene-reasoning families');
 assertDeepEqual(
   CARD_SCOPE_CATALOG.map((family) => ({
     family: family.family,
@@ -81,11 +76,11 @@ assertDeepEqual(
     subItems: family.subItems.map((item) => item.key)
   })),
   EXPECTED_SCOPE_CATALOG,
-  'scope catalog membership, roles, and sub-item order match V1 plan'
+  'scope catalog membership, roles, and sub-item order match audited V1 plan'
 );
 assert(CARD_SCOPE_CATALOG.every((family) => !family.family.includes('/')), 'card scope category labels are single-focus names without slashes');
 assert(CARD_SCOPE_CATALOG.every((family) => family.subItems.length >= 2), 'each family has sub-items');
-assertEqual(CARD_SCOPE_TOTAL_SUB_ITEMS, 33, 'scope catalog exposes the expected V1 focus count');
+assertEqual(CARD_SCOPE_TOTAL_SUB_ITEMS, 30, 'scope catalog exposes audited V1 focus count');
 assertEqual(
   CARD_SCOPE_TOTAL_SUB_ITEMS,
   CARD_SCOPE_CATALOG.reduce((sum, family) => sum + family.subItems.length, 0),
@@ -105,11 +100,18 @@ for (const family of CARD_SCOPE_CATALOG) {
   }
 }
 
-const prosePayload = scopePayloadForArbiter({ mode: 'auto', cardScope: defaultCardScope() })
-  .availableCatalog.find((entry) => entry.family === 'Prose');
+const legacyCraftFamily = 'Pr' + 'ose';
+const legacyRiskFamily = 'Continuity ' + 'Risk';
+const serializedScopeCatalog = JSON.stringify(CARD_SCOPE_CATALOG);
+for (const removed of [legacyCraftFamily, 'prose' + 'PacingCard', 'den' + 'sity', 'momentum', 'specificity' + 'Shape', legacyRiskFamily, 'continuity' + 'RiskCard', 'fragile' + 'Facts', 'present' + 'Participants']) {
+  assert(!serializedScopeCatalog.includes(removed), `removed catalog item is absent: ${removed}`);
+}
+
+const scenePayload = scopePayloadForArbiter({ mode: 'auto', cardScope: defaultCardScope() })
+  .availableCatalog.find((entry) => entry.family === 'Scene Frame');
 assert(
-  prosePayload.subItems.find((item) => item.key === 'density').description.includes('packed'),
-  'Arbiter catalog payload includes density description'
+  scenePayload.subItems.find((item) => item.key === 'beatConstraint').description.includes('avoid time skip'),
+  'Arbiter catalog payload includes beat constraint description'
 );
 
 const all = defaultCardScope();
@@ -119,7 +121,7 @@ assertEqual(cardScopeLabel(all), 'Cards', 'all-selected label is Cards');
 assertEqual(familyState(all, 'Scene Frame'), 'on', 'default family state is on');
 assertDeepEqual(
   enabledSubItemsForFamily(all, 'Scene Frame'),
-  ['locationSituation', 'presentParticipants', 'immediateDirection'],
+  ['locationSituation', 'immediateDirection', 'beatConstraint'],
   'enabled sub-items preserve catalog order'
 );
 
@@ -132,9 +134,9 @@ const restoredScene = setFamilyEnabled(noScene, 'Scene Frame', true).scope;
 assertEqual(restoredScene.families['Scene Frame'].enabled, true, 'family toggle on enables family');
 assert(Object.values(restoredScene.families['Scene Frame'].subItems).every((value) => value === true), 'family on restores all sub-items');
 
-const mixed = setSubItemEnabled(all, 'Continuity Risk', 'timelineOrder', false).scope;
-assertEqual(mixed.families['Continuity Risk'].enabled, true, 'partial sub-item keeps family enabled');
-assertEqual(familyState(mixed, 'Continuity Risk'), 'mixed', 'partial family state is mixed');
+const mixed = setSubItemEnabled(all, 'Scene Constraints', 'timelineOrder', false).scope;
+assertEqual(mixed.families['Scene Constraints'].enabled, true, 'partial sub-item keeps family enabled');
+assertEqual(familyState(mixed, 'Scene Constraints'), 'mixed', 'partial family state is mixed');
 assertEqual(cardScopeCounts(mixed).selectedSubItems, allCounts.totalSubItems - 1, 'sub-item toggle changes count');
 assertEqual(cardScopeLabel(mixed), `${allCounts.totalSubItems - 1}/${allCounts.totalSubItems}`, 'partial label is selected/total');
 
@@ -149,6 +151,16 @@ const blocked = setSubItemEnabled(oneLeft, 'Open Threads', 'pendingActions', fal
 assertEqual(blocked.blocked, true, 'final sub-item disable is blocked');
 assertEqual(blocked.reason, 'zero-selection', 'zero-selection block reason is stable');
 assertEqual(cardScopeCounts(blocked.scope).selectedSubItems, 1, 'zero-selection guard preserves last sub-item');
+
+const removedNormalized = normalizeCardScope({
+  families: {
+    [legacyCraftFamily]: { enabled: true, subItems: { ['den' + 'sity']: true } },
+    [legacyRiskFamily]: { enabled: true, subItems: { ['fragile' + 'Facts']: true } }
+  }
+});
+assert(!removedNormalized.families[legacyCraftFamily], 'removed craft family is dropped');
+assert(!removedNormalized.families[legacyRiskFamily], 'removed risk family is dropped');
+assertEqual(removedNormalized.families['Scene Constraints'].enabled, true, 'new Scene Constraints defaults on after old scope is dropped');
 
 const normalized = normalizeCardScope({
   families: {

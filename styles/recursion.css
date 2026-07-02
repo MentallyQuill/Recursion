@@ -1358,6 +1358,42 @@
   display: none !important;
 }
 
+.recursion-provider-readiness,
+.recursion-provider-route-summary {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 58%, transparent);
+  font-size: 10.5px;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.recursion-provider-readiness.is-ready {
+  color: color-mix(in srgb, var(--recursion-success) 82%, transparent);
+}
+
+.recursion-provider-readiness.is-missing {
+  color: color-mix(in srgb, var(--recursion-warning) 84%, transparent);
+}
+
+.recursion-provider-model-stack {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.recursion-provider-model-tools {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.recursion-provider-model-fetch-status {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 48%, transparent);
+  font-size: 10px;
+  line-height: 1.2;
+  min-height: 12px;
+}
+
 .recursion-control-row {
   align-content: start;
   display: grid;

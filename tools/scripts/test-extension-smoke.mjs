@@ -174,34 +174,47 @@ if (lifecycleFailures.length) {
 
 {
   const eventSource = createFakeEventSource();
+  const warnings = [];
+  const originalWarn = console.warn;
   const delayedContext = {
     chatId: 'delayed-settings-chat',
     chat: [{ mesid: 0, is_user: true, mes: 'Deferred settings user message.' }],
     extensionSettings: { memory: {} },
+    extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+    extension_prompt_roles: { SYSTEM: 'SYSTEM' },
     eventSource,
     event_types: {
       EXTENSION_SETTINGS_LOADED: 'extension_settings_loaded',
       SETTINGS_LOADED: 'settings_loaded',
       APP_READY: 'app_ready'
+    },
+    setExtensionPrompt() {
+      return true;
     }
   };
-  globalThis.SillyTavern = { getContext: () => delayedContext };
-  delete globalThis.extension_settings;
+  try {
+    console.warn = (...args) => warnings.push(args);
+    globalThis.SillyTavern = { getContext: () => delayedContext };
+    delete globalThis.extension_settings;
 
-  await globalThis.recursionOnDelete();
-  assertEqual(await globalThis.recursionOnActivate(), true, 'early activate remains fail-soft before settings load');
-  assertEqual(eventSource.listenerCount('extension_settings_loaded'), 1, 'early activate waits for extension settings load');
-  delayedContext.extensionSettings.recursion = { mode: 'manual', reasonerUse: 'off' };
-  delayedContext.saveSettingsDebounced = () => {};
-  await eventSource.emit('extension_settings_loaded');
-  assertEqual(eventSource.listenerCount('extension_settings_loaded'), 0, 'settings-load bootstrap unsubscribes retry listener');
-  assertEqual(delayedContext.extensionSettings.recursion.mode, 'manual', 'deferred bootstrap uses loaded SillyTavern settings');
-  assert(delayedContext.extensionSettings.recursion.cardScope, 'deferred bootstrap normalizes loaded settings in place');
-  await globalThis.recursionOnDelete();
-  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
-  else globalThis.SillyTavern = previousGlobals.SillyTavern;
-  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
-  else globalThis.extension_settings = previousGlobals.extensionSettings;
+    await globalThis.recursionOnDelete();
+    assertEqual(await globalThis.recursionOnActivate(), true, 'early activate remains fail-soft before settings load');
+    assertEqual(eventSource.listenerCount('extension_settings_loaded'), 1, 'early activate waits for extension settings load');
+    delayedContext.extensionSettings.recursion = { mode: 'manual', reasonerUse: 'off' };
+    delayedContext.saveSettingsDebounced = () => {};
+    await eventSource.emit('extension_settings_loaded');
+    assertEqual(eventSource.listenerCount('extension_settings_loaded'), 0, 'settings-load bootstrap unsubscribes retry listener');
+    assertEqual(delayedContext.extensionSettings.recursion.mode, 'manual', 'deferred bootstrap uses loaded SillyTavern settings');
+    assert(delayedContext.extensionSettings.recursion.cardScope, 'deferred bootstrap normalizes loaded settings in place');
+    await globalThis.recursionOnDelete();
+    assertEqual(warnings.length, 0, 'deferred settings bootstrap does not emit harness warnings');
+  } finally {
+    console.warn = originalWarn;
+    if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+    else globalThis.SillyTavern = previousGlobals.SillyTavern;
+    if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+    else globalThis.extension_settings = previousGlobals.extensionSettings;
+  }
 }
 
 {

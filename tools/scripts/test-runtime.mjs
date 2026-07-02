@@ -219,6 +219,39 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   };
 }
 
+const modelFetchSettingsStore = createSettingsStore({ root: {} });
+modelFetchSettingsStore.updateProvider('utility', {
+  source: 'openai-compatible',
+  openAICompatible: { baseUrl: 'https://runtime-models.example/v1', model: '' },
+  apiKey: 'sk-live-secret'
+});
+const modelFetchCalls = [];
+const modelFetchRuntime = createRecursionRuntime({
+  settingsStore: modelFetchSettingsStore,
+  fetchImpl: async (url, init = {}) => {
+    modelFetchCalls.push({ url, init });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { data: [{ id: 'runtime-alpha' }, { id: 'runtime-beta', name: 'Runtime Beta' }] };
+      }
+    };
+  }
+});
+const runtimeModels = await modelFetchRuntime.fetchProviderModels('utility');
+assertEqual(runtimeModels.ok, true, 'runtime exposes provider model fetch');
+assertDeepEqual(
+  runtimeModels.models.map((entry) => [entry.id, entry.label]),
+  [
+    ['runtime-alpha', 'runtime-alpha'],
+    ['runtime-beta', 'Runtime Beta']
+  ],
+  'runtime provider model fetch returns normalized model list'
+);
+assertEqual(modelFetchCalls[0].url, 'https://runtime-models.example/v1/models', 'runtime model fetch uses shared /models endpoint');
+assert(!JSON.stringify(runtimeModels).includes('sk-live-secret'), 'runtime model fetch result does not expose session key');
+
 async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, label }) {
   const storage = {
     async loadSceneCache() {
@@ -294,7 +327,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assert(cache.cards.length >= 2, 'scene cache persists fallback cards');
   assertEqual(cache.versions.cardCatalogHash, hashJson(CARD_CATALOG), 'scene cache records card catalog hash');
-  assertEqual(cache.versions.promptPacketVersion, 1, 'scene cache records prompt packet contract version');
+  assertEqual(cache.versions.promptPacketVersion, 2, 'scene cache records prompt packet contract version');
   assertEqual(cache.versions.runtimeCacheContractVersion, 1, 'scene cache records runtime cache contract version');
   assertEqual(cache.versions.settingsHash, cacheContractVersions(view.settings).settingsHash, 'scene cache records current settings hash');
   assertEqual(cache.versions.providerContractHash, cacheContractVersions(view.settings).providerContractHash, 'scene cache records provider contract hash');
@@ -317,7 +350,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(noisyVersions.settingsHash, baselineVersions.settingsHash, 'cache settings hash ignores UI, diagnostics, test labels, and secrets');
   assertNotEqual(
     cacheContractVersions({ mode: 'auto', cardScope: defaultCardScope() }).settingsHash,
-    cacheContractVersions({ mode: 'manual', cardScope: scopeWithFamilyDisabled('Prose') }).settingsHash,
+    cacheContractVersions({ mode: 'manual', cardScope: scopeWithFamilyDisabled('Environment') }).settingsHash,
     'card scope participates in scene cache contract'
   );
   const changedProviderVersions = cacheContractVersions({
@@ -998,7 +1031,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   });
   const view = runtime.view();
   assertEqual(view.settings.cardScope.families['Scene Frame'].enabled, false, 'runtime view exposes raw disabled card family scope');
-  assertEqual(view.settings.cardScopeSummary.counts.selectedSubItems, 30, 'runtime view exposes separate card scope summary');
+  assertEqual(view.settings.cardScopeSummary.counts.selectedSubItems, 27, 'runtime view exposes separate card scope summary');
 }
 
 {
@@ -1600,7 +1633,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
               cardJobs: [
                 { family: 'Scene Frame', reason: 'Scene still matters.' },
                 { family: 'Active Cast', reason: 'Cast still matters.' },
-                { family: 'Continuity Risk', reason: 'Continuity still matters.' },
+                { family: 'Scene Constraints', reason: 'Scene constraints still matter.' },
                 { family: 'Open Threads', reason: 'Thread still matters.' }
               ],
               budgets: { targetBriefTokens: 500, maxCards: 6 },
@@ -1650,7 +1683,7 @@ for (const scenario of [
               cardJobs: [
                 { family: 'Scene Frame', reason: 'Scene still matters.' },
                 { family: 'Active Cast', reason: 'Cast still matters.' },
-                { family: 'Continuity Risk', reason: 'Continuity still matters.' },
+                { family: 'Scene Constraints', reason: 'Scene constraints still matter.' },
                 { family: 'Open Threads', reason: 'Thread still matters.' }
               ],
               budgets: { targetBriefTokens: 900, maxCards: scenario.level === 'ultra' ? 6 : 20 },
@@ -1695,7 +1728,7 @@ for (const scenario of [
                 { family: 'Active Cast', reason: 'Cast still matters.' },
                 { family: 'Character Motivation', reason: 'Motivation still matters.' },
                 { family: 'Relationship', reason: 'Relationship still matters.' },
-                { family: 'Continuity Risk', reason: 'Continuity still matters.' },
+                { family: 'Scene Constraints', reason: 'Scene constraints still matter.' },
                 { family: 'Open Threads', reason: 'Thread still matters.' }
               ],
               budgets: { targetBriefTokens: 1200, maxCards: 9 },
@@ -1806,7 +1839,7 @@ for (const scenario of [
               cardJobs: [
                 { family: 'Scene Frame', reason: 'Scene frame.' },
                 { family: 'Open Threads', reason: 'Thread card.' },
-                { family: 'Prose', reason: 'Style card.' }
+                { family: 'Environment', reason: 'Style card.' }
               ],
               budgets: { targetBriefTokens: 700, maxCards: 6 },
               reasonerDecision: { mode: 'skip', reason: 'ultra still uses reasoner routes', signals: ['test'] }
@@ -3105,7 +3138,7 @@ for (const scenario of [
   );
   assert(view.lastPacket.sections.turnBrief.includes('unanswered signal'), 'provider card reaches prompt packet');
   assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'successful provider card pass does not add local Scene Frame fallback card');
-  assert(!cache.cards.some((card) => card.family === 'Continuity Risk'), 'successful provider card pass does not add local Continuity Risk fallback card');
+  assert(!cache.cards.some((card) => card.family === 'Scene Constraints'), 'successful provider card pass does not add local Scene Constraints fallback card');
   const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
   assert(!serialized.includes('Bearer live-token'), 'provider card bearer token redacted before persistence and prompt');
   assert(!serialized.includes('sk-live-runtime'), 'provider card sk token redacted before persistence and prompt');
@@ -3176,10 +3209,10 @@ for (const scenario of [
 }
 
 {
-  const autoNoContinuity = scopeWithFamilyDisabled('Continuity Risk');
+  const autoNoConstraints = scopeWithFamilyDisabled('Scene Constraints');
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', cardScope: autoNoContinuity, reasonerUse: 'off' },
+    settings: { mode: 'auto', cardScope: autoNoConstraints, reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push(roleId);
@@ -3188,18 +3221,18 @@ for (const scenario of [
           const availableCatalog = parsePromptJsonSection(request.prompt, 'Catalog');
           assertEqual(cardScope.strictWhitelist, false, 'Auto Arbiter prompt is focus, not strict');
           assert(
-            request.prompt.includes('Auto card scope policy: selected families and sub-items are the preferred focus, not a whitelist. Prefer selected scope when it can satisfy the turn; request unselected families only when they have high relevance to continuity, scene coherence, or the current user message.'),
+            request.prompt.includes('Auto card scope policy: selected families and sub-items are the preferred focus, not a whitelist. Prefer selected scope when it can satisfy the turn; request unselected families only when they have high relevance to scene constraints, scene coherence, or the current user message.'),
             'Auto Arbiter prompt explains selected card scope is bias with high-relevance exceptions'
           );
-          assert(availableCatalog.some((entry) => entry.family === 'Continuity Risk'), 'Auto catalog keeps disabled-focus continuity available');
-          assertDeepEqual(cardScope.selectedSubItemsByFamily['Continuity Risk'], undefined, 'Auto scope preference omits disabled continuity sub-items');
+          assert(availableCatalog.some((entry) => entry.family === 'Scene Constraints'), 'Auto catalog keeps disabled-focus Scene Constraints available');
+          assertDeepEqual(cardScope.selectedSubItemsByFamily['Scene Constraints'], undefined, 'Auto scope preference omits disabled Scene Constraints sub-items');
           return {
             ok: true,
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
               snapshotHash: request.snapshotHash,
               action: 'compose-brief',
-              cardJobs: [{ family: 'Continuity Risk', role: 'continuityRiskCard', reason: 'Critical risk exception.' }],
+              cardJobs: [{ family: 'Scene Constraints', role: 'sceneConstraintsCard', reason: 'Critical risk exception.' }],
               budgets: { targetBriefTokens: 500, maxCards: 4 },
               diagnostics: ['auto-scope-test']
             }
@@ -3209,7 +3242,7 @@ for (const scenario of [
       },
       async batch(requests) {
         routerCalls.push(...requests.map((request) => request.roleId));
-        assertDeepEqual(requests.map((request) => request.roleId), ['continuityRiskCard'], 'Auto keeps disabled-focus critical card job available');
+        assertDeepEqual(requests.map((request) => request.roleId), ['sceneConstraintsCard'], 'Auto keeps disabled-focus critical card job available');
         assertDeepEqual(requests[0].cardScope.selectedSubItems, [], 'Auto request carries empty selected sub-item focus for disabled family');
         return requests.map((request) => ({
           ok: true,
@@ -3233,16 +3266,16 @@ for (const scenario of [
   const view = runtime.view();
   const serializedPlan = JSON.stringify(view.lastPlan);
   assertEqual(result.ok, true, 'auto scoped run installs prompt');
-  assert(routerCalls.includes('continuityRiskCard'), 'auto scoped run generates disabled-focus critical card');
-  assert(view.lastHand.cards.some((card) => card.family === 'Continuity Risk'), 'auto scoped hand can include critical disabled-focus exception');
-  assert(serializedPlan.includes('auto-scope-exception:Continuity Risk'), 'auto scoped diagnostics record compact exception family');
+  assert(routerCalls.includes('sceneConstraintsCard'), 'auto scoped run generates disabled-focus critical card');
+  assert(view.lastHand.cards.some((card) => card.family === 'Scene Constraints'), 'auto scoped hand can include critical disabled-focus exception');
+  assert(serializedPlan.includes('auto-scope-exception:Scene Constraints'), 'auto scoped diagnostics record compact exception family');
   assert(!serializedPlan.includes('Do not contradict'), 'auto scope diagnostics do not include prompt text');
 }
 
 {
-  const autoNoProse = scopeWithFamilyDisabled('Prose');
+  const autoNoEnvironment = scopeWithFamilyDisabled('Environment');
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', cardScope: autoNoProse, reasonerUse: 'off' },
+    settings: { mode: 'auto', cardScope: autoNoEnvironment, reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         if (roleId === 'utilityArbiter') {
@@ -3252,7 +3285,7 @@ for (const scenario of [
               schema: UTILITY_ARBITER_SCHEMA,
               snapshotHash: request.snapshotHash,
               action: 'compose-brief',
-              cardJobs: [{ family: 'Prose', role: 'prosePacingCard', reason: 'High relevance style risk.' }],
+              cardJobs: [{ family: 'Environment', role: 'environmentAffordancesCard', reason: 'High relevance style risk.' }],
               budgets: { targetBriefTokens: 500, maxCards: 4 },
               diagnostics: ['auto-non-continuity-exception-test']
             }
@@ -3261,7 +3294,7 @@ for (const scenario of [
         throw new Error(`Auto non-continuity exception test expected batch routing, got generate ${roleId}`);
       },
       async batch(requests) {
-        assertDeepEqual(requests.map((request) => request.roleId), ['prosePacingCard'], 'Auto allows disabled-focus non-continuity card when Arbiter marks it relevant');
+        assertDeepEqual(requests.map((request) => request.roleId), ['environmentAffordancesCard'], 'Auto allows disabled-focus non-continuity card when Arbiter marks it relevant');
         return requests.map((request) => ({
           ok: true,
           roleId: request.roleId,
@@ -3284,8 +3317,8 @@ for (const scenario of [
   const view = runtime.view();
   const serializedPlan = JSON.stringify(view.lastPlan);
   assertEqual(result.ok, true, 'auto scoped non-continuity run installs prompt');
-  assert(view.lastHand.cards.some((card) => card.family === 'Prose'), 'auto scoped hand can include high-relevance disabled-focus non-continuity card');
-  assert(serializedPlan.includes('auto-scope-exception:Prose'), 'auto scoped diagnostics record compact exception for non-continuity family');
+  assert(view.lastHand.cards.some((card) => card.family === 'Environment'), 'auto scoped hand can include high-relevance disabled-focus non-continuity card');
+  assert(serializedPlan.includes('auto-scope-exception:Environment'), 'auto scoped diagnostics record compact exception for non-continuity family');
   assert(!serializedPlan.includes('Keep the response tight'), 'auto non-continuity diagnostics do not include prompt text');
 }
 
@@ -3307,7 +3340,7 @@ for (const scenario of [
               snapshotHash: request.snapshotHash,
               cardJobs: [
                 { role: 'openThreadsCard', reason: 'Need one sequential open thread card.' },
-                { role: 'continuityRiskCard', reason: 'Need one invalid sequential continuity card.' }
+                { role: 'sceneConstraintsCard', reason: 'Need one invalid sequential continuity card.' }
               ],
               budgets: { targetBriefTokens: 500, maxCards: 6 },
               diagnostics: ['sequential-provider-card-plan']
@@ -3316,14 +3349,14 @@ for (const scenario of [
         }
         cardStarts.push({ roleId, firstCardCompletedAtStart: firstCardCompleted });
         cardSnapshots.push({ roleId, runId: request.runId, snapshotHash: request.snapshotHash, signal: request.signal, hasSignal: isAbortSignal(request.signal) });
-        if (roleId === 'continuityRiskCard') {
+        if (roleId === 'sceneConstraintsCard') {
           return {
             ok: true,
             roleId,
             data: {
               schema: 'recursion.card.v1',
-              role: 'continuityRiskCard',
-              family: 'Continuity Risk',
+              role: 'sceneConstraintsCard',
+              family: 'Scene Constraints',
               snapshotHash: 'wrong-sequential-snapshot',
               items: [{
                 promptText: 'This invalid sequential card should be omitted.',
@@ -3358,14 +3391,14 @@ for (const scenario of [
   const view = runtime.view();
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assertEqual(result.ok, true, 'sequential provider card job run installs prompt');
-  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'continuityRiskCard'], 'router without batch runs card jobs sequentially');
+  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard'], 'router without batch runs card jobs sequentially');
   assertEqual(cardStarts[1].firstCardCompletedAtStart, true, 'second sequential card starts after first resolves');
   assertEqual(cardSnapshots.length, 2, 'sequential card jobs capture frozen requests');
   assert(cardSnapshots.every((entry) => entry.snapshotHash === result.plan.snapshotHash), 'sequential card jobs use frozen plan snapshot hash');
   assert(cardSnapshots.every((entry) => entry.runId === view.lastPacket.diagnostics.runId), 'sequential card jobs use shared run id');
   assert(cardSnapshots.every((entry) => entry.signal === cardSnapshots[0].signal && entry.hasSignal), 'sequential card jobs share abort signal object');
   assert(cache.cards.some((card) => card.family === 'Open Threads'), 'sequential provider card persisted in scene cache');
-  assert(!cache.cards.some((card) => card.family === 'Continuity Risk'), 'invalid sequential provider card is omitted independently');
+  assert(!cache.cards.some((card) => card.family === 'Scene Constraints'), 'invalid sequential provider card is omitted independently');
   assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'sequential provider card selected into hand');
   assert(view.lastPacket.sections.turnBrief.includes('sequential provider call'), 'sequential provider card reaches prompt packet');
   assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'sequential provider card pass does not add local Scene Frame fallback card');
@@ -3386,14 +3419,14 @@ for (const scenario of [
               snapshotHash: request.snapshotHash,
               cardJobs: [
                 { role: 'openThreadsCard', reason: 'Keep the first sequential card.' },
-                { role: 'continuityRiskCard', reason: 'This thrown card should not poison the first.' }
+                { role: 'sceneConstraintsCard', reason: 'This thrown card should not poison the first.' }
               ],
               budgets: { targetBriefTokens: 500, maxCards: 6 },
               diagnostics: ['sequential-provider-throw-plan']
             }
           };
         }
-        if (roleId === 'continuityRiskCard') {
+        if (roleId === 'sceneConstraintsCard') {
           throw new Error('sequential card provider failed');
         }
         return {
@@ -3418,9 +3451,9 @@ for (const scenario of [
   const view = runtime.view();
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assertEqual(result.ok, true, 'sequential thrown card job run still installs prompt');
-  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'continuityRiskCard'], 'throwing sequential card job is attempted after first card');
+  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard'], 'throwing sequential card job is attempted after first card');
   assert(cache.cards.some((card) => card.family === 'Open Threads'), 'successful sequential card persists despite later throw');
-  assert(!cache.cards.some((card) => card.family === 'Continuity Risk'), 'throwing sequential card is omitted independently');
+  assert(!cache.cards.some((card) => card.family === 'Scene Constraints'), 'throwing sequential card is omitted independently');
   assert(view.lastPacket.sections.turnBrief.includes('survives a later card failure'), 'successful sequential card reaches prompt after later throw');
   assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'sequential per-card failure does not force local fallback');
 }
@@ -3442,7 +3475,7 @@ for (const scenario of [
               snapshotHash: request.snapshotHash,
               cardJobs: [
                 { role: 'openThreadsCard', reason: 'Supersede after this card.' },
-                { role: 'continuityRiskCard', reason: 'This card must not start after supersession.' }
+                { role: 'sceneConstraintsCard', reason: 'This card must not start after supersession.' }
               ],
               budgets: { targetBriefTokens: 500, maxCards: 6 },
               diagnostics: ['sequential-supersession-plan']
@@ -3536,11 +3569,11 @@ for (const scenario of [
       async batch(requests) {
         return [{
           ok: true,
-          roleId: 'continuityRiskCard',
+          roleId: 'sceneConstraintsCard',
           data: {
             schema: 'recursion.card.v1',
-            role: 'continuityRiskCard',
-            family: 'Continuity Risk',
+            role: 'sceneConstraintsCard',
+            family: 'Scene Constraints',
             snapshotHash: requests[0]?.snapshotHash,
             items: [{
               promptText: 'Wrong returned role must not enter cache or prompt.',
@@ -3924,7 +3957,7 @@ for (const scenario of [
     versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
     cards: [{
       id: 'stale-cache-card',
-      family: 'Continuity Risk',
+      family: 'Scene Constraints',
       status: 'active',
       promptText: 'Stale cached continuity must not reach the prompt.',
       summary: 'Stale continuity',
@@ -3941,7 +3974,7 @@ for (const scenario of [
     }],
     latestHand: {
       handId: 'stale-cache-hand',
-      cards: [{ id: 'stale-cache-card', family: 'Continuity Risk' }]
+      cards: [{ id: 'stale-cache-card', family: 'Scene Constraints' }]
     }
   });
   const { runtime, installed } = createRuntimeHarness({
@@ -4072,7 +4105,7 @@ for (const scenario of [
     },
     card: {
       id: 'gapped-cache-card',
-      family: 'Continuity Risk',
+      family: 'Scene Constraints',
       status: 'active',
       promptText: 'Gapped source range must not be reused.',
       evidenceRefs: ['message:3'],
@@ -4109,7 +4142,7 @@ for (const scenario of [
     },
     card: {
       id: 'malformed-evidence-card',
-      family: 'Continuity Risk',
+      family: 'Scene Constraints',
       status: 'active',
       promptText: 'Malformed evidence ref outside source range must not be ignored.',
       evidenceRefs: ['message:4 stale suffix'],
@@ -4145,7 +4178,7 @@ for (const scenario of [
     },
     card: {
       id: 'chat-mismatch-cache-card',
-      family: 'Continuity Risk',
+      family: 'Scene Constraints',
       status: 'active',
       promptText: 'Wrong chat cache card must not be reused.',
       evidenceRefs: ['message:2'],
@@ -4218,7 +4251,7 @@ for (const scenario of [
     },
     card: {
       id: 'hidden-range-cache-card',
-      family: 'Continuity Risk',
+      family: 'Scene Constraints',
       status: 'active',
       promptText: 'Hidden source range must not be reused.',
       evidenceRefs: ['message:3'],
@@ -4291,7 +4324,7 @@ for (const scenario of [
     },
     card: {
       id: 'missing-evidence-card',
-      family: 'Continuity Risk',
+      family: 'Scene Constraints',
       status: 'active',
       promptText: 'Missing evidence ref must not be ignored.',
       evidenceRefs: ['message:4'],
@@ -4327,7 +4360,7 @@ for (const scenario of [
     },
     card: {
       id: 'unparseable-evidence-card',
-      family: 'Continuity Risk',
+      family: 'Scene Constraints',
       status: 'active',
       promptText: 'Unparseable evidence ref must not be ignored.',
       evidenceRefs: ['turn:2'],
@@ -4925,7 +4958,7 @@ for (const scenario of [
     cards: [
       {
         id: 'arbiter-keep',
-        family: 'Continuity Risk',
+        family: 'Scene Constraints',
         status: 'active',
         promptText: 'The only selected continuity risk should remain active.',
         summary: 'Keep continuity',
@@ -5032,7 +5065,7 @@ for (const scenario of [
     versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
     cards: [{
       id: 'new-scene-card',
-      family: 'Continuity Risk',
+      family: 'Scene Constraints',
       status: 'active',
       promptText: 'New scene cache should remain available after hard shift.',
       summary: 'New scene continuity',

@@ -16,8 +16,8 @@ Each lane can use one provider source when the host supports it.
 | Source | Use When | Notes |
 | --- | --- | --- |
 | Current Host Model | You want Recursion to use the model currently active in SillyTavern. | Smallest setup surface. Availability depends on host APIs. |
-| Host Connection Profile | You want Recursion to use a saved SillyTavern connection profile. | Recursion lists detected host profiles in a selector. If the host cannot expose profiles, the selector should be unavailable with a clear status. |
-| OpenAI-Compatible Endpoint | You want a direct endpoint with base URL, model, and session API key. | Session key is memory-only and must be re-entered after session loss. |
+| Host Connection Profile | You want Recursion to use a saved SillyTavern connection profile. | Recursion lists detected host profiles from SillyTavern context and host state. If the host cannot expose profiles, the selector should be unavailable with a clear status. |
+| OpenAI-Compatible Endpoint | You want a direct endpoint with base URL, model, and session API key. | Use `Fetch Models` to query `/models`. Session key is memory-only and must be re-entered after session loss. |
 
 ## Utility Setup
 
@@ -27,10 +27,11 @@ Each lane can use one provider source when the host supports it.
 4. Choose a provider source.
 5. Fill the required fields for that source.
 6. For Host Connection Profile, select one of the saved SillyTavern profiles from the profile selector.
-7. For OpenAI-compatible endpoints, enter base URL, model, and session API key.
-8. Adjust temperature, top-p, and max tokens only when needed.
-9. Save provider settings.
-10. Run `Test Provider`.
+7. For OpenAI-compatible endpoints, enter base URL and session API key, then use `Fetch Models` if the endpoint exposes a model list.
+8. Select a fetched model or type the model id manually.
+9. Adjust temperature, top-p, and max tokens only when needed.
+10. Save provider settings.
+11. Run `Test Provider`.
 
 Utility is healthy when the test passes and the bar or provider card shows a ready state. If Utility is missing or unhealthy, Recursion may reuse valid cache, skip injection, or continue without Recursion guidance.
 

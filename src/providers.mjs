@@ -28,30 +28,28 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'activeCastCard',
   'characterMotivationCard',
   'dialogueRelationshipCard',
-  'continuityRiskCard',
+  'sceneConstraintsCard',
   'knowledgeSecretsCard',
   'clocksConsequencesCard',
   'environmentAffordancesCard',
   'possessionsItemsCard',
-  'prosePacingCard',
   'openThreadsCard',
   'briefUtilityComposer',
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
-export const PROVIDER_CONTRACT_VERSION = 1;
+export const PROVIDER_CONTRACT_VERSION = 2;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.card.v1',
   activeCastCard: 'recursion.card.v1',
   characterMotivationCard: 'recursion.card.v1',
   dialogueRelationshipCard: 'recursion.card.v1',
-  continuityRiskCard: 'recursion.card.v1',
+  sceneConstraintsCard: 'recursion.card.v1',
   knowledgeSecretsCard: 'recursion.card.v1',
   clocksConsequencesCard: 'recursion.card.v1',
   environmentAffordancesCard: 'recursion.card.v1',
   possessionsItemsCard: 'recursion.card.v1',
-  prosePacingCard: 'recursion.card.v1',
   openThreadsCard: 'recursion.card.v1',
   briefUtilityComposer: 'recursion.briefUtilityComposer.v1',
   reasonerComposer: 'recursion.reasonerComposer.v1',
@@ -230,6 +228,393 @@ function openAiEndpoint(baseUrl) {
     throw providerError('RECURSION_PROVIDER_CONFIG_INVALID', 'OpenAI-compatible base URL must use http or https.', { retryable: false });
   }
   return /\/chat\/completions$/i.test(base) ? base : `${base}/chat/completions`;
+}
+
+function plainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function textValue(value, fallback = '') {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return text || fallback;
+}
+
+function controlOptions(options = {}) {
+  const source = plainObject(options) ? options : {};
+  return {
+    context: source.context ?? null,
+    globals: source.globals ?? globalThis
+  };
+}
+
+function hostContext(globals = globalThis) {
+  try {
+    return globals?.SillyTavern?.getContext?.() || globals?.getContext?.() || null;
+  } catch {
+    return null;
+  }
+}
+
+function connectionProfileService(context = null, globals = globalThis) {
+  return context?.ConnectionManagerRequestService
+    || globals?.ConnectionManagerRequestService
+    || null;
+}
+
+function profileId(profile = {}) {
+  return textValue(
+    profile.id
+      || profile.profileId
+      || profile.profile_id
+      || profile.uuid
+      || profile.key
+      || profile.name
+      || profile.label
+  );
+}
+
+function profileName(profile = {}, fallback = '') {
+  return textValue(
+    profile.label
+      || profile.name
+      || profile.profileName
+      || profile.profile_name
+      || profile.title
+      || profile.displayName,
+    fallback
+  );
+}
+
+const MODEL_KEY_PATTERN = /(^|_|\b)(model|modelid|model_id|modelname|model_name|selectedmodel|selected_model|chatmodel|chat_model|completionmodel|completion_model)$/i;
+
+function modelFromProfile(profile = {}) {
+  const seen = new Set();
+  function visit(value, depth = 0) {
+    if (!value || typeof value !== 'object' || seen.has(value) || depth > 5) return '';
+    seen.add(value);
+    for (const [key, child] of Object.entries(value)) {
+      if (child === null || child === undefined) continue;
+      if (typeof child !== 'object' && MODEL_KEY_PATTERN.test(String(key).replace(/[^a-z0-9_]/ig, ''))) {
+        const model = textValue(child);
+        if (model) return model;
+      }
+    }
+    for (const key of ['settings', 'generationSettings', 'generation_settings', 'provider', 'completion', 'chatCompletion', 'chat_completion', 'config', 'data']) {
+      const model = visit(value[key], depth + 1);
+      if (model) return model;
+    }
+    return '';
+  }
+  return visit(profile);
+}
+
+function profileLike(value, path = '') {
+  if (!plainObject(value)) return false;
+  const id = profileId(value);
+  if (!id) return false;
+  return Boolean(
+    /profile|connection/i.test(path)
+      || profileName(value)
+      || modelFromProfile(value)
+      || value.sendRequest
+      || value.api
+  );
+}
+
+function collectProfileCandidates(root, path = '', depth = 0, seen = new Set(), out = []) {
+  if (!root || typeof root !== 'object' || seen.has(root) || depth > 6) return out;
+  seen.add(root);
+  if (Array.isArray(root)) {
+    if (root.some((entry) => profileLike(entry, path))) {
+      for (const entry of root) {
+        if (profileLike(entry, path)) out.push(entry);
+      }
+    }
+    for (const entry of root) collectProfileCandidates(entry, path, depth + 1, seen, out);
+    return out;
+  }
+  if (profileLike(root, path)) out.push(root);
+  for (const [key, child] of Object.entries(root)) {
+    const childPath = path ? `${path}.${key}` : key;
+    if (Array.isArray(child) && /profile|connection/i.test(key)) {
+      for (const entry of child) {
+        if (profileLike(entry, childPath)) out.push(entry);
+      }
+    } else if (plainObject(child) && /profile|connection/i.test(key)) {
+      for (const entry of Object.values(child)) {
+        if (profileLike(entry, childPath)) out.push(entry);
+      }
+    }
+    collectProfileCandidates(child, childPath, depth + 1, seen, out);
+  }
+  return out;
+}
+
+function normalizeConnectionProfile(profile = {}) {
+  const id = profileId(profile);
+  if (!id) return null;
+  const name = profileName(profile, id);
+  const model = modelFromProfile(profile);
+  return {
+    id,
+    name,
+    model,
+    label: model ? `${name} / ${model}` : name,
+    raw: profile
+  };
+}
+
+export function listProviderConnectionProfiles(options = {}) {
+  const { globals } = controlOptions(options);
+  const context = options?.context ?? hostContext(globals);
+  let supportedProfiles = [];
+  try {
+    const service = connectionProfileService(context, globals);
+    const result = service?.getSupportedProfiles?.();
+    if (Array.isArray(result)) supportedProfiles = result;
+    else if (plainObject(result)) supportedProfiles = Object.values(result);
+  } catch {
+    supportedProfiles = [];
+  }
+  const roots = [
+    { connectionProfiles: supportedProfiles },
+    context,
+    context?.ConnectionManagerRequestService,
+    globals?.connectionManager,
+    globals?.ConnectionManager,
+    globals?.extension_settings,
+    globals?.power_user
+  ];
+  const byId = new Map();
+  for (const root of roots) {
+    for (const candidate of collectProfileCandidates(root)) {
+      const normalized = normalizeConnectionProfile(candidate);
+      if (normalized && !byId.has(normalized.id)) byId.set(normalized.id, normalized);
+    }
+  }
+  return [...byId.values()];
+}
+
+function currentHostModel(options = {}) {
+  const { globals } = controlOptions(options);
+  const context = options?.context ?? hostContext(globals);
+  const roots = [
+    context?.chatCompletionSettings,
+    context?.completionSettings,
+    context?.settings,
+    context?.power_user,
+    globals?.power_user,
+    globals?.oai_settings,
+    globals?.nai_settings,
+    globals?.textgenerationwebui_settings
+  ];
+  for (const root of roots) {
+    const model = modelFromProfile(root);
+    if (model) return model;
+  }
+  return '';
+}
+
+function sourceLabel(source) {
+  const normalized = sourceName(source);
+  if (normalized === 'host-connection-profile') return 'Host Connection Profile';
+  if (normalized === 'openai-compatible') return 'OpenAI-Compatible Endpoint';
+  return 'Current Host Model';
+}
+
+export function validateProviderConfiguration(provider = {}, options = {}) {
+  const source = sourceName(provider.source);
+  const missing = [];
+  let ready = true;
+  let message = 'Ready.';
+  if (source === 'host-current-model') {
+    if (options.hostGenerationAvailable === false) {
+      ready = false;
+      missing.push('hostGeneration');
+      message = 'Host generation API unavailable.';
+    } else {
+      message = 'Uses the active SillyTavern model.';
+    }
+  } else if (source === 'host-connection-profile') {
+    const profile = textValue(provider.hostConnectionProfileId);
+    const profiles = Array.isArray(options.profiles)
+      ? options.profiles
+      : listProviderConnectionProfiles(options);
+    if (!profile) {
+      ready = false;
+      missing.push('hostConnectionProfileId');
+      message = profiles.length ? 'Select a host connection profile.' : 'No host connection profiles detected.';
+    } else if (!profiles.some((entry) => entry.id === profile)) {
+      ready = false;
+      missing.push('connectionProfile');
+      message = profiles.length ? 'Saved profile was not detected.' : 'Connection profile service unavailable.';
+    } else {
+      message = 'Uses the selected SillyTavern connection profile.';
+    }
+  } else if (source === 'openai-compatible') {
+    const direct = plainObject(provider.openAICompatible) ? provider.openAICompatible : {};
+    if (!textValue(direct.baseUrl)) missing.push('baseUrl');
+    if (!textValue(direct.model)) missing.push('model');
+    if (!textValue(options.apiKey) && direct.sessionApiKeyPresent !== true) missing.push('sessionApiKey');
+    ready = missing.length === 0;
+    message = ready ? 'Direct endpoint configured for this session.' : `Missing ${missing.join(', ')}.`;
+  } else {
+    ready = false;
+    missing.push('source');
+    message = 'Unsupported provider source.';
+  }
+  return {
+    ready,
+    missing,
+    source,
+    sourceLabel: sourceLabel(source),
+    message
+  };
+}
+
+export function providerModelStatus(provider = {}, options = {}) {
+  const source = sourceName(provider.source);
+  const profiles = Array.isArray(options.profiles) ? options.profiles : listProviderConnectionProfiles(options);
+  const validation = validateProviderConfiguration(provider, { ...options, profiles });
+  if (source === 'host-connection-profile') {
+    const selected = profiles.find((entry) => entry.id === textValue(provider.hostConnectionProfileId));
+    return {
+      ...validation,
+      model: selected?.model || '',
+      label: selected?.label || (provider.hostConnectionProfileId ? `${provider.hostConnectionProfileId} (saved)` : sourceLabel(source)),
+      profileId: selected?.id || textValue(provider.hostConnectionProfileId),
+      profileLabel: selected?.name || ''
+    };
+  }
+  if (source === 'openai-compatible') {
+    const model = textValue(provider.openAICompatible?.model);
+    return {
+      ...validation,
+      model,
+      label: model ? `OpenAI-Compatible / ${model}` : 'OpenAI-Compatible Endpoint'
+    };
+  }
+  const model = currentHostModel(options);
+  return {
+    ...validation,
+    model,
+    label: model ? `Current Host Model / ${model}` : 'Current Host Model'
+  };
+}
+
+export function providerRouteSummary(settings = {}) {
+  const level = String(settings?.reasoningLevel || 'high').toLowerCase();
+  const normalizedLevel = ['low', 'medium', 'high', 'ultra'].includes(level) ? level : 'high';
+  const reasoner = settings?.providers?.reasoner || {};
+  const reasonerHealthy = reasoner.enabled === true && reasoner.lastTest?.status === 'pass';
+  const reasonerLabel = reasonerHealthy ? 'Reasoner' : 'Utility fallback';
+  const summary = normalizedLevel === 'low'
+    ? { arbiter: 'Utility', cards: 'Utility', composer: 'Utility' }
+    : normalizedLevel === 'medium'
+      ? { arbiter: 'Utility', cards: 'Utility', composer: reasonerLabel }
+      : normalizedLevel === 'high'
+        ? { arbiter: reasonerLabel, cards: reasonerHealthy ? 'Priority Reasoner, Utility lower priority' : 'Utility fallback', composer: reasonerLabel }
+        : { arbiter: reasonerLabel, cards: reasonerLabel, composer: reasonerLabel };
+  return {
+    level: normalizedLevel,
+    reasonerHealthy,
+    ...summary,
+    text: `Arbiter: ${summary.arbiter}; Cards: ${summary.cards}; Composer: ${summary.composer}`
+  };
+}
+
+function normalizeOpenAiBaseUrl(baseUrl) {
+  let base = String(baseUrl || '').trim().replace(/\/+$/g, '');
+  if (!base) {
+    throw providerError('RECURSION_PROVIDER_CONFIG_INVALID', 'OpenAI-compatible base URL is required.', { retryable: false });
+  }
+  try {
+    const parsed = new URL(base);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('invalid protocol');
+  } catch {
+    throw providerError('RECURSION_PROVIDER_CONFIG_INVALID', 'OpenAI-compatible base URL is invalid.', { retryable: false });
+  }
+  base = base.replace(/\/chat\/completions$/i, '');
+  base = base.replace(/\/responses$/i, '');
+  base = base.replace(/\/models$/i, '');
+  return base.replace(/\/+$/g, '');
+}
+
+export function openAiModelsEndpoint(baseUrl) {
+  return `${normalizeOpenAiBaseUrl(baseUrl)}/models`;
+}
+
+function normalizeModelList(payload = {}) {
+  const source = Array.isArray(payload?.data)
+    ? payload.data
+    : (Array.isArray(payload?.models) ? payload.models : []);
+  const byId = new Map();
+  for (const entry of source) {
+    const id = textValue(typeof entry === 'string' ? entry : (entry?.id || entry?.model || entry?.name));
+    if (!id || byId.has(id)) continue;
+    byId.set(id, {
+      id,
+      label: textValue(typeof entry === 'string' ? entry : (entry?.name || entry?.label || entry?.id || entry?.model), id)
+    });
+  }
+  return [...byId.values()];
+}
+
+export async function fetchOpenAICompatibleModels({
+  baseUrl,
+  apiKey = '',
+  fetchImpl = globalThis.fetch,
+  signal = undefined
+} = {}) {
+  if (typeof fetchImpl !== 'function') {
+    throw providerError('RECURSION_PROVIDER_FETCH_UNAVAILABLE', 'Fetch is unavailable for OpenAI-compatible model discovery.', {
+      retryable: false
+    });
+  }
+  const key = String(apiKey || '').trim();
+  if (!key) {
+    throw providerError('RECURSION_PROVIDER_KEY_MISSING', 'OpenAI-compatible provider key is missing for model discovery.', {
+      retryable: false
+    });
+  }
+  const endpoint = openAiModelsEndpoint(baseUrl);
+  let response;
+  try {
+    response = await fetchImpl(endpoint, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${key}` },
+      credentials: 'omit',
+      signal
+    });
+  } catch (error) {
+    if (error?.code === 'RECURSION_PROVIDER_CONFIG_INVALID') throw error;
+    if (error?.name === 'AbortError') throw abortError();
+    throw providerError('RECURSION_PROVIDER_TRANSPORT_FAILED', 'Provider model discovery transport failed.', {
+      retryable: true,
+      cause: error
+    });
+  }
+  if (!response?.ok) {
+    const status = Number(response?.status || 0);
+    throw providerError('RECURSION_PROVIDER_HTTP_ERROR', `Provider model discovery failed with HTTP ${status || 'error'}.`, {
+      retryable: status === 429 || (status >= 500 && status < 600),
+      status
+    });
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw providerError('RECURSION_PROVIDER_RESPONSE_JSON_INVALID', 'Provider model discovery response was not valid JSON.', {
+      retryable: false,
+      cause: error
+    });
+  }
+  return {
+    ok: true,
+    endpoint,
+    models: normalizeModelList(payload)
+  };
 }
 
 function chatMessages(request = {}) {
@@ -754,7 +1139,47 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
     return Promise.all(normalized.map(({ roleId, request }) => generate(roleId, request)));
   }
 
-  return { generate, batch };
+  function listProfiles(options = {}) {
+    return listProviderConnectionProfiles(options);
+  }
+
+  function status(lane = 'utility', options = {}) {
+    const resolvedLane = laneName(lane);
+    const { config } = providerConfigFor(settingsStore, resolvedLane);
+    return providerModelStatus(config, {
+      ...options,
+      apiKey: settingsStore?.getApiKey?.(resolvedLane) || options.apiKey || ''
+    });
+  }
+
+  async function fetchModels(lane = 'utility', patch = {}) {
+    const resolvedLane = laneName(lane);
+    const { config } = providerConfigFor(settingsStore, resolvedLane);
+    const cleanPatch = plainObject(patch) ? patch : {};
+    const provider = {
+      ...config,
+      ...cleanPatch,
+      openAICompatible: {
+        ...(config.openAICompatible || {}),
+        ...(plainObject(cleanPatch.openAICompatible) ? cleanPatch.openAICompatible : {})
+      }
+    };
+    if (sourceName(provider.source) !== 'openai-compatible') {
+      throw providerError(
+        'RECURSION_PROVIDER_MODEL_DISCOVERY_UNSUPPORTED',
+        'Model discovery is only available for OpenAI-compatible endpoints.',
+        { retryable: false }
+      );
+    }
+    return fetchOpenAICompatibleModels({
+      baseUrl: provider.openAICompatible?.baseUrl,
+      apiKey: cleanPatch.apiKey || settingsStore?.getApiKey?.(resolvedLane) || '',
+      fetchImpl,
+      signal: cleanPatch.signal
+    });
+  }
+
+  return { generate, batch, listProfiles, status, fetchModels };
 }
 
 export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = 45000, isCurrent = null } = {}) {

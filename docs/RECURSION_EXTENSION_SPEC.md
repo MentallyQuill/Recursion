@@ -108,12 +108,11 @@ V1 uses a fixed internal catalog:
 - Active Cast
 - Character Motivation
 - Relationship
-- Continuity Risk
+- Scene Constraints
 - Knowledge
 - Consequences
 - Environment
 - Items
-- Prose
 - Open Threads
 
 The catalog is visible only as high-level Cards scope, where users can focus or whitelist fixed families and sub-items. It is not a user-authored card system, not a card editor, and not a prompt-injection checklist. The Arbiter receives the fixed catalog plus the current scope and decides which cards need to exist for the current scene within Auto or Manual rules.

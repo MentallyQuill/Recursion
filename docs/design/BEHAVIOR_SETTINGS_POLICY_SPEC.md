@@ -71,7 +71,7 @@ Recursion should not implement brittle deterministic relevance scoring. Runtime 
 | Min Cards / Max Cards | Reasoning Level card-count bounds: Low uses Min, Medium/High use the average, Ultra uses Max. | Prompt section size, provider lane routing, or semantic relevance. |
 | Strength | Intervention pressure, refresh pressure, cache reuse posture, and composer assertiveness. | Prompt Footprint size or Reasoning Level lane selection. |
 | Focus | Broad family priority profile. | Hard exclusion, except where Manual card scope already excludes a family. |
-| Prompt Footprint | Packet size, section budgets, and detail density. | Provider lane policy, semantic truth, or card-count bounds. |
+| Prompt Footprint | Packet size, section budgets, and detail level. | Provider lane policy, semantic truth, or card-count bounds. |
 | Advanced Injection | Final composed packet placement, role, and depth. | Card selection, card generation, or composition content. |
 
 ## Influence Policy Object
@@ -165,8 +165,8 @@ Focus does not replace Card Scope. Card Scope is the family/sub-item selector. I
 | --- | --- |
 | Balanced | No family boost. |
 | Character | Active Cast, Character Motivation, Relationship, Knowledge. |
-| Continuity | Continuity Risk, Items, Consequences, Scene Frame, Knowledge. This current setting name means scene-constraint focus, not continuity-extension ownership. |
-| Prose | Prose, Relationship, Environment, Scene Frame. This focus should be revisited if Prose is removed from default card generation. |
+| Constraints | Scene Constraints, Items, Consequences, Scene Frame, Knowledge. |
+| Scene | Scene Frame, Environment, Items, Active Cast. |
 | Plot | Open Threads, Consequences, Knowledge, Scene Frame. |
 
 Mechanical effects:
@@ -184,7 +184,7 @@ Prohibited effects:
 - Focus must not turn Auto into a whitelist.
 - Focus must not bypass Manual scope.
 - Focus must not invent character emotions, plot importance, or scene constraints.
-- Prose focus must not become a second style preset that fights the user's SillyTavern preset.
+- Scene focus must not become a second style preset that fights the user's SillyTavern preset.
 
 ## Card Budget Contract
 
@@ -353,7 +353,7 @@ Required focused tests:
 - Same normalized settings produce a stable policy object.
 - Strength Light, Balanced, and Strong produce different Arbiter policy lines and hand-selection pressure.
 - Strength Strong does not change effective footprint, Reasoning Level, provider lane, or injection placement.
-- Focus Character, Continuity, Prose, and Plot reorder boosted families without excluding non-boosted critical cards.
+- Focus Character, Constraints, Scene, and Plot reorder boosted families without excluding non-boosted critical cards.
 - Manual mode plus Focus never includes disabled Manual-scope families.
 - Auto mode plus partial Card Scope prefers selected scope but still permits high-relevance exceptions.
 - Compact, Normal, and Rich produce different section budgets and packet detail while Min Cards, Max Cards, and Reasoning Level own card-count pressure.

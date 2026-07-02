@@ -38,17 +38,21 @@ assertEqual(normalizeSettings({ mode: 'manual' }).mode, 'manual', 'manual mode i
 assertEqual(normalizeSettings({ mode: 'removed-mode' }).mode, 'auto', 'removed mode normalizes to auto');
 assertEqual(normalizeSettings({ mode: 'observe' }).mode, 'auto', 'invalid mode normalizes to auto');
 assertEqual(normalized.enabled, false, 'power toggle disabled state preserved');
+assertEqual(normalizeSettings({ focus: 'constraints' }).focus, 'constraints', 'constraints focus is accepted');
+assertEqual(normalizeSettings({ focus: 'scene' }).focus, 'scene', 'scene focus is accepted');
+assertEqual(normalizeSettings({ focus: 'continuity' }).focus, 'balanced', 'removed continuity focus normalizes to balanced');
+assertEqual(normalizeSettings({ focus: 'pr' + 'ose' }).focus, 'balanced', 'removed craft focus normalizes to balanced');
 const normalizedDefaultScope = normalizeSettings({}).cardScope;
 assertEqual(cardScopeCounts(normalizedDefaultScope).selectedSubItems, CARD_SCOPE_TOTAL_SUB_ITEMS, 'settings default enables all card scope');
 
 const partialScope = defaultCardScope();
-partialScope.families['Prose'].enabled = false;
-for (const key of Object.keys(partialScope.families['Prose'].subItems)) {
-  partialScope.families['Prose'].subItems[key] = false;
+partialScope.families['Open Threads'].enabled = false;
+for (const key of Object.keys(partialScope.families['Open Threads'].subItems)) {
+  partialScope.families['Open Threads'].subItems[key] = false;
 }
 const normalizedPartial = normalizeSettings({ mode: 'manual', cardScope: partialScope });
 assertEqual(normalizedPartial.mode, 'manual', 'manual mode survives card-scope normalization');
-assertEqual(normalizedPartial.cardScope.families['Prose'].enabled, false, 'disabled family persists');
+assertEqual(normalizedPartial.cardScope.families['Open Threads'].enabled, false, 'disabled current family persists');
 assertDeepEqual(
   normalizeSettings({}).injection,
   { placement: 'in_prompt', role: 'system', depth: 4 },

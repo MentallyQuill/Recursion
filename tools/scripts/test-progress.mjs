@@ -59,6 +59,18 @@ assertEqual(safeProgress.steps[0].label, 'Checking token: a brass coin', 'safe s
 const blocks = createHeroPixelBlocks(safeProgress);
 assertEqual(blocks[0].label, 'Checking token: a brass coin', 'hero blocks inherit safe labels');
 
+const renamedCardProgress = createProgressRunModel({
+  activityHistory: [
+    { runId: 'renamed-card-progress', phase: 'cardBatchRunning', label: 'Utility card batch', providerLane: 'utility', cardCounts: { requested: 1 }, recordedAt: '1' },
+    { runId: 'renamed-card-progress', phase: 'providerCallSettled', roleId: 'sceneConstraintsCard', outcome: 'success', providerLane: 'utility', recordedAt: '2' }
+  ],
+  activity: { runId: 'renamed-card-progress', phase: 'providerCallSettled', roleId: 'sceneConstraintsCard', outcome: 'success', providerLane: 'utility', recordedAt: '2' }
+});
+const progressText = JSON.stringify(renamedCardProgress);
+assert(progressText.includes('Scene Constraints'), 'progress labels Scene Constraints card rows');
+assert(!progressText.includes('Continuity ' + 'Risk'), 'progress no longer labels legacy risk rows');
+assert(!progressText.includes('Pr' + 'ose'), 'progress no longer labels legacy craft cards');
+
 const controlOnlyPromptProgress = createProgressRunModel({
   settings: { enabled: false, mode: 'auto' },
   activity: {

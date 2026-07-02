@@ -85,6 +85,16 @@ Source options:
 
 V1 should implement all three source options for Utility and Reasoner when the host exposes the required APIs. If a host cannot support connection profiles, the setting should be unavailable with a clear UI status rather than silently mapped to the current model.
 
+Provider setup uses the same control-plane helpers as generation:
+
+- `listProviderConnectionProfiles()` detects saved SillyTavern profiles from `context.ConnectionManagerRequestService`, global `ConnectionManagerRequestService`, and host state objects that expose profile arrays or profile maps.
+- `providerModelStatus()` resolves the selected source into a compact readiness label before a test call runs, including selected connection profile model labels when the host exposes them.
+- `fetchOpenAICompatibleModels()` discovers direct endpoint models by normalizing the configured base URL to `/models` and parsing OpenAI-style `data[]` or `models[]` responses.
+
+Model discovery is read-only. It may use the currently typed session key, but it must not save settings, persist secrets, write diagnostics, clear prompts, or invalidate scene cache. Fetch failures are compact UI status, not runtime generation failures.
+
+The Providers settings pane shows a compact route summary derived from Reasoning Level. Recursion does not expose Directive-style deep per-role routing controls in V1; Reasoning Level remains the operator-facing route control, and runtime owns the detailed role-to-lane policy.
+
 Utility must always have an enabled settings object. If Utility is misconfigured or unhealthy, Recursion degrades to cached/local behavior and does not block the user's normal SillyTavern generation.
 
 Reasoner may be disabled. Disabled or unhealthy Reasoner means Medium, High, and Ultra keep their selected UI level but fall back to Utility composition and Utility Arbiter/card routing where needed.
@@ -128,12 +138,11 @@ Generation roles describe why a model call exists. They are not the same thing a
 | `activeCastCard` | Utility, Reasoner at High/Ultra when healthy | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
 | `characterMotivationCard` | Utility, Reasoner at High/Ultra when healthy | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
 | `dialogueRelationshipCard` | Utility, Reasoner at Ultra when healthy | Capture current conversational tension, relationship texture, promises, conflicts, and voice constraints | Omit card with diagnostic |
-| `continuityRiskCard` | Utility, Reasoner at High/Ultra when healthy | Identify hard scene constraints, contradiction traps, timing, access, and plausibility risks for the next generation | Omit card with diagnostic |
+| `sceneConstraintsCard` | Utility, Reasoner at High/Ultra when healthy | Identify hard scene constraints, contradiction traps, timing, access, and plausibility risks for the next generation | Omit card with diagnostic |
 | `knowledgeSecretsCard` | Utility, Reasoner at High/Ultra when healthy | Capture concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries | Omit card with diagnostic |
 | `clocksConsequencesCard` | Utility, Reasoner at High/Ultra when healthy | Capture deadlines, countdowns, delayed consequences, and escalation triggers | Omit card with diagnostic |
 | `environmentAffordancesCard` | Utility, Reasoner at Ultra when healthy | Capture spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances | Omit card with diagnostic |
 | `possessionsItemsCard` | Utility, Reasoner at Ultra when healthy | Capture important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them | Omit card with diagnostic |
-| `prosePacingCard` | Utility, Reasoner at Ultra when healthy | Legacy local craft role for density, momentum, specificity, and response shape; candidate for removal from default generation per the card audit | Omit card with diagnostic |
 | `openThreadsCard` | Utility, Reasoner at Ultra when healthy | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
 | `briefUtilityComposer` | Utility | Compose the normal compact prompt brief from accepted cards and budgets | Compose from available cards; omit invalid cards |
 | `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility-only composition |

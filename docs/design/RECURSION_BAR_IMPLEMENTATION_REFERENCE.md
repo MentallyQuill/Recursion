@@ -74,7 +74,7 @@ Runtime toggles:
             <span class="provider-mark">U</span>
             <span class="step-sep"></span>
             <span class="step-icon"></span>
-            <span class="step-label">Continuity Risk</span>
+            <span class="step-label">Scene Constraints</span>
             <span class="step-meta">cached</span>
           </div>
           <div class="step-row child-row done" data-step="2-2" data-provider="utility">
@@ -231,7 +231,7 @@ Relationship: The accusation remains unresolved. Keep the trust fracture visible
 
 Environment: Rain masks movement outside. Wet flooring and the dead wall light can complicate sightlines without adding new objects.
 
-Prose: Favor concrete motion and short sensory beats. Keep response length moderate and avoid private thoughts for non-viewpoint characters.</pre>
+Scene Frame: Hold the beat boundary; answer the current moment before skipping ahead.</pre>
     </section>
 
     <div class="scroll-shell">
@@ -304,7 +304,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
               <path d="M3 4h10M3 8h7M3 12h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"></path>
               <path d="M11 10.5 13 12l-2 1.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"></path>
             </svg>
-            <span class="kind-label">Prose pacing</span>
+            <span class="kind-label">Scene Frame</span>
             <span class="expand-glyph"></span>
           </div>
           <div class="card-body">
@@ -382,7 +382,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
         <button class="settings-disclosure-toggle" type="button" aria-expanded="true">Behavior</button>
         <div class="settings-disclosure-body">
           <label class="settings-row"><span>Strength</span><select><option>Light</option><option selected>Balanced</option><option>Strong</option></select></label>
-          <label class="settings-row"><span>Focus</span><select><option selected>Balanced</option><option>Character</option><option>Continuity</option><option>Prose</option><option>Plot</option></select></label>
+          <label class="settings-row"><span>Focus</span><select><option selected>Balanced</option><option>Character</option><option>Constraints</option><option>Scene</option><option>Plot</option></select></label>
           <label class="settings-row"><span>Prompt Footprint</span><select><option>Compact</option><option selected>Normal</option><option>Rich</option></select></label>
         </div>
       </section>
@@ -481,7 +481,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
       state: 'pending',
       children: [
         { id: 'scene-frame-card', label: 'Scene Frame', provider: 'utility', state: 'pending', source: 'generated' },
-        { id: 'continuity-risk-card', label: 'Continuity Risk', provider: 'utility', state: 'pending', source: 'cache' },
+        { id: 'scene-constraints-card', label: 'Scene Constraints', provider: 'utility', state: 'pending', source: 'cache' },
         { id: 'character-motivation-card', label: 'Character Motivation', provider: 'utility', state: 'pending', source: 'generated' },
         { id: 'open-threads-card', label: 'Open Threads', provider: 'utility', state: 'pending', source: 'fallback' },
         { id: 'active-cast-card', label: 'Active Cast', provider: 'utility', state: 'pending', source: 'cache' },
@@ -490,7 +490,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
         { id: 'clocks-consequences-card', label: 'Consequences', provider: 'utility', state: 'pending', source: 'generated' },
         { id: 'environment-affordances-card', label: 'Environment', provider: 'utility', state: 'pending', source: 'generated' },
         { id: 'possessions-items-card', label: 'Items', provider: 'utility', state: 'pending', source: 'generated' },
-        { id: 'prose-pacing-card', label: 'Prose', provider: 'utility', state: 'pending', source: 'generated' }
+        { id: 'scene-frame-beat-card', label: 'Scene Frame', provider: 'utility', state: 'pending', source: 'generated' }
       ]
     },
     {
@@ -518,7 +518,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     [1480, 'child-add', 'utility-card-batch:scene-frame-card', 'running', '2 model calls running...'],
     [1520, 'add', 'reasoner-brief', 'running', '2 model calls running...'],
     [1560, 'child-add', 'reasoner-brief:reasoner-synthesis', 'running', '2 model calls running...'],
-    [1740, 'child-add', 'utility-card-batch:continuity-risk-card', 'cached', 'Scene Frame card running...'],
+    [1740, 'child-add', 'utility-card-batch:scene-constraints-card', 'cached', 'Scene Frame card running...'],
     [1980, 'child-add', 'utility-card-batch:character-motivation-card', 'done', 'Scene Frame card running...'],
     [2140, 'child-set', 'utility-card-batch:scene-frame-card', 'done', 'Reasoner brief...'],
     [2220, 'child-add', 'utility-card-batch:open-threads-card', 'warning', 'Reasoner brief...'],
@@ -528,8 +528,8 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     [2360, 'child-set', 'reasoner-brief:reasoner-synthesis', 'failed', 'Reasoner failed; Utility fallback running...'],
     [2440, 'child-add', 'reasoner-brief:utility-fallback', 'warning', 'Repairing card JSON...'],
     [2500, 'child-set', 'utility-card-batch:environment-items-card', 'done', 'Repairing card JSON...'],
-    [2540, 'child-add', 'utility-card-batch:prose-pacing-card', 'running', 'Repairing card JSON...'],
-    [2580, 'child-set', 'utility-card-batch:prose-pacing-card', 'done', 'Repairing card JSON...'],
+    [2540, 'child-add', 'utility-card-batch:scene-frame-beat-card', 'running', 'Repairing card JSON...'],
+    [2580, 'child-set', 'utility-card-batch:scene-frame-beat-card', 'done', 'Repairing card JSON...'],
     [2620, 'add', 'validate-cards', 'running', 'Validating cards...'],
     [2920, 'set', 'validate-cards', 'done', 'Repairing card JSON...'],
     [3000, 'add', 'repair-json', 'running', 'Repairing card JSON...'],

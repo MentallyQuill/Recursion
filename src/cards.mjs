@@ -55,7 +55,7 @@ export const CARD_CATALOG = Object.freeze([
     family: 'Scene Frame',
     role: 'sceneFrameCard',
     priority: 100,
-    description: 'Current location, situation, participants, and immediate dramatic direction.'
+    description: 'Current location, situation, immediate direction, and hard beat boundary.'
   }),
   catalogEntry({
     family: 'Active Cast',
@@ -64,22 +64,10 @@ export const CARD_CATALOG = Object.freeze([
     description: 'Who is present, visible state, and current conversational or physical role.'
   }),
   catalogEntry({
-    family: 'Character Motivation',
-    role: 'characterMotivationCard',
-    priority: 88,
-    description: 'Observable or safely inferred motives, pressures, hesitations, and goals.'
-  }),
-  catalogEntry({
-    family: 'Relationship',
-    role: 'dialogueRelationshipCard',
-    priority: 84,
-    description: 'Current conversational tension, relationship texture, promises, conflicts, and voice constraints.'
-  }),
-  catalogEntry({
-    family: 'Continuity Risk',
-    role: 'continuityRiskCard',
+    family: 'Scene Constraints',
+    role: 'sceneConstraintsCard',
     priority: 98,
-    description: 'Facts likely to be contradicted if omitted from the next response.'
+    description: 'Hard limits, contradiction traps, timing, access, visibility, and plausibility constraints.'
   }),
   catalogEntry({
     family: 'Knowledge',
@@ -94,10 +82,16 @@ export const CARD_CATALOG = Object.freeze([
     description: 'Deadlines, countdowns, delayed consequences, and escalation triggers.'
   }),
   catalogEntry({
-    family: 'Environment',
-    role: 'environmentAffordancesCard',
-    priority: 76,
-    description: 'Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances.'
+    family: 'Character Motivation',
+    role: 'characterMotivationCard',
+    priority: 88,
+    description: 'Observable or safely inferred motives, pressures, hesitations, and goals.'
+  }),
+  catalogEntry({
+    family: 'Relationship',
+    role: 'dialogueRelationshipCard',
+    priority: 84,
+    description: 'Current social tension, leverage, promises, conflicts, and speech constraints.'
   }),
   catalogEntry({
     family: 'Items',
@@ -106,10 +100,10 @@ export const CARD_CATALOG = Object.freeze([
     description: 'Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them.'
   }),
   catalogEntry({
-    family: 'Prose',
-    role: 'prosePacingCard',
-    priority: 62,
-    description: 'Local craft guidance for density, momentum, specificity, and response shape.'
+    family: 'Environment',
+    role: 'environmentAffordancesCard',
+    priority: 76,
+    description: 'Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances.'
   }),
   catalogEntry({
     family: 'Open Threads',

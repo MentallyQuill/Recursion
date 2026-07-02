@@ -3,7 +3,12 @@ import {
   UTILITY_ROLE_IDS,
   createGenerationRouter,
   createProviderClient,
+  fetchOpenAICompatibleModels,
+  listProviderConnectionProfiles,
   parseStructuredOutput,
+  providerModelStatus,
+  providerRouteSummary,
+  validateProviderConfiguration,
   roleLane
 } from '../../src/providers.mjs';
 import { readFileSync } from 'node:fs';
@@ -52,12 +57,11 @@ const expectedUtilityRoles = [
   'activeCastCard',
   'characterMotivationCard',
   'dialogueRelationshipCard',
-  'continuityRiskCard',
+  'sceneConstraintsCard',
   'knowledgeSecretsCard',
   'clocksConsequencesCard',
   'environmentAffordancesCard',
   'possessionsItemsCard',
-  'prosePacingCard',
   'openThreadsCard',
   'briefUtilityComposer',
   'providerTest'
@@ -73,6 +77,116 @@ for (const utilityRole of expectedUtilityRoles) {
 }
 assert(providerSpec.includes('`reasonerComposer`'), 'provider spec documents reasonerComposer');
 assert(!/characterLensCard|environmentTextureCard/.test(providerSpec), 'provider spec omits legacy card role names');
+
+const contextProfileService = {
+  getSupportedProfiles() {
+    return [
+      { profileId: 'ctx-utility', label: 'Context Utility', model_name: 'glm-fast' },
+      { id: 'ctx-reasoner', name: 'Context Reasoner', settings: { model: 'o-reasoner' } }
+    ];
+  }
+};
+const contextProfiles = listProviderConnectionProfiles({
+  context: { ConnectionManagerRequestService: contextProfileService },
+  globals: {}
+});
+assertDeepEqual(
+  contextProfiles.map((profile) => [profile.id, profile.label, profile.model]),
+  [
+    ['ctx-utility', 'Context Utility / glm-fast', 'glm-fast'],
+    ['ctx-reasoner', 'Context Reasoner / o-reasoner', 'o-reasoner']
+  ],
+  'connection profiles are detected from context.ConnectionManagerRequestService'
+);
+
+const objectMapProfiles = listProviderConnectionProfiles({
+  context: {
+    state: {
+      connectionManager: {
+        profiles: {
+          mapUtility: { uuid: 'map-utility', title: 'Map Utility', generationSettings: { model: 'map-fast' } },
+          mapReasoner: { profile_id: 'map-reasoner', profileName: 'Map Reasoner', modelId: 'map-deep' }
+        }
+      }
+    }
+  },
+  globals: {}
+});
+assertDeepEqual(
+  objectMapProfiles.map((profile) => [profile.id, profile.label, profile.model]),
+  [
+    ['map-utility', 'Map Utility / map-fast', 'map-fast'],
+    ['map-reasoner', 'Map Reasoner / map-deep', 'map-deep']
+  ],
+  'connection profiles are detected from nested object-map host state'
+);
+
+const profileStatus = providerModelStatus({
+  lane: 'utility',
+  source: 'host-connection-profile',
+  hostConnectionProfileId: 'ctx-utility'
+}, {
+  context: { ConnectionManagerRequestService: contextProfileService },
+  globals: {}
+});
+assertEqual(profileStatus.ready, true, 'provider status reports selected connection profile ready');
+assertEqual(profileStatus.model, 'glm-fast', 'provider status resolves connection profile model');
+assertEqual(profileStatus.label, 'Context Utility / glm-fast', 'provider status exposes readable profile/model label');
+
+const directValidation = validateProviderConfiguration({
+  source: 'openai-compatible',
+  openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
+  maxTokens: 4096
+});
+assertEqual(directValidation.ready, false, 'OpenAI-compatible validation catches missing setup');
+assertDeepEqual(
+  directValidation.missing,
+  ['baseUrl', 'model', 'sessionApiKey'],
+  'OpenAI-compatible validation names missing setup fields'
+);
+
+const routeSummary = providerRouteSummary({
+  reasoningLevel: 'high',
+  providers: {
+    reasoner: { enabled: true, lastTest: { status: 'pass' } }
+  }
+});
+assertEqual(routeSummary.level, 'high', 'provider route summary tracks reasoning level');
+assert(routeSummary.text.includes('Arbiter: Reasoner'), 'provider route summary exposes Reasoner Arbiter route');
+assert(routeSummary.text.includes('Composer: Reasoner'), 'provider route summary exposes Reasoner composer route');
+
+const modelFetchCalls = [];
+const fetchedModels = await fetchOpenAICompatibleModels({
+  baseUrl: 'https://models.example/v1/chat/completions',
+  apiKey: 'sk-live-secret',
+  fetchImpl: async (url, init = {}) => {
+    modelFetchCalls.push({ url, init });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          data: [
+            { id: 'alpha-model', name: 'Alpha Model' },
+            { id: 'beta-model' }
+          ]
+        };
+      }
+    };
+  }
+});
+assertDeepEqual(
+  fetchedModels.models.map((model) => [model.id, model.label]),
+  [
+    ['alpha-model', 'Alpha Model'],
+    ['beta-model', 'beta-model']
+  ],
+  'OpenAI-compatible model fetch parses /models data'
+);
+assertEqual(modelFetchCalls[0].url, 'https://models.example/v1/models', 'OpenAI-compatible model fetch normalizes endpoint to /models');
+assertEqual(modelFetchCalls[0].init.method, 'GET', 'OpenAI-compatible model fetch uses GET');
+assertEqual(modelFetchCalls[0].init.headers.Authorization, 'Bearer sk-live-secret', 'OpenAI-compatible model fetch sends session bearer key');
+assertNoSecret(fetchedModels, 'OpenAI-compatible model fetch result does not expose session secret');
 
 const calls = [];
 const host = {

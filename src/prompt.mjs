@@ -7,7 +7,7 @@ import {
   summarizeBehaviorPolicyForDiagnostics
 } from './settings-policy.mjs';
 
-export const PROMPT_PACKET_VERSION = 1;
+export const PROMPT_PACKET_VERSION = 2;
 const PACKET_VERSION = PROMPT_PACKET_VERSION;
 const REASONER_SCHEMA = 'recursion.reasonerComposer.v1';
 const VALID_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
@@ -17,7 +17,7 @@ const SECTION_KEYS = Object.freeze(['sceneBrief', 'turnBrief', 'guardrails']);
 const VALID_INJECTION_PLACEMENTS = new Set(['in_prompt', 'in_chat']);
 const VALID_INJECTION_ROLES = new Set(['system', 'user', 'assistant']);
 const SCENE_BRIEF_FAMILIES = new Set(['Scene Frame', 'Active Cast', 'Environment', 'Items']);
-const GUARDRAIL_FAMILIES = new Set(['Continuity Risk', 'Knowledge']);
+const GUARDRAIL_FAMILIES = new Set(['Scene Constraints', 'Knowledge']);
 const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
 const DETAIL_PROFILES = new Set(['compact', 'standard', 'expanded']);
 const MAX_CARD_TEXT = 1200;
@@ -32,12 +32,11 @@ const VALID_FAMILIES = new Set([
   'Active Cast',
   'Character Motivation',
   'Relationship',
-  'Continuity Risk',
+  'Scene Constraints',
   'Knowledge',
   'Consequences',
   'Environment',
   'Items',
-  'Prose',
   'Open Threads'
 ]);
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|inspector[-_\s]*only|source[-_\s]*should[-_\s]*not[-_\s]*leak|freshness[-_\s]*should[-_\s]*not[-_\s]*leak|arbiter[-_\s]*should[-_\s]*not[-_\s]*leak|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/i;
@@ -47,7 +46,7 @@ const FOOTPRINT_BUDGETS = FOOTPRINT_SECTION_BUDGETS;
 const STATIC_GUARDRAILS = Object.freeze([
   'Respect the player message: preserve stated player intent, spoken content, and choices.',
   'Keep out-of-character analysis, unrevealed information, and future story plans out of the response.',
-  'Resolve conflicts by preserving continuity constraints before style suggestions.'
+  'Resolve conflicts by preserving hard scene constraints before optional style preferences.'
 ]);
 
 const INJECTION_TEMPLATE = Object.freeze([
@@ -99,7 +98,7 @@ function safePromptId(value, fallbackPrefix = 'id') {
 
 function safeFamily(value) {
   const family = cleanText(value, 120);
-  return VALID_FAMILIES.has(family) ? family : 'Prose';
+  return VALID_FAMILIES.has(family) ? family : 'Open Threads';
 }
 
 function safeEvidenceRef(value) {

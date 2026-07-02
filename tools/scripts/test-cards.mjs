@@ -13,14 +13,13 @@ import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests
 const EXPECTED_CATALOG = Object.freeze([
   { family: 'Scene Frame', role: 'sceneFrameCard', priority: 100 },
   { family: 'Active Cast', role: 'activeCastCard', priority: 95 },
-  { family: 'Character Motivation', role: 'characterMotivationCard', priority: 88 },
-  { family: 'Relationship', role: 'dialogueRelationshipCard', priority: 84 },
-  { family: 'Continuity Risk', role: 'continuityRiskCard', priority: 98 },
+  { family: 'Scene Constraints', role: 'sceneConstraintsCard', priority: 98 },
   { family: 'Knowledge', role: 'knowledgeSecretsCard', priority: 92 },
   { family: 'Consequences', role: 'clocksConsequencesCard', priority: 90 },
-  { family: 'Environment', role: 'environmentAffordancesCard', priority: 76 },
+  { family: 'Character Motivation', role: 'characterMotivationCard', priority: 88 },
+  { family: 'Relationship', role: 'dialogueRelationshipCard', priority: 84 },
   { family: 'Items', role: 'possessionsItemsCard', priority: 78 },
-  { family: 'Prose', role: 'prosePacingCard', priority: 62 },
+  { family: 'Environment', role: 'environmentAffordancesCard', priority: 76 },
   { family: 'Open Threads', role: 'openThreadsCard', priority: 72 }
 ]);
 
@@ -33,7 +32,7 @@ function deckCard(family, promptText, overrides = {}) {
   }, { sceneId: 'scene-budget', snapshotHash: 'hash-budget' });
 }
 
-assertEqual(CARD_CATALOG.length, 11, 'full V1 catalog present');
+assertEqual(CARD_CATALOG.length, 10, 'audited V1 catalog present');
 assertDeepEqual(
   CARD_CATALOG.map(({ family, role, priority }) => ({ family, role, priority })),
   EXPECTED_CATALOG,
@@ -74,16 +73,26 @@ await assertRejects(
 );
 
 const roleMapped = normalizeCard({
-  role: 'continuityRiskCard',
+  role: 'sceneConstraintsCard',
   promptText: 'The airlock is open and must be addressed.',
   detailProfile: 'bad-detail',
   emphasis: 'bad-emphasis',
   status: 'candidate'
 }, { sceneId: 'scene-2', snapshotHash: 'hash-2' });
-assertEqual(roleMapped.family, 'Continuity Risk', 'family derived from role');
+assertEqual(roleMapped.family, 'Scene Constraints', 'family derived from role');
 assertEqual(roleMapped.detailProfile, 'standard', 'invalid detail profile falls back');
 assertEqual(roleMapped.emphasis, 'normal', 'invalid emphasis falls back');
 assertEqual(roleMapped.status, 'candidate', 'valid non-default status preserved');
+await assertRejects(
+  async () => normalizeCard({ role: 'continuity' + 'RiskCard', promptText: 'Old risk role.' }, { sceneId: 'scene-removed' }),
+  /Unknown card catalog/,
+  'removed risk role is rejected'
+);
+await assertRejects(
+  async () => normalizeCard({ family: 'Pr' + 'ose', promptText: 'Old craft card.' }, { sceneId: 'scene-removed' }),
+  /Unknown card catalog/,
+  'removed craft family is rejected'
+);
 
 await assertRejects(
   async () => normalizeCard({ family: 'Scene Frame', promptText: '   ' }, { sceneId: 'scene-1' }),
@@ -101,7 +110,7 @@ await assertRejects(
   'missing card family or role rejected'
 );
 await assertRejects(
-  async () => normalizeCard({ family: 'Scene Frame', role: 'continuityRiskCard', promptText: 'Mismatch.' }, { sceneId: 'scene-1' }),
+  async () => normalizeCard({ family: 'Scene Frame', role: 'sceneConstraintsCard', promptText: 'Mismatch.' }, { sceneId: 'scene-1' }),
   /mismatch/,
   'mismatched family and role rejected'
 );
@@ -117,9 +126,9 @@ assertEqual(deck.cards[0].status, 'active', 'selected card is active');
 const lifecycleBase = [
   deckCard('Scene Frame', 'The bridge is tense.', { id: 'scene-card' }),
   deckCard('Active Cast', 'Mara and Ilya are present.', { id: 'cast-card' }),
-  deckCard('Continuity Risk', 'The door was locked.', { id: 'risk-card' }),
+  deckCard('Scene Constraints', 'The door was locked.', { id: 'risk-card' }),
   deckCard('Open Threads', 'The distress signal remains unanswered.', { id: 'thread-card' }),
-  deckCard('Prose', 'Keep the reply clipped.', { id: 'pace-card' })
+  deckCard('Relationship', 'Keep the accusation tense.', { id: 'relationship-card' })
 ];
 const transitioned = applyCardPlan(lifecycleBase, {
   lifecycle: [
@@ -128,7 +137,7 @@ const transitioned = applyCardPlan(lifecycleBase, {
     { action: 'regenerate', cardId: 'risk-card', reason: 'needs refresh' },
     { action: 'emphasize', cardId: 'thread-card', reason: 'urgent' },
     { action: 'discard', cardId: 'risk card', reason: 'mutated id should not match' },
-    { action: 'unknown', cardId: 'pace-card', reason: 'ignored action' },
+    { action: 'unknown', cardId: 'relationship-card', reason: 'ignored action' },
     { action: 'select', cardId: 'missing-card', reason: 'ignored missing card' }
   ]
 });
@@ -138,11 +147,11 @@ assertEqual(transitioned.cards.find((entry) => entry.id === 'risk-card').status,
 assertEqual(transitioned.cards.find((entry) => entry.id === 'thread-card').status, 'active', 'emphasize transition activates');
 assertEqual(transitioned.cards.find((entry) => entry.id === 'thread-card').emphasis, 'emphasized', 'emphasize transition sets emphasis');
 assertEqual(transitioned.cards.find((entry) => entry.id === 'thread-card').arbiter.reason, 'urgent', 'emphasize reason recorded');
-assertEqual(transitioned.cards.find((entry) => entry.id === 'pace-card').status, 'active', 'unknown action is no-op');
+assertEqual(transitioned.cards.find((entry) => entry.id === 'relationship-card').status, 'active', 'unknown action is no-op');
 assertEqual(transitioned.cards.find((entry) => entry.id === 'risk-card').arbiter.reason, 'needs refresh', 'mutated action id does not retarget normalized id');
 
 const preservedIdCard = {
-  ...deckCard('Continuity Risk', 'The exact stored id includes a space.', { id: 'risk-card' }),
+  ...deckCard('Scene Constraints', 'The exact stored id includes a space.', { id: 'risk-card' }),
   id: 'risk card'
 };
 const wrongIdTransition = applyCardPlan([preservedIdCard], {
@@ -171,12 +180,12 @@ const compactCachedTransition = applyCardPlan([{
 assertEqual(compactCachedTransition.cards[0].source.snapshotHash, 'cache-fp', 'compact cached card source fingerprint survives deck normalization');
 assertEqual(compactCachedTransition.cards[0].freshness.sourceFingerprint, 'cache-fp', 'compact cached card freshness fingerprint survives deck normalization');
 
-const requests = buildCardRequests({ cardJobs: [{ role: 'sceneFrameCard' }, { role: 'continuityRiskCard' }] }, {
+const requests = buildCardRequests({ cardJobs: [{ role: 'sceneFrameCard' }, { role: 'sceneConstraintsCard' }] }, {
   runId: 'run',
   snapshotHash: 'hash'
 });
 assertEqual(requests.length, 2, 'card requests built');
-assertDeepEqual(requests.map((request) => request.roleId), ['sceneFrameCard', 'continuityRiskCard'], 'request role ids built');
+assertDeepEqual(requests.map((request) => request.roleId), ['sceneFrameCard', 'sceneConstraintsCard'], 'request role ids built');
 assertEqual(requests[0].runId, 'run', 'run id included');
 assertEqual(requests[0].snapshotHash, 'hash', 'snapshot hash included');
 assertEqual(requests[0].metadata.family, 'Scene Frame', 'request metadata includes family');
@@ -193,7 +202,7 @@ assert(motivationRequest.prompt.includes('Do not include first-person internal m
 const scopedRequests = buildCardRequests({
   schema: 'recursion.utilityArbiterPlan.v1',
   snapshotHash: 'scope-test',
-  cardJobs: [{ family: 'Continuity Risk', role: 'continuityRiskCard' }],
+  cardJobs: [{ family: 'Scene Constraints', role: 'sceneConstraintsCard' }],
   budgets: { targetBriefTokens: 500, maxCards: 4 }
 }, {
   runId: 'scope-run',
@@ -201,19 +210,19 @@ const scopedRequests = buildCardRequests({
   snapshot: {},
   cardScope: {
     selectedSubItemsByFamily: {
-      'Continuity Risk': ['fragileFacts', 'timelineOrder']
+      'Scene Constraints': ['hardLimits', 'timelineOrder']
     }
   }
 });
-assertDeepEqual(scopedRequests[0].cardScope.selectedSubItems, ['fragileFacts', 'timelineOrder'], 'card request carries selected sub-item focus');
-assert(scopedRequests[0].prompt.includes('Selected focus facets for Continuity Risk:'), 'card prompt includes selected focus header');
-assert(scopedRequests[0].prompt.includes('fragileFacts (fragile facts)'), 'card prompt includes selected fragile facts facet');
+assertDeepEqual(scopedRequests[0].cardScope.selectedSubItems, ['hardLimits', 'timelineOrder'], 'card request carries selected sub-item focus');
+assert(scopedRequests[0].prompt.includes('Selected focus facets for Scene Constraints:'), 'card prompt includes selected focus header');
+assert(scopedRequests[0].prompt.includes('hardLimits (hard limits)'), 'card prompt includes selected hard limits facet');
 assert(scopedRequests[0].prompt.includes('timelineOrder (timeline/order)'), 'card prompt includes selected timeline/order facet');
-assert(scopedRequests[0].prompt.includes('Easy-to-break facts'), 'card prompt includes selected facet description');
-assert(scopedRequests[0].prompt.includes('Event order, cause and effect'), 'card prompt includes timeline facet description');
+assert(scopedRequests[0].prompt.includes('would make the next response implausible'), 'card prompt includes selected facet description');
+assert(scopedRequests[0].prompt.includes('Immediate cause and effect'), 'card prompt includes timeline facet description');
 assert(scopedRequests[0].prompt.includes('Do not create separate cards per facet.'), 'card prompt keeps one-card contract clear');
 const disabledFocusRequest = buildCardRequests({
-  cardJobs: [{ family: 'Prose', role: 'prosePacingCard', reason: 'High relevance style risk.' }]
+  cardJobs: [{ family: 'Environment', role: 'environmentAffordancesCard', reason: 'High relevance scene risk.' }]
 }, {
   runId: 'disabled-focus-run',
   snapshotHash: 'disabled-focus-hash',
@@ -222,7 +231,7 @@ const disabledFocusRequest = buildCardRequests({
 })[0];
 assertDeepEqual(disabledFocusRequest.cardScope.selectedSubItems, [], 'disabled focus request still records empty selected facets');
 assert(
-  disabledFocusRequest.prompt.includes('Selected focus facets for Prose: none selected.'),
+  disabledFocusRequest.prompt.includes('Selected focus facets for Environment: none selected.'),
   'disabled focus request tells provider no facets were selected'
 );
 assert(
@@ -231,8 +240,8 @@ assert(
 );
 const refreshRequest = buildCardRequests({
   cardJobs: [{
-    family: 'Continuity Risk',
-    role: 'continuityRiskCard',
+    family: 'Scene Constraints',
+    role: 'sceneConstraintsCard',
     refreshOfCardId: 'cached-risk-1',
     reason: 'Cached risk is stale after source drift.'
   }]
@@ -246,10 +255,10 @@ assert(refreshRequest.prompt.includes('Refreshes cached card: cached-risk-1'), '
 assert(!refreshRequest.prompt.includes('Old risk.'), 'refresh request does not expose old card prompt body by id');
 
 const refreshedDeck = applyCardPlan([
-  deckCard('Continuity Risk', 'Old risk.', { id: 'cached-risk-1', tokenEstimate: 10 })
+  deckCard('Scene Constraints', 'Old risk.', { id: 'cached-risk-1', tokenEstimate: 10 })
 ], {
   acceptedCards: [
-    deckCard('Continuity Risk', 'New risk.', { id: 'fresh-risk-1', tokenEstimate: 10 })
+    deckCard('Scene Constraints', 'New risk.', { id: 'fresh-risk-1', tokenEstimate: 10 })
   ],
   lifecycle: [
     { action: 'regenerate', cardId: 'cached-risk-1', reason: 'source drift' },
@@ -377,16 +386,16 @@ const safeQuotedSnapshotRequest = buildCardRequests({
 })[0];
 assert(safeQuotedSnapshotRequest.prompt.includes('\\"stay safe\\"'), 'safe quoted snapshot text remains escaped inside provider JSON prompt');
 assert(safeQuotedSnapshotRequest.prompt.includes('\\\\\\"stay safe\\\\\\"'), 'safe literal backslash-quote snapshot text keeps its escape layer');
-const safeProseAssignmentRequest = buildCardRequests({
+const safeStoryAssignmentRequest = buildCardRequests({
   cardJobs: [{
     role: 'sceneFrameCard',
-    reason: 'Safe prose token: a brass coin session: evening watch secret: a whispered rumor headers.authorization=raw-safe-prose-prop'
+    reason: 'Safe story token: a brass coin session: evening watch secret: a whispered rumor headers.authorization=raw-safe-story-prop'
   }]
 }, {
-  runId: 'Safe prose run',
-  snapshotHash: 'Safe prose hash token: a brass coin session: evening watch secret: a whispered rumor headers.authorization=raw-safe-prose-hash-prop',
+  runId: 'Safe story run',
+  snapshotHash: 'Safe story hash token: a brass coin session: evening watch secret: a whispered rumor headers.authorization=raw-safe-story-hash-prop',
   snapshot: {
-    message: 'Safe prose snapshot token: a brass coin session: evening watch secret: a whispered rumor headers.authorization=raw-safe-prose-snapshot-prop'
+    message: 'Safe story snapshot token: a brass coin session: evening watch secret: a whispered rumor headers.authorization=raw-safe-story-snapshot-prop'
   }
 })[0];
 for (const text of [
@@ -394,11 +403,11 @@ for (const text of [
   'session: evening watch',
   'secret: a whispered rumor'
 ]) {
-  assert(safeProseAssignmentRequest.prompt.includes(text), `${text} survives provider prompt sanitization`);
-  assert(safeProseAssignmentRequest.snapshotHash.includes(text), `${text} survives snapshotHash sanitization`);
+  assert(safeStoryAssignmentRequest.prompt.includes(text), `${text} survives provider prompt sanitization`);
+  assert(safeStoryAssignmentRequest.snapshotHash.includes(text), `${text} survives snapshotHash sanitization`);
 }
-for (const value of ['raw-safe-prose-prop', 'raw-safe-prose-hash-prop', 'raw-safe-prose-snapshot-prop']) {
-  assert(!JSON.stringify(safeProseAssignmentRequest).includes(value), `${value} redacted after safe prose assignment`);
+for (const value of ['raw-safe-story-prop', 'raw-safe-story-hash-prop', 'raw-safe-story-snapshot-prop']) {
+  assert(!JSON.stringify(safeStoryAssignmentRequest).includes(value), `${value} redacted after safe story assignment`);
 }
 const jsonInStringRequest = buildCardRequests({
   cardJobs: [{
@@ -707,7 +716,7 @@ assertEqual(cardsFromProviderResult({
     schema: 'recursion.card.v1',
     role: 'sceneFrameCard',
     family: 'Scene Frame',
-    items: [{ family: 'Continuity Risk', promptText: 'conflicting provider item' }]
+    items: [{ family: 'Scene Constraints', promptText: 'conflicting provider item' }]
   }
 }, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider item with conflicting family and role ignored');
 assertEqual(cardsFromProviderResult({
@@ -715,8 +724,8 @@ assertEqual(cardsFromProviderResult({
   roleId: 'sceneFrameCard',
   data: {
     schema: 'recursion.card.v1',
-    role: 'continuityRiskCard',
-    family: 'Continuity Risk',
+    role: 'sceneConstraintsCard',
+    family: 'Scene Constraints',
     items: [{ promptText: 'conflicting envelope role' }]
   }
 }, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with conflicting role ignored');
@@ -726,7 +735,7 @@ assertEqual(cardsFromProviderResult({
   data: {
     schema: 'recursion.card.v1',
     role: 'sceneFrameCard',
-    family: 'Continuity Risk',
+    family: 'Scene Constraints',
     items: [{ promptText: 'conflicting envelope family' }]
   }
 }, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with conflicting family ignored');
@@ -931,8 +940,8 @@ assertEqual(cardsFromProviderResult({
 }, { expectedRole: 'characterMotivationCard', expectedFamily: 'Character Motivation' }).length, 0, 'provider motivation card with private thought text ignored');
 
 const selectedDeck = [
-  deckCard('Prose', 'Keep it brisk.', { id: 'low', tokenEstimate: 20 }),
-  deckCard('Continuity Risk', 'Do not forget the cracked visor.', { id: 'risk', tokenEstimate: 220 }),
+  deckCard('Relationship', 'Keep it socially tense.', { id: 'low', tokenEstimate: 20 }),
+  deckCard('Scene Constraints', 'Do not forget the cracked visor.', { id: 'risk', tokenEstimate: 220 }),
   deckCard('Open Threads', 'The signal is unanswered.', { id: 'emph', tokenEstimate: 120, emphasis: 'emphasized' }),
   deckCard('Scene Frame', 'The bay is sealed.', { id: 'scene', tokenEstimate: 80, inspectorNotes: 'private' }),
   deckCard('Active Cast', 'Mara waits outside.', { id: 'stowed', status: 'stowed', tokenEstimate: 30 })
@@ -967,7 +976,7 @@ const compactFootprintHand = selectHand([
   deckCard('Scene Frame', 'Scene one.', { id: 'scene-compact', tokenEstimate: 20 }),
   deckCard('Active Cast', 'Cast one.', { id: 'cast-compact', tokenEstimate: 20 }),
   deckCard('Open Threads', 'Thread one.', { id: 'thread-compact', tokenEstimate: 20 }),
-  deckCard('Prose', 'Prose one.', { id: 'prose-compact', tokenEstimate: 20 }),
+  deckCard('Relationship', 'Relationship one.', { id: 'relationship-compact', tokenEstimate: 20 }),
   deckCard('Items', 'Item one.', { id: 'item-compact', tokenEstimate: 20 }),
   deckCard('Environment', 'Environment one.', { id: 'environment-compact', tokenEstimate: 20 })
 ], {
@@ -982,7 +991,7 @@ const lightStrengthHand = selectHand([
   deckCard('Scene Frame', 'Scene one.', { id: 'scene-light', tokenEstimate: 20 }),
   deckCard('Active Cast', 'Cast one.', { id: 'cast-light', tokenEstimate: 20 }),
   deckCard('Open Threads', 'Thread one.', { id: 'thread-light', tokenEstimate: 20 }),
-  deckCard('Prose', 'Prose one.', { id: 'prose-light', tokenEstimate: 20 }),
+  deckCard('Relationship', 'Relationship one.', { id: 'relationship-light', tokenEstimate: 20 }),
   deckCard('Items', 'Item one.', { id: 'item-light', tokenEstimate: 20 }),
   deckCard('Environment', 'Environment one.', { id: 'environment-light', tokenEstimate: 20 })
 ], {
@@ -994,7 +1003,7 @@ assertEqual(lightStrengthHand.cards.length, 5, 'light strength reduces normal ha
 assertEqual(lightStrengthHand.metadata.behaviorPolicy.strength, 'light', 'hand metadata records strength policy');
 
 const tokenOnlyHand = selectHand([
-  deckCard('Continuity Risk', 'Oversized risk.', { id: 'too-big', tokenEstimate: 301 }),
+  deckCard('Scene Constraints', 'Oversized risk.', { id: 'too-big', tokenEstimate: 301 }),
   deckCard('Scene Frame', 'Small scene.', { id: 'small', tokenEstimate: 20 })
 ], { maxCards: 5, maxTokens: 300 });
 assert(tokenOnlyHand.omitted.some((entry) => entry.cardId === 'too-big' && entry.reason === 'token-budget'), 'token budget omissions recorded before hand is full');

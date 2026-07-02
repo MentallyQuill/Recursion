@@ -40,15 +40,17 @@ assertDeepEqual(
   'character focus boosts expected families'
 );
 assertDeepEqual(
-  influencePolicyForSettings({ focus: 'continuity' }).focus.boostedFamilies,
-  FOCUS_BOOSTED_FAMILIES.continuity,
-  'continuity focus boosts expected families'
+  influencePolicyForSettings({ focus: 'constraints' }).focus.boostedFamilies,
+  ['Scene Constraints', 'Items', 'Consequences', 'Scene Frame', 'Knowledge'],
+  'constraints focus boosts expected families'
 );
 assertDeepEqual(
-  influencePolicyForSettings({ focus: 'prose' }).focus.boostedFamilies,
-  FOCUS_BOOSTED_FAMILIES.prose,
-  'prose focus boosts expected families'
+  influencePolicyForSettings({ focus: 'scene' }).focus.boostedFamilies,
+  ['Scene Frame', 'Environment', 'Items', 'Active Cast'],
+  'scene focus boosts expected families'
 );
+assert(!Object.prototype.hasOwnProperty.call(FOCUS_BOOSTED_FAMILIES, 'pr' + 'ose'), 'removed craft focus has no policy');
+assert(!Object.prototype.hasOwnProperty.call(FOCUS_BOOSTED_FAMILIES, 'continuity'), 'removed continuity focus has no policy');
 assertDeepEqual(
   influencePolicyForSettings({ focus: 'plot' }).focus.boostedFamilies,
   FOCUS_BOOSTED_FAMILIES.plot,
@@ -65,7 +67,7 @@ assertDeepEqual(compactPolicy.footprint.sectionBudgets, FOOTPRINT_SECTION_BUDGET
 
 const compactStoredRichEffective = runPolicyForEffectivePlan({
   promptFootprint: 'compact',
-  focus: 'prose',
+  focus: 'scene',
   strength: 'strong'
 }, {
   promptFootprint: 'rich',
@@ -79,7 +81,7 @@ assertDeepEqual(compactStoredRichEffective.cardBudget, { minCards: 3, normalCard
 assert(compactStoredRichEffective.footprint.composerLine.includes('Rich'), 'run policy composer line uses effective rich footprint');
 assertEqual(compactStoredRichEffective.footprint.footprintOverrideReason, 'footprint-risk-override', 'run policy preserves footprint override reason');
 const effectiveDiagnostics = summarizeBehaviorPolicyForDiagnostics(compactStoredRichEffective, {
-  selectedFamilies: ['Prose']
+  selectedFamilies: ['Scene Frame']
 });
 assertEqual(effectiveDiagnostics.storedFootprint, 'compact', 'diagnostics preserve stored footprint');
 assertEqual(effectiveDiagnostics.effectiveFootprint, 'rich', 'diagnostics expose effective footprint');
@@ -107,8 +109,8 @@ const diagnostics = summarizeBehaviorPolicyForDiagnostics(influencePolicyForSett
   promptFootprint: 'normal'
 }), {
   effectiveFootprint: 'rich',
-  footprintOverrideReason: 'high-continuity-risk',
-  selectedFamilies: ['Active Cast', 'Continuity Risk', 'Character Motivation'],
+  footprintOverrideReason: 'high-scene-constraint-risk',
+  selectedFamilies: ['Active Cast', 'Scene Constraints', 'Character Motivation'],
   planShaping: ['strong-refresh-pressure', 'focus-family-ordering']
 });
 assertDeepEqual(diagnostics.boostedFamilies, FOCUS_BOOSTED_FAMILIES.character, 'diagnostics expose boosted families');

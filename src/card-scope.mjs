@@ -1,25 +1,25 @@
-export const CARD_SCOPE_VERSION = 1;
+export const CARD_SCOPE_VERSION = 2;
 
 export const CARD_SCOPE_CATALOG = Object.freeze([
   Object.freeze({
     family: 'Scene Frame',
     role: 'sceneFrameCard',
-    description: 'Current location, situation, participants, and immediate dramatic direction.',
+    description: 'Current location, situation, immediate direction, and hard beat boundary.',
     subItems: Object.freeze([
       Object.freeze({
         key: 'locationSituation',
         label: 'location/situation',
-        description: 'Current place, immediate setup, and active problem the next response must not drift away from.'
-      }),
-      Object.freeze({
-        key: 'presentParticipants',
-        label: 'present participants',
-        description: 'Characters or groups visibly present in the scene and relevant to the next beat.'
+        description: 'Current place and setup expanded into nearby routes, sightlines, social exposure, local pressure, and what is relevant now.'
       }),
       Object.freeze({
         key: 'immediateDirection',
         label: 'immediate direction',
-        description: 'The near next action, pressure, or dramatic vector the response should continue.'
+        description: 'The next-beat vector the scene is pointing toward, without deciding future plot or skipping player agency.'
+      }),
+      Object.freeze({
+        key: 'beatConstraint',
+        label: 'beat constraint',
+        description: 'Hard response boundary for this beat, such as answer now, hold before a reveal, avoid time skip, or do not skip a pending payoff.'
       })
     ])
   }),
@@ -31,17 +31,17 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
       Object.freeze({
         key: 'presentCharacters',
         label: 'present characters',
-        description: 'Who is in the scene now, including characters who should not be dropped or invented.'
+        description: 'Who can act, observe, interrupt, be addressed, or be accidentally dropped from the next response.'
       }),
       Object.freeze({
         key: 'visibleState',
         label: 'visible state',
-        description: 'Observable condition, posture, injury, mood, constraint, or capability that affects action.'
+        description: 'Observable condition, posture, injury, mood, constraint, or capability that affects what a character can do now.'
       }),
       Object.freeze({
         key: 'speakerRoles',
         label: 'speaker roles',
-        description: 'Who can speak, who is being addressed, and who currently drives the exchange.'
+        description: 'Who is speaking, addressed, listening, controlling the exchange, or unable to speak.'
       })
     ])
   }),
@@ -53,12 +53,12 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
       Object.freeze({
         key: 'visibleGoals',
         label: 'visible goals',
-        description: 'Goals shown or established in-scene, phrased as behavior-facing guidance.'
+        description: 'Established visible goals phrased as behavior-facing pressure for the next response.'
       }),
       Object.freeze({
         key: 'pressures',
         label: 'pressures',
-        description: 'External, social, tactical, or emotional pressures shaping likely behavior.'
+        description: 'External, social, tactical, or emotional pressures that plausibly shape behavior in this beat.'
       }),
       Object.freeze({
         key: 'hesitationPosture',
@@ -70,44 +70,44 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
   Object.freeze({
     family: 'Relationship',
     role: 'dialogueRelationshipCard',
-    description: 'Current conversational tension, relationship texture, promises, conflicts, and voice constraints.',
+    description: 'Current social tension, leverage, promises, conflicts, and speech constraints.',
     subItems: Object.freeze([
       Object.freeze({
         key: 'tension',
         label: 'tension',
-        description: 'Current conversational pressure, emotional friction, or unresolved subtext.'
+        description: 'Current friction, trust, leverage, intimacy, threat, or subtext that creates usable social affordances.'
       }),
       Object.freeze({
         key: 'promisesConflicts',
         label: 'promises/conflicts',
-        description: 'Promises, refusals, disagreements, debts, threats, or relational obligations still active.'
+        description: 'Active promises, refusals, debts, threats, disagreements, or obligations that shape what can be said or done next.'
       }),
       Object.freeze({
         key: 'voiceConstraints',
-        label: 'voice constraints',
-        description: 'Scene-local tone, address, or speech constraints that should guide dialogue without replacing the preset.'
+        label: 'speech constraints',
+        description: 'Scene-local address, formality, taboo wording, secrecy, or who can safely say what without replacing the preset.'
       })
     ])
   }),
   Object.freeze({
-    family: 'Continuity Risk',
-    role: 'continuityRiskCard',
-    description: 'Facts likely to be contradicted if omitted from the next response.',
+    family: 'Scene Constraints',
+    role: 'sceneConstraintsCard',
+    description: 'Hard limits, contradiction traps, timing, access, visibility, and plausibility constraints.',
     subItems: Object.freeze([
       Object.freeze({
-        key: 'fragileFacts',
-        label: 'fragile facts',
-        description: 'Easy-to-break facts such as injuries, locked doors, missing items, stated choices, or visible constraints.'
+        key: 'hardLimits',
+        label: 'hard limits',
+        description: 'Injuries, locked routes, missing objects, stated choices, visible limits, or other constraints that would make the next response implausible if missed.'
       }),
       Object.freeze({
         key: 'spatialConstraints',
         label: 'spatial constraints',
-        description: 'Position, distance, blocked routes, visibility, reach, or movement limits that must stay consistent.'
+        description: 'Movement, reach, visibility, blocked route, distance, and access limits that affect the next beat.'
       }),
       Object.freeze({
         key: 'timelineOrder',
         label: 'timeline/order',
-        description: 'Event order, cause and effect, reveal order, and what has or has not happened yet.'
+        description: 'Immediate cause and effect, sequence, reveal order, and what has or has not happened yet.'
       })
     ])
   }),
@@ -168,7 +168,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
       Object.freeze({
         key: 'sensoryTexture',
         label: 'sensory texture',
-        description: 'Concrete sensory details that ground prose without turning into decorative filler.'
+        description: 'Sensory signals that affect grounding, attention, danger, social context, or available action.'
       }),
       Object.freeze({
         key: 'hazardsAffordances',
@@ -196,28 +196,6 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
         key: 'itemAffordancesRisks',
         label: 'affordances/risks',
         description: 'What an item can do now, what it enables, and what risk or limit it carries.'
-      })
-    ])
-  }),
-  Object.freeze({
-    family: 'Prose',
-    role: 'prosePacingCard',
-    description: 'Local craft guidance for density, momentum, specificity, and response shape.',
-    subItems: Object.freeze([
-      Object.freeze({
-        key: 'density',
-        label: 'density',
-        description: 'How packed the next response should be with action, dialogue, description, and consequence.'
-      }),
-      Object.freeze({
-        key: 'momentum',
-        label: 'momentum',
-        description: 'Whether the response should advance the beat, hold tension, slow down, or avoid skipping necessary payoff.'
-      }),
-      Object.freeze({
-        key: 'specificityShape',
-        label: 'specificity/shape',
-        description: 'Concrete detail choice and response structure for this beat, avoiding generic prose and shapeless recap.'
       })
     ])
   }),

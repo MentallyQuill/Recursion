@@ -9,8 +9,8 @@ export const FOOTPRINT_SECTION_BUDGETS = Object.freeze({
 export const FOCUS_BOOSTED_FAMILIES = Object.freeze({
   balanced: Object.freeze([]),
   character: Object.freeze(['Active Cast', 'Character Motivation', 'Relationship', 'Knowledge']),
-  continuity: Object.freeze(['Continuity Risk', 'Items', 'Consequences', 'Scene Frame', 'Knowledge']),
-  prose: Object.freeze(['Prose', 'Relationship', 'Environment', 'Scene Frame']),
+  constraints: Object.freeze(['Scene Constraints', 'Items', 'Consequences', 'Scene Frame', 'Knowledge']),
+  scene: Object.freeze(['Scene Frame', 'Environment', 'Items', 'Active Cast']),
   plot: Object.freeze(['Open Threads', 'Consequences', 'Knowledge', 'Scene Frame'])
 });
 
@@ -21,7 +21,7 @@ const STRENGTH_POLICIES = Object.freeze({
     refreshPressure: 'low',
     selectionPressure: 'lean',
     composerAssertiveness: 'soft',
-    arbiterLine: 'Strength: Light. Prefer valid cache, avoid churn, and refresh only when relevance or drift risk is clear. Do not drop critical continuity guardrails.',
+    arbiterLine: 'Strength: Light. Prefer valid cache, avoid churn, and refresh only when relevance or drift risk is clear. Do not drop critical scene constraints.',
     composerLine: 'Strength: Light. Use sparse, gentle current-turn guidance and keep non-critical support brief.'
   }),
   balanced: Object.freeze({
@@ -50,7 +50,7 @@ export const FOOTPRINT_POLICIES = Object.freeze({
     allowedProfiles: Object.freeze(['compact']),
     preferredProfile: 'compact',
     detailPressure: 'compact',
-    arbiterLine: 'Prompt Footprint: Compact. Keep compact unless a safety or hard continuity reason requires temporary expansion.',
+    arbiterLine: 'Prompt Footprint: Compact. Keep compact unless a safety or hard scene-constraint reason requires temporary expansion.',
     composerLine: 'Prompt Footprint: Compact. Keep packet sections terse and avoid repetitive detail.'
   }),
   normal: Object.freeze({
@@ -89,7 +89,7 @@ function focusPolicyFor(level) {
     boostedFamilies,
     arbiterLine: focus === 'balanced'
       ? 'Focus: Balanced. Do not boost a family; prefer the Arbiter-selected current turn relevance.'
-      : `Focus: ${focus[0].toUpperCase()}${focus.slice(1)}. Prefer ${boostedFamilies.join(', ')} when relevant; do not ignore critical non-${focus} continuity.`,
+      : `Focus: ${focus[0].toUpperCase()}${focus.slice(1)}. Prefer ${boostedFamilies.join(', ')} when relevant; do not ignore critical non-${focus} scene constraints.`,
     composerLine: focus === 'balanced'
       ? 'Focus: Balanced. Compose in Arbiter priority order.'
       : `Focus: ${focus[0].toUpperCase()}${focus.slice(1)}. Keep boosted-family guidance earlier under budget pressure when evidence supports it.`

@@ -23,6 +23,16 @@ Host current model routes through SillyTavern raw generation when available, wit
 
 Direct endpoint API keys are session-only secrets kept in the in-memory secret store. Settings store only `sessionApiKeyPresent`.
 
+The provider control plane is shared with the settings UI:
+
+- connection profiles are listed from `context.ConnectionManagerRequestService.getSupportedProfiles()`, global `ConnectionManagerRequestService.getSupportedProfiles()`, and host state profile arrays/maps;
+- provider status resolves the selected source, selected profile label, and model label before a test call runs;
+- OpenAI-compatible model discovery uses the configured base URL normalized to `/models`, sends a GET with the session bearer key, and accepts OpenAI-style `data[]` plus simpler `models[]` payloads.
+
+Model discovery is not a generation call. It does not mutate settings, clear prompts, invalidate scene cache, write journals, or persist the session key. The Providers pane may show the discovered model list and copy a selected id into the model input, but saving remains a separate operator action.
+
+Recursion exposes route visibility as a compact Reasoning Level summary rather than Directive-style per-role routing controls. Detailed role-to-lane policy stays in runtime so the V1 settings pane remains small.
+
 ## Generation Roles
 
 | Role | Lane | Current use |
@@ -33,7 +43,7 @@ Direct endpoint API keys are session-only secrets kept in the in-memory secret s
 | `reasonerComposer` | Reasoner | Medium+ synthesis patch for the Turn Brief. |
 | `providerTest` | Selected lane | Connectivity and structured response test for provider settings UI. |
 
-Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `continuityRiskCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, `prosePacingCard`, and `openThreadsCard`.
+Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`.
 
 ## Routing Diagram
 

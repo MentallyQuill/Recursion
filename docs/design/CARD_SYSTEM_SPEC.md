@@ -27,20 +27,19 @@ Related design docs:
 
 ## Card Families
 
-V1 currently uses the fixed catalog below. The Arbiter receives this predetermined catalog as a menu and decides what is already represented, what is missing, and what should be generated for the current scene. Implementation tests may use smaller fixtures, but the shipped V1 product should expose the current catalog to the Arbiter until the audit below is implemented in code.
+V1 uses the audited fixed catalog below. The Arbiter receives this predetermined catalog as a menu and decides what is already represented, what is missing, and what should be generated for the current scene.
 
 | Family | Purpose | Prompt Use |
 | --- | --- | --- |
-| Scene Frame | Current location, situation, participants, and immediate dramatic direction. | Usually eligible for every turn hand while the scene is active. |
+| Scene Frame | Current location, situation, immediate direction, and hard beat boundary. | Usually eligible for every turn hand while the scene is active. |
 | Active Cast | Who is present, their visible state, and current conversational or physical role. | Helps prevent dropped characters and speaker confusion. |
 | Character Motivation | Observable or safely inferred motives, pressures, hesitations, and goals. | Replaces raw internal-thought injection with bounded behavior guidance. |
 | Relationship | Current conversational tension, relationship texture, promises, conflicts, and voice constraints. | Guides reply tone, subtext, and active relationship implications. |
-| Continuity Risk | Scene constraints likely to make the next response implausible if missed. | High-priority safety lane for hard limits, timing, access, and contradiction traps. |
+| Scene Constraints | Hard limits, contradiction traps, timing, access, visibility, and plausibility constraints. | High-priority safety lane for scene constraints. |
 | Knowledge | Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries. | Guardrail lane for knowledge state and spoiler-safe reveal control. |
 | Consequences | Deadlines, countdowns, delayed consequences, and escalation triggers. | Keeps near-term pressure visible without turning it into durable memory. |
 | Environment | Spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances. | Keeps action grounded in the current scene. |
 | Items | Important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them. | Tracks item ownership and immediate object affordances. |
-| Prose | Legacy local craft guidance for density, momentum, specificity, and response shape. | Candidate for removal from default generation unless narrowed to hard response-shape constraints. |
 | Open Threads | Unresolved questions, immediate promises, pending actions, and near-term pressures. | Keeps the next response aware of visible story obligations. |
 
 Each family also exposes fixed scope facets. Facets do not create separate cards; they define what the Arbiter and card generator should emphasize inside that family. The facet labels and descriptions live in `src/card-scope.mjs` and are reused for Arbiter catalog payloads, card-generation prompt focus, UI hover help, and diagnostics.
@@ -49,7 +48,7 @@ V1 should not support arbitrary user-defined card families. Custom families can 
 
 ## Card Family Audit
 
-This audit defines the target direction for the V1 catalog. The implementation may still expose legacy family names until the catalog, role IDs, tests, prompts, and docs are updated together.
+The implemented catalog follows this direction:
 
 | Family | Decision | Reasoning-expansion target | Avoid |
 | --- | --- | --- | --- |
@@ -57,33 +56,24 @@ This audit defines the target direction for the V1 catalog. The implementation m
 | Active Cast | Keep | Expand who can plausibly act, speak, observe, interrupt, or be forgotten because they are silent but present. | Character roster recap or durable relationship tracking. |
 | Character Motivation | Keep, safety-bound | Expand visible goals, pressures, hesitation, and likely behavior vectors from observable evidence. | Hidden thoughts, private plans, mind-reading, or future plot steering. |
 | Relationship | Keep, reframe | Expand social affordances: leverage, tension, debts, promises, refusals, trust, threat, address, and what would escalate or soften the exchange. | Generic dialogue-tone advice or long relationship history. |
-| Continuity Risk | Reframe or rename | Use as scene constraints: hard limits, contradiction traps, cause/effect, timing, access, visibility, or state that would make the next response implausible if missed. | Continuity-extension posture, durable canon arbitration, or collecting facts just because they are true. |
+| Scene Constraints | Keep | Use as scene constraints: hard limits, contradiction traps, cause/effect, timing, access, visibility, or state that would make the next response implausible if missed. | Continuity-extension posture, durable canon arbitration, or collecting facts just because they are true. |
 | Knowledge | Keep | Expand knowledge asymmetry: who knows, suspects, misunderstands, can infer, must not learn, or can safely reveal something now. | Spoiler storage, secret-lore dumps, or revealing hidden facts as narration. |
 | Consequences | Keep | Expand near-term pressures from choices already in motion: deadlines, delayed effects, escalation triggers, windows of opportunity, and likely fallout. | Long plot planning or future-story scripting. |
 | Environment | Keep, core | Expand local affordances: sightlines, routes, exits, obstacles, hazards, sensory cues, usable objects, social exposure, and plausible interruptions. | Decorative description or encyclopedia detail unrelated to the current beat. |
 | Items | Keep | Expand object affordances: who controls an item, where it is, who can reach it, what it enables, and what risk it creates right now. | Inventory management for its own sake. |
-| Prose | Cut from default catalog | Most prose guidance is already handled by the base model, recent chat, preset, and behavior settings. Preserve only rare hard response-shape constraints under another family if they materially affect the next beat. | Generic density, momentum, specificity, or style advice. |
 | Open Threads | Keep, reframe | Expand visible unresolved obligations and hooks: pending questions, requested actions, promises awaiting payoff, interrupted moves, and near-term choices. | Backlog/task-list behavior or duplicating Consequences without next-turn relevance. |
 
 The highest-value Recursion cards are the ones that surface non-obvious next-response implications. Low-value cards are those that merely preserve facts, restate obvious context, teach the model broad lore, or provide generic prose coaching.
 
 ## Card Facet Audit
 
-This is the actual sub-item audit for the current `src/card-scope.mjs` catalog. Facets are not separate generated cards today, but they are the user-facing card-scope items and the prompt focus sent to the Arbiter/card generator. Future catalog changes should update these facets, labels, tests, UI hover copy, provider prompt focus, and docs together.
-
-Decision meanings:
-
-- `Keep`: preserve the facet as a high-value scene-reasoning focus.
-- `Reframe`: preserve the underlying value, but change wording or prompt meaning away from fact storage, lore, or generic style advice.
-- `Merge`: fold the facet into another stronger facet to reduce duplication.
-- `Conditional`: keep only when current evidence makes it active for the next beat.
-- `Cut`: remove from default scope/generation.
+This is the implemented sub-item catalog for `src/card-scope.mjs`. Facets are not separate generated cards today, but they are the user-facing card-scope items and the prompt focus sent to the Arbiter/card generator. Future catalog changes should update these facets, labels, tests, UI hover copy, provider prompt focus, and docs together.
 
 | Family | Facet | Decision | Target meaning | Avoid |
 | --- | --- | --- | --- | --- |
-| Scene Frame | `locationSituation` | Reframe | Expand current location and situation into nearby routes, sightlines, social exposure, local pressure, and what is relevant now. | Listing place names, broad setting lore, or unrelated room detail. |
-| Scene Frame | `presentParticipants` | Merge | Fold into Active Cast unless a scene-level frame needs a one-line crowd/presence summary. | Duplicating the Active Cast roster. |
-| Scene Frame | `immediateDirection` | Keep, reframe | Identify the next-beat vector the scene is pointing toward without deciding future plot. | Plot planning, railroading, or summarizing the last message. |
+| Scene Frame | `locationSituation` | Keep | Expand current location and situation into nearby routes, sightlines, social exposure, local pressure, and what is relevant now. | Listing place names, broad setting lore, or unrelated room detail. |
+| Scene Frame | `immediateDirection` | Keep | Identify the next-beat vector the scene is pointing toward without deciding future plot. | Plot planning, railroading, or summarizing the last message. |
+| Scene Frame | `beatConstraint` | Keep | Preserve hard response boundaries such as answer now, hold before a reveal, avoid time skip, or do not skip a pending payoff. | Generic pacing coaching. |
 | Active Cast | `presentCharacters` | Keep | Track who can act, observe, interrupt, be addressed, or be accidentally dropped from the next response. | Durable cast lists or inventing absent characters. |
 | Active Cast | `visibleState` | Keep | Surface observable condition, posture, injury, constraint, mood, or capability that changes what the character can do now. | Private feelings or generic mood tags. |
 | Active Cast | `speakerRoles` | Keep, reframe | Clarify who is speaking, addressed, listening, controlling the exchange, or unable to speak. | Dialogue formatting advice detached from the scene. |
@@ -93,9 +83,9 @@ Decision meanings:
 | Relationship | `tension` | Keep | Expand current friction, trust, leverage, intimacy, threat, or subtext into usable social affordances. | Generic tone labels. |
 | Relationship | `promisesConflicts` | Keep | Preserve active promises, refusals, debts, threats, disagreements, and obligations because they shape what can be said or done next. | Long relationship history or continuity ledger behavior. |
 | Relationship | `voiceConstraints` | Conditional, reframe | Keep only as scene-local address/speech constraints, such as formality, taboo wording, secrecy, or who can safely say what. | Replacing the preset, generic style coaching, or broad voice imitation. |
-| Continuity Risk | `fragileFacts` | Reframe | Treat as hard scene constraints and plausibility traps: injuries, locked routes, missing objects, stated choices, or visible limits. | Collecting facts merely because they are true. |
-| Continuity Risk | `spatialConstraints` | Keep, reframe | Preserve movement, reach, visibility, blocked route, distance, and access limits that affect the next beat. | General map summary better handled by Environment. |
-| Continuity Risk | `timelineOrder` | Keep, reframe | Track immediate cause/effect, sequence, reveal order, and what has not happened yet. | Long timeline management or durable canon arbitration. |
+| Scene Constraints | `hardLimits` | Keep | Treat as hard scene constraints and plausibility traps: injuries, locked routes, missing objects, stated choices, or visible limits. | Collecting facts merely because they are true. |
+| Scene Constraints | `spatialConstraints` | Keep | Preserve movement, reach, visibility, blocked route, distance, and access limits that affect the next beat. | General map summary better handled by Environment. |
+| Scene Constraints | `timelineOrder` | Keep | Track immediate cause/effect, sequence, reveal order, and what has not happened yet. | Long timeline management or durable canon arbitration. |
 | Knowledge | `concealedFacts` | Conditional, reframe | Use only for scene-active hidden facts that shape behavior or guardrails. | Secret-lore storage or spoiler dumps. |
 | Knowledge | `knowsSuspects` | Keep | Clarify who knows, suspects, misunderstands, can infer, or should not know a relevant fact. | Omniscient narration or private knowledge leakage. |
 | Knowledge | `revealBoundaries` | Keep | Define what the next response must not reveal, confirm, imply, or over-explain too early. | Turning hidden facts into narration. |
@@ -108,14 +98,11 @@ Decision meanings:
 | Items | `heldCarriedItems` | Conditional, reframe | Track active objects only when possession, absence, concealment, or readiness matters now. | Inventory management for its own sake. |
 | Items | `itemLocationControl` | Keep, core | Clarify where the object is, who controls it, who can reach it, and who can withhold or use it. | Ownership lists without scene effect. |
 | Items | `itemAffordancesRisks` | Keep, core | Expand what an item enables, blocks, threatens, exposes, or risks in the current beat. | Generic item descriptions. |
-| Prose | `density` | Cut | Remove from default scope; broad response density belongs to behavior settings/preset, not cards. | Generic writing advice. |
-| Prose | `momentum` | Rehome, reframe | Preserve only the hard beat constraint, such as do not skip a payoff or hold before a reveal, under Scene Frame/Open Threads/Consequences. | Generic pacing coaching. |
-| Prose | `specificityShape` | Cut or narrow | Remove from default scope unless converted into an explicit hard response-shape constraint for this turn. | "Be more specific" advice or prose polishing. |
 | Open Threads | `unresolvedQuestions` | Conditional, reframe | Keep questions only when they create visible next-turn pressure, uncertainty, or a decision point. | Backlog of every question raised. |
 | Open Threads | `pendingActions` | Keep | Preserve attempted, requested, promised, interrupted, or awaited actions that should influence the next response. | Task-list behavior detached from the scene. |
 | Open Threads | `nearTermPressures` | Keep | Capture immediate obligations, looming problems, choices, or hooks that shape the next beat. | Duplicating Consequences without added next-turn value. |
 
-Net facet direction: most sub-items are useful if they become implication expanders. The main cuts are `density` and broad `specificityShape`; `momentum` is salvageable only as a hard beat constraint outside Prose. The main duplication is `presentParticipants`, which should fold toward Active Cast. The riskiest keep is `voiceConstraints`, which must become scene-local speech/address constraints rather than a style-preset substitute.
+Net facet direction: every implemented sub-item must act as an implication expander. Broad craft guidance belongs to the user's preset and behavior settings; hard beat constraints live under Scene Frame. The riskiest keep is `voiceConstraints`, which must remain scene-local speech/address constraints rather than a style-preset substitute.
 
 ## Card Data Contract
 

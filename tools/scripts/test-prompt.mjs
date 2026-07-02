@@ -51,7 +51,7 @@ function baseHand(overrides = {}) {
       },
       {
         id: 'c2',
-        family: 'Continuity Risk',
+        family: 'Scene Constraints',
         promptText: 'The lamp is broken and should not provide light.',
         emphasis: 'emphasized',
         tokenEstimate: 12,
@@ -86,7 +86,7 @@ function baseHand(overrides = {}) {
     omitted: [
       {
         cardId: 'omitted-1',
-        family: 'Prose',
+        family: 'Open Threads',
         reason: 'token-budget',
         tokenEstimate: 99,
         privateSecret: 'private-secret'
@@ -103,7 +103,7 @@ const packet = await composePromptPacket({
   settings: { promptFootprint: 'normal', reasonerUse: 'off' }
 });
 validatePromptPacket(packet);
-assertEqual(packet.packetVersion, 1, 'packet version is stable');
+assertEqual(packet.packetVersion, 2, 'packet version is stable');
 assertEqual(packet.chatId, 'chat', 'chat id preserved');
 assertEqual(packet.sceneFingerprint, 'scene', 'scene fingerprint preserved');
 assertEqual(packet.turnFingerprint, 'turn', 'turn fingerprint preserved');
@@ -114,7 +114,7 @@ assert(packet.sections.sceneBrief.includes('rain-soaked alley'), 'scene frame ro
 assert(packet.sections.sceneBrief.includes('Mara'), 'active cast routes to scene brief');
 assert(packet.sections.sceneBrief.includes('blocked fire door'), 'environment affordances route to scene brief');
 assert(packet.sections.turnBrief.includes('unanswered signal'), 'other card families route to turn brief');
-assert(packet.sections.guardrails.includes('lamp'), 'continuity risk becomes guardrail');
+assert(packet.sections.guardrails.includes('lamp'), 'scene constraints become guardrail');
 assert(packet.sections.guardrails.includes('Respect the player message'), 'static player-message guardrail included');
 assert(packet.sections.guardrails.includes('Keep out-of-character analysis'), 'static hidden-information guardrail included');
 assertNoPrivateFields(packet, 'packet excludes private hand and card fields');
@@ -129,7 +129,7 @@ assertDeepEqual(
   })),
   [
     { cardId: 'c1', family: 'Scene Frame', emphasis: 'normal', tokenEstimate: 12, detailProfile: 'standard', evidenceRefs: ['message:1'] },
-    { cardId: 'c2', family: 'Continuity Risk', emphasis: 'emphasized', tokenEstimate: 12, detailProfile: 'expanded', evidenceRefs: ['message:2'] },
+    { cardId: 'c2', family: 'Scene Constraints', emphasis: 'emphasized', tokenEstimate: 12, detailProfile: 'expanded', evidenceRefs: ['message:2'] },
     { cardId: 'c3', family: 'Active Cast', emphasis: 'normal', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:3'] },
     { cardId: 'c4', family: 'Environment', emphasis: 'muted', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:4'] },
     { cardId: 'c5', family: 'Open Threads', emphasis: 'normal', tokenEstimate: 10, detailProfile: 'standard', evidenceRefs: ['message:5'] }
@@ -137,7 +137,7 @@ assertDeepEqual(
   'selected card refs preserve safe prompt-facing metadata'
 );
 assertDeepEqual(packet.omissions, [
-  { cardId: 'omitted-1', family: 'Prose', reason: 'token-budget', tokenEstimate: 99 }
+  { cardId: 'omitted-1', family: 'Open Threads', reason: 'token-budget', tokenEstimate: 99 }
 ], 'omissions preserve safe omission metadata');
 
 const policyPacket = await composePromptPacket({
@@ -314,10 +314,10 @@ const hostilePacket = await composePromptPacket({
 assertEqual(hostilePacket.diagnostics.runId, 'outer-run', 'provided runId propagated into diagnostics');
 assertNoPrivateFields(hostilePacket, 'safe packet metadata redacts hostile allowlisted strings');
 assert(hostilePacket.selectedCardRefs[0].cardId.startsWith('card-'), 'unsafe card id is hashed');
-assertEqual(hostilePacket.selectedCardRefs[0].family, 'Prose', 'unsafe card family falls back to safe family');
+assertEqual(hostilePacket.selectedCardRefs[0].family, 'Open Threads', 'unsafe card family falls back to safe family');
 assertDeepEqual(hostilePacket.selectedCardRefs[0].evidenceRefs, ['message:9'], 'unsafe evidence refs are dropped');
 assert(hostilePacket.omissions[0].cardId.startsWith('omitted-'), 'unsafe omission card id is hashed');
-assertEqual(hostilePacket.omissions[0].family, 'Prose', 'unsafe omission family falls back');
+assertEqual(hostilePacket.omissions[0].family, 'Open Threads', 'unsafe omission family falls back');
 assertEqual(hostilePacket.omissions[0].reason, 'unspecified', 'unsafe omission reason is restricted to enum');
 
 const compactHand = baseHand({
@@ -452,7 +452,7 @@ const reasonerPacket = await composePromptPacket({
     handId: 'hand-1',
     cards: [
       { id: 'c1', family: 'Scene Frame', promptText: 'The scene is in a rain-soaked alley.', emphasis: 'normal', tokenEstimate: 12 },
-      { id: 'c2', family: 'Continuity Risk', promptText: 'The lamp is broken and should not provide light.', emphasis: 'emphasized', tokenEstimate: 12 }
+      { id: 'c2', family: 'Scene Constraints', promptText: 'The lamp is broken and should not provide light.', emphasis: 'emphasized', tokenEstimate: 12 }
     ],
     omitted: []
   },
@@ -616,8 +616,8 @@ const overBudgetRiskPacket = await composePromptPacket({
     handId: 'over-budget-risk',
     cards: [{
       id: 'risk-large',
-      family: 'Continuity Risk',
-      promptText: Array.from({ length: 100 }, (_, index) => `Continuity pressure ${index}.`).join(' '),
+      family: 'Scene Constraints',
+      promptText: Array.from({ length: 100 }, (_, index) => `Scene constraint pressure ${index}.`).join(' '),
       tokenEstimate: 800
     }],
     omitted: []

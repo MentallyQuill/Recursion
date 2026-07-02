@@ -71,7 +71,7 @@ Mode selector rows:
 - Divergent arrows icon, `Auto`: Recursion selects cards, composes the prompt packet, and injects it automatically when ready.
 - Parallel arrows icon, `Manual`: Recursion uses the selected card scope as a strict whitelist when planning, selecting, composing, and injecting context.
 
-Each mode row should show the icon, short name, and a hover/focus tip with the longer explanation. The menu should use native SillyTavern popup density and close on selection, outside click, or `Esc`.
+Each mode row should show the icon, short name, and a hover/focus tip with the longer explanation. The menu should use native SillyTavern popup compactness and close on selection, outside click, or `Esc`.
 
 Reference mode selector shape:
 
@@ -216,7 +216,7 @@ When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt 
       state: "warning",
       children: [
         { id: "scene-frame-card", label: "Scene Frame", providerLane: "utility", state: "running", meta: "running", sourceRoleId: "sceneFrameCard" },
-        { id: "continuity-risk-card", label: "Continuity Risk", providerLane: "utility", state: "cached", meta: "cached", source: "cache", sourceRoleId: "continuityRiskCard" },
+        { id: "scene-constraints-card", label: "Scene Constraints", providerLane: "utility", state: "cached", meta: "cached", source: "cache", sourceRoleId: "sceneConstraintsCard" },
         { id: "knowledge-secrets-card", label: "Knowledge", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "knowledgeSecretsCard" },
         { id: "clocks-consequences-card", label: "Consequences", providerLane: "utility", state: "running", meta: "running", sourceRoleId: "clocksConsequencesCard" },
         { id: "character-motivation-card", label: "Character Motivation", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "characterMotivationCard" },
@@ -306,7 +306,7 @@ Generating                         2 model calls running
 [done] Checking scene shift         done
 [warn] Utility card batch           caution
        [run]  Scene Frame           running
-       [cache] Continuity Risk      cached
+       [cache] Scene Constraints   cached
        [done]  Motivation           generated
        [warn]  Open Threads         fallback
 [run]  Reasoner brief               running
@@ -761,11 +761,11 @@ Example:
 ```text
 Last brief - 8 cards - click row to expand - priority color only
 
-[warning]  Continuity Risk      doorway blocked, lamp broken...      critical | fresh | injected | scene
+[warning]  Scene Constraints   doorway blocked, lamp broken...      critical | fresh | injected | scene
 [target]   Motivation           Mara wants to keep control...         strong | Mara | turn brief
 [people]   Relationship         accusation unresolved...              normal | tension | dialogue
 [cube]     Environment          rain masks movement...                normal | items | local
-[lines]    Prose                keep motion concrete...               light | style | compiler
+[map]      Scene Frame          answer before time skip...             light | beat | compiler
 ```
 
 Rows are read-only. Clicking or pressing `Enter` / `Space` expands a row in place to show the full card text. Clicking again collapses it. The dropdown should not become an editor.
@@ -792,11 +792,11 @@ Each row should show:
 
 Category icons replace generic card-stack icons in the list:
 
-- Continuity risk: warning triangle.
+- Scene constraints: warning triangle.
 - Motivation: target or focus reticle.
 - Relationship: paired people or link icon.
 - Environment / items: cube, box, or scene icon.
-- Prose / pacing: text lines or rhythm icon.
+- Scene frame beat constraint: map or boundary icon.
 - Scene objective: flag.
 - Memory echo: history/clock arrow.
 - Safety guard: shield.
@@ -1070,7 +1070,7 @@ Play is the default tab. It contains one open `Behavior` disclosure for controls
 - Strength: Light, Balanced, Strong.
 - Min Cards: numeric `0..20`, used by Low Reasoning Level.
 - Max Cards: numeric `0..20`, used by Ultra Reasoning Level; Medium and High use the floor average of Min and Max.
-- Focus: Balanced, Character, Continuity, Prose, Plot.
+- Focus: Balanced, Character, Constraints, Scene, Plot.
 - Prompt Footprint: Compact, Normal, Rich.
 
 The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). In short: Strength controls intervention pressure, Min/Max Cards control Reasoning Level card-count bounds, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
@@ -1088,7 +1088,10 @@ Providers contains the complete provider setup surface in collapsible lane secti
 
 - Utility Provider, always enabled and open by default.
 - Reasoner Provider, optional and collapsed by default unless it is configured.
+- Compact route summary derived from Reasoning Level; no deep per-role routing editor in V1.
 - Source, profile, endpoint, model, session key, max tokens.
+- Readiness text for the selected source before running a provider test.
+- Fetch Models for OpenAI-compatible endpoints, with a fetched model selector that writes the chosen id into the model field.
 - Save Provider, Test Provider, Clear Session Key.
 - Status, resolved provider, and resolved model.
 - Temperature and top-p stay internal/defaulted in the compact V1 menu so the provider pane matches the mockup and does not become a dense admin form.
@@ -1126,7 +1129,7 @@ Each provider card should support:
 
 - Source: Current Host Model, Host Connection Profile, OpenAI-Compatible Endpoint.
 - Connection profile selector when using host profiles.
-- Base URL and model for OpenAI-compatible endpoints.
+- Base URL, model, Fetch Models, and fetched-model selector for OpenAI-compatible endpoints.
 - Session API key field.
 - Max tokens.
 - Save Provider.
@@ -1148,7 +1151,7 @@ The visual direction is SillyTavern-native graphite:
 - Let the active SillyTavern theme remain dominant; Recursion should adapt to the host theme instead of forcing a separate palette.
 - Use dark neutral greys as a restrained Recursion accent layer when the current theme supports dark mode.
 - Use hairline borders and subtle elevation that match SillyTavern popups and extension panels.
-- Use compact rows and segmented controls that match SillyTavern control density.
+- Use compact rows and segmented controls that match SillyTavern control compactness.
 - Teal/cyan for active system signals.
 - Amber for attention.
 - Green for ready/success.
@@ -1174,7 +1177,7 @@ Avoid:
 - Purple/blue gradient dominance.
 - Orange brand or status treatment that competes with SillyTavern dialogue text.
 - Ornate fantasy treatment.
-- Directive-sized operational density.
+- Directive-sized operational compactness.
 - Large decorative cards.
 - Cards inside cards.
 - Marketing/landing-page composition.

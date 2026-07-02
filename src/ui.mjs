@@ -12,6 +12,11 @@ import {
 } from './card-scope.mjs';
 import { packetToPromptBlocks } from './prompt.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from './progress.mjs';
+import {
+  listProviderConnectionProfiles,
+  providerModelStatus,
+  providerRouteSummary
+} from './providers.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 
 const PHASE_LABELS = Object.freeze({
@@ -71,8 +76,8 @@ const FOOTPRINT_OPTIONS = Object.freeze([
 const FOCUS_OPTIONS = Object.freeze([
   ['balanced', 'Balanced'],
   ['character', 'Character'],
-  ['continuity', 'Continuity'],
-  ['prose', 'Prose'],
+  ['constraints', 'Constraints'],
+  ['scene', 'Scene'],
   ['plot', 'Plot']
 ]);
 const REASONING_LEVEL_OPTIONS = Object.freeze([
@@ -110,7 +115,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   strength: 'Bias strength for the composed prompt packet. Light stays subtle, Balanced is the normal default, and Strong gives Recursion more room to steer scene adhesion.',
   minCards: 'Low Reasoning Level card target. Use fewer cards for faster, cheaper turns or more cards when sparse scenes need extra grounding.',
   maxCards: 'Ultra Reasoning Level card target. Medium and High use the average, so this also sets the upper range for busier scenes.',
-  focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, continuity, prose, or plot without becoming a hard whitelist.',
+  focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, constraints, scene, or plot without becoming a hard whitelist.',
   footprint: 'Prompt budget for the composed Recursion packet. Compact spends fewer tokens, Rich preserves more scene detail when the moment is complex.',
   injection: 'Compatibility controls for where the final composed Recursion packet lands in SillyTavern. These do not create per-card prompt controls.',
   injectionPlacement: 'Choose the SillyTavern prompt lane for the composed Recursion packet. In Prompt is the recommended default; In Chat can help presets that weight recent chat harder.',
@@ -301,6 +306,11 @@ function normalizeReasoningLevel(value) {
   return REASONING_LEVELS.includes(level) ? level : 'high';
 }
 
+function reasoningLevelLabel(value) {
+  const level = normalizeReasoningLevel(value);
+  return REASONING_LEVEL_OPTIONS.find(([candidate]) => candidate === level)?.[1] || titleCase(level, 'High');
+}
+
 function providerMark(providerLane) {
   return providerLane === 'reasoner' ? 'R' : 'U';
 }
@@ -322,7 +332,7 @@ function cardFamily(card) {
 
 function cardFamilyIcon(family) {
   const normalized = cleanText(family, '').toLowerCase();
-  if (normalized.includes('continuity')) return '!';
+  if (normalized.includes('constraint')) return '!';
   if (normalized.includes('knowledge') || normalized.includes('secret')) return '*';
   if (normalized.includes('clock') || normalized.includes('consequence')) return '>';
   if (normalized.includes('motivation')) return '?';
@@ -331,7 +341,6 @@ function cardFamilyIcon(family) {
   if (normalized.includes('cast')) return '@';
   if (normalized.includes('possession') || normalized.includes('item')) return '$';
   if (normalized.includes('environment') || normalized.includes('affordance')) return '+';
-  if (normalized.includes('prose') || normalized.includes('pacing')) return '~';
   return '#';
 }
 
@@ -357,7 +366,7 @@ function briefChipClass(chip, priority = '') {
 function cardFamilyIconSvg(family) {
   const normalized = cleanText(family, '').toLowerCase();
   const svgAttrs = { class: 'recursion-cat-icon', viewBox: '0 0 16 16', 'aria-hidden': 'true' };
-  if (normalized.includes('continuity') || normalized.includes('risk')) {
+  if (normalized.includes('constraint') || normalized.includes('risk')) {
     return el('svg', { attrs: svgAttrs }, [
       el('path', { attrs: { d: 'M8 2 14 13H2L8 2Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' } }),
       el('path', { attrs: { d: 'M8 6v3.2M8 11.8h.01', stroke: 'currentColor', 'stroke-width': '1.45', 'stroke-linecap': 'round' } })
@@ -389,12 +398,6 @@ function cardFamilyIconSvg(family) {
       el('circle', { attrs: { cx: '5', cy: '7', r: '2.4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2' } }),
       el('circle', { attrs: { cx: '11', cy: '7', r: '2.4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2' } }),
       el('path', { attrs: { d: 'M6.9 8.4 9.1 8.4M3.2 12.8c.8-1.3 2-2 3.3-2M12.8 12.8c-.8-1.3-2-2-3.3-2', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.1', 'stroke-linecap': 'round' } })
-    ]);
-  }
-  if (normalized.includes('prose') || normalized.includes('pacing') || normalized.includes('style')) {
-    return el('svg', { attrs: svgAttrs }, [
-      el('path', { attrs: { d: 'M3 4h10M3 8h7M3 12h5', stroke: 'currentColor', 'stroke-width': '1.3', 'stroke-linecap': 'round' } }),
-      el('path', { attrs: { d: 'M11 10.5 13 12l-2 1.5', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.1', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
     ]);
   }
   if (normalized.includes('objective') || normalized.includes('thread') || normalized.includes('plot')) {
@@ -490,7 +493,7 @@ function briefChipTooltip(chip) {
   if (normalized === 'scene') return 'Scene-scoped metadata.';
   if (normalized === 'turn') return 'Turn-scoped metadata.';
   if (normalized === 'strong') return 'High priority for this turn.';
-  if (normalized === 'critical') return 'Critical guardrail or continuity priority.';
+  if (normalized === 'critical') return 'Critical guardrail or scene-constraint priority.';
   return chip;
 }
 
@@ -1546,78 +1549,11 @@ function normalizeProviderSource(value) {
   return PROVIDER_SOURCE_OPTIONS.some(([candidate]) => candidate === source) ? source : 'host-current-model';
 }
 
-function profileId(profile = {}) {
-  return String(profile.id || profile.name || profile.profileId || profile.uuid || profile.profile_id || profile.label || '').trim();
-}
-
-function profileLabel(profile = {}, fallback = '') {
-  return cleanText(profile.name || profile.label || profile.profileName || profile.title || fallback);
-}
-
-function profileModel(profile = {}) {
-  return cleanText(profile.model || profile.modelId || profile.model_name || profile.settings?.model || '');
-}
-
-function collectProfileArrays(root, keys = []) {
-  if (!root || typeof root !== 'object') return [];
-  const arrays = [];
-  const seen = new Set();
-  function visit(value, depth = 0) {
-    if (!value || typeof value !== 'object' || seen.has(value) || depth > 3) return;
-    seen.add(value);
-    for (const key of keys) {
-      if (Array.isArray(value[key])) arrays.push(value[key]);
-    }
-    for (const key of ['settings', 'state', 'data', 'connectionManager', 'ConnectionManager']) {
-      if (value[key] && typeof value[key] === 'object') visit(value[key], depth + 1);
-    }
-  }
-  visit(root);
-  return arrays;
-}
-
 function listConnectionProfiles() {
-  let supportedProfiles = [];
-  try {
-    const service = globalThis.ConnectionManagerRequestService;
-    if (typeof service?.getSupportedProfiles === 'function') {
-      const result = service.getSupportedProfiles();
-      if (Array.isArray(result)) supportedProfiles = result;
-    }
-  } catch {
-    supportedProfiles = [];
-  }
-  let context = null;
-  try {
-    context = globalThis.SillyTavern?.getContext?.() || null;
-  } catch {
-    context = null;
-  }
-  const roots = [
-    { profiles: supportedProfiles },
-    context,
-    globalThis.connectionManager,
-    globalThis.ConnectionManager,
-    globalThis.extension_settings,
-    globalThis.power_user
-  ];
-  const seen = new Set();
-  const profiles = [];
-  for (const array of roots.flatMap((root) => collectProfileArrays(root, ['connectionProfiles', 'connection_profiles', 'profileList', 'profiles', 'connectionManagerProfiles']))) {
-    for (const item of array) {
-      if (!item || typeof item !== 'object') continue;
-      const id = profileId(item);
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      const label = profileLabel(item, id);
-      const model = profileModel(item);
-      profiles.push({
-        id,
-        label: model ? `${label} / ${model}` : label
-      });
-    }
-  }
-  return profiles;
+  return listProviderConnectionProfiles().map((profile) => ({
+    id: profile.id,
+    label: profile.label
+  }));
 }
 
 function connectionProfileOptions(selectedId = '') {
@@ -1642,8 +1578,29 @@ function syncProviderSourceVisibility(container, lane) {
   }
 }
 
-function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
+function providerReadinessNode(provider, lane) {
+  const status = providerModelStatus(provider);
+  const label = status.ready ? status.label : `${status.sourceLabel}: ${status.message}`;
+  return el('div', {
+    className: `recursion-provider-readiness${status.ready ? ' is-ready' : ' is-missing'}`,
+    dataset: providerDataset('Readiness', lane)
+  }, [
+    el('span', { text: label })
+  ]);
+}
+
+function fetchedModelOptions(models = []) {
+  const normalized = Array.isArray(models) ? models : [];
+  return [
+    ['', normalized.length ? 'Select fetched model' : 'Fetch models first'],
+    ...normalized.map((model) => [cleanText(model.id), cleanText(model.label || model.id)])
+      .filter(([id]) => id)
+  ];
+}
+
+function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, options = {}) {
   const source = asObject(provider);
+  const fetchState = asObject(asObject(options).modelFetchState);
   const title = lane === 'reasoner' ? 'Reasoner Provider' : 'Utility Provider';
   const statusText = lane === 'reasoner' ? 'optional' : providerStatusText(source).toLowerCase();
   const open = lane === 'utility' || source.openAICompatible?.sessionApiKeyPresent === true || Boolean(source.openAICompatible?.model);
@@ -1685,6 +1642,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
     dataset: providerDataset('Enabled', lane),
     ariaLabel: `${title} enabled`
   }));
+  body.appendChild(providerReadinessNode(source, lane));
   const grid = el('div', { className: 'recursion-provider-grid', dataset: { recursionProviderGrid: '' } });
   const sourceControl = selectControl({
       value: cleanText(source.source, 'host-current-model'),
@@ -1726,6 +1684,41 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
     placeholder: 'model'
   });
   setTooltip(modelControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerModel);
+  const modelListControl = selectControl({
+    value: '',
+    options: fetchedModelOptions(fetchState.models),
+    dataset: providerDataset('ModelList', lane),
+    ariaLabel: `${title} fetched model list`
+  });
+  modelListControl.addEventListener?.('change', () => {
+    if (modelListControl.value) modelControl.value = modelListControl.value;
+  });
+  const fetchModelsButton = el('button', {
+    className: 'recursion-button',
+    text: 'Fetch Models',
+    attrs: {
+      type: 'button',
+      'aria-label': `Fetch ${title} models`
+    },
+    dataset: {
+      recursionProviderFetchModels: '',
+      recursionProviderLane: lane,
+      ...providerDataset('FetchModels', lane)
+    }
+  });
+  const fetchStatus = el('span', {
+    className: 'recursion-provider-model-fetch-status',
+    text: cleanText(fetchState.status),
+    dataset: providerDataset('ModelFetchStatus', lane)
+  });
+  const modelStack = el('div', { className: 'recursion-provider-model-stack' }, [
+    modelControl,
+    el('div', { className: 'recursion-provider-model-tools' }, [
+      modelListControl,
+      fetchModelsButton
+    ]),
+    fetchStatus
+  ]);
   const apiKeyControl = inputControl({
     value: '',
     type: 'password',
@@ -1744,7 +1737,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
     }
   }, [
     providerField('Base URL', baseUrlControl),
-    providerField('Model', modelControl),
+    providerField('Model', modelStack),
     providerField('Session Key', apiKeyControl)
   ]);
   grid.appendChild(openAiFields);
@@ -1808,7 +1801,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true) {
   panel.appendChild(group);
 }
 
-function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null) {
+function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, providerModelFetchState = {}) {
   panel.replaceChildren();
   const settings = asObject(view.settings);
   const tooltipsEnabled = asObject(settings.ui).tooltipsEnabled !== false;
@@ -1836,8 +1829,22 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null) {
   const providersPane = el('div', { className: 'recursion-settings-pane', dataset: { recursionSettingsProviders: '' } });
   const advancedPane = el('div', { className: 'recursion-settings-pane', dataset: { recursionSettingsAdvanced: '' } });
   renderHighLevelSettings(playPane, settings);
-  renderProviderSettings(providersPane, 'utility', settings.providers?.utility || {}, tooltipsEnabled);
-  renderProviderSettings(providersPane, 'reasoner', settings.providers?.reasoner || {}, tooltipsEnabled);
+  const route = providerRouteSummary(settings);
+  providersPane.appendChild(el('div', {
+    className: 'recursion-provider-route-summary',
+    attrs: {
+      title: 'Reasoning Level controls routing. Deep per-role provider routing is not a V1 settings surface.'
+    },
+    dataset: { recursionProviderRouteSummary: '' }
+  }, [
+    el('span', { text: route.text })
+  ]));
+  renderProviderSettings(providersPane, 'utility', settings.providers?.utility || {}, tooltipsEnabled, {
+    modelFetchState: providerModelFetchState.utility
+  });
+  renderProviderSettings(providersPane, 'reasoner', settings.providers?.reasoner || {}, tooltipsEnabled, {
+    modelFetchState: providerModelFetchState.reasoner
+  });
   renderAdvancedSettings(advancedPane, settings, {
     resetSceneCache: typeof runtime?.resetSceneCache === 'function'
   });
@@ -2334,8 +2341,15 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let ribbonSuccessTimer = null;
   let ribbonSuccessTimerKey = '';
   let collapsedSuccessKey = '';
+  let transientCurrentStepText = '';
+  let transientCurrentStepStatusKey = '';
+  let transientCurrentStepTimer = null;
   let cardScopeNotice = '';
   let pendingCardScope = null;
+  const providerModelFetchState = {
+    utility: { models: [], status: '' },
+    reasoner: { models: [], status: '' }
+  };
 
   function clearRibbonRevealTimer() {
     if (ribbonRevealTimer !== null && typeof clearTimeout === 'function') clearTimeout(ribbonRevealTimer);
@@ -2346,6 +2360,52 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (ribbonSuccessTimer !== null && typeof clearTimeout === 'function') clearTimeout(ribbonSuccessTimer);
     ribbonSuccessTimer = null;
     ribbonSuccessTimerKey = '';
+  }
+
+  function clearTransientCurrentStepText({ updateView = false } = {}) {
+    if (transientCurrentStepTimer !== null && typeof clearTimeout === 'function') clearTimeout(transientCurrentStepTimer);
+    transientCurrentStepTimer = null;
+    transientCurrentStepText = '';
+    transientCurrentStepStatusKey = '';
+    if (updateView) update();
+  }
+
+  function statusFingerprint(view, model) {
+    const activity = asObject(view.activity);
+    return [
+      model.currentStepText || '',
+      model.runtimeHealthLabel || '',
+      activity.runId || '',
+      activity.recordedAt || '',
+      activity.phase || '',
+      activity.label || '',
+      model.progressRun?.runId || '',
+      model.progressRun?.heroPixelState || '',
+      model.progressRun?.activeCount ?? ''
+    ].map((entry) => String(entry)).join('|');
+  }
+
+  function currentStepTextForRender(view, model) {
+    if (!transientCurrentStepText) return model.currentStepText || '';
+    if (statusFingerprint(view, model) !== transientCurrentStepStatusKey) {
+      clearTransientCurrentStepText();
+      return model.currentStepText || '';
+    }
+    return transientCurrentStepText;
+  }
+
+  function showTransientCurrentStepText(text) {
+    const view = currentView();
+    const model = createRecursionViewModel(view);
+    clearTransientCurrentStepText();
+    transientCurrentStepText = cleanText(text);
+    transientCurrentStepStatusKey = statusFingerprint(view, model);
+    if (typeof setTimeout === 'function') {
+      transientCurrentStepTimer = setTimeout(() => {
+        clearTransientCurrentStepText({ updateView: true });
+      }, 2000);
+    }
+    update();
   }
 
   function setRibbonVisible(nextVisible) {
@@ -2423,13 +2483,19 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function setFixedPanelGeometry(element, { left, top, width, zIndex = 10000 } = {}) {
     if (!element?.style) return;
+    const viewportHeight = Number(globalThis.visualViewport?.height)
+      || Number(globalThis.innerHeight)
+      || Number(document.documentElement?.clientHeight)
+      || 0;
+    const bottomGutter = 14;
+    const maxHeight = Math.max(0, Math.floor(viewportHeight - top - bottomGutter));
     element.style.position = 'fixed';
     element.style.left = `${Math.round(left)}px`;
     element.style.right = 'auto';
     element.style.top = `${Math.round(top)}px`;
     element.style.width = `${Math.round(width)}px`;
     element.style.zIndex = String(zIndex);
-    element.style.maxHeight = `calc(100vh - ${Math.round(top + 10)}px)`;
+    element.style.maxHeight = `${maxHeight}px`;
   }
 
   function syncFloatingPanelGeometry() {
@@ -2437,7 +2503,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (!bar || typeof bar.getBoundingClientRect !== 'function') return;
     const rect = bar.getBoundingClientRect();
     if (!rect || rect.width <= 0) return;
-    const viewportWidth = Math.max(320, Number(globalThis.innerWidth || document.documentElement?.clientWidth || rect.right || 0));
+    const viewportWidth = Math.max(320, Number(globalThis.visualViewport?.width || globalThis.innerWidth || document.documentElement?.clientWidth || rect.right || 0));
     const rootLeft = Math.max(0, rect.left);
     const rootRight = Math.min(viewportWidth, rect.right);
     const rootWidth = Math.max(280, rootRight - rootLeft);
@@ -2574,6 +2640,40 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     section?.classList?.toggle?.('is-open', nextOpen);
   }
 
+  function replaceSelectOptions(select, options = []) {
+    if (!select) return;
+    select.replaceChildren(...options.map(([value, label]) => el('option', { text: label, attrs: { value } })));
+    select.value = '';
+  }
+
+  function setProviderModelFetchStatus(lane, status) {
+    const resolvedLane = lane === 'reasoner' ? 'reasoner' : 'utility';
+    providerModelFetchState[resolvedLane] = {
+      ...providerModelFetchState[resolvedLane],
+      status: cleanText(status)
+    };
+    setText(root, providerSelector('model-fetch-status', resolvedLane), providerModelFetchState[resolvedLane].status);
+  }
+
+  function applyProviderModelFetchResult(lane, result) {
+    const resolvedLane = lane === 'reasoner' ? 'reasoner' : 'utility';
+    if (result?.ok === false) {
+      const message = cleanText(result.error?.message, 'Model fetch failed.');
+      providerModelFetchState[resolvedLane] = { models: [], status: message };
+      replaceSelectOptions(root.querySelector(providerSelector('model-list', resolvedLane)), fetchedModelOptions([]));
+      setText(root, providerSelector('model-fetch-status', resolvedLane), message);
+      return result;
+    }
+    const models = Array.isArray(result?.models) ? result.models : [];
+    providerModelFetchState[resolvedLane] = {
+      models,
+      status: models.length ? `${models.length} models` : 'No models returned.'
+    };
+    replaceSelectOptions(root.querySelector(providerSelector('model-list', resolvedLane)), fetchedModelOptions(models));
+    setText(root, providerSelector('model-fetch-status', resolvedLane), providerModelFetchState[resolvedLane].status);
+    return result;
+  }
+
   actionsButton?.addEventListener('click', (event) => {
     event?.preventDefault?.();
     event?.stopPropagation?.();
@@ -2690,6 +2790,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         reasoningLevel,
         reasonerUse: reasonerUseForReasoningLevel(reasoningLevel)
       }));
+      showTransientCurrentStepText(`Reasoning Level: ${reasoningLevelLabel(reasoningLevel)}`);
     }
     const settingsTabControl = control('recursionSettingsTab');
     if (settingsTabControl) {
@@ -2701,7 +2802,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         ? settingsTabControl.dataset.recursionSettingsTab
         : 'play';
       const view = currentView();
-      renderSettingsPanel(settingsPanel, view, settingsTab, runtime);
+      renderSettingsPanel(settingsPanel, view, settingsTab, runtime, providerModelFetchState);
       settingsPanelRendered = true;
       syncStaticTooltips(root, createRecursionViewModel(view));
       syncFloatingPanelGeometry();
@@ -2710,6 +2811,16 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       runAction(runtime?.updateSettings?.(readSettingsPatch(root)));
       settingsPanelRendered = false;
       update();
+    }
+    const providerFetchModels = control('recursionProviderFetchModels');
+    if (providerFetchModels) {
+      const lane = providerLaneFromDataset(providerFetchModels.dataset);
+      setProviderModelFetchStatus(lane, 'Fetching models...');
+      runAction(Promise.resolve(runtime?.fetchProviderModels?.(lane, readProviderPatch(root, lane)))
+        .then((result) => applyProviderModelFetchResult(lane, result || {
+          ok: false,
+          error: { message: 'Model fetch is unavailable.' }
+        })));
     }
     const providerSave = control('recursionProviderSave');
     if (providerSave) {
@@ -2786,6 +2897,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   document.addEventListener?.('click', handleDocumentClick);
   document.addEventListener?.('keydown', handleDocumentKeydown);
+  const handleViewportChange = () => syncFloatingPanelGeometry();
+  globalThis.visualViewport?.addEventListener?.('resize', handleViewportChange);
+  globalThis.visualViewport?.addEventListener?.('scroll', handleViewportChange);
+  globalThis.addEventListener?.('resize', handleViewportChange);
+  globalThis.addEventListener?.('orientationchange', handleViewportChange);
 
   function runAction(result, after = null) {
     if (result && typeof result.then === 'function') {
@@ -2901,7 +3017,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const model = createRecursionViewModel(view);
     setText(root, '[data-recursion-status]', model.runtimeHealthLabel);
     setText(root, '[data-recursion-mode]', model.modeLabel);
-    setText(root, '[data-recursion-current-step]', model.currentStepText || '');
+    setText(root, '[data-recursion-current-step]', currentStepTextForRender(view, model));
     const modeButton = root.querySelector('[data-recursion-mode-button]');
     if (modeButton) {
       const modeKind = modeIcon(model.mode);
@@ -2933,7 +3049,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     renderHandDropdown(handPanel, view, model);
     if (!cardsPanel.hidden) renderCardsPanelForView(view);
     if (!settingsPanel.hidden && !settingsPanelRendered) {
-      renderSettingsPanel(settingsPanel, view, settingsTab, runtime);
+      renderSettingsPanel(settingsPanel, view, settingsTab, runtime, providerModelFetchState);
       settingsPanelRendered = true;
     }
     renderViewer(viewer, view, model);
@@ -2950,8 +3066,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       if (timer !== null && typeof clearInterval === 'function') clearInterval(timer);
       clearRibbonRevealTimer();
       clearRibbonSuccessTimer();
+      clearTransientCurrentStepText();
       document.removeEventListener?.('click', handleDocumentClick);
       document.removeEventListener?.('keydown', handleDocumentKeydown);
+      globalThis.visualViewport?.removeEventListener?.('resize', handleViewportChange);
+      globalThis.visualViewport?.removeEventListener?.('scroll', handleViewportChange);
+      globalThis.removeEventListener?.('resize', handleViewportChange);
+      globalThis.removeEventListener?.('orientationchange', handleViewportChange);
       root.remove();
     }
   };

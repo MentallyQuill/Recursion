@@ -99,7 +99,7 @@ const nestedChildProgress = createProgressRunModel({
         state: 'running',
         children: [
           { id: 'scene-frame-card', label: 'Scene Frame', providerLane: 'utility', state: 'done', source: 'generated', sourceRoleId: 'sceneFrameCard' },
-          { id: 'continuity-risk-card', label: 'Continuity Risk', providerLane: 'utility', state: 'cached', source: 'cache', sourceRoleId: 'continuityRiskCard' }
+          { id: 'scene-constraints-card', label: 'Scene Constraints', providerLane: 'utility', state: 'cached', source: 'cache', sourceRoleId: 'sceneConstraintsCard' }
         ]
       },
       {
@@ -135,7 +135,7 @@ assertDeepEqual(
   nestedUtilityBatch.children.map((child) => [child.id, child.label, child.state, child.meta, child.sourceRoleId]),
   [
     ['scene-frame-card', 'Scene Frame', 'done', 'generated', 'sceneFrameCard'],
-    ['continuity-risk-card', 'Continuity Risk', 'cached', 'cached', 'continuityRiskCard']
+    ['scene-constraints-card', 'Scene Constraints', 'cached', 'cached', 'sceneConstraintsCard']
   ],
   'nested progress normalizes card child rows with source-aware meta text'
 );
@@ -191,7 +191,7 @@ const derivedProgress = createProgressRunModel({
   ],
   activity: { runId: 'run-derived', phase: 'cardBatchRunning', label: 'Generating scene cards...', providerLane: 'utility', cardCounts: { requested: 3 } },
   lastPlan: {
-    cardJobs: [{ family: 'Scene Frame' }, { family: 'Motivation' }, { family: 'Continuity Risk' }],
+    cardJobs: [{ family: 'Scene Frame' }, { family: 'Motivation' }, { family: 'Scene Constraints' }],
     reasonerDecision: { mode: 'use' }
   }
 });
@@ -248,7 +248,7 @@ const derivedNestedProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'run-nested-derived', phase: 'cardBatchRunning', label: 'Generating scene cards...', providerLane: 'utility', cardCounts: { requested: 4 } },
     { runId: 'run-nested-derived', phase: 'providerCallRunning', label: 'Provider batch call running.', providerLane: 'utility', detail: { roleId: 'sceneFrameCard', batchIndex: 0 } },
-    { runId: 'run-nested-derived', phase: 'cardProgress', label: 'Continuity Risk reused from cache.', providerLane: 'utility', severity: 'success', detail: { parentStepId: 'utility-card-batch', roleId: 'continuityRiskCard', family: 'Continuity Risk', source: 'cache', state: 'cached' } },
+    { runId: 'run-nested-derived', phase: 'cardProgress', label: 'Scene Constraints reused from cache.', providerLane: 'utility', severity: 'success', detail: { parentStepId: 'utility-card-batch', roleId: 'sceneConstraintsCard', family: 'Scene Constraints', source: 'cache', state: 'cached' } },
     { runId: 'run-nested-derived', phase: 'cardProgress', label: 'Character Motivation generated.', providerLane: 'utility', severity: 'success', detail: { parentStepId: 'utility-card-batch', roleId: 'characterMotivationCard', family: 'Character Motivation', source: 'generated', state: 'done' } },
     { runId: 'run-nested-derived', phase: 'cardProgress', label: 'Open Threads fell back locally.', providerLane: 'utility', severity: 'warning', detail: { parentStepId: 'utility-card-batch', roleId: 'openThreadsCard', family: 'Open Threads', source: 'fallback', state: 'warning' } }
   ],
@@ -256,7 +256,7 @@ const derivedNestedProgress = createProgressRunModel({
   lastPlan: {
     cardJobs: [
       { family: 'Scene Frame', role: 'sceneFrameCard' },
-      { family: 'Continuity Risk', role: 'continuityRiskCard' },
+      { family: 'Scene Constraints', role: 'sceneConstraintsCard' },
       { family: 'Character Motivation', role: 'characterMotivationCard' },
       { family: 'Open Threads', role: 'openThreadsCard' }
     ]
@@ -268,7 +268,7 @@ assertDeepEqual(
   derivedNestedBatch.children.map((child) => [child.label, child.state, child.meta]),
   [
     ['Scene Frame', 'running', 'running'],
-    ['Continuity Risk', 'cached', 'cached'],
+    ['Scene Constraints', 'cached', 'cached'],
     ['Character Motivation', 'done', 'generated'],
     ['Open Threads', 'warning', 'fallback']
   ],
@@ -434,15 +434,15 @@ assert(/\.recursion-step-children\s*\{[\s\S]*?--recursion-progress-child-row-hei
 assert(/\.recursion-step-row\.child-row\s*\{[\s\S]*?height:\s*var\(--recursion-progress-child-row-height\);/.test(recursionCss), 'production child progress rows use the reference fixed child height');
 assert(/\.recursion-step-row\.running \.recursion-step-icon\s*\{[\s\S]*?height:\s*12px;[\s\S]*?width:\s*12px;/.test(recursionCss), 'production running progress spinner uses the 12px reference ring size');
 assert(/\.recursion-step-row\.running \.recursion-step-icon::after/.test(recursionCss), 'production running progress spinner uses an inner cutout like the reference ring');
-assert(/\.recursion-status-head\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?padding:\s*7px 9px;/.test(recursionCss), 'production progress popover header uses the reference 34px density');
+assert(/\.recursion-status-head\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?padding:\s*7px 9px;/.test(recursionCss), 'production progress popover header uses the reference 34px compactness');
 assert(!/\.recursion-status-subtitle\s*\{[^}]*margin-left:\s*auto;/.test(recursionCss), 'production progress subtitle stays beside the title instead of pinning to the right edge');
 assert(!/\.recursion-settings-panel\.is-beside-progress/.test(recursionCss), 'production settings panel no longer carries obsolete side-by-side progress styling');
 assert(!/\.recursion-settings-panel\s*\{[\s\S]*?left:\s*360px;/.test(recursionCss), 'production settings panel CSS fallback is full-width, not side-by-side');
-assert(/\.recursion-status-foot \.recursion-mini-chip\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*2px 5px 3px;/.test(recursionCss), 'production progress footer Live chip uses the reference tiny-chip density');
+assert(/\.recursion-status-foot \.recursion-mini-chip\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*2px 5px 3px;/.test(recursionCss), 'production progress footer Live chip uses the reference tiny-chip compactness');
 assert(/\.recursion-hand-dropdown\s*\{[\s\S]*?display:\s*block;[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production Last Brief dropdown removes the old padded grid shell');
 assert(/\.recursion-hand-dropdown::before/.test(recursionCss), 'production Last Brief dropdown keeps the reference top accent line');
-assert(/\.recursion-brief-head\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?padding:\s*7px 9px;/.test(recursionCss), 'production Last Brief header uses the reference 34px density');
-assert(/\.recursion-brief-foot \.recursion-mini-chip\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*2px 5px 3px;/.test(recursionCss), 'production Last Brief footer Esc chip uses the reference tiny-chip density');
+assert(/\.recursion-brief-head\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?padding:\s*7px 9px;/.test(recursionCss), 'production Last Brief header uses the reference 34px compactness');
+assert(/\.recursion-brief-foot \.recursion-mini-chip\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*2px 5px 3px;/.test(recursionCss), 'production Last Brief footer Esc chip uses the reference tiny-chip compactness');
 assert(/\.recursion-packet-meta\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?gap:\s*4px;/.test(recursionCss), 'production Prompt Packet header renders compact meta chips');
 assert(/function promptPacketText\(packet, hand = \{\}\)/.test(recursionUi), 'production Last Brief prompt packet view can render injected prompt text directly');
 assert(/## Turn Animation Preview Script/.test(barImplementationReference), 'implementation reference includes a turn animation preview script');
@@ -506,6 +506,11 @@ assert(/\.recursion-provider-context-fields\[hidden\]\s*\{[\s\S]*?display:\s*non
 assert(/\.recursion-provider-status\.pass\s*\{[\s\S]*?var\(--recursion-success\)/.test(recursionCss), 'production provider success status uses the defined success token');
 assert(/const progressTop = rect\.bottom \+ 3;/.test(recursionUi), 'production progress popover uses the reference vertical gap below the compact bar');
 assert(/const settingsTop = rect\.bottom \+ 5;/.test(recursionUi), 'production settings and brief popovers use the reference desktop vertical gap');
+assert(/globalThis\.visualViewport\?\.height/.test(recursionUi), 'production popover geometry clamps to the mobile visual viewport height');
+assert(/element\.style\.maxHeight = `\$\{maxHeight\}px`;/.test(recursionUi), 'production popover geometry uses pixel max-height instead of layout viewport units');
+assert(!/element\.style\.maxHeight = `calc\(100vh/.test(recursionUi), 'production popover geometry avoids mobile-clipping 100vh max-height');
+assert(/visualViewport\?\.addEventListener\?\.\('resize', handleViewportChange\)/.test(recursionUi), 'production UI resyncs popover geometry on visual viewport resize');
+assert(/visualViewport\?\.addEventListener\?\.\('scroll', handleViewportChange\)/.test(recursionUi), 'production UI resyncs popover geometry when mobile browser chrome shifts the visual viewport');
 assert(/setFixedPanelGeometry\(settingsPanel,[\s\S]*?zIndex:\s*10022/.test(recursionUi), 'production settings panel stays above progress when compact layouts overlap');
 assert(/setFixedPanelGeometry\(settingsPanel,\s*\{\s*left:\s*rootLeft,\s*top:\s*settingsTop,\s*width:\s*rootWidth,\s*zIndex:\s*10022\s*\}\)/.test(recursionUi), 'production settings panel spans the full Recursion Bar width');
 assert(!/is-beside-progress/.test(recursionUi), 'production UI no longer toggles obsolete side-by-side settings class');
@@ -856,7 +861,10 @@ const previousClearTimeout = globalThis.clearTimeout;
 const previousSetInterval = globalThis.setInterval;
 const previousClearInterval = globalThis.clearInterval;
 const previousInnerWidth = globalThis.innerWidth;
+const previousInnerHeight = globalThis.innerHeight;
+const previousVisualViewport = globalThis.visualViewport;
 const previousConnectionManagerRequestService = globalThis.ConnectionManagerRequestService;
+const previousSillyTavern = globalThis.SillyTavern;
 try {
   let timerId = 0;
   const timers = [];
@@ -895,15 +903,39 @@ try {
     setInterval: fakeSetInterval,
     clearInterval: fakeClearInterval
   };
-  globalThis.ConnectionManagerRequestService = {
-    getSupportedProfiles() {
-      return [
-        { id: 'quiet-profile-a', label: 'Quiet Utility', model: 'glm-fast' },
-        { profileId: 'deep-profile-b', label: 'Deep Reasoner', model_name: 'o-reasoner' }
-      ];
+  delete globalThis.ConnectionManagerRequestService;
+  globalThis.SillyTavern = {
+    getContext() {
+      return {
+        ConnectionManagerRequestService: {
+          getSupportedProfiles() {
+            return [
+              { id: 'quiet-profile-a', label: 'Quiet Utility', model: 'glm-fast' },
+              { profileId: 'deep-profile-b', label: 'Deep Reasoner', model_name: 'o-reasoner' }
+            ];
+          }
+        }
+      };
     }
   };
   globalThis.innerWidth = 640;
+  globalThis.innerHeight = 720;
+  const visualViewportListeners = { resize: [], scroll: [] };
+  globalThis.visualViewport = {
+    width: 640,
+    height: 520,
+    addEventListener(type, listener) {
+      if (!visualViewportListeners[type]) visualViewportListeners[type] = [];
+      visualViewportListeners[type].push(listener);
+    },
+    removeEventListener(type, listener) {
+      if (!visualViewportListeners[type]) return;
+      visualViewportListeners[type] = visualViewportListeners[type].filter((entry) => entry !== listener);
+    },
+    emit(type) {
+      for (const listener of visualViewportListeners[type] || []) listener();
+    }
+  };
   const copied = [];
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
@@ -921,6 +953,7 @@ try {
   const providerUpdates = [];
   const providerTests = [];
   const providerClears = [];
+  const providerModelFetches = [];
   let resetSceneCacheCalls = 0;
   let clearRunJournalCalls = 0;
   let exportDiagnosticsCalls = 0;
@@ -1000,11 +1033,11 @@ try {
           state: 'running',
           children: [
             { id: 'scene-frame-card', label: 'Scene Frame', providerLane: 'utility', state: 'running' },
-            { id: 'continuity-risk-card', label: 'Continuity Risk', providerLane: 'utility', state: 'pending' },
+            { id: 'scene-constraints-card', label: 'Scene Constraints', providerLane: 'utility', state: 'pending' },
             { id: 'motivation-card', label: 'Motivation', providerLane: 'utility', state: 'pending' },
             { id: 'threads-card', label: 'Open Threads', providerLane: 'utility', state: 'pending' },
             { id: 'cast-card', label: 'Active Cast', providerLane: 'utility', state: 'pending' },
-            { id: 'prose-card', label: 'Prose', providerLane: 'utility', state: 'pending' }
+            { id: 'environment-card', label: 'Environment', providerLane: 'utility', state: 'pending' }
           ]
         }
       ]
@@ -1112,6 +1145,16 @@ try {
           }
         };
         return view.settings.providers[lane];
+      },
+      fetchProviderModels: async (lane, patch) => {
+        providerModelFetches.push({ lane, patch });
+        return {
+          ok: true,
+          models: [
+            { id: 'alpha-model', label: 'Alpha Model' },
+            { id: 'beta-model', label: 'beta-model' }
+          ]
+        };
       },
       resetSceneCache: () => {
         resetSceneCacheCalls += 1;
@@ -1308,23 +1351,30 @@ try {
   assertEqual(root.querySelector('[data-recursion-cards-button]').getAttribute('aria-expanded'), 'true', 'Cards button reflects open scope dropdown');
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.left, '0px', 'Cards dropdown aligns to the full bar left edge');
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.width, '640px', 'Cards dropdown spans the full bar width');
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').style.maxHeight, '471px', 'Cards dropdown clamps to mobile visual viewport height with bottom gutter');
+  globalThis.visualViewport.height = 360;
+  globalThis.visualViewport.emit('resize');
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').style.maxHeight, '311px', 'Cards dropdown reclamps when mobile visual viewport height changes');
+  globalThis.visualViewport.height = 520;
+  globalThis.visualViewport.emit('resize');
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-family]').length, CARD_SCOPE_CATALOG.length, 'Cards dropdown renders every fixed V1 family');
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]').length, CARD_SCOPE_TOTAL_SUB_ITEMS, 'Cards dropdown renders every fixed V1 sub-item');
   const cardScopeText = fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]'));
-  for (const familyName of ['Knowledge', 'Consequences', 'Environment', 'Items']) {
+  for (const familyName of ['Scene Frame', 'Active Cast', 'Scene Constraints', 'Knowledge', 'Consequences', 'Environment', 'Items', 'Open Threads']) {
     assert(cardScopeText.includes(familyName), `Cards dropdown renders ${familyName}`);
   }
-  const proseDensity = root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
-    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Prose'
-      && node.dataset.recursionCardScopeSubItem === 'density');
-  assert(proseDensity, 'Prose density sub-item exists');
+  for (const removed of ['den' + 'sity', 'specificity/shape', 'present participants']) {
+    assert(!cardScopeText.includes(removed), `Cards dropdown omits removed label ${removed}`);
+  }
+  assert(cardScopeText.includes('beat constraint'), 'Cards dropdown renders rehomed beat constraint');
+  assert(cardScopeText.includes('hard limits'), 'Cards dropdown renders hard limits facet');
+  const beatConstraint = root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
+    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame'
+      && node.dataset.recursionCardScopeSubItem === 'beatConstraint');
+  assert(beatConstraint, 'Scene Frame beatConstraint sub-item exists');
   assert(
-    proseDensity.getAttribute('title').includes('How packed the next response should be'),
-    'density tooltip explains actual Prose density focus'
-  );
-  assert(
-    proseDensity.getAttribute('title').includes('action, dialogue, description, and consequence'),
-    'density tooltip explains why density matters'
+    beatConstraint.getAttribute('title').includes('avoid time skip'),
+    'beatConstraint tooltip explains hard beat boundary'
   );
   const sceneFamilyToggle = root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
     .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame');
@@ -1372,7 +1422,7 @@ try {
   for (const family of CARD_SCOPE_CATALOG.filter((entry) => entry.family !== 'Scene Frame')) {
     singleScope = setFamilyEnabled(singleScope, family.family, false).scope;
   }
-  singleScope = setSubItemEnabled(singleScope, 'Scene Frame', 'presentParticipants', false).scope;
+  singleScope = setSubItemEnabled(singleScope, 'Scene Frame', 'beatConstraint', false).scope;
   singleScope = setSubItemEnabled(singleScope, 'Scene Frame', 'immediateDirection', false).scope;
   view = { ...view, settings: { ...view.settings, cardScope: singleScope } };
   ui.update();
@@ -1417,8 +1467,31 @@ try {
     { reasoningLevel: 'ultra', reasonerUse: 'always' },
     'reasoning chain maps Ultra to Reasoner-heavy routing'
   );
+  root.querySelector('[data-recursion-reasoning-level-high]').click();
+  assertDeepEqual(
+    settingsUpdates.at(-1),
+    { reasoningLevel: 'high', reasonerUse: 'always' },
+    'reasoning chain maps High to Reasoner-priority routing'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-current-step]').textContent,
+    'Reasoning Level: High',
+    'reasoning chain prints a brief current-step acknowledgement'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-hero-array]').children.length,
+    1,
+    'reasoning acknowledgement does not add Hero Pixel Array progress blocks'
+  );
+  runNextTimeout(2000);
+  assertEqual(
+    root.querySelector('[data-recursion-current-step]').textContent,
+    'Utility card batch...',
+    'reasoning acknowledgement clears after two seconds when no new status arrives'
+  );
 
   globalThis.innerWidth = 920;
+  globalThis.visualViewport.width = 920;
   root.querySelector('[data-recursion-bar]').setBoundingClientRect({ left: 0, top: 0, width: 920, height: 30, right: 920, bottom: 30 });
   root.querySelector('[data-recursion-actions]').click();
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'options button opens settings panel directly');
@@ -1462,6 +1535,10 @@ try {
   assertEqual(utilitySource.getAttribute('title'), 'Choose where this lane sends Recursion model calls. Current Host Model follows the active chat model; Host Connection Profile uses a saved SillyTavern profile; OpenAI-Compatible uses the endpoint fields below. Hidden fields keep values until Save Provider.', 'provider Source control explains what each source does and why hidden fields persist');
   assertEqual(root.querySelector('[data-recursion-provider-base-url-utility]').getAttribute('title'), 'Base /v1 URL for a direct OpenAI-compatible endpoint. Only used when Source is OpenAI-Compatible.', 'provider Base URL explains source-specific endpoint use');
   assertEqual(root.querySelector('[data-recursion-provider-api-key-utility]').getAttribute('title'), 'Session-only key for the OpenAI-compatible endpoint. Recursion keeps it in memory and never writes it to settings or diagnostics.', 'provider API key tooltip explains secret boundary');
+  assert(root.querySelector('[data-recursion-provider-readiness-utility]'), 'Utility provider renders compact readiness status before test');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-provider-readiness-utility]')).includes('Current Host Model'), 'readiness status names the active source');
+  assert(root.querySelector('[data-recursion-provider-route-summary]'), 'Providers pane renders compact route summary instead of hidden deep routing');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-provider-route-summary]')).includes('Arbiter'), 'route summary exposes Arbiter routing');
   assert(utilityProfileContext, 'Utility provider renders a profile-specific field context');
   assert(utilityOpenAiContext, 'Utility provider renders an OpenAI-specific field context');
   assertEqual(utilityProfileContext.hidden, true, 'Current Host Model hides Utility profile fields');
@@ -1486,6 +1563,30 @@ try {
   for (const listener of utilitySource.eventListeners.change || []) listener({ target: utilitySource });
   assertEqual(utilityProfileContext.hidden, true, 'OpenAI-Compatible hides Utility profile fields');
   assertEqual(utilityOpenAiContext.hidden, false, 'OpenAI-Compatible shows Utility endpoint/model/key fields');
+  assert(root.querySelector('[data-recursion-provider-fetch-models-utility]'), 'OpenAI-Compatible settings expose Fetch Models control');
+  assert(root.querySelector('[data-recursion-provider-model-list-utility]'), 'OpenAI-Compatible settings expose fetched model selector');
+  root.querySelector('[data-recursion-provider-base-url-utility]').value = 'https://models.example/v1';
+  root.querySelector('[data-recursion-provider-api-key-utility]').value = 'sk-ui-secret';
+  root.querySelector('[data-recursion-provider-fetch-models-utility]').click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assertEqual(providerModelFetches.at(-1).lane, 'utility', 'Fetch Models targets Utility lane');
+  assertEqual(providerModelFetches.at(-1).patch.openAICompatible.baseUrl, 'https://models.example/v1', 'Fetch Models forwards current endpoint field');
+  assertEqual(providerModelFetches.at(-1).patch.apiKey, 'sk-ui-secret', 'Fetch Models forwards current session key without rendering it');
+  assertDeepEqual(
+    root.querySelector('[data-recursion-provider-model-list-utility]').children.map((option) => [option.value, option.textContent]),
+    [
+      ['', 'Select fetched model'],
+      ['alpha-model', 'Alpha Model'],
+      ['beta-model', 'beta-model']
+    ],
+    'Fetch Models populates direct model selector'
+  );
+  root.querySelector('[data-recursion-provider-model-list-utility]').value = 'alpha-model';
+  for (const listener of root.querySelector('[data-recursion-provider-model-list-utility]').eventListeners.change || []) {
+    listener({ target: root.querySelector('[data-recursion-provider-model-list-utility]') });
+  }
+  assertEqual(root.querySelector('[data-recursion-provider-model-utility]').value, 'alpha-model', 'fetched model selector writes selected model id into model input');
   const reasonerSource = root.querySelector('[data-recursion-provider-source-reasoner]');
   const reasonerProfileContext = root.querySelector('[data-recursion-provider-context-profile-reasoner]');
   const reasonerOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-reasoner]');
@@ -1773,8 +1874,14 @@ try {
   globalThis.clearInterval = previousClearInterval;
   if (previousInnerWidth === undefined) delete globalThis.innerWidth;
   else globalThis.innerWidth = previousInnerWidth;
+  if (previousInnerHeight === undefined) delete globalThis.innerHeight;
+  else globalThis.innerHeight = previousInnerHeight;
+  if (previousVisualViewport === undefined) delete globalThis.visualViewport;
+  else globalThis.visualViewport = previousVisualViewport;
   if (previousConnectionManagerRequestService === undefined) delete globalThis.ConnectionManagerRequestService;
   else globalThis.ConnectionManagerRequestService = previousConnectionManagerRequestService;
+  if (previousSillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousSillyTavern;
 }
 
 console.log('[pass] ui');

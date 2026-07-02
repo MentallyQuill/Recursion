@@ -52,8 +52,8 @@ Cards are normalized before composition. Unsafe evidence refs, unsupported famil
 Utility composition is the default path. It maps card families to sections:
 
 - Scene Brief: Scene Frame, Active Cast, Environment, Items
-- Guardrails: scene constraints from Continuity Risk, Knowledge, plus static guardrails
-- Turn Brief: Character Motivation, Relationship, Consequences, Prose, Open Threads, and other turn-facing guidance
+- Guardrails: Scene Constraints, Knowledge, plus static guardrails
+- Turn Brief: Character Motivation, Relationship, Consequences, Open Threads, and other turn-facing guidance
 
 Utility composition removes unsafe text, enforces section budgets, records source ids, and creates omission records when budget prevents inclusion.
 

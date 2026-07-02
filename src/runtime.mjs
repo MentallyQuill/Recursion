@@ -9,7 +9,7 @@ import {
 } from './card-scope.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { composePromptPacket, PROMPT_PACKET_VERSION } from './prompt.mjs';
-import { PROVIDER_CONTRACT_HASH } from './providers.mjs';
+import { PROVIDER_CONTRACT_HASH, fetchOpenAICompatibleModels } from './providers.mjs';
 import { createSettingsStore, normalizeCardBudgetSettings, normalizeSettings } from './settings.mjs';
 import { behaviorPolicyPromptLines, influencePolicyForSettings, runPolicyForEffectivePlan } from './settings-policy.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
@@ -1161,15 +1161,17 @@ function localCards(snapshot) {
     evidenceRefs: [`message:${evidenceMesId}`],
     emphasis: 'normal'
   }, context);
-  const continuity = normalizeCard({
-    family: 'Continuity Risk',
+  const constraints = normalizeCard({
+    family: 'Scene Constraints',
+    role: 'sceneConstraintsCard',
     promptText: latestUserText
-      ? `Keep the next response consistent with the latest visible user action: ${latestUserText}`
-      : 'Keep the next response consistent with the latest visible user action and current scene state.',
+      ? `Respect hard scene constraints from the latest visible user action: ${latestUserText}`
+      : 'Respect hard scene constraints from the visible turn: do not contradict stated access, timing, object state, or visible limits.',
+    summary: 'Hard scene constraints from latest visible turn.',
     evidenceRefs: [`message:${userEvidenceMesId}`],
     emphasis: 'emphasized'
   }, context);
-  return [scene, continuity];
+  return [scene, constraints];
 }
 
 function catalogForCard(card) {
@@ -1199,7 +1201,7 @@ function cardScopePolicyLine(cardScope) {
   if (cardScope?.strictWhitelist) {
     return 'Manual card scope policy: allowedCatalog is a strict whitelist. Do not request disabled families or sub-items.';
   }
-  return 'Auto card scope policy: selected families and sub-items are the preferred focus, not a whitelist. Prefer selected scope when it can satisfy the turn; request unselected families only when they have high relevance to continuity, scene coherence, or the current user message.';
+  return 'Auto card scope policy: selected families and sub-items are the preferred focus, not a whitelist. Prefer selected scope when it can satisfy the turn; request unselected families only when they have high relevance to scene constraints, scene coherence, or the current user message.';
 }
 
 function arbiterCardJobContractLine() {
@@ -1482,7 +1484,8 @@ export function createRecursionRuntime({
   settingsStore = createSettingsStore({ root: {} }),
   storage = createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity = createActivityReporter(),
-  generationRouter = null
+  generationRouter = null,
+  fetchImpl = globalThis.fetch
 } = {}) {
   let activeRunId = null;
   let activeRunController = null;
@@ -1690,6 +1693,58 @@ export function createRecursionRuntime({
       });
       return { ok: clear?.ok !== false, provider, clear };
     });
+  }
+
+  async function fetchProviderModels(lane = 'utility', patch = {}) {
+    const resolvedLane = providerLane(lane);
+    const current = settingsStore.get().providers?.[resolvedLane] || {};
+    const cleanPatch = asObject(patch);
+    const provider = {
+      ...current,
+      ...cleanPatch,
+      openAICompatible: {
+        ...asObject(current.openAICompatible),
+        ...asObject(cleanPatch.openAICompatible)
+      }
+    };
+    if (provider.source !== 'openai-compatible') {
+      return {
+        ok: false,
+        lane: resolvedLane,
+        error: {
+          code: 'RECURSION_PROVIDER_MODEL_DISCOVERY_UNSUPPORTED',
+          message: 'Model discovery is only available for OpenAI-compatible endpoints.'
+        }
+      };
+    }
+    try {
+      const result = await fetchOpenAICompatibleModels({
+        baseUrl: provider.openAICompatible?.baseUrl,
+        apiKey: String(cleanPatch.apiKey || settingsStore.getApiKey(resolvedLane) || '').trim(),
+        fetchImpl,
+        signal: cleanPatch.signal
+      });
+      return {
+        ok: true,
+        lane: resolvedLane,
+        endpoint: safeText(result.endpoint || '', 300),
+        models: Array.isArray(result.models)
+          ? result.models.map((entry) => ({
+            id: safeText(entry?.id || '', 200),
+            label: safeText(entry?.label || entry?.id || '', 240)
+          })).filter((entry) => entry.id)
+          : []
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        lane: resolvedLane,
+        error: {
+          code: safeText(error?.code || 'RECURSION_PROVIDER_MODEL_DISCOVERY_FAILED', 120),
+          message: safeText(error?.message || 'Provider model discovery failed.', 300)
+        }
+      };
+    }
   }
 
   function currentDiagnosticsChatKey() {
@@ -3101,6 +3156,7 @@ export function createRecursionRuntime({
     updateSettings,
     updateProvider,
     clearProviderKey,
+    fetchProviderModels,
     testProvider,
     resetSceneCache,
     clearRunJournal,

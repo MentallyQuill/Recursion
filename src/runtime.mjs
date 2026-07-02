@@ -1437,7 +1437,7 @@ export function createRecursionRuntime({
     const data = asObject(result?.data);
     return result?.ok === true
       && data.schema === PROVIDER_TEST_SCHEMA
-      && data.ok !== false;
+      && data.ok === true;
   }
 
   async function testProvider(lane = 'utility') {

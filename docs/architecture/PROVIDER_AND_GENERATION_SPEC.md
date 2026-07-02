@@ -315,6 +315,8 @@ Validation requirements:
 - clamp confidence and token estimates to valid ranges;
 - mark each accepted card or composer patch with schema version and source role.
 
+`providerTest` is a connectivity and structured-output probe, not a content job. It passes only when the router succeeds and the parsed payload contains `schema: "recursion.providerTest.v1"` plus explicit `ok: true`; missing or false `ok` fails the lane test.
+
 Invalid Utility Arbiter output should fall back to conservative local behavior: reuse valid cache, use the local fallback plan when safe, or skip Recursion injection for the turn. A missing, timed-out, or transport-failing Utility provider should not create fresh local cards; it should reuse valid cache or skip.
 
 Invalid card output should omit only that card. One bad card must not poison the whole batch.

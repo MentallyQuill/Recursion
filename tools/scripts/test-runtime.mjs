@@ -5139,4 +5139,39 @@ for (const scenario of [
   assertNoSecretText(invalid, 'false-ok provider test result');
 }
 
+{
+  const { runtime, settingsStore } = createRuntimeHarness({
+    settings: {
+      providers: {
+        utility: {
+          resolvedProviderLabel: 'stale-provider',
+          resolvedModelLabel: 'stale-model'
+        }
+      }
+    },
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          diagnostics: { providerId: 'unsafe-provider', model: 'unsafe-model' },
+          data: {
+            schema: 'recursion.providerTest.v1',
+            message: 'Bearer missing-ok-provider-token and sk-missing-ok-provider'
+          }
+        };
+      }
+    }
+  });
+
+  const invalid = await runtime.testProvider('utility');
+  assertEqual(invalid.ok, false, 'runtime provider test rejects schema success with missing ok flag');
+  assertEqual(invalid.error.code, 'RECURSION_PROVIDER_TEST_INVALID', 'missing-ok provider test returns stable error code');
+  const utility = settingsStore.get().providers.utility;
+  assertEqual(utility.lastTest.status, 'fail', 'missing-ok provider test records failing status');
+  assertEqual(utility.resolvedProviderLabel, '', 'missing-ok provider test clears stale provider label');
+  assertEqual(utility.resolvedModelLabel, '', 'missing-ok provider test clears stale model label');
+  assertNoSecretText(utility.lastTest, 'missing-ok provider test status');
+  assertNoSecretText(invalid, 'missing-ok provider test result');
+}
+
 console.log('[pass] runtime');

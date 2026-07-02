@@ -34,6 +34,52 @@ assert(prompts.some((entry) => entry.key === 'recursion.turnBrief' && entry.text
 assert(prompts.some((entry) => entry.key === 'recursion.sceneBrief' && entry.text === ''), 'prompt clear removes known scene key');
 assert(prompts.some((entry) => entry.key === 'recursion.guardrails' && entry.text === ''), 'prompt clear removes known guardrails key');
 
+const clearFailurePrompts = [];
+const clearFailureHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'clear-failure-chat',
+    chat: [],
+    setExtensionPrompt(key, text, position, depth, scan, role) {
+      clearFailurePrompts.push({ key, text, position, depth, scan, role });
+      if (key === 'recursion.sceneBrief' && text === '') {
+        throw new Error('simulated scene clear failure');
+      }
+    },
+    extension_prompt_types: { IN_CHAT: 1, IN_PROMPT: 2, BEFORE_PROMPT: 0 },
+    extension_prompt_roles: { SYSTEM: 0 }
+  }),
+  settingsRoot: {}
+});
+const clearFailureResult = await clearFailureHost.prompt.clear();
+assertEqual(clearFailureResult.ok, false, 'prompt clear reports failure when one key cannot clear');
+assertEqual(clearFailureResult.error.code, 'RECURSION_PROMPT_CLEAR_FAILED', 'prompt clear returns stable failure code');
+assert(clearFailurePrompts.some((entry) => entry.key === 'recursion.sceneBrief' && entry.text === ''), 'prompt clear attempted failing known key');
+assert(clearFailurePrompts.some((entry) => entry.key === 'recursion.turnBrief' && entry.text === ''), 'prompt clear continues after failed key');
+assert(clearFailurePrompts.some((entry) => entry.key === 'recursion.guardrails' && entry.text === ''), 'prompt clear still clears later known key');
+
+const installAfterFailedClearPrompts = [];
+const installAfterFailedClearHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'install-after-failed-clear-chat',
+    chat: [],
+    setExtensionPrompt(key, text, position, depth, scan, role) {
+      installAfterFailedClearPrompts.push({ key, text, position, depth, scan, role });
+      if (key === 'recursion.sceneBrief' && text === '') {
+        throw new Error('simulated pre-install clear failure');
+      }
+    },
+    extension_prompt_types: { IN_CHAT: 1, IN_PROMPT: 2, BEFORE_PROMPT: 0 },
+    extension_prompt_roles: { SYSTEM: 0 }
+  }),
+  settingsRoot: {}
+});
+await assertRejects(
+  async () => installAfterFailedClearHost.prompt.install(packet),
+  /prompt clear failed/i,
+  'prompt install rejects when pre-install clear fails'
+);
+assert(!installAfterFailedClearPrompts.some((entry) => entry.text === 'Use the alley scene.'), 'prompt install does not write new prompt after failed clear');
+
 const unavailablePromptHost = createSillyTavernHost({
   contextFactory: () => ({
     chatId: 'missing-prompt-api-chat',
@@ -54,6 +100,19 @@ assertDeepEqual(
     }
   },
   'prompt install returns a result-shaped failure when setExtensionPrompt is unavailable'
+);
+assertDeepEqual(
+  await unavailablePromptHost.prompt.clear(),
+  {
+    ok: false,
+    clearedKeys: [],
+    failedKeys: ['recursion.sceneBrief', 'recursion.turnBrief', 'recursion.guardrails'],
+    error: {
+      code: 'RECURSION_PROMPT_CLEAR_UNAVAILABLE',
+      message: 'SillyTavern setExtensionPrompt API is unavailable.'
+    }
+  },
+  'prompt clear returns a result-shaped failure when setExtensionPrompt is unavailable'
 );
 
 await assertRejects(

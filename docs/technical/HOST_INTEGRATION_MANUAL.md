@@ -67,7 +67,7 @@ Install behavior:
 5. Track installed keys.
 6. Roll back known keys if a partial install fails.
 
-Clear behavior calls `setExtensionPrompt` with empty text for known Recursion keys and any keys installed during the session.
+Clear behavior calls `setExtensionPrompt` with empty text for known Recursion keys and any keys installed during the session. It attempts every key even if one clear fails, returns a stable prompt-clear failure result with failed keys, and keeps failed non-core keys tracked for a later retry. Prompt install validates the packet first, then aborts before writing new prompt text if the pre-install clear reports failure.
 
 ## Storage Adapter
 

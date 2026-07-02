@@ -378,7 +378,13 @@ export function createSillyTavernHost({
 
       const blocks = promptBlocksFromPacket(packet);
       validatePromptBlocksForInstall(blocks);
-      await this.clear();
+      const clearResult = await this.clear();
+      if (clearResult?.ok === false) {
+        const error = new Error('Prompt clear failed before install.');
+        error.code = 'RECURSION_PROMPT_CLEAR_FAILED';
+        error.clear = clearResult;
+        throw error;
+      }
       const attemptedPromptKeys = new Set();
       try {
         for (const block of blocks) {
@@ -411,9 +417,43 @@ export function createSillyTavernHost({
     async clear() {
       const context = currentContext(contextFactory);
       const keys = new Set([...KNOWN_RECURSION_PROMPT_KEYS, ...installedPromptKeys]);
-      for (const key of keys) clearPromptKey(context, key);
+      if (typeof context.setExtensionPrompt !== 'function') {
+        return {
+          ok: false,
+          clearedKeys: [],
+          failedKeys: [...keys],
+          error: {
+            code: 'RECURSION_PROMPT_CLEAR_UNAVAILABLE',
+            message: 'SillyTavern setExtensionPrompt API is unavailable.'
+          }
+        };
+      }
+      const clearedKeys = [];
+      const failedKeys = [];
+      for (const key of keys) {
+        try {
+          clearPromptKey(context, key);
+          clearedKeys.push(key);
+        } catch {
+          failedKeys.push(key);
+        }
+      }
       installedPromptKeys.clear();
-      return { ok: true, clearedKeys: [...keys] };
+      for (const key of failedKeys) {
+        if (!KNOWN_RECURSION_PROMPT_KEYS.includes(key)) installedPromptKeys.add(key);
+      }
+      if (failedKeys.length) {
+        return {
+          ok: false,
+          clearedKeys,
+          failedKeys,
+          error: {
+            code: 'RECURSION_PROMPT_CLEAR_FAILED',
+            message: 'One or more Recursion prompt keys failed to clear.'
+          }
+        };
+      }
+      return { ok: true, clearedKeys };
     }
   };
 

@@ -124,10 +124,10 @@ Runtime toggles:
 
     <div class="mode-cluster" title="Mode: Auto">
       <button class="icon-button mode-btn" aria-label="Mode: Auto" id="mode-button" aria-expanded="false">
-        <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true">
-          <rect x="3" y="5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".45"></rect>
-          <rect x="5" y="3" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".70"></rect>
-          <rect x="7" y="1.5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25"></rect>
+        <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true" data-recursion-mode-arrow-fan>
+          <path d="M3.2 8.5 11.8 3.4M9.2 2.8 11.8 3.4 10.5 5.8" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" data-recursion-mode-arrow></path>
+          <path d="M3.2 8.5h9.6M10.7 6.4 12.8 8.5 10.7 10.6" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" data-recursion-mode-arrow></path>
+          <path d="M3.2 8.5 11.8 13.6M10.5 11.2 11.8 13.6 9.2 14.2" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" data-recursion-mode-arrow></path>
         </svg>
       </button>
       <span class="sep" aria-hidden="true"></span>
@@ -185,7 +185,13 @@ Runtime toggles:
         <button class="reasoning-node" type="button" role="radio" aria-checked="false" data-level="ultra" title="Ultra: Reasoner-heavy synthesis with a larger card bias."></button>
       </div>
       <button class="cards-button" id="cards-button" aria-label="Open card scope selector" aria-expanded="false">
-        <span class="cards-button-icon" aria-hidden="true"><!-- stacked cards --></span>
+        <span class="cards-button-icon" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true">
+            <rect x="3" y="5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".45"></rect>
+            <rect x="5" y="3" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".70"></rect>
+            <rect x="7" y="1.5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25"></rect>
+          </svg>
+        </span>
         <span class="cards-button-label">Cards</span>
       </button>
       <button class="icon-button brief-arrow" id="brief-arrow" aria-label="Open last brief preview" aria-expanded="false">

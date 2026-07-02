@@ -186,6 +186,7 @@ const storageHost = createSillyTavernHost({
     if (url === '/api/files/delete') {
       const body = JSON.parse(options.body);
       const name = body.path.slice('/user/files/'.length);
+      if (!storageFiles.has(name)) return { ok: false, status: 404, json: async () => ({}) };
       storageFiles.delete(name);
       return { ok: true, status: 200, json: async () => ({ ok: true }) };
     }
@@ -210,6 +211,16 @@ assertEqual(JSON.parse(deleteCall.options.body).path, '/user/files/recursion-sys
 assertEqual(await storageHost.storageAdapter.readJson('recursion-system-index.v1.json'), null, 'default storage returns null for missing user files');
 await storageHost.storageAdapter.writeJson('recursion-after-404.v1.json', { ok: 'host' });
 assert(storageFetchCalls.some((call) => call.url === '/api/files/upload' && JSON.parse(call.options.body).name === 'recursion-after-404.v1.json'), 'missing user file reads do not force memory fallback');
+assertDeepEqual(
+  await storageHost.storageAdapter.deleteJson('recursion-missing-delete.v1.json'),
+  { ok: true, key: 'recursion-missing-delete.v1.json', missing: true },
+  'default storage treats missing deletes as already gone'
+);
+await storageHost.storageAdapter.writeJson('recursion-after-delete-404.v1.json', { ok: 'host-after-delete' });
+assert(
+  storageFetchCalls.some((call) => call.url === '/api/files/upload' && JSON.parse(call.options.body).name === 'recursion-after-delete-404.v1.json'),
+  'missing user file deletes do not force memory fallback'
+);
 const storageFetchCountBeforeRejectedKeys = storageFetchCalls.length;
 await assertRejects(
   async () => storageHost.storageAdapter.writeJson('../recursion-escape.v1.json', { ok: false }),

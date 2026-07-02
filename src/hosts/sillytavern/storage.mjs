@@ -142,6 +142,7 @@ export function createSillyTavernUserFileStorageAdapter({ contextFactory = null,
           headers: await requestHeaders(context),
           body: JSON.stringify({ path: `/user/files/${fileName}` })
         });
+        if (response?.status === 404) return { ok: true, key, missing: true };
         assertOk(response, 'delete', fileName);
         return { ok: true, key };
       } catch {

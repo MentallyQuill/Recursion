@@ -157,12 +157,13 @@ function createRuntimeHarness({
 
 function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   return {
-    async generate(roleId) {
+    async generate(roleId, request) {
       assertEqual(roleId, 'utilityArbiter', 'local fallback card router only handles Utility Arbiter');
       return {
         ok: true,
         data: {
           schema: UTILITY_ARBITER_SCHEMA,
+          snapshotHash: request.snapshotHash,
           action: 'compose-brief',
           cardJobs: [],
           budgets: { targetBriefTokens: 500, maxCards: 6 },
@@ -194,12 +195,13 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
     storage,
     snapshot,
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', `${label}: only utility arbiter should run`);
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'reuse-cache',
             lifecycle: [{ action: 'select', cardId: card.id, reason: label }],
             budgets: { targetBriefTokens: 500, maxCards: 4 },
@@ -320,7 +322,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const { runtime, installed, cleared } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'Utility unavailable test only asks Arbiter');
         return { ok: false, error: { code: 'timeout', message: 'Utility timeout with Bearer utility-token and sk-utility-runtime' } };
       },
@@ -391,7 +393,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
       messages: cachedMessages
     },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'Utility unavailable cache test only asks Arbiter');
         throw new Error('Utility transport unavailable');
       },
@@ -538,6 +540,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             budgets: { targetBriefTokens: 500, maxCards: 4 }
           }
         };
@@ -590,6 +593,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             budgets: { targetBriefTokens: 500, maxCards: 4 }
           }
         };
@@ -685,6 +689,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             budgets: { targetBriefTokens: 500, maxCards: 4 }
           }
         };
@@ -727,7 +732,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
       ]
     }),
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'last saved cache invalidation test only calls arbiter');
         arbiterCalls += 1;
         if (arbiterCalls === 2) {
@@ -740,6 +745,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             budgets: { targetBriefTokens: 500, maxCards: 4 },
             diagnostics: [`arbiter-${arbiterCalls}`]
           }
@@ -1566,6 +1572,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             cardJobs: [{ family: 'Open Threads', reason: 'Need one open thread card.' }],
             budgets: { targetBriefTokens: 60, maxCards: 1 },
             reasonerDecision: { mode: 'use', reason: 'arbiter requested reasoner', signals: ['test'] },
@@ -1591,12 +1598,13 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const { runtime, installed, settingsStore } = createRuntimeHarness({
     settings: { mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'low' },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'compact footprint override only calls utility arbiter');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             promptFootprint: 'compact',
             budgets: { targetBriefTokens: 500, maxCards: 6 },
             diagnostics: ['compact-footprint-override']
@@ -1627,6 +1635,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
             ok: true,
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
               promptFootprint: 'rich',
               reasonerDecision: { mode: 'use', reason: 'rich turn needs synthesis', signals: ['rich-footprint'] },
               budgets: { targetBriefTokens: 900, maxCards: 6 }
@@ -1721,13 +1730,14 @@ for (const scenario of [
   const { runtime } = createRuntimeHarness({
     settings: scenario.settings,
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         routerCalls.push(roleId);
         if (roleId === 'utilityArbiter') {
           return {
             ok: true,
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
               reasonerDecision: { mode: 'use', reason: `${scenario.label} should be gated`, signals: ['health-gate'] },
               budgets: { targetBriefTokens: 900, maxCards: 6 }
             }
@@ -1753,12 +1763,13 @@ for (const scenario of [
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', promptFootprint: 'compact', reasonerUse: 'off' },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'invalid footprint fallback only calls utility arbiter');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             promptFootprint: 'oversized-secret-mode',
             budgets: { targetBriefTokens: 500, maxCards: 6 },
             diagnostics: ['invalid-footprint-fallback']
@@ -1780,12 +1791,13 @@ for (const scenario of [
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'invalid scene status fallback only calls utility arbiter');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             sceneStatus: 'hard_shift',
             budgets: { targetBriefTokens: 500, maxCards: 6 },
             diagnostics: ['invalid-scene-status-fallback']
@@ -1825,6 +1837,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'skip',
             diagnostics: ['pending-user-message']
           }
@@ -1855,11 +1868,12 @@ for (const scenario of [
       ]
     },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'skip',
             diagnostics: ['pending-user-message-mesid']
           }
@@ -1945,12 +1959,13 @@ for (const scenario of [
       return snapshotReads === 1 ? initialSnapshot : committedSnapshot;
     },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'pending hard-shift install only needs Utility Arbiter');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'compose-brief',
             sceneStatus: 'hard-shift',
             diagnostics: ['pending-hard-shift-commit']
@@ -2006,12 +2021,13 @@ for (const scenario of [
       return snapshotReads <= 2 ? initialSnapshot : committedSnapshot;
     },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'late pending hard-shift install only needs Utility Arbiter');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'compose-brief',
             sceneStatus: 'hard-shift',
             diagnostics: ['late-pending-hard-shift-commit']
@@ -2077,12 +2093,13 @@ for (const scenario of [
       return movedSnapshot;
     },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'final move hard-shift install only needs Utility Arbiter');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'compose-brief',
             sceneStatus: 'hard-shift',
             diagnostics: ['final-move-after-recompose']
@@ -2230,11 +2247,12 @@ for (const scenario of [
       ]
     },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'skip',
             diagnostics: ['repeated-pending-user-message']
           }
@@ -2265,7 +2283,15 @@ for (const scenario of [
     generationRouter: {
       async generate(roleId, request) {
         if (roleId === 'utilityArbiter') arbiterPrompts.push(request.prompt);
-        return { ok: true, data: { schema: UTILITY_ARBITER_SCHEMA, action: 'skip', diagnostics: ['settings-projection'] } };
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'skip',
+            diagnostics: ['settings-projection']
+          }
+        };
       }
     }
   });
@@ -2300,11 +2326,12 @@ for (const scenario of [
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'compose-brief',
             sceneStatus: 'same-scene',
             cardJobs: [{
@@ -2343,39 +2370,65 @@ for (const scenario of [
   assertNoSecretText({ resultPlan: result.plan, viewPlan }, 'successful arbiter plan');
 }
 
-{
+for (const scenario of [
+  { label: 'mismatched', snapshotHash: 'hallucinated-provider-hash' },
+  { label: 'missing', snapshotHash: undefined }
+]) {
+  const routerCalls = [];
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              ...(scenario.snapshotHash === undefined ? {} : { snapshotHash: scenario.snapshotHash }),
+              action: 'refresh-cards',
+              cardJobs: [{ role: 'openThreadsCard', priority: 0.9, reason: 'stale plan card job' }],
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: [`${scenario.label}-snapshot-hash`]
+            }
+          };
+        }
         return {
           ok: true,
+          roleId,
           data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: 'hallucinated-provider-hash',
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: ['bogus-snapshot-hash']
+            schema: 'recursion.card.v1',
+            snapshotHash: request.snapshotHash,
+            role: 'openThreadsCard',
+            family: 'Open Threads',
+            items: [{ id: 'stale-card', promptText: 'This stale card job should not run.', evidenceRefs: ['message:1'] }]
           }
         };
       }
     }
   });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Ignore bogus hash.' });
-  assertEqual(result.ok, true, 'bogus arbiter snapshot hash still installs');
-  assert(result.plan.snapshotHash !== 'hallucinated-provider-hash', 'provider snapshot hash is ignored');
-  assertEqual(result.plan.snapshotHash, result.plan.source.snapshotHash, 'runtime snapshot hash remains authoritative');
-  assertEqual(runtime.view().lastPlan.snapshotHash, result.plan.snapshotHash, 'view plan uses runtime snapshot hash');
+  const result = await runtime.prepareForGeneration({ userMessage: `Reject ${scenario.label} Arbiter hash.` });
+  assertEqual(result.ok, true, `${scenario.label} arbiter snapshot hash falls back fail-soft`);
+  assertDeepEqual(routerCalls, ['utilityArbiter'], `${scenario.label} arbiter snapshot hash does not launch provider card jobs`);
+  assertEqual(result.plan.action, 'compose-brief', `${scenario.label} arbiter snapshot hash uses local fallback plan`);
+  assertEqual(result.plan.cardJobs.length, 0, `${scenario.label} arbiter snapshot hash drops provider card jobs`);
+  assert(result.plan.diagnostics.includes('utility-arbiter-fallback'), `${scenario.label} arbiter snapshot hash records fallback diagnostic`);
+  assert(!result.plan.diagnostics.includes(`${scenario.label}-snapshot-hash`), `${scenario.label} arbiter diagnostics are not trusted`);
+  assert(result.plan.snapshotHash !== scenario.snapshotHash, `${scenario.label} provider snapshot hash is rejected`);
+  assertEqual(result.plan.snapshotHash, result.plan.source.snapshotHash, `${scenario.label} fallback snapshot hash remains authoritative`);
+  assertEqual(runtime.view().lastPlan.snapshotHash, result.plan.snapshotHash, `${scenario.label} view plan uses runtime snapshot hash`);
 }
 
 {
   const { runtime, installed } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             budgets: { targetBriefTokens: 0, maxCards: 0 },
             diagnostics: ['zero-budget']
           }
@@ -2396,11 +2449,12 @@ for (const scenario of [
   const { runtime, storage } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             cardJobs: [{ family: 'Open Threads', reason: 'Need a provider provenance card.' }],
             budgets: { targetBriefTokens: 900, maxCards: 6 }
           }
@@ -2451,11 +2505,12 @@ for (const scenario of [
   const { runtime, installed } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'skip',
             diagnostics: ['arbiter-skip-test'],
             budgets: { targetBriefTokens: 500, maxCards: 4 }
@@ -2477,11 +2532,12 @@ for (const scenario of [
     settings: { mode: 'auto', reasonerUse: 'off' },
     hostPrompt: { methods: { clear: undefined } },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'skip',
             diagnostics: ['arbiter-skip-missing-clear']
           }
@@ -2513,6 +2569,7 @@ for (const scenario of [
             ok: true,
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
               reasonerDecision: { mode: 'use', reason: 'crowded hand', signals: ['test'] },
               budgets: { targetBriefTokens: 900, maxCards: 6 }
             }
@@ -2545,13 +2602,14 @@ for (const scenario of [
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', promptFootprint: 'rich', reasonerUse: 'auto' },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         routerCalls.push(roleId);
         if (roleId === 'utilityArbiter') {
           return {
             ok: true,
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
               reasonerDecision: { mode: 'skip', reason: 'rich prompt does not need reasoner', signals: ['explicit-skip'] },
               budgets: { targetBriefTokens: 900, maxCards: 6 }
             }
@@ -2595,6 +2653,7 @@ for (const scenario of [
             ok: true,
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
               cardJobs: [{ family: 'Open Threads', reason: 'Need one open thread card.' }],
               budgets: { targetBriefTokens: 900, maxCards: 6 },
               reasonerDecision: { mode: 'use', reason: 'signal propagation test', signals: ['signal-test'] }
@@ -2654,7 +2713,7 @@ for (const scenario of [
   const router = createGenerationRouter({
     activity,
     client: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'shared activity test only needs utility arbiter');
         return {
           text: JSON.stringify({
@@ -2685,7 +2744,7 @@ for (const scenario of [
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         throw new Error('arbiter failed with Bearer arbiter-token, sk-arbiter-runtime, and private-secret');
       }
     }
@@ -2705,12 +2764,13 @@ for (const scenario of [
   const { runtime, storage } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         routerCalls.push(roleId);
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
             budgets: { targetBriefTokens: 500, maxCards: 6 },
             diagnostics: ['provider-card-plan']
@@ -2778,6 +2838,7 @@ for (const scenario of [
             ok: true,
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
               cardJobs: [
                 { role: 'openThreadsCard', reason: 'Need one sequential open thread card.' },
                 { role: 'continuityRiskCard', reason: 'Need one invalid sequential continuity card.' }
@@ -2856,6 +2917,7 @@ for (const scenario of [
             ok: true,
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
               cardJobs: [
                 { role: 'openThreadsCard', reason: 'Keep the first sequential card.' },
                 { role: 'continuityRiskCard', reason: 'This thrown card should not poison the first.' }
@@ -2911,6 +2973,7 @@ for (const scenario of [
             ok: true,
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
               cardJobs: [
                 { role: 'openThreadsCard', reason: 'Supersede after this card.' },
                 { role: 'continuityRiskCard', reason: 'This card must not start after supersession.' }
@@ -2952,11 +3015,12 @@ for (const scenario of [
   const { runtime, storage } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
             budgets: { targetBriefTokens: 500, maxCards: 6 },
             diagnostics: ['identityless-provider-envelope']
@@ -2991,11 +3055,12 @@ for (const scenario of [
   const { runtime, storage } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
             budgets: { targetBriefTokens: 500, maxCards: 6 },
             diagnostics: ['wrong-role-provider-envelope']
@@ -3033,11 +3098,12 @@ for (const scenario of [
   const { runtime, storage } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
             budgets: { targetBriefTokens: 500, maxCards: 6 },
             diagnostics: ['extra-provider-envelope']
@@ -3142,6 +3208,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'reuse-cache',
             lifecycle: [{ action: 'select', cardId: 'cache-aware-card', reason: 'still relevant' }],
             budgets: { targetBriefTokens: 500, maxCards: 4 },
@@ -3214,6 +3281,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'reuse-cache',
             lifecycle: [{ action: 'select', cardId: 'contract-stale-card', reason: 'stale contract should be ignored' }],
             budgets: { targetBriefTokens: 500, maxCards: 4 },
@@ -3282,6 +3350,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'reuse-cache',
             lifecycle: [{ action: 'select', cardId: 'missing-version-card', reason: 'missing versions should be ignored' }],
             budgets: { targetBriefTokens: 500, maxCards: 4 },
@@ -3354,6 +3423,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'reuse-cache',
             lifecycle: [{ action: 'select', cardId: 'settings-drift-card', reason: 'still relevant after settings drift' }],
             budgets: { targetBriefTokens: 500, maxCards: 4 },
@@ -3418,12 +3488,13 @@ for (const scenario of [
       messages: staleMessages
     },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'stale cache test only calls utility arbiter');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'reuse-cache',
             lifecycle: [{ action: 'select', cardId: 'stale-cache-card', reason: 'provider thought it was reusable' }],
             budgets: { targetBriefTokens: 500, maxCards: 4 },
@@ -3850,6 +3921,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'skip',
             diagnostics: ['hostile-cache-safety']
           }
@@ -3875,7 +3947,7 @@ for (const scenario of [
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'invalid schema test only asks Utility Arbiter');
         return {
           ok: true,
@@ -3906,7 +3978,7 @@ for (const scenario of [
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
@@ -3973,11 +4045,12 @@ for (const scenario of [
       messages: reuseCacheMessages
     },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'reuse-cache',
             budgets: { targetBriefTokens: 500, maxCards: 4 },
             diagnostics: ['reuse-cache-redaction']
@@ -4019,11 +4092,12 @@ for (const scenario of [
     settings: { mode: 'auto', reasonerUse: 'off' },
     storage,
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'reuse-cache',
             budgets: { targetBriefTokens: 500, maxCards: 4 },
             diagnostics: ['malformed-cache']
@@ -4083,6 +4157,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             cardJobs: [{ family: 'Open Threads', reason: 'Check the current thread.' }],
             budgets: { targetBriefTokens: 500, maxCards: 4 },
             diagnostics: ['provider-safe-snapshot']
@@ -4145,7 +4220,7 @@ for (const scenario of [
       messages: [{ mesid: 1, role: 'user', text: 'Fallback visible message.', visible: true }]
     },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         routerCalls.push(roleId);
         throw new Error('arbiter unavailable');
       }
@@ -4428,12 +4503,13 @@ for (const scenario of [
       messages: arbiterMessages
     },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'arbiter lifecycle regression only calls utility arbiter');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'reuse-cache',
             lifecycle: [
               { action: 'select', cardId: 'arbiter-keep', reason: 'still important' },
@@ -4507,12 +4583,13 @@ for (const scenario of [
     storage,
     snapshot,
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'hard-shift lifecycle regression only calls utility arbiter');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'compose-brief',
             sceneStatus: 'hard-shift',
             lifecycle: [{ action: 'select', cardId: 'old-scene-card', reason: 'selected from original cache before hard shift' }],
@@ -4580,12 +4657,13 @@ for (const scenario of [
       messages: mixedCacheMessages
     },
     generationRouter: {
-      async generate(roleId) {
+      async generate(roleId, request) {
         assertEqual(roleId, 'utilityArbiter', 'mixed cache lifecycle regression only calls utility arbiter');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'compose-brief',
             lifecycle: [{ action: 'select', cardId: 'rejected-selected', reason: 'malformed card was selected before validation' }],
             budgets: { targetBriefTokens: 700, maxCards: 6 },
@@ -4627,6 +4705,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'skip',
             diagnostics: ['newer-run-superseded-provider']
           }
@@ -4658,6 +4737,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'compose-brief',
             diagnostics: ['dispose-regression']
           }
@@ -4691,6 +4771,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             action: 'compose-brief',
             diagnostics: ['off-mode-regression']
           }
@@ -4750,11 +4831,27 @@ for (const scenario of [
       }
     },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         if (snapshotCalls === 1) {
-          return { ok: true, data: { schema: UTILITY_ARBITER_SCHEMA, action: 'skip', diagnostics: ['older-clear'] } };
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'skip',
+              diagnostics: ['older-clear']
+            }
+          };
         }
-        return { ok: true, data: { schema: UTILITY_ARBITER_SCHEMA, action: 'compose-brief', diagnostics: ['newer-install'] } };
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'compose-brief',
+            diagnostics: ['newer-install']
+          }
+        };
       }
     }
   });
@@ -4888,6 +4985,7 @@ for (const scenario of [
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
             budgets: { targetBriefTokens: 500, maxCards: 4 }
           }
         };
@@ -5048,7 +5146,7 @@ for (const scenario of [
   const { runtime, settingsStore } = createRuntimeHarness({
     settings: { reasonerUse: 'always', providers: { reasoner: { enabled: true } } },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: false,
           error: {
@@ -5078,7 +5176,7 @@ for (const scenario of [
       }
     },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           diagnostics: { providerId: 'unsafe-provider', model: 'unsafe-model' },
@@ -5114,7 +5212,7 @@ for (const scenario of [
       }
     },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           diagnostics: { providerId: 'unsafe-provider', model: 'unsafe-model' },
@@ -5150,7 +5248,7 @@ for (const scenario of [
       }
     },
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
         return {
           ok: true,
           diagnostics: { providerId: 'unsafe-provider', model: 'unsafe-model' },

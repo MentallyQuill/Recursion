@@ -53,6 +53,7 @@ Snapshot hashes and fingerprints are used to reject stale work. A newer run supe
 
 The Utility Arbiter receives safe settings, the fixed card catalog, provider health, and the bounded snapshot. It returns the V1 `recursion.utilityArbiter.v1` plan shape:
 
+- `snapshotHash`: exact echo of the frozen request snapshot hash
 - `action`: `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`
 - `sceneStatus`: `same-scene`, `soft-shift`, `hard-shift`, or `unknown`
 - `cardJobs`: requested card roles or families
@@ -60,7 +61,7 @@ The Utility Arbiter receives safe settings, the fixed card catalog, provider hea
 - `budgets`: target brief tokens and max cards
 - `diagnostics`: compact labels
 
-Runtime validates and normalizes the plan. If the Utility provider is unavailable, runtime reuses a valid cache when safe or clears Recursion injection and continues the turn without new guidance. If the Arbiter returns invalid structured output, runtime may use the conservative local fallback plan because the provider responded but the plan was unsafe.
+Runtime validates and normalizes the plan. If the Utility provider is unavailable, runtime reuses a valid cache when safe or clears Recursion injection and continues the turn without new guidance. If the Arbiter returns invalid structured output, including a missing or mismatched `snapshotHash`, runtime uses the conservative local fallback plan because the provider responded but the plan was unsafe. Rejected Arbiter card jobs, lifecycle actions, diagnostics, and Reasoner decisions are not trusted.
 
 Reasoner decisions are advisory after normalization. When the Arbiter requests Reasoner but the Reasoner lane is disabled, untested, has a failed provider test, lacks a required direct-endpoint session key, or has incomplete route settings, runtime rewrites the decision to `skip`, records a stable `reasoner-unavailable` diagnostic, and composes through Utility only.
 

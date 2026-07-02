@@ -459,6 +459,11 @@ function mergePlan(fallbackPlan, arbiterData) {
   if (schema !== UTILITY_ARBITER_SCHEMA) {
     throw new Error(`Invalid Utility Arbiter schema: ${schema || 'missing'}`);
   }
+  const expectedSnapshotHash = safeText(fallbackPlan.snapshotHash, 180);
+  const actualSnapshotHash = safeText(data.snapshotHash, 180);
+  if (!actualSnapshotHash || actualSnapshotHash !== expectedSnapshotHash) {
+    throw new Error(`Invalid Utility Arbiter snapshotHash: ${actualSnapshotHash ? 'mismatch' : 'missing'}`);
+  }
   const budgets = {
     targetBriefTokens: normalizeBudget(
       asObject(data.budgets).targetBriefTokens,

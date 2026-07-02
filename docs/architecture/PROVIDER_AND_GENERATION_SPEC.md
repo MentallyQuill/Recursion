@@ -171,6 +171,8 @@ Required output shape:
 }
 ```
 
+The Utility Arbiter must echo the frozen request `snapshotHash`. Missing or mismatched Arbiter hashes are stale output; runtime rejects the plan and uses the conservative local fallback instead of trusting its action, card jobs, lifecycle, diagnostics, or Reasoner decision.
+
 The Arbiter is allowed to choose `reasonerDecision.mode: "use"` only when Reasoner is enabled and healthy. If Reasoner is disabled, unhealthy, or missing a provider secret, the Arbiter must select `skip` and explain the reason compactly.
 
 `promptFootprint` is a current-turn override only. Runtime accepts only `compact`, `normal`, or `rich`; invalid or missing values fall back to the stored user setting and must not appear in the sanitized plan. The override is passed to Prompt Composition for the packet being installed, but it does not mutate the stored setting.
@@ -181,12 +183,13 @@ Utility card calls should run from one snapshot. The batch boundary is part of t
 
 The preferred execution shape is:
 
-1. Arbiter returns a `cardJobs` list.
-2. Runtime freezes a `snapshotHash`.
-3. Utility card jobs are submitted as one batch when the host/provider supports batching.
-4. If batching is unavailable, jobs may run sequentially, but they must still use the same frozen snapshot and shared run id.
-5. Each card returns structured JSON with its own schema id, frozen snapshot hash, and compact evidence references.
-6. Runtime validates and accepts, repairs locally where safe, or omits each card independently.
+1. Runtime freezes a `snapshotHash` before asking the Arbiter.
+2. Arbiter returns a plan that echoes the same `snapshotHash`.
+3. Runtime rejects missing or mismatched Arbiter hashes before trusting `cardJobs`.
+4. Utility card jobs are submitted as one batch when the host/provider supports batching.
+5. If batching is unavailable, jobs may run sequentially, but they must still use the same frozen snapshot and shared run id.
+6. Each card returns structured JSON with its own schema id, frozen snapshot hash, and compact evidence references.
+7. Runtime validates and accepts, repairs locally where safe, or omits each card independently.
 
 Card calls must not depend on sibling card outputs from the same batch. Fusion happens later in the Utility composer or Reasoner composer.
 

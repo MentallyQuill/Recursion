@@ -840,7 +840,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'secret test' });
   const view = runtime.view();
-  assertEqual(result.ok, false, 'secret install failure returns ok false');
+  assertEqual(result.ok, true, 'secret install failure remains fail-soft');
+  assertEqual(result.install.ok, false, 'secret install failure preserves non-ok install outcome');
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
   const serialized = JSON.stringify({ cache, journal });
@@ -1272,7 +1273,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Install fails.' });
   const view = runtime.view();
-  assertEqual(result.ok, false, 'install exception returns ok false');
+  assertEqual(result.ok, true, 'install exception remains fail-soft');
+  assertEqual(result.install.ok, false, 'install exception preserves non-ok install outcome');
   assertEqual(calls.install, 1, 'install attempted once');
   assertEqual(installed.length, 1, 'failed install still received packet');
   assertEqual(view.activity.severity, 'warning', 'install failure settles warning');
@@ -1303,7 +1305,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
     }
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Returned install failure.' });
-  assertEqual(result.ok, false, 'returned install failure returns ok false');
+  assertEqual(result.ok, true, 'returned install failure remains fail-soft');
+  assertEqual(result.install.ok, false, 'returned install failure preserves non-ok install outcome');
   assertEqual(result.install.error.code, 'RETURNED_SECRET', 'returned install failure preserves safe code');
   assertNoSecretText(result, 'returned install result');
 }
@@ -1315,7 +1318,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'No installer.' });
   const view = runtime.view();
-  assertEqual(result.ok, false, 'missing host prompt install is explicit failure');
+  assertEqual(result.ok, true, 'missing host prompt install remains fail-soft');
+  assertEqual(result.install.ok, false, 'missing installer preserves non-ok install outcome');
   assertEqual(calls.install, 0, 'missing installer is not called');
   assertEqual(result.install.error.code, 'RECURSION_PROMPT_INSTALL_UNAVAILABLE', 'missing installer returns explicit error code');
   assertEqual(view.activity.label, 'Prompt install failed. Generation will continue without Recursion.', 'missing installer warning label');

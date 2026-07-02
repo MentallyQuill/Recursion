@@ -2455,7 +2455,7 @@ export function createRecursionRuntime({
           outcome: installOk ? 'success' : 'warning',
           label: installOk ? 'Recursion prompt ready.' : INSTALL_FAILURE_LABEL
         });
-        return { ok: installOk, packet, hand, plan, install };
+        return { ok: true, packet, hand, plan, install };
       });
       return installedResult;
     } catch (error) {

@@ -521,7 +521,7 @@ async function applyReasonerPatch({
       cards,
       sections: packet.sections
     });
-    const result = await generationRouter.generate('reasonerComposer', { runId, prompt });
+    const result = await generationRouter.generate('reasonerComposer', { runId, snapshotHash: packet.snapshotHash, prompt });
     const validated = validateReasonerResult(result, allowedIds, packet.snapshotHash);
     if (!validated.ok) {
       emitFallbackActivity(activity, { runId, reason: validated.reason });

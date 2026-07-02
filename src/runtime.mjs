@@ -2053,6 +2053,7 @@ export function createRecursionRuntime({
       const result = await generationRouter.generate('utilityArbiter', {
         runId,
         signal,
+        snapshotHash: fallbackPlan.snapshotHash,
         prompt: [
           'Return a Recursion Utility Arbiter plan as strict JSON.',
           `Schema: ${UTILITY_ARBITER_SCHEMA}`,

@@ -2578,12 +2578,15 @@ for (const scenario of [
   let arbiterSignal = null;
   let batchSignal = null;
   let reasonerSignal = null;
+  let arbiterRequestSnapshotHash = null;
+  let reasonerRequestSnapshotHash = null;
   const { runtime } = createRuntimeHarness({
     settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'rich', reasonerUse: 'always' }),
     generationRouter: {
       async generate(roleId, request = {}) {
         if (roleId === 'utilityArbiter') {
           arbiterSignal = request.signal;
+          arbiterRequestSnapshotHash = request.snapshotHash;
           return {
             ok: true,
             data: {
@@ -2596,6 +2599,7 @@ for (const scenario of [
         }
         if (roleId === 'reasonerComposer') {
           reasonerSignal = request.signal;
+          reasonerRequestSnapshotHash = request.snapshotHash;
           return {
             ok: true,
             data: {
@@ -2630,7 +2634,10 @@ for (const scenario of [
     }
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Thread abort signals.' });
+  const view = runtime.view();
   assertEqual(result.ok, true, 'signal-threaded provider run still installs');
+  assertEqual(arbiterRequestSnapshotHash, result.plan.snapshotHash, 'utility arbiter request includes frozen plan snapshot hash');
+  assertEqual(reasonerRequestSnapshotHash, view.lastPacket.snapshotHash, 'reasoner composer request includes prompt packet snapshot hash');
   assert(isAbortSignal(arbiterSignal), 'utility arbiter receives per-run abort signal');
   assert(isAbortSignal(batchSignal), 'card batch receives per-run abort signal');
   assert(isAbortSignal(reasonerSignal), 'reasoner composer receives per-run abort signal through prompt composition');

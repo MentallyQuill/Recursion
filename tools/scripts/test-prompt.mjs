@@ -300,6 +300,7 @@ const richReasonerPacket = await composePromptPacket({
 assertEqual(richReasonerCalls.length, 1, 'auto reasoner uses router on rich footprint');
 assertEqual(richReasonerCalls[0].roleId, 'reasonerComposer', 'reasoner role id used');
 assertEqual(richReasonerCalls[0].request.runId, 'rich-run', 'reasoner request includes provided run id');
+assertEqual(richReasonerCalls[0].request.snapshotHash, richReasonerPacket.snapshotHash, 'reasoner request includes prompt packet snapshot hash');
 assert(richReasonerCalls[0].request.prompt.includes('recursion.reasonerComposer.v1'), 'reasoner prompt requests schema');
 assert(richReasonerCalls[0].request.prompt.includes('"id": "c1"'), 'reasoner prompt includes safe card id');
 assert(richReasonerCalls[0].request.prompt.includes('"family": "Scene Frame"'), 'reasoner prompt includes safe card family');

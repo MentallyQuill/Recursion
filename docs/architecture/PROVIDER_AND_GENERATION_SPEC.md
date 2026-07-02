@@ -111,7 +111,7 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 | Role | Default lane | Purpose | Failure behavior |
 | --- | --- | --- | --- |
-| `utilityArbiter` | Utility | Decide whether Recursion should skip, reuse cache, refresh cards, compose a brief, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema may use conservative local fallback |
+| `utilityArbiter` | Utility | Decide whether Recursion should skip, reuse cache, refresh cards, compose a brief, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
 | `sceneFrameCard` | Utility | Produce compact current-scene frame data | Omit card with diagnostic |
 | `activeCastCard` | Utility | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
 | `characterMotivationCard` | Utility | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |

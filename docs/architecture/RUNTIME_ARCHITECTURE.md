@@ -145,7 +145,7 @@ Recursion must be fail-soft. Provider, schema, storage, and injection failures s
 Expected failure behavior:
 
 - Utility provider unavailable: skip new Arbiter work, reuse a valid packet if safe, or clear Recursion injection and continue.
-- Arbiter schema invalid: reject the plan, record diagnostics, and fall back to a conservative local action.
+- Arbiter schema invalid or `snapshotHash` missing/mismatched: reject the plan, record diagnostics, and fall back to a conservative local action.
 - Card job failure: keep the last valid cache segment, omit failed cards from the hand, and record omission reasons.
 - Reasoner failure: continue with deterministic or Utility-composed prompt packets.
 - Prompt composition over budget: trim by lane priority and record budget omissions.

@@ -17,6 +17,15 @@ Cards are disposable cache artifacts. They are not memories, lore, canon, or use
 | Prose/Pacing | `prosePacingCard` | Local craft guidance for density, momentum, specificity, and response shape. | Low-volume style guidance. |
 | Open Threads | `openThreadsCard` | Unresolved questions, promises, pending actions, and near-term pressures. | Keeps the next response aware of visible obligations. |
 
+## Card Scope
+
+Card scope is the user-facing focus control over the fixed V1 catalog. It has two modes:
+
+- Auto: selected families and sub-items guide focus, but the Utility Arbiter still sees the full catalog. Runtime can keep critical continuity exceptions and records them as compact `auto-scope-exception:<family>` diagnostics.
+- Manual: selected families and sub-items are a strict whitelist. Runtime removes disabled-family card jobs before provider generation and filters disabled cached, provider, and fallback cards before deck and hand selection.
+
+Sub-items are focus facets inside a family, such as `fragileFacts` under Continuity Risk or `pendingActions` under Open Threads. They guide the prompt for that family card and appear in safe diagnostics, but they do not create separate generated cards, separate deck records, or separate prompt-injection lanes.
+
 ## Card Data Contract
 
 A normalized card contains:

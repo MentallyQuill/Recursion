@@ -9,6 +9,7 @@ Recursion storage is cache-oriented. It makes current-scene prompt compilation f
 `extension_settings.recursion` stores compact controls:
 
 - mode
+- card scope
 - strength
 - prompt footprint
 - focus
@@ -48,7 +49,7 @@ The run journal is a ring buffer, not an archive. It stores compact entries with
 
 Provider journal entries are diagnostic only. A journal write failure cannot break the generation path.
 
-Committed Auto and Semi-Auto prompt install attempts write a `hand.selected` breadcrumb. The entry is metadata only: hand id, selected and omitted counts, up to 16 selected card ids/families/roles/emphasis/token estimates with `listedCount` and `truncated`, source hash, prompt packet hash, and compact metrics. It must not persist card `promptText`, prompt packet sections, inspector notes, raw provider prompts, raw provider responses, transcript text, or secrets.
+Committed Auto and Manual prompt install attempts write a `hand.selected` breadcrumb. The entry is metadata only: hand id, selected and omitted counts, up to 16 selected card ids/families/roles/emphasis/token estimates with `listedCount` and `truncated`, source hash, prompt packet hash, and compact metrics. It must not persist card `promptText`, prompt packet sections, inspector notes, raw provider prompts, raw provider responses, transcript text, or secrets.
 
 ## Activity Event Contract
 
@@ -69,6 +70,7 @@ Allowed default diagnostics:
 - durations and token counts
 - card ids, families, statuses, emphasis, and token estimates
 - hand selection counts and selected card identity metadata
+- card-scope counts, selected family keys, selected sub-item keys, and compact scope labels
 - source message ranges and hashes
 - prompt packet hashes and omission reasons
 - cache hit, stale, index update, and prune events
@@ -122,7 +124,7 @@ versions: {
 }
 ```
 
-`cardCatalogHash` is derived from the full V1 card catalog. `promptPacketVersion` is the prompt packet contract used by the composer. `providerContractHash` is derived from provider role ids and expected provider response schemas. `settingsHash` is derived from cache-relevant normalized settings, excluding UI state, diagnostics, provider test results, resolved display labels, and raw secrets.
+`cardCatalogHash` is derived from the full V1 card catalog. `promptPacketVersion` is the prompt packet contract used by the composer. `providerContractHash` is derived from provider role ids and expected provider response schemas. `settingsHash` is derived from cache-relevant normalized settings, including Auto/Manual mode and normalized card scope, and excluding UI state, diagnostics, provider test results, resolved display labels, and raw secrets.
 
 When `storageSchemaVersion`, `runtimeCacheContractVersion`, `cardCatalogHash`, `promptPacketVersion`, or `providerContractHash` is missing or mismatched, runtime treats the record as a hard contract mismatch: cached cards are hidden from the Utility Arbiter prompt, the cache is best-effort marked `invalid` with reason `contract-mismatch`, and the scene rebuilds. When only `settingsHash` is missing or mismatched, runtime treats the record as soft settings drift: the cache is best-effort marked `stale` with reason `settings-changed`, but compact cached-card metadata remains visible to the Arbiter so it can decide whether reuse is still valid.
 
@@ -146,6 +148,19 @@ The journal entry uses `event: 'cache.invalidated'`, `severity: 'info'`, the san
 Runtime V1 reasons are `user-refresh`, `settings-changed`, `provider-changed`, `provider-key-cleared`, `chat-changed`, and `source-changed`. Chat-change invalidation is best-effort against the previously active scene cache when a cache reference exists; it does not create a new cache for the newly selected chat. Source-change invalidation is best-effort when SillyTavern reports a message delete, update, or swipe event; runtime clears the stale prompt immediately and leaves later source-window validation to reject any cached card whose evidence no longer matches. Details must not persist API keys, bearer tokens, `sk-...` tokens, private secrets, raw provider payloads, hidden reasoning, or raw message text.
 
 Pre-alpha records can be invalidated and rebuilt instead of migrated through compatibility shims.
+
+## Card Scope Diagnostics
+
+Card scope is diagnostic metadata, not prompt text. Runtime may persist:
+
+- normalized mode: `auto` or `manual`;
+- selected family names from the fixed V1 catalog;
+- selected sub-item keys under those families;
+- selected/total counts and compact UI label;
+- omission reasons such as `manual-scope-omitted:<family>`;
+- exception reasons such as `auto-scope-exception:<family>`.
+
+Runtime must not persist generated card text, provider prompt text, transcript text, or user-authored prose inside card-scope diagnostics. Sub-items are focus facets that guide a family card, not separate V1 card records and not separate prompt-injection lanes.
 
 ## Cleanup And Index Maintenance
 

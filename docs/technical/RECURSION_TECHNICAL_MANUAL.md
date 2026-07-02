@@ -42,7 +42,7 @@ The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src
 | Cards | `src/cards.mjs` | Fixed V1 catalog, card normalization, provider-result conversion, lifecycle application, and hand selection. |
 | Prompt | `src/prompt.mjs` | Packet sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
 | Storage | `src/storage.mjs` | Logical scene-cache and run-journal records, key safety, redaction, index maintenance, and bounded retention. |
-| Runtime | `src/runtime.mjs` | Power toggle, Auto/Semi-Auto orchestration, snapshot use, Utility Arbiter plan handling, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
+| Runtime | `src/runtime.mjs` | Power toggle, Auto/Manual orchestration, snapshot use, Utility Arbiter plan handling, card-scope enforcement, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
 | UI | `src/ui.mjs` | Recursion Bar, Hero Pixel Array progress menu, options/settings, Last Brief, Full Viewer, settings, and provider controls. |
 | SillyTavern host | `src/hosts/sillytavern/host.mjs` | Snapshot capture, prompt install/clear, provider bridge, settings store, and user-file storage adapter selection. |
 | Entrypoint | `src/extension/index.js` | Extension lifecycle hooks, runtime bootstrap, UI mount, generation interceptor, and teardown cleanup. |
@@ -51,9 +51,9 @@ The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src
 
 Power-off clears or avoids Recursion prompt entries and does not inspect chat for prompt compilation.
 
-Semi-Auto captures the current turn and currently follows the Auto prompt-install path. Its UI contract is reserved for constraining card generation to selected card types when that backend selector lands.
+Manual captures the current turn and follows the normal prompt-install path, but it constrains card generation and cached-card reuse to the selected card families. Disabled families are omitted before provider card jobs run and filtered again before deck and hand selection.
 
-Auto mode runs the full pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the Utility Arbiter or local fallback path produces useful guidance.
+Auto mode runs the full pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the Utility Arbiter or local fallback path produces useful guidance. User-selected card families and sub-items guide focus in Auto, but the Utility Arbiter still sees the full fixed catalog and can keep critical continuity exceptions with compact diagnostics.
 
 Settings and provider changes supersede the active run, abort stale provider work where possible, and await prompt cleanup before their operation results resolve. `updateSettings` returns updated settings plus the prompt-clear result; `updateProvider` and `clearProviderKey` return updated provider settings plus the prompt-clear result. Clear failure leaves the setting or provider change applied, returns `ok: false`, and surfaces the sanitized prompt-clear warning.
 

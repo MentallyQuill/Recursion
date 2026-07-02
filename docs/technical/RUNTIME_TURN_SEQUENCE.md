@@ -7,8 +7,8 @@ This manual describes the turn lifecycle implemented by `src/runtime.mjs` and th
 | Control state | Runtime behavior |
 | --- | --- |
 | Power off | Supersedes active Recursion work, clears Recursion prompt entries, and returns without chat inspection or prompt compilation. |
-| Auto | Captures a snapshot, runs the full pipeline, installs validated prompt blocks, writes bounded diagnostics, and settles the progress surface. |
-| Semi-Auto | Uses the same runtime path as Auto in V1, with the UI contract reserved for constraining card generation to selected card types when that backend selector lands. |
+| Auto | Captures a snapshot, sends the full fixed catalog plus card-scope focus preferences to the Utility Arbiter, runs the full pipeline, installs validated prompt blocks, writes bounded diagnostics, and settles the progress surface. |
+| Manual | Captures a snapshot, sends only enabled card-scope families/sub-items to the Utility Arbiter, strictly filters disabled card jobs/cards before generation and hand selection, then runs the same prompt-compile pipeline when useful. |
 
 ## Auto Sequence
 
@@ -51,7 +51,7 @@ Snapshot hashes and fingerprints are used to reject stale work. A newer run supe
 
 ## Utility Arbiter
 
-The Utility Arbiter receives safe settings, the fixed card catalog, provider health, and the bounded snapshot. It returns the V1 `recursion.utilityArbiter.v1` plan shape:
+The Utility Arbiter receives safe settings, provider health, the bounded snapshot, and card-scope payload. In Auto, the payload includes the full available catalog plus selected focus preferences; critical continuity families can still appear as visible `auto-scope-exception:<family>` diagnostics. In Manual, the payload is a strict whitelist and disabled families are not offered to the Arbiter. It returns the V1 `recursion.utilityArbiter.v1` plan shape:
 
 - `snapshotHash`: exact echo of the frozen request snapshot hash
 - `action`: `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`
@@ -67,7 +67,11 @@ Reasoner decisions are advisory after normalization. When the Arbiter requests R
 
 ## Card Jobs And Deck Update
 
-Card requests are built from the Arbiter plan and the frozen snapshot. Utility card calls are batched when the provider router supports batching. Each accepted provider result is converted into a normalized V1 card, then sanitized before entering the deck.
+Card requests are built from the Arbiter plan, the frozen snapshot, and the selected sub-item focus for each requested family. Sub-items guide what the provider should emphasize inside a family; they do not create separate card instances.
+
+In Manual mode, runtime enforces the whitelist after the Arbiter returns. Disabled-family jobs are omitted before provider generation, disabled cached/provider/fallback cards are filtered before deck and hand selection, and diagnostics use compact `manual-scope-omitted:<family>` reasons without prompt text. In Auto mode, disabled focus is advisory: runtime keeps the full catalog available, but records compact exception diagnostics when an unselected critical family is used.
+
+Utility card calls are batched when the provider router supports batching. Each accepted provider result is converted into a normalized V1 card, then sanitized before entering the deck.
 
 Runtime can create local fallback Scene Frame and Continuity Risk cards from the latest visible messages after a valid or locally recoverable plan exists. These local cards keep the first loop useful when card generation is unavailable, but they are not used to mask a missing or transport-failing Utility provider.
 
@@ -85,7 +89,7 @@ The resulting hand contains sanitized card ids, families, roles, prompt text, to
 
 The prompt composer turns the hand into Scene Brief, Turn Brief, and Guardrails. Utility composition is the default path. Reasoner composition can add a validated synthesis patch when settings and the Arbiter permit it.
 
-Auto and Semi-Auto install prompt blocks through the SillyTavern adapter. Committed prompt install attempts write a sanitized `hand.selected` journal breadcrumb for the final hand before the prompt install event. Power-off clears without compilation.
+Auto and Manual install prompt blocks through the SillyTavern adapter when the current run produces a valid hand and packet. Committed prompt install attempts write a sanitized `hand.selected` journal breadcrumb for the final hand before the prompt install event. Power-off clears without compilation.
 
 Current SillyTavern prompt keys:
 

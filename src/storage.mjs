@@ -214,6 +214,50 @@ function normalizeInvalidation(value = {}) {
   }));
 }
 
+function normalizeNonNegativeInteger(value, fallback = 0) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(0, Math.round(number));
+}
+
+function normalizeSourceRole(value) {
+  const role = safeMetadataText(value, 40, '');
+  return ['user', 'assistant', 'system', 'unknown'].includes(role) ? role : undefined;
+}
+
+function normalizeSourceRef(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const refId = safeMetadataText(source.refId || source.id || '', 160, '');
+  const textHash = safeMetadataText(source.textHash || source.hash || '', 160, '');
+  if (!refId || !textHash) return null;
+  const output = {
+    refId,
+    firstMesId: normalizeNonNegativeInteger(source.firstMesId),
+    lastMesId: normalizeNonNegativeInteger(source.lastMesId),
+    textHash
+  };
+  const role = normalizeSourceRole(source.role);
+  if (role) output.role = role;
+  const excerpt = sanitizedOptionalTextValue(source.excerpt, 160);
+  if (excerpt) output.excerpt = excerpt;
+  return output;
+}
+
+function normalizeSceneSource(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    chatIdHash: safeMetadataText(source.chatIdHash || '', 160, ''),
+    firstMesId: normalizeNonNegativeInteger(source.firstMesId),
+    lastMesId: normalizeNonNegativeInteger(source.lastMesId),
+    latestMesId: normalizeNonNegativeInteger(source.latestMesId),
+    sceneFingerprint: safeMetadataText(source.sceneFingerprint || '', 160, ''),
+    chatWindowHash: safeMetadataText(source.chatWindowHash || '', 160, ''),
+    sourceRefs: Array.isArray(source.sourceRefs)
+      ? source.sourceRefs.map(normalizeSourceRef).filter(Boolean).slice(0, 32)
+      : []
+  };
+}
+
 function normalizeSceneCard(card) {
   if (!card || typeof card !== 'object' || Array.isArray(card)) return null;
   const source = card.source && typeof card.source === 'object' && !Array.isArray(card.source) ? card.source : {};
@@ -292,7 +336,7 @@ function normalizeSceneCache(chatKey, sceneKey, value = {}) {
     cacheState: ['active', 'stale', 'retired', 'invalid'].includes(source.cacheState) ? source.cacheState : 'active',
     cards: Array.isArray(source.cards) ? source.cards.map(normalizeSceneCard).filter(Boolean) : [],
     latestHand: normalizeLatestHand(source.latestHand),
-    source: sanitizedJsonValue(source.source, null),
+    source: normalizeSceneSource(source.source),
     versions: sanitizedJsonValue(source.versions, {}),
     ...(source.invalidation === undefined ? {} : { invalidation: normalizeInvalidation(source.invalidation) })
   });

@@ -6,7 +6,7 @@ import {
   runJournalKey
 } from '../../src/storage.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
-import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
+import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 function assertNoSecret(value, message) {
   assert(!JSON.stringify(value).includes('secret'), message);
@@ -543,9 +543,82 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertParseableTimestamp(persisted.createdAt, 'scene cache invalid createdAt replaced with timestamp string');
   assertEqual(persisted.latestHand.handId, 'hand-1', 'latestHand keeps allowlisted handId');
   assertNoOwnField(persisted.latestHand, 'provider', 'latestHand drops non-contract provider metadata');
-  assertEqual(persisted.source.authorization, '[redacted]', 'source authorization redacted');
+  assertNoOwnField(persisted.source, 'name', 'scene cache source drops non-contract name metadata');
+  assertNoOwnField(persisted.source, 'authorization', 'scene cache source drops non-contract authorization metadata');
   assertEqual(persisted.versions.prompt.token, '[redacted]', 'versions nested token redacted');
   assertNoSecret(persisted, 'scene cache nested metadata contains no raw secrets');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  const key = sceneCacheKey('Source Boundary Chat', 'Scene Cache');
+  const longExcerpt = `${'Visible excerpt. '.repeat(40)}Bearer source-token should redact.`;
+  await repo.saveSceneCache('Source Boundary Chat', 'Scene Cache', {
+    source: {
+      chatIdHash: 'chat-hash-safe',
+      firstMesId: 2,
+      lastMesId: 5,
+      latestMesId: 8,
+      sceneFingerprint: 'scene-fingerprint-safe',
+      chatWindowHash: 'window-hash-safe',
+      transcript: 'Full transcript text must not persist.',
+      messages: [{ text: 'Message text must not persist.' }],
+      arbitrary: { providerPrompt: 'provider prompt body' },
+      sourceRefs: [
+        {
+          refId: 'message:2-5',
+          firstMesId: 2,
+          lastMesId: 5,
+          textHash: 'text-hash-safe',
+          role: 'assistant',
+          excerpt: longExcerpt
+        },
+        {
+          refId: 'F:\\SillyTavern\\unsafe\\chat.jsonl',
+          firstMesId: 1,
+          lastMesId: 1,
+          textHash: 'unsafe-path-ref',
+          role: 'user',
+          excerpt: 'Unsafe path ref must not persist.'
+        },
+        {
+          refId: 'message:7',
+          firstMesId: 7,
+          lastMesId: 7,
+          textHash: 'Bearer source-ref-token',
+          role: 'user',
+          excerpt: 'Unsafe token hash must not persist.'
+        }
+      ]
+    }
+  });
+  const persisted = adapter.dump()[key];
+  assertDeepEqual(
+    Object.keys(persisted.source).sort(),
+    ['chatIdHash', 'chatWindowHash', 'firstMesId', 'lastMesId', 'latestMesId', 'sceneFingerprint', 'sourceRefs'].sort(),
+    'scene cache source keeps only allowlisted source metadata fields'
+  );
+  assertEqual(persisted.source.chatIdHash, 'chat-hash-safe', 'scene source keeps safe chat hash');
+  assertEqual(persisted.source.firstMesId, 2, 'scene source keeps first message id');
+  assertEqual(persisted.source.lastMesId, 5, 'scene source keeps last message id');
+  assertEqual(persisted.source.latestMesId, 8, 'scene source keeps latest message id');
+  assertEqual(persisted.source.sceneFingerprint, 'scene-fingerprint-safe', 'scene source keeps scene fingerprint');
+  assertEqual(persisted.source.chatWindowHash, 'window-hash-safe', 'scene source keeps chat window hash');
+  assertEqual(persisted.source.sourceRefs.length, 1, 'scene source drops unsafe source refs');
+  assertEqual(persisted.source.sourceRefs[0].refId, 'message:2-5', 'scene source keeps safe source ref id');
+  assertEqual(persisted.source.sourceRefs[0].firstMesId, 2, 'scene source ref keeps first message id');
+  assertEqual(persisted.source.sourceRefs[0].lastMesId, 5, 'scene source ref keeps last message id');
+  assertEqual(persisted.source.sourceRefs[0].textHash, 'text-hash-safe', 'scene source ref keeps text hash');
+  assertEqual(persisted.source.sourceRefs[0].role, 'assistant', 'scene source keeps allowed source ref role');
+  assert(persisted.source.sourceRefs[0].excerpt.length <= 160, 'scene source ref excerpt is bounded');
+  const serialized = JSON.stringify(persisted);
+  assert(!serialized.includes('Full transcript text must not persist'), 'scene source drops transcript text');
+  assert(!serialized.includes('Message text must not persist'), 'scene source drops message text');
+  assert(!serialized.includes('provider prompt body'), 'scene source drops arbitrary provider prompt text');
+  assert(!serialized.includes('Unsafe path ref must not persist'), 'scene source drops unsafe path source ref');
+  assert(!serialized.includes('Unsafe token hash must not persist'), 'scene source drops unsafe token source ref');
+  assertNoRawSecretText(persisted, 'scene source boundary redacts unsafe excerpt text');
 }
 
 {

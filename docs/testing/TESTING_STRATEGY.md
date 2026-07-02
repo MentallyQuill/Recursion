@@ -15,8 +15,8 @@ The fast contract suite is the normal maintained confidence gate in this checkou
 
 Highest-priority invariants:
 
-- Off mode performs no chat inspection, provider calls, card updates, or prompt injection.
-- Observe only mode may capture diagnostics and preview decisions but must not install prompt packets.
+- Power-off performs no chat inspection, provider calls, card updates, or prompt injection.
+- Semi-Auto mode currently follows the Auto install path and must remain a distinct selectable mode for future card-type constraints.
 - Auto mode may install prompt packets only through Recursion-owned SillyTavern prompt keys.
 - Prompt packet installation is replace-or-clear by Recursion metadata, not blind append.
 - Stale provider results cannot update the active scene cache or active prompt packet.
@@ -88,14 +88,14 @@ Live smoke must start with these gates:
 Primary live scenarios:
 
 - extension mount and Recursion Bar render;
-- mode transitions: Off, Observe only, Auto;
+- mode transitions: disabled power, Auto, Semi-Auto;
 - provider setup display and Test Provider action for Utility and Reasoner;
-- Observe only mode diagnostics without prompt injection;
+- Semi-Auto prompt-install proof through the current Auto-equivalent path;
 - Auto mode Utility Arbiter pass, card refresh, hand selection, prompt packet composition, and prompt installation;
 - Last Brief dropdown reflects the cards used for the last prompt packet;
 - Hero Pixel Array progress menu shows model-call, cache, storage, composition, injection, fallback, and settled states;
 - full viewer opens Now, Deck, Activity, Prompt Packet, Settings, and Providers views;
-- prompt packet clear on Off mode, chat change, disable, and teardown;
+- prompt packet clear on power-off, chat change, disable, and teardown;
 - Utility provider failure falls back without blocking host generation;
 - Reasoner failure falls back to Utility or local composition without blocking host generation;
 - storage repair and journal pruning report logical progress without leaking physical paths.

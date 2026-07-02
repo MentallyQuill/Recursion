@@ -88,12 +88,12 @@ Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIV
 | Scenario | Mutates chat | Requires provider | Must prove |
 | --- | --- | --- | --- |
 | Mount smoke | no | no | Recursion extension loads, Recursion Bar renders, Hero Pixel Array progress menu can open, settings/options can open, viewer can open. |
-| Mode smoke | no | no | Off, Observe only, Auto, and return-to-Off controls update runtime mode, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
+| Mode smoke | no | no | Disabled power, Auto, Semi-Auto, and return-to-disabled controls update runtime state, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
 | Storage probe | files only | no | Dedicated user can write/read/delete Recursion-owned files and records are isolated from other users. |
-| Observe only smoke | optional | no | Snapshot and diagnostics can be previewed without prompt injection. |
+| Semi-Auto smoke | optional | Utility | Semi-Auto applies as a distinct mode and currently installs prompts through the Auto-equivalent V1 path. |
 | Utility provider smoke | yes | Utility | Arbiter/card/composer work runs, progress menu reports it, prompt packet installs, and generation continues. |
 | Reasoner fallback smoke | yes | Utility and Reasoner | Reasoner can compose when healthy and falls back to Utility when off, timed out, or invalid. |
-| Prompt cleanup smoke | no | no | Off mode, disable, teardown, and chat change clear Recursion prompt keys. |
+| Prompt cleanup smoke | no | no | Power-off, disable, teardown, and chat change clear Recursion prompt keys. |
 | Failure smoke | optional | simulated or real failing lane | Provider/storage/injection failure reports visible fallback and does not block host generation. |
 | Responsive UI smoke | no | no | Desktop and phone viewport screenshots show no overlap with chat controls. |
 
@@ -116,7 +116,7 @@ The run stops here on unsafe user, stale extension, missing host, failed auth, o
 ### 2. Mount And UI
 
 - Locate the Recursion Bar.
-- Assert the compact bar has stable wordmark, mode, progress, reasoning, Last Brief, and options zones.
+- Assert the compact bar has stable power, mode, progress, reasoning, Last Brief, and options zones.
 - Open the Hero Pixel Array progress menu.
 - Open the Last Brief dropdown.
 - Open settings/options and verify Play, Providers, and Advanced tabs.
@@ -130,12 +130,12 @@ The smoke should fail if controls overlap chat input, if text escapes compact co
 ### 3. Mode Transitions
 
 - Seed a Recursion-owned prompt key as a cleanup sentinel.
-- Set Off mode and verify prompt keys are absent or cleared.
-- Set Observe only mode and verify no prompt packet is installed.
+- Turn power off and verify prompt keys are absent or cleared.
 - Set Auto mode and verify the runtime is ready to compile when a generation begins.
-- Return to Off mode and verify cleanup.
+- Set Semi-Auto mode and verify it applies as a distinct mode.
+- Return to power off and verify cleanup.
 
-Mode changes should be visible in the bar and should append sanitized activity events. The no-generation browser snapshot should include `modeSmoke.sequence: ["off", "observe", "auto", "off"]`, per-step selected/observed modes, and prompt-key names only. It must not store seeded prompt text.
+Mode and power changes should be visible in the bar and should append sanitized activity events. The no-generation browser snapshot should include `modeSmoke.sequence: ["disabled", "auto", "semi-auto", "disabled"]`, per-step selected/observed modes, power state, and prompt-key names only. It must not store seeded prompt text.
 
 ### 4. Provider Controls
 
@@ -148,16 +148,16 @@ When providers are configured:
 
 Provider tests must not persist API keys, raw prompts, or raw responses.
 
-### 5. Observe Only Pass
+### 5. Semi-Auto Pass
 
-In Observe only mode:
+In Semi-Auto mode:
 
 - Capture a turn snapshot or current chat snapshot.
-- Ask runtime for a preview-safe decision when supported.
-- Verify no prompt packet is installed.
+- Verify the mode applies as `semi-auto`.
+- Verify a prompt packet is installed through the current Auto-equivalent path.
 - Verify the progress menu and Full Viewer show sanitized snapshot/card-plan metadata.
 
-Observe only mode may record hashes, counts, ids, and bounded labels. It must not create model-facing prompt keys.
+Semi-Auto mode may record hashes, counts, ids, and bounded labels. It must not leak raw provider payloads, full transcript text, or secrets.
 
 ### 6. Auto Utility Pass
 

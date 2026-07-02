@@ -2,13 +2,13 @@
 
 This manual describes the turn lifecycle implemented by `src/runtime.mjs` and the adjacent card, prompt, provider, activity, storage, and SillyTavern adapter modules.
 
-## Mode Lifecycles
+## Power And Mode Lifecycles
 
-| Mode | Runtime behavior |
+| Control state | Runtime behavior |
 | --- | --- |
-| Off | Supersedes active Recursion work, clears Recursion prompt entries, and returns without chat inspection or prompt compilation. |
-| Observe only | Captures a snapshot, runs Utility planning and safe card/prompt work, saves diagnostics, clears prompt entries, and returns a preview without injection. |
+| Power off | Supersedes active Recursion work, clears Recursion prompt entries, and returns without chat inspection or prompt compilation. |
 | Auto | Captures a snapshot, runs the full pipeline, installs validated prompt blocks, writes bounded diagnostics, and settles the progress surface. |
+| Semi-Auto | Uses the same runtime path as Auto in V1, with the UI contract reserved for constraining card generation to selected card types when that backend selector lands. |
 
 ## Auto Sequence
 
@@ -41,7 +41,7 @@ sequenceDiagram
     Runtime->>UI: Recursion prompt ready or warning
 ```
 
-<Render Needed>: assets/documentation/renders/recursion-runtime-turn-sequence.png - Polished turn sequence visual for Auto mode from generation interceptor through prompt install and settled activity.
+![Runtime turn sequence visual](../../assets/documentation/renders/recursion-runtime-turn-sequence.png)
 
 ## Snapshot Capture
 
@@ -85,7 +85,7 @@ The resulting hand contains sanitized card ids, families, roles, prompt text, to
 
 The prompt composer turns the hand into Scene Brief, Turn Brief, and Guardrails. Utility composition is the default path. Reasoner composition can add a validated synthesis patch when settings and the Arbiter permit it.
 
-Auto mode installs prompt blocks through the SillyTavern adapter. Committed Auto prompt install attempts write a sanitized `hand.selected` journal breadcrumb for the final hand before the prompt install event. Observe only mode composes, clears prompt entries, then writes the same sanitized hand breadcrumb for the preview. Off mode clears without compilation.
+Auto and Semi-Auto install prompt blocks through the SillyTavern adapter. Committed prompt install attempts write a sanitized `hand.selected` journal breadcrumb for the final hand before the prompt install event. Power-off clears without compilation.
 
 Current SillyTavern prompt keys:
 

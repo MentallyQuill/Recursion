@@ -30,33 +30,36 @@ Recursion should use its own chat-attached top bar instead of adopting the Direc
 Default desktop shape:
 
 ```text
-[Hero Pixel Array] RECURSION | [mode icon] | Selecting turn hand...         v | ...
+[power] | [mode icon] | [Hero Pixel Array] Selecting turn hand...     [reasoning] v | ...
 ```
 
 Narrow/mobile shape:
 
 ```text
-[Hero Pixel Array] RECURSION | [mode] | Selecting...    v | ...
+[power] | [mode] | [Hero Pixel Array] Selecting...      v | ...
 ```
 
-The desktop bar uses one compact row with distinct zones for identity, mode, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
+The desktop bar uses one compact row with distinct zones for power, mode, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
 
 The exact copyable HTML/CSS snapshot for this V1 bar lives in `docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md`. Treat that file as the implementation reference for reproducing the current mock in SillyTavern: it captures the final class names, inline SVG icons, Hero Pixel Array, progress menu, mode menu, Last Brief dropdown, Prompt Packet panel, metachips, and 12px active progress spinner treatment.
+
+Recursion chrome should use explicit compact font sizing instead of inheriting SillyTavern chat/body text size. Use 12.5px as the default bar, menu, settings, and control font scale, 11.5px for compact current-step and mode-choice names, and 10px for subdued helper/meta text. This keeps the live SillyTavern extension visually aligned with the mockup even when the host theme uses larger global typography.
 
 Canonical desktop layout:
 
 ```text
-[Hero Pixel Array] RECURSION | [eye] | Observing turn...                    v | ...
-[Hero Pixel Array] RECURSION | [cards] | Selecting turn hand...             v | ...
-[Hero Pixel Array] RECURSION | [cards] | Installing prompt...               v | ...
-[empty Hero Pixel Array] RECURSION | [power]                                v | ...
+[power] | [cards] | [blocks] Selecting turn hand...               [reasoning] v | ...
+[power] | [cards] | [blocks] Installing prompt...                 [reasoning] v | ...
+[power] | [cards] | [blocks] Semi-Auto card subset pending...     [reasoning] v | ...
+[power-off] | [cards] |                                           [reasoning] v | ...
 ```
 
-The mode control is a single icon-only button near the brand. It changes icon based on the active mode:
+The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
 
-- Eye: `Observe only`.
+The mode control is a single icon-only button beside the power toggle. It shows the stacked-cards icon for both current V1 modes:
+
 - Stacked cards: `Auto`.
-- Power: `Off`.
+- Stacked cards: `Semi-Auto`.
 
 Do not duplicate the mode controls on the right side of the bar. The mode icon should expose tooltip and accessible label text for the current mode and can open a compact mode selector.
 
@@ -64,15 +67,20 @@ Clicking the mode icon opens a compact mode selector menu. The selected mode cha
 
 Mode selector rows:
 
-- Eye icon, `Observe only`: Recursion watches the turn and prepares inspection surfaces, but does not inject prompt text.
 - Stacked cards icon, `Auto`: Recursion selects cards, composes the prompt packet, and injects it automatically when ready.
-- Power icon, `Off`: Recursion disables prompt work and visible runtime activity until re-enabled.
+- Stacked cards icon, `Semi-Auto`: Recursion constrains card generation to selected card types. Until the backend subset selector lands, it follows the same generation/install path as Auto.
 
 Each mode row should show the icon, short name, and a hover/focus tip with the longer explanation. The menu should use native SillyTavern popup density and close on selection, outside click, or `Esc`.
 
 Reference mode selector shape:
 
 ```html
+<button class="recursion-power-toggle is-on"
+        aria-label="Turn Recursion off"
+        aria-pressed="true">
+  <!-- power icon -->
+</button>
+
 <button class="recursion-mode-button" aria-label="Mode: Auto" aria-expanded="false">
   <!-- current mode icon -->
 </button>
@@ -80,15 +88,16 @@ Reference mode selector shape:
 <div class="recursion-mode-menu" aria-label="Recursion mode selector">
   <button class="recursion-mode-choice is-selected"
           data-mode="auto"
-          title="Auto selects cards, composes the prompt packet, and injects it when ready.">
+          title="Selects cards and injects composed prompt context automatically.">
     <span class="recursion-mode-choice-icon"><!-- stacked cards --></span>
     <span>
       <span class="recursion-mode-choice-name">Auto</span>
       <span class="recursion-mode-choice-tip">Selects cards and injects composed prompt context automatically.</span>
     </span>
   </button>
-  <button class="recursion-mode-choice" data-mode="observe" title="Observe only prepares inspection surfaces without injecting prompt text.">...</button>
-  <button class="recursion-mode-choice" data-mode="off" title="Off disables Recursion prompt work.">...</button>
+  <button class="recursion-mode-choice"
+          data-mode="semi-auto"
+          title="Constrains card generation to selected card types.">...</button>
 </div>
 ```
 
@@ -126,7 +135,7 @@ Reference mode selector CSS:
 }
 ```
 
-The Hero Pixel Array sits immediately before `RECURSION`. It shows runtime state at a glance and mirrors the visible top-level rows in the progress menu:
+The Hero Pixel Array sits to the right of the mode separator and immediately before the compact current-step text. It shows runtime state at a glance and mirrors the visible top-level rows in the progress menu:
 
 - Empty muted blocks: queued or not-yet-started progress items.
 - Green filled blocks: completed progress items.
@@ -135,14 +144,17 @@ The Hero Pixel Array sits immediately before `RECURSION`. It shows runtime state
 - Yellow filled blocks: finished with errors, fallback, JSON repair, or other repairable caution.
 - Red filled blocks: blocked or failed progress items.
 
-Blocks build down from the top of a three-row column, then start the next column to the right. The `RECURSION` brand stays fixed in place. New columns grow across the brand text instead of pushing it right, while a bar-background gradient grows beneath the blocks to fade the covered letters cleanly. On the next user message, the old blocks and gradient wipe away, revealing the full brand before the next run starts building.
+Blocks build down from the top of a three-row column, then start the next column to the right. The array sits after the Mode separator and before the compact current-step text. On the next user message, old blocks wipe away before the next run starts building.
 
 The Hero Pixel Array must respect reduced-motion preferences. It may pulse active blocks while work is running, but it must not animate when `prefers-reduced-motion: reduce` is active.
 
 The bar may show exactly one live generation status: the current in-progress step, rendered as short muted text to the right of the mode separator. The full step list belongs in the Hero Pixel Array menu. The bar may expose last-brief details through tooltip/accessibility text on the preview arrow, but it should not become a row of status chips.
 
-The right side has exactly two controls:
+Pending or waiting progress rows must not appear as the compact current-step text. They remain visible in the progress menu as empty/waiting rows while the bar stays quiet until work is actually running, warning, or failed.
 
+The right tool cluster contains:
+
+- Reasoning level chain: four node boxes from Low through Ultra, with illuminated chain fill up to the selected level. Use muted SillyTavern foreground grey-white for the nodes and connecting line; do not use Recursion cyan for this control.
 - Dropdown arrow: opens the last-brief preview.
 - Ellipsis: opens the options menu.
 
@@ -156,19 +168,28 @@ The bar should visually align with nearby SillyTavern chrome. Its height, border
 
 Color grammar:
 
-- `RECURSION` uses muted SillyTavern foreground text, not a bright brand color.
+- The power and mode controls use muted SillyTavern foreground text, not bright brand color.
+- Reasoning level controls use muted SillyTavern foreground grey-white, so they read as chrome rather than runtime state.
 - The Hero Pixel Array owns compact state color.
 - The bar itself should remain mostly neutral; amber/red should appear only in the array or disclosed menus for attention or blocking conditions.
 - `Working` uses cyan motion treatment.
 - `Issue`, provider failures, and prompt-install failures use red only when blocked or failed.
 - Review, fallback, stale, and warning states use amber.
-- Observe-only and disabled-but-normal states use muted neutral treatment.
+- Disabled-but-normal states use muted neutral treatment on the power toggle.
 
 ## Hero Pixel Array Progress Menu
 
 The Hero Pixel Array is both a compact block-based state indicator and the entry point for live generation progress. Clicking it opens a popover that behaves like Codex-style task progress: a compact progress list where each row moves independently from waiting to running to a final outcome.
 
-The Hero Pixel Array and progress menu must render from the same normalized `progressRun.steps[]` view model. Do not maintain separate array state and menu state. Each visible top-level progress row gets exactly one Hero Pixel Array block. If provider subcalls are nested under a grouped row, they do not get separate Hero Pixel Array blocks unless they are also visible as top-level rows.
+The progress menu header keeps the title and subtitle in the same left-flow group with the reference 8px gap. The subtitle must not be pinned to the right edge; right alignment is reserved for row metadata and footer chips.
+
+The Hero Pixel Array and progress menu must render from the same normalized `progressRun.steps[]` view model. Do not maintain separate array state and menu state. Each visible top-level generation/progress row gets exactly one Hero Pixel Array block. If a UI control interaction creates only successful prompt cleanup/install rows, discard those rows from the progress menu and render no Hero Pixel Array blocks; clicking power, mode, reasoning level, settings tabs, Last Brief, or options must not populate generation progress. Keep control-side prompt warning or failed rows visible so the user can see a cleanup issue, but still do not create compact pixels for them. If provider subcalls are nested under a grouped row, they do not get separate Hero Pixel Array blocks unless they are also visible as top-level rows.
+
+The progress menu footer summarizes the visible provider lanes represented by the progress rows. If any visible top-level row or child row uses Reasoner and any row uses Utility, footer copy is `Auto - Utility and Reasoner lanes`; it must not collapse to the last prompt composer lane.
+
+When runtime activity is `idle`, or when an explicit progress title is `Ready`/`Idle`, a `progressRun` that contains only pending/waiting rows is stale planned work and must be discarded before rendering. Keep completed, cached, warning, or failed rows visible, but never show a `Ready` progress menu with a leftover pending-only task such as `Clearing Recursion prompt`.
+
+When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt install done/failed, or prompt clear done/failed), the progress menu must stop adding pending plan rows for future steps that never ran. Material rows such as generated cards, cached cards, warnings, failures, and completed setup steps stay visible; unrun rows like `Composing prompt packet waiting` or `Clearing Recursion prompt waiting` must not remain as empty Hero Pixel blocks after the final outcome.
 
 `progressRun.steps[]` shape:
 
@@ -228,7 +249,7 @@ When the user sends the next message, the renderer should briefly enter a reset 
 
 - Reverse-stagger the old `.hero-block` elements out.
 - Remove old blocks after the wipe completes.
-- Start the next run from an empty Hero Pixel Array while the `RECURSION` word remains fixed and fully visible.
+- Start the next run from an empty Hero Pixel Array while the power and mode controls remain fixed.
 
 The array layout is deterministic:
 
@@ -239,11 +260,9 @@ The array layout is deterministic:
 - If a run has more than 36 top-level progress rows, the progress menu still shows every row, but the Hero Pixel Array uses its final block as an overflow aggregate. The aggregate state is selected from represented overflow rows in this priority order: running, failed, warning, pending, cached, done, skipped.
 - The renderer sets `--columns` from `columnCount`, `grid-row` from `row + 1`, `grid-column` from `column + 1`, and `--block-index` from the block index.
 - Entry delay is slight, roughly 24ms per block, so a 12-step run visibly builds without feeling slow.
-- The brand stage remains fixed width and contains only the `RECURSION` wordmark.
 - The Hero Pixel Array sits to the right of the mode separator and to the left of the current-step status text.
 - The current-step status text shifts smoothly with the array width, keeping a small gap from the growing columns.
 - The compact current-step text uses action wording only, such as `Installing Recursion prompt...`; it must not append row meta like `waiting`, `done`, `generated`, or `cached`.
-- No gradient or fade layer should cover the `RECURSION` word in V1.
 - The renderer sets `--columns` and `--block-count` on the activity trigger so the pixel grid and status spacing derive from the same run state.
 
 The list is not always sequential. Several model calls may launch at once or start a few moments apart, so multiple rows can be active at the same time.
@@ -257,7 +276,7 @@ Default behavior:
 - Clicking outside the status menu closes it.
 - Hovering or focusing the array may show a subtle affordance, but must not open the menu.
 - The Hero Pixel Array remains full size and visually unboxed. It may be implemented as a button for accessibility, but it must not draw a square button background, border, or box on hover.
-- The status menu aligns to the left edge of the Recursion Bar, not to the left edge of the array or `RECURSION` brand cluster.
+- The status menu aligns to the left edge of the Recursion Bar, not to the left edge of the array or mode cluster.
 - The status menu must render above the Last Brief dropdown. The Recursion Bar creates the higher stacking context, the status popover sits above it, and the Last Brief dropdown remains lower.
 - Active Hero Pixel Array blocks animate only while an active model call, prompt composition, prompt installation, or cache write is running.
 - The menu updates rows in place as steps succeed.
@@ -337,11 +356,11 @@ The status menu should use friendly stage text, not internal event names. It mus
 Reference DOM shape:
 
 ```html
-<div class="brand-block">
-  <button class="brand-stage" aria-label="Recursion status">
-    <span class="brand">RECURSION</span>
-  </button>
-</div>
+<button class="recursion-power-toggle is-on"
+        aria-label="Turn Recursion off"
+        aria-pressed="true">
+  <!-- power icon -->
+</button>
 
 <button class="recursion-mode-button" aria-label="Mode: Auto">...</button>
 
@@ -429,7 +448,7 @@ Reference CSS contract:
 .recursion-bar {
   position: relative;
   z-index: 70;
-  height: 32px;
+  height: 30px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -440,17 +459,23 @@ Reference CSS contract:
   backdrop-filter: blur(var(--SmartThemeBlurStrength));
 }
 
-.brand-block {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  height: 30px;
+.recursion-power-toggle {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor) 86%, transparent);
+  display: inline-grid;
+  place-items: center;
 }
 
 .status-array-button {
   width: auto;
   min-width: var(--hero-block-size, 4px);
-  height: 20px;
+  height: 24px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -463,27 +488,6 @@ Reference CSS contract:
 .status-array-button:focus-visible {
   background: transparent;
   box-shadow: none;
-}
-
-.brand-stage {
-  position: relative;
-  --brand-text-width: 66px;
-  width: var(--brand-text-width);
-  min-width: var(--brand-text-width);
-  height: 24px;
-  overflow: hidden;
-  display: block;
-}
-
-.brand {
-  display: block;
-  z-index: 1;
-  font-family: "Segoe UI Light", "Segoe UI", system-ui, sans-serif;
-  font-weight: 300;
-  letter-spacing: 0;
-  color: var(--SmartThemeBodyColor);
-  opacity: .74;
-  pointer-events: none;
 }
 
 .hero-pixel-array {
@@ -762,8 +766,9 @@ Prompt Packet behavior:
 - Disabled when no composed packet exists.
 - Opens in the dropdown as a full-width inspection panel or opens the Full Viewer directly to the Prompt Packet section.
 - Shows the final injected packet text, composer lane, source card count, omitted-card summary, and injection timestamp/message id when available.
+- Does not show the packet JSON wrapper as the primary panel content; users should see the exact injected prompt text without expanding or reading implementation fields.
 - Does not show raw provider responses, hidden reasoning, API keys, stack traces, or unrelated diagnostics.
-- Includes a Copy action when a packet exists.
+- Includes a Copy action when a packet exists; Copy writes the injected prompt text, not the packet JSON wrapper.
 
 Each row should show:
 
@@ -817,8 +822,10 @@ Reference DOM shape:
             data-priority="critical"
             aria-expanded="false">
       <span class="recursion-card-kind">
-        <svg class="recursion-category-icon" aria-hidden="true"></svg>
-        <span class="recursion-card-kind-label">Continuity risk</span>
+        <span class="recursion-cat-icon-wrap">
+          <svg class="recursion-cat-icon" aria-hidden="true"></svg>
+        </span>
+        <span class="recursion-kind-label">Continuity risk</span>
         <span class="recursion-expand-glyph" aria-hidden="true"></span>
       </span>
 
@@ -946,14 +953,14 @@ Reference CSS contract:
   min-width: 0;
 }
 
-.recursion-category-icon {
+.recursion-cat-icon {
   width: 15px;
   height: 15px;
   flex: 0 0 15px;
   color: rgba(224, 224, 224, .58);
 }
 
-.recursion-brief-card[data-priority="critical"] .recursion-category-icon {
+.recursion-brief-card[data-priority="critical"] .recursion-cat-icon {
   color: rgba(224, 103, 103, .78);
 }
 
@@ -1033,7 +1040,7 @@ Card detail view should include:
 
 Settings should be few, powerful, and understandable.
 
-The compact settings menu opens from the ellipsis/options path. On desktop, it should align its right edge with the right edge of the Recursion Bar. When the Hero Pixel Array progress menu is also open, the settings menu begins to the right of the progress menu with a small gutter, so the two popovers read as an integrated pair instead of overlapping. On narrow viewports, settings may become full-width or close competing popovers.
+The compact settings menu opens from the ellipsis/options path. It should align to the left edge of the Recursion Bar and span the full bar width, with its right edge aligned to the bar's right edge. Opening settings closes the Hero Pixel Array progress menu, Last Brief dropdown, and mode menu so the full-width settings surface never overlaps competing popovers. Opening progress closes settings for the same reason.
 
 The menu uses three tabs:
 
@@ -1041,9 +1048,11 @@ The menu uses three tabs:
 - Providers.
 - Advanced.
 
+Switching between settings tabs is internal panel navigation. A tab click must keep the settings menu open, even though the tab switch re-renders the floating panel content; outside-click closers must ignore that handled tab-switch event.
+
 Play is the default tab. It contains controls users are expected to understand during normal play:
 
-- Mode: Off, Observe only, Auto.
+- Mode: Auto, Semi-Auto.
 - Reasoning Level: Low, Medium, High, Ultra.
 - Strength: Light, Balanced, Strong.
 - Focus: Balanced, Character, Continuity, Prose, Plot.
@@ -1062,9 +1071,10 @@ Providers contains the complete provider setup surface:
 
 - Utility Provider, always enabled.
 - Reasoner Provider, optional.
-- Source, profile, endpoint, model, session key, temperature, top-p, max tokens.
+- Source, profile, endpoint, model, session key, max tokens.
 - Save Provider, Test Provider, Clear Session Key.
 - Status, resolved provider, and resolved model.
+- Temperature and top-p stay internal/defaulted in the compact V1 menu so the provider pane matches the mockup and does not become a dense admin form.
 
 Advanced contains low-frequency controls:
 
@@ -1077,6 +1087,8 @@ Advanced contains low-frequency controls:
 - Clear run journal.
 
 Advanced commands without V1 runtime handlers must render disabled with tooltip copy. They should not appear active until they perform the named action.
+
+Checkboxes inside Recursion settings must use the compact dark Recursion control skin instead of SillyTavern's global checkbox background. The unchecked state is a dark 20px square with a subtle hairline border; the checked state fills with the Recursion cyan and shows a small checkmark.
 
 Most internal Auto settings should not be exposed as controls. The UI can display Auto decisions for inspection, but users should not have to manage per-turn action, scene status, Reasoner decision rules, or individual card families.
 
@@ -1093,11 +1105,13 @@ Each provider card should support:
 - Connection profile selector when using host profiles.
 - Base URL and model for OpenAI-compatible endpoints.
 - Session API key field.
-- Temperature, top-p, max tokens.
+- Max tokens.
 - Save Provider.
 - Test Provider.
 - Clear Session Key.
 - Status and resolved model.
+
+The compact Providers tab shows Utility details and keeps Reasoner as a collapsed optional summary row in the V1 mock. Temperature and top-p remain normalized provider settings with safe defaults, but they are not visible controls in the compact top-bar menu.
 
 API keys are session-only. They must not be written to extension settings, scene caches, prompt packets, run journals, diagnostics, reports, or artifacts.
 
@@ -1147,7 +1161,7 @@ Empty states should be short and action-oriented.
 Examples:
 
 - No brief yet: `No brief has been composed for this chat.`
-- Observe mode: `Observing only. Recursion will not inject prompts.`
+- Power off: `Recursion disabled. Prompt cleared.`
 - Provider missing: `Utility provider is not ready.`
 - Reasoner off: `Reasoner off. Utility will compose compact packets.`
 
@@ -1164,9 +1178,9 @@ Provider fallback states should appear in the Hero Pixel Array Progress Menu and
 
 On narrow viewports:
 
-- Keep the Hero Pixel Array, `RECURSION`, mode icon, last-brief arrow, and ellipsis visible when possible.
+- Keep the power toggle, mode icon, Hero Pixel Array, last-brief arrow, and ellipsis visible when possible.
 - Collapse provider details, viewer entry points, and advanced commands into the ellipsis options menu.
-- Use `[array] RECURSION | [mode] v ...` as the default collapsed shape.
+- Use `[power] | [mode] | [array] v ...` as the default collapsed shape.
 - Put mode selection, provider details, settings, last brief, and viewer links inside menus when there is not enough width.
 - Prefer one-column viewer layouts.
 - Keep buttons icon-first where meaning is familiar, with tooltips or accessible labels.

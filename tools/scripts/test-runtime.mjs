@@ -518,7 +518,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'provider-changed'), 'provider update records prompt clear journal');
   assertNoSecretText(journal.entries.find((entry) => entry.event === 'prompt.cleared'), 'provider prompt clear journal');
 
-  const settingsUpdate = await runtime.updateSettings({ reasonerUse: 'always' });
+  const settingsUpdate = await runtime.updateSettings({ strength: 'strong' });
   assertEqual(settingsUpdate.ok, true, 'settings update still succeeds after cache invalidation');
   cache = await storage.loadSceneCache(snapshot.chatKey, snapshot.sceneKey);
   assertEqual(cache.cacheState, 'stale', 'settings update keeps scene cache stale');
@@ -858,138 +858,30 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 
 {
   const { runtime, calls, installed, storage } = createRuntimeHarness({
-    settings: { mode: 'observe', reasonerUse: 'off' }
+    settings: { mode: 'semi-auto', reasonerUse: 'off' }
   });
   const result = await runtime.prepareForGeneration({
-    userMessage: 'Observe only with Bearer live-token, sk-live-runtime, and private-secret.'
+    userMessage: 'Semi-Auto with Bearer live-token, sk-live-runtime, and private-secret.'
   });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'observe mode returns ok');
-  assertEqual(result.observe, true, 'observe result marked');
-  assertEqual(calls.snapshot, 1, 'observe mode reads snapshot');
-  assertEqual(installed.length, 0, 'observe mode does not install');
-  assert(view.lastPacket, 'observe mode still builds packet');
-  assert(view.lastHand.cards.length > 0, 'observe mode still builds hand');
-  assertEqual(view.activity.label, 'Observe mode: hand preview ready. No prompt injected.', 'observe activity label');
-  assertEqual(view.activeRunId, null, 'active run cleared after observe');
+  assertEqual(result.ok, true, 'semi-auto mode returns ok');
+  assertEqual(result.observe, undefined, 'semi-auto is not an observe-only preview path');
+  assertEqual(calls.snapshot, 3, 'semi-auto reads snapshot and rechecks before compose and install');
+  assertEqual(installed.length, 1, 'semi-auto installs one prompt until card subset constraints are implemented');
+  assert(view.lastPacket, 'semi-auto builds packet');
+  assert(view.lastHand.cards.length > 0, 'semi-auto builds hand');
+  assertEqual(view.activity.label, 'Recursion prompt ready.', 'semi-auto activity settles as prompt ready');
+  assert(view.activityHistory.some((event) => event.chips?.includes('Semi-Auto')), 'semi-auto activity history carries the mode chip');
+  assertEqual(view.activeRunId, null, 'active run cleared after semi-auto');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
-  assertDeepEqual(journal.entries.map((entry) => entry.event), ['prompt.cleared', 'hand.selected'], 'observe only journals prompt clear before hand selection');
-  const promptCleared = journal.entries.find((entry) => entry.event === 'prompt.cleared');
+  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.installed'], 'semi-auto journals hand before prompt install');
   const handSelected = journal.entries.find((entry) => entry.event === 'hand.selected');
-  assert(promptCleared, 'observe mode appends prompt clear journal');
-  assert(handSelected, 'observe mode appends hand selection journal');
-  assert(!journal.entries.some((entry) => entry.event === 'prompt.installed'), 'observe mode does not append install journal');
-  assertEqual(promptCleared.severity, 'info', 'observe prompt clear journal is informational on success');
-  assertEqual(promptCleared.details?.status, 'cleared', 'observe prompt clear journal records cleared status');
-  assertEqual(promptCleared.sceneKey, view.lastSnapshot.sceneKey, 'observe prompt clear journal records scene key');
-  assertEqual(handSelected.details?.selectedCount, view.lastHand.cards.length, 'observe hand journal records selected count');
-  assertEqual(handSelected.details?.omittedCount, view.lastHand.omitted.length, 'observe hand journal records omitted count');
-  assert(!JSON.stringify(promptCleared).includes(view.lastPacket.sections.sceneBrief), 'observe prompt clear journal omits prompt sections');
-  assert(!JSON.stringify(handSelected).includes(view.lastHand.cards[0].promptText), 'observe hand journal omits prompt text');
-  assert(!JSON.stringify(handSelected).includes('inspectorNotes'), 'observe hand journal omits inspector notes');
-  assertNoSecretText(promptCleared, 'observe prompt clear journal');
-  assertNoSecretText(handSelected, 'observe hand journal');
-}
-
-{
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'observe', reasonerUse: 'off' },
-    hostPrompt: {
-      async clear() {
-        const error = new Error('clear failed near Scene brief: do not persist this prompt section or transcript text with Bearer clear-token and sk-clear-runtime');
-        error.code = 'SCENE_BRIEF_CODE_DO_NOT_PERSIST_TRANSCRIPT_TEXT';
-        throw error;
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({
-    userMessage: 'Failed observe clear should keep journal terse.'
-  });
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'observe clear failure remains fail-soft');
-  const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
-  const promptCleared = journal.entries.find((entry) => entry.event === 'prompt.cleared');
-  assert(promptCleared, 'observe clear failure appends prompt clear journal');
-  assertEqual(promptCleared.severity, 'warn', 'failed prompt clear journal is warning severity');
-  assertEqual(promptCleared.summary, 'Prompt clear failed', 'failed prompt clear journal uses stable summary');
-  assertEqual(promptCleared.details?.status, 'failed', 'failed prompt clear journal records failed status');
-  assertEqual(promptCleared.details?.code, 'RECURSION_PROMPT_CLEAR_FAILED', 'failed prompt clear journal records stable code');
-  assertEqual(promptCleared.details?.message, undefined, 'failed prompt clear journal omits host error text');
-  assert(!JSON.stringify(promptCleared).includes('do not persist this prompt section'), 'failed prompt clear journal omits prompt-adjacent error text');
-  assert(!JSON.stringify(promptCleared).includes('transcript text'), 'failed prompt clear journal omits transcript-like error text');
-  assert(!JSON.stringify(promptCleared).includes('SCENE_BRIEF_CODE'), 'failed prompt clear journal omits host-controlled error code text');
-  assertNoSecretText(promptCleared, 'failed prompt clear journal');
-}
-
-{
-  const adapter = createMemoryStorageAdapter();
-  const repository = createStorageRepository({ storage: adapter });
-  let releaseFirstLoad;
-  let firstLoadStarted = false;
-  let snapshotReads = 0;
-  const storage = {
-    async loadSceneCache(chatKey, sceneKey) {
-      if (!firstLoadStarted) {
-        firstLoadStarted = true;
-        await new Promise((resolve) => {
-          releaseFirstLoad = resolve;
-        });
-      }
-      return repository.loadSceneCache(chatKey, sceneKey);
-    },
-    async saveSceneCache(...args) {
-      return repository.saveSceneCache(...args);
-    },
-    async appendJournal(...args) {
-      return repository.appendJournal(...args);
-    },
-    async loadRunJournal(...args) {
-      return repository.loadRunJournal(...args);
-    }
-  };
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'observe', reasonerUse: 'off' },
-    storage,
-    snapshot: () => {
-      snapshotReads += 1;
-      const run = snapshotReads === 1 ? 'a' : 'b';
-      return {
-        chatId: `observe-${run}`,
-        chatKey: `observe-${run}`,
-        sceneKey: `observe-scene-${run}`,
-        sceneFingerprint: `observe-scene-${run}`,
-        turnFingerprint: `observe-turn-${run}`,
-        latestMesId: run === 'a' ? 1 : 2,
-        messages: [{ mesid: run === 'a' ? 1 : 2, role: 'user', text: `Observe ${run}.`, visible: true }]
-      };
-    }
-  });
-  const first = runtime.prepareForGeneration({ userMessage: 'Observe a.' });
-  await waitUntil(() => firstLoadStarted, 'first observe run did not block in scene cache load');
-  const second = await runtime.prepareForGeneration({ userMessage: 'Observe b.' });
-  releaseFirstLoad();
-  const firstResult = await first;
-  assertEqual(second.ok, true, 'newer observe run completes');
-  assertEqual(second.observe, true, 'newer observe run remains observe');
-  assertEqual(firstResult.superseded, true, 'older observe run is superseded');
-  const staleJournal = await storage.loadRunJournal('observe-a');
-  const freshJournal = await storage.loadRunJournal('observe-b');
-  assertEqual(staleJournal.entries.length, 0, 'superseded observe run does not append hand journal');
-  assertDeepEqual(freshJournal.entries.map((entry) => entry.event), ['prompt.cleared', 'hand.selected'], 'only final observe run records one prompt clear and hand journal');
-}
-
-{
-  const { runtime, installed, cleared, settingsStore } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' }
-  });
-  const autoResult = await runtime.prepareForGeneration({ userMessage: 'Install first.' });
-  assertEqual(autoResult.ok, true, 'auto before observe installs');
-  settingsStore.update({ mode: 'observe' });
-  const observeResult = await runtime.prepareForGeneration({ userMessage: 'Observe after install.' });
-  assertEqual(observeResult.ok, true, 'observe after auto returns ok');
-  assertEqual(observeResult.observe, true, 'observe after auto is marked observe');
-  assertEqual(installed.length, 1, 'observe after auto does not install another prompt');
-  assertEqual(cleared.length, 1, 'observe after auto clears prior Recursion prompt');
+  const promptInstalled = journal.entries.find((entry) => entry.event === 'prompt.installed');
+  assert(handSelected, 'semi-auto appends hand selection journal');
+  assert(promptInstalled, 'semi-auto appends prompt install journal');
+  assert(!JSON.stringify(handSelected).includes(view.lastHand.cards[0].promptText), 'semi-auto hand journal omits prompt text');
+  assertNoSecretText(handSelected, 'semi-auto hand journal');
+  assertNoSecretText(promptInstalled, 'semi-auto prompt install journal');
 }
 
 {
@@ -1006,23 +898,24 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
       }
     }
   });
-  const update = runtime.updateSettings({ mode: 'off' });
+  const update = runtime.updateSettings({ enabled: false });
   update.then(() => {
     updateResolved = true;
   });
-  await waitUntil(() => typeof releaseClear === 'function', 'Off settings change did not start prompt clear');
-  assertEqual(updateResolved, false, 'Off settings change waits for prompt clear before resolving');
-  assertEqual(runtime.view().settings.mode, 'off', 'Off settings change updates mode immediately');
-  assertEqual(runtime.view().activity.phase, 'promptClearing', 'Off settings change surfaces prompt clear activity');
+  await waitUntil(() => typeof releaseClear === 'function', 'power toggle change did not start prompt clear');
+  assertEqual(updateResolved, false, 'power toggle change waits for prompt clear before resolving');
+  assertEqual(runtime.view().settings.enabled, false, 'power toggle change updates enabled immediately');
+  assertEqual(runtime.view().settings.mode, 'auto', 'power toggle change leaves mode unchanged');
+  assertEqual(runtime.view().activity.phase, 'promptClearing', 'power toggle change surfaces prompt clear activity');
   releaseClear();
   const result = await update;
   const view = runtime.view();
-  assertEqual(result.ok, true, 'Off settings change returns success when prompt clear succeeds');
-  assertEqual(result.settings.mode, 'off', 'Off settings change returns updated settings');
-  assertEqual(result.clear.ok, true, 'Off settings change returns clear result');
-  assertEqual(calls.clear, 1, 'Off settings change clears host prompt');
-  assertEqual(view.activity.severity, 'success', 'Off settings change surfaces success activity');
-  assertEqual(view.activity.label, 'Recursion Off. Prompt cleared.', 'Off settings change has visible success label');
+  assertEqual(result.ok, true, 'power toggle change returns success when prompt clear succeeds');
+  assertEqual(result.settings.enabled, false, 'power toggle change returns updated enabled state');
+  assertEqual(result.clear.ok, true, 'power toggle change returns clear result');
+  assertEqual(calls.clear, 1, 'power toggle change clears host prompt');
+  assertEqual(view.activity.severity, 'success', 'power toggle change surfaces success activity');
+  assertEqual(view.activity.label, 'Recursion disabled. Prompt cleared.', 'power toggle change has visible success label');
 }
 
 {
@@ -1034,16 +927,30 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
       }
     }
   });
-  const result = await runtime.updateSettings({ mode: 'off' });
+  const result = await runtime.updateSettings({ enabled: false });
   const view = runtime.view();
-  assertEqual(result.ok, false, 'Off settings change returns non-ok when prompt clear fails');
-  assertEqual(result.settings.mode, 'off', 'Off settings still applies when prompt clear fails');
-  assertEqual(result.clear.ok, false, 'Off settings change returns failed clear result');
-  assertEqual(calls.clear, 1, 'Off settings clear failure still calls host prompt clear');
-  assertEqual(view.activity.severity, 'warning', 'Off settings clear failure surfaces warning activity');
-  assert(view.activity.label.includes('Prompt clear failed'), 'Off settings clear failure has visible warning label');
-  assertNoSecretText(result, 'Off settings clear failure result');
-  assertNoSecretText(view.activity, 'Off settings clear failure activity');
+  assertEqual(result.ok, false, 'power toggle change returns non-ok when prompt clear fails');
+  assertEqual(result.settings.enabled, false, 'power toggle disabled state still applies when prompt clear fails');
+  assertEqual(result.clear.ok, false, 'power toggle change returns failed clear result');
+  assertEqual(calls.clear, 1, 'power toggle clear failure still calls host prompt clear');
+  assertEqual(view.activity.severity, 'warning', 'power toggle clear failure surfaces warning activity');
+  assert(view.activity.label.includes('Prompt clear failed'), 'power toggle clear failure has visible warning label');
+  assertNoSecretText(result, 'power toggle clear failure result');
+  assertNoSecretText(view.activity, 'power toggle clear failure activity');
+}
+
+{
+  const { runtime, calls } = createRuntimeHarness({
+    settings: { mode: 'semi-auto', reasoningLevel: 'high', reasonerUse: 'auto' }
+  });
+  const result = await runtime.updateSettings({ reasoningLevel: 'ultra', reasonerUse: 'always' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'reasoning level settings update succeeds');
+  assertEqual(result.clear, null, 'reasoning level bar click does not perform prompt clear');
+  assertEqual(calls.clear, 0, 'reasoning level bar click does not call host prompt clear');
+  assertEqual(view.settings.reasoningLevel, 'ultra', 'reasoning level bar click updates runtime setting');
+  assertEqual(view.settings.reasonerUse, 'always', 'reasoning level bar click updates derived reasoner use');
+  assert(view.activity.phase !== 'promptClearing', 'reasoning level bar click does not surface prompt clearing activity');
 }
 
 {
@@ -1218,23 +1125,23 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 
 {
   const { runtime, calls, installed, cleared } = createRuntimeHarness({
-    settings: { mode: 'off', reasonerUse: 'off' }
+    settings: { enabled: false, mode: 'auto', reasonerUse: 'off' }
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Skip this.' });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'off mode returns ok');
-  assertEqual(result.skipped, true, 'off mode skipped');
-  assertEqual(result.reason, 'off', 'off mode reason');
-  assertEqual(calls.snapshot, 0, 'off mode does not read snapshot');
-  assertEqual(installed.length, 0, 'off mode does not install');
-  assertEqual(cleared.length, 1, 'off mode clears host prompt');
-  assertEqual(view.activity.phase, 'idle', 'off mode clears activity');
-  assertEqual(view.activeRunId, null, 'active run clear after off mode');
+  assertEqual(result.ok, true, 'disabled power state returns ok');
+  assertEqual(result.skipped, true, 'disabled power state skipped');
+  assertEqual(result.reason, 'disabled', 'disabled power state reason');
+  assertEqual(calls.snapshot, 0, 'disabled power state does not read snapshot');
+  assertEqual(installed.length, 0, 'disabled power state does not install');
+  assertEqual(cleared.length, 1, 'disabled power state clears host prompt');
+  assertEqual(view.activity.phase, 'idle', 'disabled power state clears activity');
+  assertEqual(view.activeRunId, null, 'active run clear after disabled power state');
 }
 
 {
   const { runtime, calls } = createRuntimeHarness({
-    settings: { mode: 'off', reasonerUse: 'off' },
+    settings: { enabled: false, mode: 'auto', reasonerUse: 'off' },
     hostPrompt: {
       async clear() {
         throw new Error('clear failed with Bearer clear-token, sk-clear-runtime, and private-secret');
@@ -1243,29 +1150,29 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Clear fails.' });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'off mode still returns ok when clear fails');
-  assertEqual(result.clear.ok, false, 'off mode reports clear warning');
-  assertEqual(calls.snapshot, 0, 'off clear failure still skips snapshot');
-  assertEqual(view.activity.severity, 'warning', 'off clear failure surfaces warning activity');
-  assert(view.activity.label.includes('Prompt clear failed'), 'off clear failure has visible warning label');
-  assertNoSecretText(result, 'off clear result');
+  assertEqual(result.ok, true, 'disabled power state still returns ok when clear fails');
+  assertEqual(result.clear.ok, false, 'disabled power state reports clear warning');
+  assertEqual(calls.snapshot, 0, 'disabled clear failure still skips snapshot');
+  assertEqual(view.activity.severity, 'warning', 'disabled clear failure surfaces warning activity');
+  assert(view.activity.label.includes('Prompt clear failed'), 'disabled clear failure has visible warning label');
+  assertNoSecretText(result, 'disabled clear result');
 }
 
 {
   const { runtime, calls, installed } = createRuntimeHarness({
-    settings: { mode: 'off', reasonerUse: 'off' },
+    settings: { enabled: false, mode: 'auto', reasonerUse: 'off' },
     hostPrompt: { methods: { clear: undefined } }
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Missing clear.' });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'off mode still skips when clear API is missing');
+  assertEqual(result.ok, true, 'disabled power state still skips when clear API is missing');
   assertEqual(result.clear.ok, false, 'missing clear returns non-ok clear outcome');
   assertEqual(result.clear.error.code, 'RECURSION_PROMPT_CLEAR_UNAVAILABLE', 'missing clear returns explicit error code');
-  assertEqual(calls.snapshot, 0, 'missing clear off path still skips snapshot');
-  assertEqual(calls.clear, 0, 'missing clear off path does not call host clear');
-  assertEqual(installed.length, 0, 'missing clear off path does not install');
-  assertEqual(view.activity.severity, 'warning', 'missing clear off path surfaces warning activity');
-  assert(view.activity.label.includes('Prompt clear failed'), 'missing clear off path has visible warning label');
+  assertEqual(calls.snapshot, 0, 'missing clear disabled path still skips snapshot');
+  assertEqual(calls.clear, 0, 'missing clear disabled path does not call host clear');
+  assertEqual(installed.length, 0, 'missing clear disabled path does not install');
+  assertEqual(view.activity.severity, 'warning', 'missing clear disabled path surfaces warning activity');
+  assert(view.activity.label.includes('Prompt clear failed'), 'missing clear disabled path has visible warning label');
 }
 
 {
@@ -3382,7 +3289,7 @@ for (const scenario of [
   ];
   const sourceHash = sourceWindowHash(softSettingsMessages, 1, 2);
   await storage.saveSceneCache('settings-drift-chat', 'settings-drift-scene', {
-    versions: cacheContractVersions({ mode: 'observe' }),
+    versions: cacheContractVersions({ mode: 'semi-auto' }),
     cards: [{
       id: 'settings-drift-card',
       family: 'Scene Frame',
@@ -4253,7 +4160,7 @@ for (const scenario of [
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'observe', reasonerUse: 'off' },
+    settings: { mode: 'semi-auto', reasonerUse: 'off' },
     snapshot: {
       messages: null
     }
@@ -4267,7 +4174,7 @@ for (const scenario of [
   assertEqual(view.lastSnapshot.latestMesId, 0, 'missing latest message id normalized');
   assertDeepEqual(view.lastSnapshot.messages, [], 'missing messages normalized to empty array');
   assertEqual(view.lastPacket.chatId, 'chat', 'packet gets normalized chat id');
-  assertEqual(view.activeRunId, null, 'active run cleared after normalized observe');
+  assertEqual(view.activeRunId, null, 'active run cleared after normalized semi-auto');
 }
 
 {
@@ -4765,31 +4672,31 @@ for (const scenario of [
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request = {}) {
-        assertEqual(roleId, 'utilityArbiter', 'off-mode regression only needs utility arbiter');
+        assertEqual(roleId, 'utilityArbiter', 'power-toggle regression only needs utility arbiter');
         await new Promise((resolve) => {
           releaseArbiter = resolve;
         });
-        assertEqual(request.signal?.aborted, true, 'switching to Off aborts in-flight provider signal');
+        assertEqual(request.signal?.aborted, true, 'switching power off aborts in-flight provider signal');
         return {
           ok: true,
           data: {
             schema: UTILITY_ARBITER_SCHEMA,
             snapshotHash: request.snapshotHash,
             action: 'compose-brief',
-            diagnostics: ['off-mode-regression']
+            diagnostics: ['power-toggle-regression']
           }
         };
       }
     }
   });
   const pending = runtime.prepareForGeneration({ userMessage: 'Turn off before install.' });
-  await waitUntil(() => typeof releaseArbiter === 'function', 'off-mode run did not enter arbiter');
-  const offUpdate = runtime.updateSettings({ mode: 'off' });
+  await waitUntil(() => typeof releaseArbiter === 'function', 'power-toggle run did not enter arbiter');
+  const offUpdate = runtime.updateSettings({ enabled: false });
   releaseArbiter();
   const result = await pending;
-  assertEqual(result.superseded, true, 'Off mode change supersedes in-flight generation preparation');
-  assertEqual(installed.length, 0, 'Off mode change prevents stale prompt install');
-  assertEqual(runtime.view().activeRunId, null, 'Off mode change clears active run id');
+  assertEqual(result.superseded, true, 'power toggle change supersedes in-flight generation preparation');
+  assertEqual(installed.length, 0, 'power toggle change prevents stale prompt install');
+  assertEqual(runtime.view().activeRunId, null, 'power toggle change clears active run id');
   await offUpdate;
 }
 
@@ -4950,7 +4857,7 @@ for (const scenario of [
     }
   };
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'observe', reasonerUse: 'off' },
+    settings: { mode: 'semi-auto', reasonerUse: 'off' },
     storage: deferredStorage,
     snapshot: () => ({
       chatId: 'concurrent-chat',

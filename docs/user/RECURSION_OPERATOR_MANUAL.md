@@ -1,6 +1,6 @@
 # Recursion Operator Manual
 
-Recursion is a pre-alpha SillyTavern extension that compiles compact, current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto mode is active.
+Recursion is a pre-alpha SillyTavern extension that compiles compact, current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Semi-Auto mode is active.
 
 Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, character database, or card-editing product. It does not own durable canon. It improves the next response by preparing a bounded writing brief from the scene in front of the user.
 
@@ -8,7 +8,7 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 <Render Needed>: assets/documentation/renders/recursion-operator-install-enable.png - Install and enable flow with SillyTavern extension list, Recursion enabled state, and mounted Recursion Bar.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-mode-controls.png - Mode controls showing Off, Observe only, Auto, Reasoning Level, and Off-mode cleanup behavior.
+<Render Needed>: assets/documentation/renders/recursion-operator-mode-controls.png - Power toggle, Auto/Semi-Auto mode controls, Reasoning Level, and prompt cleanup behavior.
 
 <Render Needed>: assets/documentation/renders/recursion-operator-bar-states.png - Recursion Bar ready, working, warning, disabled, provider issue, prompt-ready states, Hero Pixel Array, and current-step text.
 
@@ -37,8 +37,8 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 The Recursion Bar is the normal control surface. It sits near the chat surface and shows:
 
 - runtime health: Ready, Working, Paused, Issue, or Off;
-- `RECURSION` wordmark;
-- icon-only mode control: Off, Observe only, or Auto;
+- power toggle;
+- icon-only mode control: Auto or Semi-Auto;
 - Hero Pixel Array plus current-step text;
 - Reasoning Level chain;
 - Last Brief dropdown arrow;
@@ -61,7 +61,6 @@ Expected stages include:
 - `Reasoner composing final brief...`
 - `Installing Recursion prompt...`
 - `Recursion prompt ready.`
-- `Observe mode: hand preview ready. No prompt injected.`
 
 Fallback states should be equally direct, such as `Reasoner unavailable. Utility composed the packet.` or `Prompt install failed. Generation will continue without Recursion.`
 
@@ -100,23 +99,23 @@ The Full Viewer is the complete observatory. It should include:
 
 ## Modes
 
-### Off
+### Power Off
 
-Off stops Recursion from preparing prompt packets. It should clear or skip Recursion-owned prompt lanes so stale packets do not affect generation.
-
-### Observe Only
-
-Observe only lets Recursion inspect the active chat and preview hand or prompt decisions without installing a prompt packet. Use it for first-run validation, provider checks, or when you want visibility without influence.
+The power toggle stops Recursion from preparing prompt packets. Turning it off should clear or skip Recursion-owned prompt lanes so stale packets do not affect generation.
 
 ### Auto
 
 Auto lets Recursion compile and install the next prompt packet. It should finish, reuse valid cache, or fail soft before the next Recursion packet is trusted.
 
+### Semi-Auto
+
+Semi-Auto is the V1 mode reserved for constraining card generation to selected card types. Until that backend selector lands, it follows the same runtime path as Auto.
+
 ## Settings
 
 Operator settings should stay broad:
 
-- Mode: Off, Observe only, Auto.
+- Mode: Auto, Semi-Auto.
 - Reasoning Level: Low, Medium, High, Ultra.
 - Strength: Light, Balanced, Strong.
 - Prompt Footprint: Compact, Normal, Rich.
@@ -153,14 +152,13 @@ Use this first-run path:
 1. Enable Recursion and confirm the bar mounts.
 2. Configure Utility.
 3. Leave Reasoner off unless you need it.
-4. Set mode to Observe only.
-5. Send or select a safe ordinary turn.
-6. Confirm the Hero Pixel Array progress menu shows work and no prompt was injected.
-7. Set mode to Auto.
-8. Send a safe ordinary turn.
-9. Confirm progress reaches prompt ready or a clear fallback.
-10. Inspect Last Brief and Prompt Packet.
-11. Use Off to verify prompt cleanup.
+4. Confirm the power toggle is on.
+5. Set mode to Auto.
+6. Send a safe ordinary turn.
+7. Confirm progress reaches prompt ready or a clear fallback.
+8. Inspect Last Brief and Prompt Packet.
+9. Try Semi-Auto and confirm it follows the same current V1 install path.
+10. Use the power toggle to verify prompt cleanup.
 
 See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.
 
@@ -173,7 +171,7 @@ During normal play:
 3. Use Last Brief when output quality suggests the wrong scene pressure was selected.
 4. Open Prompt Packet when you need to inspect exact model-facing Recursion guidance.
 5. Use the progress menu or Full Viewer when you need diagnostic detail.
-6. Use Off when you want an unassisted generation or prompt cleanup.
+6. Turn the power toggle off when you want an unassisted generation or prompt cleanup.
 
 Recursion should not require card editing or repeated manual tuning.
 
@@ -227,7 +225,7 @@ Normal diagnostics must not include API keys, authorization headers, cookies, ra
 
 Recursion storage is cache-oriented. The runtime owns scene cache, run journal, prompt metadata, redaction, pruning, and prompt-lane cleanup. Current operator controls are:
 
-- Off mode cleanup;
+- power-toggle cleanup;
 - Clear Session Key for each provider lane;
 - diagnostics row-limit and excerpt settings;
 - disabled planned maintenance commands until runtime handlers exist;
@@ -255,13 +253,13 @@ Use this checklist for a practical browser pass:
 3. Open the Hero Pixel Array progress menu, Last Brief dropdown, Settings, and Full Viewer.
 4. Visit Play, Providers, Advanced, Prompt Packet, and Viewer sections.
 5. Configure and test Utility when provider work is intended.
-6. Set Off and confirm prompt lanes are absent or cleared.
-7. Set Observe only and confirm no prompt packet is installed.
-8. Set Auto and confirm Recursion is ready to compile.
+6. Turn power off and confirm prompt lanes are absent or cleared.
+7. Set Auto and confirm Recursion is ready to compile.
+8. Set Semi-Auto and confirm it applies as a distinct mode.
 9. Run a safe Auto pass only when provider and live mutation are intended.
 10. Confirm Activity reaches ready or a clear fallback.
 11. Inspect Last Brief and the final Prompt Packet text.
-12. Clear prompt or return to Off and confirm cleanup.
+12. Turn power off and confirm cleanup.
 13. Clear session keys before screenshots or exports that might show provider setup.
 
 Automated live evidence must use dedicated `recursion-soak-*` users and must reject `default-user` before mutation. See [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md).

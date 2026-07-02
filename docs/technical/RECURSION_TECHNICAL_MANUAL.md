@@ -27,7 +27,7 @@ flowchart TD
     Activity --> Storage["Scene cache and run journal"]
 ```
 
-<Render Needed>: assets/documentation/renders/recursion-technical-runtime-pipeline.png - Polished runtime pipeline from SillyTavern snapshot through Utility Arbiter, scene deck, turn hand, prompt packet, injection, activity, and storage.
+![Runtime pipeline visual](../../assets/documentation/renders/recursion-technical-runtime-pipeline.png)
 
 The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src/prompt.mjs`, `src/providers.mjs`, `src/storage.mjs`, `src/activity.mjs`, and `src/hosts/sillytavern/host.mjs`.
 
@@ -42,16 +42,16 @@ The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src
 | Cards | `src/cards.mjs` | Fixed V1 catalog, card normalization, provider-result conversion, lifecycle application, and hand selection. |
 | Prompt | `src/prompt.mjs` | Packet sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
 | Storage | `src/storage.mjs` | Logical scene-cache and run-journal records, key safety, redaction, index maintenance, and bounded retention. |
-| Runtime | `src/runtime.mjs` | Off/Observe only/Auto orchestration, snapshot use, Utility Arbiter plan handling, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
+| Runtime | `src/runtime.mjs` | Power toggle, Auto/Semi-Auto orchestration, snapshot use, Utility Arbiter plan handling, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
 | UI | `src/ui.mjs` | Recursion Bar, Hero Pixel Array progress menu, options/settings, Last Brief, Full Viewer, settings, and provider controls. |
 | SillyTavern host | `src/hosts/sillytavern/host.mjs` | Snapshot capture, prompt install/clear, provider bridge, settings store, and user-file storage adapter selection. |
 | Entrypoint | `src/extension/index.js` | Extension lifecycle hooks, runtime bootstrap, UI mount, generation interceptor, and teardown cleanup. |
 
 ## Mode Behavior
 
-Off mode clears or avoids Recursion prompt entries and does not inspect chat for prompt compilation.
+Power-off clears or avoids Recursion prompt entries and does not inspect chat for prompt compilation.
 
-Observe only mode captures the current turn, runs safe runtime work, composes a preview packet, updates diagnostics, and clears Recursion prompt entries instead of injecting.
+Semi-Auto captures the current turn and currently follows the Auto prompt-install path. Its UI contract is reserved for constraining card generation to selected card types when that backend selector lands.
 
 Auto mode runs the full pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the Utility Arbiter or local fallback path produces useful guidance.
 

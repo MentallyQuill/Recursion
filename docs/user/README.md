@@ -4,7 +4,7 @@ These guides cover the current Recursion V1 pre-alpha operator surface. Recursio
 
 ## Start Here
 
-- [First Run Workflow](FIRST_RUN_WORKFLOW.md) - Short first-session path from install and provider setup through Observe, Auto, inspection, and cleanup.
+- [First Run Workflow](FIRST_RUN_WORKFLOW.md) - Short first-session path from install and provider setup through Auto, Semi-Auto, inspection, and power-toggle cleanup.
 - [Recursion Operator Manual](RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for normal operation, UI surfaces, modes, settings, diagnostics, storage actions, mobile behavior, and smoke checks.
 
 ## Provider, Prompt, And Safety

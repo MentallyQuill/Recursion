@@ -31,10 +31,25 @@ const VALID_SEVERITIES = new Set(['info', 'success', 'warning', 'error']);
 const READY_PHASES = new Set(['idle', 'settled', '', undefined, null]);
 const REASONER_ACTIVE_PHASES = new Set(['reasonerComposing']);
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const SVG_TAGS = new Set(['svg', 'rect', 'path', 'circle']);
 const MODE_OPTIONS = Object.freeze([
-  ['off', 'Off'],
-  ['observe', 'Observe only'],
-  ['auto', 'Auto']
+  ['auto', 'Auto'],
+  ['semi-auto', 'Semi-Auto']
+]);
+const MODE_MENU_OPTIONS = Object.freeze([
+  {
+    value: 'auto',
+    label: 'Auto',
+    title: 'Selects cards and injects composed prompt context automatically.',
+    tip: 'Selects cards and injects composed prompt context automatically.'
+  },
+  {
+    value: 'semi-auto',
+    label: 'Semi-Auto',
+    title: 'Constrains card generation to selected card types.',
+    tip: 'Constrains card generation to selected card types.'
+  }
 ]);
 const STRENGTH_OPTIONS = Object.freeze([
   ['light', 'Light'],
@@ -59,6 +74,12 @@ const REASONING_LEVEL_OPTIONS = Object.freeze([
   ['high', 'High'],
   ['ultra', 'Ultra']
 ]);
+const REASONING_LEVEL_TIPS = Object.freeze({
+  low: 'Low: Utility-only, reduced cards.',
+  medium: 'Medium: mostly Utility, Reasoner eligible for the brief.',
+  high: 'High: mixed Utility and Reasoner checks.',
+  ultra: 'Ultra: Reasoner-heavy synthesis with a larger card bias.'
+});
 const REASONING_LEVELS = Object.freeze(REASONING_LEVEL_OPTIONS.map(([value]) => value));
 const PROVIDER_SOURCE_OPTIONS = Object.freeze([
   ['host-current-model', 'Current Host Model'],
@@ -97,6 +118,10 @@ function titleCase(value, fallback = '') {
     .join(' ');
 }
 
+function datasetSuffix(value, fallback = '') {
+  return titleCase(value, fallback).replace(/\s+/g, '');
+}
+
 function normalizeSeverity(value) {
   const severity = cleanText(value, 'info').toLowerCase();
   return VALID_SEVERITIES.has(severity) ? severity : 'info';
@@ -124,17 +149,80 @@ function laneLabel(value, fallback = 'Utility') {
 }
 
 function modeLabel(value) {
-  const mode = cleanText(value, 'observe').toLowerCase();
-  if (mode === 'off') return 'Off';
+  const mode = cleanText(value, 'auto').toLowerCase();
+  if (mode === 'semi-auto') return 'Semi-Auto';
   if (mode === 'auto') return 'Auto';
-  return 'Observe only';
+  return 'Auto';
+}
+
+function normalizeMode(value) {
+  return cleanText(value, 'auto').toLowerCase() === 'semi-auto' ? 'semi-auto' : 'auto';
 }
 
 function modeIcon(value) {
-  const mode = cleanText(value, 'observe').toLowerCase();
-  if (mode === 'off') return 'power';
-  if (mode === 'auto') return 'cards';
-  return 'eye';
+  const mode = normalizeMode(value);
+  if (mode === 'auto' || mode === 'semi-auto') return 'cards';
+  return 'cards';
+}
+
+function modeIconSvg(kind) {
+  if (kind === 'cards') {
+    return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true' } }, [
+      el('rect', { attrs: { x: '3', y: '5', width: '8', height: '9', rx: '1.7', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', opacity: '.45' } }),
+      el('rect', { attrs: { x: '5', y: '3', width: '8', height: '9', rx: '1.7', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', opacity: '.70' } }),
+      el('rect', { attrs: { x: '7', y: '1.5', width: '8', height: '9', rx: '1.7', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' } })
+    ]);
+  }
+  if (kind === 'power') {
+    return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
+      el('path', { attrs: { d: 'M8 1.7v6', stroke: 'currentColor', 'stroke-width': '1.4', 'stroke-linecap': 'round' } }),
+      el('path', { attrs: { d: 'M5 3.8a5 5 0 1 0 6 0', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linecap': 'round' } })
+    ]);
+  }
+  return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
+    el('path', { attrs: { d: 'M1.6 8s2.4-4 6.4-4 6.4 4 6.4 4-2.4 4-6.4 4-6.4-4-6.4-4Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' } }),
+    el('circle', { attrs: { cx: '8', cy: '8', r: '2', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' } })
+  ]);
+}
+
+function renderModeIcon(container, kind) {
+  if (!container) return;
+  container.replaceChildren(modeIconSvg(kind));
+}
+
+function modeMenuChoice(option) {
+  const kind = modeIcon(option.value);
+  return el('button', {
+    className: 'recursion-mode-choice',
+    attrs: {
+      type: 'button',
+      title: option.title,
+      'aria-current': 'false'
+    },
+    dataset: {
+      recursionModeChoice: option.value,
+      [`recursionModeChoice${datasetSuffix(option.value)}`]: '',
+      recursionModeKind: kind
+    }
+  }, [
+    el('span', {
+      className: 'recursion-mode-choice-icon',
+      attrs: { 'aria-hidden': 'true' },
+      dataset: { recursionModeChoiceIcon: '' }
+    }, [modeIconSvg(kind)]),
+    el('span', { className: 'recursion-mode-choice-copy' }, [
+      el('span', {
+        className: 'recursion-mode-choice-name',
+        text: option.label,
+        dataset: { recursionModeChoiceName: '' }
+      }),
+      el('span', {
+        className: 'recursion-mode-choice-tip',
+        text: option.tip,
+        dataset: { recursionModeChoiceTip: '' }
+      })
+    ])
+  ]);
 }
 
 function reasonerUseForReasoningLevel(value) {
@@ -180,6 +268,77 @@ function cardFamilyIcon(family) {
   return '#';
 }
 
+function cardPriority(card) {
+  const source = asObject(card);
+  const priorityText = cleanText(`${source.priority || ''} ${source.emphasis || ''} ${source.status || ''}`).toLowerCase();
+  if (priorityText.includes('critical') || priorityText.includes('guard')) return 'critical';
+  if (priorityText.includes('strong') || priorityText.includes('emphasized') || priorityText.includes('high')) return 'strong';
+  if (priorityText.includes('support') || priorityText.includes('light')) return 'support';
+  return 'normal';
+}
+
+function briefChipClass(chip, priority = '') {
+  const normalized = cleanText(chip).toLowerCase();
+  if (normalized === 'critical' || priority === 'critical' && normalized === 'guard') return 'recursion-mini-chip recursion-brief-chip critical';
+  if (normalized === 'strong' || priority === 'strong' && normalized === 'emphasized') return 'recursion-mini-chip recursion-brief-chip strong';
+  if (['fresh', 'generated', 'cached', 'injected', 'turn brief', 'compiler', 'memory', 'active'].includes(normalized)) {
+    return 'recursion-mini-chip recursion-brief-chip state';
+  }
+  return 'recursion-mini-chip recursion-brief-chip';
+}
+
+function cardFamilyIconSvg(family) {
+  const normalized = cleanText(family, '').toLowerCase();
+  const svgAttrs = { class: 'recursion-cat-icon', viewBox: '0 0 16 16', 'aria-hidden': 'true' };
+  if (normalized.includes('continuity') || normalized.includes('risk')) {
+    return el('svg', { attrs: svgAttrs }, [
+      el('path', { attrs: { d: 'M8 2 14 13H2L8 2Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' } }),
+      el('path', { attrs: { d: 'M8 6v3.2M8 11.8h.01', stroke: 'currentColor', 'stroke-width': '1.45', 'stroke-linecap': 'round' } })
+    ]);
+  }
+  if (normalized.includes('motivation')) {
+    return el('svg', { attrs: svgAttrs }, [
+      el('circle', { attrs: { cx: '8', cy: '8', r: '5.5', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2' } }),
+      el('circle', { attrs: { cx: '8', cy: '8', r: '2.2', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2' } }),
+      el('path', { attrs: { d: 'M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2', stroke: 'currentColor', 'stroke-width': '1.1', 'stroke-linecap': 'round' } })
+    ]);
+  }
+  if (normalized.includes('relationship') || normalized.includes('dialogue') || normalized.includes('cast')) {
+    return el('svg', { attrs: svgAttrs }, [
+      el('circle', { attrs: { cx: '5', cy: '7', r: '2.4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2' } }),
+      el('circle', { attrs: { cx: '11', cy: '7', r: '2.4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2' } }),
+      el('path', { attrs: { d: 'M6.9 8.4 9.1 8.4M3.2 12.8c.8-1.3 2-2 3.3-2M12.8 12.8c-.8-1.3-2-2-3.3-2', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.1', 'stroke-linecap': 'round' } })
+    ]);
+  }
+  if (normalized.includes('prose') || normalized.includes('pacing') || normalized.includes('style')) {
+    return el('svg', { attrs: svgAttrs }, [
+      el('path', { attrs: { d: 'M3 4h10M3 8h7M3 12h5', stroke: 'currentColor', 'stroke-width': '1.3', 'stroke-linecap': 'round' } }),
+      el('path', { attrs: { d: 'M11 10.5 13 12l-2 1.5', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.1', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
+    ]);
+  }
+  if (normalized.includes('objective') || normalized.includes('thread') || normalized.includes('plot')) {
+    return el('svg', { attrs: svgAttrs }, [
+      el('path', { attrs: { d: 'M4 14V3M4 3h7l-1 2 1 2H4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
+    ]);
+  }
+  if (normalized.includes('memory') || normalized.includes('echo')) {
+    return el('svg', { attrs: svgAttrs }, [
+      el('path', { attrs: { d: 'M5 4H3V2M3.2 4A5.5 5.5 0 1 1 2.6 9', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } }),
+      el('path', { attrs: { d: 'M8 5.3v3.1l2.2 1.2', stroke: 'currentColor', 'stroke-width': '1.1', 'stroke-linecap': 'round' } })
+    ]);
+  }
+  if (normalized.includes('safety') || normalized.includes('guard')) {
+    return el('svg', { attrs: svgAttrs }, [
+      el('path', { attrs: { d: 'M8 2.3 13 4v3.8c0 3-1.9 5-5 6-3.1-1-5-3-5-6V4l5-1.7Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2', 'stroke-linejoin': 'round' } }),
+      el('path', { attrs: { d: 'M5.8 8 7.3 9.5 10.5 6.3', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
+    ]);
+  }
+  return el('svg', { attrs: svgAttrs }, [
+    el('path', { attrs: { d: 'M3 6.2 8 3l5 3.2v5.6L8 14l-5-2.2V6.2Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.15' } }),
+    el('path', { attrs: { d: 'M3.2 6.4 8 8.7l4.8-2.3M8 8.7V14', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.05' } })
+  ]);
+}
+
 function cardMetaChips(card) {
   const source = asObject(card);
   const chips = [
@@ -211,6 +370,26 @@ function reasonerState(view, activity) {
   return reasoner.enabled === true ? 'Available' : 'Unavailable';
 }
 
+function collectProviderLanesFromSteps(steps, lanes = new Set()) {
+  if (!Array.isArray(steps)) return lanes;
+  for (const step of steps) {
+    const lane = cleanText(asObject(step).providerLane).toLowerCase();
+    if (lane === 'utility' || lane === 'reasoner') lanes.add(lane);
+    collectProviderLanesFromSteps(step?.children, lanes);
+  }
+  return lanes;
+}
+
+function progressFooterLabel(modelSource, progressRun, composerLane) {
+  const lanes = collectProviderLanesFromSteps(progressRun?.steps);
+  const fallbackLane = cleanText(composerLane, 'utility').toLowerCase();
+  if (!lanes.size && (fallbackLane === 'utility' || fallbackLane === 'reasoner')) lanes.add(fallbackLane);
+  const mode = modeLabel(cleanText(modelSource.settings?.mode, 'auto').toLowerCase());
+  if (lanes.has('utility') && lanes.has('reasoner')) return `${mode} - Utility and Reasoner lanes`;
+  if (lanes.has('reasoner')) return `${mode} - Reasoner lane`;
+  return `${mode} - Utility lane`;
+}
+
 export function activityLabel(activity = {}) {
   const source = asObject(activity);
   const explicitLabel = cleanText(source.label);
@@ -219,14 +398,24 @@ export function activityLabel(activity = {}) {
   return 'Recursion is working...';
 }
 
+function runtimeHealthLabel(activity, progressRun) {
+  if (!READY_PHASES.has(activity.phase)) return 'Working';
+  const severity = normalizeSeverity(activity.severity);
+  if (severity === 'error') return 'Issue';
+  if (severity === 'warning') return 'Needs attention';
+  if (progressRun?.title === 'Issue') return 'Issue';
+  if (progressRun?.title === 'Needs attention') return 'Needs attention';
+  return 'Ready';
+}
+
 export function createRecursionViewModel(view = {}) {
   const source = asObject(view);
   const settings = asObject(source.settings);
   const activity = asObject(source.activity);
-  const mode = cleanText(settings.mode, 'observe').toLowerCase();
+  const enabled = settings.enabled !== false;
+  const mode = normalizeMode(settings.mode);
   const cards = Array.isArray(source.lastHand?.cards) ? source.lastHand.cards : [];
   const composerLane = source.lastPacket?.diagnostics?.composerLane || activity.composerLane || activity.providerLane || 'utility';
-  const ready = READY_PHASES.has(activity.phase);
   const progressRun = createProgressRunModel(source);
   const heroPixelBlocks = createHeroPixelBlocks(progressRun);
   const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
@@ -240,8 +429,9 @@ export function createRecursionViewModel(view = {}) {
 
   return {
     mode,
+    enabled,
     modeLabel: modeLabel(mode),
-    runtimeHealthLabel: ready ? 'Ready' : 'Working',
+    runtimeHealthLabel: enabled ? runtimeHealthLabel(activity, progressRun) : 'Off',
     handCount: cards.length,
     activityLabel: activityLabel(activity),
     activitySeverity: normalizeSeverity(activity.severity),
@@ -253,6 +443,7 @@ export function createRecursionViewModel(view = {}) {
     progressChildVisibleLimit,
     progressListVisibleLimit,
     composerLabel: laneLabel(composerLane, 'Utility'),
+    progressFooterLabel: progressFooterLabel(source, progressRun, composerLane),
     reasonerState: reasonerState(source, activity),
     reasonerLabel: `Reasoner ${reasonerState(source, activity).toLowerCase()}`,
     lastUpdatedAt: cleanText(source.updatedAt),
@@ -272,8 +463,10 @@ function noopMount() {
 }
 
 function el(tagName, { className = '', text = '', attrs = {}, dataset = {} } = {}, children = []) {
-  const node = document.createElement(tagName);
-  if (className) node.className = className;
+  const node = SVG_TAGS.has(tagName) && typeof document.createElementNS === 'function'
+    ? document.createElementNS(SVG_NS, tagName)
+    : document.createElement(tagName);
+  if (className) node.setAttribute('class', className);
   if (text) node.textContent = text;
   for (const [name, value] of Object.entries(attrs)) {
     node.setAttribute(name, value);
@@ -387,6 +580,20 @@ function renderChipList(container, chips) {
   }
 }
 
+function datasetHas(dataset, key) {
+  return Object.prototype.hasOwnProperty.call(dataset || {}, key);
+}
+
+function closestDatasetElement(target, key, stopAt = null) {
+  let node = target;
+  while (node) {
+    if (datasetHas(node.dataset, key)) return node;
+    if (node === stopAt) break;
+    node = node.parentNode;
+  }
+  return null;
+}
+
 function renderHeroPixelArray(container, blocks = []) {
   if (!container) return;
   const columnCount = blocks.at(-1)?.columnCount || 0;
@@ -426,22 +633,65 @@ function renderHeroPixelArray(container, blocks = []) {
   });
 }
 
-function renderProgressRow(step, child = false) {
-  const row = el('div', {
-    className: `recursion-step-row ${child ? 'child-row ' : ''}${step.state || 'pending'}`,
+function progressRowClass(step, child = false, transientClass = '') {
+  return [
+    'recursion-step-row',
+    child ? 'child-row' : '',
+    step.state || 'pending',
+    transientClass
+  ].filter(Boolean).join(' ');
+}
+
+function createProgressRowShell(step, child = false) {
+  return el('div', {
+    className: progressRowClass(step, child, 'is-entering'),
     dataset: {
       recursionProgressRow: '',
-      recursionProgressStepId: step.id || '',
-      recursionProgressProvider: step.providerLane || 'utility'
+      recursionProgressStepId: step.id || ''
     }
   }, [
-    el('span', { className: 'recursion-provider-mark', text: providerMark(step.providerLane) }),
+    el('span', {
+      className: 'recursion-provider-mark',
+      text: providerMark(step.providerLane),
+      dataset: { recursionProgressProviderMark: '' }
+    }),
     el('span', { className: 'recursion-step-separator', attrs: { 'aria-hidden': 'true' } }),
     el('span', { className: 'recursion-step-icon', attrs: { 'aria-hidden': 'true' } }),
-    el('span', { className: 'recursion-step-label', text: step.label || 'Step' }),
-    el('span', { className: 'recursion-step-meta', text: step.meta || '' })
+    el('span', {
+      className: 'recursion-step-label',
+      text: step.label || 'Step',
+      dataset: { recursionProgressLabel: '' }
+    }),
+    el('span', {
+      className: 'recursion-step-meta',
+      text: step.meta || '',
+      dataset: { recursionProgressMeta: '' }
+    })
   ]);
-  return row;
+}
+
+function updateProgressRow(row, step, child = false) {
+  const label = step.label || 'Step';
+  const meta = step.meta || '';
+  const state = step.state || 'pending';
+  const providerLane = step.providerLane || 'utility';
+  const firstRender = row.dataset.recursionProgressRendered !== 'true';
+  const changed = !firstRender && (
+    row.dataset.recursionProgressState !== state
+    || row.dataset.recursionProgressLabel !== label
+    || row.dataset.recursionProgressMeta !== meta
+    || row.dataset.recursionProgressProvider !== providerLane
+  );
+  row.className = progressRowClass(step, child, firstRender ? 'is-entering' : (changed ? 'is-updating' : ''));
+  row.dataset.recursionProgressRendered = 'true';
+  row.dataset.recursionProgressStepId = step.id || '';
+  row.dataset.recursionProgressState = state;
+  row.dataset.recursionProgressLabel = label;
+  row.dataset.recursionProgressMeta = meta;
+  row.dataset.recursionProgressProvider = providerLane;
+  setText(row, '[data-recursion-progress-provider-mark]', providerMark(providerLane));
+  setText(row, '[data-recursion-progress-label]', label);
+  setText(row, '[data-recursion-progress-meta]', meta);
 }
 
 function syncScrollableChildFade(group) {
@@ -454,6 +704,86 @@ function syncScrollableChildFade(group) {
   group.className = atEnd ? `${base} is-at-end` : base;
 }
 
+function findProgressRow(container, stepId) {
+  return [...container.querySelectorAll('[data-recursion-progress-row]')]
+    .find((row) => row.dataset.recursionProgressStepId === stepId && row.parentNode === container);
+}
+
+function findProgressChildRow(group, stepId) {
+  return [...group.querySelectorAll('[data-recursion-progress-row]')]
+    .find((row) => row.dataset.recursionProgressStepId === stepId);
+}
+
+function findProgressChildrenGroup(list, parentStepId) {
+  return [...list.querySelectorAll('[data-recursion-progress-children]')]
+    .find((group) => group.dataset.recursionProgressParentStep === parentStepId);
+}
+
+function insertAt(container, node, index) {
+  const before = container.children[index] || null;
+  if (before === node) return;
+  if (node.parentNode === container) node.remove();
+  container.insertBefore(node, before);
+}
+
+function renderProgressChildrenGroup(group, step, model, previousChildScrollTops) {
+  const children = Array.isArray(step.children) ? step.children : [];
+  const childLimit = model.progressChildVisibleLimit || 5;
+  const scrollable = children.length > childLimit;
+  group.className = `recursion-step-children${scrollable ? ' is-scrollable' : ''}`;
+  group.dataset.recursionProgressParentStep = step.id || '';
+  group.dataset.recursionProgressChildCount = String(children.length);
+  group.style = group.style || {};
+  group.style.setProperty?.('--recursion-progress-child-limit', String(childLimit));
+
+  const visibleIds = new Set(children.map((child, index) => child.id || `progress-child-${index}`));
+  for (const row of [...group.querySelectorAll('[data-recursion-progress-row]')]) {
+    if (!visibleIds.has(row.dataset.recursionProgressStepId || '')) row.remove();
+  }
+  children.forEach((child, index) => {
+    const childId = child.id || `progress-child-${index}`;
+    const childStep = { ...child, id: childId };
+    let row = findProgressChildRow(group, childId);
+    if (!row) row = createProgressRowShell(childStep, true);
+    updateProgressRow(row, childStep, true);
+    insertAt(group, row, index);
+  });
+
+  const previousChildScrollTop = previousChildScrollTops.get(step.id || '');
+  if (previousChildScrollTop > 0 && Number(group.scrollTop || 0) === 0) group.scrollTop = previousChildScrollTop;
+  if (scrollable) {
+    if (group.dataset.recursionScrollBound !== 'true') {
+      group.addEventListener?.('scroll', () => syncScrollableChildFade(group));
+      group.dataset.recursionScrollBound = 'true';
+    }
+    syncScrollableChildFade(group);
+  } else {
+    delete group.dataset.recursionScrollBound;
+  }
+}
+
+function ensureProgressPopoverShell(panel) {
+  let head = panel.querySelector?.('[data-recursion-progress-head]');
+  let list = panel.querySelector?.('[data-recursion-progress-list]');
+  let foot = panel.querySelector?.('[data-recursion-progress-foot]');
+  if (head && list && foot) return { head, list, foot };
+
+  head = el('div', { className: 'recursion-status-head', dataset: { recursionProgressHead: '' } }, [
+    el('span', { className: 'recursion-status-title', dataset: { recursionProgressTitle: '' } }),
+    el('span', { className: 'recursion-status-subtitle', dataset: { recursionProgressSubtitle: '' } })
+  ]);
+  list = el('div', {
+    className: 'recursion-status-list',
+    dataset: { recursionProgressList: '' }
+  });
+  foot = el('div', { className: 'recursion-status-foot', dataset: { recursionProgressFoot: '' } }, [
+    el('span', { dataset: { recursionProgressFootText: '' } }),
+    el('span', { className: 'recursion-mini-chip', text: 'Live' })
+  ]);
+  panel.replaceChildren(head, list, foot);
+  return { head, list, foot };
+}
+
 function renderProgressPopover(panel, progressRun, model) {
   const previousList = typeof panel.querySelector === 'function'
     ? panel.querySelector('[data-recursion-progress-list]')
@@ -462,48 +792,51 @@ function renderProgressPopover(panel, progressRun, model) {
   const previousChildScrollTops = new Map(Array.from(panel.querySelectorAll?.('[data-recursion-progress-children]') || [])
     .map((group) => [group.dataset?.recursionProgressParentStep, Number(group.scrollTop || 0)])
     .filter(([id]) => Boolean(id)));
-  panel.replaceChildren();
-  panel.appendChild(el('div', { className: 'recursion-status-head' }, [
-    el('span', { className: 'recursion-status-title', text: progressRun.title || 'Generating' }),
-    el('span', { className: 'recursion-status-subtitle', text: progressRun.subtitle || model.currentStepText || '' })
-  ]));
-  const list = el('div', {
-    className: 'recursion-status-list',
-    dataset: { recursionProgressList: '' }
-  });
+  const { list } = ensureProgressPopoverShell(panel);
+  setText(panel, '[data-recursion-progress-title]', progressRun.title || 'Generating');
+  setText(panel, '[data-recursion-progress-subtitle]', progressRun.subtitle || model.currentStepText || '');
+  setText(panel, '[data-recursion-progress-foot-text]', model.progressFooterLabel);
   list.style = list.style || {};
   list.style.setProperty?.('--recursion-progress-list-limit', String(model.progressListVisibleLimit || 15));
-  for (const step of progressRun.steps || []) {
-    list.appendChild(renderProgressRow(step));
-    if (Array.isArray(step.children) && step.children.length) {
-      const childLimit = model.progressChildVisibleLimit || 5;
-      const scrollable = step.children.length > childLimit;
-      const group = el('div', {
-        className: `recursion-step-children${scrollable ? ' is-scrollable' : ''}`,
-        dataset: {
-          recursionProgressChildren: '',
-          recursionProgressParentStep: step.id || '',
-          recursionProgressChildCount: String(step.children.length)
-        }
-      });
-      group.style = group.style || {};
-      group.style.setProperty?.('--recursion-progress-child-limit', String(childLimit));
-      for (const child of step.children) group.appendChild(renderProgressRow(child, true));
-      const previousChildScrollTop = previousChildScrollTops.get(step.id || '');
-      if (previousChildScrollTop > 0) group.scrollTop = previousChildScrollTop;
-      if (scrollable) {
-        group.addEventListener?.('scroll', () => syncScrollableChildFade(group));
-        syncScrollableChildFade(group);
-      }
-      list.appendChild(group);
-    }
+
+  const steps = Array.isArray(progressRun.steps) ? progressRun.steps : [];
+  const visibleTopIds = new Set(steps.map((step, index) => step.id || `progress-step-${index}`));
+  for (const node of [...list.children]) {
+    const rowId = node.dataset?.recursionProgressStepId;
+    const groupId = node.dataset?.recursionProgressParentStep;
+    if (rowId && !visibleTopIds.has(rowId)) node.remove();
+    if (groupId && !visibleTopIds.has(groupId)) node.remove();
   }
+
+  let insertIndex = 0;
+  steps.forEach((step, index) => {
+    const stepId = step.id || `progress-step-${index}`;
+    const stepModel = { ...step, id: stepId };
+    let row = findProgressRow(list, stepId);
+    if (!row) row = createProgressRowShell(stepModel);
+    updateProgressRow(row, stepModel);
+    insertAt(list, row, insertIndex++);
+
+    const children = Array.isArray(step.children) ? step.children : [];
+    let group = findProgressChildrenGroup(list, stepId);
+    if (children.length) {
+      if (!group) {
+        group = el('div', {
+          className: 'recursion-step-children',
+          dataset: {
+            recursionProgressChildren: '',
+            recursionProgressParentStep: stepId
+          }
+        });
+      }
+      renderProgressChildrenGroup(group, stepModel, model, previousChildScrollTops);
+      insertAt(list, group, insertIndex++);
+    } else if (group) {
+      group.remove();
+    }
+  });
+
   if (previousScrollTop > 0) list.scrollTop = previousScrollTop;
-  panel.appendChild(list);
-  panel.appendChild(el('div', { className: 'recursion-status-foot' }, [
-    el('span', { text: `${model.modeLabel} - ${model.composerLabel} lane` }),
-    el('span', { className: 'recursion-mini-chip', text: 'Live' })
-  ]));
 }
 
 function renderReasoningChain(root, reasoningLevel) {
@@ -518,6 +851,26 @@ function renderReasoningChain(root, reasoningLevel) {
     node.className = [
       'recursion-reasoning-node',
       index <= selectedIndex ? 'is-lit' : '',
+      selected ? 'is-selected' : ''
+    ].filter(Boolean).join(' ');
+    node.setAttribute('aria-checked', selected ? 'true' : 'false');
+  }
+}
+
+function updateSettingsReasoningChain(root, reasoningLevel) {
+  const level = normalizeReasoningLevel(reasoningLevel);
+  const selectedIndex = REASONING_LEVELS.indexOf(level);
+  const hidden = root.querySelector('[data-recursion-setting-reasoning-level]');
+  const chain = root.querySelector('[data-recursion-setting-reasoning-chain]');
+  if (hidden) hidden.value = level;
+  if (!chain) return;
+  chain.dataset.recursionSettingReasoningSelected = level;
+  for (const node of chain.querySelectorAll('[data-recursion-setting-reasoning-choice]')) {
+    const nodeIndex = REASONING_LEVELS.indexOf(node.dataset.recursionSettingReasoningChoice);
+    const selected = node.dataset.recursionSettingReasoningChoice === level;
+    node.className = [
+      'recursion-settings-reasoning-node',
+      nodeIndex >= 0 && nodeIndex <= selectedIndex ? 'is-lit' : '',
       selected ? 'is-selected' : ''
     ].filter(Boolean).join(' ');
     node.setAttribute('aria-checked', selected ? 'true' : 'false');
@@ -539,6 +892,9 @@ function renderHandDropdown(panel, view, model) {
     .filter(Boolean));
   panel.replaceChildren();
   const cards = model.cards;
+  const packetPreview = promptPacketPreview(view.lastPacket, view.lastHand);
+  const packetText = promptPacketText(view.lastPacket, view.lastHand);
+  const packetMeta = promptPacketMeta(packetPreview);
   const packetButton = el('button', {
     className: 'recursion-prompt-packet-button',
     text: 'Prompt Packet',
@@ -553,9 +909,14 @@ function renderHandDropdown(panel, view, model) {
   panel.appendChild(el('div', { className: 'recursion-brief-head' }, [
     el('span', {
       className: 'recursion-dropdown-title',
-      text: `Last brief - ${cards.length} card${cards.length === 1 ? '' : 's'}`
+      text: 'Last brief'
     }),
-    el('span', { className: 'recursion-brief-summary', text: `composed by ${model.composerLabel}` }),
+    el('span', {
+      className: 'recursion-brief-summary',
+      text: cards.length
+        ? `${cards.length} card${cards.length === 1 ? '' : 's'} - click row to expand - priority color only`
+        : '0 cards - waiting for composed hand'
+    }),
     packetButton
   ]));
   const packetPanel = el('section', {
@@ -565,13 +926,16 @@ function renderHandDropdown(panel, view, model) {
   }, [
     el('div', { className: 'recursion-packet-head' }, [
       el('span', { text: 'Injected prompt packet' }),
-      button('Copy', 'recursionCopyPromptPacket', 'Copy last Recursion prompt packet')
+      el('span', { className: 'recursion-packet-meta' }, [
+        ...packetMeta.map((chip) => el('span', { className: 'recursion-mini-chip', text: chip })),
+        button('Copy', 'recursionCopyPromptPacket', 'Copy last Recursion prompt packet')
+      ])
     ]),
-    el('pre', { className: 'recursion-packet-text', text: safeJson(promptPacketPreview(view.lastPacket, view.lastHand), { maxString: 5000 }), dataset: { recursionPromptPacketPreview: '' } })
+    el('pre', { className: 'recursion-packet-text', text: packetText, dataset: { recursionPromptPacketPreview: '' } })
   ]);
   packetPanel.hidden = !packetPanelWasOpen || !view.lastPacket;
-  const packetText = packetPanel.querySelector?.('[data-recursion-prompt-packet-preview]');
-  if (previousPacketScrollTop > 0 && packetText) packetText.scrollTop = previousPacketScrollTop;
+  const packetPreviewNode = packetPanel.querySelector?.('[data-recursion-prompt-packet-preview]');
+  if (previousPacketScrollTop > 0 && packetPreviewNode) packetPreviewNode.scrollTop = previousPacketScrollTop;
   packetButton.addEventListener?.('click', () => {
     if (!view.lastPacket) return;
     packetPanel.hidden = !packetPanel.hidden;
@@ -580,6 +944,10 @@ function renderHandDropdown(panel, view, model) {
   panel.appendChild(packetPanel);
   if (!cards.length) {
     panel.appendChild(el('p', { className: 'recursion-empty', text: 'No hand has been composed for this chat.' }));
+    panel.appendChild(el('div', { className: 'recursion-brief-foot' }, [
+      el('span', { text: 'Waiting for first composed brief' }),
+      el('span', { className: 'recursion-mini-chip', text: 'Esc' })
+    ]));
     return;
   }
   const scroll = el('div', { className: 'recursion-brief-scroll', dataset: { recursionBriefScroll: '' } });
@@ -588,22 +956,46 @@ function renderHandDropdown(panel, view, model) {
     const cardDomId = briefCardDomId(source, index);
     const expanded = expandedCards.has(cardDomId);
     const family = cardFamily(source);
+    const priority = cardPriority(source);
     const metaChips = cardMetaChips(source);
+    const priorityLabel = priority === 'support' ? 'support' : priority;
+    const visibleChips = [
+      priorityLabel,
+      ...metaChips
+    ].map((chip) => cleanText(chip, '')).filter(Boolean);
     const row = el('button', {
-      className: 'recursion-hand-row recursion-brief-card',
-      attrs: { type: 'button', 'aria-expanded': expanded ? 'true' : 'false' },
-      dataset: { recursionBriefCardId: cardDomId }
+      className: 'recursion-brief-card',
+      attrs: {
+        type: 'button',
+        'aria-expanded': expanded ? 'true' : 'false',
+        'data-priority': priority
+      },
+      dataset: {
+        recursionBriefCard: '',
+        recursionBriefCardId: cardDomId,
+        recursionPriority: priority
+      }
     }, [
-      el('span', {
-        className: 'recursion-hand-icon',
-        text: cardFamilyIcon(family),
-        attrs: { title: family, 'aria-hidden': 'true' }
-      }),
-      el('span', { className: 'recursion-hand-emphasis', text: titleCase(source.emphasis, 'Normal') }),
-      el('span', { className: 'recursion-hand-family', text: family }),
-      el('span', { className: 'recursion-hand-summary', text: cardSummary(source) }),
-      el('span', { className: 'recursion-brief-detail', text: cardText(source) || cardSummary(source) }),
-      el('span', { className: 'recursion-brief-meta' }, metaChips.map((chip) => el('span', { className: 'recursion-mini-chip', text: chip })))
+      el('div', { className: 'recursion-card-kind' }, [
+        el('span', {
+          className: 'recursion-cat-icon-wrap',
+          attrs: { title: family },
+          dataset: { recursionBriefCardIcon: '' }
+        }, [cardFamilyIconSvg(family)]),
+        el('span', { className: 'recursion-kind-label', text: family, dataset: { recursionBriefCardFamily: '' } }),
+        el('span', { className: 'recursion-expand-glyph', attrs: { 'aria-hidden': 'true' } })
+      ]),
+      el('div', { className: 'recursion-card-body' }, [
+        el('p', {
+          className: 'recursion-card-text',
+          text: cardText(source) || cardSummary(source),
+          dataset: { recursionBriefCardText: '' }
+        }),
+        el('div', {
+          className: 'recursion-meta-row',
+          dataset: { recursionBriefCardMeta: '' }
+        }, visibleChips.map((chip) => el('span', { className: briefChipClass(chip, priority), text: chip })))
+      ])
     ]);
     row.addEventListener?.('click', () => {
       const next = row.getAttribute('aria-expanded') !== 'true';
@@ -613,6 +1005,14 @@ function renderHandDropdown(panel, view, model) {
   }
   panel.appendChild(scroll);
   if (previousBriefScrollTop > 0) scroll.scrollTop = previousBriefScrollTop;
+  panel.appendChild(el('div', { className: 'recursion-brief-foot' }, [
+    el('span', {
+      text: view.lastPacket?.composedAt
+        ? `Generated ${safeText(view.lastPacket.composedAt, 80)}`
+        : 'Generated for last composed brief'
+    }),
+    el('span', { className: 'recursion-mini-chip', text: 'Esc' })
+  ]));
 }
 
 function settingsSelectRow(label, datasetName, value, options) {
@@ -624,14 +1024,48 @@ function settingsSelectRow(label, datasetName, value, options) {
   }));
 }
 
+function settingsReasoningLevelRow(value) {
+  const level = normalizeReasoningLevel(value);
+  const selectedIndex = REASONING_LEVELS.indexOf(level);
+  const hidden = el('input', {
+    attrs: { type: 'hidden', value: level },
+    dataset: { recursionSettingReasoningLevel: '' }
+  });
+  hidden.value = level;
+  const chain = el('div', {
+    className: 'recursion-settings-reasoning-chain',
+    attrs: { role: 'radiogroup', 'aria-label': 'Reasoning Level' },
+    dataset: { recursionSettingReasoningChain: '', recursionSettingReasoningSelected: level }
+  }, [
+    el('span', { className: 'recursion-settings-reasoning-line-fill', attrs: { 'aria-hidden': 'true' } }),
+    ...REASONING_LEVEL_OPTIONS.map(([candidate], index) => el('button', {
+      className: [
+        'recursion-settings-reasoning-node',
+        index <= selectedIndex ? 'is-lit' : '',
+        candidate === level ? 'is-selected' : ''
+      ].filter(Boolean).join(' '),
+      attrs: {
+        type: 'button',
+        role: 'radio',
+        'aria-checked': candidate === level ? 'true' : 'false',
+        title: REASONING_LEVEL_TIPS[candidate] || `${candidate} reasoning`
+      },
+      dataset: {
+        recursionSettingReasoningChoice: candidate,
+        [`recursionSettingReasoningChoice${titleCase(candidate)}`]: ''
+      }
+    }))
+  ]);
+  return controlRow('Reasoning Level', el('span', { className: 'recursion-settings-reasoning-control' }, [hidden, chain]));
+}
+
 function renderHighLevelSettings(panel, settings) {
   const group = el('section', { className: 'recursion-settings-group' });
-  group.appendChild(el('h3', { text: 'Behavior' }));
-  group.appendChild(settingsSelectRow('Mode', 'recursionSettingMode', cleanText(settings.mode, 'observe'), MODE_OPTIONS));
-  group.appendChild(settingsSelectRow('Reasoning Level', 'recursionSettingReasoningLevel', normalizeReasoningLevel(settings.reasoningLevel), REASONING_LEVEL_OPTIONS));
+  group.appendChild(settingsSelectRow('Mode', 'recursionSettingMode', normalizeMode(settings.mode), MODE_OPTIONS));
+  group.appendChild(settingsReasoningLevelRow(settings.reasoningLevel));
   group.appendChild(settingsSelectRow('Strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS));
-  group.appendChild(settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS));
   group.appendChild(settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS));
+  group.appendChild(settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS));
   panel.appendChild(group);
 }
 
@@ -696,81 +1130,121 @@ function providerSelector(name, lane) {
   return `[data-recursion-provider-${name}-${lane}]`;
 }
 
+function providerStatusClass(text) {
+  const status = cleanText(text).toLowerCase();
+  return status === 'not run' || status === 'ok' || status === 'pass' || status === 'passed' || status === 'ready'
+    ? 'recursion-provider-status pass'
+    : 'recursion-provider-status';
+}
+
+function renderProviderHiddenDefaults(group, lane, provider) {
+  const source = asObject(provider);
+  group.appendChild(inputControl({
+    value: source.temperature ?? (lane === 'reasoner' ? 0.4 : 0.1),
+    type: 'hidden',
+    dataset: providerDataset('Temperature', lane),
+    ariaLabel: `${laneLabel(lane)} provider temperature`
+  }));
+  group.appendChild(inputControl({
+    value: source.topP ?? 0.95,
+    type: 'hidden',
+    dataset: providerDataset('TopP', lane),
+    ariaLabel: `${laneLabel(lane)} provider top p`
+  }));
+}
+
 function renderProviderSettings(panel, lane, provider) {
   const source = asObject(provider);
   const title = lane === 'reasoner' ? 'Reasoner Provider' : 'Utility Provider';
+  const statusText = lane === 'reasoner' ? 'optional' : providerStatusText(source).toLowerCase();
   const group = el('section', {
-    className: 'recursion-settings-group recursion-provider-card',
-    dataset: { recursionProviderLane: lane }
+    className: 'recursion-provider-section',
+    dataset: { recursionProviderSection: '', recursionProviderLane: lane }
   });
-  group.appendChild(el('h3', { text: title }));
-  group.appendChild(controlRow(
-    'Enabled',
-    checkboxControl({
-      checked: lane === 'utility' ? true : source.enabled === true,
-      disabled: lane === 'utility',
+  group.appendChild(el('div', { className: 'recursion-provider-card' }, [
+    el('span', { className: 'recursion-provider-card-title', text: title }),
+    el('span', {
+      className: providerStatusClass(statusText),
+      text: statusText,
+      dataset: providerDataset('Status', lane)
+    })
+  ]));
+  renderProviderHiddenDefaults(group, lane, source);
+  if (lane === 'reasoner') {
+    group.appendChild(inputControl({
+      value: source.enabled === true ? 'true' : 'false',
+      type: 'hidden',
       dataset: providerDataset('Enabled', lane),
       ariaLabel: `${title} enabled`
-    }),
-    lane === 'utility' ? 'Utility stays on for fallback planning.' : ''
-  ));
-  group.appendChild(controlRow('Source', selectControl({
-    value: cleanText(source.source, 'host-current-model'),
-    options: PROVIDER_SOURCE_OPTIONS,
-    dataset: providerDataset('Source', lane),
-    ariaLabel: `${title} source`
-  })));
-  group.appendChild(controlRow('Profile', inputControl({
-    value: source.hostConnectionProfileId || '',
-    dataset: providerDataset('Profile', lane),
-    ariaLabel: `${title} host connection profile`,
-    placeholder: 'Host profile id'
-  })));
-  group.appendChild(controlRow('Base URL', inputControl({
-    value: source.openAICompatible?.baseUrl || '',
-    dataset: providerDataset('BaseUrl', lane),
-    ariaLabel: `${title} OpenAI-compatible base URL`,
-    placeholder: 'https://host/v1'
-  })));
-  group.appendChild(controlRow('Model', inputControl({
-    value: source.openAICompatible?.model || '',
-    dataset: providerDataset('Model', lane),
-    ariaLabel: `${title} model`,
-    placeholder: 'model'
-  })));
-  group.appendChild(controlRow('Session Key', inputControl({
-    value: '',
-    type: 'password',
-    dataset: providerDataset('ApiKey', lane),
-    ariaLabel: `${title} session API key`,
-    placeholder: source.openAICompatible?.sessionApiKeyPresent ? 'Session key loaded' : 'Session API key'
-  }), 'Session-only; never saved to settings.'));
-  group.appendChild(controlRow('Temperature', inputControl({
-    value: source.temperature ?? '',
-    type: 'number',
-    min: 0,
-    max: 2,
-    step: 0.1,
-    dataset: providerDataset('Temperature', lane),
-    ariaLabel: `${title} temperature`
-  })));
-  group.appendChild(controlRow('Top P', inputControl({
-    value: source.topP ?? '',
-    type: 'number',
-    min: 0,
-    max: 1,
-    step: 0.05,
-    dataset: providerDataset('TopP', lane),
-    ariaLabel: `${title} top p`
-  })));
-  group.appendChild(controlRow('Max Tokens', inputControl({
-    value: source.maxTokens ?? '',
-    type: 'number',
-    min: 64,
-    step: 64,
-    dataset: providerDataset('MaxTokens', lane),
-    ariaLabel: `${title} max tokens`
-  })));
+    }));
+    panel.appendChild(group);
+    return;
+  }
+  group.appendChild(inputControl({
+    value: 'true',
+    type: 'hidden',
+    dataset: providerDataset('Enabled', lane),
+    ariaLabel: `${title} enabled`
+  }));
+  const grid = el('div', { className: 'recursion-provider-grid', dataset: { recursionProviderGrid: '' } });
+  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
+    el('span', { text: 'Source' }),
+    selectControl({
+      value: cleanText(source.source, 'host-current-model'),
+      options: PROVIDER_SOURCE_OPTIONS,
+      dataset: providerDataset('Source', lane),
+      ariaLabel: `${title} source`
+    })
+  ]));
+  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
+    el('span', { text: 'Profile' }),
+    inputControl({
+      value: source.hostConnectionProfileId || '',
+      dataset: providerDataset('Profile', lane),
+      ariaLabel: `${title} host connection profile`,
+      placeholder: 'Host profile id'
+    })
+  ]));
+  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
+    el('span', { text: 'Base URL' }),
+    inputControl({
+      value: source.openAICompatible?.baseUrl || '',
+      dataset: providerDataset('BaseUrl', lane),
+      ariaLabel: `${title} OpenAI-compatible base URL`,
+      placeholder: 'https://host/v1'
+    })
+  ]));
+  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
+    el('span', { text: 'Model' }),
+    inputControl({
+      value: source.openAICompatible?.model || '',
+      dataset: providerDataset('Model', lane),
+      ariaLabel: `${title} model`,
+      placeholder: 'model'
+    })
+  ]));
+  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
+    el('span', { text: 'Session Key' }),
+    inputControl({
+      value: '',
+      type: 'password',
+      dataset: providerDataset('ApiKey', lane),
+      ariaLabel: `${title} session API key`,
+      placeholder: source.openAICompatible?.sessionApiKeyPresent ? 'Session key loaded' : 'Session API key'
+    })
+  ]));
+  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
+    el('span', { text: 'Max Tokens' }),
+    inputControl({
+      value: source.maxTokens ?? '',
+      type: 'number',
+      min: 64,
+      step: 64,
+      dataset: providerDataset('MaxTokens', lane),
+      ariaLabel: `${title} max tokens`
+    })
+  ]));
+  group.appendChild(grid);
   group.appendChild(el('div', { className: 'recursion-provider-actions' }, [
     el('button', {
       className: 'recursion-button',
@@ -803,11 +1277,6 @@ function renderProviderSettings(panel, lane, provider) {
       }
     })
   ]));
-  group.appendChild(el('p', {
-    className: 'recursion-provider-status',
-    text: providerStatusText(source),
-    dataset: providerDataset('Status', lane)
-  }));
   panel.appendChild(group);
 }
 
@@ -843,7 +1312,6 @@ function renderSettingsPanel(panel, view, activeTab = 'play') {
   panel.appendChild(providersPane);
   panel.appendChild(advancedPane);
   panel.appendChild(el('div', { className: 'recursion-settings-footer' }, [
-    button('Open Viewer', 'recursionViewerToggle', 'Open Recursion viewer'),
     button('Save Settings', 'recursionSettingsSave', 'Save Recursion settings')
   ]));
 }
@@ -1019,6 +1487,29 @@ function isSensitiveViewerKey(key) {
   return ['sections', 'prompt', 'prompttext', 'rawprompt', 'rawresponse', 'apikey', 'authorization', 'cookie', 'password', 'secret'].includes(normalized);
 }
 
+function fallbackPromptBlocksFromPacket(packet) {
+  const source = asObject(packet);
+  const sections = asObject(source.sections);
+  const plan = Array.isArray(source.injectionPlan) ? source.injectionPlan.map(asObject) : [];
+  return plan
+    .map((entry) => {
+      const sectionKey = cleanText(entry.section || entry.id);
+      const text = safeText(sections[sectionKey], 5000);
+      if (!sectionKey || !text) return null;
+      return {
+        promptKey: entry.promptKey || sectionKey,
+        title: cleanText(entry.title, titleCase(sectionKey)),
+        placement: entry.placement || '',
+        depth: entry.depth ?? null,
+        role: entry.role || '',
+        sourceIds: Array.isArray(entry.sourceIds) ? entry.sourceIds : [],
+        text,
+        hash: ''
+      };
+    })
+    .filter(Boolean);
+}
+
 function promptPacketPreview(packet, hand = {}) {
   const source = asObject(packet);
   const handSource = asObject(hand);
@@ -1028,6 +1519,7 @@ function promptPacketPreview(packet, hand = {}) {
   } catch {
     blocks = [];
   }
+  if (!blocks.length) blocks = fallbackPromptBlocksFromPacket(source);
   const injectedText = blocks.length
     ? blocks.map((block) => `## ${block.title}\n${block.text}`).join('\n\n')
     : '';
@@ -1057,6 +1549,20 @@ function promptPacketPreview(packet, hand = {}) {
   };
 }
 
+function promptPacketText(packet, hand = {}) {
+  const preview = promptPacketPreview(packet, hand);
+  return cleanText(preview.injectedText, safeJson(preview, { maxString: 5000 }));
+}
+
+function promptPacketMeta(preview) {
+  const lane = cleanText(preview.composerLane);
+  const cardCount = Number(preview.sourceCardCount || 0);
+  return [
+    lane ? `${laneLabel(lane)} composed` : '',
+    cardCount ? `${cardCount} card${cardCount === 1 ? '' : 's'}` : ''
+  ].filter(Boolean);
+}
+
 function renderViewer(viewer, view, model) {
   viewer.replaceChildren();
   const header = el('div', { className: 'recursion-viewer-header' }, [
@@ -1084,7 +1590,8 @@ function renderViewer(viewer, view, model) {
 function buildRoot() {
   const root = el('section', {
     className: 'recursion-root',
-    attrs: { id: 'recursion-root' }
+    attrs: { id: 'recursion-root' },
+    dataset: { recursionRoot: '' }
   });
 
   const bar = el('div', {
@@ -1093,27 +1600,26 @@ function buildRoot() {
     dataset: { recursionBar: '' }
   }, [
     el('button', {
-      className: 'recursion-brand-stage',
-      attrs: { type: 'button', 'aria-label': 'Open Recursion progress', 'aria-expanded': 'false' },
-      dataset: { recursionBrandStage: '' }
+      className: 'recursion-power-toggle',
+      attrs: { type: 'button', 'aria-label': 'Turn Recursion off', 'aria-pressed': 'true', title: 'Turn Recursion off' },
+      dataset: { recursionPowerToggle: '' }
     }, [
-      el('strong', { className: 'recursion-brand', text: 'RECURSION' })
+      el('span', { className: 'recursion-power-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionPowerIcon: '' } }, [
+        modeIconSvg('power')
+      ])
     ]),
     el('span', { className: 'recursion-bar-separator', attrs: { 'aria-hidden': 'true' } }),
     el('div', { className: 'recursion-mode-cluster' }, [
       el('button', {
         className: 'recursion-mode-button',
         attrs: { type: 'button', 'aria-label': 'Mode', 'aria-expanded': 'false' },
-        dataset: { recursionModeButton: '', recursionModeKind: 'observe' }
+        dataset: { recursionModeButton: '', recursionModeKind: 'cards' }
       }, [
-        el('span', { className: 'recursion-mode-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionModeIcon: '' } }),
+        el('span', { className: 'recursion-mode-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionModeIcon: '' } }, [modeIconSvg('cards')]),
         el('span', { className: 'recursion-mode-text', dataset: { recursionMode: '' } })
       ]),
-      el('div', { className: 'recursion-mode-menu', dataset: { recursionModeMenu: '' } }, [
-        el('button', { className: 'recursion-mode-choice', text: 'Observe only', attrs: { type: 'button', title: 'Observe only prepares inspection surfaces without injecting prompt text.' }, dataset: { recursionModeChoice: 'observe', recursionModeChoiceObserve: '' } }),
-        el('button', { className: 'recursion-mode-choice', text: 'Auto', attrs: { type: 'button', title: 'Auto selects cards, composes the prompt packet, and injects it when ready.' }, dataset: { recursionModeChoice: 'auto', recursionModeChoiceAuto: '' } }),
-        el('button', { className: 'recursion-mode-choice', text: 'Off', attrs: { type: 'button', title: 'Off disables Recursion prompt work.' }, dataset: { recursionModeChoice: 'off', recursionModeChoiceOff: '' } })
-      ])
+      el('div', { className: 'recursion-mode-menu', attrs: { 'aria-label': 'Recursion mode selector' }, dataset: { recursionModeMenu: '' } },
+        MODE_MENU_OPTIONS.map(modeMenuChoice))
     ]),
     el('span', { className: 'recursion-bar-separator', attrs: { 'aria-hidden': 'true' } }),
     el('button', {
@@ -1137,15 +1643,31 @@ function buildRoot() {
         el('span', { className: 'recursion-reasoning-line-fill', attrs: { 'aria-hidden': 'true' } }),
         ...REASONING_LEVEL_OPTIONS.map(([level, label]) => el('button', {
           className: 'recursion-reasoning-node',
-          attrs: { type: 'button', role: 'radio', 'aria-checked': 'false', title: `${label} reasoning` },
+          attrs: { type: 'button', role: 'radio', 'aria-checked': 'false', title: REASONING_LEVEL_TIPS[level] || `${label} reasoning` },
           dataset: {
             recursionReasoningLevelNode: level,
             [`recursionReasoningLevel${titleCase(level)}`]: ''
           }
         }))
       ]),
-      el('button', { className: 'recursion-icon-button recursion-brief-arrow', text: 'v', attrs: { type: 'button', 'aria-label': 'Open last brief preview', 'aria-expanded': 'false' }, dataset: { recursionHandToggle: '', recursionBriefArrow: '' } }),
-      el('button', { className: 'recursion-icon-button recursion-options-button', text: '...', attrs: { type: 'button', 'aria-label': 'Open Recursion options', 'aria-expanded': 'false' }, dataset: { recursionActions: '', recursionOptionsButton: '' } })
+      el('button', {
+        className: 'recursion-icon-button recursion-brief-arrow',
+        attrs: { type: 'button', 'aria-label': 'Open last brief preview', 'aria-expanded': 'false' },
+        dataset: { recursionHandToggle: '', recursionBriefArrow: '' }
+      }, [
+        el('span', { className: 'recursion-arrow-down', attrs: { 'aria-hidden': 'true' }, dataset: { recursionArrowDown: '' } })
+      ]),
+      el('button', {
+        className: 'recursion-icon-button recursion-options-button',
+        attrs: { type: 'button', 'aria-label': 'Open Recursion options', 'aria-expanded': 'false' },
+        dataset: { recursionActions: '', recursionOptionsButton: '' }
+      }, [
+        el('span', { className: 'recursion-ellipsis', attrs: { 'aria-hidden': 'true' }, dataset: { recursionEllipsis: '' } }, [
+          el('span'),
+          el('span'),
+          el('span')
+        ])
+      ])
     ])
   ]);
 
@@ -1188,12 +1710,15 @@ function buildRoot() {
     button('Close', 'recursionViewerClose', 'Close Recursion viewer')
   ]);
   viewer.hidden = true;
+  const hiddenViewerToggle = button('Open Viewer', 'recursionViewerToggle', 'Open Recursion viewer');
+  hiddenViewerToggle.className = 'recursion-visually-hidden';
 
   root.appendChild(bar);
   root.appendChild(statusPopover);
   root.appendChild(ribbon);
   root.appendChild(hand);
   root.appendChild(settingsPanel);
+  root.appendChild(hiddenViewerToggle);
   root.appendChild(viewer);
   root.querySelector('[data-recursion-mode-menu]').hidden = true;
   return root;
@@ -1216,6 +1741,23 @@ function insertRoot(root, mountPoint) {
   parent.insertBefore(root, parent.firstChild ?? null);
 }
 
+function targetWithin(target, elements) {
+  let node = target;
+  while (node) {
+    if (elements.includes(node)) return true;
+    node = node.parentNode;
+  }
+  return false;
+}
+
+function eventWithin(event, elements) {
+  const path = typeof event?.composedPath === 'function' ? event.composedPath() : null;
+  if (Array.isArray(path) && path.length) {
+    return elements.some((element) => element && path.includes(element));
+  }
+  return targetWithin(event?.target, elements);
+}
+
 export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   if (!canUseDocument()) return noopMount();
 
@@ -1225,7 +1767,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const settingsPanel = root.querySelector('[data-recursion-settings-panel]');
   const statusPopover = root.querySelector('[data-recursion-status-popover]');
   const actionsButton = root.querySelector('[data-recursion-actions]');
-  const brandButton = root.querySelector('[data-recursion-brand-stage]');
+  const powerButton = root.querySelector('[data-recursion-power-toggle]');
   const handButton = root.querySelector('[data-recursion-hand-toggle]');
   const modeButton = root.querySelector('[data-recursion-mode-button]');
   const statusButton = root.querySelector('[data-recursion-status-trigger]');
@@ -1234,6 +1776,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const ribbon = root.querySelector('[data-recursion-activity-ribbon]');
   let settingsPanelRendered = false;
   let settingsTab = 'play';
+  const panelRerenderClickEvents = typeof WeakSet === 'function' ? new WeakSet() : null;
   let ribbonVisible = false;
   let ribbonRevealTimer = null;
   let ribbonSuccessTimer = null;
@@ -1344,21 +1887,19 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const rootLeft = Math.max(0, rect.left);
     const rootRight = Math.min(viewportWidth, rect.right);
     const rootWidth = Math.max(280, rootRight - rootLeft);
-    const top = rect.bottom + 1;
+    const progressTop = rect.bottom + 3;
+    const settingsTop = rect.bottom + 5;
     const progressWidth = Math.min(352, rootWidth);
-    const gutter = 8;
-    const settingsFitsBesideProgress = rootWidth >= progressWidth + gutter + 300;
-    const settingsLeft = settingsFitsBesideProgress ? rootLeft + progressWidth + gutter : rootLeft;
-    const settingsWidth = Math.max(280, rootRight - settingsLeft);
+    settingsPanel.classList.toggle('is-beside-progress', false);
 
-    setFixedPanelGeometry(statusPopover, { left: rootLeft, top, width: progressWidth, zIndex: 10020 });
-    setFixedPanelGeometry(handPanel, { left: rootLeft, top, width: rootWidth, zIndex: 10010 });
-    setFixedPanelGeometry(settingsPanel, { left: settingsLeft, top, width: settingsWidth, zIndex: 10012 });
+    setFixedPanelGeometry(statusPopover, { left: rootLeft, top: progressTop, width: progressWidth, zIndex: 10020 });
+    setFixedPanelGeometry(handPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10010 });
+    setFixedPanelGeometry(settingsPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10022 });
     if (modeMenu?.style) {
       const modeRect = root.querySelector('[data-recursion-mode-button]')?.getBoundingClientRect?.();
       if (modeRect) setFixedPanelGeometry(modeMenu, {
         left: Math.min(modeRect.left, viewportWidth - 222),
-        top,
+        top: progressTop,
         width: 222,
         zIndex: 10018
       });
@@ -1371,9 +1912,19 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     modeButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 
+  function renderModeMenuSelection(mode) {
+    const selectedMode = normalizeMode(mode);
+    for (const choice of root.querySelectorAll('[data-recursion-mode-choice]')) {
+      const selected = cleanText(choice.dataset.recursionModeChoice).toLowerCase() === selectedMode;
+      choice.className = selected ? 'recursion-mode-choice is-selected' : 'recursion-mode-choice';
+      choice.setAttribute('aria-current', selected ? 'true' : 'false');
+    }
+  }
+
   function setProgressPopoverOpen(open) {
+    if (open) setModeMenuOpen(false);
+    if (open && settingsPanel.hidden === false) setSettingsPanelOpen(false);
     statusPopover.hidden = !open;
-    brandButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     statusButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     syncFloatingPanelGeometry();
   }
@@ -1385,6 +1936,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function setSettingsPanelOpen(open) {
+    if (open && statusPopover.hidden === false) setProgressPopoverOpen(false);
     settingsPanel.hidden = !open;
     actionsButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
@@ -1396,83 +1948,155 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     syncFloatingPanelGeometry();
   }
 
-  actionsButton?.addEventListener('click', () => {
+  actionsButton?.addEventListener('click', (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (event?.isTrusted === false && !settingsPanel.hidden) {
+      setSettingsPanelOpen(true);
+      return;
+    }
     setSettingsPanelOpen(settingsPanel.hidden);
   });
   handButton?.addEventListener('click', () => {
     setHandPanelOpen(handPanel.hidden);
   });
   modeButton?.addEventListener('click', () => {
-    setModeMenuOpen(modeMenu?.hidden !== false);
+    const open = modeMenu?.hidden !== false;
+    if (open) {
+      setProgressPopoverOpen(false);
+      setHandPanelOpen(false);
+      setSettingsPanelOpen(false);
+    }
+    setModeMenuOpen(open);
     syncFloatingPanelGeometry();
   });
-  brandButton?.addEventListener('click', () => {
-    setProgressPopoverOpen(statusPopover.hidden);
+  powerButton?.addEventListener('click', () => {
+    const view = currentView();
+    runAction(runtime?.updateSettings?.({ enabled: view.settings?.enabled === false }));
   });
   statusButton?.addEventListener('click', () => {
     setProgressPopoverOpen(statusPopover.hidden);
   });
   root.addEventListener('click', (event) => {
-    const dataset = event?.target?.dataset || {};
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionViewerClose')) {
+    const target = event?.target;
+    const control = (key) => closestDatasetElement(target, key, root);
+    if (control('recursionViewerClose')) {
       if (typeof viewer.close === 'function' && viewer.open) viewer.close();
       viewer.hidden = true;
     }
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionViewerToggle')) {
+    if (control('recursionViewerToggle')) {
       openViewer();
     }
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionSettingsClose')) {
+    if (control('recursionSettingsClose')) {
       setSettingsPanelOpen(false);
     }
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionCopyPromptPacket')) {
+    if (control('recursionCopyPromptPacket')) {
       const view = currentView();
-      const packetText = safeJson(promptPacketPreview(view.lastPacket, view.lastHand), { maxString: 5000 });
+      const packetText = promptPacketText(view.lastPacket, view.lastHand);
       runAction(globalThis.navigator?.clipboard?.writeText?.(packetText));
     }
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionModeChoice')) {
-      runAction(runtime?.updateSettings?.({ mode: dataset.recursionModeChoice }));
+    const modeChoice = control('recursionModeChoice');
+    if (modeChoice) {
+      runAction(runtime?.updateSettings?.({ mode: modeChoice.dataset.recursionModeChoice }));
       setModeMenuOpen(false);
     }
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionReasoningLevelNode')) {
-      const reasoningLevel = normalizeReasoningLevel(dataset.recursionReasoningLevelNode);
+    const reasoningNode = control('recursionReasoningLevelNode');
+    if (reasoningNode) {
+      const reasoningLevel = normalizeReasoningLevel(reasoningNode.dataset.recursionReasoningLevelNode);
       runAction(runtime?.updateSettings?.({
         reasoningLevel,
         reasonerUse: reasonerUseForReasoningLevel(reasoningLevel)
       }));
     }
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionSettingsTab')) {
-      settingsTab = ['play', 'providers', 'advanced'].includes(dataset.recursionSettingsTab)
-        ? dataset.recursionSettingsTab
+    const settingsReasoningChoice = control('recursionSettingReasoningChoice');
+    if (settingsReasoningChoice) {
+      updateSettingsReasoningChain(root, settingsReasoningChoice.dataset.recursionSettingReasoningChoice);
+    }
+    const settingsTabControl = control('recursionSettingsTab');
+    if (settingsTabControl) {
+      panelRerenderClickEvents?.add(event);
+      event?.preventDefault?.();
+      event?.stopImmediatePropagation?.();
+      event?.stopPropagation?.();
+      settingsTab = ['play', 'providers', 'advanced'].includes(settingsTabControl.dataset.recursionSettingsTab)
+        ? settingsTabControl.dataset.recursionSettingsTab
         : 'play';
       renderSettingsPanel(settingsPanel, currentView(), settingsTab);
       settingsPanelRendered = true;
       syncFloatingPanelGeometry();
     }
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionSettingsSave')) {
+    if (control('recursionSettingsSave')) {
       runAction(runtime?.updateSettings?.(readSettingsPatch(root)));
       settingsPanelRendered = false;
       update();
     }
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionProviderSave')) {
-      const lane = providerLaneFromDataset(dataset);
+    const providerSave = control('recursionProviderSave');
+    if (providerSave) {
+      const lane = providerLaneFromDataset(providerSave.dataset);
       runAction(runtime?.updateProvider?.(lane, readProviderPatch(root, lane)));
       settingsPanelRendered = false;
       update();
     }
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionProviderTest')) {
-      const lane = providerLaneFromDataset(dataset);
+    const providerTest = control('recursionProviderTest');
+    if (providerTest) {
+      const lane = providerLaneFromDataset(providerTest.dataset);
       runAction(runtime?.testProvider?.(lane), () => {
         settingsPanelRendered = false;
         update();
       });
     }
-    if (Object.prototype.hasOwnProperty.call(dataset, 'recursionProviderClearKey')) {
-      const lane = providerLaneFromDataset(dataset);
+    const providerClearKey = control('recursionProviderClearKey');
+    if (providerClearKey) {
+      const lane = providerLaneFromDataset(providerClearKey.dataset);
       runAction(runtime?.clearProviderKey?.(lane));
       settingsPanelRendered = false;
       update();
     }
   });
+
+  function handleDocumentClick(event) {
+    const target = event?.target;
+    if (!target) return;
+    if (panelRerenderClickEvents?.has(event)) return;
+
+    if (statusPopover.hidden === false && !eventWithin(event, [
+      statusPopover,
+      statusButton,
+      powerButton,
+      handButton,
+      handPanel,
+      actionsButton,
+      settingsPanel
+    ])) {
+      setProgressPopoverOpen(false);
+    }
+    if (modeMenu?.hidden === false && !eventWithin(event, [modeMenu, modeButton])) {
+      setModeMenuOpen(false);
+    }
+    if (handPanel.hidden === false && !eventWithin(event, [handPanel, handButton, statusPopover])) {
+      setHandPanelOpen(false);
+    }
+    if (settingsPanel.hidden === false && !eventWithin(event, [
+      settingsPanel,
+      actionsButton,
+      statusPopover,
+      statusButton,
+      powerButton
+    ])) {
+      setSettingsPanelOpen(false);
+    }
+  }
+
+  function handleDocumentKeydown(event) {
+    if (event?.key !== 'Escape') return;
+    setModeMenuOpen(false);
+    setProgressPopoverOpen(false);
+    setHandPanelOpen(false);
+    setSettingsPanelOpen(false);
+  }
+
+  document.addEventListener?.('click', handleDocumentClick);
+  document.addEventListener?.('keydown', handleDocumentKeydown);
 
   function runAction(result, after = null) {
     if (result && typeof result.then === 'function') {
@@ -1557,7 +2181,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       return typeof runtime?.view === 'function' ? runtime.view() : {};
     } catch (error) {
       return {
-        settings: { mode: 'observe' },
+        settings: { enabled: true, mode: 'auto' },
         activity: {
           phase: 'runtimeViewFailed',
           severity: 'error',
@@ -1573,9 +2197,22 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     setText(root, '[data-recursion-status]', model.runtimeHealthLabel);
     setText(root, '[data-recursion-mode]', model.modeLabel);
     setText(root, '[data-recursion-current-step]', model.currentStepText || '');
-    setText(root, '[data-recursion-mode-icon]', '');
     const modeButton = root.querySelector('[data-recursion-mode-button]');
-    if (modeButton) modeButton.dataset.recursionModeKind = modeIcon(model.mode);
+    if (modeButton) {
+      const modeKind = modeIcon(model.mode);
+      modeButton.dataset.recursionModeKind = modeKind;
+      modeButton.setAttribute('aria-label', `Mode: ${model.modeLabel}`);
+      renderModeIcon(root.querySelector('[data-recursion-mode-icon]'), modeKind);
+    }
+    const powerButton = root.querySelector('[data-recursion-power-toggle]');
+    if (powerButton) {
+      const powerTip = model.enabled ? 'Turn Recursion off' : 'Turn Recursion on';
+      powerButton.setAttribute('aria-pressed', model.enabled ? 'true' : 'false');
+      powerButton.setAttribute('aria-label', powerTip);
+      powerButton.setAttribute('title', powerTip);
+      powerButton.className = model.enabled ? 'recursion-power-toggle is-on' : 'recursion-power-toggle is-off';
+    }
+    renderModeMenuSelection(model.mode);
     setText(root, '[data-recursion-hand-count]', `Hand ${model.handCount}`);
     setText(root, '[data-recursion-composer]', model.composerLabel);
     setText(root, '[data-recursion-reasoner]', model.reasonerLabel);
@@ -1604,6 +2241,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       if (timer !== null && typeof clearInterval === 'function') clearInterval(timer);
       clearRibbonRevealTimer();
       clearRibbonSuccessTimer();
+      document.removeEventListener?.('click', handleDocumentClick);
+      document.removeEventListener?.('keydown', handleDocumentKeydown);
       root.remove();
     }
   };

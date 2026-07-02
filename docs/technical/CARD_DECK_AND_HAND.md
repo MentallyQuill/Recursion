@@ -56,7 +56,7 @@ stateDiagram-v2
     Discarded --> [*]
 ```
 
-<Render Needed>: assets/documentation/renders/recursion-card-lifecycle.png - Card lifecycle visual showing create, accept, select, stow, stale, refresh, discard, and diagnostic-only discarded history.
+![Card lifecycle visual](../../assets/documentation/renders/recursion-card-lifecycle.png)
 
 Runtime normalizes cards, enforces text and evidence limits, validates catalog membership, caps token estimates, and rejects malformed records. The Utility Arbiter owns semantic utility decisions such as which families matter, which cards are stale, and which cards belong in the next hand.
 

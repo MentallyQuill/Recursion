@@ -22,6 +22,7 @@ const PLAN_ACTIONS = new Set(['skip', 'reuse-cache', 'refresh-cards', 'compose-b
 const REASONER_DECISION_MODES = new Set(['use', 'skip']);
 const PROMPT_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const SCENE_STATUSES = new Set(['same-scene', 'soft-shift', 'hard-shift', 'unknown']);
+const PROMPT_NEUTRAL_SETTING_KEYS = new Set(['reasoningLevel', 'reasonerUse']);
 const HARD_CACHE_VERSION_FIELDS = Object.freeze([
   'storageSchemaVersion',
   'runtimeCacheContractVersion',
@@ -89,6 +90,7 @@ function cacheProviderSettingsSignature(provider = {}) {
 function cacheSettingsSignature(settings = {}) {
   const normalized = normalizeSettings(settings);
   return {
+    enabled: normalized.enabled,
     mode: normalized.mode,
     strength: normalized.strength,
     reasoningLevel: normalized.reasoningLevel,
@@ -714,6 +716,7 @@ function budgetOr(value, fallback) {
 function arbiterSafeSettings(settings) {
   const source = asObject(settings);
   return {
+    enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
     strength: safeText(source.strength || 'balanced', 40),
     reasoningLevel: safeText(source.reasoningLevel || 'high', 40),
@@ -769,7 +772,8 @@ function safeProviderSettingsView(provider) {
 function safeSettingsView(settings) {
   const source = asObject(settings);
   return {
-    mode: safeText(source.mode || 'observe', 40),
+    enabled: source.enabled !== false,
+    mode: safeText(source.mode || 'auto', 40),
     strength: safeText(source.strength || 'balanced', 40),
     reasoningLevel: safeText(source.reasoningLevel || 'high', 40),
     promptFootprint: safeText(source.promptFootprint || 'normal', 40),
@@ -1365,15 +1369,21 @@ export function createRecursionRuntime({
   async function updateSettings(patch = {}) {
     const cleanPatch = asObject(patch);
     const next = settingsStore.update(cleanPatch);
-    if (Object.keys(cleanPatch).length > 0) {
+    const changedKeys = Object.keys(cleanPatch);
+    const promptNeutralPatch = changedKeys.length > 0
+      && changedKeys.every((key) => PROMPT_NEUTRAL_SETTING_KEYS.has(key));
+    if (promptNeutralPatch) {
+      return { ok: true, settings: next, clear: null };
+    }
+    if (changedKeys.length > 0) {
       supersedeActiveRun();
       return trackRuntimeMutation(async () => {
         await invalidateActiveSceneCacheBestEffort('settings-changed', {
-          changedKeys: Object.keys(cleanPatch)
+          changedKeys
         });
         const clear = await clearPromptAfterSupersede({
-          successLabel: next.mode === 'off'
-            ? 'Recursion Off. Prompt cleared.'
+          successLabel: next.enabled === false
+            ? 'Recursion disabled. Prompt cleared.'
             : 'Recursion prompt cleared after settings change.',
           journalReason: 'settings-changed'
         });
@@ -2134,7 +2144,7 @@ export function createRecursionRuntime({
 
   async function prepareForGeneration({ userMessage = '', refreshReason = '' } = {}) {
     const settings = settingsStore.get();
-    if (settings.mode === 'off') {
+    if (settings.enabled === false) {
       await waitForExternalMutations();
       supersedeActiveRun();
       const clearRunId = makeId('run');
@@ -2146,19 +2156,20 @@ export function createRecursionRuntime({
       });
       const clear = await runPromptMutationSection(null, async () => {
         const result = await clearPromptBestEffort(host);
-        await appendPromptClearedJournal(clearRunId, promptClearContext(), result, 'off');
+        await appendPromptClearedJournal(clearRunId, promptClearContext(), result, 'disabled');
         return result;
       });
       if (clear?.ok === false) reportClearWarning(clearRunId, clear);
       else safeActivity(activity, 'clear');
-      return { ok: true, skipped: true, reason: 'off', clear };
+      return { ok: true, skipped: true, reason: 'disabled', clear };
     }
 
     await waitForExternalMutations();
     const pendingUserMessage = normalizePendingUserMessage(userMessage);
     const runId = makeId('run');
     const signal = startRun(runId);
-    startRuntimeActivity({ runId, label: 'Reading current turn...', chips: ['Auto'] });
+    const modeChip = settings.mode === 'semi-auto' ? 'Semi-Auto' : 'Auto';
+    startRuntimeActivity({ runId, label: 'Reading current turn...', chips: [modeChip] });
     try {
       const snapshot = snapshotWithPendingUserMessage(await readSnapshot(), pendingUserMessage);
       if (!isActiveRun(runId)) return supersededResult(runId);
@@ -2296,32 +2307,30 @@ export function createRecursionRuntime({
         maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700)
       });
 
-      if (settings.mode !== 'observe') {
-        const freshness = await recheckPromptInstallSnapshot(runId, sceneSnapshot, plan, pendingUserMessage);
-        if (!isActiveRun(runId)) return supersededResult(runId);
-        if (freshness.ok === false) {
-          return await skipPromptInstallAfterFreshnessFailure(runId, {
-            reason: freshness.reason,
-            sceneSnapshot,
-            currentSnapshot: freshness.currentSnapshot,
-            hand,
-            plan,
-            error: freshness.error
-          });
-        }
-        promptSnapshot = freshness.snapshot;
-        if (promptSnapshot.sceneKey !== sceneSnapshot.sceneKey || promptSnapshot.sceneFingerprint !== sceneSnapshot.sceneFingerprint) {
-          promptDeck = {
-            ...deck,
-            cards: rebaseCardsForSnapshot(deck.cards, promptSnapshot, plan)
-          };
-          hand = selectHand(promptDeck.cards, {
-            maxCards: budgetOr(plan.budgets?.maxCards, 6),
-            maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700)
-          });
-        }
-        lastSnapshot = promptSnapshot;
+      const freshness = await recheckPromptInstallSnapshot(runId, sceneSnapshot, plan, pendingUserMessage);
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      if (freshness.ok === false) {
+        return await skipPromptInstallAfterFreshnessFailure(runId, {
+          reason: freshness.reason,
+          sceneSnapshot,
+          currentSnapshot: freshness.currentSnapshot,
+          hand,
+          plan,
+          error: freshness.error
+        });
       }
+      promptSnapshot = freshness.snapshot;
+      if (promptSnapshot.sceneKey !== sceneSnapshot.sceneKey || promptSnapshot.sceneFingerprint !== sceneSnapshot.sceneFingerprint) {
+        promptDeck = {
+          ...deck,
+          cards: rebaseCardsForSnapshot(deck.cards, promptSnapshot, plan)
+        };
+        hand = selectHand(promptDeck.cards, {
+          maxCards: budgetOr(plan.budgets?.maxCards, 6),
+          maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700)
+        });
+      }
+      lastSnapshot = promptSnapshot;
 
       await runStorageSaveSection(runId, () => saveSceneCacheSafe(
         runId,
@@ -2342,35 +2351,6 @@ export function createRecursionRuntime({
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastHand = hand;
       lastPacket = packet;
-
-      if (settings.mode === 'observe') {
-        await runStorageSaveSection(runId, () => saveSceneCacheSafe(
-          runId,
-          promptSnapshot,
-          sceneCachePayload(promptSnapshot, promptDeck, hand, plan, packet, settings)
-        ));
-        if (!isActiveRun(runId)) return supersededResult(runId);
-        const observeResult = await runPromptMutationSection(runId, async () => {
-          const clear = await clearPromptBestEffort(host);
-          if (clear?.superseded) return clear;
-          if (!isActiveRun(runId)) return supersededResult(runId);
-          await appendPromptClearedJournal(runId, promptClearContext(promptSnapshot), clear, 'observe-preview');
-          if (!isActiveRun(runId)) return supersededResult(runId);
-          await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
-          if (!isActiveRun(runId)) return supersededResult(runId);
-          if (clear?.ok === false) {
-            reportClearWarning(runId, clear);
-          } else {
-            settleRuntimeActivity({
-              runId,
-              outcome: 'success',
-              label: 'Observe mode: hand preview ready. No prompt injected.'
-            });
-          }
-          return { ok: true, observe: true, packet, hand, plan, clear };
-        });
-        return observeResult;
-      }
 
       if (!isActiveRun(runId)) return supersededResult(runId);
       const installedResult = await runPromptMutationSection(runId, async () => {

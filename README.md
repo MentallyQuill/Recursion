@@ -1,10 +1,10 @@
 # Recursion
 
-Recursion is a pre-alpha SillyTavern extension that compiles compact, current-scene prompt guidance for the next roleplay generation. It observes the active chat, builds a short-lived scene deck and turn hand, then installs an inspectable prompt packet when Auto mode is active.
+Recursion is a pre-alpha SillyTavern extension that compiles compact, current-scene prompt guidance for the next roleplay generation. It observes the active chat, builds a short-lived scene deck and turn hand, then installs an inspectable prompt packet when Auto or Semi-Auto mode is active.
 
 Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product. It is a focused prompt compiler for the scene in front of the user.
 
-<Render Needed>: assets/documentation/renders/recursion-bar-desktop.png - Recursion Bar mounted in SillyTavern on desktop, showing Ready, mode, Hand dropdown, Utility state, Reasoner state, Actions, and Viewer controls.
+<Render Needed>: assets/documentation/renders/recursion-bar-desktop.png - Recursion Bar mounted in SillyTavern on desktop, showing power, mode, Hero Pixel Array, reasoning level, Last Brief dropdown, and options controls.
 
 ## Current Status
 
@@ -24,15 +24,15 @@ V1 currently covers settings, provider lanes, scene cards, runtime coordination,
 2. Enable the `Recursion` extension in SillyTavern.
 3. Configure the Utility provider.
 4. Leave Reasoner off unless you want the optional composition lane.
-5. Use `Observe only` to inspect without prompt injection, or `Auto` to prepare and install the next prompt packet.
-6. Watch the Activity Ribbon, then inspect the Last Hand or Full Viewer when you need details.
+5. Keep the power toggle on and use `Auto` or `Semi-Auto` to prepare and install the next prompt packet.
+6. Watch the Hero Pixel Array progress menu, then inspect Last Brief or Full Viewer when you need details.
 
 ## Key Features
 
 | Feature | Current V1 contract |
 | --- | --- |
-| Recursion Bar | Chat-attached top bar for mode, hand count, provider health, actions, last hand, and viewer access. |
-| Activity Ribbon | Visible progress for snapshot reading, Utility planning, card generation, prompt composition, prompt install, fallback, and ready states. |
+| Recursion Bar | Chat-attached top bar for power, mode, Hero Pixel Array progress, reasoning level, Last Brief, options, and viewer access. |
+| Hero Pixel Array progress menu | Visible progress for snapshot reading, Utility planning, card generation, prompt composition, prompt install, fallback, and ready states. |
 | Scene deck and turn hand | Bounded current-scene cache with a compact hand selected for the next generation. |
 | Utility lane | Required default lane for Arbiter planning, structured card work, and normal prompt composition. |
 | Reasoner lane | Optional composer lane for crowded, conflicted, or subtle hands; Utility remains the fallback. |
@@ -40,7 +40,7 @@ V1 currently covers settings, provider lanes, scene cards, runtime coordination,
 | Storage and diagnostics | Compact settings, logical scene cache, bounded run journal, sanitized activity, and artifact redaction boundaries. |
 | Live smoke guardrails | Dedicated soak users are required; `default-user` is rejected before live mutation or provider calls. |
 
-<Render Needed>: assets/documentation/renders/recursion-activity-ribbon-auto-pass.png - Activity Ribbon during an Auto pass, showing Utility planning, card generation, prompt composition, prompt install, and ready state.
+<Render Needed>: assets/documentation/renders/recursion-progress-menu-auto-pass.png - Hero Pixel Array progress menu during an Auto pass, showing Utility planning, card generation, prompt composition, prompt install, and ready state.
 
 <Render Needed>: assets/documentation/renders/recursion-full-viewer-overview.png - Full Viewer overview with Now, Deck, Activity, Prompt Packet, Settings, and Providers sections visible.
 
@@ -50,7 +50,7 @@ V1 currently covers settings, provider lanes, scene cards, runtime coordination,
 
 - [Documentation Index](docs/DOCUMENTATION_INDEX.md) - Canonical map for current docs and expansion tracking.
 - [Release Notes](docs/release/0.1.0-pre-alpha.1.md) - Current pre-alpha release scope, verification, and known doc/render gaps.
-- [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md) - First-session path from install and provider setup through Observe, Auto, inspection, and cleanup.
+- [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md) - First-session path from install and provider setup through Auto, Semi-Auto, inspection, and cleanup.
 - [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md) - Complete practical guide for UI surfaces, modes, operation, fail-soft behavior, diagnostics, storage, mobile behavior, and smoke checks.
 - [Provider Setup](docs/user/PROVIDER_SETUP.md) - Utility and Reasoner setup, session-only keys, provider tests, fallback behavior, and safe verification.
 - [Prompt Privacy And Safety](docs/user/PROMPT_PRIVACY_AND_SAFETY.md) - Prompt packet contents, injection boundary, storage limits, redaction, coexistence, and operator safety checks.

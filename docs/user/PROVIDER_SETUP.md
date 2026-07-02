@@ -117,7 +117,7 @@ Provider failures should degrade Recursion, not block normal SillyTavern generat
 | Provider test failed | Bad key, base URL, model name, network, or incompatible response. | Re-enter session key, verify endpoint/model, test again. |
 | Reasoner never runs | Off, unhealthy, or not needed by Auto. | Enable Reasoner, test it, and use Auto only for suitable complex turns. |
 | Reasoner failed but generation continued | Expected fallback path. | Inspect Activity and Prompt Packet to confirm Utility composition. |
-| Prompt not installed | Observe only mode, Off mode, Utility unavailable, stale run, or injection failure. | Check mode, Activity, Provider status, and Prompt Packet metadata. |
+| Prompt not installed | Power is off, Utility unavailable, stale run, or injection failure. | Check power state, mode, Activity, Provider status, and Prompt Packet metadata. |
 | Session key disappeared | Browser session reset or Clear Session Key used. | Re-enter key and run Test Provider. |
 | Error text looks too vague | Redaction removed sensitive details. | Use sanitized diagnostics and provider-side logs if you need endpoint details. |
 
@@ -128,7 +128,7 @@ For manual verification:
 1. Do not show provider secret fields in screenshots.
 2. Run Utility Test Provider.
 3. Run Reasoner Test Provider only if Reasoner is enabled.
-4. Set Observe only and confirm no prompt is installed.
+4. Turn power off and confirm no prompt is installed.
 5. Set Auto only when you intend Recursion to affect the next prompt.
 6. Inspect Activity for route and fallback details.
 7. Inspect Prompt Packet metadata, not raw provider payloads.

@@ -68,7 +68,7 @@ Every missing render, screenshot, diagram, or infographic requested by a documen
 Use this format:
 
 ```markdown
-<Render Needed>: assets/documentation/renders/recursion-activity-ribbon-auto-pass.png - Activity Ribbon during an Auto pass, showing Utility planning, card generation, prompt composition, prompt install, and ready state.
+<Render Needed>: assets/documentation/renders/recursion-progress-menu-auto-pass.png - Hero Pixel Array progress menu during an Auto pass, showing Utility planning, card generation, prompt composition, prompt install, and ready state.
 ```
 
 Rules:
@@ -86,7 +86,7 @@ Replacement example:
 
 ```markdown
 <p align="center">
-  <img src="../../assets/documentation/renders/recursion-activity-ribbon-auto-pass.png" alt="Recursion Activity Ribbon during an Auto pass">
+  <img src="../../assets/documentation/renders/recursion-progress-menu-auto-pass.png" alt="Recursion Hero Pixel Array progress menu during an Auto pass">
 </p>
 ```
 
@@ -107,7 +107,7 @@ Build a source-backed inventory before expanding public prose.
 ### Work
 
 - Audit `README.md`, `docs/README.md`, existing design docs, architecture docs, user docs, testing docs, and source READMEs.
-- Inventory user-facing surfaces: Recursion Bar, Activity Ribbon, Actions menu, Last Hand dropdown, Full Viewer, Settings, Provider Controls, Off/Observe only/Auto mode controls, warnings, fallback states, and mobile behavior.
+- Inventory user-facing surfaces: Recursion Bar, Hero Pixel Array progress menu, options menu, Last Brief dropdown, Full Viewer, Settings, Provider Controls, power toggle, Auto/Semi-Auto mode controls, warnings, fallback states, and mobile behavior.
 - Inventory technical seams: SillyTavern host adapter, generation interceptor, runtime coordinator, Utility Arbiter, card catalog, scene cache, turn hand selection, prompt packet composition, prompt injection, provider lanes, storage, activity reporting, diagnostics, and redaction.
 - Inventory verification evidence: `npm.cmd test`, `node tools\scripts\run-alpha-gate.mjs`, Playwright readiness artifacts, dedicated soak-user checks, live smoke plans, and artifact contracts.
 - Identify stale or overlapping docs that should be renamed, merged, or rewritten in place.
@@ -167,7 +167,7 @@ Capture or plan visuals before writing screenshot-backed prose.
 | Render | Viewport | Purpose |
 | --- | --- | --- |
 | Recursion Bar in SillyTavern | Desktop | First visual proof of the active extension surface. |
-| Activity Ribbon active pass | Desktop | Shows invisible work becoming visible during Auto mode. |
+| Hero Pixel Array active pass | Desktop | Shows invisible work becoming visible during Auto mode. |
 | Full Viewer overview | Desktop | Shows inspectable Now, Deck, Activity, Prompt Packet, Settings, and Providers sections. |
 | Recursion Bar mobile layout | Phone | Shows narrow-host usability. |
 
@@ -176,10 +176,10 @@ Capture or plan visuals before writing screenshot-backed prose.
 | Surface Or Flow | Required States |
 | --- | --- |
 | Install and enable | SillyTavern extension listed, enabled, and bar mounted. |
-| Mode controls | Off, Observe only, Auto, Refresh Scene, and Off-mode cleanup behavior. |
+| Mode controls | Power toggle, Auto, Semi-Auto, Reasoning Level, and prompt cleanup behavior. |
 | Recursion Bar | Ready, working, warning, disabled, provider issue, and prompt-ready states. |
-| Activity Ribbon | Snapshot, Utility planning, card generation, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states. |
-| Actions menu | Refresh Scene, Switch to Auto or Switch to Observe only, Copy Last Prompt Packet, Open Settings, Open Viewer, and disabled copy state. |
+| Hero Pixel Array progress menu | Snapshot, Utility planning, card generation, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states. |
+| Options menu | Copy Last Prompt Packet, Open Settings, Open Viewer, provider controls, and disabled planned commands. |
 | Last Hand dropdown | Compact selected cards, omission hints, prompt packet link, empty hand, stale hand, and error state. |
 | Full Viewer | Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections. |
 | Settings | Mode, Strength, Prompt Footprint, Focus, Reasoner Use, Utility provider setup, and Reasoner provider setup. |
@@ -193,7 +193,7 @@ Capture or plan visuals before writing screenshot-backed prose.
 | Visual | Purpose |
 | --- | --- |
 | Runtime pipeline infographic | Host Snapshot -> Utility Arbiter -> Scene Deck -> Turn Hand -> Composer/Reasoner -> Prompt Packet -> Injection -> Diagnostics. |
-| Turn sequence diagram | Observe/Auto generation lifecycle, prompt install timing, cancellation, and stale result discard. |
+| Turn sequence diagram | Power, Auto/Semi-Auto generation lifecycle, prompt install timing, cancellation, and stale result discard. |
 | Card lifecycle diagram | Create, refresh, stow, discard, select, omit, and invalidate cards. |
 | Card family matrix | Scene Frame, Active Cast, Character Motivation, Dialogue/Relationship, Continuity Risk, Environment/Items, Prose/Pacing, Open Threads. |
 | Prompt packet stack | Scene Brief, Turn Brief, Guardrails, raw critical guardrail exception. |
@@ -229,14 +229,14 @@ Create the practical guide for using Recursion in SillyTavern.
 
 - Rewrite the current operator guide around real operator tasks:
   - install and enable Recursion;
-  - choose Off, Observe only, or Auto;
+  - use the power toggle, Auto, or Semi-Auto;
   - configure Utility;
   - optionally configure Reasoner;
-  - run the first Observe only pass;
   - run the first Auto pass;
-  - inspect Activity, Last Hand, and Prompt Packet;
+  - try the current Semi-Auto path;
+  - inspect Activity, Last Brief, and Prompt Packet;
   - interpret fallback states;
-  - use Off mode cleanup or disable Recursion;
+  - use power-off cleanup or disable Recursion;
   - avoid persisting secrets or raw provider data.
 - Add `<Render Needed>` markers for every surface that lacks a current render.
 - Keep internals out unless they affect operator decisions.

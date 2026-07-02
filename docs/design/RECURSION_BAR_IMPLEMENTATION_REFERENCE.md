@@ -8,7 +8,7 @@ Regenerate the standalone mockup with `node tools/scripts/build-recursion-bar-pr
 
 Runtime toggles:
 
-- `.brand-block.is-open` opens the progress menu.
+- `.power-toggle.is-on` / `.power-toggle.is-off` shows whether Recursion is enabled.
 - `.activity-trigger` opens the progress menu from either the Hero Pixel Array or current status text.
 - `.hero-pixel-array[data-state="pending|running|done|cached|warning|failed"]` controls the compact Hero Pixel Array state.
 - `.hero-block.pending`, `.hero-block.running`, `.hero-block.done`, `.hero-block.cached`, `.hero-block.warning`, and `.hero-block.failed` control each Hero Pixel Array block.
@@ -27,101 +27,102 @@ Runtime toggles:
 ```html
 <div class="recursion-topbar-host">
   <section class="recursion-bar">
-    <div class="brand-block is-open" id="status-control" title="Recursion is composing context">
-      <button class="brand-stage brand-button" id="brand-stage" aria-label="Recursion status">
-        <span class="brand">RECURSION</span>
-      </button>
+    <button class="power-toggle is-on" id="power-toggle" aria-label="Turn Recursion off" aria-pressed="true" title="Turn Recursion off">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 1.7v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path>
+        <path d="M5 3.8a5 5 0 1 0 6 0" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"></path>
+      </svg>
+    </button>
+    <span class="sep" aria-hidden="true"></span>
 
-      <section class="status-popover" aria-label="Generation status steps">
-        <div class="status-head">
-          <span class="status-title">Generating</span>
-          <span class="status-subtitle" id="status-subtitle">2 model calls running</span>
+    <section class="status-popover is-open" id="status-popover" aria-label="Generation status steps">
+      <div class="status-head">
+        <span class="status-title">Generating</span>
+        <span class="status-subtitle" id="status-subtitle">2 model calls running</span>
+      </div>
+
+      <div class="status-list" id="status-list">
+        <div class="step-row done" data-step="0" data-provider="utility">
+          <span class="provider-mark">U</span>
+          <span class="step-sep"></span>
+          <span class="step-icon"></span>
+          <span class="step-label">Reading current turn</span>
+          <span class="step-meta">done</span>
         </div>
-
-        <div class="status-list" id="status-list">
-          <div class="step-row done" data-step="0" data-provider="utility">
+        <div class="step-row done" data-step="1" data-provider="utility">
+          <span class="provider-mark">U</span>
+          <span class="step-sep"></span>
+          <span class="step-icon"></span>
+          <span class="step-label">Checking scene shift</span>
+          <span class="step-meta">done</span>
+        </div>
+        <div class="step-row running" data-step="2" data-provider="utility">
+          <span class="provider-mark">U</span>
+          <span class="step-sep"></span>
+          <span class="step-icon"></span>
+          <span class="step-label">Utility card batch</span>
+          <span class="step-meta">running</span>
+        </div>
+        <div class="step-children" data-parent-step="utility-card-batch">
+          <div class="step-row child-row running" data-step="2-0" data-provider="utility">
             <span class="provider-mark">U</span>
             <span class="step-sep"></span>
             <span class="step-icon"></span>
-            <span class="step-label">Reading current turn</span>
-            <span class="step-meta">done</span>
-          </div>
-          <div class="step-row done" data-step="1" data-provider="utility">
-            <span class="provider-mark">U</span>
-            <span class="step-sep"></span>
-            <span class="step-icon"></span>
-            <span class="step-label">Checking scene shift</span>
-            <span class="step-meta">done</span>
-          </div>
-          <div class="step-row running" data-step="2" data-provider="utility">
-            <span class="provider-mark">U</span>
-            <span class="step-sep"></span>
-            <span class="step-icon"></span>
-            <span class="step-label">Utility card batch</span>
+            <span class="step-label">Scene Frame</span>
             <span class="step-meta">running</span>
           </div>
-          <div class="step-children" data-parent-step="utility-card-batch">
-            <div class="step-row child-row running" data-step="2-0" data-provider="utility">
-              <span class="provider-mark">U</span>
-              <span class="step-sep"></span>
-              <span class="step-icon"></span>
-              <span class="step-label">Scene Frame</span>
-              <span class="step-meta">running</span>
-            </div>
-            <div class="step-row child-row cached" data-step="2-1" data-provider="utility">
-              <span class="provider-mark">U</span>
-              <span class="step-sep"></span>
-              <span class="step-icon"></span>
-              <span class="step-label">Continuity Risk</span>
-              <span class="step-meta">cached</span>
-            </div>
-            <div class="step-row child-row done" data-step="2-2" data-provider="utility">
-              <span class="provider-mark">U</span>
-              <span class="step-sep"></span>
-              <span class="step-icon"></span>
-              <span class="step-label">Character Motivation</span>
-              <span class="step-meta">generated</span>
-            </div>
-          </div>
-          <div class="step-row running" data-step="3" data-provider="reasoner">
-            <span class="provider-mark">R</span>
-            <span class="step-sep"></span>
-            <span class="step-icon"></span>
-            <span class="step-label">Reasoner brief</span>
-            <span class="step-meta">running</span>
-          </div>
-          <div class="step-row queued" data-step="4" data-provider="utility">
+          <div class="step-row child-row cached" data-step="2-1" data-provider="utility">
             <span class="provider-mark">U</span>
             <span class="step-sep"></span>
             <span class="step-icon"></span>
-            <span class="step-label">Composing prompt packet</span>
-            <span class="step-meta">waiting</span>
+            <span class="step-label">Continuity Risk</span>
+            <span class="step-meta">cached</span>
           </div>
-          <div class="step-row queued" data-step="5" data-provider="utility">
+          <div class="step-row child-row done" data-step="2-2" data-provider="utility">
             <span class="provider-mark">U</span>
             <span class="step-sep"></span>
             <span class="step-icon"></span>
-            <span class="step-label">Installing Recursion prompt</span>
-            <span class="step-meta">waiting</span>
-          </div>
-          <div class="step-row queued" data-step="6" data-provider="utility">
-            <span class="provider-mark">U</span>
-            <span class="step-sep"></span>
-            <span class="step-icon"></span>
-            <span class="step-label">Saving scene cache</span>
-            <span class="step-meta">waiting</span>
+            <span class="step-label">Character Motivation</span>
+            <span class="step-meta">generated</span>
           </div>
         </div>
+        <div class="step-row running" data-step="3" data-provider="reasoner">
+          <span class="provider-mark">R</span>
+          <span class="step-sep"></span>
+          <span class="step-icon"></span>
+          <span class="step-label">Reasoner brief</span>
+          <span class="step-meta">running</span>
+        </div>
+        <div class="step-row queued" data-step="4" data-provider="utility">
+          <span class="provider-mark">U</span>
+          <span class="step-sep"></span>
+          <span class="step-icon"></span>
+          <span class="step-label">Composing prompt packet</span>
+          <span class="step-meta">waiting</span>
+        </div>
+        <div class="step-row queued" data-step="5" data-provider="utility">
+          <span class="provider-mark">U</span>
+          <span class="step-sep"></span>
+          <span class="step-icon"></span>
+          <span class="step-label">Installing Recursion prompt</span>
+          <span class="step-meta">waiting</span>
+        </div>
+        <div class="step-row queued" data-step="6" data-provider="utility">
+          <span class="provider-mark">U</span>
+          <span class="step-sep"></span>
+          <span class="step-icon"></span>
+          <span class="step-label">Saving scene cache</span>
+          <span class="step-meta">waiting</span>
+        </div>
+      </div>
 
-        <footer class="status-foot">
-          <span id="status-foot-text">Auto - Utility and Reasoner lanes</span>
-          <span class="tiny-chip">Live</span>
-        </footer>
-      </section>
-    </div>
+      <footer class="status-foot">
+        <span id="status-foot-text">Auto - Utility and Reasoner lanes</span>
+        <span class="tiny-chip">Live</span>
+      </footer>
+    </section>
 
     <div class="mode-cluster" title="Mode: Auto">
-      <span class="sep" aria-hidden="true"></span>
       <button class="icon-button mode-btn" aria-label="Mode: Auto" id="mode-button" aria-expanded="false">
         <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true">
           <rect x="3" y="5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".45"></rect>
@@ -146,29 +147,17 @@ Runtime toggles:
           </span>
         </button>
 
-        <button class="mode-choice" type="button" data-mode="observe" title="Previews what Recursion would use, but leaves the prompt untouched.">
+        <button class="mode-choice" type="button" data-mode="semi-auto" title="Constrains card generation to selected card types.">
           <span class="mode-choice-icon">
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M1.6 8s2.4-4 6.4-4 6.4 4 6.4 4-2.4 4-6.4 4-6.4-4-6.4-4Z" fill="none" stroke="currentColor" stroke-width="1.25"></path>
-              <circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.25"></circle>
+            <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true">
+              <rect x="3" y="5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".45"></rect>
+              <rect x="5" y="3" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".70"></rect>
+              <rect x="7" y="1.5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25"></rect>
             </svg>
           </span>
           <span>
-            <span class="mode-choice-name">Observe only</span>
-            <span class="mode-choice-tip">Previews what Recursion would use, but leaves the prompt untouched.</span>
-          </span>
-        </button>
-
-        <button class="mode-choice" type="button" data-mode="off" title="Stops Recursion from preparing or injecting context.">
-          <span class="mode-choice-icon">
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 1.7v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path>
-              <path d="M5 3.8a5 5 0 1 0 6 0" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"></path>
-            </svg>
-          </span>
-          <span>
-            <span class="mode-choice-name">Off</span>
-            <span class="mode-choice-tip">Stops Recursion from preparing or injecting context.</span>
+            <span class="mode-choice-name">Semi-Auto</span>
+            <span class="mode-choice-tip">Constrains card generation to selected card types.</span>
           </span>
         </button>
       </div>
@@ -379,7 +368,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     </div>
 
     <div class="settings-pane is-selected" data-pane="play">
-      <label class="settings-row"><span>Mode</span><select><option>Observe only</option><option selected>Auto</option><option>Off</option></select></label>
+      <label class="settings-row"><span>Mode</span><select><option selected>Auto</option><option>Semi-Auto</option></select></label>
       <label class="settings-row"><span>Reasoning Level</span><div class="mini-chain" data-selected="high"><span></span><i></i><i></i><i class="on"></i><i></i></div></label>
       <label class="settings-row"><span>Strength</span><select><option>Light</option><option selected>Balanced</option><option>Strong</option></select></label>
       <label class="settings-row"><span>Focus</span><select><option selected>Balanced</option><option>Character</option><option>Continuity</option><option>Prose</option><option>Plot</option></select></label>
@@ -836,11 +825,8 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   }
 
   async function resetTurn(root, token) {
-    const brandBlock = root.querySelector('#status-control');
     const arrayButton = root.querySelector('#array-button');
-    brandBlock.classList.add('is-resetting');
     arrayButton.classList.add('is-resetting');
-    root.querySelector('#current-step').textContent = 'Ready';
     await wait(260);
     if (token !== animationToken) return false;
     TURN_ANIMATION_STEPS.forEach((step) => {
@@ -866,7 +852,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     arrayButton.style.setProperty('--columns', '0');
     arrayButton.style.setProperty('--block-count', '0');
     root.querySelector('#status-subtitle').textContent = 'Waiting for next turn';
-    brandBlock.classList.remove('is-resetting');
+    root.querySelector('#current-step').textContent = 'Ready';
     arrayButton.classList.remove('is-resetting');
     return true;
   }
@@ -947,7 +933,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     });
 
     document.querySelector('#array-button')?.addEventListener('click', () => {
-      root?.querySelector('#status-control')?.classList.add('is-open');
+      root?.querySelector('#status-popover')?.classList.add('is-open');
       playRecursionTurnAnimation({ loop: false });
     });
     setTimeout(() => playRecursionTurnAnimation({ loop: true }), 450);
@@ -994,14 +980,14 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   position: relative;
   width: 100%;
   color: var(--text);
-  font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 12.5px/1 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 .recursion-bar {
   position: relative;
   z-index: 70;
   width: 100%;
-  height: 32px;
+  height: 30px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1016,48 +1002,32 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   overflow: visible;
 }
 
-.brand-block {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-  min-width: 0;
-  height: 30px;
-}
-
-.brand-button {
-  width: auto;
-  height: 20px;
+.power-toggle {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
   box-shadow: none;
   display: inline-grid;
   place-items: center;
-  color: inherit;
-  cursor: default;
+  color: rgba(224, 224, 224, .72);
+  cursor: pointer;
+  flex: 0 0 24px;
 }
 
-.brand-stage {
-  position: relative;
-  --brand-offset: calc(var(--hero-block-size) + 7px);
-  --brand-text-width: 66px;
-  --brand-stage-width: calc(var(--brand-offset) + var(--brand-text-width));
-  width: var(--brand-stage-width);
-  min-width: var(--brand-stage-width);
-  height: 24px;
-  overflow: hidden;
-  display: block;
-  cursor: default;
-}
-
-.brand-button:hover,
-.brand-button:focus-visible {
-  background: transparent;
+.power-toggle:hover,
+.power-toggle:focus-visible {
+  background: rgba(255, 255, 255, .045);
   box-shadow: none;
-  outline: none;
+  outline: 1px solid rgba(224, 224, 224, .20);
+  outline-offset: 1px;
+}
+
+.power-toggle.is-off {
+  color: rgba(224, 224, 224, .30);
 }
 
 .activity-trigger {
@@ -1164,21 +1134,6 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   box-shadow: 0 0 5px rgba(224, 103, 103, .28);
 }
 
-.brand {
-  position: absolute;
-  left: var(--brand-offset);
-  top: 50%;
-  z-index: 1;
-  font-family: "Segoe UI Light", "Segoe UI", system-ui, sans-serif;
-  font-weight: 300;
-  color: rgba(224, 224, 224, .74);
-  font-size: 13px;
-  letter-spacing: 0;
-  white-space: nowrap;
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
 .activity-trigger.is-resetting .hero-block {
   animation: hero-block-wipe .20s ease-in forwards;
   animation-delay: calc((var(--block-count, 0) - var(--block-index, 0)) * 16ms);
@@ -1259,7 +1214,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   padding: 0 2px;
   display: inline-block;
   flex: 0 0 58px;
-  color: var(--cyan);
+  color: rgba(220, 220, 210, .74);
 }
 
 .reasoning-chain[data-selected="low"] {
@@ -1295,8 +1250,8 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   top: 50%;
   width: var(--chain-fill);
   height: 1px;
-  background: rgba(101, 216, 232, .72);
-  box-shadow: 0 0 7px rgba(101, 216, 232, .30);
+  background: rgba(220, 220, 210, .52);
+  box-shadow: 0 0 7px rgba(220, 220, 210, .18);
   transform: translateY(-50%);
   transition: width .16s ease;
 }
@@ -1343,14 +1298,14 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 }
 
 .reasoning-node.is-lit {
-  border-color: rgba(101, 216, 232, .92);
-  background: rgba(101, 216, 232, .70);
-  box-shadow: 0 0 8px rgba(101, 216, 232, .38);
+  border-color: rgba(220, 220, 210, .78);
+  background: rgba(220, 220, 210, .62);
+  box-shadow: 0 0 8px rgba(220, 220, 210, .22);
 }
 
 .reasoning-node.is-selected {
-  background: var(--cyan);
-  box-shadow: 0 0 10px rgba(101, 216, 232, .46);
+  background: rgba(220, 220, 210, .82);
+  box-shadow: 0 0 10px rgba(220, 220, 210, .28);
 }
 
 .reasoning-node:not(.is-lit) {
@@ -1359,8 +1314,8 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
 
 .reasoning-node:hover,
 .reasoning-node:focus-visible {
-  border-color: rgba(101, 216, 232, .96);
-  box-shadow: 0 0 9px rgba(101, 216, 232, .40);
+  border-color: rgba(220, 220, 210, .88);
+  box-shadow: 0 0 9px rgba(220, 220, 210, .26);
   outline: none;
 }
 
@@ -1414,7 +1369,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   transition: opacity .12s ease, transform .12s ease;
 }
 
-.brand-block.is-open .status-popover {
+.status-popover.is-open {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
@@ -2156,6 +2111,36 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   padding: 3px 6px;
 }
 
+.settings-row input[type="checkbox"] {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  margin: 0;
+  padding: 0;
+  display: inline-grid;
+  place-content: center;
+  justify-self: start;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .035);
+  border: 1px solid rgba(255, 255, 255, .18);
+}
+
+.settings-row input[type="checkbox"]:checked {
+  background: rgba(101, 216, 232, .72);
+  border-color: rgba(101, 216, 232, .82);
+}
+
+.settings-row input[type="checkbox"]:checked::before {
+  content: "";
+  width: 4px;
+  height: 8px;
+  border-right: 1.5px solid rgba(255, 255, 255, .88);
+  border-bottom: 1.5px solid rgba(255, 255, 255, .88);
+  transform: translateY(-1px) rotate(45deg);
+}
+
 .mini-chain {
   position: relative;
   display: grid;
@@ -2172,21 +2157,21 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   right: 7px;
   top: 10px;
   height: 1px;
-  background: rgba(101, 216, 232, .32);
+  background: rgba(220, 220, 210, .32);
 }
 
 .mini-chain i {
   position: relative;
   width: 8px;
   height: 8px;
-  border: 1px solid rgba(101, 216, 232, .45);
+  border: 1px solid rgba(220, 220, 210, .45);
   border-radius: 2px;
   background: rgba(255, 255, 255, .035);
 }
 
 .mini-chain i:nth-of-type(-n + 3) {
-  background: rgba(101, 216, 232, .72);
-  box-shadow: 0 0 9px rgba(101, 216, 232, .28);
+  background: rgba(220, 220, 210, .62);
+  box-shadow: 0 0 9px rgba(220, 220, 210, .22);
 }
 
 .provider-card {
@@ -2321,10 +2306,6 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   .recursion-bar {
     height: 30px;
     padding: 0 6px 0 2px;
-  }
-
-  .brand {
-    font-size: 12px;
   }
 
   .status-popover {

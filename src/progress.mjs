@@ -3,6 +3,11 @@ const VALID_PROVIDER_LANES = new Set(['utility', 'reasoner']);
 const SAFE_PROGRESS_TITLES = new Set(['Generating', 'Ready', 'Idle', 'Issue', 'Needs attention']);
 const DEFAULT_HERO_PIXEL_ROWS = 3;
 const DEFAULT_HERO_PIXEL_MAX_COLUMNS = 12;
+const HERO_CONTROL_ONLY_STEP_IDS = new Set([
+  'installing-recursion-prompt',
+  'clearing-recursion-prompt',
+  'recursion-prompt-ready'
+]);
 const VALID_CHILD_SOURCES = new Set(['generated', 'cache', 'fallback', 'provider', 'local']);
 const MODEL_CALL_ROLE_IDS = new Set([
   'sceneFrameCard',
@@ -446,10 +451,19 @@ function planWantsCards(view, currentActivity) {
   return Number.isFinite(requested) && requested > 0;
 }
 
+function hasTerminalPromptOutcome(map) {
+  for (const id of ['recursion-prompt-ready', 'installing-recursion-prompt', 'clearing-recursion-prompt']) {
+    const state = map.get(id)?.state;
+    if (FINAL_STATES.has(state)) return true;
+  }
+  return false;
+}
+
 function appendPendingPlanSteps(map, view, orderStart = 0) {
   const source = asObject(view);
   const activity = asObject(source.activity);
-  const mode = cleanText(source.settings?.mode, 'observe').toLowerCase();
+  const enabled = source.settings?.enabled !== false;
+  if (hasTerminalPromptOutcome(map)) return;
   let order = orderStart;
   if (planWantsCards(source, activity) || map.has('utility-card-batch')) {
     for (const id of ['selecting-turn-hand', 'saving-scene-cache', 'composing-prompt-packet']) {
@@ -459,13 +473,14 @@ function appendPendingPlanSteps(map, view, orderStart = 0) {
   if (planWantsReasoner(source) && !map.has('reasoner-brief')) {
     upsertStep(map, pendingStep('reasoner-brief', order++));
   }
-  const promptStepId = mode === 'observe' || mode === 'off' ? 'clearing-recursion-prompt' : 'installing-recursion-prompt';
+  const promptStepId = enabled ? 'installing-recursion-prompt' : 'clearing-recursion-prompt';
   if (!map.has(promptStepId)) upsertStep(map, pendingStep(promptStepId, order++));
 }
 
 function appendPendingChildSteps(map, view, orderStart = 0) {
   const source = asObject(view);
   const jobs = Array.isArray(source.lastPlan?.cardJobs) ? source.lastPlan.cardJobs : [];
+  if (hasTerminalPromptOutcome(map)) return;
   if (jobs.length && map.has('utility-card-batch')) {
     let order = orderStart;
     for (const job of jobs) {
@@ -504,6 +519,32 @@ function normalizeExplicitProgress(progressRun) {
   }, { sort: false });
 }
 
+function hasMaterialProgressState(step) {
+  const source = asObject(step);
+  const state = normalizeState(source.state);
+  if (state !== 'pending') return true;
+  return Array.isArray(source.children) && source.children.some(hasMaterialProgressState);
+}
+
+function shouldDiscardIdlePendingProgress(view, progress) {
+  const activity = asObject(asObject(view).activity);
+  const phase = cleanText(activity.phase).toLowerCase();
+  const title = cleanText(progress.title).toLowerCase();
+  if (phase !== 'idle' && title !== 'ready' && title !== 'idle') return false;
+  return Array.isArray(progress.steps)
+    && progress.steps.length > 0
+    && !progress.steps.some(hasMaterialProgressState);
+}
+
+function shouldDiscardSuccessfulControlOnlyProgress(progress) {
+  const source = asObject(progress);
+  const runId = cleanText(source.runId).toLowerCase();
+  const steps = Array.isArray(source.steps) ? source.steps : [];
+  if (!runId.startsWith('settings-') || steps.length === 0) return false;
+  if (!steps.every((step) => HERO_CONTROL_ONLY_STEP_IDS.has(step.id))) return false;
+  return !steps.some((step) => ['warning', 'failed'].includes(normalizeState(step.state)));
+}
+
 function deriveProgressRun(view) {
   const events = sourceEvents(view);
   const current = asObject(asObject(view).activity);
@@ -536,12 +577,29 @@ function deriveProgressRun(view) {
   }
   appendPendingPlanSteps(steps, view, order);
   appendPendingChildSteps(steps, view, order);
-  return finalizeProgress({
+  const derived = finalizeProgress({
     runId,
     title: progressTitle([...steps.values()]),
     subtitle: '',
     steps: [...steps.values()].sort(compareStepOrder)
   });
+  if (shouldDiscardIdlePendingProgress(view, derived)) {
+    return finalizeProgress({
+      runId: derived.runId,
+      title: 'Ready',
+      subtitle: '',
+      steps: []
+    }, { sort: false });
+  }
+  if (shouldDiscardSuccessfulControlOnlyProgress(derived)) {
+    return finalizeProgress({
+      runId: derived.runId,
+      title: 'Ready',
+      subtitle: '',
+      steps: []
+    }, { sort: false });
+  }
+  return derived;
 }
 
 function activityLabelText(event) {
@@ -563,9 +621,7 @@ function currentStepText(steps) {
   if (warning) return `${warning.label.replace(/\.+$/g, '')} needs attention`;
   const failed = steps.find((step) => step.state === 'failed');
   if (failed) return `${failed.label.replace(/\.+$/g, '')} failed`;
-  const pending = steps.find((step) => step.state === 'pending');
-  if (pending) return `${pending.label.replace(/\.+$/g, '')}...`;
-  return steps.length ? 'Ready' : '';
+  return '';
 }
 
 function heroPixelState(steps) {
@@ -613,13 +669,33 @@ function finalizeProgress(progress, options = {}) {
 
 export function createProgressRunModel(view = {}) {
   const source = asObject(view);
-  if (source.progressRun && typeof source.progressRun === 'object') return normalizeExplicitProgress(source.progressRun);
+  if (source.progressRun && typeof source.progressRun === 'object') {
+    const explicit = normalizeExplicitProgress(source.progressRun);
+    if (shouldDiscardIdlePendingProgress(source, explicit)) {
+      return finalizeProgress({
+        runId: explicit.runId,
+        title: 'Ready',
+        subtitle: '',
+        steps: []
+      }, { sort: false });
+    }
+    if (shouldDiscardSuccessfulControlOnlyProgress(explicit)) {
+      return finalizeProgress({
+        runId: explicit.runId,
+        title: 'Ready',
+        subtitle: '',
+        steps: []
+      }, { sort: false });
+    }
+    return explicit;
+  }
   return deriveProgressRun(source);
 }
 
 export function createHeroPixelBlocks(progressRun = {}, options = {}) {
   const source = asObject(progressRun);
   const steps = Array.isArray(source.steps) ? source.steps.map((step, index) => normalizeStep(step, index)) : [];
+  if (steps.length > 0 && steps.every((step) => HERO_CONTROL_ONLY_STEP_IDS.has(step.id))) return [];
   const rows = Math.max(1, Math.floor(Number(options.rows ?? DEFAULT_HERO_PIXEL_ROWS)) || DEFAULT_HERO_PIXEL_ROWS);
   const maxColumns = Math.max(1, Math.floor(Number(options.maxColumns ?? DEFAULT_HERO_PIXEL_MAX_COLUMNS)) || DEFAULT_HERO_PIXEL_MAX_COLUMNS);
   const maxBlocks = rows * maxColumns;

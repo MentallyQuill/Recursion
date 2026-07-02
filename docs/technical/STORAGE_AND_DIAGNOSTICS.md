@@ -48,7 +48,7 @@ The run journal is a ring buffer, not an archive. It stores compact entries with
 
 Provider journal entries are diagnostic only. A journal write failure cannot break the generation path.
 
-Committed Auto prompt install attempts and completed Observe previews write a `hand.selected` breadcrumb. The entry is metadata only: hand id, selected and omitted counts, up to 16 selected card ids/families/roles/emphasis/token estimates with `listedCount` and `truncated`, source hash, prompt packet hash, and compact metrics. It must not persist card `promptText`, prompt packet sections, inspector notes, raw provider prompts, raw provider responses, transcript text, or secrets.
+Committed Auto and Semi-Auto prompt install attempts write a `hand.selected` breadcrumb. The entry is metadata only: hand id, selected and omitted counts, up to 16 selected card ids/families/roles/emphasis/token estimates with `listedCount` and `truncated`, source hash, prompt packet hash, and compact metrics. It must not persist card `promptText`, prompt packet sections, inspector notes, raw provider prompts, raw provider responses, transcript text, or secrets.
 
 ## Activity Event Contract
 
@@ -101,7 +101,7 @@ flowchart TD
     Secrets["Secrets and raw payloads"] -. "blocked" .-> Redact
 ```
 
-<Render Needed>: assets/documentation/renders/recursion-storage-key-map.png - Storage key map showing extension settings, system index, scene cache, run journal, prompt metadata, and sanitized artifact boundary.
+![Storage key map visual](../../assets/documentation/renders/recursion-storage-key-map.png)
 
 <Render Needed>: assets/documentation/renders/recursion-storage-redaction-boundary.png - Redaction boundary visual showing allowed metadata, blocked secrets, blocked raw provider payloads, and sanitized UI/artifact outputs.
 

@@ -2,7 +2,7 @@
 
 This guide walks through the first useful Recursion session in SillyTavern. It assumes Recursion is installed or served as an extension and that you are using the current V1 pre-alpha contract.
 
-Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet only when Auto mode is active. It is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing workflow.
+Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Semi-Auto mode is active. It is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing workflow.
 
 ## 1. Install And Enable
 
@@ -13,9 +13,9 @@ Recursion is a current-scene prompt compiler. It observes the active chat, build
 
 <Render Needed>: assets/documentation/renders/recursion-first-run-install-enable.png - SillyTavern extension settings with Recursion enabled and the Recursion Bar mounted in the active chat.
 
-The bar should expose the `RECURSION` wordmark, icon-only mode control, Hero Pixel Array plus current-step text, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, extra details may collapse into compact menus.
+The bar should expose the power toggle, icon-only mode control, Hero Pixel Array plus current-step text, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, extra details may collapse into compact menus.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-bar-mounted.png - Recursion Bar mounted below the SillyTavern chat header with wordmark, mode icon, Hero Pixel Array, Reasoning Level chain, Last Brief dropdown arrow, and options entry visible.
+<Render Needed>: assets/documentation/renders/recursion-first-run-bar-mounted.png - Recursion Bar mounted below the SillyTavern chat header with power toggle, mode icon, Hero Pixel Array, Reasoning Level chain, Last Brief dropdown arrow, and options entry visible.
 
 ## 2. Configure Utility
 
@@ -38,37 +38,36 @@ Reasoner is optional. Leave it off for the first pass unless you intentionally w
 
 Reasoner is used only when enabled, healthy, and selected for a crowded, conflicted, or subtle hand. If Reasoner fails, times out, is off, or returns invalid output, Recursion falls back to Utility composition.
 
-## 4. Start In Observe Only
-
-Observe only lets you inspect Recursion without installing a prompt packet.
-
-1. Set mode to `Observe only`.
-2. Send or select a safe, ordinary chat turn.
-3. Watch the Hero Pixel Array and current-step text.
-4. Confirm the progress menu reports snapshot, planning, card, brief, or preview work.
-5. Confirm the status says no prompt was injected.
-
-<Render Needed>: assets/documentation/renders/recursion-first-run-observe-pass.png - Hero Pixel Array progress menu during an Observe only pass showing snapshot capture, Utility planning, brief preview, and no prompt injection.
-
-Use Observe only when you want to check what Recursion would do before letting it affect generation.
-
-## 5. Run The First Auto Pass
+## 4. Run The First Auto Pass
 
 Auto prepares and installs the next Recursion prompt packet.
 
-1. Set mode to `Auto`.
-2. Send a safe, ordinary chat message.
-3. Watch the Hero Pixel Array progress menu for visible progress.
-4. Wait for `Recursion prompt ready.` or a clear fallback state.
-5. Let SillyTavern generation continue normally.
+1. Confirm the power toggle is on.
+2. Set mode to `Auto`.
+3. Send a safe, ordinary chat message.
+4. Watch the Hero Pixel Array progress menu for visible progress.
+5. Wait for `Recursion prompt ready.` or a clear fallback state.
+6. Let SillyTavern generation continue normally.
 
 <Render Needed>: assets/documentation/renders/recursion-first-run-auto-pass.png - Hero Pixel Array progress menu during an Auto pass showing Utility planning, card generation, prompt composition, prompt install, and ready state.
+
+Use the Last Brief dropdown and Prompt Packet panel when you want to inspect exactly what Recursion installed.
+
+## 5. Try Semi-Auto
+
+Semi-Auto is the V1 mode reserved for constraining card generation to selected card types. Until that backend selector lands, it follows the same prompt-install path as Auto.
+
+1. Set mode to `Semi-Auto`.
+2. Send a safe, ordinary chat message.
+3. Confirm the Hero Pixel Array progresses and prompt readiness behaves like Auto.
+
+<Render Needed>: assets/documentation/renders/recursion-first-run-semi-auto-pass.png - Hero Pixel Array progress menu during a Semi-Auto pass showing the same current V1 install path as Auto.
 
 A normal Auto pass may show stages such as reading the current turn, planning the card pass, generating or reusing scene cards, selecting the turn hand, composing the prompt packet, installing the Recursion prompt, saving cache, and ready state.
 
 ## 6. Inspect Last Brief And Viewer
 
-After Observe only or Auto has produced a hand:
+After Auto or Semi-Auto has produced a hand:
 
 1. Open the Last Brief dropdown arrow from the Recursion Bar.
 2. Review compact selected cards, emphasis, omission hints, and composition route.
@@ -85,7 +84,7 @@ The prompt packet should be bounded and inspectable. It should contain current-s
 
 Use these controls when you want Recursion out of the next generation:
 
-- Set mode to `Off` to stop Recursion and clear or skip Recursion-owned prompt lanes.
+- Click the power toggle off to stop Recursion and clear or skip Recursion-owned prompt lanes.
 - Disable the extension if you want Recursion fully inactive.
 - Clear session keys when you are finished with direct endpoint testing.
 
@@ -97,11 +96,11 @@ The first run is healthy when:
 
 - Recursion Bar is mounted and stable.
 - Utility provider can be configured and tested.
-- Observe only mode shows visible work without prompt injection.
 - Auto mode reaches prompt ready or a clear fail-soft fallback.
+- Semi-Auto mode currently reaches the same prompt-ready path as Auto.
 - Last Brief and Full Viewer inspection are available.
 - Prompt Packet inspection shows bounded current-scene guidance.
-- Off mode or extension disable removes Recursion from the next prompt path.
+- Power-off or extension disable removes Recursion from the next prompt path.
 
 Related docs:
 

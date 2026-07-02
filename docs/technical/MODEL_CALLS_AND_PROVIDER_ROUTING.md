@@ -58,7 +58,7 @@ flowchart TD
     Validate --> Runtime["Runtime fallback or success"]
 ```
 
-<Render Needed>: assets/documentation/renders/recursion-provider-routing.png - Provider routing visual showing Utility and Reasoner lanes, source choices, session secret boundary, validation, journal, retry, and fallback paths.
+![Provider routing visual](../../assets/documentation/renders/recursion-provider-routing.png)
 
 ## Structured Output Validation
 
@@ -112,6 +112,6 @@ If a run is no longer active, runtime returns a superseded result and refuses to
 
 ## Operator-Visible Provider States
 
-The UI shows Utility and Reasoner provider cards with source, profile, endpoint, model, session key state, temperature, top-p, max tokens, test status, resolved provider, and resolved model. The Recursion Bar shows the active composer lane and Reasoner state.
+The compact UI shows Utility provider details with source, profile, endpoint, model, session key state, max tokens, test status, resolved provider, and resolved model. The Reasoner provider appears as an optional collapsed summary row in the top-bar settings menu. Temperature and top-p remain normalized provider settings with defaults, but they are not visible controls in the compact V1 mock. The Recursion Bar shows the active composer lane and Reasoner state.
 
 Visible states are compact: ready, unavailable, disabled, issue, composing, or test failed. Raw provider errors remain out of the bar and ribbon.

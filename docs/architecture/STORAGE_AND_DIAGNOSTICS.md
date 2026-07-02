@@ -30,7 +30,7 @@ Every persisted record is cache-oriented. If it is stale, corrupt, too large, or
 
 `extension_settings.recursion` is for compact controls only. It may store:
 
-- enabled mode: off, observe, or auto;
+- enabled state plus mode: power on/off and `auto` or `semi-auto`;
 - strength, prompt footprint, focus, and Reasoner-use settings;
 - final prompt injection placement, role, and depth controls;
 - provider lane preferences without secrets;
@@ -232,7 +232,7 @@ type RecursionRunJournalEntry = {
 };
 ```
 
-`hand.selected` is the default V1 breadcrumb for committed Auto prompt install attempts and completed Observe previews. It stores metadata needed to explain what Recursion used without persisting prompt-facing text:
+`hand.selected` is the default V1 breadcrumb for committed Auto and Semi-Auto prompt install attempts. It stores metadata needed to explain what Recursion used without persisting prompt-facing text:
 
 - `details.handId`, `selectedCount`, `omittedCount`, `listedCount`, and `truncated`;
 - `details.cards[]` with up to 16 selected card ids, families, roles, emphasis values, detail profiles, and token estimates;

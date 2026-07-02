@@ -318,8 +318,8 @@ const pendingProgressViewModel = createRecursionViewModel({
 });
 assertEqual(
   pendingProgressViewModel.progressRun.currentStepText,
-  'Installing Recursion prompt...',
-  'compact bar omits progress-row meta such as waiting'
+  '',
+  'compact bar hides pending/waiting steps until work is active'
 );
 
 const customProgressCapsViewModel = createRecursionViewModel({
@@ -333,11 +333,15 @@ const uiSpec = readFileSync(new URL('../../docs/design/UI_SPEC.md', import.meta.
 const recursionCss = readFileSync(new URL('../../styles/recursion.css', import.meta.url), 'utf8');
 const recursionUi = readFileSync(new URL('../../src/ui.mjs', import.meta.url), 'utf8');
 const activityTriggerCss = barImplementationReference.match(/\.activity-trigger\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const referenceHostCss = barImplementationReference.match(/\.recursion-topbar-host\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const referenceBarCss = barImplementationReference.match(/\.recursion-bar\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const heroBlockCss = barImplementationReference.match(/\.hero-block\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const heroBlockEnterCss = barImplementationReference.match(/@keyframes hero-block-enter\s*\{([\s\S]*?)\n\}\n\n@keyframes hero-block-active/)?.[1] ?? '';
 const heroBlockActiveCss = barImplementationReference.match(/@keyframes hero-block-active\s*\{([\s\S]*?)\n\}\n\n@keyframes hero-block-wipe/)?.[1] ?? '';
 const reasoningChainCss = barImplementationReference.match(/\.reasoning-chain\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const reasoningNodeCss = barImplementationReference.match(/\.reasoning-node\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const reasoningLitNodeCss = barImplementationReference.match(/\.reasoning-node\.is-lit\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const settingsReasoningLitNodeCss = recursionCss.match(/\.recursion-settings-reasoning-node\.is-lit\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 assert(/padding:\s*0 8px 0 2px;/.test(barImplementationReference), 'recursion bar uses a tighter left inset than right controls');
 assert(/--hero-running:\s*var\(--cyan\);/.test(barImplementationReference), 'hero pixel running blocks use the active blue token');
 assert(/--hero-done:\s*var\(--green\);/.test(barImplementationReference), 'hero pixel done blocks use the success green token');
@@ -346,16 +350,13 @@ assert(/--hero-warning:\s*var\(--amber\);/.test(barImplementationReference), 'he
 assert(/--hero-failed:\s*var\(--red\);/.test(barImplementationReference), 'hero pixel failed blocks use the failure red token');
 assert(/--hero-block-gap:\s*2px;/.test(barImplementationReference), 'hero pixel blocks use a 2px row and column gap');
 assert(/grid-template-rows:\s*repeat\(3,\s*var\(--hero-block-size\)\);/.test(barImplementationReference), 'hero pixel array uses three rows per column');
-assert(/class="brand-stage brand-button"/.test(barImplementationReference), 'brand stage is a dedicated brand-only control');
+assert(/class="power-toggle is-on"/.test(barImplementationReference), 'reference bar starts with a dedicated power toggle');
 assert(/class="activity-trigger status-array-button"/.test(barImplementationReference), 'hero pixel array and current status share one activity trigger after mode');
-assert(!/class="brand-stage status-array-button"/.test(barImplementationReference), 'hero pixel array is no longer mounted inside the brand stage');
-assert(!/class="brand-fade"/.test(barImplementationReference), 'brand stage does not render a gradient over Recursion');
-assert(/\.brand-stage\s*\{[\s\S]*?position:\s*relative;[\s\S]*?overflow:\s*hidden;/.test(barImplementationReference), 'brand stage clips overlay animation without shifting the bar');
-assert(/\.brand\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?z-index:\s*1;/.test(barImplementationReference), 'brand text stays fixed behind the overlay layers');
-assert(/--brand-stage-width:\s*calc\(var\(--brand-offset\) \+ var\(--brand-text-width\)\);/.test(barImplementationReference), 'brand stage ends at the Recursion word for even separator spacing');
-assert(!/--brand-cover-width:/.test(barImplementationReference), 'brand gradient sizing is removed with the fade layer');
-assert(!/--brand-cover-width:\s*calc\(\(var\(--columns/.test(barImplementationReference), 'brand fade does not grow with Hero Pixel Array columns');
-assert(!/\.brand-fade\s*\{/.test(barImplementationReference), 'brand fade CSS is removed');
+assert(!/class="brand-stage/.test(barImplementationReference), 'reference bar no longer renders the Recursion wordmark stage');
+assert(/\.power-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*24px;/.test(barImplementationReference), 'reference power toggle keeps compact 24px control geometry');
+assert(/data-mode="semi-auto"/.test(barImplementationReference), 'reference mode menu includes Semi-Auto');
+assert(!/data-mode="observe"/.test(barImplementationReference), 'reference mode menu removes Observe only');
+assert(!/data-mode="off"/.test(barImplementationReference), 'reference mode menu removes Off');
 assert(/\.hero-pixel-array\s*\{[\s\S]*?position:\s*relative;[\s\S]*?width:\s*max\(0px,/.test(barImplementationReference), 'hero pixel blocks render inline after mode with a zero-width reset state');
 assert(/\.activity-trigger\s*\{[\s\S]*?gap:\s*7px;[\s\S]*?transition:\s*color \.14s ease;/.test(barImplementationReference), 'activity trigger keeps a stable visual gap between blocks and status');
 assert(/text-align:\s*left;/.test(activityTriggerCss), 'activity trigger keeps status text visually attached to the pixel blocks');
@@ -375,7 +376,12 @@ assert(/data-level="medium"[\s\S]*?title="Medium/.test(barImplementationReferenc
 assert(/data-level="high"[\s\S]*?title="High/.test(barImplementationReference), 'reasoning chain includes High tooltip copy');
 assert(/data-level="ultra"[\s\S]*?title="Ultra/.test(barImplementationReference), 'reasoning chain includes Ultra tooltip copy');
 assert(/border-radius:\s*2px;/.test(reasoningNodeCss), 'reasoning nodes use 2px radius square boxes');
-assert(/box-shadow:\s*0 0 8px rgba\(101,\s*216,\s*232,\s*\.38\)/.test(barImplementationReference), 'lit reasoning nodes glow with the cyan token');
+assert(!/rgba\(101,\s*216,\s*232/.test(reasoningLitNodeCss), 'lit reasoning nodes do not use cyan after moving to SillyTavern grey-white theme');
+assert(/\.reasoning-line-fill\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.52\)/.test(barImplementationReference), 'reasoning chain fill uses SillyTavern grey-white theme color');
+assert(/\.reasoning-node\.is-lit\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.62\)/.test(barImplementationReference), 'lit reasoning nodes use muted SillyTavern grey-white fill');
+assert(/\.recursion-reasoning-line-fill\s*\{[\s\S]*?var\(--SmartThemeBodyColor/.test(recursionCss), 'production reasoning fill derives from SillyTavern body color');
+assert(/\.recursion-settings-reasoning-line-fill\s*\{[\s\S]*?var\(--SmartThemeBodyColor/.test(recursionCss), 'settings reasoning fill derives from SillyTavern body color');
+assert(!/var\(--recursion-accent/.test(settingsReasoningLitNodeCss), 'settings reasoning nodes do not use cyan after moving to SillyTavern grey-white theme');
 assert(/\.reasoning-chain::before/.test(barImplementationReference), 'reasoning nodes are connected by a chain line');
 assert(/--chain-start:\s*5px;/.test(reasoningChainCss), 'reasoning chain defines the first node center');
 assert(/--chain-step:\s*15px;/.test(reasoningChainCss), 'reasoning chain defines exact node-center spacing');
@@ -389,6 +395,13 @@ assert(/\.reasoning-node\[data-level="ultra"\]\s*\{[\s\S]*?--node-x:\s*calc\(var
 assert(/\.reasoning-node\[data-level="low"\]\s*\{[\s\S]*?--node-size:\s*5px;/.test(barImplementationReference), 'Low reasoning node is the smallest box');
 assert(/\.reasoning-node\[data-level="ultra"\]\s*\{[\s\S]*?--node-size:\s*11px;/.test(barImplementationReference), 'Ultra reasoning node is the largest box');
 assert(/function setReasoningLevel/.test(barImplementationReference), 'turn animation preview lets reasoning nodes update selection');
+assert(/font:\s*12\.5px\/1/.test(referenceHostCss), 'reference topbar host pins compact typography for detached popovers');
+assert(/height:\s*30px;/.test(referenceBarCss), 'reference bar height matches the production compact SillyTavern bar');
+assert(/\.power-toggle\s*\{[\s\S]*?color:\s*rgba\(224,\s*224,\s*224,\s*\.72\);/.test(barImplementationReference), 'reference power toggle uses the grey-white SillyTavern theme color');
+assert(!/\.recursion-mode-icon::before/.test(recursionCss), 'production mode button uses inline SVG, not CSS pseudo icons');
+assert(!/\.recursion-mode-choice-icon::before/.test(recursionCss), 'production mode menu uses inline SVG, not CSS pseudo icons');
+assert(/\.recursion-brief-card\s*\{[\s\S]*?grid-template-columns:\s*138px minmax\(0,\s*1fr\);/.test(recursionCss), 'production Last Brief cards use the reference two-column card grid');
+assert(/\.recursion-card-text\s*\{[\s\S]*?-webkit-line-clamp:\s*1;/.test(recursionCss), 'production Last Brief cards clamp text to one line while compact');
 assert(/\.status-popover\s*\{[\s\S]*?left:\s*-3px;/.test(barImplementationReference), 'status popover aligns to the visible left edge of the bar');
 assert(/const PROGRESS_CHILD_VISIBLE_LIMIT = 5;/.test(barImplementationReference), 'turn animation preview defaults to five visible sub-tier rows');
 assert(/const PROGRESS_LIST_VISIBLE_LIMIT = 15;/.test(barImplementationReference), 'turn animation preview defaults to fifteen visible progress items');
@@ -400,6 +413,24 @@ assert(/function updateChildGroupScrollState/.test(barImplementationReference), 
 assert(/function updateStatusListScrollState/.test(barImplementationReference), 'turn animation preview updates whole progress list scroll state');
 assert(/\.step-row\.is-entering/.test(barImplementationReference), 'progress rows have an insertion animation class');
 assert(/@keyframes step-row-enter/.test(barImplementationReference), 'progress row insertion animation is defined');
+assert(/\.recursion-step-row\.is-entering/.test(recursionCss), 'production progress rows have an insertion animation class');
+assert(/\.recursion-step-row\.is-updating/.test(recursionCss), 'production progress rows have an update animation class');
+assert(/@keyframes recursion-step-row-enter/.test(recursionCss), 'production progress row insertion animation is defined');
+assert(/@keyframes recursion-step-row-update/.test(recursionCss), 'production progress row update animation is defined');
+assert(/\.recursion-step-children\s*\{[\s\S]*?--recursion-progress-child-row-height:\s*25px;[\s\S]*?padding:\s*0 0 3px 22px;/.test(recursionCss), 'production progress child rows match the compact indented reference geometry');
+assert(/\.recursion-step-row\.child-row\s*\{[\s\S]*?height:\s*var\(--recursion-progress-child-row-height\);/.test(recursionCss), 'production child progress rows use the reference fixed child height');
+assert(/\.recursion-step-row\.running \.recursion-step-icon\s*\{[\s\S]*?height:\s*12px;[\s\S]*?width:\s*12px;/.test(recursionCss), 'production running progress spinner uses the 12px reference ring size');
+assert(/\.recursion-step-row\.running \.recursion-step-icon::after/.test(recursionCss), 'production running progress spinner uses an inner cutout like the reference ring');
+assert(/\.recursion-status-head\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?padding:\s*7px 9px;/.test(recursionCss), 'production progress popover header uses the reference 34px density');
+assert(!/\.recursion-status-subtitle\s*\{[^}]*margin-left:\s*auto;/.test(recursionCss), 'production progress subtitle stays beside the title instead of pinning to the right edge');
+assert(!/\.recursion-settings-panel\.is-beside-progress/.test(recursionCss), 'production settings panel no longer carries obsolete side-by-side progress styling');
+assert(/\.recursion-status-foot \.recursion-mini-chip\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*2px 5px 3px;/.test(recursionCss), 'production progress footer Live chip uses the reference tiny-chip density');
+assert(/\.recursion-hand-dropdown\s*\{[\s\S]*?display:\s*block;[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production Last Brief dropdown removes the old padded grid shell');
+assert(/\.recursion-hand-dropdown::before/.test(recursionCss), 'production Last Brief dropdown keeps the reference top accent line');
+assert(/\.recursion-brief-head\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?padding:\s*7px 9px;/.test(recursionCss), 'production Last Brief header uses the reference 34px density');
+assert(/\.recursion-brief-foot \.recursion-mini-chip\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*2px 5px 3px;/.test(recursionCss), 'production Last Brief footer Esc chip uses the reference tiny-chip density');
+assert(/\.recursion-packet-meta\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?gap:\s*4px;/.test(recursionCss), 'production Prompt Packet header renders compact meta chips');
+assert(/function promptPacketText\(packet, hand = \{\}\)/.test(recursionUi), 'production Last Brief prompt packet view can render injected prompt text directly');
 assert(/## Turn Animation Preview Script/.test(barImplementationReference), 'implementation reference includes a turn animation preview script');
 assert(/const TURN_ANIMATION_STEPS = \[/.test(barImplementationReference), 'turn animation preview declares deterministic step data');
 assert(/cached:\s*'cached'/.test(barImplementationReference), 'turn animation preview supports cached progress state');
@@ -418,6 +449,7 @@ assert(/function preserveScrollPosition/.test(barImplementationReference), 'turn
 assert(/function placeAfter/.test(barImplementationReference), 'turn animation preview reorders rows without unconditional append moves');
 assert(/preserveScrollPosition\(group,/.test(barImplementationReference), 'turn animation preview preserves sub-tier scroll position during child updates');
 assert(/preserveScrollPosition\(list,/.test(barImplementationReference), 'turn animation preview preserves whole-list scroll position during row updates');
+assert(!/classList\.add\('is-resetting'\);[\s\S]*?#current-step'\)\.textContent = 'Ready';[\s\S]*?await wait\(260\);/.test(barImplementationReference), 'turn animation preview does not show Ready while old progress rows are still wiping');
 assert(/children:\s*\[/.test(uiSpec), 'UI spec documents progress child rows in the normalized view model');
 assert(/Parent row aggregation:/.test(uiSpec), 'UI spec documents nested parent aggregation rules');
 assert(/cardProgress/.test(uiSpec), 'UI spec documents sanitized card progress activity events');
@@ -425,6 +457,8 @@ assert(/\.recursion-status-popover\s*\{[\s\S]*?left:\s*-3px;/.test(uiSpec), 'UI 
 assert(/progressChildVisibleLimit:\s*5/.test(uiSpec), 'UI spec documents the sub-tier visible row default');
 assert(/progressListVisibleLimit:\s*15/.test(uiSpec), 'UI spec documents the whole progress list visible row default');
 assert(/bottom fade/.test(uiSpec), 'UI spec documents the sub-tier overflow fade affordance');
+assert(/\.settings-row input\[type="checkbox"\]\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?background:\s*rgba\(255, 255, 255, \.035\);/.test(barImplementationReference), 'reference settings checkbox uses the compact dark mockup skin');
+assert(/Checkboxes inside Recursion settings must use the compact dark Recursion control skin/.test(uiSpec), 'UI spec documents host checkbox override requirement');
 assert(!/array\.innerHTML\s*=\s*steps\.map/.test(barImplementationReference), 'turn animation preview does not recreate all hero blocks on every tick');
 assert(!/list\.innerHTML\s*=\s*rows\.map/.test(barImplementationReference), 'turn animation preview does not recreate all progress rows on every tick');
 assert(!/list\.appendChild\(parentRow\);/.test(barImplementationReference), 'turn animation preview does not unconditionally move parent rows on every refresh');
@@ -432,9 +466,23 @@ assert(!/const before = list\.children\[index\];[\s\S]*?list\.insertBefore\(row,
 assert(/dataset\.stepId/.test(barImplementationReference), 'turn animation preview keys hero blocks and progress rows by stable step id');
 assert(/function syncHeroBlock/.test(barImplementationReference), 'turn animation preview updates hero blocks in place');
 assert(/function syncProgressRow/.test(barImplementationReference), 'turn animation preview updates progress rows in place');
-assert(/\.recursion-brand-stage\s*\{[\s\S]*?--brand-stage-width:\s*calc\(var\(--brand-offset\) \+ var\(--brand-text-width\)\);/.test(recursionCss), 'production brand stage uses the same Recursion wordmark geometry as the reference');
+assert(/\.recursion-power-toggle\s*\{[\s\S]*?flex:\s*0 0 24px;[\s\S]*?height:\s*24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production power toggle uses the same compact geometry as the reference');
 assert(/\.recursion-activity-trigger\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production activity trigger keeps reference spacing around pixel blocks');
 assert(/\.recursion-hero-pixel-array\s*\{[\s\S]*?width:\s*max\(0px,/.test(recursionCss), 'production Hero Pixel Array uses column-based width animation');
+assert(/\.recursion-options-button:hover,[\s\S]*?\.recursion-options-button\[aria-expanded="true"\]\s*\{[\s\S]*?background:\s*transparent\s*!important;[\s\S]*?outline:\s*none\s*!important;/.test(recursionCss), 'production options button stays icon-only while focused or open');
+assert(/select\.recursion-input\.recursion-select\s*\{[\s\S]*?background-image:[\s\S]*?linear-gradient\(45deg,[\s\S]*?padding-right:\s*24px\s*!important;/.test(recursionCss), 'production settings selects draw their own dropdown chevron under SillyTavern globals');
+assert(/\.recursion-hand-dropdown\s*>\s*\.recursion-empty\s*\{[\s\S]*?margin:\s*0;[\s\S]*?padding:\s*8px 9px 7px;/.test(recursionCss), 'production empty Last Brief state keeps aligned native dropdown padding');
+assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]\s*\{[\s\S]*?appearance:\s*none !important;[\s\S]*?background:[\s\S]*?var\(--SmartThemeBlurTintColor/.test(recursionCss), 'production settings checkbox uses a Recursion-scoped selector strong enough to beat SillyTavern globals');
+assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]:checked\s*\{[\s\S]*?background:[\s\S]*?var\(--recursion-accent\)/.test(recursionCss), 'production settings checkbox uses Recursion cyan when checked');
+assert(/\.recursion-provider-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/.test(recursionCss), 'production Providers pane uses the reference two-column provider grid');
+assert(/\.recursion-provider-status\.pass\s*\{[\s\S]*?var\(--recursion-success\)/.test(recursionCss), 'production provider success status uses the defined success token');
+assert(/const progressTop = rect\.bottom \+ 3;/.test(recursionUi), 'production progress popover uses the reference vertical gap below the compact bar');
+assert(/const settingsTop = rect\.bottom \+ 5;/.test(recursionUi), 'production settings and brief popovers use the reference desktop vertical gap');
+assert(/setFixedPanelGeometry\(settingsPanel,[\s\S]*?zIndex:\s*10022/.test(recursionUi), 'production settings panel stays above progress when compact layouts overlap');
+assert(/setFixedPanelGeometry\(settingsPanel,\s*\{\s*left:\s*rootLeft,\s*top:\s*settingsTop,\s*width:\s*rootWidth,\s*zIndex:\s*10022\s*\}\)/.test(recursionUi), 'production settings panel spans the full Recursion Bar width');
+assert(/function eventWithin\(event, elements\)/.test(recursionUi), 'outside-click handling keeps original event path for rerendered popover controls');
+assert(/!eventWithin\(event, \[/.test(recursionUi), 'document click handling uses event path containment before closing popovers');
+assert(/recursionSettingsTab[\s\S]*?event\?\.stopPropagation\?\.\(\)/.test(recursionUi), 'settings tab clicks do not bubble into outside-click closers after rerender');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(recursionCss), 'production CSS honors reduced-motion preferences');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.recursion-root \*[\s\S]*?animation:\s*none\s*!important;[\s\S]*?transition:\s*none\s*!important;/.test(recursionCss), 'reduced-motion rule disables Recursion animations and transitions');
 assert(/\.recursion-viewer-card-list\s*\{[\s\S]*?display:\s*grid;[\s\S]*?gap:\s*8px;/.test(recursionCss), 'full viewer deck renders structured cards in a compact grid');
@@ -455,13 +503,13 @@ assertEqual(activityLabel({ phase: 'unknown' }), 'Recursion is working...', 'unk
 
 const fallbackModel = createRecursionViewModel({});
 assertEqual(fallbackModel.runtimeHealthLabel, 'Ready', 'missing view defaults to ready runtime health');
-assertEqual(fallbackModel.modeLabel, 'Observe only', 'missing view defaults to observe only mode');
+assertEqual(fallbackModel.modeLabel, 'Auto', 'missing view defaults to auto mode');
 assertEqual(fallbackModel.handCount, 0, 'missing hand defaults to zero');
 assertEqual(fallbackModel.composerLabel, 'Utility', 'missing composer defaults to Utility');
 assertEqual(fallbackModel.reasonerState, 'Unavailable', 'missing reasoner provider is unavailable');
 
 const activeModel = createRecursionViewModel({
-  settings: { mode: 'off', providers: { reasoner: { enabled: false, lastTest: { status: 'failed' } } } },
+  settings: { mode: 'auto', providers: { reasoner: { enabled: false, lastTest: { status: 'failed' } } } },
   lastHand: { cards: 'not-cards' },
   activity: {
     phase: 'reasonerComposing',
@@ -472,17 +520,44 @@ const activeModel = createRecursionViewModel({
   lastPacket: { diagnostics: { composerLane: 'reasoner' } }
 });
 assertEqual(activeModel.runtimeHealthLabel, 'Working', 'non-settled status is working');
-assertEqual(activeModel.modeLabel, 'Off', 'mode label is separate from runtime health');
+assertEqual(activeModel.modeLabel, 'Auto', 'mode label is separate from runtime health');
 assertEqual(activeModel.activitySeverity, 'warning', 'activity severity is preserved');
 assertDeepEqual(activeModel.activityChips, ['Reasoner', 'Cards', '3'], 'activity chips are normalized and deduped');
 assertEqual(activeModel.composerLabel, 'Reasoner', 'reasoner composer label built');
 assertEqual(activeModel.reasonerState, 'Disabled', 'disabled reasoner state built');
+
+const settledWarningModel = createRecursionViewModel({
+  settings: { mode: 'semi-auto' },
+  activity: { phase: 'settled', severity: 'warning', label: 'Observe fallback ready.' },
+  progressRun: {
+    title: 'Needs attention',
+    steps: [
+      { id: 'read-turn', label: 'Reading current turn', providerLane: 'utility', state: 'done' },
+      { id: 'card-batch', label: 'Utility card batch', providerLane: 'utility', state: 'warning' }
+    ]
+  }
+});
+assertEqual(settledWarningModel.runtimeHealthLabel, 'Needs attention', 'settled warning progress is not announced as ready');
 
 const reasonerAvailable = createRecursionViewModel({
   settings: { mode: 'auto', providers: { reasoner: { enabled: true, lastTest: { status: 'ok' } } } },
   activity: { phase: 'idle' }
 });
 assertEqual(reasonerAvailable.reasonerState, 'Available', 'available reasoner state built');
+
+const mixedLaneProgressModel = createRecursionViewModel({
+  settings: { mode: 'auto', providers: { reasoner: { enabled: true, lastTest: { status: 'ok' } } } },
+  activity: { phase: 'cardBatchRunning' },
+  lastPacket: { diagnostics: { composerLane: 'utility' } },
+  progressRun: {
+    title: 'Generating',
+    steps: [
+      { id: 'card-batch', label: 'Utility card batch', providerLane: 'utility', state: 'running' },
+      { id: 'reasoner-brief', label: 'Reasoner brief', providerLane: 'reasoner', state: 'running' }
+    ]
+  }
+});
+assertEqual(mixedLaneProgressModel.progressFooterLabel, 'Auto - Utility and Reasoner lanes', 'progress footer summarizes all visible active provider lanes');
 
 const reasonerPassAvailable = createRecursionViewModel({
   settings: { mode: 'auto', providers: { reasoner: { enabled: true, lastTest: { status: 'pass' } } } },
@@ -533,6 +608,8 @@ noDocumentMount.update();
 noDocumentMount.destroy();
 
 function createFakeDocument() {
+  const documentListeners = {};
+
   class FakeElement {
     constructor(tagName) {
       this.tagName = tagName.toUpperCase();
@@ -552,6 +629,18 @@ function createFakeDocument() {
       this.value = '';
       this.checked = false;
       this.disabled = false;
+      this.rect = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+      this.classList = {
+        toggle: (className, force) => {
+          const classes = new Set(String(this.className || '').split(/\s+/).filter(Boolean));
+          const shouldHave = force === undefined ? !classes.has(className) : Boolean(force);
+          if (shouldHave) classes.add(className);
+          else classes.delete(className);
+          this.className = [...classes].join(' ');
+          this.attributes.class = this.className;
+          return shouldHave;
+        }
+      };
       this.style = {
         props: {},
         setProperty(name, value) {
@@ -582,6 +671,9 @@ function createFakeDocument() {
     }
 
     replaceChildren(...children) {
+      for (const child of this.children) {
+        child.parentNode = null;
+      }
       this.children = [];
       for (const child of children) this.appendChild(child);
     }
@@ -611,12 +703,29 @@ function createFakeDocument() {
       this.eventListeners[type].push(listener);
     }
 
-    click() {
-      const event = { target: this };
+    click(eventInit = {}) {
+      const event = {
+        target: this,
+        isTrusted: eventInit.isTrusted ?? true,
+        preventDefault() {
+          this.defaultPrevented = true;
+        },
+        stopPropagation() {
+          this.propagationStopped = true;
+        },
+        stopImmediatePropagation() {
+          this.propagationStopped = true;
+          this.immediatePropagationStopped = true;
+        }
+      };
       let node = this;
       while (node) {
         for (const listener of node.eventListeners.click || []) listener(event);
+        if (event.propagationStopped && !eventInit.ignoreStopPropagation) break;
         node = node.parentNode;
+      }
+      if (!event.propagationStopped || eventInit.ignoreStopPropagation) {
+        for (const listener of documentListeners.click || []) listener(event);
       }
     }
 
@@ -626,6 +735,27 @@ function createFakeDocument() {
 
     close() {
       this.open = false;
+    }
+
+    setBoundingClientRect(rect = {}) {
+      const left = Number(rect.left ?? rect.x ?? 0);
+      const top = Number(rect.top ?? rect.y ?? 0);
+      const width = Number(rect.width ?? rect.w ?? Math.max(0, Number(rect.right ?? left) - left));
+      const height = Number(rect.height ?? rect.h ?? Math.max(0, Number(rect.bottom ?? top) - top));
+      this.rect = {
+        left,
+        top,
+        x: left,
+        y: top,
+        width,
+        height,
+        right: Number(rect.right ?? left + width),
+        bottom: Number(rect.bottom ?? top + height)
+      };
+    }
+
+    getBoundingClientRect() {
+      return { ...this.rect };
     }
 
     querySelector(selector) {
@@ -677,6 +807,14 @@ function createFakeDocument() {
     body,
     createElement: (tagName) => new FakeElement(tagName),
     getElementById: (id) => findFirst(body, `#${id}`),
+    addEventListener(type, listener) {
+      if (!documentListeners[type]) documentListeners[type] = [];
+      documentListeners[type].push(listener);
+    },
+    removeEventListener(type, listener) {
+      if (!documentListeners[type]) return;
+      documentListeners[type] = documentListeners[type].filter((entry) => entry !== listener);
+    },
     textTree
   };
 }
@@ -688,6 +826,7 @@ const previousSetTimeout = globalThis.setTimeout;
 const previousClearTimeout = globalThis.clearTimeout;
 const previousSetInterval = globalThis.setInterval;
 const previousClearInterval = globalThis.clearInterval;
+const previousInnerWidth = globalThis.innerWidth;
 try {
   let timerId = 0;
   const timers = [];
@@ -726,6 +865,7 @@ try {
     setInterval: fakeSetInterval,
     clearInterval: fakeClearInterval
   };
+  globalThis.innerWidth = 640;
   const copied = [];
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
@@ -743,11 +883,10 @@ try {
   const providerUpdates = [];
   const providerTests = [];
   const providerClears = [];
-  let resolveOffSettingsUpdate = null;
-  let offSettingsUpdate = null;
   let view = {
     settings: {
       mode: 'auto',
+      enabled: true,
       strength: 'balanced',
       promptFootprint: 'normal',
       focus: 'balanced',
@@ -857,7 +996,7 @@ try {
       updateSettings: (patch) => {
         settingsUpdates.push(patch);
         view = { ...view, settings: { ...view.settings, ...patch } };
-        if (patch?.mode === 'off') {
+        if (patch?.enabled === false) {
           view = {
             ...view,
             activity: {
@@ -867,21 +1006,18 @@ try {
               chips: ['Prompt']
             }
           };
-          offSettingsUpdate = new Promise((resolve) => {
-            resolveOffSettingsUpdate = () => {
-              view = {
-                ...view,
-                activity: {
-                  phase: 'settled',
-                  severity: 'warning',
-                  label: 'Prompt clear failed. Recursion skipped without clearing host prompt.',
-                  chips: ['Prompt']
-                }
-              };
-              resolve({ ok: false, settings: view.settings, clear: { ok: false } });
+          return new Promise((resolve) => {
+            view = {
+              ...view,
+              activity: {
+                phase: 'settled',
+                severity: 'warning',
+                label: 'Prompt clear failed. Recursion skipped without clearing host prompt.',
+                chips: ['Prompt']
+              }
             };
+            resolve({ ok: false, settings: view.settings, clear: { ok: false } });
           });
-          return offSettingsUpdate;
         }
         return view.settings;
       },
@@ -938,22 +1074,73 @@ try {
   const root = fakeDocument.getElementById('recursion-root');
   assert(root, 'root is rendered');
   assert(root.querySelector('[data-recursion-bar]'), 'bar selector is rendered');
-  assert(root.querySelector('[data-recursion-brand-stage]'), 'compact bar renders the Recursion brand stage');
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-brand-stage]')).includes('RECURSION'), 'compact brand uses uppercase Recursion wordmark');
+  root.querySelector('[data-recursion-bar]').setBoundingClientRect({ left: 0, top: 0, width: 640, height: 30, right: 640, bottom: 30 });
+  assert(root.querySelector('[data-recursion-power-toggle]'), 'compact bar renders the dedicated power toggle');
+  assert(root.querySelector('[data-recursion-power-toggle]').querySelector('svg'), 'power toggle uses the reference power SVG');
+  assert(!fakeDocument.textTree(root.querySelector('[data-recursion-bar]')).includes('RECURSION'), 'compact bar does not render the Recursion wordmark');
   assert(root.querySelector('[data-recursion-mode-button]'), 'compact bar renders an icon-only mode button');
   assert(root.querySelector('[data-recursion-mode-menu]'), 'compact bar renders the mode selector menu');
+  assert(root.querySelector('[data-recursion-mode-icon]').querySelector('svg'), 'mode button renders the reference inline SVG icon');
+  assertEqual(root.querySelector('[data-recursion-mode-icon]').querySelectorAll('rect').length, 3, 'Auto mode button uses the reference stacked-cards SVG');
+  assertEqual(root.querySelectorAll('[data-recursion-mode-choice-icon]').length, 2, 'mode selector renders icons only for Auto and Semi-Auto');
+  assertEqual(root.querySelectorAll('[data-recursion-mode-choice-tip]').length, 2, 'mode selector renders tips only for Auto and Semi-Auto');
+  assertEqual(root.querySelector('[data-recursion-mode-choice-auto]').querySelectorAll('rect').length, 3, 'Auto mode row uses the reference stacked-cards SVG');
+  assert(root.querySelector('[data-recursion-mode-choice-semi-auto]').querySelectorAll('rect').length >= 2, 'Semi-Auto mode row uses the reference stacked-cards SVG');
+  assert(!root.querySelector('[data-recursion-mode-choice-observe]'), 'Observe only mode is removed from the compact mode menu');
+  assert(!root.querySelector('[data-recursion-mode-choice-off]'), 'Off mode is removed from the compact mode menu');
+  assertDeepEqual(
+    root.querySelectorAll('[data-recursion-mode-choice]').map((choice) => choice.dataset.recursionModeChoice),
+    ['auto', 'semi-auto'],
+    'mode selector uses the Auto/Semi-Auto mode order'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-mode-button]').getAttribute('aria-label'),
+    'Mode: Auto',
+    'mode button exposes the current mode label'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-mode-choice-auto]').getAttribute('title'),
+    'Selects cards and injects composed prompt context automatically.',
+    'Auto mode tooltip matches the reference copy'
+  );
+  assert(
+    fakeDocument.textTree(root.querySelector('[data-recursion-mode-choice-semi-auto]')).includes('Constrains card generation to selected card types.'),
+    'Semi-Auto mode tip explains future card-type subset constraints'
+  );
+  assert(
+    root.querySelector('[data-recursion-mode-choice-auto]').className.includes('is-selected'),
+    'mode selector marks the current mode'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-mode-choice-auto]').getAttribute('aria-current'),
+    'true',
+    'mode selector exposes the current mode to assistive tech'
+  );
   assert(root.querySelector('[data-recursion-status-trigger]'), 'compact bar renders the progress activity trigger');
   assert(root.querySelector('[data-recursion-hero-array]'), 'compact bar renders the Hero Pixel Array');
   assert(root.querySelector('[data-recursion-status-popover]'), 'compact bar renders the progress popover');
   assert(root.querySelector('[data-recursion-current-step]'), 'compact bar renders one current-step status text');
   assert(root.querySelector('[data-recursion-reasoning-chain]'), 'compact bar renders the reasoning level chain');
   assert(root.querySelector('[data-recursion-reasoning-level-high]'), 'reasoning chain defaults to the High node');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('title'), 'Low: Utility-only, reduced cards.', 'Low reasoning tooltip matches the reference copy');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-medium]').getAttribute('title'), 'Medium: mostly Utility, Reasoner eligible for the brief.', 'Medium reasoning tooltip matches the reference copy');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('title'), 'High: mixed Utility and Reasoner checks.', 'High reasoning tooltip matches the reference copy');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('title'), 'Ultra: Reasoner-heavy synthesis with a larger card bias.', 'Ultra reasoning tooltip matches the reference copy');
   assert(root.querySelector('[data-recursion-brief-arrow]'), 'compact bar renders a dedicated last-brief dropdown arrow');
+  assert(root.querySelector('[data-recursion-arrow-down]'), 'last-brief dropdown arrow uses a drawn icon instead of text');
   assert(root.querySelector('[data-recursion-options-button]'), 'compact bar renders a dedicated ellipsis options button');
-  assertEqual(root.querySelector('[data-recursion-brand-stage]').getAttribute('aria-expanded'), 'false', 'brand progress button starts collapsed');
+  assert(root.querySelector('[data-recursion-ellipsis]'), 'options button uses drawn ellipsis dots instead of text');
+  assertEqual(
+    fakeDocument.textTree(root.querySelector('[data-recursion-options-button]')).trim(),
+    '',
+    'options button does not render a literal ellipsis glyph'
+  );
+  assertEqual(root.querySelector('[data-recursion-power-toggle]').getAttribute('aria-pressed'), 'true', 'power toggle starts pressed when Recursion is enabled');
+  assertEqual(root.querySelector('[data-recursion-power-toggle]').getAttribute('title'), 'Turn Recursion off', 'power toggle exposes hover tip copy');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'false', 'progress activity trigger starts collapsed');
   assertEqual(root.querySelector('[data-recursion-hand-toggle]').getAttribute('aria-expanded'), 'false', 'brief dropdown trigger starts collapsed');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode menu trigger starts collapsed');
+  assertEqual(root.dataset.recursionRoot, '', 'root exposes stable recursion capture selector');
   assert(root.querySelector('[data-recursion-activity-ribbon]'), 'activity ribbon selector is rendered');
   assert(!root.querySelector('[data-recursion-action-menu]'), 'legacy action menu is not rendered');
   assert(root.querySelector('[data-recursion-hand-dropdown]'), 'hand dropdown selector is rendered');
@@ -979,21 +1166,32 @@ try {
   root.querySelector('[data-recursion-mode-button]').click();
   assertEqual(root.querySelector('[data-recursion-mode-menu]').hidden, false, 'mode button opens mode selector');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'true', 'mode button reflects open menu');
-  root.querySelector('[data-recursion-mode-choice-observe]').click();
-  assertDeepEqual(settingsUpdates.at(-1), { mode: 'observe' }, 'mode menu updates mode directly');
+  root.querySelector('[data-recursion-mode-choice-semi-auto]').querySelector('[data-recursion-mode-choice-name]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { mode: 'semi-auto' }, 'mode menu updates Semi-Auto from nested row content clicks');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode button reflects closed menu after selection');
-  root.querySelector('[data-recursion-brand-stage]').click();
-  assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, false, 'brand button opens progress popover');
-  assertEqual(root.querySelector('[data-recursion-brand-stage]').getAttribute('aria-expanded'), 'true', 'brand button reflects open progress popover');
-  assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'true', 'activity trigger mirrors open progress popover');
+  root.querySelector('[data-recursion-power-toggle]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { enabled: false }, 'power toggle disables Recursion without changing mode');
+  assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'power toggle does not open progress popover');
+  root.querySelector('[data-recursion-status-trigger]').click();
+  assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, false, 'activity trigger opens progress popover');
+  assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'true', 'activity trigger reflects open progress popover');
   root.querySelector('[data-recursion-status-trigger]').click();
   assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'activity trigger closes progress popover');
-  assertEqual(root.querySelector('[data-recursion-brand-stage]').getAttribute('aria-expanded'), 'false', 'brand button reflects closed progress popover');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'false', 'activity trigger reflects closed progress popover');
   root.querySelector('[data-recursion-status-trigger]').click();
   assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, false, 'activity trigger opens progress popover');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'true', 'activity trigger reflects open progress popover');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-status-popover]')).includes('Utility card batch'), 'progress popover renders progress rows');
+  root.querySelector('[data-recursion-actions]').click();
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'narrow options click opens settings panel');
+  assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'narrow options click closes progress instead of hiding it behind settings');
+  root.querySelector('[data-recursion-status-trigger]').click();
+  assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, false, 'narrow status click reopens progress popover');
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, true, 'narrow status click closes settings instead of overlapping it');
+  root.querySelector('[data-recursion-mode-button]').click();
+  assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'mode menu closes progress popover to avoid left-lane overlap');
+  assertEqual(root.querySelector('[data-recursion-mode-menu]').hidden, false, 'mode menu opens after closing progress popover');
+  root.querySelector('[data-recursion-mode-choice-auto]').click();
   assertEqual(
     root.querySelector('[data-recursion-progress-list]').style.props['--recursion-progress-list-limit'],
     '15',
@@ -1011,22 +1209,44 @@ try {
     'reasoning chain updates reasoning level and derived reasoner use'
   );
 
+  globalThis.innerWidth = 920;
+  root.querySelector('[data-recursion-bar]').setBoundingClientRect({ left: 0, top: 0, width: 920, height: 30, right: 920, bottom: 30 });
   root.querySelector('[data-recursion-actions]').click();
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'options button opens settings panel directly');
   assertEqual(root.querySelector('[data-recursion-actions]').getAttribute('aria-expanded'), 'true', 'options button reflects open settings state');
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').style.left, '0px', 'settings panel aligns to full bar left edge on wide desktop');
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').style.width, '920px', 'settings panel spans the full bar width on wide desktop');
+  assert(!root.querySelector('[data-recursion-settings-panel]').className.includes('is-beside-progress'), 'settings panel no longer uses side-by-side progress layout');
+  root.querySelector('[data-recursion-actions]').click({ isTrusted: false });
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'scripted options staging click cannot close an open settings panel');
+  assertEqual(root.querySelector('[data-recursion-actions]').getAttribute('aria-expanded'), 'true', 'scripted options staging click preserves open settings state');
   assert(root.querySelector('[data-recursion-settings-tabs]'), 'settings menu renders tab controls');
   assert(root.querySelector('[data-recursion-settings-play]'), 'settings menu renders Play pane');
   assert(root.querySelector('[data-recursion-settings-providers]'), 'settings menu renders Providers pane');
   assert(root.querySelector('[data-recursion-settings-advanced]'), 'settings menu renders Advanced pane');
   assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, false, 'Play pane is the default settings tab');
   assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, true, 'Providers pane starts tucked behind a tab');
+  assert(root.querySelector('[data-recursion-setting-reasoning-chain]'), 'settings play tab renders the compact reasoning level chain');
+  assertEqual(root.querySelector('[data-recursion-setting-reasoning-level]').getAttribute('type'), 'hidden', 'settings reasoning level stores a hidden form value');
+  assertEqual(root.querySelectorAll('[data-recursion-setting-reasoning-choice]').length, 4, 'settings reasoning chain renders four selectable levels');
+  root.querySelector('[data-recursion-setting-reasoning-choice-ultra]').click();
+  assertEqual(root.querySelector('[data-recursion-setting-reasoning-level]').value, 'ultra', 'settings reasoning chain updates the saved value');
   root.querySelector('[data-recursion-settings-tab-providers]').click();
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open');
   assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, true, 'clicking Providers hides Play pane');
   assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, false, 'clicking Providers shows provider controls');
+  root.querySelector('[data-recursion-settings-tab-advanced]').click({ ignoreStopPropagation: true });
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open even when document outside-click also receives the rerendered event');
+  assertEqual(root.querySelector('[data-recursion-settings-advanced]').hidden, false, 'clicking Advanced shows advanced controls');
+  assert(root.querySelector('[data-recursion-provider-grid]'), 'Providers pane renders the compact reference provider grid');
+  assertEqual(root.querySelectorAll('[data-recursion-provider-section]').length, 2, 'Providers pane renders Utility plus collapsed Reasoner sections');
+  assert(!root.querySelector('[data-recursion-provider-model-reasoner]'), 'Reasoner provider stays collapsed to the reference summary row');
+  assertEqual(root.querySelector('[data-recursion-provider-temperature-utility]').getAttribute('type'), 'hidden', 'provider temperature stays hidden from the compact mockup UI');
+  assertEqual(root.querySelector('[data-recursion-provider-top-p-utility]').getAttribute('type'), 'hidden', 'provider top-p stays hidden from the compact mockup UI');
   assertDeepEqual(
     root.querySelector('[data-recursion-setting-mode]').children.map((child) => child.textContent),
-    ['Off', 'Observe only', 'Auto'],
-    'mode settings options use product wording'
+    ['Auto', 'Semi-Auto'],
+    'mode settings options use the Auto/Semi-Auto reference order'
   );
   root.querySelector('[data-recursion-settings-close]').click();
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, true, 'settings close button closes options panel');
@@ -1035,21 +1255,27 @@ try {
   root.querySelector('[data-recursion-hand-toggle]').click();
   assertEqual(root.querySelector('[data-recursion-hand-dropdown]').hidden, false, 'brief dropdown button opens Last Brief');
   assertEqual(root.querySelector('[data-recursion-hand-toggle]').getAttribute('aria-expanded'), 'true', 'brief dropdown trigger reflects open state');
-  const briefCard = root.querySelector('[data-recursion-brief-card-id]');
+  const briefCard = root.querySelector('[data-recursion-brief-card]');
+  assert(briefCard.dataset.recursionBriefCardId, 'brief card keeps per-card id for expansion persistence');
   assertEqual(briefCard.getAttribute('aria-expanded'), 'false', 'brief card starts compact');
+  assert(briefCard.querySelector('[data-recursion-brief-card-icon]').querySelector('svg'), 'brief card uses category SVG icon');
+  assert(briefCard.querySelector('[data-recursion-brief-card-text]'), 'brief card renders text in the mockup card body');
+  assert(briefCard.querySelector('[data-recursion-brief-card-meta]'), 'brief card renders compact meta chip row');
   briefCard.click();
   assertEqual(briefCard.getAttribute('aria-expanded'), 'true', 'brief card expands on click');
-  assert(fakeDocument.textTree(briefCard).includes('#'), 'brief card uses a category glyph instead of a generic card icon');
   assert(fakeDocument.textTree(briefCard).includes('Door stays blocked and the brass lock remains warped.'), 'expanded brief card exposes full card text');
   assert(fakeDocument.textTree(briefCard).includes('fresh'), 'expanded brief card exposes bounded meta chips');
   const packetButton = root.querySelector('[data-recursion-prompt-packet-button]');
   assert(packetButton, 'last brief renders Prompt Packet button');
   packetButton.click();
   assertEqual(root.querySelector('[data-recursion-prompt-packet-panel]').hidden, false, 'Prompt Packet button opens composed packet panel');
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('packet-ui'), 'prompt packet panel renders composed packet metadata');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Utility composed'), 'prompt packet panel renders composer lane meta chip');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('1 card'), 'prompt packet panel renders card count meta chip');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Recursion Scene Brief'), 'prompt packet panel renders injected block titles');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Door stays blocked and the brass lock remains warped.'), 'prompt packet panel renders actual injected prompt text');
+  assert(!root.querySelector('[data-recursion-prompt-packet-preview]').textContent.includes('"packetId"'), 'prompt packet panel does not show the packet JSON wrapper');
   const progressList = root.querySelector('[data-recursion-progress-list]');
+  const progressRow = root.querySelector('[data-recursion-progress-row]');
   const progressChildren = root.querySelector('[data-recursion-progress-children]');
   const briefScroll = root.querySelector('[data-recursion-brief-scroll]');
   const packetPreview = root.querySelector('[data-recursion-prompt-packet-preview]');
@@ -1058,12 +1284,32 @@ try {
   briefScroll.scrollTop = 44;
   packetPreview.scrollTop = 52;
   ui.update();
+  assertEqual(root.querySelector('[data-recursion-progress-list]'), progressList, 'progress list node is preserved across rerender');
+  assertEqual(root.querySelector('[data-recursion-progress-row]'), progressRow, 'progress row node is preserved across rerender');
   assertEqual(root.querySelector('[data-recursion-progress-list]').scrollTop, 48, 'progress list preserves scroll position across rerender');
   assertEqual(root.querySelector('[data-recursion-progress-children]').scrollTop, 36, 'progress child list preserves scroll position across rerender');
   assertEqual(root.querySelector('[data-recursion-brief-scroll]').scrollTop, 44, 'brief card list preserves scroll position across rerender');
   assertEqual(root.querySelector('[data-recursion-prompt-packet-preview]').scrollTop, 52, 'prompt packet preview preserves scroll position across rerender');
   assertEqual(root.querySelector('[data-recursion-prompt-packet-panel]').hidden, false, 'prompt packet panel stays open across rerender');
-  assertEqual(root.querySelector('[data-recursion-brief-card-id]').getAttribute('aria-expanded'), 'true', 'expanded brief card stays expanded across rerender');
+  assertEqual(root.querySelector('[data-recursion-brief-card]').getAttribute('aria-expanded'), 'true', 'expanded brief card stays expanded across rerender');
+  view = {
+    ...view,
+    progressRun: {
+      ...view.progressRun,
+      steps: view.progressRun.steps.map((step) => (
+        step.id === 'utility-card-batch'
+          ? {
+            ...step,
+            state: 'done',
+            children: step.children.map((child) => ({ ...child, state: 'done' }))
+          }
+          : step
+      ))
+    }
+  };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-progress-row]'), progressRow, 'progress row node is updated in place when status changes');
+  assert(root.querySelector('[data-recursion-progress-row]').className.includes('is-updating'), 'progress row update animation class is applied on status changes');
   const rerenderedChildren = root.querySelector('[data-recursion-progress-children]');
   rerenderedChildren.scrollHeight = 180;
   rerenderedChildren.clientHeight = 90;
@@ -1074,7 +1320,7 @@ try {
   for (const listener of rerenderedChildren.eventListeners.scroll || []) listener({ target: rerenderedChildren });
   assert(rerenderedChildren.className.includes('is-at-end'), 'child progress fade clears at scroll end');
 
-  root.querySelector('[data-recursion-setting-mode]').value = 'auto';
+  root.querySelector('[data-recursion-setting-mode]').value = 'semi-auto';
   root.querySelector('[data-recursion-setting-reasoning-level]').value = 'medium';
   root.querySelector('[data-recursion-setting-strength]').value = 'strong';
   root.querySelector('[data-recursion-setting-footprint]').value = 'rich';
@@ -1085,7 +1331,7 @@ try {
   root.querySelector('[data-recursion-setting-include-excerpts]').checked = true;
   root.querySelector('[data-recursion-settings-save]').click();
   assertDeepEqual(settingsUpdates.at(-1), {
-    mode: 'auto',
+    mode: 'semi-auto',
     reasoningLevel: 'medium',
     strength: 'strong',
     promptFootprint: 'rich',
@@ -1099,35 +1345,7 @@ try {
       maxJournalEntries: 120,
       includeExcerpts: true
     }
-  }, 'settings panel saves broad behavior controls');
-  root.querySelector('[data-recursion-setting-mode]').value = 'off';
-  root.querySelector('[data-recursion-settings-save]').click();
-  assertDeepEqual(settingsUpdates.at(-1), {
-    mode: 'off',
-    reasoningLevel: 'medium',
-    strength: 'strong',
-    promptFootprint: 'rich',
-    focus: 'character',
-    reasonerUse: 'auto',
-    ui: {
-      progressChildVisibleLimit: 7,
-      progressListVisibleLimit: 22
-    },
-    diagnostics: {
-      maxJournalEntries: 120,
-      includeExcerpts: true
-    }
-  }, 'settings panel can switch Recursion Off');
-  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Working', 'Off settings save shows cleanup work');
-  assertEqual(root.querySelector('[data-recursion-mode]').textContent, 'Off', 'Off settings save shows mode separately');
-  assertEqual(root.querySelector('[data-recursion-ribbon-label]').textContent, 'Clearing Recursion prompt...', 'Off settings save shows prompt cleanup label');
-  resolveOffSettingsUpdate();
-  await offSettingsUpdate;
-  ui.update();
-  assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Ready', 'Off warning still leaves runtime ready');
-  assertEqual(root.querySelector('[data-recursion-mode]').textContent, 'Off', 'Off warning keeps mode separate');
-  assertEqual(root.querySelector('[data-recursion-ribbon-label]').textContent, 'Prompt clear failed. Recursion skipped without clearing host prompt.', 'Off clear warning label remains visible');
-  assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, false, 'Off clear warning ribbon stays visible');
+  }, 'settings panel saves broad behavior controls without owning the power state');
 
   root.querySelector('[data-recursion-provider-source-utility]').value = 'openai-compatible';
   root.querySelector('[data-recursion-provider-profile-utility]').value = 'utility-profile';
@@ -1152,7 +1370,8 @@ try {
   root.querySelector('[data-recursion-actions]').click();
   root.querySelector('[data-recursion-copy-prompt-packet]').click();
   await Promise.resolve();
-  assert(copied[0].includes('composerLane'), 'copy prompt packet writes sanitized packet preview');
+  assert(copied[0].includes('Recursion Scene Brief'), 'copy prompt packet writes the injected prompt text');
+  assert(!copied[0].includes('"packetId"'), 'copy prompt packet omits packet JSON wrapper');
   assert(copied[0].includes('Door stays blocked and the brass lock remains warped.'), 'copy prompt packet includes actual injected prompt text');
 
   const viewer = root.querySelector('[data-recursion-viewer]');
@@ -1183,7 +1402,7 @@ try {
 
   view = {
     ...view,
-    settings: { ...view.settings, mode: 'auto' },
+    settings: { ...view.settings, enabled: true, mode: 'auto' },
     activity: { phase: 'settled', severity: 'success', label: 'Recursion prompt ready.' }
   };
   ui.update();
@@ -1232,6 +1451,8 @@ try {
   globalThis.clearTimeout = previousClearTimeout;
   globalThis.setInterval = previousSetInterval;
   globalThis.clearInterval = previousClearInterval;
+  if (previousInnerWidth === undefined) delete globalThis.innerWidth;
+  else globalThis.innerWidth = previousInnerWidth;
 }
 
 console.log('[pass] ui');

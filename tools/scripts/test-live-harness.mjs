@@ -163,8 +163,8 @@ function recursionSmokeFixtureHtml({
   omitVisibleSendMarker = false,
   omitHostGenerationContinuation = false,
   sendControlsDisabled = false,
-  observeInjectsPrompt = false,
-  observeModeSave = 'sync',
+  semiAutoSkipsPrompt = false,
+  semiAutoModeSave = 'sync',
   unclearedPromptOnDisable = false,
   staleModeChip = false,
   reasonerFallback = false,
@@ -191,7 +191,7 @@ function recursionSmokeFixtureHtml({
     <main id="chat-root">
       <section id="recursion-root" class="recursion-root">
         <div class="recursion-bar" data-recursion-bar role="toolbar" aria-label="Recursion">
-          <strong class="recursion-brand">Recursion</strong>
+          <button type="button" data-recursion-power-toggle aria-pressed="true" aria-label="Turn Recursion off">Power</button>
           <span data-recursion-status>Ready</span>
           <span data-recursion-mode>Auto</span>
           <span data-recursion-hand-count>Hand 0</span>
@@ -208,7 +208,7 @@ function recursionSmokeFixtureHtml({
         <div data-recursion-status-popover hidden>Progress ready</div>
         <div data-recursion-hand-dropdown hidden>No hand has been composed for this chat.</div>
         <div data-recursion-settings-panel hidden>
-          <select data-recursion-setting-mode aria-label="Mode"><option value="off">Off</option><option value="observe">Observe only</option><option value="auto" selected>Auto</option></select>
+          <select data-recursion-setting-mode aria-label="Mode"><option value="auto" selected>Auto</option><option value="semi-auto">Semi-Auto</option></select>
           <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
           <input type="checkbox" data-recursion-provider-enabled-reasoner aria-label="Reasoner enabled">
           <button type="button" data-recursion-settings-save>Save Settings</button>
@@ -230,6 +230,7 @@ function recursionSmokeFixtureHtml({
       const smokeContext = {
         chat: [],
         prompts: {},
+        enabled: true,
         mode: 'auto',
         unclearedPromptOnDisable: ${unclearedPromptOnDisable ? 'true' : 'false'},
         setExtensionPrompt(key, text, position, depth, scan, role) {
@@ -239,26 +240,25 @@ function recursionSmokeFixtureHtml({
       };
       globalThis.SillyTavern = { getContext: () => smokeContext };
       if (smokeContext.unclearedPromptOnDisable) {
-        smokeContext.setExtensionPrompt('recursion.sceneBrief', 'Recursion stale observe baseline prompt.', 'IN_PROMPT', 4, false, 'SYSTEM');
+        smokeContext.setExtensionPrompt('recursion.sceneBrief', 'Recursion stale disabled baseline prompt.', 'IN_PROMPT', 4, false, 'SYSTEM');
       }
       globalThis.recursionGenerationInterceptor = async function recursionGenerationInterceptor(chat) {
         const sourceChat = Array.isArray(chat) ? chat : smokeContext.chat;
         const activeMode = smokeContext.mode || document.querySelector('[data-recursion-setting-mode]')?.value || 'auto';
+        const activeModeLabel = activeMode === 'semi-auto' ? 'Semi-Auto' : 'Auto';
         const renderGenerationUi = () => {
           document.querySelector('[data-recursion-status]').textContent = 'Ready';
           if (!${staleModeChip ? 'true' : 'false'}) {
-            document.querySelector('[data-recursion-mode]').textContent = activeMode === 'observe' ? 'Observe only' : (activeMode === 'off' ? 'Off' : 'Auto');
+            document.querySelector('[data-recursion-mode]').textContent = activeModeLabel;
           }
           if (${reasonerFallbackFlag} && activeMode === 'auto') {
             document.querySelector('[data-recursion-reasoner]').textContent = 'Reasoner fallback';
           }
           document.querySelector('[data-recursion-hand-count]').textContent = 'Hand 2';
-          document.querySelector('[data-recursion-ribbon-label]').textContent = activeMode === 'observe'
-            ? 'Observe mode: hand preview ready. No prompt injected.'
-            : (${reasonerFallbackFlag} ? 'Reasoner unavailable. Utility composed.' : 'Recursion prompt ready.');
+          document.querySelector('[data-recursion-ribbon-label]').textContent = ${reasonerFallbackFlag} ? 'Reasoner unavailable. Utility composed.' : 'Recursion prompt ready.';
           document.querySelector('[data-recursion-prompt-packet]').textContent = ${promptPacketMetadataExpression};
         };
-        if (activeMode === 'observe' && !${observeInjectsPrompt ? 'true' : 'false'}) {
+        if (activeMode === 'semi-auto' && ${semiAutoSkipsPrompt ? 'true' : 'false'}) {
           renderGenerationUi();
           return sourceChat;
         }
@@ -270,6 +270,20 @@ function recursionSmokeFixtureHtml({
       };
       globalThis.recursionOnEnable = function recursionOnEnable() { return true; };
       ${disableHookScript}
+      document.querySelector('[data-recursion-power-toggle]')?.addEventListener('click', () => {
+        smokeContext.enabled = !smokeContext.enabled;
+        const button = document.querySelector('[data-recursion-power-toggle]');
+        button?.setAttribute('aria-pressed', smokeContext.enabled ? 'true' : 'false');
+        button?.setAttribute('aria-label', smokeContext.enabled ? 'Turn Recursion off' : 'Turn Recursion on');
+        if (!smokeContext.enabled) {
+          for (const key of ['recursion.sceneBrief', 'recursion.turnBrief', 'recursion.guardrails']) {
+            smokeContext.setExtensionPrompt(key, '', 'IN_PROMPT', 0, false, 'SYSTEM');
+          }
+          document.querySelector('[data-recursion-status]').textContent = 'Off';
+        } else {
+          document.querySelector('[data-recursion-status]').textContent = 'Ready';
+        }
+      });
       document.querySelector('#send_but')?.addEventListener('click', async () => {
         const input = document.querySelector('#send_textarea');
         const message = {
@@ -308,18 +322,13 @@ function recursionSmokeFixtureHtml({
         const mode = document.querySelector('[data-recursion-setting-mode]')?.value || 'auto';
         const applyMode = () => {
           smokeContext.mode = mode;
-          if (mode === 'off') {
-            for (const key of ['recursion.sceneBrief', 'recursion.turnBrief', 'recursion.guardrails']) {
-              smokeContext.setExtensionPrompt(key, '', 'IN_PROMPT', 0, false, 'SYSTEM');
-            }
-          }
-          document.querySelector('[data-recursion-status]').textContent = 'Ready';
+          document.querySelector('[data-recursion-status]').textContent = smokeContext.enabled ? 'Ready' : 'Off';
           if (!${staleModeChip ? 'true' : 'false'}) {
-            document.querySelector('[data-recursion-mode]').textContent = mode === 'off' ? 'Off' : (mode === 'observe' ? 'Observe only' : 'Auto');
+            document.querySelector('[data-recursion-mode]').textContent = mode === 'semi-auto' ? 'Semi-Auto' : 'Auto';
           }
         };
-        if ('${observeModeSave}' === 'noop' && mode === 'observe') return;
-        if ('${observeModeSave}' === 'async' && mode === 'observe') setTimeout(applyMode, 150);
+        if ('${semiAutoModeSave}' === 'noop' && mode === 'semi-auto') return;
+        if ('${semiAutoModeSave}' === 'async' && mode === 'semi-auto') setTimeout(applyMode, 150);
         else applyMode();
       });
       document.querySelector('[data-recursion-hand-toggle]').addEventListener('click', () => {
@@ -356,8 +365,8 @@ async function createSillyTavernSmokeFixtureServer({
   omitVisibleSendMarker = false,
   omitHostGenerationContinuation = false,
   sendControlsDisabled = false,
-  observeInjectsPrompt = false,
-  observeModeSave = 'sync',
+  semiAutoSkipsPrompt = false,
+  semiAutoModeSave = 'sync',
   unclearedPromptOnDisable = false,
   staleModeChip = false,
   reasonerFallback = false,
@@ -506,8 +515,8 @@ async function createSillyTavernSmokeFixtureServer({
         omitVisibleSendMarker,
         omitHostGenerationContinuation,
         sendControlsDisabled,
-        observeInjectsPrompt,
-        observeModeSave,
+        semiAutoSkipsPrompt,
+        semiAutoModeSave,
         unclearedPromptOnDisable,
         staleModeChip,
         reasonerFallback,
@@ -837,8 +846,8 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.storageProbe.status, 'pass', 'live smoke runs storage probe before browser smoke');
     assertEqual(report.browser.status, 'pass', 'browser result is pass');
     assertEqual(report.browser.snapshot.rootMounted, true, 'browser smoke sees Recursion root');
-    assertEqual(report.browser.snapshot.statusText, 'Ready', 'browser smoke reads runtime health separately');
-    assertEqual(report.browser.snapshot.modeText, 'Off', 'browser smoke reads mode chip separately');
+    assertEqual(report.browser.snapshot.statusText, 'Off', 'browser smoke reads disabled power state separately');
+    assertEqual(report.browser.snapshot.modeText, 'Semi-Auto', 'browser smoke reads mode chip separately');
     assertEqual(report.browser.snapshot.handOpen, true, 'browser smoke opens hand dropdown');
     assertEqual(report.browser.snapshot.progressOpen, true, 'browser smoke opens progress popover');
     assertEqual(report.browser.snapshot.actionMenuOpen, false, 'browser smoke sees no legacy action menu');
@@ -849,10 +858,10 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.browser.snapshot.bridge.interceptor, true, 'browser smoke sees Recursion generation bridge');
     assertEqual(report.browser.snapshot.bridge.enableHook, true, 'browser smoke sees Recursion enable hook');
     assertEqual(report.browser.snapshot.bridge.disableHook, true, 'browser smoke sees Recursion disable hook');
-    assertEqual(report.browser.snapshot.modeSmoke?.ok, true, 'browser smoke proves Off/Observe/Auto/Off mode flow');
-    assertDeepEqual(report.browser.snapshot.modeSmoke?.sequence, ['off', 'observe', 'auto', 'off'], 'mode smoke records exact mode sequence');
-    assertEqual(report.browser.snapshot.modeSmoke?.steps.at(0)?.promptCleared, true, 'initial Off clears seeded Recursion prompt');
-    assertEqual(report.browser.snapshot.modeSmoke?.steps.at(-1)?.promptCleared, true, 'final Off leaves Recursion prompts clear');
+    assertEqual(report.browser.snapshot.modeSmoke?.ok, true, 'browser smoke proves disabled/Auto/Semi-Auto/disabled flow');
+    assertDeepEqual(report.browser.snapshot.modeSmoke?.sequence, ['disabled', 'auto', 'semi-auto', 'disabled'], 'mode smoke records exact mode sequence');
+    assertEqual(report.browser.snapshot.modeSmoke?.steps.at(0)?.promptCleared, true, 'initial disabled power state clears seeded Recursion prompt');
+    assertEqual(report.browser.snapshot.modeSmoke?.steps.at(-1)?.promptCleared, true, 'final disabled power state leaves Recursion prompts clear');
     assertEqual(report.artifacts.liveLog, 'live-log.jsonl', 'live smoke writes live log path');
     assertEqual(report.artifacts.servedExtension, 'host-extensions/served-extension-compare.json', 'live smoke writes served extension compare path');
     assertEqual(report.artifacts.storageProbe, 'storage/probe.json', 'live smoke writes storage probe path');
@@ -1095,8 +1104,8 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.browser.snapshot.generation.triggerSource, 'ui-send', 'generation smoke uses visible send controls when available');
     assertEqual(report.browser.snapshot.generation.chatMutationSource, 'visible-control', 'generation smoke records visible chat mutation source');
     assertEqual(report.browser.snapshot.generation.hostGenerationContinued, true, 'generation smoke proves host generation continued after visible send');
-    assertEqual(report.browser.snapshot.generation.observeProof?.ok, true, 'generation smoke proves Observe mode before Auto');
-    assertEqual(report.browser.snapshot.generation.observeProof?.promptInstalled, false, 'Observe proof records no prompt install');
+    assertEqual(report.browser.snapshot.generation.semiAutoProof?.ok, true, 'generation smoke proves Semi-Auto mode before Auto');
+    assertEqual(report.browser.snapshot.generation.semiAutoProof?.promptInstalled, true, 'Semi-Auto proof records prompt install');
     assertEqual(/screenshot/i.test(report.nextAction || ''), false, 'generation success guidance does not ask for suppressed screenshots');
     assertEqual(report.browser.snapshot.generation.promptInstalled, true, 'generation smoke records Recursion prompt install');
     assertEqual(report.browser.cleanup?.promptCleared, true, 'generation smoke records Recursion prompt clear');
@@ -1122,9 +1131,9 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assert(promptMetadata.includes('"clearStatus": "cleared"'), 'generation prompt metadata records clear status');
     assert(promptMetadata.includes('"triggerSource": "ui-send"'), 'generation prompt metadata records visible trigger source');
     assert(promptMetadata.includes('"hostGenerationContinued": true'), 'generation prompt metadata records host continuation');
-    assert(promptMetadata.includes('"observeProof"'), 'generation prompt metadata records observe proof');
-    assert(promptMetadata.includes('"mode": "observe"'), 'generation prompt metadata records observe mode');
-    assert(promptMetadata.includes('"promptInstalled": false'), 'generation prompt metadata records observe no-injection');
+    assert(promptMetadata.includes('"semiAutoProof"'), 'generation prompt metadata records Semi-Auto proof');
+    assert(promptMetadata.includes('"mode": "semi-auto"'), 'generation prompt metadata records Semi-Auto mode');
+    assert(promptMetadata.includes('"promptInstalled": true'), 'generation prompt metadata records Semi-Auto injection');
     assert(promptMetadata.includes('"promptKeys"'), 'generation prompt metadata records prompt keys');
     assert(activityRun.includes('"generation-smoke-pass"'), 'generation activity latest-run records generation result');
     assert(redactionCheck.includes('"status": "pass"'), 'generation redaction check passes');
@@ -1136,7 +1145,7 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
-  const server = await createSillyTavernSmokeFixtureServer({ observeInjectsPrompt: true });
+  const server = await createSillyTavernSmokeFixtureServer({ semiAutoSkipsPrompt: true });
   try {
     const report = await runSillyTavernLiveSmoke({
       argv: ['--live'],
@@ -1147,10 +1156,10 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
         RECURSION_LIVE_TIMEOUT_MS: '1000'
       }
     });
-    assertEqual(report.status, 'fail', 'generation smoke fails if Observe mode installs prompt text before Auto');
-    assertEqual(report.result, 'generation-observe-injection-failed', 'Observe injection failure result is explicit');
-    assertEqual(report.browser.snapshot.generation.observeProof?.ok, false, 'Observe failure records failed proof');
-    assertEqual(report.browser.snapshot.generation.observeProof?.promptInstalled, true, 'Observe failure records prompt install');
+    assertEqual(report.status, 'fail', 'generation smoke fails if Semi-Auto does not install prompt text before Auto');
+    assertEqual(report.result, 'generation-semi-auto-install-failed', 'Semi-Auto install failure result is explicit');
+    assertEqual(report.browser.snapshot.generation.semiAutoProof?.ok, false, 'Semi-Auto failure records failed proof');
+    assertEqual(report.browser.snapshot.generation.semiAutoProof?.promptInstalled, false, 'Semi-Auto failure records missing prompt install');
   } finally {
     await server.close();
   }
@@ -1158,7 +1167,7 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 
 {
   const server = await createSillyTavernSmokeFixtureServer({ unclearedPromptOnDisable: true });
-  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-observe-baseline-fail-'));
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'recursion-semi-auto-baseline-fail-'));
   try {
     const report = await runSillyTavernLiveSmoke({
       argv: ['--live', '--write-artifacts'],
@@ -1170,21 +1179,21 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
       },
       artifactRoot
     });
-    assertEqual(report.status, 'fail', 'generation smoke fails if Observe baseline prompt remains installed');
-    assertEqual(report.result, 'generation-observe-injection-failed', 'uncleared Observe baseline uses explicit failure result');
-    assertEqual(report.browser.snapshot.generation.observeProof?.baselineClearOk, false, 'Observe proof records failed baseline clear');
-    assertEqual(report.browser.snapshot.generation.observeProof?.promptInstalled, true, 'Observe proof records remaining prompt install');
+    assertEqual(report.status, 'fail', 'generation smoke fails if Semi-Auto baseline prompt remains installed');
+    assertEqual(report.result, 'generation-semi-auto-install-failed', 'uncleared Semi-Auto baseline uses explicit failure result');
+    assertEqual(report.browser.snapshot.generation.semiAutoProof?.baselineClearOk, false, 'Semi-Auto proof records failed baseline clear');
+    assertEqual(report.browser.snapshot.generation.semiAutoProof?.promptInstalled, true, 'Semi-Auto proof records remaining prompt install');
     const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
     const promptMetadata = readFileSync(join(runRoot, 'prompt', 'latest-packet-metadata.json'), 'utf8');
     const activityRun = readFileSync(join(runRoot, 'activity', 'latest-run.json'), 'utf8');
     const redactionCheck = readFileSync(join(runRoot, 'diagnostics', 'redaction-check.json'), 'utf8');
-    assert(promptMetadata.includes('"observeProof"'), 'Observe baseline failure writes proof metadata');
-    assert(promptMetadata.includes('"baselineClearOk": false'), 'Observe baseline failure metadata records failed clear');
-    assert(activityRun.includes('"generation-observe-injection-failed"'), 'Observe baseline failure activity records result');
-    assert(redactionCheck.includes('"status": "pass"'), 'Observe baseline failure artifacts pass redaction');
-    assertEqual(existsSync(join(runRoot, 'screenshots', 'desktop.png')), false, 'Observe baseline failure omits desktop screenshot');
-    assertEqual(existsSync(join(runRoot, 'playwright', 'trace.zip')), false, 'Observe baseline failure omits trace');
-    assert(!promptMetadata.includes('Recursion stale observe baseline prompt'), 'Observe baseline failure omits raw prompt text');
+    assert(promptMetadata.includes('"semiAutoProof"'), 'Semi-Auto baseline failure writes proof metadata');
+    assert(promptMetadata.includes('"baselineClearOk": false'), 'Semi-Auto baseline failure metadata records failed clear');
+    assert(activityRun.includes('"generation-semi-auto-install-failed"'), 'Semi-Auto baseline failure activity records result');
+    assert(redactionCheck.includes('"status": "pass"'), 'Semi-Auto baseline failure artifacts pass redaction');
+    assertEqual(existsSync(join(runRoot, 'screenshots', 'desktop.png')), false, 'Semi-Auto baseline failure omits desktop screenshot');
+    assertEqual(existsSync(join(runRoot, 'playwright', 'trace.zip')), false, 'Semi-Auto baseline failure omits trace');
+    assert(!promptMetadata.includes('Recursion stale disabled baseline prompt'), 'Semi-Auto baseline failure omits raw prompt text');
   } finally {
     rmSync(artifactRoot, { recursive: true, force: true });
     await server.close();
@@ -1192,7 +1201,7 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
-  const server = await createSillyTavernSmokeFixtureServer({ observeModeSave: 'noop' });
+  const server = await createSillyTavernSmokeFixtureServer({ semiAutoModeSave: 'noop' });
   try {
     const report = await runSillyTavernLiveSmoke({
       argv: ['--live'],
@@ -1203,16 +1212,16 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
         RECURSION_LIVE_TIMEOUT_MS: '1000'
       }
     });
-    assertEqual(report.status, 'fail', 'generation smoke fails when Observe mode does not apply');
-    assertEqual(report.result, 'generation-observe-mode-unavailable', 'Observe mode no-op save failure result is explicit');
-    assertEqual(report.browser.snapshot.generation.observeProof?.ok, false, 'Observe mode no-op records failed proof');
+    assertEqual(report.status, 'fail', 'generation smoke fails when Semi-Auto mode does not apply');
+    assertEqual(report.result, 'generation-semi-auto-mode-unavailable', 'Semi-Auto mode no-op save failure result is explicit');
+    assertEqual(report.browser.snapshot.generation.semiAutoProof?.ok, false, 'Semi-Auto mode no-op records failed proof');
   } finally {
     await server.close();
   }
 }
 
 {
-  const server = await createSillyTavernSmokeFixtureServer({ observeModeSave: 'async' });
+  const server = await createSillyTavernSmokeFixtureServer({ semiAutoModeSave: 'async' });
   try {
     const report = await runSillyTavernLiveSmoke({
       argv: ['--live'],
@@ -1222,8 +1231,8 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
         RECURSION_LIVE_GENERATION: '1'
       }
     });
-    assertEqual(report.status, 'pass', 'generation smoke waits for asynchronous Observe mode application');
-    assertEqual(report.browser.snapshot.generation.observeProof?.observedMode, 'observe', 'async Observe proof records observed mode');
+    assertEqual(report.status, 'pass', 'generation smoke waits for asynchronous Semi-Auto mode application');
+    assertEqual(report.browser.snapshot.generation.semiAutoProof?.observedMode, 'semi-auto', 'async Semi-Auto proof records observed mode');
   } finally {
     await server.close();
   }

@@ -921,20 +921,26 @@ function modeSmokeReadStepScript() {
     })();
     const statusText = String(document.querySelector('[data-recursion-status]')?.textContent || '').replace(/\s+/g, ' ').trim();
     const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').replace(/\s+/g, ' ').trim();
+    const powerButton = document.querySelector('[data-recursion-power-toggle]');
+    const powerPressed = powerButton ? powerButton.getAttribute('aria-pressed') !== 'false' : true;
     const selectedValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '').toLowerCase();
     const modeLower = modeText.toLowerCase();
-    const observedMode = /off/.test(modeLower)
-      ? 'off'
-      : (/observe/.test(modeLower) ? 'observe' : (/auto/.test(modeLower) ? 'auto' : 'unknown'));
+    const observedMode = /semi/.test(modeLower)
+      ? 'semi-auto'
+      : (/auto/.test(modeLower) ? 'auto' : 'unknown');
     const promptKeys = Object.entries(context?.prompts || {})
       .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
       .map(([key]) => String(key))
       .slice(0, 24);
+    const expectedMode = mode === 'disabled' ? selectedValue : mode;
     return {
       mode: String(mode || ''),
       selectedValue,
       observedMode,
-      modeApplied: selectedValue === mode && observedMode === mode,
+      powerPressed,
+      modeApplied: mode === 'disabled'
+        ? powerPressed === false && promptKeys.length === 0
+        : powerPressed === true && selectedValue === expectedMode && observedMode === expectedMode,
       statusText,
       modeText,
       promptCleared: promptKeys.length === 0,
@@ -954,13 +960,16 @@ function modeSmokeWaitScript() {
     })();
     const selectedValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '').toLowerCase();
     const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').toLowerCase();
-    const observedMode = /off/.test(modeText)
-      ? 'off'
-      : (/observe/.test(modeText) ? 'observe' : (/auto/.test(modeText) ? 'auto' : 'unknown'));
+    const powerButton = document.querySelector('[data-recursion-power-toggle]');
+    const powerPressed = powerButton ? powerButton.getAttribute('aria-pressed') !== 'false' : true;
+    const observedMode = /semi/.test(modeText)
+      ? 'semi-auto'
+      : (/auto/.test(modeText) ? 'auto' : 'unknown');
     const promptKeys = Object.entries(context?.prompts || {})
       .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
       .map(([key]) => String(key));
-    return selectedValue === mode && observedMode === mode && (mode !== 'off' || promptKeys.length === 0);
+    if (mode === 'disabled') return powerPressed === false && promptKeys.length === 0;
+    return powerPressed === true && selectedValue === mode && observedMode === mode;
   };
 }
 
@@ -1020,7 +1029,7 @@ function generationRecorderInstallScript() {
   };
 }
 
-function generationObserveProofScript() {
+function generationSemiAutoProofScript() {
   return async () => {
     const context = (() => {
       try {
@@ -1037,12 +1046,11 @@ function generationObserveProofScript() {
       : [];
     const observedMode = (() => {
       const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').toLowerCase();
-      if (/observe/.test(modeText)) return 'observe';
+      if (/semi/.test(modeText)) return 'semi-auto';
       if (/auto/.test(modeText)) return 'auto';
-      if (/off/.test(modeText)) return 'off';
       return 'unknown';
     })();
-    const modeApplied = observedMode === 'observe';
+    const modeApplied = observedMode === 'semi-auto';
 
     let disableHookOk = false;
     let interceptorOk = false;
@@ -1055,7 +1063,7 @@ function generationObserveProofScript() {
       disableHookOk = true;
       if (Array.isArray(context?.__recursionSmokePromptEvents)) context.__recursionSmokePromptEvents.length = 0;
     } catch (clearError) {
-      error = String(clearError?.message || clearError || 'observe baseline clear failed');
+      error = String(clearError?.message || clearError || 'semi-auto baseline clear failed');
     }
 
     const beforePromptKeys = promptKeys();
@@ -1069,13 +1077,13 @@ function generationObserveProofScript() {
       chat.push({
         mesid: chat.length,
         is_user: true,
-        name: 'Recursion Smoke Observe',
-        mes: 'Recursion live smoke: prove Observe mode does not inject prompts.'
+        name: 'Recursion Smoke Semi-Auto',
+        mes: 'Recursion live smoke: prove Semi-Auto installs prompts.'
       });
       await globalThis.recursionGenerationInterceptor(chat);
       interceptorOk = true;
     } catch (interceptorError) {
-      error = String(interceptorError?.message || interceptorError || 'observe interceptor failed');
+      error = String(interceptorError?.message || interceptorError || 'semi-auto interceptor failed');
     }
 
     const afterEvents = eventSlice();
@@ -1089,15 +1097,15 @@ function generationObserveProofScript() {
       ...installedEvents.map((entry) => String(entry.key || '')),
       ...addedPromptKeys
     ])].filter(Boolean);
-    if (!error && !modeApplied) error = 'observe mode was not applied';
-    if (!error && !baselineClearOk) error = 'observe baseline prompt remained installed';
-    if (!error && promptInstalled) error = 'observe mode installed prompt text';
+    if (!error && !modeApplied) error = 'semi-auto mode was not applied';
+    if (!error && !baselineClearOk) error = 'semi-auto baseline prompt remained installed';
+    if (!error && !promptInstalled) error = 'semi-auto mode did not install prompt text';
     const proof = {
       requested: true,
-      mode: 'observe',
+      mode: 'semi-auto',
       observedMode,
       modeApplied,
-      ok: modeApplied && baselineClearOk && interceptorOk && !promptInstalled,
+      ok: modeApplied && baselineClearOk && interceptorOk && promptInstalled,
       disableHookOk,
       baselineClearOk,
       interceptorOk,
@@ -1106,11 +1114,11 @@ function generationObserveProofScript() {
       promptEventCount: newEvents.length,
       error
     };
-    globalThis.__recursionSmokeObserveProof = proof;
+    globalThis.__recursionSmokeSemiAutoProof = proof;
     globalThis.__recursionSmokeGeneration = {
       ...(globalThis.__recursionSmokeGeneration || {}),
       requested: true,
-      observeProof: proof
+      semiAutoProof: proof
     };
     return proof;
   };
@@ -1217,7 +1225,7 @@ function generationBaseSetupScript() {
     const base = {
       requested: true,
       reasonerRequested: Boolean(pageReasonerRequested),
-      observeProof: globalThis.__recursionSmokeObserveProof || null,
+      semiAutoProof: globalThis.__recursionSmokeSemiAutoProof || null,
       startedAt: new Date().toISOString(),
       triggerSource,
       chatMutationSource,
@@ -1366,7 +1374,7 @@ function generationEvidenceScript() {
       modeText,
       ready: /Ready/i.test(statusText),
       promptPacketVisible,
-      observeProof: base.observeProof || globalThis.__recursionSmokeObserveProof || null,
+      semiAutoProof: base.semiAutoProof || globalThis.__recursionSmokeSemiAutoProof || null,
       promptPacket: packet
         ? {
             packetId,
@@ -1491,8 +1499,19 @@ function generationPromptClearScript() {
 }
 
 async function applyRecursionModeSmokeStep(page, mode, timeoutMs) {
-  await page.locator('[data-recursion-setting-mode]').selectOption(mode, { timeout: timeoutMs });
-  await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
+  if (mode === 'disabled') {
+    await page.evaluate(() => {
+      const button = document.querySelector('[data-recursion-power-toggle]');
+      if (button?.getAttribute('aria-pressed') !== 'false') button.click();
+    });
+  } else {
+    await page.evaluate(() => {
+      const button = document.querySelector('[data-recursion-power-toggle]');
+      if (button?.getAttribute('aria-pressed') === 'false') button.click();
+    });
+    await page.locator('[data-recursion-setting-mode]').selectOption(mode, { timeout: timeoutMs });
+    await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
+  }
   await page.waitForFunction(modeSmokeWaitScript(), mode, { timeout: timeoutMs });
   return await page.evaluate(modeSmokeReadStepScript(), mode);
 }
@@ -1500,12 +1519,12 @@ async function applyRecursionModeSmokeStep(page, mode, timeoutMs) {
 async function runRecursionModeSmoke(page, timeoutMs) {
   const seed = await page.evaluate(modeSmokeSeedPromptScript());
   const steps = [];
-  for (const mode of ['off', 'observe', 'auto', 'off']) {
+  for (const mode of ['disabled', 'auto', 'semi-auto', 'disabled']) {
     steps.push(await applyRecursionModeSmokeStep(page, mode, timeoutMs));
   }
   const sequence = steps.map((step) => step.mode);
   const ok = seed.seeded === true
-    && sequence.join('|') === 'off|observe|auto|off'
+    && sequence.join('|') === 'disabled|auto|semi-auto|disabled'
     && steps.every((step) => step.modeApplied === true)
     && steps[0]?.promptCleared === true
     && steps.at(-1)?.promptCleared === true;
@@ -1642,7 +1661,7 @@ async function runBrowserUiSmoke({
         throw failed;
       });
       if (!modeSmoke?.ok) {
-        const failed = new Error('Recursion mode smoke did not prove Off/Observe/Auto/Off cleanup.');
+        const failed = new Error('Recursion mode smoke did not prove disabled/Auto/Semi-Auto/disabled cleanup.');
         failed.status = 'fail';
         failed.result = 'browser-mode-smoke-failed';
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ modeSmoke }));
@@ -1652,16 +1671,16 @@ async function runBrowserUiSmoke({
 
     if (generationRequested) {
       await page.evaluate(generationRecorderInstallScript());
-      await page.locator('[data-recursion-setting-mode]').selectOption('observe', { timeout: timeoutMs });
+      await page.locator('[data-recursion-setting-mode]').selectOption('semi-auto', { timeout: timeoutMs });
       await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
       try {
         await page.waitForFunction(() => {
           const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '');
           const selectValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '');
-          return selectValue === 'observe' && /Observe/i.test(modeText);
+          return selectValue === 'semi-auto' && /Semi/i.test(modeText);
         }, null, { timeout: timeoutMs });
       } catch (error) {
-        const observeProof = await page.evaluate(() => {
+        const semiAutoProof = await page.evaluate(() => {
           const context = (() => {
             try {
               return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
@@ -1670,15 +1689,15 @@ async function runBrowserUiSmoke({
             }
           })();
           const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').toLowerCase();
-          const observedMode = /observe/.test(modeText)
-            ? 'observe'
-            : (/auto/.test(modeText) ? 'auto' : (/off/.test(modeText) ? 'off' : 'unknown'));
+          const observedMode = /semi/.test(modeText)
+            ? 'semi-auto'
+            : (/auto/.test(modeText) ? 'auto' : 'unknown');
           const promptKeys = Object.entries(context?.prompts || {})
             .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
             .map(([key]) => String(key));
           const proof = {
             requested: true,
-            mode: 'observe',
+            mode: 'semi-auto',
             observedMode,
             modeApplied: false,
             ok: false,
@@ -1688,18 +1707,18 @@ async function runBrowserUiSmoke({
             promptInstalled: promptKeys.length > 0,
             promptKeys,
             promptEventCount: 0,
-            error: 'observe mode was not applied'
+            error: 'semi-auto mode was not applied'
           };
-          globalThis.__recursionSmokeObserveProof = proof;
+          globalThis.__recursionSmokeSemiAutoProof = proof;
           globalThis.__recursionSmokeGeneration = {
             ...(globalThis.__recursionSmokeGeneration || {}),
             requested: true,
-            observeProof: proof
+            semiAutoProof: proof
           };
           return proof;
         }).catch(() => ({
           requested: true,
-          mode: 'observe',
+          mode: 'semi-auto',
           observedMode: 'unknown',
           modeApplied: false,
           ok: false,
@@ -1709,22 +1728,22 @@ async function runBrowserUiSmoke({
           promptInstalled: false,
           promptKeys: [],
           promptEventCount: 0,
-          error: 'observe mode was not applied'
+          error: 'semi-auto mode was not applied'
         }));
-        const failed = new Error('Recursion Observe mode did not apply before Auto smoke.');
+        const failed = new Error('Recursion Semi-Auto mode did not apply before Auto smoke.');
         failed.status = 'fail';
-        failed.result = 'generation-observe-mode-unavailable';
+        failed.result = 'generation-semi-auto-mode-unavailable';
         failed.cause = error;
-        failed.generation = { requested: true, observeProof };
+        failed.generation = { requested: true, semiAutoProof };
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation: failed.generation }));
         throw failed;
       }
-      const observeProof = await page.evaluate(generationObserveProofScript());
-      if (!observeProof?.ok) {
-        const failed = new Error('Recursion Observe mode installed prompt text before Auto smoke.');
+      const semiAutoProof = await page.evaluate(generationSemiAutoProofScript());
+      if (!semiAutoProof?.ok) {
+        const failed = new Error('Recursion Semi-Auto mode did not install prompt text before Auto smoke.');
         failed.status = 'fail';
-        failed.result = 'generation-observe-injection-failed';
-        failed.generation = { requested: true, observeProof };
+        failed.result = 'generation-semi-auto-install-failed';
+        failed.generation = { requested: true, semiAutoProof };
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation: failed.generation }));
         throw failed;
       }
@@ -2014,22 +2033,22 @@ function promptMetadataFromBrowserResult(report, browserResult) {
     triggerSource: String(generation?.triggerSource || ''),
     chatMutationSource: String(generation?.chatMutationSource || ''),
     hostGenerationContinued: generation?.hostGenerationContinued === null ? null : generation?.hostGenerationContinued === true,
-    observeProof: generation?.observeProof
+    semiAutoProof: generation?.semiAutoProof
       ? {
-          requested: generation.observeProof.requested === true,
-          mode: String(generation.observeProof.mode || ''),
-          observedMode: String(generation.observeProof.observedMode || ''),
-          modeApplied: generation.observeProof.modeApplied === true,
-          ok: generation.observeProof.ok === true,
-          disableHookOk: generation.observeProof.disableHookOk === true,
-          baselineClearOk: generation.observeProof.baselineClearOk === true,
-          interceptorOk: generation.observeProof.interceptorOk === true,
-          promptInstalled: generation.observeProof.promptInstalled === true,
-          promptKeys: Array.isArray(generation.observeProof.promptKeys)
-            ? generation.observeProof.promptKeys.map((entry) => String(entry)).filter(Boolean).slice(0, 24)
+          requested: generation.semiAutoProof.requested === true,
+          mode: String(generation.semiAutoProof.mode || ''),
+          observedMode: String(generation.semiAutoProof.observedMode || ''),
+          modeApplied: generation.semiAutoProof.modeApplied === true,
+          ok: generation.semiAutoProof.ok === true,
+          disableHookOk: generation.semiAutoProof.disableHookOk === true,
+          baselineClearOk: generation.semiAutoProof.baselineClearOk === true,
+          interceptorOk: generation.semiAutoProof.interceptorOk === true,
+          promptInstalled: generation.semiAutoProof.promptInstalled === true,
+          promptKeys: Array.isArray(generation.semiAutoProof.promptKeys)
+            ? generation.semiAutoProof.promptKeys.map((entry) => String(entry)).filter(Boolean).slice(0, 24)
             : [],
-          promptEventCount: Number(generation.observeProof.promptEventCount) || 0,
-          error: sanitizeHarnessText(generation.observeProof.error || '', 240)
+          promptEventCount: Number(generation.semiAutoProof.promptEventCount) || 0,
+          error: sanitizeHarnessText(generation.semiAutoProof.error || '', 240)
         }
       : null,
     available,
@@ -2112,14 +2131,14 @@ function activityLatestRunFromReport(report, liveLog, browserResult) {
                   triggerSource: browserGeneration.triggerSource || '',
                   chatMutationSource: browserGeneration.chatMutationSource || '',
                   hostGenerationContinued: browserGeneration.hostGenerationContinued === null ? null : browserGeneration.hostGenerationContinued === true,
-                  observeProof: browserGeneration.observeProof
+                  semiAutoProof: browserGeneration.semiAutoProof
                     ? {
-                        ok: browserGeneration.observeProof.ok === true,
-                        mode: browserGeneration.observeProof.mode || '',
-                        observedMode: browserGeneration.observeProof.observedMode || '',
-                        modeApplied: browserGeneration.observeProof.modeApplied === true,
-                        promptInstalled: browserGeneration.observeProof.promptInstalled === true,
-                        promptEventCount: browserGeneration.observeProof.promptEventCount || 0
+                        ok: browserGeneration.semiAutoProof.ok === true,
+                        mode: browserGeneration.semiAutoProof.mode || '',
+                        observedMode: browserGeneration.semiAutoProof.observedMode || '',
+                        modeApplied: browserGeneration.semiAutoProof.modeApplied === true,
+                        promptInstalled: browserGeneration.semiAutoProof.promptInstalled === true,
+                        promptEventCount: browserGeneration.semiAutoProof.promptEventCount || 0
                       }
                     : null,
                   interceptorOk: browserGeneration.interceptorOk === true,
@@ -3174,13 +3193,13 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
                     triggerSource: browserResult.snapshot.generation.triggerSource,
                     chatMutationSource: browserResult.snapshot.generation.chatMutationSource,
                     hostGenerationContinued: browserResult.snapshot.generation.hostGenerationContinued,
-                    observeProof: browserResult.snapshot.generation.observeProof
+                    semiAutoProof: browserResult.snapshot.generation.semiAutoProof
                       ? {
-                          ok: browserResult.snapshot.generation.observeProof.ok === true,
-                          mode: browserResult.snapshot.generation.observeProof.mode || '',
-                          observedMode: browserResult.snapshot.generation.observeProof.observedMode || '',
-                          modeApplied: browserResult.snapshot.generation.observeProof.modeApplied === true,
-                          promptInstalled: browserResult.snapshot.generation.observeProof.promptInstalled === true
+                          ok: browserResult.snapshot.generation.semiAutoProof.ok === true,
+                          mode: browserResult.snapshot.generation.semiAutoProof.mode || '',
+                          observedMode: browserResult.snapshot.generation.semiAutoProof.observedMode || '',
+                          modeApplied: browserResult.snapshot.generation.semiAutoProof.modeApplied === true,
+                          promptInstalled: browserResult.snapshot.generation.semiAutoProof.promptInstalled === true
                         }
                       : null,
                     interceptorOk: browserResult.snapshot.generation.interceptorOk,
@@ -3213,13 +3232,13 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
                   triggerSource: browserResult.snapshot.generation.triggerSource,
                   chatMutationSource: browserResult.snapshot.generation.chatMutationSource,
                   hostGenerationContinued: browserResult.snapshot.generation.hostGenerationContinued,
-                  observeProof: browserResult.snapshot.generation.observeProof
+                  semiAutoProof: browserResult.snapshot.generation.semiAutoProof
                     ? {
-                        ok: browserResult.snapshot.generation.observeProof.ok === true,
-                        mode: browserResult.snapshot.generation.observeProof.mode || '',
-                        observedMode: browserResult.snapshot.generation.observeProof.observedMode || '',
-                        modeApplied: browserResult.snapshot.generation.observeProof.modeApplied === true,
-                        promptInstalled: browserResult.snapshot.generation.observeProof.promptInstalled === true
+                        ok: browserResult.snapshot.generation.semiAutoProof.ok === true,
+                        mode: browserResult.snapshot.generation.semiAutoProof.mode || '',
+                        observedMode: browserResult.snapshot.generation.semiAutoProof.observedMode || '',
+                        modeApplied: browserResult.snapshot.generation.semiAutoProof.modeApplied === true,
+                        promptInstalled: browserResult.snapshot.generation.semiAutoProof.promptInstalled === true
                       }
                     : null,
                   promptInstalled: browserResult.snapshot.generation.promptInstalled,

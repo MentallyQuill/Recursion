@@ -1,6 +1,6 @@
 import { cloneJson } from './core.mjs';
 
-const MODES = new Set(['off', 'observe', 'auto']);
+const MODES = new Set(['auto', 'semi-auto']);
 const STRENGTHS = new Set(['light', 'balanced', 'strong']);
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
 const FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
@@ -21,7 +21,8 @@ function deepFreeze(value) {
 }
 
 export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
-  mode: 'observe',
+  enabled: true,
+  mode: 'auto',
   strength: 'balanced',
   reasoningLevel: 'high',
   promptFootprint: 'normal',
@@ -186,6 +187,7 @@ export function normalizeSettings(value = {}, secretStore = null) {
   const source = value && typeof value === 'object' ? value : {};
   const reasoningLevel = enumValue(source.reasoningLevel, REASONING_LEVELS, DEFAULT_RECURSION_SETTINGS.reasoningLevel);
   return {
+    enabled: source.enabled !== false,
     mode: enumValue(source.mode, MODES, DEFAULT_RECURSION_SETTINGS.mode),
     strength: enumValue(source.strength, STRENGTHS, DEFAULT_RECURSION_SETTINGS.strength),
     reasoningLevel,

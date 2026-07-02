@@ -19,6 +19,7 @@ function assertThrows(fn, pattern, message) {
 }
 
 const normalized = normalizeSettings({
+  enabled: false,
   mode: 'auto',
   strength: 'strong',
   reasoningLevel: 'ultra',
@@ -28,6 +29,9 @@ const normalized = normalizeSettings({
     reasoner: { enabled: true, source: 'host-current-model' }
   }
 });
+const semiAutoNormalized = normalizeSettings({ mode: 'semi-auto' });
+assertEqual(semiAutoNormalized.mode, 'semi-auto', 'semi-auto mode preserved');
+assertEqual(normalized.enabled, false, 'power toggle disabled state preserved');
 assertDeepEqual(
   normalizeSettings({}).injection,
   { placement: 'default', role: 'system', depth: 'default' },
@@ -70,6 +74,8 @@ const blankDiagnostics = normalizeSettings({ diagnostics: { maxJournalEntries: '
 assertEqual(blankDiagnostics.diagnostics.maxJournalEntries, DEFAULT_RECURSION_SETTINGS.diagnostics.maxJournalEntries, 'blank diagnostics max falls back');
 
 const defaultUi = normalizeSettings({});
+assertEqual(defaultUi.enabled, true, 'power toggle defaults on');
+assertEqual(defaultUi.mode, 'auto', 'mode defaults to auto');
 assertEqual(defaultUi.reasoningLevel, 'high', 'reasoning level defaults to high');
 assertEqual(defaultUi.ui.progressChildVisibleLimit, 5, 'sub-tier visible item default is five');
 assertEqual(defaultUi.ui.progressListVisibleLimit, 15, 'whole progress list visible item default is fifteen');

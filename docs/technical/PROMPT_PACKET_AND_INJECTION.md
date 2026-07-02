@@ -28,7 +28,7 @@ flowchart TD
     Packet --> Blocks["SillyTavern prompt blocks"]
 ```
 
-<Render Needed>: assets/documentation/renders/recursion-prompt-packet-stack.png - Prompt packet stack visual showing Scene Brief, Turn Brief, Guardrails, selected-card refs, omissions, section hashes, and injection metadata.
+![Prompt packet stack visual](../../assets/documentation/renders/recursion-prompt-packet-stack.png)
 
 ## Composer Inputs
 
@@ -116,7 +116,7 @@ Advanced user settings can override the composed packet's effective insertion la
 
 `default` preserves the section template shown above. Explicit overrides apply to the composed Recursion packet blocks after Utility/Reasoner composition and before host install. They are intended for model/preset compatibility, not per-card prompt engineering. Invalid or unsupported host combinations must normalize to the default safe system-role plan and emit a compact activity warning.
 
-Off mode, Observe only mode, disable, delete, and runtime teardown clear Recursion prompt keys best-effort.
+Power-off, extension disable, delete, and runtime teardown clear Recursion prompt keys best-effort.
 
 <Render Needed>: assets/documentation/renders/recursion-prompt-injection-lanes.png - Injection visual showing Recursion prompt keys, clear-before-install, rollback on failure, and host prompt boundary.
 

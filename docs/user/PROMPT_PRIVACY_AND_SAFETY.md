@@ -43,7 +43,7 @@ Runtime safety rules:
 
 - Validate packet schema before install.
 - Match packet fingerprints to the active chat, scene, turn, settings, and provider state.
-- Clear stale packet lanes when Off mode, disable, chat change, source edit, settings change, or provider change invalidates them.
+- Clear stale packet lanes when power-off, extension disable, chat change, source edit, settings change, or provider change invalidates them.
 - Prefer no Recursion prompt over an invalid or stale prompt.
 - Do not treat Recursion as the top-level system authority over SillyTavern character prompts, presets, author notes, World Info, Memory Books, Summaryception, VectFox, or other context tools.
 
@@ -163,7 +163,7 @@ Before using Auto:
 
 1. Confirm Utility is healthy.
 2. Confirm Reasoner is intentionally enabled or disabled.
-3. Use Observe only first if you are unsure what Recursion will compile.
+3. Inspect Last Brief and Prompt Packet after a safe Auto or Semi-Auto pass if you are unsure what Recursion compiled.
 4. Inspect Prompt Packet when output quality or privacy matters.
 5. Confirm the packet is current-scene guidance, not lore, memory, or hidden planning.
 

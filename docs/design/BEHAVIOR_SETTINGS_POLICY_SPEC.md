@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This spec defines the target V1 contract for the Play-tab behavior controls:
+This spec defines the implemented V1 contract for the Play-tab behavior controls:
 
 - Strength
 - Focus
@@ -10,7 +10,7 @@ This spec defines the target V1 contract for the Play-tab behavior controls:
 
 These controls must create observable backend behavior, not merely send vague hints to the Arbiter. The design keeps Recursion mostly turnkey by making each setting a small pressure control over the automatic card and prompt pipeline.
 
-This spec covers design improvement planning. It does not replace provider routing, card generation, prompt composition, storage, or UI specs; it defines how those systems should interpret the user-facing behavior knobs.
+This spec covers the source-backed behavior policy implemented in `src/settings-policy.mjs`. It does not replace provider routing, card generation, prompt composition, storage, or UI specs; it defines how those systems interpret the user-facing behavior knobs.
 
 Related docs:
 
@@ -25,9 +25,9 @@ Related docs:
 
 ## Problem
 
-Prompt Footprint already affects prompt composition because it maps to concrete packet budgets. Strength and Focus are currently too weak if they are only normalized, stored, passed to Arbiter JSON, and included in the scene-cache settings hash.
+Prompt Footprint affects prompt composition because it maps to concrete packet budgets. Strength and Focus also have backend effects through policy prompt lines, plan shaping, hand-selection pressure, composer lines, boosted-family ordering, and diagnostics.
 
-That is not enough for a user-facing control. If the Arbiter ignores the raw setting text, the backend should still show a predictable difference.
+If the Arbiter ignores raw setting text, the backend still shows predictable mechanical differences.
 
 The robust approach is:
 
@@ -76,7 +76,7 @@ Recursion should not implement brittle deterministic relevance scoring. Runtime 
 
 ## Influence Policy Object
 
-Runtime should derive one policy object from normalized settings at the start of each run. This keeps Arbiter prompt text, post-Arbiter plan shaping, hand selection, composition, diagnostics, and tests aligned.
+Runtime derives one policy object from normalized settings at the start of each run. This keeps Arbiter prompt text, post-Arbiter plan shaping, hand selection, composition, diagnostics, and tests aligned.
 
 Source module:
 
@@ -84,7 +84,7 @@ Source module:
 src/settings-policy.mjs
 ```
 
-Target shape:
+Current shape:
 
 ```ts
 type RecursionInfluencePolicy = {
@@ -98,7 +98,7 @@ type RecursionInfluencePolicy = {
     composerLine: string;
   };
   focus: {
-    level: "balanced" | "character" | "continuity" | "prose" | "plot";
+    level: "balanced" | "character" | "constraints" | "scene" | "plot";
     boostedFamilies: string[];
     arbiterLine: string;
     composerLine: string;
@@ -243,7 +243,7 @@ Prohibited effects:
 
 ## Runtime Flow
 
-Target V1 flow:
+Implemented V1 flow:
 
 1. Normalize settings.
 2. Derive `influencePolicyForSettings(settings)`.
@@ -315,7 +315,7 @@ Diagnostics should expose policy effects without exposing prompt internals:
     "focus": "character",
     "storedFootprint": "normal",
     "effectiveFootprint": "rich",
-    "footprintOverrideReason": "high-continuity-risk",
+    "footprintOverrideReason": "high-scene-constraint-risk",
     "boostedFamilies": ["Active Cast", "Character Motivation", "Relationship", "Knowledge"],
     "selectedBoostedCards": 3,
     "planShaping": ["strong-refresh-pressure", "focus-family-ordering"]
@@ -331,20 +331,20 @@ Visible surfaces:
 - Full Viewer should show the full sanitized behavior policy for the last run.
 - Export Diagnostics may include the policy object, but not raw prompts or provider responses.
 
-## Implementation Planning
+## Implementation Status
 
-Recommended task order:
+The deterministic V1 policy surface is implemented in `src/settings-policy.mjs` and covered by focused settings-policy, runtime, prompt, card-scope, and UI tests.
 
-1. Add policy tests before code.
-2. Create `src/settings-policy.mjs` with pure policy derivation and exported constants.
-3. Thread the policy into the Arbiter prompt.
-4. Apply post-Arbiter plan shaping for footprint, strength, and focus.
-5. Apply policy-aware hand selection without adding deterministic semantic relevance.
-6. Thread policy into prompt composition and diagnostics.
-7. Update UI view models and Full Viewer diagnostics.
-8. Update docs and render evidence.
+Current source-backed behavior:
 
-The first implementation pass should focus on deterministic tests and runtime contracts. Live SillyTavern proof comes after the deterministic suite passes.
+- `influencePolicyForSettings(settings)` derives Strength, Focus, Prompt Footprint, card-budget, reasoning-level, and injection policy data from normalized settings.
+- `behaviorPolicyPromptLines(policy)` adds compact Strength, Focus, and Prompt Footprint policy lines to the Utility Arbiter request.
+- `runPolicyForEffectivePlan(settings, plan)` resolves the stored Prompt Footprint plus the Arbiter's current-run footprint request into an effective footprint for hand selection, composition, and diagnostics.
+- Runtime clamps Arbiter card budgets through Reasoning Level plus Min/Max Cards, applies Strength and Focus as mechanical pressure, and records compact plan-shaping diagnostics.
+- Reasoning Level derives provider reasoning intent per work category: final brief composition scales from minimal to medium/high, High and Ultra Reasoner Arbiter work uses medium, Reasoner card work stays minimal except Ultra, and provider tests always use minimal.
+- Prompt composition consumes the effective behavior policy, section budgets, and composer policy lines without exposing raw provider output or hidden reasoning.
+
+Live SillyTavern proof remains a separate release gate. The policy contract is considered source-backed when the deterministic suite passes; live renders and live smoke should prove the user-facing surface only after the real UI is stable enough to capture.
 
 ## Verification Plan
 
@@ -362,14 +362,14 @@ Required focused tests:
 - Reasoner unavailable still produces a Utility-composed packet with policy diagnostics.
 - Diagnostics contain policy labels and hashes, not raw prompts, raw responses, secrets, or transcript text.
 
-Recommended commands:
+Maintained commands:
 
 ```powershell
 npm.cmd test
 node tools\scripts\run-alpha-gate.mjs
 ```
 
-Use live SillyTavern smoke only after the deterministic suite proves the contract.
+Use live SillyTavern smoke only after the deterministic suite proves the contract and a dedicated `recursion-soak-*` user is configured.
 
 ## Acceptance Criteria
 
@@ -394,4 +394,4 @@ Do not add these while implementing this policy:
 - A separate "auto everything" setting that hides these three controls.
 - Legacy support for older pre-alpha settings that contradict this contract.
 
-Recursion is pre-alpha. When this policy is implemented, update code, docs, tests, and examples in place to the new coherent V1 contract.
+Recursion is pre-alpha. When this policy changes, update code, docs, tests, and examples in place to the new coherent V1 contract.

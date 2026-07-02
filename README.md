@@ -4,7 +4,7 @@ Recursion is a pre-alpha SillyTavern extension that improves the next roleplay g
 
 Recursion is not a continuity extension, memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product. It is a focused prompt compiler for the scene in front of the user: cards should expand immediate scene implications, affordances, constraints, tensions, and reveal boundaries rather than restate facts or teach broad lore the model already knows.
 
-<Render Needed>: assets/documentation/renders/recursion-bar-desktop.png - Recursion Bar mounted in SillyTavern on desktop, showing power, Auto/Manual mode, Cards scope, Hero Pixel Array, reasoning level, Last Brief dropdown, and options controls.
+![Recursion Bar mounted in SillyTavern on desktop](assets/documentation/renders/recursion-bar-desktop.png)
 
 ## Current Status
 
@@ -16,16 +16,17 @@ Recursion is not a continuity extension, memory manager, lore database, summary 
 - Stylesheet: `styles/recursion.css`
 - License: [MIT](LICENSE)
 
-V1 currently covers settings, provider lanes, scene cards, runtime coordination, SillyTavern host integration, prompt packet composition/injection, Recursion Bar UI surfaces, and focused automated tests. Live SillyTavern smoke is guarded and must use a dedicated `recursion-soak-*` user, not `default-user`.
+V1 currently covers settings, behavior policy, provider lanes, scene cards, runtime coordination, SillyTavern host integration, prompt packet composition/injection, Recursion Bar UI surfaces, and focused automated tests. Live SillyTavern smoke is guarded and must use a dedicated `recursion-soak-*` user, not `default-user`.
 
 ## Fast Start
 
 1. Install or serve Recursion as a SillyTavern extension.
 2. Enable the `Recursion` extension in SillyTavern.
 3. Configure the Utility provider.
-4. Leave Reasoner off unless you want the optional composition lane.
-5. Keep the power toggle on and use `Auto` or `Manual` to prepare and install the next prompt packet.
-6. Watch the Hero Pixel Array progress menu, then inspect Last Brief or Full Viewer when you need details.
+4. Keep Utility tested; enable and test Reasoner only when you want Medium/High/Ultra routing to use the optional synthesis lane.
+5. Use the Reasoning Level chain for broad cost/depth bias: Low is Utility-only, Medium/High/Ultra become Reasoner-eligible when the lane is healthy.
+6. Keep the power toggle on and use `Auto` or `Manual` to prepare and install the next prompt packet.
+7. Watch the Hero Pixel Array progress menu, then inspect Last Brief or Full Viewer when you need details.
 
 ## Key Features
 
@@ -34,17 +35,18 @@ V1 currently covers settings, provider lanes, scene cards, runtime coordination,
 | Recursion Bar | Chat-attached top bar for power, Auto/Manual mode, Cards scope, Hero Pixel Array progress, reasoning level, Last Brief, options, and viewer access. |
 | Hero Pixel Array progress menu | Visible progress for snapshot reading, Utility planning, card generation, prompt composition, prompt install, fallback, and ready states. |
 | Scene deck and turn hand | Bounded current-scene cache with a compact hand selected for the next generation. |
-| Utility lane | Required default lane for Arbiter planning, structured card work, and normal prompt composition. |
-| Reasoner lane | Optional composer lane for crowded, conflicted, or subtle hands; Utility remains the fallback. |
+| Utility lane | Required default lane for Arbiter planning, structured card work, provider tests, and Utility fallback composition. |
+| Reasoner lane | Optional synthesis lane controlled by Reasoning Level and lane health; Utility remains the fallback. |
+| Behavior policy | Source-backed Strength, Min/Max Cards, Focus, and Prompt Footprint policy through `src/settings-policy.mjs`. |
 | Prompt packet | Bounded, inspectable Scene Brief, Turn Brief, and Guardrails installed through Recursion-owned SillyTavern prompt entries. |
 | Storage and diagnostics | Compact settings, logical scene cache, bounded run journal, sanitized activity, and artifact redaction boundaries. |
 | Live smoke guardrails | Dedicated soak users are required; `default-user` is rejected before live mutation or provider calls. |
 
-<Render Needed>: assets/documentation/renders/recursion-progress-menu-auto-pass.png - Hero Pixel Array progress menu during an Auto pass, showing Utility planning, card generation, prompt composition, prompt install, and ready state.
+![Hero Pixel Array progress menu during an Auto pass](assets/documentation/renders/recursion-progress-menu-auto-pass.png)
 
-<Render Needed>: assets/documentation/renders/recursion-full-viewer-overview.png - Full Viewer overview with Now, Deck, Activity, Prompt Packet, settings, providers, and sanitized diagnostics visible.
+![Full Viewer overview with cards, activity, prompt packet, settings, providers, and diagnostics](assets/documentation/renders/recursion-full-viewer-overview.png)
 
-<Render Needed>: assets/documentation/renders/recursion-bar-mobile.png - Recursion Bar in a phone-width SillyTavern viewport, showing wrapped or compact controls without overlap.
+![Recursion Bar in a phone-width SillyTavern viewport](assets/documentation/renders/recursion-bar-mobile.png)
 
 ## Documentation
 

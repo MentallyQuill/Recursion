@@ -10,6 +10,7 @@ import {
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { composePromptPacket, PROMPT_PACKET_VERSION } from './prompt.mjs';
 import { PROVIDER_CONTRACT_HASH, fetchOpenAICompatibleModels } from './providers.mjs';
+import { reasoningRequestMetadata } from './reasoning-policy.mjs';
 import { createSettingsStore, normalizeCardBudgetSettings, normalizeSettings } from './settings.mjs';
 import { behaviorPolicyPromptLines, influencePolicyForSettings, runPolicyForEffectivePlan } from './settings-policy.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
@@ -609,10 +610,20 @@ function cardLaneForRequest(request, settings) {
 }
 
 function applyReasoningLaneToCardRequest(request, settings) {
-  return {
+  const routedRequest = {
     ...request,
     lane: cardLaneForRequest(request, settings)
   };
+  if (routedRequest.lane !== 'reasoner') return routedRequest;
+  return {
+    ...routedRequest,
+    ...reasoningRequestMetadata(settings, 'card')
+  };
+}
+
+function reasonerRequestMetadata(settings, category, lane) {
+  if (lane !== 'reasoner') return {};
+  return reasoningRequestMetadata(settings, category);
 }
 
 function normalizePlanCardJobs(value) {
@@ -1213,6 +1224,24 @@ function arbiterCardJobContractLine() {
     '- Use lifecycle actions only for cached or accepted card ids: select, emphasize, stow, discard, regenerate.',
     '- Lifecycle regenerate marks an old cached card stale; it does not create a replacement without cardJobs.',
     '- Do not include raw prompt text, hidden reasoning, provider endpoints, or host prompt instructions in plan fields.'
+  ].join('\n');
+}
+
+function arbiterOutputContractLine(snapshotHash) {
+  const frozenSnapshotHash = safeText(snapshotHash, 180);
+  return [
+    'Output contract:',
+    'Return exactly one JSON object with these required top-level fields:',
+    `- "schema": "${UTILITY_ARBITER_SCHEMA}"`,
+    `- "snapshotHash": "${frozenSnapshotHash}"`,
+    '- "action": "skip" | "reuse-cache" | "refresh-cards" | "compose-brief"',
+    '- "sceneStatus": "same-scene" | "soft-shift" | "hard-shift" | "unknown"',
+    '- "promptFootprint": "compact" | "normal" | "rich"',
+    '- "cardJobs": []',
+    '- "reasonerDecision": {"mode":"use"|"skip","reason":"string","signals":[]}',
+    '- "budgets": {"targetBriefTokens":500,"maxCards":6}',
+    '- "diagnostics": []',
+    'Do not emit reasoning, lifecycleActions, markdown, or prose.'
   ].join('\n');
 }
 
@@ -2154,6 +2183,7 @@ export function createRecursionRuntime({
       const result = await generationRouter.generate('providerTest', {
         runId,
         lane: resolvedLane,
+        ...reasoningRequestMetadata({}, 'provider-test'),
         prompt: providerTestPrompt(resolvedLane)
       });
       if (validProviderTestResult(result)) {
@@ -2720,9 +2750,11 @@ export function createRecursionRuntime({
         runId,
         signal,
         snapshotHash: fallbackPlan.snapshotHash,
+        ...reasonerRequestMetadata(settings, 'arbiter', arbiterLane),
         prompt: [
           'Return a Recursion Utility Arbiter plan as strict JSON.',
           `Schema: ${UTILITY_ARBITER_SCHEMA}`,
+          arbiterOutputContractLine(fallbackPlan.snapshotHash),
           `Settings: ${JSON.stringify(arbiterSafeSettings(settings))}`,
           behaviorPolicyPromptLines(influencePolicyForSettings(settings)),
           `Provider health: ${JSON.stringify(providerHealthForArbiter(settings))}`,

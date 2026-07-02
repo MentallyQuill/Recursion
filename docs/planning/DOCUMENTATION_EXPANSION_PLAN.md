@@ -164,7 +164,7 @@ Capture or plan visuals before writing screenshot-backed prose.
 
 ### Current Render Pass Status
 
-The 2026-07-02 first pass promotes source-backed static infographics and defers final live UI screenshots. Current inventory: 22 promoted static PNGs, 20 open live-host `<Render Needed>` slots. Static diagrams document runtime, cards, prompt packet, provider routing, storage, diagnostics, host boundary, redaction, fail-soft behavior, verification gates, and behavior settings policy. Live screenshots remain marked with `<Render Needed>` until the current Recursion Bar, options/settings menu, Last Brief, provider setup, prompt packet viewer, and mobile layout are stable in real SillyTavern.
+The 2026-07-02 render pass promotes 22 source-backed static infographics and 20 live-served UI screenshots. Static diagrams document runtime, cards, prompt packet, provider routing, storage, diagnostics, host boundary, redaction, fail-soft behavior, verification gates, and behavior settings policy. Live UI screenshots now cover the Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief, provider setup, prompt packet viewer, Full Viewer, release smoke overview, and mobile layout.
 
 ### README Render Needs
 
@@ -187,7 +187,7 @@ The 2026-07-02 first pass promotes source-backed static infographics and defers 
 | Last Brief dropdown | Compact selected cards, omission hints, prompt packet link, empty hand, stale hand, and error state. |
 | Full Viewer | Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections. |
 | Settings | Play Behavior, Strength, Prompt Footprint, Focus, collapsible Utility and Reasoner provider setup, Advanced Injection/UI/Diagnostics sections, and final prompt injection placement/role/depth. |
-| Provider Controls | Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, fallback warning. |
+| Provider Controls | Utility setup, Reasoner setup, source selector, fetched model list, session-only key state, test connection, Reasoner disabled/unhealthy state, and Utility fallback warning. |
 | Prompt packet inspection | Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and redaction-safe diagnostics. |
 | Fail-soft states | Utility unavailable, Reasoner timeout, invalid structured output, storage write failure, injection failure, and stale async result. |
 | Mobile behavior | Bar wrap behavior, menu access, viewer layout, and touch-safe controls. |

@@ -110,22 +110,191 @@ function stripFencedJson(text) {
   return match ? match[1].trim() : source;
 }
 
-export function parseJsonObject(value) {
-  const source = stripFencedJson(value);
+function extractJsonObjectCandidate(text) {
+  const source = String(text ?? '').trim();
+  const start = source.indexOf('{');
+  if (start < 0) return source;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1).trim();
+    }
+  }
+  return source;
+}
+
+function normalizeJsonText(text) {
+  return String(text ?? '')
+    .replace(/^\uFEFF/, '')
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+}
+
+function removeJsonLineComments(text) {
+  let output = '';
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      output += char;
+      continue;
+    }
+    if (char === '/' && next === '/') {
+      while (index < text.length && text[index] !== '\n' && text[index] !== '\r') index += 1;
+      output += text[index] || '';
+      continue;
+    }
+    output += char;
+  }
+  return output;
+}
+
+function removeTrailingJsonCommas(text) {
+  let output = '';
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      output += char;
+      continue;
+    }
+    if (char === ',') {
+      let nextIndex = index + 1;
+      while (/\s/.test(text[nextIndex] || '')) nextIndex += 1;
+      if (text[nextIndex] === '}' || text[nextIndex] === ']') continue;
+    }
+    output += char;
+  }
+  return output;
+}
+
+function escapeLiteralStringLineBreaks(text) {
+  let output = '';
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (inString) {
+      if (escaped) {
+        output += char;
+        escaped = false;
+      } else if (char === '\\') {
+        output += char;
+        escaped = true;
+      } else if (char === '"') {
+        output += char;
+        inString = false;
+      } else if (char === '\n') {
+        output += '\\n';
+      } else if (char === '\r') {
+        output += '';
+      } else {
+        output += char;
+      }
+      continue;
+    }
+    output += char;
+    if (char === '"') inString = true;
+  }
+  return output;
+}
+
+export function repairCommonJson(text) {
+  return removeTrailingJsonCommas(
+    escapeLiteralStringLineBreaks(
+      removeJsonLineComments(
+        normalizeJsonText(text)
+      )
+    )
+  ).trim();
+}
+
+export function parseJsonObjectWithDiagnostics(value) {
+  const source = extractJsonObjectCandidate(stripFencedJson(value));
+  const visibleContentLength = source.length;
   let parsed;
+  let repaired = false;
+  let repairCode = '';
   try {
     parsed = JSON.parse(source);
-  } catch (error) {
-    const wrapped = new Error(`Provider output is not valid JSON object: ${error.message}`);
-    wrapped.code = 'RECURSION_JSON_PARSE_FAILED';
-    throw wrapped;
+  } catch (firstError) {
+    const repairedSource = repairCommonJson(source);
+    if (repairedSource !== source) {
+      try {
+        parsed = JSON.parse(repairedSource);
+        repaired = true;
+        repairCode = 'json_repaired';
+      } catch {
+        const wrapped = new Error(`Provider output is not valid JSON object: ${firstError.message}`);
+        wrapped.code = 'RECURSION_JSON_PARSE_FAILED';
+        throw wrapped;
+      }
+    } else {
+      const wrapped = new Error(`Provider output is not valid JSON object: ${firstError.message}`);
+      wrapped.code = 'RECURSION_JSON_PARSE_FAILED';
+      throw wrapped;
+    }
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     const error = new Error('Provider output is not a valid JSON object.');
     error.code = 'RECURSION_JSON_OBJECT_REQUIRED';
     throw error;
   }
-  return parsed;
+  return {
+    value: parsed,
+    repaired,
+    repairCode,
+    visibleContentLength
+  };
+}
+
+export function parseJsonObject(value) {
+  return parseJsonObjectWithDiagnostics(value).value;
 }
 
 export function redact(value, { maxString = 500 } = {}) {

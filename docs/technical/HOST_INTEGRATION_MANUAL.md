@@ -97,7 +97,9 @@ Settings are stored under `extension_settings.recursion` and normalized through 
 
 ## Generation Adapter
 
-The generation adapter prefers `generateRaw` when available. It passes prompt, system prompt, response length, temperature, top-p, provider source, host connection profile id, JSON schema, and abort signal.
+The generation adapter prefers `generateRaw` when available. It passes prompt, system prompt, response length, temperature, top-p, provider source, host connection profile id, response schema metadata, machine-JSON intent, and abort signal.
+
+Host connection profile routing uses `ConnectionManagerRequestService.sendRequest` when available. For Recursion machine-JSON jobs, the adapter disables host preset/instruct inclusion and passes a minimal JSON schema constraint keyed to the expected Recursion response schema and frozen snapshot hash when present. This is an output-shape request, not trust by itself; `src/providers.mjs` still parses and validates the returned visible JSON before runtime consumes it.
 
 If only `generateQuietPrompt` is available, host connection profiles are unsupported and current-host-model generation can still run. Missing generation APIs produce a provider failure, not a host-blocking exception.
 

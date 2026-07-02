@@ -2133,7 +2133,23 @@ async function runBrowserUiSmoke({
     }
 
     if (generationRequested) {
-      cleanup = await page.evaluate(generationPromptClearScript());
+      try {
+        cleanup = await page.evaluate(generationPromptClearScript());
+      } catch (error) {
+        cleanup = {
+          clearRequested: true,
+          disableHookOk: false,
+          disableHookError: sanitizeHarnessText(error?.message || error || 'Prompt cleanup evaluation failed.', 240),
+          installedPromptKeys: [],
+          clearedPromptKeys: [],
+          promptStateAvailable: false,
+          remainingPromptKeys: [],
+          recorderCleared: false,
+          hostPromptCleared: false,
+          promptCleared: false,
+          promptEventCount: 0
+        };
+      }
       if (!cleanup?.promptCleared) {
         const error = new Error('Recursion generation bridge cleanup assertion failed.');
         error.status = 'fail';

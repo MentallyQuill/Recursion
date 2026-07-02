@@ -19,7 +19,7 @@ Each lane can resolve to:
 - `host-connection-profile`
 - `openai-compatible`
 
-Host current model routes through SillyTavern raw generation when available, with quiet prompt as a current-model fallback. Host connection profiles route through `ConnectionManagerRequestService.sendRequest` when that SillyTavern service is available. If a profile is selected but only quiet prompt generation is available, Recursion reports the profile route as unsupported instead of silently falling back to the current model. OpenAI-compatible endpoints use `fetch` against `/chat/completions` with JSON-object response format.
+Host current model routes through SillyTavern raw generation when available, with quiet prompt as a current-model fallback. Host connection profiles route through `ConnectionManagerRequestService.sendRequest` when that SillyTavern service is available. For machine JSON jobs, Recursion passes the expected response schema and frozen snapshot hash to the host profile request, suppresses host preset/instruct wrapping, and still validates the returned schema before trusting the output. If a profile is selected but only quiet prompt generation is available, Recursion reports the profile route as unsupported instead of silently falling back to the current model. OpenAI-compatible endpoints use `fetch` against `/chat/completions` with JSON-object response format.
 
 Direct endpoint API keys are session-only secrets kept in the in-memory secret store. Settings store only `sessionApiKeyPresent`.
 
@@ -74,11 +74,31 @@ flowchart TD
 
 All provider work must return a JSON object. OpenAI-compatible responses are normalized before JSON parsing so empty visible output, reasoning-only payloads, and token-limit truncation are reported as provider failures with stable error codes. The router rejects undeclared role ids, parses visible text through the structured JSON parser, validates the expected role schema, and returns either `ok: true` with parsed data or `ok: false` with sanitized diagnostics. Runtime consumers still validate role-specific payload details; for example, provider tests pass only when the router succeeds and the parsed payload contains `schema: "recursion.providerTest.v1"` plus explicit `ok: true`.
 
-Validation failures do not become successful model calls. Prompt composition consumes accepted structured data only.
+The structured parser may recover common provider formatting damage: markdown fences, wrapper prose, `<think>` / `<reasoning>` blocks, comments, trailing commas, smart quotes, BOMs, and literal line breaks inside JSON strings. Repair never supplies missing contract fields. A repaired object that lacks the expected `schema`, frozen `snapshotHash`, card role/family, valid evidence, or composer envelope remains invalid and is retried or rejected by the same semantic validators as strict JSON.
+
+Every generation-role request carries `responseSchema` and `machineJson: true` into the host adapter. Requests with a frozen snapshot also carry `snapshotHash`. Host adapters may use that metadata to request structured JSON support, but the metadata is advisory until the router validates the visible response body.
+
+Validation failures do not become successful model calls. Prompt composition consumes accepted structured data only. Success diagnostics may include compact repair metadata such as `structuredOutputRepaired`, `structuredOutputRepairCode`, and `visibleContentLength`; raw malformed response text and hidden reasoning stay out of journals, activity details, and reports.
+
+## Reasoning Amount Routing
+
+Runtime derives provider reasoning amount from the user-facing Reasoning Level and the work category. Final brief composition uses minimal for Low, medium for Medium and High, and high for Ultra. Reasoner Arbiter calls use medium for High and Ultra. Reasoner card calls use minimal for High and medium for Ultra. Provider tests always use minimal.
+
+The request contract is `reasoningCategory` plus `reasoningIntent`, where intent is normalized to `minimal`, `medium`, or `high`. Direct OpenAI-compatible calls apply provider fields only for known dialects:
+
+- OpenRouter and OpenAI: `reasoning: { effort, exclude: true }`.
+- GLM/Z.AI: `thinking: { type: "enabled" }` plus `reasoning_effort`.
+- MiniMax M3: `thinking: "adaptive"` for medium/minimal and `"enabled"` for high.
+- DeepSeek reasoner: no reasoning-control field because the provider does not expose an effort knob.
+- Unknown endpoints: no speculative reasoning-control field.
+
+If a known endpoint rejects reasoning fields, the adapter retries once without those fields and records `reasoningDowngraded: true`. Host current-model calls receive flat and nested reasoning metadata; host connection-profile calls receive `parameters.reasoning = { intent, category, exclude: true }` so profile-backed Claude, Gemini, OpenRouter, and other integrations can translate intent to native controls. Hidden reasoning content is never requested for display or persisted by Recursion.
 
 ## Retries And Fallbacks
 
-Transient transport and server failures can receive one same-lane retry only while the abort signal has not fired and the current-run or current-snapshot guard still passes. Schema failures do not receive blind retries. Provider results normalize to statuses such as success, validation failed, provider failed, timeout, aborted, or stale.
+Provider calls use a 120 second default timeout unless a caller overrides it. The longer default keeps live host connection-profile routes from failing early while still bounding stalled Recursion work.
+
+Transient transport and server failures can receive one same-lane retry only while the abort signal has not fired and the current-run or current-snapshot guard still passes. Recoverable structured-output schema failures receive one correction retry that names the expected `schema` field and, when present, the frozen `snapshotHash` field. Provider results normalize to statuses such as success, validation failed, provider failed, timeout, aborted, or stale.
 
 Fallback behavior:
 
@@ -104,6 +124,8 @@ Journal entries are sanitized and bounded. They can include:
 - frozen snapshot hash when the request carries one
 - request hash
 - response hash
+- structured-output repair metadata
+- reasoning intent, category, dialect, applied/downgraded flags
 - compact error code and message
 
 They must not include raw prompts, raw provider responses, API keys, bearer tokens, cookies, full chat messages, hidden reasoning, or full prompt packets.

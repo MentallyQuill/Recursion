@@ -48,15 +48,15 @@ That path is ignored because it is tooling output. Promotion means copying only 
 
 ## Current Pass Status
 
-The 2026-07-02 first pass promoted 22 source-backed static infographics. Live SillyTavern UI screenshots remain deferred because the Recursion UI is still moving and current live captures do not yet show stable, documentation-ready states for the bar, options menu, provider setup, prompt packet, or mobile layout.
+The 2026-07-02 render pass promoted 22 source-backed static infographics and 20 live-served Recursion UI screenshots. Live UI renders were captured through the local `.recursion-doc-renderer/` harness against the dedicated `recursion-soak-ui` SillyTavern profile, using the live-served Recursion UI module plus sanitized documentation fixture state so provider secrets, raw provider payloads, and private transcripts do not enter binary assets.
 
-Live screenshots should resume only when all of these are true:
+Future live screenshots should be promoted only when all of these are true:
 
 - the dedicated `recursion-soak-*` render profile is sterile, with no non-Recursion third-party extensions installed;
 - served Recursion extension files match the checkout under test;
 - the target UI state exists in the real SillyTavern extension, not only in fixture or design reference code;
 - the screenshot can be captured without raw provider payloads, secrets, private chat transcripts, or unrelated extension UI;
-- the target document's `<Render Needed>` marker exactly names the state being captured.
+- the target document's `<Render Needed>` marker exactly names the state being captured, or the promoted image is directly linked from its target document.
 
 ## Promotion Workflow
 
@@ -111,32 +111,36 @@ These assets are promoted and may be embedded directly from `assets/documentatio
 | `recursion-operator-last-brief-states.png` | fixture/static | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Last Brief dropdown states. |
 | `recursion-operator-fail-soft-states.png` | fixture/static | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Operator-visible fail-soft state families. |
 
+## Promoted Live UI Renders
+
+These assets are promoted live-served UI renders and may be embedded directly from `assets/documentation/renders/`.
+
+| Asset | Source Type | Current Primary Doc | Visual Scope |
+| --- | --- | --- | --- |
+| `recursion-bar-desktop.png` | live host | `README.md` | Desktop Recursion Bar mounted in SillyTavern with power, Auto mode, Cards scope, Hero Pixel Array, reasoning, Last Brief, and options controls. |
+| `recursion-progress-menu-auto-pass.png` | live host | `README.md` | Hero Pixel Array progress menu during an Auto pass. |
+| `recursion-full-viewer-overview.png` | live host | `README.md` | Full Viewer overview with Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics. |
+| `recursion-bar-mobile.png` | live host | `README.md` | Phone-width Recursion Bar layout. |
+| `recursion-prompt-packet-viewer.png` | live host | `docs/user/PROMPT_PRIVACY_AND_SAFETY.md` | Prompt Packet viewer with card refs, omissions, injection metadata, and sanitized diagnostics. |
+| `recursion-provider-controls-utility-reasoner.png` | live host | `docs/user/PROVIDER_SETUP.md` | Utility and Reasoner provider controls with source, model, session key, Test Provider, and Clear Session Key state. |
+| `recursion-operator-install-enable.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Operator install and enable flow with Recursion mounted in SillyTavern. |
+| `recursion-operator-mode-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Auto and Manual mode controls. |
+| `recursion-operator-options-menu.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Options/settings menu with Play, Providers, Advanced, diagnostics, and Full Viewer entry point. |
+| `recursion-operator-full-viewer-sections.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Full Viewer sections. |
+| `recursion-operator-settings.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Settings view with Play Behavior, Strength, Focus, Prompt Footprint, and injection controls. |
+| `recursion-operator-provider-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Provider controls with Utility fallback and Reasoner disabled state. |
+| `recursion-operator-prompt-packet-inspection.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Prompt Packet inspection with redaction-safe diagnostics. |
+| `recursion-operator-mobile-behavior.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Mobile settings/menu access and touch-safe controls. |
+| `recursion-first-run-install-enable.png` | live host | `docs/user/FIRST_RUN_WORKFLOW.md` | First-run SillyTavern surface with Recursion enabled and mounted. |
+| `recursion-first-run-bar-mounted.png` | live host | `docs/user/FIRST_RUN_WORKFLOW.md` | First-run mounted Recursion Bar. |
+| `recursion-first-run-manual-pass.png` | live host | `docs/user/FIRST_RUN_WORKFLOW.md` | Manual pass Hero Pixel Array progress menu with narrowed scope. |
+| `recursion-first-run-auto-pass.png` | live host | `docs/user/FIRST_RUN_WORKFLOW.md` | Auto pass Hero Pixel Array progress menu. |
+| `recursion-first-run-inspection.png` | live host | `docs/user/FIRST_RUN_WORKFLOW.md` | Last Brief inspection after first Auto pass. |
+| `recursion-release-smoke-overview.png` | live host | `docs/release/0.1.0-pre-alpha.1.md` | Sanitized release smoke overview with ready state and progress completion. |
+
 ## Open Render Inventory
 
-All rows below correspond to current visible marker lines that begin `<Render Needed>:` in `README.md` or `docs/**/*.md`, excluding `docs/planning/DOCUMENTATION_EXPANSION_PLAN.md`, which contains fenced syntax examples.
-
-| Render ID | Source Doc | Target Asset | Source Type | Needed Visual |
-| --- | --- | --- | --- | --- |
-| RDR-001 | `README.md` | `assets/documentation/renders/recursion-bar-desktop.png` | live host | Recursion Bar mounted in SillyTavern on desktop, showing power, Auto/Manual mode, Cards scope, Hero Pixel Array, reasoning level, Last Brief, and options controls. |
-| RDR-002 | `README.md` | `assets/documentation/renders/recursion-progress-menu-auto-pass.png` | live host | Hero Pixel Array progress menu during an Auto pass, showing Utility planning, card generation, prompt composition, prompt install, and ready state. |
-| RDR-003 | `README.md` | `assets/documentation/renders/recursion-full-viewer-overview.png` | live host | Full Viewer overview with Now, Deck, Activity, Prompt Packet, settings, providers, and sanitized diagnostics visible. |
-| RDR-004 | `README.md` | `assets/documentation/renders/recursion-bar-mobile.png` | live host | Recursion Bar in a phone-width SillyTavern viewport, showing wrapped or compact controls without overlap. |
-| RDR-005 | `docs/user/PROMPT_PRIVACY_AND_SAFETY.md` | `assets/documentation/renders/recursion-prompt-packet-viewer.png` | live host | Prompt Packet viewer showing Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and sanitized diagnostics. |
-| RDR-008 | `docs/user/PROVIDER_SETUP.md` | `assets/documentation/renders/recursion-provider-controls-utility-reasoner.png` | live host | Provider controls showing collapsible Utility and Reasoner lanes with source selector, model fields, session key state, Test Provider, and OpenAI-only Clear Session Key. |
-| RDR-011 | `docs/user/RECURSION_OPERATOR_MANUAL.md` | `assets/documentation/renders/recursion-operator-install-enable.png` | live host | Install and enable flow with SillyTavern extension list, Recursion enabled state, and mounted Recursion Bar. |
-| RDR-012 | `docs/user/RECURSION_OPERATOR_MANUAL.md` | `assets/documentation/renders/recursion-operator-mode-controls.png` | live host | Power toggle, Auto/Manual mode controls, Reasoning Level, and prompt cleanup behavior. |
-| RDR-015 | `docs/user/RECURSION_OPERATOR_MANUAL.md` | `assets/documentation/renders/recursion-operator-options-menu.png` | live host | Options/settings menu with Play, Providers, Advanced, collapsible provider lanes, Injection/UI/Diagnostics sections, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and Full Viewer entry point. |
-| RDR-017 | `docs/user/RECURSION_OPERATOR_MANUAL.md` | `assets/documentation/renders/recursion-operator-full-viewer-sections.png` | live host | Full Viewer showing Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections. |
-| RDR-018 | `docs/user/RECURSION_OPERATOR_MANUAL.md` | `assets/documentation/renders/recursion-operator-settings.png` | live host | Settings view showing Play Behavior, collapsible Utility and Reasoner provider setup, Advanced Injection/UI/Diagnostics sections, Strength, Prompt Footprint, Focus, and prompt injection placement/role/depth. |
-| RDR-019 | `docs/user/RECURSION_OPERATOR_MANUAL.md` | `assets/documentation/renders/recursion-operator-provider-controls.png` | live host | Provider controls for Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, and fallback warning. |
-| RDR-020 | `docs/user/RECURSION_OPERATOR_MANUAL.md` | `assets/documentation/renders/recursion-operator-prompt-packet-inspection.png` | live host | Prompt Packet inspection showing Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and redaction-safe diagnostics. |
-| RDR-022 | `docs/user/RECURSION_OPERATOR_MANUAL.md` | `assets/documentation/renders/recursion-operator-mobile-behavior.png` | live host | Mobile layout showing Recursion Bar wrap behavior, menu access, viewer layout, and touch-safe controls. |
-| RDR-023 | `docs/user/FIRST_RUN_WORKFLOW.md` | `assets/documentation/renders/recursion-first-run-install-enable.png` | live host | SillyTavern extension settings with Recursion enabled and the Recursion Bar mounted in the active chat. |
-| RDR-024 | `docs/user/FIRST_RUN_WORKFLOW.md` | `assets/documentation/renders/recursion-first-run-bar-mounted.png` | live host | Recursion Bar mounted below the SillyTavern chat header with power, mode, Cards scope, Hero Pixel Array, Reasoning Level, Last Brief dropdown, and options entry visible. |
-| RDR-025 | `docs/user/FIRST_RUN_WORKFLOW.md` | `assets/documentation/renders/recursion-first-run-manual-pass.png` | live host | Hero Pixel Array progress menu during a Manual pass with narrowed card scope. |
-| RDR-026 | `docs/user/FIRST_RUN_WORKFLOW.md` | `assets/documentation/renders/recursion-first-run-auto-pass.png` | live host | Hero Pixel Array progress menu during an Auto pass showing Utility planning, card generation, prompt composition, prompt install, and ready state. |
-| RDR-027 | `docs/user/FIRST_RUN_WORKFLOW.md` | `assets/documentation/renders/recursion-first-run-inspection.png` | live host | Last Brief dropdown and Full Viewer showing selected cards, Activity, Prompt Packet, Settings, and Providers after a first Auto pass. |
-| RDR-028 | `docs/release/0.1.0-pre-alpha.1.md` | `assets/documentation/renders/recursion-release-smoke-overview.png` | live host | Sanitized release smoke overview showing Recursion Bar ready state, Cards scope, progress completion, and no visible secrets or raw provider payloads. |
+There are no open render markers outside the fenced syntax examples in `docs/planning/DOCUMENTATION_EXPANSION_PLAN.md`.
 
 ## Verification Commands
 
@@ -173,5 +177,5 @@ node .recursion-doc-renderer/check-doc-images.mjs
 Promoted inventory check:
 
 ```powershell
-node -e "const fs=require('fs');const tracking=fs.readFileSync('docs/testing/DOCUMENTATION_RENDER_TRACKING.md','utf8');const rows=tracking.split(/\r?\n/).filter(line=>line.startsWith('| `')&&(line.includes('| diagram/static |')||line.includes('| fixture/static |'))).length;const files=fs.readdirSync('assets/documentation/renders').filter(f=>f.endsWith('.png')).length;if(rows!==files){console.error(JSON.stringify({promotedRows:rows,promotedPngs:files},null,2));process.exit(1);}console.log('promoted inventory ok ('+files+' PNGs)');"
+node -e "const fs=require('fs');const tracking=fs.readFileSync('docs/testing/DOCUMENTATION_RENDER_TRACKING.md','utf8');const rows=tracking.split(/\r?\n/).filter(line=>line.startsWith('| `')&&(line.includes('| diagram/static |')||line.includes('| fixture/static |')||line.includes('| live host |'))).length;const files=fs.readdirSync('assets/documentation/renders').filter(f=>f.endsWith('.png')).length;if(rows!==files){console.error(JSON.stringify({promotedRows:rows,promotedPngs:files},null,2));process.exit(1);}console.log('promoted inventory ok ('+files+' PNGs)');"
 ```

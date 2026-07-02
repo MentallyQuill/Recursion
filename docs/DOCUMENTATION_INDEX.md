@@ -17,9 +17,9 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 
 ## Provider, Privacy, And Safety Docs
 
-- [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md) - Current provider lanes, structured calls, validation, and secret handling contract.
+- [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md) - Current provider lanes, source routing, machine-JSON schema metadata, structured calls, validation, and secret handling contract.
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md) - Current storage, journal, diagnostics, redaction, and retention contract.
-- [Provider Setup](user/PROVIDER_SETUP.md) - Utility and Reasoner setup, session-only keys, provider tests, fallback behavior, and safe verification.
+- [Provider Setup](user/PROVIDER_SETUP.md) - Utility and Reasoner setup, source options, autosaving provider fields, model discovery, session-only keys, provider tests, fallback behavior, and safe verification.
 - [Prompt Privacy And Safety](user/PROMPT_PRIVACY_AND_SAFETY.md) - Prompt packet contents, injection boundary, storage limits, redaction, external extension coexistence, and safety checks.
 
 ## Technical Manuals
@@ -39,7 +39,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Recursion Extension Spec](RECURSION_EXTENSION_SPEC.md) - Top-level V1 design and implementation contract.
 - [Product Scope](design/RECURSION_PRODUCT_SCOPE.md) - Product promise, V1 scope, non-goals, and success criteria.
 - [Card System Spec](design/CARD_SYSTEM_SPEC.md) - Fixed V1 catalog, card lifecycle, Utility Arbiter responsibilities, and turn hand.
-- [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) - V1 contract for Strength, Focus, and Prompt Footprint backend effects.
+- [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) - Source-backed V1 contract for Strength, Min/Max Cards, Focus, and Prompt Footprint backend effects.
 - [UI Spec](design/UI_SPEC.md) - Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, viewer, settings, and provider controls.
 - [Turn Context Compiler Seed Note](design/RECURSION_TURN_CONTEXT_COMPILER.md) - Historical seed note superseded by the V1 spec family.
 - [Design Folder Guide](design/README.md)
@@ -66,6 +66,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 ## Planning Docs
 
 - [Documentation Expansion Plan](planning/DOCUMENTATION_EXPANSION_PLAN.md)
+- [Provider JSON Robustness Pass](planning/PROVIDER_JSON_ROBUSTNESS_PASS.md)
 - [Planning Folder Guide](planning/README.md)
 - [Internal Superpowers Execution Plan](superpowers/plans/2026-06-30-recursion-v1.md)
 

@@ -4,10 +4,17 @@ import {
   hashJson,
   makeId,
   nowIso,
-  parseJsonObject,
   redact,
   truncate
 } from './core.mjs';
+import {
+  PROVIDER_RESPONSE_ERROR_CODES,
+  assertProviderResponseText
+} from './providers/provider-response-normalizer.mjs';
+import {
+  STRUCTURED_OUTPUT_PARSE_ERROR_CODES,
+  parseStructuredJsonText
+} from './providers/structured-output-parser.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 
 const LANES = new Set(['utility', 'reasoner']);
@@ -64,13 +71,8 @@ export const PROVIDER_CONTRACT_HASH = hashJson({
 const UTILITY_ROLES = new Set(UTILITY_ROLE_IDS);
 const REASONER_ROLES = new Set(REASONER_ROLE_IDS);
 const SECRET_TEXT_PATTERN = /(sk-[a-z0-9_-]+|bearer\s+[a-z0-9._-]+|session-key|secret[-_\s]*value|private[-_\s]*key[-_\s]*material)/ig;
-const TOKEN_LIMIT_FINISH_REASONS = new Set([
-  'length',
-  'max_tokens',
-  'max_output_tokens',
-  'max_completion_tokens',
-  'token_limit'
-]);
+const DEFAULT_PROVIDER_TIMEOUT_MS = 120000;
+const REASONING_INTENTS = new Set(['minimal', 'medium', 'high']);
 
 function scrubSecretText(value) {
   if (typeof value === 'string') return value.replace(SECRET_TEXT_PATTERN, '[redacted]');
@@ -129,6 +131,31 @@ function sourceName(value) {
   return String(value || 'host-current-model').trim() || 'host-current-model';
 }
 
+function normalizeReasoningIntent(value) {
+  const intent = String(value || '').trim().toLowerCase();
+  if (REASONING_INTENTS.has(intent)) return intent;
+  if (intent === 'low') return 'minimal';
+  if (intent === 'max' || intent === 'maximum' || intent === 'xhigh') return 'high';
+  return '';
+}
+
+function reasoningCategoryName(value) {
+  return String(value || '').trim().replace(/[^a-z0-9_-]+/gi, '-').slice(0, 80);
+}
+
+function reasoningDiagnostics(source = {}) {
+  const intent = normalizeReasoningIntent(source.reasoningIntent);
+  const category = reasoningCategoryName(source.reasoningCategory);
+  const dialect = String(source.reasoningDialect || '').trim();
+  const output = {};
+  if (intent) output.reasoningIntent = intent;
+  if (category) output.reasoningCategory = category;
+  if (dialect) output.reasoningDialect = dialect;
+  if (Object.prototype.hasOwnProperty.call(source, 'reasoningApplied')) output.reasoningApplied = source.reasoningApplied === true;
+  if (source.reasoningDowngraded === true) output.reasoningDowngraded = true;
+  return output;
+}
+
 function readSettings(settingsStore) {
   try {
     return settingsStore?.get?.() || cloneJson(DEFAULT_RECURSION_SETTINGS);
@@ -176,6 +203,33 @@ function expectedResponseSchema(roleId) {
   return ROLE_RESPONSE_SCHEMAS[String(roleId || '').trim()] || '';
 }
 
+function schemaSafeName(schema) {
+  return String(schema || '').trim().replace(/[^a-zA-Z0-9_-]+/g, '_');
+}
+
+export function machineJsonSchemaForRequest(request = {}) {
+  const schema = String(request?.responseSchema || '').trim();
+  if (!schema || request?.machineJson !== true) return null;
+  const properties = {
+    schema: { const: schema }
+  };
+  const required = ['schema'];
+  const snapshotHash = String(request?.snapshotHash || '').trim();
+  if (snapshotHash) {
+    properties.snapshotHash = { const: snapshotHash };
+    required.push('snapshotHash');
+  }
+  return {
+    name: schemaSafeName(schema),
+    schema: {
+      type: 'object',
+      properties,
+      required,
+      additionalProperties: true
+    }
+  };
+}
+
 function validateRoleResponseSchema(roleId, data) {
   const expected = expectedResponseSchema(roleId);
   if (!expected) throw unsupportedRoleError(roleId);
@@ -211,6 +265,97 @@ function cleanRequestForDiagnostics(request = {}) {
   if (request.prompt !== undefined) clean.promptHash = hashJson(String(request.prompt));
   if (request.messages !== undefined) clean.messagesHash = hashJson(request.messages);
   return sanitize(clean, 200);
+}
+
+function openAiCompatibleReasoningDialect(providerConfig = {}) {
+  const baseUrl = String(providerConfig?.openAICompatible?.baseUrl || '').toLowerCase();
+  const model = String(providerConfig?.openAICompatible?.model || '').toLowerCase();
+  const haystack = `${baseUrl} ${model}`;
+  if (haystack.includes('deepseek') || model.includes('deepseek-reasoner')) return 'deepseek-reasoner';
+  if (haystack.includes('openrouter.ai')) return 'openrouter';
+  if (haystack.includes('z.ai') || haystack.includes('zhipu') || model.startsWith('glm-') || model.includes('/glm-')) return 'z-ai-glm';
+  if (haystack.includes('minimax') || model.includes('minimax-m3')) return 'minimax-m3';
+  if (haystack.includes('api.openai.com') || /(^|[/:-])(gpt-[5-9]|o[1-9])/.test(model)) return 'openai';
+  return 'none';
+}
+
+function openAiStyleReasoningEffort(intent) {
+  if (intent === 'high') return 'high';
+  if (intent === 'medium') return 'medium';
+  return 'minimal';
+}
+
+function glmReasoningEffort(intent) {
+  if (intent === 'high') return 'max';
+  if (intent === 'medium') return 'medium';
+  return 'minimal';
+}
+
+function openAiCompatibleReasoningPlan(enriched = {}, { omitReasoning = false } = {}) {
+  const intent = normalizeReasoningIntent(enriched.reasoningIntent);
+  const category = reasoningCategoryName(enriched.reasoningCategory);
+  if (!intent) {
+    return {
+      body: {},
+      diagnostics: category ? { reasoningCategory: category } : {}
+    };
+  }
+  const dialect = openAiCompatibleReasoningDialect(enriched.providerConfig);
+  const diagnostics = {
+    reasoningIntent: intent,
+    ...(category ? { reasoningCategory: category } : {}),
+    reasoningDialect: dialect,
+    reasoningApplied: false
+  };
+  if (omitReasoning) {
+    return {
+      body: {},
+      diagnostics: { ...diagnostics, reasoningDowngraded: true }
+    };
+  }
+  if (dialect === 'openrouter' || dialect === 'openai') {
+    return {
+      body: { reasoning: { effort: openAiStyleReasoningEffort(intent), exclude: true } },
+      diagnostics: { ...diagnostics, reasoningApplied: true }
+    };
+  }
+  if (dialect === 'z-ai-glm') {
+    return {
+      body: {
+        thinking: { type: 'enabled' },
+        reasoning_effort: glmReasoningEffort(intent)
+      },
+      diagnostics: { ...diagnostics, reasoningApplied: true }
+    };
+  }
+  if (dialect === 'minimax-m3') {
+    return {
+      body: { thinking: intent === 'high' ? 'enabled' : 'adaptive' },
+      diagnostics: { ...diagnostics, reasoningApplied: true }
+    };
+  }
+  return { body: {}, diagnostics };
+}
+
+async function readProviderErrorMessage(response) {
+  try {
+    const payload = await response.json();
+    return compact([
+      payload?.error?.message,
+      payload?.error?.code,
+      payload?.message,
+      typeof payload === 'string' ? payload : JSON.stringify(payload)
+    ].filter(Boolean).join(' '));
+  } catch {
+    return '';
+  }
+}
+
+function providerRejectedReasoningFields(status, message) {
+  if (status !== 400 && status !== 422) return false;
+  const text = String(message || '').toLowerCase();
+  if (!/(reasoning|thinking|reasoning_effort)/.test(text)) return false;
+  return /(unknown|unrecognized|unsupported|invalid|unexpected|not\s+permitted|extra|extraneous)/.test(text);
 }
 
 function openAiEndpoint(baseUrl) {
@@ -635,77 +780,60 @@ function chatMessages(request = {}) {
   return [{ role: 'user', content: String(request.prompt ?? '') }];
 }
 
-function parseOpenAiText(payload) {
-  const choice = payload?.choices?.[0];
-  const finishReason = normalizeFinishReason(choice?.finish_reason ?? choice?.finishReason ?? payload?.finish_reason ?? payload?.finishReason);
-  if (TOKEN_LIMIT_FINISH_REASONS.has(finishReason)) {
+function providerResponseFailureError(error) {
+  const code = String(error?.code || '');
+  const details = error?.details || {};
+  if (code === PROVIDER_RESPONSE_ERROR_CODES.TOKEN_LIMIT) {
     throw providerError('RECURSION_PROVIDER_TOKEN_LIMIT', 'Provider response stopped at the token limit before returning complete visible JSON.', {
       retryable: false
     });
   }
-
-  const content = visibleProviderText(choice?.message?.content ?? choice?.text ?? payload?.output_text);
-  if (content.trim()) return content;
-
-  if (hasReasoningOnlyText(payload)) {
+  if (code === PROVIDER_RESPONSE_ERROR_CODES.REASONING_ONLY) {
     throw providerError('RECURSION_PROVIDER_REASONING_ONLY', 'Provider returned hidden reasoning without visible JSON content.', {
       retryable: false
     });
   }
-
-  throw providerError('RECURSION_PROVIDER_EMPTY_RESPONSE', 'Provider response did not include message content.', {
+  if (code === PROVIDER_RESPONSE_ERROR_CODES.EMPTY_CONTENT) {
+    throw providerError('RECURSION_PROVIDER_EMPTY_RESPONSE', 'Provider response did not include message content.', {
+      retryable: false
+    });
+  }
+  throw providerError('RECURSION_PROVIDER_EMPTY_RESPONSE', details.message || 'Provider response did not include message content.', {
     retryable: false
   });
 }
 
-function normalizeFinishReason(value) {
-  return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-}
-
-function visibleProviderText(value) {
-  if (typeof value === 'string') return value;
-  if (!value || typeof value !== 'object') return '';
-  if (Array.isArray(value)) {
-    return value
-      .map((entry) => {
-        if (typeof entry === 'string') return entry;
-        if (!entry || typeof entry !== 'object') return '';
-        return String(entry.text ?? entry.content ?? entry.value ?? '');
-      })
-      .join('');
+function providerVisibleText(value, enriched = {}) {
+  try {
+    return assertProviderResponseText(value, {
+      providerTitle: enriched.providerSource || 'Provider',
+      maxTokens: enriched.providerConfig?.maxTokens
+    });
+  } catch (error) {
+    providerResponseFailureError(error);
   }
-  return String(value.text ?? value.content ?? value.value ?? '');
 }
 
-function hasReasoningOnlyText(value) {
-  return containsReasoningText(value, false);
-}
-
-function containsReasoningText(value, insideReasoningField) {
-  if (typeof value === 'string') return insideReasoningField && value.trim().length > 0;
-  if (!value || typeof value !== 'object') return false;
-  if (Array.isArray(value)) return value.some((entry) => containsReasoningText(entry, insideReasoningField));
-  for (const [key, child] of Object.entries(value)) {
-    const normalizedKey = String(key || '').replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
-    const nextInsideReasoningField = insideReasoningField
-      || normalizedKey.includes('reasoning')
-      || normalizedKey.includes('thought');
-    if (containsReasoningText(child, nextInsideReasoningField)) return true;
-  }
-  return false;
+function parseOpenAiText(payload, enriched = {}) {
+  return providerVisibleText(payload, {
+    ...enriched,
+    providerSource: enriched.providerSource || 'OpenAI-compatible'
+  });
 }
 
 function normalizeProviderResponse(response, enriched) {
   const output = response && typeof response === 'object' ? { ...response } : { text: String(response ?? '') };
+  const text = providerVisibleText(output, enriched);
   return {
     ...output,
-    text: String(output.text ?? ''),
+    text,
     roleId: enriched.roleId,
     lane: enriched.lane,
     providerSource: enriched.providerSource,
     providerId: output.providerId || enriched.providerSource,
     model: output.model || enriched.providerConfig?.resolvedModelLabel || enriched.providerConfig?.openAICompatible?.model || '',
-    providerConfig: enriched.providerConfig
+    providerConfig: enriched.providerConfig,
+    ...reasoningDiagnostics({ ...enriched, ...output })
   };
 }
 
@@ -728,12 +856,24 @@ function structuredOutputRetryableError(error) {
     || code === 'RECURSION_PROVIDER_SCHEMA_MISMATCH';
 }
 
+function structuredOutputFieldHint(roleId, request = {}) {
+  const expected = expectedResponseSchema(roleId);
+  const fields = [];
+  if (expected) fields.push(`"schema": "${expected}"`);
+  const snapshotHash = String(request?.snapshotHash || '').trim();
+  if (snapshotHash) fields.push(`"snapshotHash": "${snapshotHash}"`);
+  return fields.length
+    ? `Required top-level fields include ${fields.join(', ')}.`
+    : 'Required top-level fields must match the requested role contract.';
+}
+
 function requestWithStructuredRetryPrompt(request = {}, { roleId = '', error = null } = {}) {
   const expected = expectedResponseSchema(roleId);
   const correction = [
     '',
     'Previous response was rejected by Recursion structured-output validation.',
     `Return exactly one JSON object with schema "${expected}".`,
+    structuredOutputFieldHint(roleId, request),
     'Do not include markdown fences, prose, comments, hidden reasoning, or alternate schemas.',
     `Validation error code: ${String(error?.code || 'RECURSION_PROVIDER_FORMAT_RETRY')}.`
   ].join('\n');
@@ -1000,6 +1140,7 @@ function diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs })
     runId,
     roleId,
     lane,
+    ...reasoningDiagnostics(request),
     timeoutMs: diagnosticsTimeout(timeoutMs),
     ...(snapshotHash ? { snapshotHash } : {}),
     requestHash: hashJson({ roleId, lane, request: cleanRequestForDiagnostics(request) }),
@@ -1015,18 +1156,36 @@ export function roleLane(roleId) {
 }
 
 export function parseStructuredOutput(text) {
-  return parseJsonObject(text);
+  const parsed = parseStructuredJsonText(text);
+  if (!parsed.ok) {
+    const error = new Error(parsed.error || 'Provider output was not a valid JSON object.');
+    error.code = parsed.diagnostic?.code === STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_NOT_OBJECT
+      ? 'RECURSION_JSON_OBJECT_REQUIRED'
+      : 'RECURSION_JSON_PARSE_FAILED';
+    error.diagnostic = parsed.diagnostic;
+    throw error;
+  }
+  return parsed.value;
 }
 
 function parseProviderStructuredOutput(text) {
-  try {
-    return parseStructuredOutput(text);
-  } catch (error) {
-    if (error?.code === 'RECURSION_JSON_PARSE_FAILED' || error?.code === 'RECURSION_JSON_OBJECT_REQUIRED') {
-      throw providerError(error.code, 'Provider output was not a valid JSON object.', { retryable: false, cause: error });
-    }
+  const parsed = parseStructuredJsonText(text);
+  if (!parsed.ok) {
+    const code = parsed.diagnostic?.code === STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_NOT_OBJECT
+      ? 'RECURSION_JSON_OBJECT_REQUIRED'
+      : 'RECURSION_JSON_PARSE_FAILED';
+    const error = providerError(code, 'Provider output was not a valid JSON object.', { retryable: false });
+    error.diagnostic = parsed.diagnostic;
     throw error;
   }
+  return {
+    data: parsed.value,
+    diagnostics: {
+      structuredOutputRepaired: parsed.repaired === true,
+      ...(parsed.repaired ? { structuredOutputRepairCode: 'json_repaired' } : {}),
+      visibleContentLength: parsed.visibleContentLength
+    }
+  };
 }
 
 export function createProviderClient({ host = null, settingsStore = null, fetchImpl = globalThis.fetch } = {}) {
@@ -1049,6 +1208,10 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
       ...request,
       roleId: resolvedRoleId,
       lane,
+      ...(normalizeReasoningIntent(request.reasoningIntent) ? { reasoningIntent: normalizeReasoningIntent(request.reasoningIntent) } : {}),
+      ...(reasoningCategoryName(request.reasoningCategory) ? { reasoningCategory: reasoningCategoryName(request.reasoningCategory) } : {}),
+      responseSchema: expectedResponseSchema(resolvedRoleId),
+      machineJson: true,
       providerSource: sourceName(config.source),
       providerConfig: cloneJson(config)
     };
@@ -1092,20 +1255,38 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
       throw providerError('RECURSION_PROVIDER_CONFIG_INVALID', 'OpenAI-compatible model is required.', { retryable: false });
     }
 
-    const body = {
-      model,
-      messages: chatMessages(enriched),
-      temperature: enriched.providerConfig.temperature,
-      top_p: enriched.providerConfig.topP,
-      max_tokens: enriched.providerConfig.maxTokens,
-      response_format: { type: 'json_object' },
-      stream: false
-    };
+    function buildOpenAiCompatibleBody({ omitReasoning = false } = {}) {
+      const machineSchema = machineJsonSchemaForRequest(enriched);
+      const reasoningPlan = openAiCompatibleReasoningPlan(enriched, { omitReasoning });
+      return {
+        body: {
+          model,
+          messages: chatMessages(enriched),
+          temperature: enriched.providerConfig.temperature,
+          top_p: enriched.providerConfig.topP,
+          max_tokens: enriched.providerConfig.maxTokens,
+          response_format: machineSchema
+            ? {
+                type: 'json_schema',
+                json_schema: {
+                  name: machineSchema.name,
+                  strict: false,
+                  schema: machineSchema.schema
+                }
+              }
+            : { type: 'json_object' },
+          stream: false,
+          ...reasoningPlan.body
+        },
+        reasoningDiagnostics: reasoningPlan.diagnostics
+      };
+    }
 
-    let response;
-    try {
-      const endpoint = openAiEndpoint(enriched.providerConfig?.openAICompatible?.baseUrl);
-      response = await fetchImpl(endpoint, {
+    const endpoint = openAiEndpoint(enriched.providerConfig?.openAICompatible?.baseUrl);
+    let requestBody = buildOpenAiCompatibleBody();
+
+    async function sendOpenAiCompatible(body) {
+      return await fetchImpl(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1114,6 +1295,11 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
         body: JSON.stringify(body),
         signal: enriched.signal
       });
+    }
+
+    let response;
+    try {
+      response = await sendOpenAiCompatible(requestBody.body);
     } catch (error) {
       if (error?.code === 'RECURSION_PROVIDER_CONFIG_INVALID') throw error;
       if (error?.name === 'AbortError') throw abortError();
@@ -1121,6 +1307,32 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
         retryable: true,
         cause: error
       });
+    }
+
+    if (!response?.ok) {
+      const status = Number(response?.status || 0);
+      if (status === 401 || status === 403) {
+        markOpenAiAuthFailure(settingsStore, enriched.lane);
+        throw providerError('RECURSION_PROVIDER_AUTH_FAILED', 'OpenAI-compatible authentication failed.', {
+          retryable: false,
+          status
+        });
+      }
+      if (requestBody.reasoningDiagnostics?.reasoningApplied === true) {
+        const errorMessage = await readProviderErrorMessage(response);
+        if (providerRejectedReasoningFields(status, errorMessage)) {
+          requestBody = buildOpenAiCompatibleBody({ omitReasoning: true });
+          try {
+            response = await sendOpenAiCompatible(requestBody.body);
+          } catch (error) {
+            if (error?.name === 'AbortError') throw abortError();
+            throw providerError('RECURSION_PROVIDER_TRANSPORT_FAILED', 'Provider transport failed.', {
+              retryable: true,
+              cause: error
+            });
+          }
+        }
+      }
     }
 
     if (!response?.ok) {
@@ -1148,10 +1360,11 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
       });
     }
     return normalizeProviderResponse({
-      text: parseOpenAiText(payload),
+      text: parseOpenAiText(payload, enriched),
       providerId: 'openai-compatible',
       model: payload?.model || model,
-      responseId: payload?.id || ''
+      responseId: payload?.id || '',
+      ...requestBody.reasoningDiagnostics
     }, enriched);
   }
 
@@ -1217,7 +1430,7 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
   return { generate, batch, listProfiles, status, fetchModels };
 }
 
-export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = 45000, isCurrent = null } = {}) {
+export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = DEFAULT_PROVIDER_TIMEOUT_MS, isCurrent = null } = {}) {
   if (!client || typeof client.generate !== 'function') {
     throw new Error('createGenerationRouter requires a client with generate(roleId, request).');
   }
@@ -1301,11 +1514,14 @@ export function createGenerationRouter({ client, activity = null, journal = null
             effectiveTimeoutMs,
             composedExternalSignal.signal || null
           );
-          const data = parseProviderStructuredOutput(raw.text);
+          const parsed = parseProviderStructuredOutput(raw.text);
+          const data = parsed.data;
           validateRoleResponseSchema(roleId, data);
           const latencyMs = Date.now() - started;
           const diagnostics = sanitize({
             ...lastDiagnostics,
+            ...parsed.diagnostics,
+            ...reasoningDiagnostics(raw),
             providerSource: raw.providerSource,
             providerId: raw.providerId,
             model: raw.model,
@@ -1337,7 +1553,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
             roleId,
             lane,
             data,
-            text: String(raw.text ?? ''),
+            text: JSON.stringify(data),
             diagnostics
           };
         } catch (error) {
@@ -1514,10 +1730,13 @@ export function createGenerationRouter({ client, activity = null, journal = null
     });
 
     async function successResult(entry, raw, retryCount = 0) {
-      const data = parseProviderStructuredOutput(raw?.text);
+      const parsed = parseProviderStructuredOutput(raw?.text);
+      const data = parsed.data;
       validateRoleResponseSchema(entry.roleId, data);
       const diagnostics = sanitize({
         ...entry.diagnostics,
+        ...parsed.diagnostics,
+        ...reasoningDiagnostics(raw),
         providerSource: raw?.providerSource,
         providerId: raw?.providerId,
         model: raw?.model,
@@ -1540,7 +1759,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         roleId: entry.roleId,
         lane: entry.lane,
         data,
-        text: String(raw?.text ?? ''),
+        text: JSON.stringify(data),
         diagnostics
       };
     }

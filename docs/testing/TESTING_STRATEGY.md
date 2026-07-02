@@ -48,7 +48,7 @@ The gate calls the focused local suite rather than duplicating test logic. Cover
 - logical storage key safety;
 - scene cache schema validation;
 - run journal redaction and ring-buffer pruning;
-- provider lane routing and structured response parsing;
+- provider lane routing, provider-payload normalization, and structured response parsing/repair;
 - Utility Arbiter Auto Control Plan validation;
 - card catalog, lifecycle, emphasis, detail, and hand-selection contracts;
 - Utility and Reasoner prompt packet composition;
@@ -56,7 +56,7 @@ The gate calls the focused local suite rather than duplicating test logic. Cover
 - prompt injection metadata, replacement, and clearing through a fake host;
 - activity event normalization and user-safe status text.
 
-Focused contract tests should use deterministic fixtures and fake provider responses before live providers. If a live smoke finds a defect, add a focused contract regression where the behavior can be isolated without browser control.
+Focused contract tests should use deterministic fixtures and fake provider responses before live providers. `tools/scripts/test-provider-response-parser.mjs` owns provider-envelope extraction and syntax-repair cases. `tools/scripts/test-providers.mjs` owns router integration, sanitized repair diagnostics, stable failure codes, and retry behavior. Runtime/card tests own the semantic boundary: repaired JSON still fails when it lacks the expected schema, snapshot hash, role, family, or valid evidence. If a live smoke finds a defect, add a focused contract regression where the behavior can be isolated without browser control.
 
 ## Playwright Readiness
 

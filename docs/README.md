@@ -13,7 +13,7 @@ Render status is tracked in [Documentation Render Tracking](testing/DOCUMENTATIO
 | `release/` | Release notes and pre-alpha signoff records. |
 | `user/` | Operator-facing setup, normal-use, provider, privacy, and safety manuals. |
 | `technical/` | Release-facing technical manuals for runtime, cards, prompt packets, providers, storage, diagnostics, and host integration. |
-| `design/` | Product, card-system, behavior settings policy, UI, and historical seed design documents. |
+| `design/` | Product, card-system, source-backed behavior settings policy, UI, and historical seed design documents. |
 | `architecture/` | Implementation-facing runtime, provider, prompt, storage, and diagnostics specs. |
 | `testing/` | Local gates, Playwright readiness, live smoke plans, artifact contracts, and implementation verification notes. |
 | `planning/` | Staged documentation and product-work plans. |

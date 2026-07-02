@@ -6,6 +6,7 @@ import {
   influencePolicyForSettings,
   summarizeBehaviorPolicyForDiagnostics
 } from './settings-policy.mjs';
+import { reasoningRequestMetadata } from './reasoning-policy.mjs';
 
 export const PROMPT_PACKET_VERSION = 2;
 const PACKET_VERSION = PROMPT_PACKET_VERSION;
@@ -561,6 +562,7 @@ async function applyReasonerPatch({
   budgets,
   injectionSettings,
   behaviorPolicy,
+  settings,
   generationRouter,
   activity
 }) {
@@ -575,7 +577,13 @@ async function applyReasonerPatch({
       sections: packet.sections,
       behaviorPolicy
     });
-    const result = await generationRouter.generate('reasonerComposer', { lane: 'reasoner', runId, snapshotHash: packet.snapshotHash, prompt });
+    const result = await generationRouter.generate('reasonerComposer', {
+      lane: 'reasoner',
+      runId,
+      snapshotHash: packet.snapshotHash,
+      ...reasoningRequestMetadata(settings, 'final-brief'),
+      prompt
+    });
     const validated = validateReasonerResult(result, allowedIds, packet.snapshotHash);
     if (!validated.ok) {
       emitFallbackActivity(activity, { runId, reason: validated.reason });
@@ -758,6 +766,7 @@ export async function composePromptPacket({
       budgets,
       injectionSettings,
       behaviorPolicy: policy,
+      settings,
       generationRouter,
       activity: activityTarget
     });

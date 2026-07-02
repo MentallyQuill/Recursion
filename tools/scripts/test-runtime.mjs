@@ -2,7 +2,7 @@ import { cacheContractVersions, createRecursionRuntime } from '../../src/runtime
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
-import { createGenerationRouter } from '../../src/providers.mjs';
+import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
 import { CARD_CATALOG, cardsFromProviderResult } from '../../src/cards.mjs';
 import { defaultCardScope, setFamilyEnabled } from '../../src/card-scope.mjs';
 import { hashJson } from '../../src/core.mjs';
@@ -1790,7 +1790,12 @@ for (const scenario of [
     settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'medium' }),
     generationRouter: {
       async generate(roleId, request = {}) {
-        routerCalls.push({ roleId, lane: request.lane || 'utility' });
+        routerCalls.push({
+          roleId,
+          lane: request.lane || 'utility',
+          reasoningCategory: request.reasoningCategory,
+          reasoningIntent: request.reasoningIntent
+        });
         if (roleId === 'utilityArbiter') {
           return {
             ok: true,
@@ -1812,6 +1817,8 @@ for (const scenario of [
   assertEqual(result.ok, true, 'medium reasoning installs');
   assert(routerCalls.some((call) => call.roleId === 'reasonerComposer'), 'medium reasoning invokes Reasoner composer even when Arbiter skips optional reasoner use');
   assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.lane, 'utility', 'medium reasoning keeps Arbiter on Utility');
+  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningCategory, 'final-brief', 'medium reasoning labels Reasoner composer as final-brief work');
+  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningIntent, 'medium', 'medium reasoning asks the Reasoner composer for medium provider reasoning');
 }
 
 {
@@ -1820,7 +1827,12 @@ for (const scenario of [
     settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'high' }),
     generationRouter: {
       async generate(roleId, request = {}) {
-        routerCalls.push({ roleId, lane: request.lane || 'utility' });
+        routerCalls.push({
+          roleId,
+          lane: request.lane || 'utility',
+          reasoningCategory: request.reasoningCategory,
+          reasoningIntent: request.reasoningIntent
+        });
         if (roleId === 'utilityArbiter') {
           return {
             ok: true,
@@ -1847,6 +1859,12 @@ for (const scenario of [
   assertEqual(routerCalls.find((call) => call.roleId === 'sceneFrameCard')?.lane, 'reasoner', 'high reasoning routes high-priority cards through Reasoner');
   assertEqual(routerCalls.find((call) => call.roleId === 'openThreadsCard')?.lane, 'utility', 'high reasoning leaves lower-priority cards on Utility');
   assert(routerCalls.some((call) => call.roleId === 'reasonerComposer' && call.lane === 'reasoner'), 'high reasoning routes final composition through Reasoner');
+  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.reasoningCategory, 'arbiter', 'high reasoning labels Reasoner Arbiter work');
+  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.reasoningIntent, 'medium', 'high reasoning asks the Reasoner Arbiter for medium provider reasoning');
+  assertEqual(routerCalls.find((call) => call.roleId === 'sceneFrameCard')?.reasoningCategory, 'card', 'high reasoning labels Reasoner card work');
+  assertEqual(routerCalls.find((call) => call.roleId === 'sceneFrameCard')?.reasoningIntent, 'minimal', 'high reasoning keeps Reasoner card generation at minimal provider reasoning');
+  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningCategory, 'final-brief', 'high reasoning labels Reasoner composer as final-brief work');
+  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningIntent, 'medium', 'high reasoning asks the Reasoner composer for medium provider reasoning');
   assertEqual(runtime.view().lastPlan.budgets.maxCards, 6, 'high reasoning keeps normal card budget pressure');
 }
 
@@ -1856,7 +1874,12 @@ for (const scenario of [
     settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'ultra' }),
     generationRouter: {
       async generate(roleId, request = {}) {
-        routerCalls.push({ roleId, lane: request.lane || 'utility' });
+        routerCalls.push({
+          roleId,
+          lane: request.lane || 'utility',
+          reasoningCategory: request.reasoningCategory,
+          reasoningIntent: request.reasoningIntent
+        });
         if (roleId === 'utilityArbiter') {
           return {
             ok: true,
@@ -1884,6 +1907,12 @@ for (const scenario of [
   assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.lane, 'reasoner', 'ultra reasoning routes Arbiter through Reasoner');
   assert(routerCalls.filter((call) => call.roleId.endsWith('Card')).every((call) => call.lane === 'reasoner'), 'ultra reasoning routes generated card calls through Reasoner');
   assert(routerCalls.some((call) => call.roleId === 'reasonerComposer' && call.lane === 'reasoner'), 'ultra reasoning routes final composition through Reasoner');
+  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.reasoningCategory, 'arbiter', 'ultra reasoning labels Reasoner Arbiter work');
+  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.reasoningIntent, 'medium', 'ultra reasoning keeps Reasoner Arbiter at medium provider reasoning');
+  assert(routerCalls.filter((call) => call.roleId.endsWith('Card')).every((call) => call.reasoningCategory === 'card'), 'ultra reasoning labels every Reasoner card request');
+  assert(routerCalls.filter((call) => call.roleId.endsWith('Card')).every((call) => call.reasoningIntent === 'medium'), 'ultra reasoning asks Reasoner card generation for medium provider reasoning');
+  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningCategory, 'final-brief', 'ultra reasoning labels Reasoner composer as final-brief work');
+  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningIntent, 'high', 'ultra reasoning asks the Reasoner composer for high provider reasoning');
   assertEqual(view.lastPlan.budgets.maxCards, 10, 'ultra reasoning raises max card pressure for larger relevant hands');
 }
 
@@ -2648,6 +2677,20 @@ for (const scenario of [
   assert(
     arbiterPrompts[0].includes('Lifecycle regenerate marks an old cached card stale; it does not create a replacement without cardJobs.'),
     'Arbiter prompt explains regenerate without replacement behavior'
+  );
+  const arbiterPromptSnapshotHash = /^Snapshot hash: (.+)$/m.exec(arbiterPrompts[0])?.[1]?.trim();
+  assert(arbiterPromptSnapshotHash, 'Arbiter prompt includes snapshot hash line');
+  assert(
+    arbiterPrompts[0].includes(`"schema": "${UTILITY_ARBITER_SCHEMA}"`),
+    'Arbiter prompt spells out required schema field'
+  );
+  assert(
+    arbiterPrompts[0].includes(`"snapshotHash": "${arbiterPromptSnapshotHash}"`),
+    'Arbiter prompt spells out required snapshot hash field'
+  );
+  assert(
+    arbiterPrompts[0].includes('Do not emit reasoning, lifecycleActions, markdown, or prose.'),
+    'Arbiter prompt forbids common invalid alternate fields'
   );
   assert(!arbiterPrompts[0].includes('lastTest'), 'arbiter prompt omits provider test diagnostics');
   assert(!arbiterPrompts[0].includes('openAICompatible'), 'arbiter prompt omits endpoint settings');
@@ -3429,6 +3472,75 @@ for (const scenario of [
   assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'sequential provider card selected into hand');
   assert(view.lastPacket.sections.turnBrief.includes('sequential provider call'), 'sequential provider card reaches prompt packet');
   assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'sequential provider card pass does not add local Scene Frame fallback card');
+}
+
+{
+  let delegateRouter = null;
+  const providerActivity = createActivityReporter();
+  const fetchCalls = [];
+  const { runtime, storage, settingsStore } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      generate(roleId, request, options) {
+        return delegateRouter.generate(roleId, request, options);
+      },
+      batch(requests, options) {
+        return delegateRouter.batch(requests, options);
+      }
+    }
+  });
+  settingsStore.updateProvider('utility', {
+    source: 'openai-compatible',
+    apiKey: 'session-key',
+    openAICompatible: { baseUrl: 'https://semantic-repair.example/v1', model: 'utility-model' },
+    maxTokens: 4096
+  });
+  delegateRouter = createGenerationRouter({
+    activity: providerActivity,
+    client: createProviderClient({
+      settingsStore,
+      fetchImpl: async (url, options) => {
+        const body = JSON.parse(options.body);
+        fetchCalls.push({ url, body });
+        const expectedSchema = body.response_format?.json_schema?.schema?.properties?.schema?.const || '';
+        const snapshotHash = body.response_format?.json_schema?.schema?.properties?.snapshotHash?.const || '';
+        const prompt = String(body.messages?.[0]?.content || '');
+        let content = '';
+        if (expectedSchema === UTILITY_ARBITER_SCHEMA) {
+          content = [
+            'Provider wrapper:',
+            `{"schema":"${UTILITY_ARBITER_SCHEMA}","snapshotHash":"${snapshotHash}","action":"compose-brief","cardJobs":[{"role":"openThreadsCard","reason":"Keep valid repaired sibling."},{"role":"sceneConstraintsCard","reason":"Reject repaired stale sibling."}],"budgets":{"targetBriefTokens":500,"maxCards":6},"reasonerDecision":{"mode":"skip","reason":"semantic repair test","signals":[]},"diagnostics":["semantic-repair-arbiter"],}`
+          ].join('\n');
+        } else if (prompt.includes('sceneConstraintsCard')) {
+          content = `<think>draft that must not persist</think>{"schema":"recursion.card.v1","role":"sceneConstraintsCard","family":"Scene Constraints","items":[{"promptText":"Missing repaired snapshot card must not enter prompt.","evidenceRefs":["message:2"],"tokenEstimate":12,}],}`;
+        } else {
+          content = '```json\n'
+            + `{"schema":"recursion.card.v1","role":"openThreadsCard","family":"Open Threads","snapshotHash":"${snapshotHash}","items":[{"promptText":"Valid repaired card survives semantic sibling rejection.","evidenceRefs":["message:2"],"tokenEstimate":12,}],}`
+            + '\n```';
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: `semantic-repair-${fetchCalls.length}`,
+            model: body.model,
+            choices: [{ message: { content } }]
+          })
+        };
+      }
+    })
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Run repaired semantic rejection.' });
+  const view = runtime.view();
+  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
+  const serializedRuntime = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
+  const providerHistory = JSON.stringify(providerActivity.history());
+  assertEqual(result.ok, true, 'runtime with repaired provider JSON remains fail-soft');
+  assert(fetchCalls.length >= 3, 'real provider router handled arbiter and card provider calls');
+  assert(serializedRuntime.includes('Valid repaired card survives semantic sibling rejection'), 'valid repaired sibling reaches runtime prompt');
+  assert(!serializedRuntime.includes('Missing repaired snapshot card'), 'repaired card missing snapshot hash is still semantically rejected');
+  assert(providerHistory.includes('"structuredOutputRepaired":true'), 'provider diagnostics record syntax repair before runtime semantics');
+  assert(!providerHistory.includes('draft that must not persist'), 'provider diagnostics omit stripped hidden reasoning text');
 }
 
 {
@@ -5869,6 +5981,8 @@ for (const scenario of [
   assertEqual(providerTest.ok, true, 'runtime provider test returns success result');
   assertEqual(routerCalls[0].roleId, 'providerTest', 'runtime provider test uses providerTest role');
   assertEqual(routerCalls[0].request.lane, 'utility', 'runtime provider test targets selected lane');
+  assertEqual(routerCalls[0].request.reasoningCategory, 'provider-test', 'runtime provider test labels diagnostic provider calls');
+  assertEqual(routerCalls[0].request.reasoningIntent, 'minimal', 'runtime provider test always uses minimal provider reasoning');
   assertEqual(settingsStore.get().providers.utility.lastTest.status, 'pass', 'runtime provider test records passing provider status');
   assertEqual(settingsStore.get().providers.utility.resolvedModelLabel, 'utility-test-model', 'runtime provider test records resolved model');
 

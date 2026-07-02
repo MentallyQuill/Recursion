@@ -16,9 +16,9 @@ Start here, then follow the focused specs:
 
 - [Product Scope](design/RECURSION_PRODUCT_SCOPE.md): product promise, V1 scope, non-goals, success criteria.
 - [Card System Spec](design/CARD_SYSTEM_SPEC.md): scene-local cards, card families, lifecycle, Utility Arbiter responsibilities, turn hand.
-- [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md): Strength, Focus, and Prompt Footprint backend effects.
+- [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md): Strength, Min/Max Cards, Focus, and Prompt Footprint backend effects.
 - [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md): host boundary, turn pipeline, Auto Control Plan, failure behavior, implementation slices.
-- [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md): Utility and Reasoner lanes, structured calls, validation, session-only secrets, model-call journal.
+- [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md): Utility and Reasoner lanes, source routing, machine-JSON schema metadata, structured calls, validation, session-only secrets, model-call journal.
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md): prompt packet contract, Utility/Reasoner composition, injection lanes, footprint profiles, omissions.
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md): settings, logical JSON records, scene cache, run journal, activity events, redaction, invalidation.
 - [UI Spec](design/UI_SPEC.md): Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, full viewer, high-level settings, SillyTavern-native graphite visual system.
@@ -40,6 +40,7 @@ Current V1 decisions:
 - Build provider settings, provider contracts, and structured call contracts before the card loop depends on them.
 - The first working loop must support both Utility Composer and Reasoner Composer, with Utility Composer as the default and fail-soft path.
 - Support all three provider sources for both lanes where the host permits it: current host model, host connection profile, and OpenAI-compatible endpoint.
+- Machine-readable Recursion provider jobs carry the expected response schema, request structured output where the host supports it, and still validate visible JSON before runtime trusts the result.
 - Advanced users can control where the conditioned final prompt packet is injected by setting placement, role, and depth; defaults use the recommended concrete `in_prompt`, `system`, depth `4` plan.
 - Use Directive-style runtime discipline for retries, timeouts, aborts, fallbacks, structured validation, and sanitized model-call diagnostics without importing Directive's campaign architecture.
 - Do not store raw provider prompts or raw provider responses by default.
@@ -75,7 +76,7 @@ Recursion does not own:
 ## Core Runtime Flow
 
 1. The SillyTavern host adapter captures a stable turn snapshot.
-2. Runtime derives the behavior influence policy for Strength, Focus, and Prompt Footprint.
+2. Runtime derives the behavior influence policy for Strength, Min/Max Cards, Focus, and Prompt Footprint.
 3. The Utility Arbiter receives the snapshot, current scene cache metadata, fixed V1 card catalog, provider status, behavior influence policy, and prompt budget context.
 4. The Arbiter returns an Auto Control Plan: action, scene status, prompt footprint, card jobs, card lifecycle decisions, Reasoner decision, and budgets.
 5. Runtime validates the plan, enforces schema and budget caps, applies current behavior policy and card-scope policy, and executes requested card jobs from one frozen snapshot.
@@ -180,6 +181,8 @@ Provider sources:
 - current host model;
 - host connection profile;
 - OpenAI-compatible endpoint.
+
+Host connection profile calls request machine JSON without host preset/instruct wrapping when the SillyTavern service supports it. OpenAI-compatible calls use direct chat-completions JSON-object requests and read-only `/models` discovery. All lanes validate role-specific schemas before returning `ok: true`.
 
 API keys for direct endpoints are session-only. They must not persist to settings, scene cache, prompt packet, run journal, diagnostics, reports, or artifacts.
 

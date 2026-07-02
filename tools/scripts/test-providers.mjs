@@ -49,6 +49,7 @@ function responseTextForRole(roleId, fields = {}) {
 }
 
 assertEqual(parseStructuredOutput('```json\n{"schema":"x"}\n```').schema, 'x', 'structured parser accepts fenced json');
+assertEqual(parseStructuredOutput('Here is the JSON:\n{"schema":"x","ok":true}\nDone.').schema, 'x', 'structured parser extracts a JSON object from wrapper prose');
 assertEqual(roleLane('unknownRole'), '', 'unknown roles have no provider lane');
 assertEqual(roleLane('reasonerComposer'), 'reasoner', 'reasonerComposer uses reasoner lane');
 const expectedUtilityRoles = [
@@ -276,9 +277,12 @@ const router = createGenerationRouter({ client });
 const result = await router.generate('utilityArbiter', { prompt: 'Return JSON' });
 assertEqual(result.ok, true, 'generation succeeds');
 assertEqual(result.data.ok, true, 'json data parsed');
+assertEqual(result.diagnostics.timeoutMs, 120000, 'default provider timeout allows slow live connection profiles');
 assertEqual(calls[0].lane, 'utility', 'utility lane selected');
 assertEqual(calls[0].roleId, 'utilityArbiter', 'role id passed to host');
 assertEqual(calls[0].providerSource, 'host-current-model', 'provider source passed to host');
+assertEqual(calls[0].responseSchema, 'recursion.utilityArbiter.v1', 'provider request carries expected response schema');
+assertEqual(calls[0].machineJson, true, 'provider request marks machine JSON calls');
 
 store.update({ reasonerUse: 'always' });
 store.updateProvider('reasoner', { enabled: true });
@@ -379,6 +383,56 @@ const malformed = await malformedRouter.generate('utilityArbiter', { prompt: 'Re
 assertEqual(malformed.ok, false, 'malformed json returns failure result');
 assertEqual(malformed.error.code, 'RECURSION_JSON_PARSE_FAILED', 'malformed json exposes useful parse code');
 
+const repairedMarker = 'RAW_REPAIRED_PROVIDER_TEXT';
+const repairedActivity = createActivityReporter();
+const repairedJournal = [];
+const repairedRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: `Here is the JSON ${repairedMarker}:
+\`\`\`json
+{
+  // provider comment
+  "schema": "recursion.utilityArbiter.v1",
+  "ok": true,
+}
+\`\`\``,
+        providerId: 'fake-host',
+        model: 'fake-model'
+      };
+    }
+  },
+  activity: repairedActivity,
+  journal: { append: (entry) => repairedJournal.push(entry) }
+});
+const repairedRouterResult = await repairedRouter.generate('utilityArbiter', { prompt: 'Repair JSON.' });
+assertEqual(repairedRouterResult.ok, true, 'router accepts safely repaired provider json');
+assertEqual(repairedRouterResult.diagnostics.structuredOutputRepaired, true, 'router diagnostics record repaired structured output');
+assertEqual(repairedRouterResult.diagnostics.structuredOutputRepairCode, 'json_repaired', 'router diagnostics record compact repair code');
+assertEqual(typeof repairedRouterResult.diagnostics.visibleContentLength, 'number', 'router diagnostics record visible content length');
+assertNoProviderMarker(repairedRouterResult, repairedMarker, 'repaired result does not expose raw malformed provider text');
+assertNoProviderMarker(repairedActivity.history(), repairedMarker, 'repaired activity does not expose raw malformed provider text');
+assertNoProviderMarker(repairedJournal, repairedMarker, 'repaired journal does not expose raw malformed provider text');
+
+let repairedMissingSchemaAttempts = 0;
+const repairedMissingSchemaRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      repairedMissingSchemaAttempts += 1;
+      return {
+        text: '{"ok":true,}',
+        providerId: 'fake-host',
+        model: 'fake-model'
+      };
+    }
+  }
+});
+const repairedMissingSchema = await repairedMissingSchemaRouter.generate('utilityArbiter', { prompt: 'Missing schema after repair.' });
+assertEqual(repairedMissingSchema.ok, false, 'repaired json missing schema still fails');
+assertEqual(repairedMissingSchema.error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'repaired json missing schema keeps schema mismatch code');
+assertEqual(repairedMissingSchemaAttempts, 2, 'repaired schema mismatch still gets one correction retry');
+
 let formatRetryAttempts = 0;
 const formatRetryPrompts = [];
 const formatRetryRouter = createGenerationRouter({
@@ -393,12 +447,17 @@ const formatRetryRouter = createGenerationRouter({
     }
   }
 });
-const formatRetried = await formatRetryRouter.generate('utilityArbiter', { prompt: 'Return Utility Arbiter JSON.' });
+const formatRetried = await formatRetryRouter.generate('utilityArbiter', {
+  prompt: 'Return Utility Arbiter JSON.',
+  snapshotHash: 'retry-snapshot-hash'
+});
 assertEqual(formatRetried.ok, true, 'structured-output schema mismatch retries once');
 assertEqual(formatRetryAttempts, 2, 'structured-output retry makes exactly one retry attempt');
 assertEqual(formatRetried.diagnostics.retryCount, 1, 'structured-output retry records retry count');
 assert(formatRetryPrompts[1].includes('Previous response was rejected'), 'structured-output retry adds correction prompt');
 assert(formatRetryPrompts[1].includes('recursion.utilityArbiter.v1'), 'structured-output retry names expected schema');
+assert(formatRetryPrompts[1].includes('"schema": "recursion.utilityArbiter.v1"'), 'structured-output retry spells out schema field');
+assert(formatRetryPrompts[1].includes('"snapshotHash": "retry-snapshot-hash"'), 'structured-output retry spells out snapshot hash field');
 
 let retryAttempts = 0;
 const retryHost = {
@@ -909,7 +968,10 @@ const openAiRouter = createGenerationRouter({
     }
   })
 });
-const openAiResult = await openAiRouter.generate('utilityArbiter', { prompt: 'OpenAI compatible' });
+const openAiResult = await openAiRouter.generate('utilityArbiter', {
+  prompt: 'OpenAI compatible',
+  snapshotHash: 'openai-snapshot-hash'
+});
 assertEqual(openAiResult.ok, true, 'openai-compatible route succeeds');
 assertEqual(fetchCalls[0].url, 'https://provider.test/v1/chat/completions', 'openai-compatible endpoint is constructed');
 assertEqual(fetchCalls[0].options.headers.Authorization, 'Bearer session-key', 'session key sent as bearer token');
@@ -917,7 +979,156 @@ assertEqual(fetchCalls[0].body.model, 'utility-model', 'configured model sent');
 assertEqual(fetchCalls[0].body.temperature, 0.25, 'configured temperature sent');
 assertEqual(fetchCalls[0].body.top_p, 0.8, 'configured top_p sent');
 assertEqual(fetchCalls[0].body.max_tokens, 321, 'configured max tokens sent');
+assertEqual(fetchCalls[0].body.response_format.type, 'json_schema', 'openai-compatible requests schema-constrained JSON');
+assertEqual(fetchCalls[0].body.response_format.json_schema.schema.properties.schema.const, 'recursion.utilityArbiter.v1', 'openai-compatible JSON schema constrains role schema');
+assertEqual(fetchCalls[0].body.response_format.json_schema.schema.properties.snapshotHash.const, 'openai-snapshot-hash', 'openai-compatible JSON schema constrains snapshot hash');
 assertEqual(fetchCalls[0].body.messages[0].content, 'OpenAI compatible', 'prompt sent as chat message');
+
+async function captureReasoningBody({
+  baseUrl,
+  model,
+  reasoningIntent = 'medium',
+  responseRoleId = 'reasonerComposer',
+  fetchImpl = null
+} = {}) {
+  const calls = [];
+  const store = createStore();
+  store.updateProvider('reasoner', {
+    enabled: true,
+    source: 'openai-compatible',
+    apiKey: 'session-key',
+    openAICompatible: { baseUrl, model },
+    maxTokens: 4096
+  });
+  const router = createGenerationRouter({
+    client: createProviderClient({
+      settingsStore: store,
+      fetchImpl: fetchImpl || (async (url, options) => {
+        calls.push({ url, options, body: JSON.parse(options.body) });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: `${responseRoleId}-reasoning-test`,
+            model,
+            choices: [{ message: { content: responseTextForRole(responseRoleId) } }]
+          })
+        };
+      })
+    })
+  });
+  const result = await router.generate(responseRoleId, {
+    lane: 'reasoner',
+    prompt: `Reasoning intent ${reasoningIntent}`,
+    reasoningIntent
+  });
+  return { result, calls, store };
+}
+
+const openRouterReasoning = await captureReasoningBody({
+  baseUrl: 'https://openrouter.ai/api/v1',
+  model: 'openai/gpt-5.5',
+  reasoningIntent: 'medium'
+});
+assertEqual(openRouterReasoning.result.ok, true, 'OpenRouter-style reasoning route succeeds');
+assertDeepEqual(
+  openRouterReasoning.calls[0].body.reasoning,
+  { effort: 'medium', exclude: true },
+  'OpenRouter-style endpoints receive medium reasoning effort'
+);
+assertEqual(openRouterReasoning.result.diagnostics.reasoningIntent, 'medium', 'diagnostics record normalized reasoning intent');
+assertEqual(openRouterReasoning.result.diagnostics.reasoningDialect, 'openrouter', 'diagnostics record OpenRouter reasoning dialect');
+assertEqual(openRouterReasoning.result.diagnostics.reasoningApplied, true, 'diagnostics record applied reasoning fields');
+
+const openAiReasoning = await captureReasoningBody({
+  baseUrl: 'https://api.openai.com/v1',
+  model: 'gpt-5.5',
+  reasoningIntent: 'high'
+});
+assertDeepEqual(
+  openAiReasoning.calls[0].body.reasoning,
+  { effort: 'high', exclude: true },
+  'OpenAI-style endpoints receive high reasoning effort'
+);
+assertEqual(openAiReasoning.result.diagnostics.reasoningDialect, 'openai', 'diagnostics record OpenAI reasoning dialect');
+
+const glmReasoning = await captureReasoningBody({
+  baseUrl: 'https://api.z.ai/api/paas/v4',
+  model: 'glm-5.2',
+  reasoningIntent: 'high'
+});
+assertDeepEqual(glmReasoning.calls[0].body.thinking, { type: 'enabled' }, 'GLM endpoints enable thinking mode');
+assertEqual(glmReasoning.calls[0].body.reasoning_effort, 'max', 'GLM high intent maps to maximum reasoning effort');
+assertEqual(glmReasoning.result.diagnostics.reasoningDialect, 'z-ai-glm', 'diagnostics record GLM reasoning dialect');
+
+const minimaxMediumReasoning = await captureReasoningBody({
+  baseUrl: 'https://api.minimax.io/v1',
+  model: 'MiniMax-M3',
+  reasoningIntent: 'medium'
+});
+assertEqual(minimaxMediumReasoning.calls[0].body.thinking, 'adaptive', 'MiniMax medium intent uses adaptive thinking');
+assertEqual(minimaxMediumReasoning.result.diagnostics.reasoningDialect, 'minimax-m3', 'diagnostics record MiniMax reasoning dialect');
+
+const minimaxHighReasoning = await captureReasoningBody({
+  baseUrl: 'https://api.minimax.io/v1',
+  model: 'MiniMax-M3',
+  reasoningIntent: 'high'
+});
+assertEqual(minimaxHighReasoning.calls[0].body.thinking, 'enabled', 'MiniMax high intent enables reasoning');
+
+const deepSeekReasoning = await captureReasoningBody({
+  baseUrl: 'https://api.deepseek.com',
+  model: 'deepseek-reasoner',
+  reasoningIntent: 'high'
+});
+assert(!Object.prototype.hasOwnProperty.call(deepSeekReasoning.calls[0].body, 'reasoning'), 'DeepSeek reasoner does not receive unsupported reasoning object');
+assert(!Object.prototype.hasOwnProperty.call(deepSeekReasoning.calls[0].body, 'thinking'), 'DeepSeek reasoner does not receive unsupported thinking field');
+assert(!Object.prototype.hasOwnProperty.call(deepSeekReasoning.calls[0].body, 'reasoning_effort'), 'DeepSeek reasoner does not receive unsupported reasoning_effort field');
+assertEqual(deepSeekReasoning.result.diagnostics.reasoningDialect, 'deepseek-reasoner', 'diagnostics record DeepSeek no-op reasoning dialect');
+assertEqual(deepSeekReasoning.result.diagnostics.reasoningApplied, false, 'diagnostics record DeepSeek reasoning intent as not field-applied');
+
+const unknownReasoning = await captureReasoningBody({
+  baseUrl: 'https://unknown-reasoning.test/v1',
+  model: 'custom-reasoner',
+  reasoningIntent: 'high'
+});
+assert(!Object.prototype.hasOwnProperty.call(unknownReasoning.calls[0].body, 'reasoning'), 'unknown endpoints omit speculative reasoning object');
+assert(!Object.prototype.hasOwnProperty.call(unknownReasoning.calls[0].body, 'thinking'), 'unknown endpoints omit speculative thinking field');
+assert(!Object.prototype.hasOwnProperty.call(unknownReasoning.calls[0].body, 'reasoning_effort'), 'unknown endpoints omit speculative reasoning_effort field');
+assertEqual(unknownReasoning.result.diagnostics.reasoningDialect, 'none', 'diagnostics record no dialect for unknown endpoint');
+assertEqual(unknownReasoning.result.diagnostics.reasoningApplied, false, 'diagnostics record unknown endpoint as not field-applied');
+
+const downgradeCalls = [];
+const downgradedReasoning = await captureReasoningBody({
+  baseUrl: 'https://openrouter.ai/api/v1',
+  model: 'openai/gpt-5.5',
+  reasoningIntent: 'high',
+  fetchImpl: async (url, options) => {
+    const body = JSON.parse(options.body);
+    downgradeCalls.push({ url, options, body });
+    if (downgradeCalls.length === 1) {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: 'Unrecognized request argument supplied: reasoning' } })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: 'downgraded-reasoning-test',
+        model: 'openai/gpt-5.5',
+        choices: [{ message: { content: responseTextForRole('reasonerComposer') } }]
+      })
+    };
+  }
+});
+assertEqual(downgradeCalls.length, 2, 'known reasoning dialect retries once without unsupported reasoning fields');
+assertDeepEqual(downgradeCalls[0].body.reasoning, { effort: 'high', exclude: true }, 'first downgrade attempt sends requested reasoning fields');
+assert(!Object.prototype.hasOwnProperty.call(downgradeCalls[1].body, 'reasoning'), 'downgrade retry removes unsupported reasoning object');
+assertEqual(downgradedReasoning.result.ok, true, 'downgraded reasoning retry succeeds');
+assertEqual(downgradedReasoning.result.diagnostics.reasoningDowngraded, true, 'diagnostics record reasoning downgrade');
 
 const invalidUrlStore = createStore();
 invalidUrlStore.updateProvider('utility', {

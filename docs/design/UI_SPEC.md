@@ -1206,7 +1206,7 @@ Examples:
 - No brief yet: `No brief has been composed for this chat.`
 - Power off: `Recursion disabled. Prompt cleared.`
 - Provider missing: `Utility provider is not ready.`
-- Reasoner off: `Reasoner off. Utility will compose compact packets.`
+- Reasoner unavailable: `Reasoner unavailable. Utility will compose compact packets.`
 
 Provider failures should fail soft. The UI should show the issue, preserve any usable cached scene state, and allow the main generation to continue without Recursion when needed.
 

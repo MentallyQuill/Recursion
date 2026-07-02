@@ -536,6 +536,9 @@ const connectionProfileHost = createSillyTavernHost({
 const connectionProfileResult = await createGenerationRouter({ client: connectionProfileHost.providerClient }).generate('utilityArbiter', {
   prompt: 'Use profile service.',
   systemPrompt: 'System profile service.',
+  snapshotHash: 'profile-snapshot-hash',
+  reasoningCategory: 'final-brief',
+  reasoningIntent: 'medium',
   signal: connectionProfileSignal
 });
 assertEqual(connectionProfileResult.ok, true, 'host connection profile routes through ConnectionManagerRequestService when available');
@@ -551,6 +554,17 @@ assertDeepEqual(
 assertEqual(connectionProfileCalls[0].maxTokens, 512, 'connection profile service receives configured max tokens');
 assertEqual(connectionProfileCalls[0].requestOptions.stream, false, 'connection profile service disables streaming for structured calls');
 assertEqual(connectionProfileCalls[0].requestOptions.extractData, true, 'connection profile service requests extracted data');
+assertEqual(connectionProfileCalls[0].requestOptions.includePreset, false, 'connection profile service skips host preset for machine JSON');
+assertEqual(connectionProfileCalls[0].requestOptions.includeInstruct, false, 'connection profile service skips host instruct for machine JSON');
+assertEqual(connectionProfileCalls[0].parameters.json_schema.name, 'recursion_utilityArbiter_v1', 'connection profile service receives JSON schema name');
+assertEqual(connectionProfileCalls[0].parameters.json_schema.value.properties.schema.const, 'recursion.utilityArbiter.v1', 'connection profile service constrains provider schema');
+assertEqual(connectionProfileCalls[0].parameters.json_schema.value.properties.snapshotHash.const, 'profile-snapshot-hash', 'connection profile service constrains snapshot hash');
+assert(connectionProfileCalls[0].parameters.json_schema.value.required.includes('snapshotHash'), 'connection profile service requires snapshot hash');
+assertDeepEqual(
+  connectionProfileCalls[0].parameters.reasoning,
+  { intent: 'medium', category: 'final-brief', exclude: true },
+  'connection profile service receives sanitized reasoning intent'
+);
 assertEqual(connectionProfileCalls[0].parameters.temperature, 0.15, 'connection profile service receives configured temperature');
 assertEqual(connectionProfileCalls[0].parameters.top_p, 0.7, 'connection profile service receives configured top p');
 assert(typeof connectionProfileCalls[0].parameters.signal?.addEventListener === 'function', 'connection profile service receives abort-capable provider signal');
@@ -659,6 +673,14 @@ assertEqual(rawCalls[0].prompt, 'Route through provider client', 'provider clien
 assertEqual(rawCalls[0].responseLength, 4096, 'provider client maxTokens pass through to responseLength');
 assertEqual(rawCalls[0].temperature, 0.1, 'provider client temperature pass through');
 assertEqual(rawCalls[0].topP, 0.95, 'provider client topP pass through');
+const reasonedRouted = await createGenerationRouter({ client: host.providerClient }).generate('utilityArbiter', {
+  prompt: 'Route through provider client with reasoning metadata',
+  reasoningCategory: 'arbiter',
+  reasoningIntent: 'high'
+});
+assertEqual(reasonedRouted.ok, true, 'provider client routes host current model reasoning metadata');
+assertEqual(rawCalls[1].reasoningCategory, 'arbiter', 'host generateRaw receives reasoning category');
+assertEqual(rawCalls[1].reasoningIntent, 'high', 'host generateRaw receives reasoning intent');
 
 const profileCalls = [];
 const profileHost = createSillyTavernHost({

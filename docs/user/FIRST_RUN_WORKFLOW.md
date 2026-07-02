@@ -11,15 +11,15 @@ Recursion is a current-scene prompt compiler. It observes the active chat, build
 3. Enable `Recursion`.
 4. Return to the active chat and confirm the Recursion Bar appears near the chat surface.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-install-enable.png - SillyTavern extension settings with Recursion enabled and the Recursion Bar mounted in the active chat.
+![SillyTavern with Recursion enabled and the Recursion Bar mounted](../../assets/documentation/renders/recursion-first-run-install-enable.png)
 
 The bar should expose the power toggle, icon-only mode control, Cards selector, Hero Pixel Array plus current-step text, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, extra details may collapse into compact menus.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-bar-mounted.png - Recursion Bar mounted below the SillyTavern chat header with power toggle, mode icon, Cards selector, Hero Pixel Array, Reasoning Level chain, Last Brief dropdown arrow, and options entry visible.
+![Recursion Bar mounted below the SillyTavern chat header](../../assets/documentation/renders/recursion-first-run-bar-mounted.png)
 
 ## 2. Configure Utility
 
-Utility is required. It is the default lane for Arbiter planning, card work, and normal prompt composition.
+Utility is required. It is the default lane for Arbiter planning, card work, provider tests, and Utility fallback composition.
 
 1. Open the Recursion options menu from the ellipsis.
 2. Choose the `Providers` tab.
@@ -27,16 +27,17 @@ Utility is required. It is the default lane for Arbiter planning, card work, and
    - Current Host Model;
    - Host Connection Profile; or
    - OpenAI-Compatible Endpoint.
-4. If using an OpenAI-compatible endpoint, enter base URL, model, and a session API key.
-5. Run `Test Provider`.
+4. If using an OpenAI-compatible endpoint, enter base URL and a session API key.
+5. Use `Fetch Models` if the endpoint exposes `/models`, then select a fetched model or type the model id manually.
+6. Run `Test Provider`.
 
 Session API keys are memory-only for the browser session. Recursion may remember that a session key is present, but it must not save the key in settings, scene cache, prompt packets, journals, diagnostics, browser local storage, SillyTavern file storage, reports, or test artifacts.
 
 ## 3. Optionally Configure Reasoner
 
-Reasoner is optional. Leave it off for the first pass unless you intentionally want the extra composer lane.
+Reasoner is optional. Leave it disabled for the first pass unless you intentionally want Medium/High/Ultra routing to use the extra synthesis lane.
 
-Reasoner is used only when enabled, healthy, and selected for a crowded, conflicted, or subtle hand. If Reasoner fails, times out, is off, or returns invalid output, Recursion falls back to Utility composition.
+Reasoning Level controls how strongly Recursion tries to use Reasoner. Low is Utility-only. Medium uses Reasoner for final brief composition when healthy. High adds Reasoner for Arbiter and priority card families. Ultra is Reasoner-heavy when the lane is healthy. If Reasoner fails, times out, is disabled, lacks credentials, or returns invalid output, Recursion keeps the selected level visible and falls back to Utility.
 
 ## 4. Run The First Auto Pass
 
@@ -49,7 +50,7 @@ Auto prepares and installs the next Recursion prompt packet.
 5. Wait for `Recursion prompt ready.` or a clear fallback state.
 6. Let SillyTavern generation continue normally.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-auto-pass.png - Hero Pixel Array progress menu during an Auto pass showing Utility planning, card generation, prompt composition, prompt install, and ready state.
+![Hero Pixel Array progress menu during a first Auto pass](../../assets/documentation/renders/recursion-first-run-auto-pass.png)
 
 Use the Last Brief dropdown and Prompt Packet panel when you want to inspect exactly what Recursion installed.
 
@@ -61,7 +62,7 @@ Manual uses the Cards selector as a strict whitelist. Disabled families stay out
 2. Send a safe, ordinary chat message.
 3. Confirm the Hero Pixel Array progresses and prompt readiness reflects the selected card scope.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-manual-pass.png - Hero Pixel Array progress menu during a Manual pass with narrowed card scope.
+![Hero Pixel Array progress menu during a Manual pass with narrowed card scope](../../assets/documentation/renders/recursion-first-run-manual-pass.png)
 
 A normal Auto pass may show stages such as reading the current turn, planning the card pass, generating or reusing scene cards, selecting the turn hand, composing the prompt packet, installing the Recursion prompt, saving cache, and ready state.
 
@@ -76,7 +77,7 @@ After Auto or Manual has produced a hand:
 5. Open the Full Viewer from options/settings.
 6. Inspect `Now`, `Deck`, `Activity`, `Prompt Packet`, `Settings`, and `Providers`.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-inspection.png - Last Brief dropdown and Full Viewer showing selected cards, Activity, Prompt Packet, Settings, and Providers after a first Auto pass.
+![Last Brief dropdown after a first Auto pass](../../assets/documentation/renders/recursion-first-run-inspection.png)
 
 The prompt packet should be bounded and inspectable. It should contain current-scene guidance, not raw provider output, hidden reasoning, broad lore, or transcript-scale summaries.
 

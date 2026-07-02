@@ -6,29 +6,29 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 ## Surface Matrix
 
-<Render Needed>: assets/documentation/renders/recursion-operator-install-enable.png - Install and enable flow with SillyTavern extension list, Recursion enabled state, and mounted Recursion Bar.
+![Install and enable flow with Recursion mounted in SillyTavern](../../assets/documentation/renders/recursion-operator-install-enable.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-mode-controls.png - Power toggle, Auto/Manual mode controls, Reasoning Level, and prompt cleanup behavior.
+![Auto and Manual mode controls](../../assets/documentation/renders/recursion-operator-mode-controls.png)
 
 ![Recursion Bar states](../../assets/documentation/renders/recursion-operator-bar-states.png)
 
 ![Hero Pixel Array progress menu states](../../assets/documentation/renders/recursion-operator-progress-menu-states.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-options-menu.png - Options/settings menu with Play, Providers, Advanced, collapsible provider lanes, Injection/UI/Diagnostics sections, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and Full Viewer entry point.
+![Options settings menu with Play, Providers, Advanced, diagnostics, and Full Viewer entry point](../../assets/documentation/renders/recursion-operator-options-menu.png)
 
 ![Last Brief dropdown states](../../assets/documentation/renders/recursion-operator-last-brief-states.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-full-viewer-sections.png - Full Viewer showing Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections.
+![Full Viewer sections for Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics](../../assets/documentation/renders/recursion-operator-full-viewer-sections.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-settings.png - Settings view showing Play Behavior, collapsible Utility and Reasoner provider setup, Advanced Injection/UI/Diagnostics sections, Strength, Prompt Footprint, Focus, and prompt injection placement/role/depth.
+![Settings view with Play Behavior, Strength, Focus, Prompt Footprint, and injection controls](../../assets/documentation/renders/recursion-operator-settings.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-provider-controls.png - Provider controls for Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, and fallback warning.
+![Provider controls with Utility fallback warning and Reasoner disabled state](../../assets/documentation/renders/recursion-operator-provider-controls.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-prompt-packet-inspection.png - Prompt Packet inspection showing Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and redaction-safe diagnostics.
+![Prompt Packet inspection with redaction-safe diagnostics](../../assets/documentation/renders/recursion-operator-prompt-packet-inspection.png)
 
 ![Fail-soft states](../../assets/documentation/renders/recursion-operator-fail-soft-states.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-mobile-behavior.png - Mobile layout showing Recursion Bar wrap behavior, menu access, viewer layout, and touch-safe controls.
+![Mobile layout showing menu access and touch-safe controls](../../assets/documentation/renders/recursion-operator-mobile-behavior.png)
 
 ## Main Surfaces
 
@@ -131,23 +131,23 @@ Default injection settings use Recursion's recommended concrete plan: `In Prompt
 
 Recursion has two provider lanes:
 
-- Utility: required, default, and used for Arbiter planning, structured card work, and normal prompt composition.
-- Reasoner: optional, used only for eligible crowded, conflicted, or subtle composition work.
+- Utility: required, default, and used for Arbiter planning, structured card work, provider tests, and Utility fallback composition.
+- Reasoner: optional, selected by Reasoning Level and lane health for synthesis, priority routing, crowded hands, conflicted cards, or subtle composition work.
 
 Each lane may support:
 
 - Current Host Model;
 - Host Connection Profile;
 - OpenAI-Compatible Endpoint;
-- base URL, model, temperature, top-p, and max token controls;
+- base URL, model, fetched-model selector, and max token controls;
 - session API key field for direct endpoints;
 - Test Provider;
 - Clear Session Key for OpenAI-compatible endpoints;
 - status and resolved model labels.
 
-Provider fields auto-save when changed. Session API keys stay in browser-session memory and are never persisted.
+Provider fields auto-save when changed. Source changes switch the visible field context immediately while preserving hidden alternate-source values. Session API keys stay in browser-session memory and are never persisted.
 
-Utility must be configured for normal operation. Reasoner can remain off. See [Provider Setup](PROVIDER_SETUP.md).
+Utility must be configured for normal operation. Reasoner can remain disabled; if Medium, High, or Ultra is selected while Reasoner is unavailable, Recursion keeps the selected Reasoning Level and falls back through Utility. See [Provider Setup](PROVIDER_SETUP.md).
 
 ## First Run
 
@@ -155,7 +155,7 @@ Use this first-run path:
 
 1. Enable Recursion and confirm the bar mounts.
 2. Configure Utility.
-3. Leave Reasoner off unless you need it.
+3. Leave Reasoner disabled unless you need Medium/High/Ultra synthesis; if you enable it, run Test Provider.
 4. Confirm the power toggle is on.
 5. Set mode to Auto.
 6. Send a safe ordinary turn.
@@ -188,7 +188,8 @@ Expected behavior:
 - Utility unavailable: skip new work, reuse valid cache when safe, or avoid injection.
 - Utility invalid output: reject unsafe structured output and use conservative fallback.
 - Card failure: omit failed cards and keep valid siblings.
-- Reasoner off or failed: compose with Utility.
+- Reasoner disabled, unhealthy, missing credentials, or failed: compose with Utility.
+- Player Stop / host generation stop: abort active Recursion work, clear owned prompt keys, and show skipped/canceled progress rather than a provider warning.
 - Storage write failure: continue with memory state when safe and report a warning.
 - Prompt install failure: allow SillyTavern generation to continue without Recursion guidance.
 - Chat, settings, or source change during a run: abort or discard stale results.

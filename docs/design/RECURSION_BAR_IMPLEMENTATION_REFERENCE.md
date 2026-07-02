@@ -221,9 +221,9 @@ Runtime toggles:
         </span>
       </div>
       <pre class="packet-text">[Recursion Brief - injected]
-Use the following continuity and style guidance for the next assistant response. Treat it as scene-local context; do not quote it directly.
+Use the following scene-local guidance for the next assistant response. Treat it as current-turn context; do not quote it directly.
 
-Continuity: The corridor doorway remains blocked, the lamp is broken, and movement through the corridor should stay constrained until characters actively address the obstruction.
+Scene Constraints: The corridor doorway remains blocked, the lamp is broken, and movement through the corridor should stay constrained until characters actively address the obstruction.
 
 Character: Mara is trying to keep control without revealing panic. She should redirect pressure through precise questions rather than confession.
 
@@ -437,7 +437,7 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
       </section>
     </div>
 
-    <footer class="settings-foot"><button>Save Settings</button></footer>
+    <footer class="settings-foot"><span>Changes auto-save.</span></footer>
   </section>
 </div>
 ```

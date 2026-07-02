@@ -1,6 +1,7 @@
 import { hashJson, safeId } from '../../core.mjs';
 import { packetToPromptBlocks } from '../../prompt.mjs';
-import { createProviderClient } from '../../providers.mjs';
+import { createProviderClient, machineJsonSchemaForRequest } from '../../providers.mjs';
+import { normalizeReasoningCategory, normalizeReasoningIntent } from '../../reasoning-policy.mjs';
 import { createSettingsStore } from '../../settings.mjs';
 import { createMemoryStorageAdapter } from '../../storage.mjs';
 import { createSillyTavernUserFileStorageAdapter } from './storage.mjs';
@@ -277,6 +278,11 @@ function requestTopP(request = {}) {
   return request.topP ?? request.providerConfig?.topP;
 }
 
+function requestJsonSchema(request = {}) {
+  const jsonSchema = machineJsonSchemaForRequest(request);
+  return jsonSchema ? { name: jsonSchema.name, value: jsonSchema.schema } : null;
+}
+
 function requestMessages(request = {}) {
   if (Array.isArray(request.messages) && request.messages.length > 0) {
     return request.messages
@@ -294,6 +300,17 @@ function requestMessages(request = {}) {
   ];
 }
 
+function requestReasoning(request = {}) {
+  const intent = normalizeReasoningIntent(request.reasoningIntent);
+  if (!intent) return null;
+  const category = normalizeReasoningCategory(request.reasoningCategory);
+  return {
+    intent,
+    ...(category ? { category } : {}),
+    exclude: true
+  };
+}
+
 function connectionProfileService(context) {
   const service = context.ConnectionManagerRequestService || globalThis.ConnectionManagerRequestService;
   return typeof service?.sendRequest === 'function' ? service : null;
@@ -309,6 +326,7 @@ async function sendViaConnectionProfile(context, request = {}) {
   }
   const service = connectionProfileService(context);
   if (!service) throw hostProfileUnsupportedError();
+  const reasoning = requestReasoning(request);
   return normalizeGenerationResponse(await service.sendRequest(
     profileId,
     requestMessages(request),
@@ -316,12 +334,14 @@ async function sendViaConnectionProfile(context, request = {}) {
     {
       stream: false,
       extractData: true,
-      includePreset: true,
-      includeInstruct: true
+      includePreset: request.machineJson === true ? false : true,
+      includeInstruct: request.machineJson === true ? false : true
     },
     {
       temperature: requestTemperature(request),
       top_p: requestTopP(request),
+      ...(requestJsonSchema(request) ? { json_schema: requestJsonSchema(request) } : {}),
+      ...(reasoning ? { reasoning } : {}),
       signal: request.signal
     }
   ));
@@ -523,6 +543,7 @@ export function createSillyTavernHost({
         return sendViaConnectionProfile(context, request);
       }
       if (typeof context.generateRaw === 'function') {
+        const reasoning = requestReasoning(request);
         const rawRequest = {
           prompt: stringValue(request.prompt),
           systemPrompt: request.systemPrompt,
@@ -531,6 +552,13 @@ export function createSillyTavernHost({
           topP: requestTopP(request),
           providerSource: request.providerSource,
           jsonSchema: request.jsonSchema,
+          ...(reasoning
+            ? {
+                reasoning,
+                reasoningIntent: reasoning.intent,
+                ...(reasoning.category ? { reasoningCategory: reasoning.category } : {})
+              }
+            : {}),
           signal: request.signal
         };
         if (profileGenerationRequested(request)) {

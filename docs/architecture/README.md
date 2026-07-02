@@ -7,6 +7,6 @@ Use this folder for implementation-facing diagrams, module boundaries, storage c
 - [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](STORAGE_AND_DIAGNOSTICS.md)
 
-Behavior-control ownership for Strength, Focus, and Prompt Footprint is defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
+Behavior-control ownership for Strength, Min/Max Cards, Focus, and Prompt Footprint is defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
 
 For release-facing technical manuals, use [Technical Manuals](../technical/README.md).

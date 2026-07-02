@@ -77,6 +77,17 @@ Reasoning Level also controls runtime lane preference and card pressure:
 
 If the Reasoner lane is disabled, untested, unhealthy, missing credentials, or missing required profile/config fields, runtime falls back to Utility for the affected call instead of blocking the host generation.
 
+Reasoning Level also maps to provider-level reasoning intent for model calls that actually use the Reasoner lane:
+
+| Work category | Low | Medium | High | Ultra |
+| --- | --- | --- | --- | --- |
+| Final brief / `reasonerComposer` | minimal | medium | medium | high |
+| Arbiter on Reasoner | minimal | minimal | medium | medium |
+| Card generation on Reasoner | minimal | minimal | minimal | medium |
+| Provider tests | minimal | minimal | minimal | minimal |
+
+Provider reasoning intent is request metadata, not prompt text. OpenAI-compatible adapters apply it only for known dialects: OpenRouter and OpenAI receive `reasoning: { effort, exclude: true }`; GLM/Z.AI receives `thinking: { type: "enabled" }` plus `reasoning_effort`; MiniMax M3 receives `thinking: "adaptive"` or `"enabled"`; DeepSeek reasoner and unknown endpoints receive no speculative reasoning fields. If a known endpoint rejects reasoning fields with a 400/422 unsupported-parameter response, the adapter retries once without reasoning fields and records `reasoningDowngraded: true` in sanitized diagnostics.
+
 Source options:
 
 - `host-current-model`: use the model currently active in SillyTavern.
@@ -96,6 +107,10 @@ Connection profile discovery must stay scoped to provider/connection-profile sea
 Model discovery is read-only. It may use the currently typed session key, but it must not save settings, persist secrets, write diagnostics, clear prompts, or invalidate scene cache. Fetch failures are compact UI status, not runtime generation failures.
 
 The Providers settings pane shows a compact route summary derived from Reasoning Level. Recursion does not expose Directive-style deep per-role routing controls in V1; Reasoning Level remains the operator-facing route control, and runtime owns the detailed role-to-lane policy.
+
+Machine JSON calls carry the expected response schema as provider request metadata. Host connection profile calls pass a minimal JSON schema constraint to `ConnectionManagerRequestService.sendRequest` when available and suppress host preset/instruct wrapping for those machine-readable Recursion jobs. The schema constrains the response `schema` field and, when the request has a frozen `snapshotHash`, the response `snapshotHash` field. This keeps saved SillyTavern profiles useful for routing while avoiding accidental roleplay preset text around strict JSON contracts. Human-facing SillyTavern generation remains outside Recursion's provider-job wrapper.
+
+Host current-model calls pass normalized `reasoningIntent`, `reasoningCategory`, and nested `reasoning` metadata to raw host adapters when a caller provides reasoning intent. Host connection-profile calls pass `parameters.reasoning = { intent, category, exclude: true }` so SillyTavern/provider integrations for Claude, Gemini, OpenRouter, and other profile-backed models can map intent to their native reasoning controls without Recursion storing or exposing hidden reasoning content.
 
 Utility must always have an enabled settings object. If Utility is misconfigured or unhealthy, Recursion degrades to cached/local behavior and does not block the user's normal SillyTavern generation.
 
@@ -274,7 +289,7 @@ Reasoner is not appropriate when:
 
 - the hand is small and non-conflicting;
 - Utility produced invalid or insufficient card data;
-- the user turned Reasoner off;
+- the Reasoner lane is disabled by settings or Reasoning Level;
 - the Reasoner lane is missing a provider secret or failed its last connectivity test.
 
 Required output shape:
@@ -294,7 +309,7 @@ Required output shape:
   "conflictResolutions": [
     {
       "summary": "string",
-      "basis": ["message:42", "card:continuity-risk-1"]
+      "basis": ["message:42", "card:scene-constraints-1"]
     }
   ],
   "warnings": ["string"]
@@ -337,15 +352,22 @@ Reasoner must not become mandatory for normal operation. The Utility path must r
 
 All provider-owned Recursion jobs must request structured JSON and validate before use.
 
+Machine-JSON requests carry the expected `responseSchema` and, when available, the frozen `snapshotHash` into provider adapters. OpenAI-compatible calls should use schema-constrained JSON when supported, and SillyTavern connection-profile calls should pass equivalent `json_schema` metadata while disabling host preset/instruct injection for machine output. Prompt text and correction retries still spell out the required `schema` and `snapshotHash` fields because provider-side schema support is not universal.
+
+Reasoning intent metadata may accompany machine-JSON requests. It is limited to compact fields such as `reasoningIntent`, `reasoningCategory`, `reasoningDialect`, `reasoningApplied`, and `reasoningDowngraded`; it must not include raw chain-of-thought or hidden reasoning text.
+
 Validation requirements:
 
-- parse JSON, including safe recovery from fenced JSON wrappers when needed;
 - normalize provider-shaped responses before parsing so empty visible output, reasoning-only output, and token-limit truncation become stable provider failures instead of ambiguous JSON parse failures;
+- parse JSON through the shared structured-output parser, including safe recovery from fenced JSON, wrapper prose, `<think>` / `<reasoning>` blocks, comments, trailing commas, smart quotes, BOMs, and literal line breaks inside strings;
+- treat syntax repair as syntax repair only: never fabricate missing `schema`, `snapshotHash`, role, family, evidence, card text, budgets, diagnostics, or composer fields;
 - verify `schema`, `role`, `snapshotHash`, enum values, string lengths, numeric ranges, and required arrays;
 - reject outputs that include raw hidden reasoning, chain-of-thought, private motives, or unsupported durable lore;
 - reject outputs that cite evidence outside the frozen snapshot;
 - clamp confidence and token estimates to valid ranges;
 - mark each accepted card or composer patch with schema version and source role.
+
+Repaired output remains untrusted until all role-specific validation passes. A repaired Arbiter object missing or mismatching the frozen `snapshotHash` still falls back to the conservative local plan. A repaired card object with a missing or mismatched role, family, `snapshotHash`, or evidence range is omitted independently. Success diagnostics may record compact metadata such as `structuredOutputRepaired`, `structuredOutputRepairCode`, and `visibleContentLength`; diagnostics, journals, activity, and artifacts must not persist raw malformed provider text or hidden reasoning.
 
 `providerTest` is a connectivity and structured-output probe, not a content job. It passes only when the router succeeds and the parsed payload contains `schema: "recursion.providerTest.v1"` plus explicit `ok: true`; missing or false `ok` fails the lane test.
 
@@ -418,7 +440,7 @@ Card failure:
 
 Reasoner failure:
 
-- retry the same Reasoner call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot and the user has not turned Reasoner off;
+- retry the same Reasoner call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot and the Reasoner route remains enabled;
 - fall back to Utility-only composition;
 - do not run an additional hidden Utility model call solely to recover the Reasoner result; use the Utility composer output that is already part of the normal route, or compose locally from accepted cards if available;
 - record a compact reason such as auth failure, timeout, validation failure, or provider error.
@@ -443,8 +465,9 @@ Recursion should borrow Directive's robustness discipline in smaller form:
 
 - every provider call has a role, lane, timeout, run id, snapshot hash, and abort signal;
 - every result is normalized into success, validation failure, provider failure, timeout, abort, or stale result;
+- default provider timeout is 120 seconds unless a caller overrides it;
 - transient transport failures may get one same-lane retry only while the abort signal is still open and the current-run or current-snapshot guard passes;
-- schema failures do not get blind retries unless the failure is clearly recoverable, such as fenced JSON or likely truncation;
+- schema failures do not get blind retries unless the failure is clearly recoverable, such as schema mismatch or likely truncation; correction prompts must restate the required response `schema` and frozen `snapshotHash` when present;
 - card failures, including malformed batch entries, omit only the failed card and keep valid siblings;
 - Utility Arbiter failure reuses valid cache or skips injection;
 - Reasoner failure falls back to Utility composition;

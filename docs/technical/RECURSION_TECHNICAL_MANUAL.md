@@ -29,17 +29,18 @@ flowchart TD
 
 ![Runtime pipeline visual](../../assets/documentation/renders/recursion-technical-runtime-pipeline.png)
 
-The runtime spine is implemented across `src/runtime.mjs`, `src/cards.mjs`, `src/card-scope.mjs`, `src/progress.mjs`, `src/prompt.mjs`, `src/providers.mjs`, `src/storage.mjs`, `src/activity.mjs`, and `src/hosts/sillytavern/host.mjs`.
+The runtime spine is implemented across `src/runtime.mjs`, `src/settings-policy.mjs`, `src/cards.mjs`, `src/card-scope.mjs`, `src/progress.mjs`, `src/prompt.mjs`, `src/providers.mjs`, `src/storage.mjs`, `src/activity.mjs`, and `src/hosts/sillytavern/host.mjs`.
 
 ## Component Ownership
 
 | Component | Owner module | Responsibility |
 | --- | --- | --- |
 | Core helpers | `src/core.mjs` | Stable hashing, safe ids, truncation, JSON parsing, cloning, timestamps, and redaction. |
-| Settings | `src/settings.mjs` | Mode, Reasoning Level, strength, footprint, focus, provider preferences, and session-only API key handling. |
+| Settings | `src/settings.mjs` | Mode, Reasoning Level, strength, footprint, focus, provider preferences, injection settings, UI limits, and session-only API key handling. |
+| Behavior policy | `src/settings-policy.mjs` | Source-backed Strength, Min/Max Cards, Focus, Prompt Footprint, policy prompt lines, effective footprint, and diagnostics summaries. |
 | Activity | `src/activity.mjs` | Sanitized user-facing activity events for the bar, progress menu, viewer, and diagnostics. |
 | Progress model | `src/progress.mjs` | Hero Pixel Array blocks, progress-menu rows, nested card/model-call status, and compact current-step text. |
-| Providers | `src/providers.mjs` | Utility and Reasoner lane routing, host and OpenAI-compatible calls, JSON parsing, retries, timeouts, aborts, and model-call diagnostics. |
+| Providers | `src/providers.mjs` | Utility and Reasoner lane routing, host-current-model, host-connection-profile, OpenAI-compatible calls, model discovery, JSON parsing, retries, timeouts, aborts, and model-call diagnostics. |
 | Cards | `src/cards.mjs` | Fixed V1 catalog, card normalization, provider-result conversion, lifecycle application, and hand selection. |
 | Card scope | `src/card-scope.mjs` | Fixed family/sub-item scope catalog, Auto focus payloads, Manual whitelist enforcement helpers, and safe scope summaries. |
 | Prompt | `src/prompt.mjs` | Packet sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
@@ -65,10 +66,12 @@ Recursion has two provider lanes:
 
 | Lane | Role |
 | --- | --- |
-| Utility | Required default lane for Arbiter planning, card work, provider tests, and normal prompt composition support. |
+| Utility | Required default lane for Arbiter planning, card work, provider tests, and Utility fallback composition support. |
 | Reasoner | Optional composer lane for rich, crowded, conflicted, or subtle hands. Utility remains the fallback. |
 
-Each lane can use the current host model, a host connection profile when the host supports it, or an OpenAI-compatible endpoint. Direct endpoint API keys live only in the session secret store and are never persisted.
+Each lane can use the current host model, a host connection profile when the host supports it, or an OpenAI-compatible endpoint. Direct endpoint API keys live only in the session secret store and are never persisted. OpenAI-compatible model discovery is read-only against `/models`; it may use the session key but does not save secrets, write journals, clear prompts, or invalidate scene cache.
+
+Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses Reasoner for final composition when healthy, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when healthy. Disabled, untested, unhealthy, missing-profile, or missing-key Reasoner routes fall back to Utility without blocking normal chat generation.
 
 ## Card And Hand System
 
@@ -127,6 +130,7 @@ The UI is an observatory, not a card editor. It shows what Recursion did without
 - Storage failure keeps in-memory work for the current turn when possible and reports a warning.
 - Stale async results cannot mutate the active cache or prompt packet.
 - Prompt install is replace-or-clear from Recursion's perspective.
+- Player Stop / host generation stop aborts active Recursion work, clears owned prompt keys, marks any canceled cache stale, and reports skipped progress instead of warning/failure.
 
 ## Testing Evidence
 

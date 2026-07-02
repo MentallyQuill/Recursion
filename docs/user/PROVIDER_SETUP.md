@@ -2,12 +2,12 @@
 
 Recursion uses two provider lanes:
 
-- Utility: required, default, and used for Arbiter planning, scene/card extraction, card generation, lifecycle support, structured diagnostics, and normal prompt composition.
-- Reasoner: optional, used for crowded, conflicted, or subtle prompt composition when enabled and healthy.
+- Utility: required, default, and used for Arbiter planning, scene/card extraction, card generation, lifecycle support, structured diagnostics, and Utility fallback composition.
+- Reasoner: optional, used by Medium/High/Ultra Reasoning Level routing when enabled and healthy, with Utility fallback when unavailable.
 
-Reasoner is not a better default Utility. Utility remains the normal path and the fallback path.
+Reasoner is not a better default Utility. Utility remains the required path and the fallback path. The compact-bar Reasoning Level chain controls how much Recursion tries to use Reasoner: Low is Utility-only, Medium uses Reasoner for final composition when healthy, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when the lane is healthy.
 
-<Render Needed>: assets/documentation/renders/recursion-provider-controls-utility-reasoner.png - Provider controls showing collapsible Utility and Reasoner lanes with source selector, model fields, session key state, Test Provider, and OpenAI-only Clear Session Key.
+![Utility and Reasoner provider controls with session-only key state](../../assets/documentation/renders/recursion-provider-controls-utility-reasoner.png)
 
 ## Source Options
 
@@ -37,13 +37,24 @@ Utility is healthy when the test passes and the bar or provider card shows a rea
 ## Reasoner Setup
 
 1. Open the Reasoner provider card.
-2. Enable Reasoner only if you want the optional composer lane.
+2. Enable Reasoner only if you want Medium/High/Ultra routing to use the optional synthesis lane.
 3. Choose a provider source.
 4. Fill the required fields.
 5. Run `Test Provider`.
-6. Use the compact-bar Reasoning Level chain for broad provider bias; leave it at the default unless you are deliberately testing lower Utility-only or higher Reasoner-heavy routing.
+6. Use the compact-bar Reasoning Level chain for broad provider bias; Low forces Utility-only behavior, while Medium, High, and Ultra keep their selected level and fall back to Utility if the Reasoner lane is unhealthy.
 
-Reasoner is eligible only when enabled, healthy, and selected by Recursion for a useful reason such as crowded hand, conflicting cards, high continuity risk, or complex active cast.
+Reasoner is eligible only when enabled, healthy, and selected by Reasoning Level plus runtime policy for a useful reason such as a crowded hand, conflicting cards, high scene-constraint risk, or complex active cast.
+
+Reasoning Level also sets the amount of provider-side reasoning Recursion requests for Reasoner work:
+
+| Level | Final brief | Other Reasoner work |
+| --- | --- | --- |
+| Low | minimal | minimal |
+| Medium | medium | minimal |
+| High | medium | Arbiter medium, cards minimal |
+| Ultra | high | Arbiter medium, cards medium |
+
+Provider tests always use minimal reasoning. Direct OpenAI-compatible endpoints receive native reasoning fields only when Recursion knows the dialect. OpenRouter and OpenAI use an effort field, GLM/Z.AI uses thinking plus `reasoning_effort`, MiniMax M3 uses its thinking mode, and unsupported/unknown endpoints are left alone. SillyTavern connection profiles receive compact reasoning metadata so profile-backed Claude, Gemini, OpenRouter, and other integrations can apply their own native controls.
 
 ## Session-Only API Keys
 
@@ -72,7 +83,7 @@ Recursion must not persist:
 
 Clear Session Key appears only when the lane source is OpenAI-Compatible Endpoint. Clearing a session key should immediately mark that lane untestable until a key is re-entered.
 
-Provider field changes auto-save on commit. Source, profile, base URL, model, and max token changes apply immediately. Session keys are accepted into browser-session memory only and are not written to persisted settings.
+Provider field changes auto-save on commit. Source, profile, base URL, model, fetched-model selection, and max-token changes apply immediately. Session keys are accepted into browser-session memory only and are not written to persisted settings. Hidden alternate-source fields keep their values when the selected source changes, but only the selected source participates in readiness, tests, and generation.
 
 ## Test Provider Flow
 
@@ -102,9 +113,9 @@ Expected fallback behavior:
 
 - Utility auth failure: mark Utility unhealthy and skip or reuse safe cache.
 - Utility timeout: retry once for transient transport failure only if the request is not aborted and the current snapshot is still current, then skip or reuse safe cache.
-- Utility invalid structured output: reject the output and use conservative local behavior.
+- Utility invalid structured output: repair safe JSON syntax when possible, then reject any output that still misses the required schema or snapshot hash and use conservative local behavior.
 - Card job failure: omit failed card and keep valid sibling cards.
-- Reasoner off: Utility composes.
+- Reasoner disabled: Utility composes.
 - Reasoner missing key: Utility composes.
 - Reasoner timeout or invalid output: Utility composes and the fallback is recorded.
 - Prompt install failure after provider success: generation continues without Recursion guidance.
@@ -121,6 +132,7 @@ Provider failures should degrade Recursion, not block normal SillyTavern generat
 | Reasoner failed but generation continued | Expected fallback path. | Inspect Activity and Prompt Packet to confirm Utility composition. |
 | Prompt not installed | Power is off, Utility unavailable, stale run, or injection failure. | Check power state, mode, Activity, Provider status, and Prompt Packet metadata. |
 | Session key disappeared | Browser session reset or Clear Session Key used. | Re-enter key and run Test Provider. |
+| Provider returned messy JSON | Recursion can strip wrappers and repair common JSON syntax, but cannot invent missing contract fields. | Inspect sanitized Activity details; fix provider prompt/model settings if schema or snapshot errors repeat. |
 | Error text looks too vague | Redaction removed sensitive details. | Use sanitized diagnostics and provider-side logs if you need endpoint details. |
 
 ## Safe Verification

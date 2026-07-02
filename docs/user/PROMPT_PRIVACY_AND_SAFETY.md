@@ -24,7 +24,7 @@ Inspection metadata can include:
 - injection lane and clear status;
 - composer route and fallback path.
 
-<Render Needed>: assets/documentation/renders/recursion-prompt-packet-viewer.png - Prompt Packet viewer showing Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and sanitized diagnostics.
+![Prompt Packet viewer with selected card refs, omissions, injection metadata, and sanitized diagnostics](../../assets/documentation/renders/recursion-prompt-packet-viewer.png)
 
 The packet should stay current-scene oriented. It should not become a lore recap, transcript summary, future plot plan, or memory replacement.
 
@@ -127,7 +127,7 @@ Recursion coexists with other SillyTavern context systems. It should not replace
 | VectFox or vector recall tools | Similarity recall and retrieval. | Treat retrieved context as external context, not Recursion cache. |
 | Author notes or user prompts | User-authored guidance. | Do not rewrite or silently replace user intent. |
 
-Recursion should mark omitted candidates with reasons such as `external_owner` or `already_in_external_context` when the host exposes enough information. If external context conflicts with selected-hand evidence, Recursion should stay conservative and flag a continuity risk rather than silently override another system.
+Recursion should mark omitted candidates with reasons such as `external_owner` or `already_in_external_context` when the host exposes enough information. If external context conflicts with selected-hand evidence, Recursion should stay conservative and flag a scene-constraint risk rather than silently override another system.
 
 ![External context coexistence diagram](../../assets/documentation/renders/recursion-external-coexistence.png)
 

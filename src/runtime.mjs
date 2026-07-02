@@ -2080,13 +2080,14 @@ export function createRecursionRuntime({
   }
 
   async function generatePlanCards({ runId, plan, snapshot, signal }) {
-    if (!generationRouter || typeof generationRouter.batch !== 'function') return [];
+    if (!generationRouter) return [];
     const requests = buildCardRequests(plan, {
       runId,
       snapshotHash: plan.snapshotHash || hashJson(snapshot),
       snapshot: providerSafeSnapshot(snapshot)
     });
     if (!requests.length) return [];
+    if (typeof generationRouter.batch !== 'function' && typeof generationRouter.generate !== 'function') return [];
     stageRuntimeActivity({
       runId,
       phase: 'cardBatchRunning',
@@ -2099,7 +2100,21 @@ export function createRecursionRuntime({
       const signalRequests = signal
         ? requests.map((request) => ({ ...request, signal }))
         : requests;
-      const results = await generationRouter.batch(signalRequests, { runId, signal, isCurrent: () => isActiveRun(runId) });
+      const options = { runId, signal, isCurrent: () => isActiveRun(runId) };
+      const results = typeof generationRouter.batch === 'function'
+        ? await generationRouter.batch(signalRequests, options)
+        : [];
+      if (typeof generationRouter.batch !== 'function') {
+        for (const request of signalRequests) {
+          if (signal?.aborted === true || !isActiveRun(runId)) break;
+          try {
+            results.push(await generationRouter.generate(request.roleId, request, options));
+          } catch {
+            if (signal?.aborted === true || !isActiveRun(runId)) break;
+            results.push({ ok: false });
+          }
+        }
+      }
       return results.flatMap((result, index) => cardsFromProviderResult(result, {
         ...cardSourceContext(snapshot),
         expectedSnapshotHash: requests[index]?.snapshotHash,

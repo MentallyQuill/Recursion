@@ -1541,7 +1541,23 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push({ roleId, request });
-        assertEqual(roleId, 'utilityArbiter', 'only utility arbiter should be called');
+        if (roleId !== 'utilityArbiter') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'openThreadsCard',
+              family: 'Open Threads',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: 'The unanswered signal still needs a response.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 18
+              }]
+            }
+          };
+        }
         return {
           ok: true,
           data: {
@@ -1564,7 +1580,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(view.lastPlan.reasonerDecision.mode, 'use', 'arbiter reasoner decision preserved in plan');
   assertEqual(view.lastHand.cards.length, 1, 'router card budget changes selected hand');
   assertEqual(view.lastPacket.diagnostics.reasonerStatus, 'skipped', 'low reasoning level skips reasoner routing');
-  assertEqual(routerCalls.length, 1, 'reasoner composer not called when reasoning level is low');
+  assert(!routerCalls.some((call) => call.roleId === 'reasonerComposer'), 'reasoner composer not called when reasoning level is low');
 }
 
 {
@@ -2734,6 +2750,191 @@ for (const scenario of [
   const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
   assert(!serialized.includes('Bearer live-token'), 'provider card bearer token redacted before persistence and prompt');
   assert(!serialized.includes('sk-live-runtime'), 'provider card sk token redacted before persistence and prompt');
+}
+
+{
+  const routerCalls = [];
+  const cardSnapshots = [];
+  const cardStarts = [];
+  let firstCardCompleted = false;
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              cardJobs: [
+                { role: 'openThreadsCard', reason: 'Need one sequential open thread card.' },
+                { role: 'continuityRiskCard', reason: 'Need one invalid sequential continuity card.' }
+              ],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              diagnostics: ['sequential-provider-card-plan']
+            }
+          };
+        }
+        cardStarts.push({ roleId, firstCardCompletedAtStart: firstCardCompleted });
+        cardSnapshots.push({ roleId, runId: request.runId, snapshotHash: request.snapshotHash, signal: request.signal, hasSignal: isAbortSignal(request.signal) });
+        if (roleId === 'continuityRiskCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'continuityRiskCard',
+              family: 'Continuity Risk',
+              snapshotHash: 'wrong-sequential-snapshot',
+              items: [{
+                promptText: 'This invalid sequential card should be omitted.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 18
+              }]
+            }
+          };
+        }
+        await Promise.resolve();
+        firstCardCompleted = true;
+        return {
+          ok: true,
+          roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: 'openThreadsCard',
+            family: 'Open Threads',
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: 'The sequential provider call keeps the unanswered signal active.',
+              summary: 'Sequential open thread summary.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 18
+            }]
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Generate sequential card job.' });
+  const view = runtime.view();
+  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
+  assertEqual(result.ok, true, 'sequential provider card job run installs prompt');
+  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'continuityRiskCard'], 'router without batch runs card jobs sequentially');
+  assertEqual(cardStarts[1].firstCardCompletedAtStart, true, 'second sequential card starts after first resolves');
+  assertEqual(cardSnapshots.length, 2, 'sequential card jobs capture frozen requests');
+  assert(cardSnapshots.every((entry) => entry.snapshotHash === result.plan.snapshotHash), 'sequential card jobs use frozen plan snapshot hash');
+  assert(cardSnapshots.every((entry) => entry.runId === view.lastPacket.diagnostics.runId), 'sequential card jobs use shared run id');
+  assert(cardSnapshots.every((entry) => entry.signal === cardSnapshots[0].signal && entry.hasSignal), 'sequential card jobs share abort signal object');
+  assert(cache.cards.some((card) => card.family === 'Open Threads'), 'sequential provider card persisted in scene cache');
+  assert(!cache.cards.some((card) => card.family === 'Continuity Risk'), 'invalid sequential provider card is omitted independently');
+  assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'sequential provider card selected into hand');
+  assert(view.lastPacket.sections.turnBrief.includes('sequential provider call'), 'sequential provider card reaches prompt packet');
+  assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'sequential provider card pass does not add local Scene Frame fallback card');
+}
+
+{
+  const routerCalls = [];
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              cardJobs: [
+                { role: 'openThreadsCard', reason: 'Keep the first sequential card.' },
+                { role: 'continuityRiskCard', reason: 'This thrown card should not poison the first.' }
+              ],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              diagnostics: ['sequential-provider-throw-plan']
+            }
+          };
+        }
+        if (roleId === 'continuityRiskCard') {
+          throw new Error('sequential card provider failed');
+        }
+        return {
+          ok: true,
+          roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: 'openThreadsCard',
+            family: 'Open Threads',
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: 'The first sequential card survives a later card failure.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 18
+            }]
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Generate with one throwing sequential card.' });
+  const view = runtime.view();
+  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
+  assertEqual(result.ok, true, 'sequential thrown card job run still installs prompt');
+  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'continuityRiskCard'], 'throwing sequential card job is attempted after first card');
+  assert(cache.cards.some((card) => card.family === 'Open Threads'), 'successful sequential card persists despite later throw');
+  assert(!cache.cards.some((card) => card.family === 'Continuity Risk'), 'throwing sequential card is omitted independently');
+  assert(view.lastPacket.sections.turnBrief.includes('survives a later card failure'), 'successful sequential card reaches prompt after later throw');
+  assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'sequential per-card failure does not force local fallback');
+}
+
+{
+  const routerCalls = [];
+  let runtimeForSupersede = null;
+  let disposedDuringFirstCard = false;
+  const harness = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              cardJobs: [
+                { role: 'openThreadsCard', reason: 'Supersede after this card.' },
+                { role: 'continuityRiskCard', reason: 'This card must not start after supersession.' }
+              ],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              diagnostics: ['sequential-supersession-plan']
+            }
+          };
+        }
+        if (roleId === 'openThreadsCard' && !disposedDuringFirstCard) {
+          disposedDuringFirstCard = true;
+          await runtimeForSupersede.dispose();
+        }
+        return {
+          ok: true,
+          roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: 'Superseded sequential card.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 18
+            }]
+          }
+        };
+      }
+    }
+  });
+  runtimeForSupersede = harness.runtime;
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Supersede sequential card pass.' });
+  assertEqual(result.superseded, true, 'sequential card pass returns superseded after dispose');
+  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard'], 'sequential card pass stops before launching next card after supersession');
 }
 
 {

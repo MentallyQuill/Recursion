@@ -119,6 +119,24 @@ assertEqual(unknownRoleBatch[1].ok, false, 'batch with unknown role fails unknow
 assertEqual(unknownRoleBatch[1].error.code, 'RECURSION_PROVIDER_ROLE_UNSUPPORTED', 'batch unknown role uses stable error code');
 assertEqual(calls.length, batchCallsBeforeUnknownRole + 1, 'batch unknown role does not call host for unknown slot');
 
+const batchCallsBeforeMalformedEntry = calls.length;
+const malformedEntryBatch = await router.batch([
+  { roleId: 'utilityArbiter', prompt: 'Known role still runs after malformed sibling.' },
+  null,
+  { prompt: 'Missing role should fail without aborting sibling slots.' }
+], { runId: 'provider-batch-malformed-entry' });
+assertEqual(malformedEntryBatch[0].ok, true, 'batch with malformed entry keeps known slot successful');
+assertEqual(malformedEntryBatch[1].ok, false, 'batch with malformed entry fails only malformed slot');
+assertEqual(malformedEntryBatch[1].error.code, 'RECURSION_PROVIDER_REQUEST_INVALID', 'batch malformed entry uses stable error code');
+assertEqual(malformedEntryBatch[2].ok, false, 'batch with missing role fails only missing-role slot');
+assertEqual(malformedEntryBatch[2].error.code, 'RECURSION_PROVIDER_ROLE_MISSING', 'batch missing role uses stable error code');
+assertEqual(calls.length, batchCallsBeforeMalformedEntry + 1, 'batch malformed entries do not call host');
+assertDeepEqual(
+  malformedEntryBatch.map((entry) => entry.diagnostics.runId),
+  ['provider-batch-malformed-entry', 'provider-batch-malformed-entry', 'provider-batch-malformed-entry'],
+  'batch malformed-entry diagnostics keep shared run id'
+);
+
 const wrongSchemaRouter = createGenerationRouter({
   client: {
     async generate() {

@@ -944,36 +944,46 @@ export function createGenerationRouter({ client, activity = null, journal = null
   }
 
   async function batch(requests = [], options = {}) {
-    if (typeof client.batch !== 'function') {
-      const results = [];
-      for (const entry of requests) {
-        const { roleId, request } = normalizeBatchRequest(entry);
-        results.push(await generate(roleId, request, options));
-      }
-      return results;
-    }
-
+    const rawRequests = Array.isArray(requests) ? requests : [];
     const batchRunId = String(options.runId || makeId('provider-batch'));
     const effectiveTimeoutMs = options.timeoutMs ?? timeoutMs;
-    const entries = requests.map((entry, index) => {
-      const { roleId, request } = normalizeBatchRequest(entry);
+    const results = new Array(rawRequests.length);
+
+    function fallbackBatchRequest(entry) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return { roleId: '', request: {} };
+      const request = { ...entry };
+      const roleId = String(request.roleId || request.role || '').trim();
+      delete request.roleId;
+      delete request.role;
+      return { roleId, request };
+    }
+
+    function makeBatchEntry(entry, index) {
+      let roleId = '';
+      let request = {};
+      let normalizationError = null;
+      try {
+        ({ roleId, request } = normalizeBatchRequest(entry));
+      } catch (error) {
+        normalizationError = error;
+        ({ roleId, request } = fallbackBatchRequest(entry));
+      }
       const lane = laneName(requestLane(roleId, request));
       const started = Date.now();
       const startedAt = nowIso();
       const diagnostics = diagnosticsBase({ roleId, lane, request, runId: batchRunId, startedAt, timeoutMs: effectiveTimeoutMs });
-      activityStart(activity, {
-        runId: batchRunId,
-        phase: 'providerCallStarted',
-        mode: 'background',
-        severity: 'info',
-        providerLane: lane,
-        composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
-        label: `${lane === 'reasoner' ? 'Reasoner' : 'Utility'} provider batch call started.`,
-        detail: diagnostics
-      });
-      return { index, roleId, request, lane, started, startedAt, diagnostics, providerRoleKnown: isProviderRole(roleId) };
-    });
-    const results = new Array(entries.length);
+      return {
+        index,
+        roleId,
+        request,
+        lane,
+        started,
+        startedAt,
+        diagnostics,
+        providerRoleKnown: isProviderRole(roleId),
+        normalizationError
+      };
+    }
 
     async function failureResult(entry, error, retryCount = 0, extraDiagnostics = {}) {
       const safeError = sanitizedError(error, entry.request);
@@ -999,6 +1009,33 @@ export function createGenerationRouter({ client, activity = null, journal = null
         diagnostics
       };
     }
+
+    if (typeof client.batch !== 'function') {
+      const entries = rawRequests.map(makeBatchEntry);
+      for (const entry of entries) {
+        if (entry.normalizationError) {
+          results[entry.index] = await failureResult(entry, entry.normalizationError);
+          continue;
+        }
+        results[entry.index] = await generate(entry.roleId, entry.request, options);
+      }
+      return results;
+    }
+
+    const entries = rawRequests.map((entry, index) => {
+      const batchEntry = makeBatchEntry(entry, index);
+      activityStart(activity, {
+        runId: batchRunId,
+        phase: 'providerCallStarted',
+        mode: 'background',
+        severity: 'info',
+        providerLane: batchEntry.lane,
+        composerLane: batchEntry.lane === 'reasoner' ? 'reasoner' : 'utility',
+        label: `${batchEntry.lane === 'reasoner' ? 'Reasoner' : 'Utility'} provider batch call started.`,
+        detail: batchEntry.diagnostics
+      });
+      return batchEntry;
+    });
 
     async function successResult(entry, raw, retryCount = 0) {
       const data = parseProviderStructuredOutput(raw?.text);
@@ -1056,6 +1093,10 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     const pendingEntries = [];
     for (const entry of entries) {
+      if (entry.normalizationError) {
+        results[entry.index] = await failureResult(entry, entry.normalizationError);
+        continue;
+      }
       if (!entry.providerRoleKnown) {
         results[entry.index] = await failureResult(entry, unsupportedRoleError(entry.roleId));
         continue;

@@ -385,6 +385,7 @@ Utility failure:
 Card failure:
 
 - accept valid sibling cards;
+- treat malformed or missing-role batch entries as failed slots before provider dispatch;
 - omit failed cards with omission reasons;
 - continue composition if enough accepted cards remain.
 
@@ -416,7 +417,7 @@ Recursion should borrow Directive's robustness discipline in smaller form:
 - every result is normalized into success, validation failure, provider failure, timeout, abort, or stale result;
 - transient transport failures may get one same-lane retry only while the abort signal is still open and the current-run or current-snapshot guard passes;
 - schema failures do not get blind retries unless the failure is clearly recoverable, such as fenced JSON or likely truncation;
-- card failures omit only the failed card and keep valid siblings;
+- card failures, including malformed batch entries, omit only the failed card and keep valid siblings;
 - Utility Arbiter failure reuses valid cache or skips injection;
 - Reasoner failure falls back to Utility composition;
 - all fallbacks emit progress status and sanitized journal events.

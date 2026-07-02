@@ -89,6 +89,25 @@ function providerError(code, message, { retryable = false, status = undefined, c
   return error;
 }
 
+function markOpenAiAuthFailure(settingsStore, lane) {
+  try {
+    if (typeof settingsStore?.clearApiKey === 'function') settingsStore.clearApiKey(lane);
+    if (typeof settingsStore?.updateProvider === 'function') {
+      settingsStore.updateProvider(lane, {
+        resolvedProviderLabel: '',
+        resolvedModelLabel: '',
+        lastTest: {
+          status: 'fail',
+          checkedAt: nowIso(),
+          compactError: 'OpenAI-compatible authentication failed.'
+        }
+      });
+    }
+  } catch {
+    // Provider health metadata is advisory; the provider call still fails with a stable auth error.
+  }
+}
+
 function laneName(value, fallback = 'utility') {
   const lane = String(value || '').trim();
   return LANES.has(lane) ? lane : fallback;
@@ -635,6 +654,13 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
 
     if (!response?.ok) {
       const status = Number(response?.status || 0);
+      if (status === 401 || status === 403) {
+        markOpenAiAuthFailure(settingsStore, enriched.lane);
+        throw providerError('RECURSION_PROVIDER_AUTH_FAILED', 'OpenAI-compatible authentication failed.', {
+          retryable: false,
+          status
+        });
+      }
       throw providerError('RECURSION_PROVIDER_HTTP_ERROR', `Provider request failed with HTTP ${status || 'error'}.`, {
         retryable: status === 429 || (status >= 500 && status < 600),
         status

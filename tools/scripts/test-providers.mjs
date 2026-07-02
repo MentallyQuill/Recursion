@@ -659,6 +659,62 @@ const badJsonResult = await createGenerationRouter({
 assertEqual(badJsonResult.ok, false, 'bad provider response json returns failure result');
 assertEqual(badJsonResult.error.code, 'RECURSION_PROVIDER_RESPONSE_JSON_INVALID', 'bad response json exposes stable code');
 
+const authFailureStore = createStore();
+authFailureStore.updateProvider('reasoner', {
+  enabled: true,
+  source: 'openai-compatible',
+  apiKey: 'sk-live-secret',
+  openAICompatible: { baseUrl: 'https://auth-failure.test/v1', model: 'reasoner-model' }
+});
+authFailureStore.updateProvider('reasoner', {
+  resolvedProviderLabel: 'stale-provider',
+  resolvedModelLabel: 'stale-model',
+  lastTest: { status: 'pass', checkedAt: '2026-07-01T00:00:00.000Z' }
+});
+let authFailureFetches = 0;
+const authFailureResult = await createGenerationRouter({
+  client: createProviderClient({
+    settingsStore: authFailureStore,
+    fetchImpl: async () => {
+      authFailureFetches += 1;
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { message: 'Invalid sk-live-secret' } })
+      };
+    }
+  })
+}).generate('reasonerComposer', { prompt: 'Auth failure must mark health failed.' });
+const authFailureReasoner = authFailureStore.get().providers.reasoner;
+assertEqual(authFailureResult.ok, false, 'openai auth failure returns failure result');
+assertEqual(authFailureResult.error.code, 'RECURSION_PROVIDER_AUTH_FAILED', 'openai auth failure exposes stable auth code');
+assertEqual(authFailureFetches, 1, 'openai auth failure is not retried');
+assertEqual(authFailureReasoner.lastTest.status, 'fail', 'openai auth failure marks lane test status failed');
+assertEqual(authFailureReasoner.lastTest.compactError, 'OpenAI-compatible authentication failed.', 'openai auth failure records stable compact error');
+assertEqual(authFailureReasoner.resolvedProviderLabel, '', 'openai auth failure clears stale provider label');
+assertEqual(authFailureReasoner.resolvedModelLabel, '', 'openai auth failure clears stale model label');
+assertEqual(authFailureReasoner.openAICompatible.sessionApiKeyPresent, false, 'openai auth failure clears invalid session key');
+assertEqual(authFailureReasoner.openAICompatible.baseUrl, 'https://auth-failure.test/v1', 'openai auth failure preserves non-secret base URL');
+assertEqual(authFailureReasoner.openAICompatible.model, 'reasoner-model', 'openai auth failure preserves non-secret model');
+assertNoSecret(authFailureResult, 'openai auth failure result redacts session key');
+assertNoSecret(authFailureReasoner, 'openai auth failure provider health redacts session key');
+
+const forbiddenAuthStore = createStore();
+forbiddenAuthStore.updateProvider('utility', {
+  source: 'openai-compatible',
+  apiKey: 'sk-live-secret',
+  openAICompatible: { baseUrl: 'https://auth-forbidden.test/v1', model: 'utility-model' }
+});
+const forbiddenAuthResult = await createGenerationRouter({
+  client: createProviderClient({
+    settingsStore: forbiddenAuthStore,
+    fetchImpl: async () => ({ ok: false, status: 403 })
+  })
+}).generate('utilityArbiter', { prompt: 'Forbidden auth failure.' });
+assertEqual(forbiddenAuthResult.ok, false, 'openai forbidden auth failure returns failure result');
+assertEqual(forbiddenAuthResult.error.code, 'RECURSION_PROVIDER_AUTH_FAILED', 'openai 403 auth failure exposes stable auth code');
+assertEqual(forbiddenAuthStore.get().providers.utility.lastTest.status, 'fail', 'openai 403 auth failure marks lane unhealthy');
+
 async function openAiProviderFailure(payload, prompt = 'OpenAI provider failure') {
   const marker = 'RAW_PROVIDER_NORMALIZER_MARKER';
   const activity = createActivityReporter();

@@ -367,7 +367,13 @@ export function createSillyTavernHost({
     async install(packet) {
       const context = currentContext(contextFactory);
       if (typeof context.setExtensionPrompt !== 'function') {
-        throw new Error('SillyTavern setExtensionPrompt API is unavailable.');
+        return {
+          ok: false,
+          error: {
+            code: 'RECURSION_PROMPT_INSTALL_UNAVAILABLE',
+            message: 'SillyTavern setExtensionPrompt API is unavailable.'
+          }
+        };
       }
 
       const blocks = promptBlocksFromPacket(packet);

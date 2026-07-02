@@ -34,6 +34,28 @@ assert(prompts.some((entry) => entry.key === 'recursion.turnBrief' && entry.text
 assert(prompts.some((entry) => entry.key === 'recursion.sceneBrief' && entry.text === ''), 'prompt clear removes known scene key');
 assert(prompts.some((entry) => entry.key === 'recursion.guardrails' && entry.text === ''), 'prompt clear removes known guardrails key');
 
+const unavailablePromptHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'missing-prompt-api-chat',
+    chat: [],
+    extension_prompt_types: { IN_CHAT: 1, IN_PROMPT: 2, BEFORE_PROMPT: 0 },
+    extension_prompt_roles: { SYSTEM: 0 }
+  }),
+  settingsRoot: {}
+});
+const unavailablePromptResult = await unavailablePromptHost.prompt.install(packet);
+assertDeepEqual(
+  unavailablePromptResult,
+  {
+    ok: false,
+    error: {
+      code: 'RECURSION_PROMPT_INSTALL_UNAVAILABLE',
+      message: 'SillyTavern setExtensionPrompt API is unavailable.'
+    }
+  },
+  'prompt install returns a result-shaped failure when setExtensionPrompt is unavailable'
+);
+
 await assertRejects(
   async () => host.prompt.install({
     injectionPlan: { blocks: [{ id: 'turnBrief', promptKey: 'unsafe.turnBrief', placement: 'in_chat', depth: 2, role: 'system' }] },

@@ -20,6 +20,7 @@
     "test:ui": "node tools/scripts/test-ui.mjs",
     "test:host": "node tools/scripts/test-host.mjs",
     "test:live-harness": "node tools/scripts/test-live-harness.mjs",
+    "test:model-eval": "node tools/scripts/test-model-eval-harness.mjs",
     "check:playwright": "node tools/scripts/check-playwright-readiness.mjs",
     "check:soak-users": "node tools/scripts/check-sillytavern-soak-users.mjs",
     "smoke:sillytavern": "node tools/scripts/smoke-sillytavern-live.mjs"

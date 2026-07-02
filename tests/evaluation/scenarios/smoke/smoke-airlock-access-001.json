@@ -1,0 +1,25 @@
+{
+  "id": "smoke-airlock-access-001",
+  "title": "Airlock access conflict",
+  "pack": "smoke",
+  "tags": ["spatial-constraint", "item-affordance", "active-cast"],
+  "snapshot": {
+    "chatId": "eval-smoke-airlock-access-001",
+    "sceneKey": "airlock-access",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "Mara stands by the sealed airlock with one visible keycard clipped to her sleeve." },
+      { "mesid": 2, "role": "user", "text": "I tell Mara to open it before the pressure alarm gets worse." }
+    ]
+  },
+  "pendingUserMessage": "I reach for the panel and ask if she can override it manually.",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "expectedFamilies": ["Items", "Active Cast", "Scene Constraints"],
+    "allowedSupportingFamilies": ["Scene Frame", "Environment", "Open Threads"],
+    "discouragedFamilies": ["Knowledge", "Consequences"],
+    "mustUseFacts": ["airlock is sealed", "Mara has the keycard"],
+    "mustNotReveal": ["captain ordered the lockout"],
+    "mustAvoid": ["inventing a second keycard", "opening the airlock without Mara"],
+    "successCriteria": ["Response respects who can open the airlock.", "Response does not reveal hidden lockout order."]
+  }
+}

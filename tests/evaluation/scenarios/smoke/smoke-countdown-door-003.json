@@ -1,0 +1,25 @@
+{
+  "id": "smoke-countdown-door-003",
+  "title": "Countdown at the blast door",
+  "pack": "smoke",
+  "tags": ["consequence-clock", "spatial-constraint", "environment-affordance"],
+  "snapshot": {
+    "chatId": "eval-smoke-countdown-door-003",
+    "sceneKey": "countdown-door",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "The blast door is halfway down. A thirty-second warning repeats over the corridor speaker." },
+      { "mesid": 2, "role": "user", "text": "I slide under it and wave Jen through after me." }
+    ]
+  },
+  "pendingUserMessage": "Can I hold the door with the service cart?",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "expectedFamilies": ["Consequences", "Environment", "Scene Constraints"],
+    "allowedSupportingFamilies": ["Items", "Active Cast"],
+    "discouragedFamilies": ["Knowledge", "Relationship"],
+    "mustUseFacts": ["blast door is halfway down", "thirty-second warning"],
+    "mustNotReveal": ["door motor was sabotaged by Jen"],
+    "mustAvoid": ["ignoring the countdown", "teleporting everyone through"],
+    "successCriteria": ["Response preserves the countdown pressure.", "Response treats the cart as a physical affordance with risk."]
+  }
+}

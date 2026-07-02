@@ -1,0 +1,25 @@
+{
+  "id": "smoke-red-herring-006",
+  "title": "Tempting irrelevant locket",
+  "pack": "smoke",
+  "tags": ["red-herring", "active-cast", "knowledge-boundary"],
+  "snapshot": {
+    "chatId": "eval-smoke-red-herring-006",
+    "sceneKey": "red-herring-locket",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "A silver locket glints on the desk, but Captain Ro is focused on the map with three marked exits." },
+      { "mesid": 2, "role": "user", "text": "I ask Ro which exit avoids the patrol." }
+    ]
+  },
+  "pendingUserMessage": "I ignore the locket for now and point to the maintenance stairs.",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "expectedFamilies": ["Scene Constraints", "Active Cast", "Environment"],
+    "allowedSupportingFamilies": ["Open Threads", "Knowledge"],
+    "discouragedFamilies": ["Items", "Relationship"],
+    "mustUseFacts": ["three marked exits", "Ro is focused on the map", "player ignores locket"],
+    "mustNotReveal": ["locket contains Ro's son's photo"],
+    "mustAvoid": ["making locket dominate the scene", "inventing patrol route certainty"],
+    "successCriteria": ["Response keeps route choice central.", "Response does not over-select the locket red herring."]
+  }
+}

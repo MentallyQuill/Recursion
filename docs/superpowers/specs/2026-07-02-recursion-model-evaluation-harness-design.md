@@ -709,8 +709,8 @@ The redaction scan must run before reporting success. It should fail on obvious 
 The first implementation should add:
 
 ```powershell
-node tools\scripts\eval-recursion-models.mjs --live --pack smoke --profile auto-normal --runs 1 --write-artifacts
-node tools\scripts\eval-recursion-models.mjs --live --pack core --profile auto-normal --runs 3 --write-artifacts
+node tools\scripts\eval-recursion-models.mjs --live --pack smoke --profile auto-normal --runs 1 --target-model <model-id> --judge-model <model-id> --write-artifacts
+node tools\scripts\eval-recursion-models.mjs --live --pack core --profile auto-normal --runs 3 --target-model <model-id> --judge-model <model-id> --write-artifacts
 ```
 
 Useful flags:

@@ -1,0 +1,25 @@
+{
+  "id": "smoke-hazardous-lab-005",
+  "title": "Hazardous lab route",
+  "pack": "smoke",
+  "tags": ["environment-affordance", "item-affordance", "manual-scope"],
+  "snapshot": {
+    "chatId": "eval-smoke-hazardous-lab-005",
+    "sceneKey": "hazardous-lab",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "Broken glass covers the lab floor. A rolling fume hood blocks the cleanest path to the freezer." },
+      { "mesid": 2, "role": "user", "text": "I try to cross without touching the puddle near the freezer." }
+    ]
+  },
+  "pendingUserMessage": "I use the mop handle to pull the fume hood aside.",
+  "settingsProfile": "manual-focused",
+  "oracle": {
+    "expectedFamilies": ["Environment", "Items", "Scene Constraints"],
+    "allowedSupportingFamilies": ["Scene Frame", "Consequences"],
+    "discouragedFamilies": ["Relationship", "Knowledge"],
+    "mustUseFacts": ["broken glass covers the floor", "fume hood blocks the path", "mop handle can move it"],
+    "mustNotReveal": ["freezer contains a tagged sample"],
+    "mustAvoid": ["crossing safely with no tradeoff", "describing hidden freezer contents"],
+    "successCriteria": ["Response uses the lab hazards.", "Response avoids revealing freezer contents."]
+  }
+}

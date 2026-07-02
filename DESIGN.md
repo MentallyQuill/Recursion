@@ -162,7 +162,7 @@ Recursion inherits SillyTavern theme variables for the real background, foregrou
 - **Tertiary (#a78bfa):** cached-state purple for card or deck rows reused from cache. It is a state color, not a decorative brand gradient.
 - **Neutral (#202020):** graphite fallback surface for the root bar and viewer background.
 - **Success (#7fcf8a):** ready, done, passing provider checks, and completed Hero Pixel Array blocks.
-- **Warning (#ffd479):** review, fallback, repair, stale, or attention states that are not hard failures.
+- **Warning (#ffd479):** review, fallback, repair, retry, or attention states that are not hard failures. Routine cache inspection after source changes is not a warning by itself.
 - **Error (#ff8a8a):** provider failures, blocked states, and prompt-install failures.
 
 Keep the bar itself mostly neutral. Let the Hero Pixel Array and disclosed menus carry state color. Avoid broad cyan washes, neon styling, purple-blue gradient dominance, and orange status treatment that competes with SillyTavern dialogue.

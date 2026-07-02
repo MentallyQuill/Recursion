@@ -496,6 +496,11 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const third = await runtime.prepareForGeneration({ userMessage });
   assertEqual(third.ok, true, 'swipe A return installs');
   assertEqual(third.skipped, undefined, 'swipe A return can reuse active variant');
+  const thirdRunId = runtime.view().lastPacket?.diagnostics?.runId;
+  assert(
+    runtime.view().activityHistory.some((event) => event.runId === thirdRunId && event.phase === 'cacheReusing'),
+    'swipe A return emits cacheReusing progress for purple scene deck reuse'
+  );
   assert(JSON.stringify(installed.at(-1)).includes('Swipe A cached card guidance.'), 'swipe A return reuses A card');
   assert(!JSON.stringify(installed.at(-1)).includes('Swipe B cached card guidance.'), 'swipe A return does not leak B card');
   const cache = await storage.loadSceneCache(snapshots.a.chatKey, snapshots.a.sceneKey);

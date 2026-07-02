@@ -186,7 +186,7 @@ Color grammar:
 - The bar itself should remain mostly neutral; amber/red should appear only in the array or disclosed menus for attention or blocking conditions.
 - `Working` uses cyan motion treatment.
 - `Issue`, provider failures, and prompt-install failures use red only when blocked or failed.
-- Review, fallback, stale, and warning states use amber.
+- Review, fallback, retried-success, and warning states use amber. Routine cache inspection after source changes is neutral completed work, not amber.
 - Disabled-but-normal states use muted neutral treatment on the power toggle.
 - Player-canceled generation uses muted skipped treatment, not green, amber, or red.
 
@@ -205,6 +205,8 @@ When runtime activity is `idle`, or when an explicit progress title is `Ready`/`
 When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt install done/failed, prompt clear done/failed, or player-canceled generation), the progress menu must stop adding pending plan rows for future steps that never ran. Material rows such as generated cards, cached cards, warnings, failures, skipped/canceled rows, and completed setup steps stay visible; unrun rows like `Composing prompt packet waiting` or `Clearing Recursion prompt waiting` must not remain as empty Hero Pixel blocks after the final outcome.
 
 Successful provider work that required a retry is not plain green success. A successful retry is `warning` / amber with visible `retried` row meta and a safe reason such as `Provider card batch retried once before this card completed.` in tooltip/accessibility text. Parent rows follow the normal aggregation rule, so a batch containing retried-but-successful cards stays amber until superseded by a later clean run.
+
+Swipes and other source mutations start a fresh visible run. The new run must not inherit warning or failed row state from the prior generation. If the new run only checks or invalidates stale cache metadata before planning, render that as `Checking scene cache` with neutral completed state. Actual `Reusing scene deck` rows are cache reads and must use `cached` / purple, not amber.
 
 `progressRun.steps[]` shape:
 

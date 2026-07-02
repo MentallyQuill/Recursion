@@ -1,0 +1,25 @@
+{
+  "id": "smoke-hidden-order-002",
+  "title": "Hidden sealed order",
+  "pack": "smoke",
+  "tags": ["knowledge-boundary", "active-cast", "red-herring"],
+  "snapshot": {
+    "chatId": "eval-smoke-hidden-order-002",
+    "sceneKey": "sealed-order",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "Lieutenant Vale glances at the sealed order packet but has not opened it in front of you." },
+      { "mesid": 2, "role": "user", "text": "I ask Vale what command is hiding from us." }
+    ]
+  },
+  "pendingUserMessage": "I watch his face and press him for whatever he knows.",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "expectedFamilies": ["Knowledge", "Relationship", "Active Cast"],
+    "allowedSupportingFamilies": ["Scene Constraints", "Open Threads"],
+    "discouragedFamilies": ["Items", "Environment"],
+    "mustUseFacts": ["Vale has not opened the packet", "player is pressing him"],
+    "mustNotReveal": ["packet says evacuate deck nine"],
+    "mustAvoid": ["stating contents of the sealed packet", "making Vale confess facts he cannot know"],
+    "successCriteria": ["Response keeps the packet contents unknown.", "Response uses Vale's visible reaction instead of hidden facts."]
+  }
+}

@@ -109,6 +109,73 @@ assertEqual(retriedGeneratedChild.meta, 'retried', 'generated card retry has vis
 assert(retriedGeneratedChild.reason.includes('retried once'), 'generated card retry keeps a safe visible reason');
 assertEqual(retriedGeneratedBatch.state, 'warning', 'retried generated child keeps batch caution-colored');
 
+const swipeFreshRunProgress = createProgressRunModel({
+  activityHistory: [
+    {
+      runId: 'swipe-old-cautioned-run',
+      phase: 'cardProgress',
+      severity: 'warning',
+      detail: {
+        parentStepId: 'utility-card-batch',
+        roleId: 'sceneFrameCard',
+        family: 'Scene Frame',
+        source: 'generated',
+        state: 'warning',
+        reason: 'Provider card batch retried once before this card completed.'
+      },
+      recordedAt: '1'
+    },
+    {
+      runId: 'swipe-new-run',
+      phase: 'started',
+      label: 'Reading current turn...',
+      recordedAt: '2'
+    },
+    {
+      runId: 'swipe-new-run',
+      phase: 'cacheWarning',
+      severity: 'warning',
+      label: 'Ignored stale cached Recursion cards.',
+      detail: { reason: 'source-changed' },
+      recordedAt: '3'
+    },
+    {
+      runId: 'swipe-new-run',
+      phase: 'providerCallStarted',
+      roleId: 'utilityArbiter',
+      providerLane: 'utility',
+      label: 'Utility Arbiter started.',
+      recordedAt: '4'
+    }
+  ],
+  activity: {
+    runId: 'swipe-new-run',
+    phase: 'providerCallStarted',
+    roleId: 'utilityArbiter',
+    providerLane: 'utility',
+    label: 'Utility Arbiter started.',
+    recordedAt: '4'
+  }
+});
+assertEqual(swipeFreshRunProgress.title, 'Generating', 'fresh swipe run does not inherit previous caution title');
+assert(!swipeFreshRunProgress.steps.some((step) => step.state === 'warning' || step.state === 'failed'), 'fresh swipe run does not retain old warning or failed rows');
+assert(!swipeFreshRunProgress.steps.some((step) => step.id === 'reusing-scene-deck' && step.state === 'warning'), 'cache hygiene is not rendered as yellow scene-deck reuse');
+const swipeCacheCheck = swipeFreshRunProgress.steps.find((step) => step.id === 'checking-scene-cache');
+assert(swipeCacheCheck, 'fresh swipe run shows neutral cache inspection instead of reused caution');
+assertEqual(swipeCacheCheck.state, 'done', 'stale cache inspection is completed neutral work');
+
+const cacheReuseProgress = createProgressRunModel({
+  activityHistory: [
+    { runId: 'cache-reuse-purple-run', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },
+    { runId: 'cache-reuse-purple-run', phase: 'cacheReusing', label: 'Reusing scene deck...', providerLane: 'utility', recordedAt: '2' }
+  ],
+  activity: { runId: 'cache-reuse-purple-run', phase: 'cacheReusing', label: 'Reusing scene deck...', providerLane: 'utility', recordedAt: '2' }
+});
+const cacheReuseStep = cacheReuseProgress.steps.find((step) => step.id === 'reusing-scene-deck');
+assert(cacheReuseStep, 'cache reuse renders the scene deck reuse row');
+assertEqual(cacheReuseStep.state, 'cached', 'scene deck reuse is purple cached state');
+assertEqual(cacheReuseStep.meta, 'cached', 'scene deck reuse uses cached meta');
+
 const controlOnlyPromptProgress = createProgressRunModel({
   settings: { enabled: false, mode: 'auto' },
   activity: {

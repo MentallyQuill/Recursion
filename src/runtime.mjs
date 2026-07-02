@@ -2462,7 +2462,7 @@ export function createRecursionRuntime({
     stageRuntimeActivity({
       runId,
       phase: 'cacheWarning',
-      severity: 'warning',
+      severity: 'info',
       label: status.hard
         ? 'Scene cache contract changed; rebuilding cache.'
         : 'Scene cache settings changed; reviewing cached cards.',
@@ -2766,7 +2766,7 @@ export function createRecursionRuntime({
       stageRuntimeActivity({
         runId,
         phase: 'cacheWarning',
-        severity: 'warning',
+        severity: 'info',
         label: stale
           ? 'Ignored stale cached Recursion cards.'
           : 'Ignored invalid cached Recursion cards.',
@@ -3094,7 +3094,7 @@ export function createRecursionRuntime({
 
       stageRuntimeActivity({
         runId,
-        phase: 'cardBatchRunning',
+        phase: plan.cardJobs?.length ? 'cardBatchRunning' : 'cacheReusing',
         label: plan.cardJobs?.length ? 'Generating scene cards...' : 'Reusing scene deck...',
         cardCounts: { requested: plan.cardJobs?.length || 0 },
         chips: ['Cards']

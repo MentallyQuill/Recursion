@@ -273,7 +273,7 @@ Before any cached card can enter the deck/hand for prompt composition, runtime m
 - expiry metadata has not passed;
 - stored source fingerprint matches the current source-window fingerprint.
 
-Cards that fail this check are stale cache artifacts. They may be counted in visible cache warnings, but their `promptText`, summaries, and evidence must not become prompt-facing. If the Arbiter requests `reuse-cache` and no cached cards pass freshness, runtime should fail soft as cache unavailable instead of injecting stale guidance.
+Cards that fail this check are stale cache artifacts. They may be counted in visible cache-inspection metadata, but their `promptText`, summaries, and evidence must not become prompt-facing. Routine cache inspection is not a warning by itself. If the Arbiter requests `reuse-cache` and no cached cards pass freshness, runtime should fail soft as cache unavailable instead of injecting stale guidance.
 
 ## Reasoner Composer Call
 

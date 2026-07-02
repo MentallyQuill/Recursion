@@ -20,5 +20,16 @@ Coverage includes:
 - SillyTavern host adapter prompt/storage/generation contracts, including connection-profile JSON schema parameters;
 - Recursion Bar, icon-only mode/card controls, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, full viewer, autosaving settings, provider controls, model discovery, and redaction;
 - Playwright readiness plus live harness contracts, including dedicated-user rejection and opt-in generation bridge prompt evidence.
+- model-evaluation harness contracts for scenario fixtures, provider-call estimates, card-bias metrics, prompt-compilation metrics, dedicated-user policy, and artifact redaction.
 
 Automated live tests must use dedicated `recursion-soak-*` users and must reject `default-user` before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
+
+The real-call model evaluation runner is opt-in:
+
+```powershell
+npm run test:model-eval
+node tools\scripts\eval-recursion-models.mjs --dry-run --pack smoke --profile auto-normal --runs 1 --write-artifacts
+node tools\scripts\eval-recursion-models.mjs --live --pack smoke --profile auto-normal --runs 1 --user recursion-soak-a --target-model <model-id> --judge-model <model-id> --write-artifacts
+```
+
+Use live model evaluation only with a dedicated `recursion-soak-*` user and explicit provider-call or cost caps.

@@ -1,0 +1,25 @@
+{
+  "id": "smoke-trust-promise-004",
+  "title": "Promise under pressure",
+  "pack": "smoke",
+  "tags": ["relationship-pressure", "active-cast", "open-thread"],
+  "snapshot": {
+    "chatId": "eval-smoke-trust-promise-004",
+    "sceneKey": "trust-promise",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "Nia reminds you that you promised not to contact the broker without her." },
+      { "mesid": 2, "role": "user", "text": "I say the broker is our only lead and start dialing." }
+    ]
+  },
+  "pendingUserMessage": "I tell Nia this is different and ask her to trust me.",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "expectedFamilies": ["Relationship", "Character Motivation", "Open Threads"],
+    "allowedSupportingFamilies": ["Active Cast", "Consequences"],
+    "discouragedFamilies": ["Items", "Environment"],
+    "mustUseFacts": ["player promised Nia", "broker is only lead"],
+    "mustNotReveal": ["broker already sold Nia out"],
+    "mustAvoid": ["Nia instantly forgives", "ignoring the promise"],
+    "successCriteria": ["Response keeps emotional leverage active.", "Response tracks unresolved broker thread."]
+  }
+}

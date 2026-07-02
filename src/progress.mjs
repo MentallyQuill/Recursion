@@ -40,6 +40,7 @@ const STEP_ORDER = [
   'read-turn',
   'checking-scene-shift',
   'planning-card-pass',
+  'checking-scene-cache',
   'reusing-scene-deck',
   'utility-card-batch',
   'validating-cards',
@@ -58,6 +59,7 @@ const STEP_DEFINITIONS = Object.freeze({
   'read-turn': { label: 'Reading current turn', providerLane: 'utility' },
   'checking-scene-shift': { label: 'Checking scene shift', providerLane: 'utility' },
   'planning-card-pass': { label: 'Planning card pass', providerLane: 'utility' },
+  'checking-scene-cache': { label: 'Checking scene cache', providerLane: 'utility' },
   'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
   'utility-card-batch': { label: 'Utility card batch', providerLane: 'utility' },
   'validating-cards': { label: 'Validating cards', providerLane: 'utility' },
@@ -92,7 +94,7 @@ const PHASE_STEP_IDS = Object.freeze({
   promptInstalling: 'installing-recursion-prompt',
   promptClearing: 'clearing-recursion-prompt',
   promptClearFailed: 'clearing-recursion-prompt',
-  cacheWarning: 'reusing-scene-deck',
+  cacheWarning: 'checking-scene-cache',
   settled: 'recursion-prompt-ready'
 });
 
@@ -305,6 +307,7 @@ function eventState(event, isCurrent) {
   const detail = asObject(event.detail);
   const retryCount = eventRetryCount(event);
   if (phase === 'cardProgress' && detail.state) return normalizeStateWithRetry(detail.state, retryCount);
+  if (phase === 'cacheWarning') return severity === 'error' ? 'failed' : 'done';
   if (phase === 'providerCallSettled' || isProviderSettledEvent(event)) {
     if (outcome === 'skipped' || outcome === 'canceled') return 'skipped';
     if (outcome === 'error' || severity === 'error') return 'failed';

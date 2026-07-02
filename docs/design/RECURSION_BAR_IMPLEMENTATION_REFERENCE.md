@@ -14,7 +14,7 @@ Runtime toggles:
 - `.hero-block.pending`, `.hero-block.running`, `.hero-block.done`, `.hero-block.cached`, `.hero-block.warning`, and `.hero-block.failed` control each Hero Pixel Array block.
 - `.mode-menu.is-open` opens the mode menu.
 - `.brief-menu.is-open` opens the Last Brief menu.
-- `.settings-menu.is-open` opens the settings menu; on desktop it starts to the right of the progress popover and aligns its right edge with the bar.
+- `.settings-menu.is-open` opens the settings menu full-width under the Recursion Bar; opening it should close competing progress, mode, and brief popovers in production.
 - `.settings-tab.is-selected` and `.settings-pane.is-selected` switch Play, Providers, and Advanced settings groups.
 - `.prompt-packet-panel.is-open` opens the injected prompt packet panel.
 - `.brief-card[aria-expanded="true"]` expands a card row.
@@ -35,7 +35,7 @@ Runtime toggles:
     </button>
     <span class="sep" aria-hidden="true"></span>
 
-    <section class="status-popover is-open" id="status-popover" aria-label="Generation status steps">
+    <section class="status-popover" id="status-popover" aria-label="Generation status steps">
       <div class="status-head">
         <span class="status-title">Generating</span>
         <span class="status-subtitle" id="status-subtitle">2 model calls running</span>
@@ -915,6 +915,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     function setSettingsOpen(open) {
       settingsMenu?.classList.toggle('is-open', open);
       optionsButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) root?.querySelector('#status-popover')?.classList.remove('is-open');
     }
     optionsButton?.addEventListener('click', () => {
       setSettingsOpen(!settingsMenu?.classList.contains('is-open'));
@@ -933,6 +934,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
     });
 
     document.querySelector('#array-button')?.addEventListener('click', () => {
+      setSettingsOpen(false);
       root?.querySelector('#status-popover')?.classList.add('is-open');
       playRecursionTurnAnimation({ loop: false });
     });
@@ -1993,7 +1995,7 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   display: none;
   position: absolute;
   top: 36px;
-  left: 360px;
+  left: 0;
   right: 0;
   z-index: 88;
   border: 1px solid var(--border);

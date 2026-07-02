@@ -2846,6 +2846,10 @@ for (const scenario of [
           const cardScope = parsePromptJsonSection(request.prompt, 'Card scope');
           const availableCatalog = parsePromptJsonSection(request.prompt, 'Catalog');
           assertEqual(cardScope.strictWhitelist, false, 'Auto Arbiter prompt is focus, not strict');
+          assert(
+            request.prompt.includes('Auto card scope policy: selected families and sub-items are the preferred focus, not a whitelist. Prefer selected scope when it can satisfy the turn; request unselected families only when they have high relevance to continuity, scene coherence, or the current user message.'),
+            'Auto Arbiter prompt explains selected card scope is bias with high-relevance exceptions'
+          );
           assert(availableCatalog.some((entry) => entry.family === 'Continuity Risk'), 'Auto catalog keeps disabled-focus continuity available');
           assertDeepEqual(cardScope.selectedSubItemsByFamily['Continuity Risk'], undefined, 'Auto scope preference omits disabled continuity sub-items');
           return {
@@ -2892,6 +2896,56 @@ for (const scenario of [
   assert(view.lastHand.cards.some((card) => card.family === 'Continuity Risk'), 'auto scoped hand can include critical disabled-focus exception');
   assert(serializedPlan.includes('auto-scope-exception:Continuity Risk'), 'auto scoped diagnostics record compact exception family');
   assert(!serializedPlan.includes('Do not contradict'), 'auto scope diagnostics do not include prompt text');
+}
+
+{
+  const autoNoProse = scopeWithFamilyDisabled('Prose/Pacing');
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', cardScope: autoNoProse, reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ family: 'Prose/Pacing', role: 'prosePacingCard', reason: 'High relevance style risk.' }],
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['auto-non-continuity-exception-test']
+            }
+          };
+        }
+        throw new Error(`Auto non-continuity exception test expected batch routing, got generate ${roleId}`);
+      },
+      async batch(requests) {
+        assertDeepEqual(requests.map((request) => request.roleId), ['prosePacingCard'], 'Auto allows disabled-focus non-continuity card when Arbiter marks it relevant');
+        return requests.map((request) => ({
+          ok: true,
+          roleId: request.roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: 'Keep the response tight and concrete.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 18
+            }]
+          }
+        }));
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Auto non-continuity scope.' });
+  const view = runtime.view();
+  const serializedPlan = JSON.stringify(view.lastPlan);
+  assertEqual(result.ok, true, 'auto scoped non-continuity run installs prompt');
+  assert(view.lastHand.cards.some((card) => card.family === 'Prose/Pacing'), 'auto scoped hand can include high-relevance disabled-focus non-continuity card');
+  assert(serializedPlan.includes('auto-scope-exception:Prose/Pacing'), 'auto scoped diagnostics record compact exception for non-continuity family');
+  assert(!serializedPlan.includes('Keep the response tight'), 'auto non-continuity diagnostics do not include prompt text');
 }
 
 {

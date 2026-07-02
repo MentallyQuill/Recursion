@@ -163,6 +163,17 @@ Runtime toggles:
       </div>
     </div>
 
+    <button class="icon-button cards-button" id="cards-button" aria-label="Open card scope selector" aria-expanded="false">
+      <span class="cards-button-icon" aria-hidden="true">
+        <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true">
+          <rect x="3" y="5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".45"></rect>
+          <rect x="5" y="3" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".70"></rect>
+          <rect x="7" y="1.5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25"></rect>
+        </svg>
+      </span>
+    </button>
+    <span class="sep" aria-hidden="true"></span>
+
     <button class="activity-trigger status-array-button" id="array-button" aria-label="Open Recursion generation status" aria-expanded="true" data-state="running" style="--columns: 3; --block-count: 7">
       <span class="hero-pixel-array" aria-hidden="true" data-state="running" data-run-id="run-preview-42">
         <span class="hero-block done" style="grid-row: 1; grid-column: 1; --block-index: 0"></span>
@@ -184,16 +195,6 @@ Runtime toggles:
         <button class="reasoning-node is-lit is-selected" type="button" role="radio" aria-checked="true" data-level="high" title="High: mixed Utility and Reasoner checks."></button>
         <button class="reasoning-node" type="button" role="radio" aria-checked="false" data-level="ultra" title="Ultra: Reasoner-heavy synthesis with a larger card bias."></button>
       </div>
-      <button class="cards-button" id="cards-button" aria-label="Open card scope selector" aria-expanded="false">
-        <span class="cards-button-icon" aria-hidden="true">
-          <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true">
-            <rect x="3" y="5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".45"></rect>
-            <rect x="5" y="3" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".70"></rect>
-            <rect x="7" y="1.5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25"></rect>
-          </svg>
-        </span>
-        <span class="cards-button-label">Cards</span>
-      </button>
       <button class="icon-button brief-arrow" id="brief-arrow" aria-label="Open last brief preview" aria-expanded="false">
         <span class="arrow-down" aria-hidden="true"></span>
       </button>
@@ -394,10 +395,12 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
         <div class="provider-body">
           <div class="provider-grid">
             <label>Source<select><option selected>Current Host Model</option><option>Host Connection Profile</option><option>OpenAI-Compatible Endpoint</option></select></label>
-            <label>Profile<input placeholder="Host profile id"></label>
-            <label>Base URL<input placeholder="https://host/v1"></label>
-            <label>Model<input placeholder="model"></label>
-            <label>Session Key<input type="password" placeholder="Session API key"></label>
+            <label class="provider-context-field" data-source-context="profile" hidden>Profile<input placeholder="Host profile id"></label>
+            <div class="provider-context-fields" data-source-context="openai-compatible" hidden>
+              <label>Base URL<input placeholder="https://host/v1"></label>
+              <label>Model<input placeholder="model"></label>
+              <label>Session Key<input type="password" placeholder="Session API key"></label>
+            </div>
             <label>Max Tokens<input type="number" value="4096"></label>
           </div>
           <div class="provider-actions"><button>Save Provider</button><button>Test Provider</button><button>Clear Session Key</button></div>
@@ -2292,6 +2295,14 @@ Prose: Favor concrete motion and short sensory beats. Keep response length moder
   gap: 3px;
   color: rgba(224, 224, 224, .56);
   font-size: 10.5px;
+}
+
+.provider-context-fields {
+  display: contents;
+}
+
+.provider-context-fields[hidden] {
+  display: none !important;
 }
 
 .provider-actions {

@@ -279,7 +279,7 @@ export function scopePayloadForArbiter(settings = {}) {
     selectedSubItemsByFamily,
     availableCatalog,
     allowedCatalog,
-    autoExceptionFamilies: strictWhitelist ? [] : ['Continuity Risk']
+    autoExceptionFamilies: strictWhitelist ? [] : CARD_SCOPE_CATALOG.map((entry) => entry.family)
   };
 }
 

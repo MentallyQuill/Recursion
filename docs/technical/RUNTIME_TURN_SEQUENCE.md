@@ -51,7 +51,7 @@ Snapshot hashes and fingerprints are used to reject stale work. A newer run supe
 
 ## Utility Arbiter
 
-The Utility Arbiter receives safe settings, provider health, the bounded snapshot, and card-scope payload. In Auto, the payload includes the full available catalog plus selected focus preferences; critical continuity families can still appear as visible `auto-scope-exception:<family>` diagnostics. In Manual, the payload is a strict whitelist and disabled families are not offered to the Arbiter. It returns the V1 `recursion.utilityArbiter.v1` plan shape:
+The Utility Arbiter receives safe settings, provider health, the bounded snapshot, and card-scope payload. In Auto, the payload includes the full available catalog plus selected focus preferences; selected families and sub-items are preferred, but unselected families can still be requested when they have high relevance to continuity, scene coherence, or the current user message. In Manual, the payload is a strict whitelist and disabled families are not offered to the Arbiter. It returns the V1 `recursion.utilityArbiter.v1` plan shape:
 
 - `snapshotHash`: exact echo of the frozen request snapshot hash
 - `action`: `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`

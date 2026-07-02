@@ -1292,6 +1292,39 @@ function renderProviderHiddenDefaults(group, lane, provider) {
   }));
 }
 
+function providerField(label, control, options = {}) {
+  const lane = cleanText(options.lane);
+  const context = cleanText(options.context);
+  const sourceTypes = Array.isArray(options.sourceTypes) ? options.sourceTypes.map((entry) => cleanText(entry)).filter(Boolean) : [];
+  const dataset = {};
+  if (context) {
+    Object.assign(dataset, {
+      recursionProviderContext: context,
+      recursionProviderLane: lane,
+      recursionProviderSourceTypes: sourceTypes.join(' '),
+      ...providerDataset(`Context${datasetSuffix(context)}`, lane)
+    });
+  }
+  return el('label', { className: 'recursion-provider-field', dataset }, [
+    el('span', { text: label }),
+    control
+  ]);
+}
+
+function normalizeProviderSource(value) {
+  const source = cleanText(value, 'host-current-model').toLowerCase();
+  return PROVIDER_SOURCE_OPTIONS.some(([candidate]) => candidate === source) ? source : 'host-current-model';
+}
+
+function syncProviderSourceVisibility(container, lane) {
+  const selected = normalizeProviderSource(container?.querySelector?.(providerSelector('source', lane))?.value);
+  for (const field of container?.querySelectorAll?.('[data-recursion-provider-context]') || []) {
+    if (field.dataset.recursionProviderLane !== lane) continue;
+    const sourceTypes = cleanText(field.dataset.recursionProviderSourceTypes).split(/\s+/).filter(Boolean);
+    field.hidden = !sourceTypes.includes(selected);
+  }
+}
+
 function renderProviderSettings(panel, lane, provider) {
   const source = asObject(provider);
   const title = lane === 'reasoner' ? 'Reasoner Provider' : 'Utility Provider';
@@ -1332,63 +1365,63 @@ function renderProviderSettings(panel, lane, provider) {
     ariaLabel: `${title} enabled`
   }));
   const grid = el('div', { className: 'recursion-provider-grid', dataset: { recursionProviderGrid: '' } });
-  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
-    el('span', { text: 'Source' }),
-    selectControl({
+  const sourceControl = selectControl({
       value: cleanText(source.source, 'host-current-model'),
       options: PROVIDER_SOURCE_OPTIONS,
       dataset: providerDataset('Source', lane),
       ariaLabel: `${title} source`
-    })
-  ]));
-  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
-    el('span', { text: 'Profile' }),
-    inputControl({
+  });
+  sourceControl.addEventListener?.('change', () => syncProviderSourceVisibility(grid, lane));
+  grid.appendChild(providerField('Source', sourceControl));
+  grid.appendChild(providerField('Profile', inputControl({
       value: source.hostConnectionProfileId || '',
       dataset: providerDataset('Profile', lane),
       ariaLabel: `${title} host connection profile`,
       placeholder: 'Host profile id'
-    })
-  ]));
-  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
-    el('span', { text: 'Base URL' }),
-    inputControl({
+    }), {
+      lane,
+      context: 'profile',
+      sourceTypes: ['host-connection-profile']
+    }));
+  const openAiFields = el('div', {
+    className: 'recursion-provider-context-fields',
+    dataset: {
+      recursionProviderContext: 'open-ai',
+      recursionProviderLane: lane,
+      recursionProviderSourceTypes: 'openai-compatible',
+      ...providerDataset('ContextOpenAi', lane)
+    }
+  }, [
+    providerField('Base URL', inputControl({
       value: source.openAICompatible?.baseUrl || '',
       dataset: providerDataset('BaseUrl', lane),
       ariaLabel: `${title} OpenAI-compatible base URL`,
       placeholder: 'https://host/v1'
-    })
-  ]));
-  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
-    el('span', { text: 'Model' }),
-    inputControl({
+    })),
+    providerField('Model', inputControl({
       value: source.openAICompatible?.model || '',
       dataset: providerDataset('Model', lane),
       ariaLabel: `${title} model`,
       placeholder: 'model'
-    })
-  ]));
-  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
-    el('span', { text: 'Session Key' }),
-    inputControl({
+    })),
+    providerField('Session Key', inputControl({
       value: '',
       type: 'password',
       dataset: providerDataset('ApiKey', lane),
       ariaLabel: `${title} session API key`,
       placeholder: source.openAICompatible?.sessionApiKeyPresent ? 'Session key loaded' : 'Session API key'
-    })
-  ]));
-  grid.appendChild(el('label', { className: 'recursion-provider-field' }, [
-    el('span', { text: 'Max Tokens' }),
-    inputControl({
+    }))
+  ]);
+  grid.appendChild(openAiFields);
+  grid.appendChild(providerField('Max Tokens', inputControl({
       value: source.maxTokens ?? '',
       type: 'number',
       min: 64,
       step: 64,
       dataset: providerDataset('MaxTokens', lane),
       ariaLabel: `${title} max tokens`
-    })
-  ]));
+    })));
+  syncProviderSourceVisibility(grid, lane);
   body.appendChild(grid);
   body.appendChild(el('div', { className: 'recursion-provider-actions' }, [
     el('button', {
@@ -1769,6 +1802,13 @@ function buildRoot() {
       el('div', { className: 'recursion-mode-menu', attrs: { 'aria-label': 'Recursion mode selector' }, dataset: { recursionModeMenu: '' } },
         MODE_MENU_OPTIONS.map(modeMenuChoice))
     ]),
+    el('button', {
+      className: 'recursion-cards-button',
+      attrs: { type: 'button', 'aria-label': 'Open card scope selector', 'aria-expanded': 'false', title: 'Open card scope selector' },
+      dataset: { recursionCardsButton: '' }
+    }, [
+      el('span', { className: 'recursion-cards-button-icon', attrs: { 'aria-hidden': 'true' } }, [modeIconSvg('cards')])
+    ]),
     el('span', { className: 'recursion-bar-separator', attrs: { 'aria-hidden': 'true' } }),
     el('button', {
       className: 'recursion-activity-trigger',
@@ -1797,14 +1837,6 @@ function buildRoot() {
             [`recursionReasoningLevel${titleCase(level)}`]: ''
           }
         }))
-      ]),
-      el('button', {
-        className: 'recursion-cards-button',
-        attrs: { type: 'button', 'aria-label': 'Open card scope selector', 'aria-expanded': 'false' },
-        dataset: { recursionCardsButton: '' }
-      }, [
-        el('span', { className: 'recursion-cards-button-icon', attrs: { 'aria-hidden': 'true' } }, [modeIconSvg('cards')]),
-        el('span', { className: 'recursion-cards-button-label', text: 'Cards', dataset: { recursionCardsLabel: '' } })
       ]),
       el('button', {
         className: 'recursion-icon-button recursion-brief-arrow',
@@ -2485,7 +2517,6 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     renderProgressPopover(statusPopover, model.progressRun, model);
     renderReasoningChain(root, normalizeReasoningLevel(view.settings?.reasoningLevel));
     renderHandDropdown(handPanel, view, model);
-    setText(root, '[data-recursion-cards-label]', model.cardScopeLabel);
     if (!cardsPanel.hidden) renderCardsPanel(cardsPanel, view, model, cardScopeNotice);
     if (!settingsPanel.hidden && !settingsPanelRendered) {
       renderSettingsPanel(settingsPanel, view, settingsTab, runtime);

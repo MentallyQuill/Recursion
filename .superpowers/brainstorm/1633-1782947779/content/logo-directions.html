@@ -1,0 +1,170 @@
+<style>
+  .recursion-logo-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    margin-top: 18px;
+  }
+
+  .recursion-logo-card {
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .035);
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  .recursion-logo-card:hover {
+    border-color: rgba(101, 216, 232, .36);
+    background: rgba(101, 216, 232, .045);
+  }
+
+  .recursion-logo-art {
+    display: grid;
+    place-items: center;
+    min-height: 220px;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.045), rgba(255,255,255,0)),
+      #171b1f;
+  }
+
+  .recursion-logo-art svg {
+    width: 152px;
+    height: 152px;
+  }
+
+  .recursion-logo-body {
+    padding: 14px 15px 16px;
+  }
+
+  .recursion-logo-body h3 {
+    margin: 0 0 7px;
+  }
+
+  .recursion-logo-body p {
+    margin: 0;
+  }
+
+  .recursion-logo-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .recursion-logo-tags span {
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 5px;
+    padding: 3px 6px;
+    color: rgba(238, 238, 238, .62);
+    background: rgba(255, 255, 255, .035);
+    font-size: 11px;
+  }
+
+  .recursion-wordmark-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    color: rgba(238, 238, 238, .72);
+    font: 600 13px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+    letter-spacing: .08em;
+  }
+
+  @media (max-width: 760px) {
+    .recursion-logo-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<h2>Which logo metaphor feels most like Recursion?</h2>
+<p class="subtitle">These are rough SVG-ready directions, tuned to the current product shape: compact scene context, prompt packets, a scene deck, and the Hero Pixel Array.</p>
+
+<div class="recursion-logo-grid">
+  <div class="recursion-logo-card" data-choice="recursive-frame" onclick="toggleSelect(this)">
+    <div class="recursion-logo-art">
+      <svg viewBox="0 0 160 160" role="img" aria-label="Recursive Frame mark">
+        <rect x="34" y="34" width="92" height="92" rx="10" fill="none" stroke="#d8dde1" stroke-width="9"/>
+        <rect x="52" y="52" width="56" height="56" rx="7" fill="none" stroke="#65d8e8" stroke-width="9"/>
+        <path d="M96 108H70c-10 0-18-8-18-18V64" fill="none" stroke="#65d8e8" stroke-width="9" stroke-linecap="round"/>
+        <path d="M70 64h34" fill="none" stroke="#d8dde1" stroke-width="9" stroke-linecap="round"/>
+        <path d="M99 53l13 11-13 11" fill="none" stroke="#65d8e8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="119" y="119" width="12" height="12" rx="3" fill="#76d889"/>
+      </svg>
+    </div>
+    <div class="recursion-logo-body">
+      <h3>A. Recursive Frame</h3>
+      <p>A nested scene frame that turns inward, with a small ready pixel. Reads as "current scene, refined into prompt guidance."</p>
+      <div class="recursion-logo-tags"><span>best favicon</span><span>clean SVG</span><span>subtle recursion</span></div>
+      <div class="recursion-wordmark-strip">RECURSION</div>
+    </div>
+  </div>
+
+  <div class="recursion-logo-card" data-choice="turn-hand" onclick="toggleSelect(this)">
+    <div class="recursion-logo-art">
+      <svg viewBox="0 0 160 160" role="img" aria-label="Turn Hand mark">
+        <g fill="#1f252a" stroke="#d8dde1" stroke-width="6">
+          <rect x="36" y="40" width="46" height="72" rx="7" transform="rotate(-17 59 76)"/>
+          <rect x="57" y="30" width="46" height="72" rx="7" transform="rotate(-7 80 66)"/>
+          <rect x="78" y="40" width="46" height="72" rx="7" transform="rotate(15 101 76)"/>
+        </g>
+        <path d="M52 113c17 20 55 20 72-1" fill="none" stroke="#65d8e8" stroke-width="9" stroke-linecap="round"/>
+        <path d="M118 94l8 21-22 3" fill="none" stroke="#65d8e8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="80" cy="76" r="10" fill="#76d889"/>
+      </svg>
+    </div>
+    <div class="recursion-logo-body">
+      <h3>B. Turn Hand</h3>
+      <p>Cards selected into a curved hand, with a center signal. Strongly tied to Recursion's scene deck and turn hand language.</p>
+      <div class="recursion-logo-tags"><span>product-specific</span><span>friendly</span><span>less tiny-safe</span></div>
+      <div class="recursion-wordmark-strip">RECURSION</div>
+    </div>
+  </div>
+
+  <div class="recursion-logo-card" data-choice="prompt-packet" onclick="toggleSelect(this)">
+    <div class="recursion-logo-art">
+      <svg viewBox="0 0 160 160" role="img" aria-label="Prompt Packet mark">
+        <path d="M45 30h52l24 24v76H45z" fill="#1f252a" stroke="#d8dde1" stroke-width="8" stroke-linejoin="round"/>
+        <path d="M97 31v24h24" fill="none" stroke="#d8dde1" stroke-width="8" stroke-linejoin="round"/>
+        <path d="M61 82h42" stroke="#65d8e8" stroke-width="8" stroke-linecap="round"/>
+        <path d="M61 101h30" stroke="#65d8e8" stroke-width="8" stroke-linecap="round"/>
+        <path d="M104 95c14-13 14-36-3-46" fill="none" stroke="#76d889" stroke-width="8" stroke-linecap="round"/>
+        <path d="M102 44l1 16 15-5" fill="none" stroke="#76d889" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="recursion-logo-body">
+      <h3>C. Prompt Packet</h3>
+      <p>A compiled packet with an internal loop. Directly communicates "Recursion prepares inspectable prompt context."</p>
+      <div class="recursion-logo-tags"><span>clearest function</span><span>professional</span><span>less iconic</span></div>
+      <div class="recursion-wordmark-strip">RECURSION</div>
+    </div>
+  </div>
+
+  <div class="recursion-logo-card" data-choice="hero-pixel-r" onclick="toggleSelect(this)">
+    <div class="recursion-logo-art">
+      <svg viewBox="0 0 160 160" role="img" aria-label="Hero Pixel R mark">
+        <g rx="3">
+          <rect x="42" y="34" width="18" height="18" rx="4" fill="#d8dde1"/>
+          <rect x="66" y="34" width="18" height="18" rx="4" fill="#d8dde1"/>
+          <rect x="90" y="34" width="18" height="18" rx="4" fill="#65d8e8"/>
+          <rect x="42" y="58" width="18" height="18" rx="4" fill="#d8dde1"/>
+          <rect x="90" y="58" width="18" height="18" rx="4" fill="#65d8e8"/>
+          <rect x="42" y="82" width="18" height="18" rx="4" fill="#d8dde1"/>
+          <rect x="66" y="82" width="18" height="18" rx="4" fill="#d8dde1"/>
+          <rect x="90" y="82" width="18" height="18" rx="4" fill="#65d8e8"/>
+          <rect x="42" y="106" width="18" height="18" rx="4" fill="#d8dde1"/>
+          <rect x="72" y="106" width="18" height="18" rx="4" fill="#76d889"/>
+          <rect x="96" y="106" width="18" height="18" rx="4" fill="#76d889"/>
+        </g>
+        <path d="M111 88c16 3 25 14 25 31" fill="none" stroke="#65d8e8" stroke-width="8" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="recursion-logo-body">
+      <h3>D. Hero Pixel R</h3>
+      <p>A pixel-built R that borrows from the Hero Pixel Array. It feels native to the Recursion Bar and works well as extension chrome.</p>
+      <div class="recursion-logo-tags"><span>most ownable</span><span>UI-linked</span><span>more abstract</span></div>
+      <div class="recursion-wordmark-strip">RECURSION</div>
+    </div>
+  </div>
+</div>

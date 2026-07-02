@@ -21,7 +21,7 @@ Cards are disposable cache artifacts. They are not memories, lore, canon, or use
 
 Card scope is the user-facing focus control over the fixed V1 catalog. It has two modes:
 
-- Auto: selected families and sub-items guide focus, but the Utility Arbiter still sees the full catalog. Runtime can keep critical continuity exceptions and records them as compact `auto-scope-exception:<family>` diagnostics.
+- Auto: selected families and sub-items are the preferred focus, but not a whitelist. The Utility Arbiter still sees the full catalog and may request unselected families when they have high relevance to continuity, scene coherence, or the current user message. Runtime records visible compact `auto-scope-exception:<family>` diagnostics for any unselected family that enters the plan or hand.
 - Manual: selected families and sub-items are a strict whitelist. Runtime removes disabled-family card jobs before provider generation and filters disabled cached, provider, and fallback cards before deck and hand selection.
 
 Sub-items are focus facets inside a family, such as `fragileFacts` under Continuity Risk or `pendingActions` under Open Threads. They guide the prompt for that family card and appear in safe diagnostics, but they do not create separate generated cards, separate deck records, or separate prompt-injection lanes.

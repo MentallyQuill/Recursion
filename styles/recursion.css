@@ -636,9 +636,10 @@
 
 .recursion-cards-button {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 72%, transparent);
-  gap: 4px;
-  min-width: 48px;
-  padding: 0 6px;
+  flex: 0 0 24px;
+  min-width: 24px;
+  padding: 0;
+  width: 24px;
 }
 
 .recursion-cards-button[aria-expanded="true"] {
@@ -656,15 +657,6 @@
 .recursion-cards-button-icon svg {
   height: 15px;
   width: 15px;
-}
-
-.recursion-cards-button-label {
-  font-size: 10.5px;
-  line-height: 1;
-  max-width: 34px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .recursion-reasoning-chain {
@@ -1344,6 +1336,14 @@
   gap: 3px;
   line-height: 1;
   min-width: 0;
+}
+
+.recursion-provider-context-fields {
+  display: contents;
+}
+
+.recursion-provider-context-fields[hidden] {
+  display: none !important;
 }
 
 .recursion-control-row {

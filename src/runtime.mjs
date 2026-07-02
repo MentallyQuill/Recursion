@@ -984,6 +984,13 @@ function autoScopeExceptionReasons(entries, settings) {
     .map((family) => `auto-scope-exception:${family}`))];
 }
 
+function cardScopePolicyLine(cardScope) {
+  if (cardScope?.strictWhitelist) {
+    return 'Manual card scope policy: allowedCatalog is a strict whitelist. Do not request disabled families or sub-items.';
+  }
+  return 'Auto card scope policy: selected families and sub-items are the preferred focus, not a whitelist. Prefer selected scope when it can satisfy the turn; request unselected families only when they have high relevance to continuity, scene coherence, or the current user message.';
+}
+
 function cardProgressDetail(card, source, state) {
   const catalog = catalogForCard(card);
   const roleId = safeText(catalog?.role || card?.role || card?.roleId || '', 120);
@@ -2416,6 +2423,7 @@ export function createRecursionRuntime({
           `Settings: ${JSON.stringify(arbiterSafeSettings(settings))}`,
           `Provider health: ${JSON.stringify(providerHealthForArbiter(settings))}`,
           `Card scope: ${JSON.stringify(cardScope)}`,
+          cardScopePolicyLine(cardScope),
           `Catalog: ${JSON.stringify(catalog)}`,
           `Catalog hash: ${hashJson(catalog)}`,
           `Snapshot hash: ${fallbackPlan.snapshotHash}`,

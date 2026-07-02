@@ -79,7 +79,7 @@ assertEqual(manualPayload.autoExceptionFamilies.length, 0, 'Manual payload has n
 const autoPayload = scopePayloadForArbiter({ mode: 'auto', cardScope: noScene });
 assertEqual(autoPayload.strictWhitelist, false, 'Auto payload is focus');
 assert(autoPayload.availableCatalog.some((entry) => entry.family === 'Scene Frame'), 'Auto payload keeps full catalog available');
-assertDeepEqual(autoPayload.autoExceptionFamilies, ['Continuity Risk'], 'Auto payload exposes continuity exception family');
+assertDeepEqual(autoPayload.autoExceptionFamilies, CARD_SCOPE_CATALOG.map((entry) => entry.family), 'Auto payload exposes every family as eligible for high-relevance exceptions');
 
 const manualJobs = filterCardJobsForScope([
   { family: 'Scene Frame', role: 'sceneFrameCard' },

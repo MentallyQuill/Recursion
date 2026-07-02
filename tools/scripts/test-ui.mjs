@@ -471,6 +471,8 @@ assert(/progressListVisibleLimit:\s*15/.test(uiSpec), 'UI spec documents the who
 assert(/bottom fade/.test(uiSpec), 'UI spec documents the sub-tier overflow fade affordance');
 assert(/\.settings-row input\[type="checkbox"\]\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?background:\s*rgba\(255, 255, 255, \.035\);/.test(barImplementationReference), 'reference settings checkbox uses the compact dark mockup skin');
 assert(/Checkboxes inside Recursion settings must use the compact dark Recursion control skin/.test(uiSpec), 'UI spec documents host checkbox override requirement');
+assert(/Provider Source changes the field context inside each lane immediately/.test(uiSpec), 'UI spec documents source-specific provider field contexts');
+assert(/Switching Source is a UI-only context switch until Save Provider is clicked/.test(uiSpec), 'UI spec documents non-destructive provider source switching');
 assert(!/array\.innerHTML\s*=\s*steps\.map/.test(barImplementationReference), 'turn animation preview does not recreate all hero blocks on every tick');
 assert(!/list\.innerHTML\s*=\s*rows\.map/.test(barImplementationReference), 'turn animation preview does not recreate all progress rows on every tick');
 assert(!/list\.appendChild\(parentRow\);/.test(barImplementationReference), 'turn animation preview does not unconditionally move parent rows on every refresh');
@@ -478,7 +480,11 @@ assert(!/const before = list\.children\[index\];[\s\S]*?list\.insertBefore\(row,
 assert(/dataset\.stepId/.test(barImplementationReference), 'turn animation preview keys hero blocks and progress rows by stable step id');
 assert(/function syncHeroBlock/.test(barImplementationReference), 'turn animation preview updates hero blocks in place');
 assert(/function syncProgressRow/.test(barImplementationReference), 'turn animation preview updates progress rows in place');
+assert(!/cards-button-label/.test(barImplementationReference), 'implementation reference Cards button is icon-only');
+assert(/<button class="icon-button cards-button"[\s\S]*?<span class="sep" aria-hidden="true"><\/span>\s*<button class="activity-trigger status-array-button"/.test(barImplementationReference), 'implementation reference places icon-only Cards before the Hero Pixel Array trigger');
 assert(/\.recursion-power-toggle\s*\{[\s\S]*?flex:\s*0 0 24px;[\s\S]*?height:\s*24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production power toggle uses the same compact geometry as the reference');
+assert(/\.recursion-cards-button\s*\{[\s\S]*?flex:\s*0 0 24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production Cards scope button stays icon-only in the compact bar');
+assert(!/recursion-cards-button-label/.test(recursionUi), 'production Cards scope button has no visible label node');
 assert(/\.recursion-activity-trigger\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production activity trigger keeps reference spacing around pixel blocks');
 assert(/\.recursion-hero-pixel-array\s*\{[\s\S]*?width:\s*max\(0px,/.test(recursionCss), 'production Hero Pixel Array uses column-based width animation');
 assert(/\.recursion-options-button:hover,[\s\S]*?\.recursion-options-button\[aria-expanded="true"\]\s*\{[\s\S]*?background:\s*transparent\s*!important;[\s\S]*?outline:\s*none\s*!important;/.test(recursionCss), 'production options button stays icon-only while focused or open');
@@ -488,6 +494,8 @@ assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]\s*\{[\s\
 assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]\[hidden\]\s*\{[\s\S]*?display:\s*none !important;/.test(recursionCss), 'hidden provider state checkboxes stay hidden despite Recursion checkbox skin');
 assert(/\.recursion-root\s+input\.recursion-checkbox\[type="checkbox"\]:checked\s*\{[\s\S]*?background:[\s\S]*?var\(--recursion-accent\)/.test(recursionCss), 'production settings checkbox uses Recursion cyan when checked');
 assert(/\.recursion-provider-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/.test(recursionCss), 'production Providers pane uses the reference two-column provider grid');
+assert(/\.recursion-provider-context-fields\s*\{[\s\S]*?display:\s*contents;/.test(recursionCss), 'production provider source-specific field groups keep the reference provider grid');
+assert(/\.recursion-provider-context-fields\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'hidden provider source-specific field groups stay hidden despite display contents');
 assert(/\.recursion-provider-status\.pass\s*\{[\s\S]*?var\(--recursion-success\)/.test(recursionCss), 'production provider success status uses the defined success token');
 assert(/const progressTop = rect\.bottom \+ 3;/.test(recursionUi), 'production progress popover uses the reference vertical gap below the compact bar');
 assert(/const settingsTop = rect\.bottom \+ 5;/.test(recursionUi), 'production settings and brief popovers use the reference desktop vertical gap');
@@ -1168,7 +1176,17 @@ try {
   assert(root.querySelector('[data-recursion-brief-arrow]'), 'compact bar renders a dedicated last-brief dropdown arrow');
   assert(root.querySelector('[data-recursion-cards-button]'), 'compact bar renders the Cards scope button');
   assertEqual(root.querySelector('[data-recursion-cards-button]').querySelectorAll('rect').length, 3, 'Cards scope button owns the stacked-cards SVG');
-  assertEqual(root.querySelector('[data-recursion-cards-label]').textContent, 'Cards', 'Cards button labels the full default scope as Cards');
+  const barChildren = root.querySelector('[data-recursion-bar]').children;
+  const modeCluster = root.querySelector('[data-recursion-mode-button]').parentNode;
+  const cardsButton = root.querySelector('[data-recursion-cards-button]');
+  const statusTrigger = root.querySelector('[data-recursion-status-trigger]');
+  const rightTools = root.querySelector('[data-recursion-reasoning-chain]').parentNode;
+  assertEqual(cardsButton.parentNode, root.querySelector('[data-recursion-bar]'), 'Cards button lives in the left bar flow');
+  assert(barChildren.indexOf(modeCluster) < barChildren.indexOf(cardsButton), 'Cards button sits to the right of Mode');
+  assert(barChildren.indexOf(cardsButton) < barChildren.indexOf(statusTrigger), 'Cards button sits to the left of the Hero Pixel Array progress trigger');
+  assert(!rightTools.children.includes(cardsButton), 'Cards button is not part of the right tool cluster');
+  assert(!root.querySelector('[data-recursion-cards-label]'), 'Cards button is icon-only with no visible label node');
+  assertEqual(fakeDocument.textTree(cardsButton).trim(), '', 'Cards button renders no visible text');
   assertEqual(root.querySelector('[data-recursion-cards-button]').getAttribute('aria-expanded'), 'false', 'Cards button starts collapsed');
   assert(root.querySelector('[data-recursion-arrow-down]'), 'last-brief dropdown arrow uses a drawn icon instead of text');
   assert(root.querySelector('[data-recursion-options-button]'), 'compact bar renders a dedicated ellipsis options button');
@@ -1253,7 +1271,7 @@ try {
   sceneFamilyToggle.click();
   assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].enabled, false, 'family toggle disables the selected family scope');
   ui.update();
-  assertEqual(root.querySelector('[data-recursion-cards-label]').textContent, '21/24', 'Cards button shows selected/total after partial scope change');
+  assert(!root.querySelector('[data-recursion-cards-label]'), 'Cards button stays icon-only after partial scope change');
   root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
     .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame')
     .click();
@@ -1264,7 +1282,7 @@ try {
   locationToggle.click();
   assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].subItems.locationSituation, false, 'sub-item toggle disables one selected focus item');
   ui.update();
-  assertEqual(root.querySelector('[data-recursion-cards-label]').textContent, '23/24', 'Cards button tracks partial sub-item scope');
+  assert(!root.querySelector('[data-recursion-cards-label]'), 'Cards button stays icon-only after sub-item scope change');
   let singleScope = defaultCardScope();
   for (const family of CARD_SCOPE_CATALOG.filter((entry) => entry.family !== 'Scene Frame')) {
     singleScope = setFamilyEnabled(singleScope, family.family, false).scope;
@@ -1334,6 +1352,28 @@ try {
   root.querySelector('[data-recursion-provider-toggle-reasoner]').click();
   assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, false, 'Reasoner provider section expands');
   assert(root.querySelector('[data-recursion-provider-model-reasoner]'), 'Reasoner provider expansion exposes model setting');
+  const utilitySource = root.querySelector('[data-recursion-provider-source-utility]');
+  const utilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
+  const utilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
+  assert(utilityProfileContext, 'Utility provider renders a profile-specific field context');
+  assert(utilityOpenAiContext, 'Utility provider renders an OpenAI-specific field context');
+  assertEqual(utilityProfileContext.hidden, true, 'Current Host Model hides Utility profile fields');
+  assertEqual(utilityOpenAiContext.hidden, true, 'Current Host Model hides Utility OpenAI endpoint fields');
+  utilitySource.value = 'host-connection-profile';
+  for (const listener of utilitySource.eventListeners.change || []) listener({ target: utilitySource });
+  assertEqual(utilityProfileContext.hidden, false, 'Host Connection Profile shows Utility profile fields');
+  assertEqual(utilityOpenAiContext.hidden, true, 'Host Connection Profile hides Utility OpenAI endpoint fields');
+  utilitySource.value = 'openai-compatible';
+  for (const listener of utilitySource.eventListeners.change || []) listener({ target: utilitySource });
+  assertEqual(utilityProfileContext.hidden, true, 'OpenAI-Compatible hides Utility profile fields');
+  assertEqual(utilityOpenAiContext.hidden, false, 'OpenAI-Compatible shows Utility endpoint/model/key fields');
+  const reasonerSource = root.querySelector('[data-recursion-provider-source-reasoner]');
+  const reasonerProfileContext = root.querySelector('[data-recursion-provider-context-profile-reasoner]');
+  const reasonerOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-reasoner]');
+  reasonerSource.value = 'host-connection-profile';
+  for (const listener of reasonerSource.eventListeners.change || []) listener({ target: reasonerSource });
+  assertEqual(reasonerProfileContext.hidden, false, 'Host Connection Profile shows Reasoner profile fields');
+  assertEqual(reasonerOpenAiContext.hidden, true, 'Host Connection Profile hides Reasoner OpenAI endpoint fields');
   root.querySelector('[data-recursion-settings-tab-advanced]').click({ ignoreStopPropagation: true });
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open even when document outside-click also receives the rerendered event');
   assertEqual(root.querySelector('[data-recursion-settings-advanced]').hidden, false, 'clicking Advanced shows advanced controls');

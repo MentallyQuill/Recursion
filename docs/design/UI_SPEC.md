@@ -139,7 +139,9 @@ Reference mode selector CSS:
 }
 ```
 
-The Hero Pixel Array sits to the right of the mode separator and immediately before the compact current-step text. It shows runtime state at a glance and mirrors the visible top-level rows in the progress menu:
+The card scope selector is an icon-only stacked-cards button in the left bar flow. It sits immediately to the right of Mode and to the left of the Hero Pixel Array separator. Its accessible label and tooltip carry the meaning; it must not render a visible `Cards` title or selected-count text in the compact bar.
+
+The Hero Pixel Array sits to the right of the card scope selector separator and immediately before the compact current-step text. It shows runtime state at a glance and mirrors the visible top-level rows in the progress menu:
 
 - Empty muted blocks: queued or not-yet-started progress items.
 - Green filled blocks: completed progress items.
@@ -148,7 +150,7 @@ The Hero Pixel Array sits to the right of the mode separator and immediately bef
 - Yellow filled blocks: finished with errors, fallback, JSON repair, or other repairable caution.
 - Red filled blocks: blocked or failed progress items.
 
-Blocks build down from the top of a three-row column, then start the next column to the right. The array sits after the Mode separator and before the compact current-step text. On the next user message, old blocks wipe away before the next run starts building.
+Blocks build down from the top of a three-row column, then start the next column to the right. The array sits after the Cards separator and before the compact current-step text. On the next user message, old blocks wipe away before the next run starts building.
 
 The Hero Pixel Array must respect reduced-motion preferences. It may pulse active blocks while work is running, but it must not animate when `prefers-reduced-motion: reduce` is active.
 
@@ -1078,6 +1080,14 @@ Providers contains the complete provider setup surface in collapsible lane secti
 - Status, resolved provider, and resolved model.
 - Temperature and top-p stay internal/defaulted in the compact V1 menu so the provider pane matches the mockup and does not become a dense admin form.
 
+Provider Source changes the field context inside each lane immediately, matching the lean Directive/Saga pattern instead of showing every possible provider field at once:
+
+- Current Host Model shows no connection-specific option boxes; it uses the active SillyTavern model context.
+- Host Connection Profile shows Profile and hides OpenAI-compatible endpoint, model, and session key fields.
+- OpenAI-Compatible Endpoint shows Base URL, Model, and Session Key and hides Profile.
+- Max Tokens and provider actions remain visible for every Source.
+- Switching Source is a UI-only context switch until Save Provider is clicked. Hidden field values are preserved so a user can compare sources without losing typed-but-unsaved settings.
+
 Advanced contains low-frequency controls grouped into collapsible sections:
 
 - Injection: placement, role, and depth controls for the composed prompt packet.
@@ -1112,6 +1122,8 @@ Each provider card should support:
 - Status and resolved model.
 
 The compact Providers tab shows Utility details by default and keeps Reasoner as a collapsed optional lane until the user opens or configures it. Temperature and top-p remain normalized provider settings with safe defaults, but they are not visible controls in the compact top-bar menu.
+
+Provider cards must not sprawl by rendering profile and OpenAI endpoint fields together. The selected Source owns the visible option context, while hidden alternate-source values remain available to Save Provider if the user switches back before saving.
 
 API keys are session-only. They must not be written to extension settings, scene caches, prompt packets, run journals, diagnostics, reports, or artifacts.
 

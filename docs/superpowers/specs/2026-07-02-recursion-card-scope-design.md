@@ -209,7 +209,7 @@ This design does not add:
 - Family off disables the family; family on restores all sub-items.
 - Partial sub-item selection shows a mixed family state.
 - The UI prevents disabling the final enabled sub-item.
-- Auto treats partial selection as focus, with critical continuity/safety exceptions allowed and visible.
+- Auto treats partial selection as preferred focus, with unselected families still allowed when they have high relevance to continuity, scene coherence, or the current user message.
 - Manual treats partial selection as a strict whitelist.
 - Runtime never generates, selects, composes, or injects disabled scope in Manual.
 - Sub-items guide family focus and do not require separate V1 card instances.

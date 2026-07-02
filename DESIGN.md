@@ -209,7 +209,7 @@ Do not introduce large rounded cards or soft marketing panels. Keep cards at 8px
 
 ## Components
 
-**Recursion Bar:** One compact chat-attached row with power, mode, Hero Pixel Array/current step, reasoning chain, Last Brief arrow, and options ellipsis. The bar is neutral graphite chrome; it should not become a message strip or dashboard.
+**Recursion Bar:** One compact chat-attached row with power, mode, icon-only card scope, Hero Pixel Array/current step, reasoning chain, Last Brief arrow, and options ellipsis. The bar is neutral graphite chrome; it should not become a message strip or dashboard.
 
 **Icon buttons:** Familiar controls should be icon-first, 24px square, with accessible labels and tooltips. Power and mode use muted foreground, not bright brand color.
 

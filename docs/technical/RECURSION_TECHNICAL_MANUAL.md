@@ -53,7 +53,7 @@ Power-off clears or avoids Recursion prompt entries and does not inspect chat fo
 
 Manual captures the current turn and follows the normal prompt-install path, but it constrains card generation and cached-card reuse to the selected card families. Disabled families are omitted before provider card jobs run and filtered again before deck and hand selection.
 
-Auto mode runs the full pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the Utility Arbiter or local fallback path produces useful guidance. User-selected card families and sub-items guide focus in Auto, but the Utility Arbiter still sees the full fixed catalog and can keep critical continuity exceptions with compact diagnostics.
+Auto mode runs the full pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the Utility Arbiter or local fallback path produces useful guidance. User-selected card families and sub-items are preferred in Auto, but the Utility Arbiter still sees the full fixed catalog and can request unselected families when they have high relevance to continuity, scene coherence, or the current user message.
 
 Settings and provider changes supersede the active run, abort stale provider work where possible, and await prompt cleanup before their operation results resolve. `updateSettings` returns updated settings plus the prompt-clear result; `updateProvider` and `clearProviderKey` return updated provider settings plus the prompt-clear result. Clear failure leaves the setting or provider change applied, returns `ok: false`, and surfaces the sanitized prompt-clear warning.
 

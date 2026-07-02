@@ -39,6 +39,7 @@ Current V1 decisions:
 - Build provider settings, provider contracts, and structured call contracts before the card loop depends on them.
 - The first working loop must support both Utility Composer and Reasoner Composer, with Utility Composer as the default and fail-soft path.
 - Support all three provider sources for both lanes where the host permits it: current host model, host connection profile, and OpenAI-compatible endpoint.
+- Advanced users can control where the conditioned final prompt packet is injected by setting placement, role, and depth; defaults preserve Recursion's recommended packet template.
 - Use Directive-style runtime discipline for retries, timeouts, aborts, fallbacks, structured validation, and sanitized model-call diagnostics without importing Directive's campaign architecture.
 - Do not store raw provider prompts or raw provider responses by default.
 - Recursion lives in its own chat-attached top bar. It should sit as the lowest bar in the top-bar stack when the host layout makes that possible.
@@ -125,6 +126,8 @@ The packet has three primary sections:
 
 Prompt footprint can be compact, normal, or rich. Even rich packets must stay bounded, current-scene oriented, and inspectable.
 
+Advanced Injection settings can override the conditioned final packet's SillyTavern placement, role, and depth for model or preset compatibility. They apply after Utility or Reasoner composition and do not create per-card injection controls.
+
 ## UI Shape
 
 The primary UI is a Recursion Bar attached to the chat surface:
@@ -140,6 +143,7 @@ It replaces the earlier shelf/drawer idea. The bar is thin, stable, mostly obser
 - a Last Brief dropdown opened from the dropdown arrow;
 - a full viewer for deck/activity/prompt/settings/provider inspection;
 - provider settings for Utility and Reasoner lanes;
+- Advanced Injection settings for final prompt placement, role, and depth;
 - a small set of broad behavior controls.
 
 Users should not need to edit cards, tune individual card weights, or maintain relevance rules.

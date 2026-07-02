@@ -883,7 +883,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(result.ok, true, 'manual mode returns ok');
   assertEqual(result.observe, undefined, 'manual is not an observe-only preview path');
   assertEqual(calls.snapshot, 3, 'manual reads snapshot and rechecks before compose and install');
-  assertEqual(installed.length, 1, 'manual installs one prompt until card subset constraints are implemented');
+  assertEqual(installed.length, 1, 'manual installs one prompt through the scoped pipeline');
   assert(view.lastPacket, 'manual builds packet');
   assert(view.lastHand.cards.length > 0, 'manual builds hand');
   assertEqual(view.activity.label, 'Recursion prompt ready.', 'manual activity settles as prompt ready');
@@ -5191,7 +5191,7 @@ for (const scenario of [
   const setupSnapshot = runtime.view().lastSnapshot;
   const result = await runtime.refreshScene();
   assertEqual(result.ok, true, 'manual refresh prepares generation');
-  assertEqual(installed.length, 2, 'manual refresh installs prompt in auto mode');
+  assertEqual(installed.length, 2, 'manual refresh installs prompt after cache invalidation');
   assert(arbiterPrompts[1].includes('"cacheState":"stale"'), 'manual refresh Arbiter prompt sees stale prior cache');
   assert(arbiterPrompts[1].includes('"reason":"user-refresh"'), 'manual refresh Arbiter prompt sees invalidation reason');
   const refreshedSnapshot = parsePromptJsonSection(arbiterPrompts[1], 'Snapshot');

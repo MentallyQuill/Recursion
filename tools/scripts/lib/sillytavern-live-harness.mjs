@@ -1571,7 +1571,7 @@ async function selectRecursionMode(page, mode, timeoutMs) {
     return;
   }
   await page.locator('[data-recursion-setting-mode]').selectOption(mode, { timeout: timeoutMs });
-  await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
+  await page.locator('[data-recursion-setting-mode]').dispatchEvent('change');
 }
 
 async function applyRecursionModeSmokeStep(page, mode, timeoutMs) {
@@ -1843,7 +1843,6 @@ async function runBrowserUiSmoke({
         await page.locator('[data-recursion-provider-enabled-reasoner]').check({ timeout: timeoutMs }).catch(() => {});
         await page.locator('[data-recursion-reasoner-provider-save]').click({ timeout: timeoutMs }).catch(() => {});
       }
-      await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs }).catch(() => {});
       await page.waitForFunction(() => /Auto/i.test(document.querySelector('[data-recursion-mode]')?.textContent || ''), null, { timeout: timeoutMs });
     }
 

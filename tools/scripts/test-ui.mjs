@@ -365,6 +365,8 @@ assert(/\.power-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*24px;/.test(b
 assert(/data-recursion-mode-arrow-fan/.test(barImplementationReference), 'reference Auto mode icon uses divergent three-arrow geometry');
 assert(/data-recursion-mode-arrow-parallel/.test(barImplementationReference), 'reference Manual mode icon uses parallel three-arrow geometry');
 assert(/Cards Selection button owns the stacked-cards icon/.test(uiSpec), 'UI spec assigns stacked cards to card scope selection, not mode');
+assert(/small neutral `All` command/.test(uiSpec), 'UI spec documents the Cards dropdown All action');
+assert(/Use `All`, not `Reset`/.test(uiSpec), 'UI spec reserves Reset language for runtime reset commands');
 assert(/data-mode="manual"/.test(barImplementationReference), 'reference mode menu includes Manual');
 const removedModeValue = ['semi', 'auto'].join('-');
 assert(!barImplementationReference.includes(`data-mode="${removedModeValue}"`), 'reference mode menu removes the old named mode');
@@ -413,6 +415,8 @@ assert(/height:\s*30px;/.test(referenceBarCss), 'reference bar height matches th
 assert(/\.power-toggle\s*\{[\s\S]*?color:\s*rgba\(224,\s*224,\s*224,\s*\.72\);/.test(barImplementationReference), 'reference power toggle uses the grey-white SillyTavern theme color');
 assert(!/\.recursion-mode-icon::before/.test(recursionCss), 'production mode button uses inline SVG, not CSS pseudo icons');
 assert(!/\.recursion-mode-choice-icon::before/.test(recursionCss), 'production mode menu uses inline SVG, not CSS pseudo icons');
+assert(/\.recursion-mode-icon\s*\{[\s\S]*?pointer-events:\s*none;/.test(recursionCss), 'production mode icon container does not become an independent click target');
+assert(/\.recursion-mode-icon \*\s*\{[\s\S]*?pointer-events:\s*none;/.test(recursionCss), 'production mode icon graphics do not become independent click targets');
 assert(/\.recursion-brief-card\s*\{[\s\S]*?grid-template-columns:\s*138px minmax\(0,\s*1fr\);/.test(recursionCss), 'production Last Brief cards use the reference two-column card grid');
 assert(/\.recursion-card-text\s*\{[\s\S]*?-webkit-line-clamp:\s*1;/.test(recursionCss), 'production Last Brief cards clamp text to one line while compact');
 assert(/\.status-popover\s*\{[\s\S]*?left:\s*-3px;/.test(barImplementationReference), 'status popover aligns to the visible left edge of the bar');
@@ -426,6 +430,8 @@ assert(/function updateChildGroupScrollState/.test(barImplementationReference), 
 assert(/function updateStatusListScrollState/.test(barImplementationReference), 'turn animation preview updates whole progress list scroll state');
 assert(/\.step-row\.is-entering/.test(barImplementationReference), 'progress rows have an insertion animation class');
 assert(/@keyframes step-row-enter/.test(barImplementationReference), 'progress row insertion animation is defined');
+assert(/\.status-popover\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-direction:\s*column;[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/.test(barImplementationReference), 'reference progress popover uses the same mobile flex shell as production');
+assert(/\.status-list\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?min-height:\s*0;[\s\S]*?overflow-y:\s*auto;/.test(barImplementationReference), 'reference progress list flex-shrinks and scrolls inside the popover');
 assert(/\.recursion-step-row\.is-entering/.test(recursionCss), 'production progress rows have an insertion animation class');
 assert(/\.recursion-step-row\.is-updating/.test(recursionCss), 'production progress rows have an update animation class');
 assert(/@keyframes recursion-step-row-enter/.test(recursionCss), 'production progress row insertion animation is defined');
@@ -434,8 +440,13 @@ assert(/\.recursion-step-children\s*\{[\s\S]*?--recursion-progress-child-row-hei
 assert(/\.recursion-step-row\.child-row\s*\{[\s\S]*?height:\s*var\(--recursion-progress-child-row-height\);/.test(recursionCss), 'production child progress rows use the reference fixed child height');
 assert(/\.recursion-step-row\.running \.recursion-step-icon\s*\{[\s\S]*?height:\s*12px;[\s\S]*?width:\s*12px;/.test(recursionCss), 'production running progress spinner uses the 12px reference ring size');
 assert(/\.recursion-step-row\.running \.recursion-step-icon::after/.test(recursionCss), 'production running progress spinner uses an inner cutout like the reference ring');
+assert(/\.recursion-status-popover\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-direction:\s*column;[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/.test(recursionCss), 'production progress popover uses a flex column shell so mobile height clamps constrain its contents');
+assert(/\.recursion-status-popover\[hidden\]\s*\{[\s\S]*?display:\s*none !important;/.test(recursionCss), 'production progress popover hidden state survives the flex display rule');
 assert(/\.recursion-status-head\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?padding:\s*7px 9px;/.test(recursionCss), 'production progress popover header uses the reference 34px compactness');
+assert(/\.recursion-status-head,\s*[\r\n]+\.recursion-status-foot\s*\{[\s\S]*?flex:\s*0 0 auto;/.test(recursionCss), 'production progress header and footer stay fixed while the list scrolls');
 assert(!/\.recursion-status-subtitle\s*\{[^}]*margin-left:\s*auto;/.test(recursionCss), 'production progress subtitle stays beside the title instead of pinning to the right edge');
+assert(/\.recursion-status-list\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?max-height:\s*calc\(var\(--recursion-progress-list-limit, 15\) \* 30px\);[\s\S]*?min-height:\s*0;[\s\S]*?overflow-y:\s*auto;/.test(recursionCss), 'production progress list flex-shrinks inside the viewport-clamped popover');
+assert(/\.recursion-status-list\s*\{[\s\S]*?-webkit-overflow-scrolling:\s*touch;/.test(recursionCss), 'production progress list keeps touch momentum scrolling on mobile');
 assert(!/\.recursion-settings-panel\.is-beside-progress/.test(recursionCss), 'production settings panel no longer carries obsolete side-by-side progress styling');
 assert(!/\.recursion-settings-panel\s*\{[\s\S]*?left:\s*360px;/.test(recursionCss), 'production settings panel CSS fallback is full-width, not side-by-side');
 assert(/\.recursion-status-foot \.recursion-mini-chip\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*2px 5px 3px;/.test(recursionCss), 'production progress footer Live chip uses the reference tiny-chip compactness');
@@ -468,8 +479,11 @@ assert(/children:\s*\[/.test(uiSpec), 'UI spec documents progress child rows in 
 assert(/Parent row aggregation:/.test(uiSpec), 'UI spec documents nested parent aggregation rules');
 assert(/cardProgress/.test(uiSpec), 'UI spec documents sanitized card progress activity events');
 assert(/\.recursion-status-popover\s*\{[\s\S]*?left:\s*-3px;/.test(uiSpec), 'UI spec anchors the status popover to the visible bar edge');
+assert(/header and footer stay visible/.test(uiSpec), 'UI spec documents mobile progress header and footer visibility');
+assert(/\.recursion-status-list` flex-shrinks/.test(uiSpec), 'UI spec documents the mobile progress list flex-shrink contract');
 assert(/progressChildVisibleLimit:\s*5/.test(uiSpec), 'UI spec documents the sub-tier visible row default');
 assert(/progressListVisibleLimit:\s*15/.test(uiSpec), 'UI spec documents the whole progress list visible row default');
+assert(/Play and Advanced setting controls auto-save on change/.test(uiSpec), 'UI spec documents broad settings autosave instead of a Save Settings button');
 assert(/bottom fade/.test(uiSpec), 'UI spec documents the sub-tier overflow fade affordance');
 assert(/\.settings-row input\[type="checkbox"\]\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?background:\s*rgba\(255, 255, 255, \.035\);/.test(barImplementationReference), 'reference settings checkbox uses the compact dark mockup skin');
 assert(/Checkboxes inside Recursion settings must use the compact dark Recursion control skin/.test(uiSpec), 'UI spec documents host checkbox override requirement');
@@ -488,6 +502,9 @@ assert(/<button class="icon-button cards-button"[\s\S]*?<span class="sep" aria-h
 assert(/\.recursion-power-toggle\s*\{[\s\S]*?flex:\s*0 0 24px;[\s\S]*?height:\s*24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production power toggle uses the same compact geometry as the reference');
 assert(/\.recursion-cards-button\s*\{[\s\S]*?flex:\s*0 0 24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production Cards scope button stays icon-only in the compact bar');
 assert(!/recursion-cards-button-label/.test(recursionUi), 'production Cards scope button has no visible label node');
+assert(/recursionCardScopeAll:\s*''/.test(recursionUi), 'production Cards dropdown renders an All card-scope action');
+assert(/applyCardScopeResult\(\{\s*scope:\s*defaultCardScope\(\),\s*blocked:\s*false\s*\}\)/.test(recursionUi), 'production Cards All action restores the default full card scope');
+assert(/\.recursion-cards-all-button\s*\{[\s\S]*?font-size:\s*10px;[\s\S]*?min-height:\s*20px;/.test(recursionCss), 'production Cards All action uses compact SillyTavern-native button sizing');
 assert(/\.recursion-activity-trigger\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production activity trigger keeps reference spacing around pixel blocks');
 assert(/\.recursion-hero-pixel-array\s*\{[\s\S]*?width:\s*max\(0px,/.test(recursionCss), 'production Hero Pixel Array uses column-based width animation');
 assert(/\.recursion-options-button:hover,[\s\S]*?\.recursion-options-button\[aria-expanded="true"\]\s*\{[\s\S]*?background:\s*transparent\s*!important;[\s\S]*?outline:\s*none\s*!important;/.test(recursionCss), 'production options button stays icon-only while focused or open');
@@ -501,8 +518,11 @@ assert(/\.recursion-settings-disclosure-body\[hidden\]\s*\{[\s\S]*?display:\s*no
 assert(/\.recursion-provider-body\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'provider disclosure bodies stay hidden despite author display rules');
 assert(/\.recursion-provider-field\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'provider source-specific fields stay hidden despite grid display rules');
 assert(/\.recursion-provider-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/.test(recursionCss), 'production Providers pane uses the reference two-column provider grid');
-assert(/\.recursion-provider-context-fields\s*\{[\s\S]*?display:\s*contents;/.test(recursionCss), 'production provider source-specific field groups keep the reference provider grid');
-assert(/\.recursion-provider-context-fields\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'hidden provider source-specific field groups stay hidden despite display contents');
+assert(/\.recursion-provider-grid\s*\{[\s\S]*?align-items:\s*start;/.test(recursionCss), 'provider grid does not stretch short fields beside taller model tools');
+assert(!/\.recursion-provider-context-fields\s*\{[\s\S]*?display:\s*contents;/.test(recursionCss), 'provider source-specific fields are grouped instead of flattened into auto-placement');
+assert(/\.recursion-provider-context-fields\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1;/.test(recursionCss), 'provider source-specific field groups span the provider grid');
+assert(/\.recursion-provider-openai-fields\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\);/.test(recursionCss), 'OpenAI provider fields align as a stable two-column block');
+assert(/\.recursion-provider-context-fields\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'hidden provider source-specific field groups stay hidden despite grouped provider layout');
 assert(/\.recursion-provider-status\.pass\s*\{[\s\S]*?var\(--recursion-success\)/.test(recursionCss), 'production provider success status uses the defined success token');
 assert(/const progressTop = rect\.bottom \+ 3;/.test(recursionUi), 'production progress popover uses the reference vertical gap below the compact bar');
 assert(/const settingsTop = rect\.bottom \+ 5;/.test(recursionUi), 'production settings and brief popovers use the reference desktop vertical gap');
@@ -517,6 +537,9 @@ assert(!/is-beside-progress/.test(recursionUi), 'production UI no longer toggles
 assert(/function eventWithin\(event, elements\)/.test(recursionUi), 'outside-click handling keeps original event path for rerendered popover controls');
 assert(/!eventWithin\(event, \[/.test(recursionUi), 'document click handling uses event path containment before closing popovers');
 assert(/recursionSettingsTab[\s\S]*?event\?\.stopPropagation\?\.\(\)/.test(recursionUi), 'settings tab clicks do not bubble into outside-click closers after rerender');
+assert(!/recursionSettingsSave/.test(recursionUi), 'settings panel has no broad Save Settings action because settings controls auto-save');
+assert(!/recursionSettingsClose/.test(recursionUi), 'settings panel has no redundant header close button');
+assert(!/settings-close/.test(barImplementationReference), 'implementation reference settings panel has no redundant close button');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(recursionCss), 'production CSS honors reduced-motion preferences');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.recursion-root \*[\s\S]*?animation:\s*none\s*!important;[\s\S]*?transition:\s*none\s*!important;/.test(recursionCss), 'reduced-motion rule disables Recursion animations and transitions');
 assert(/\.recursion-viewer-card-list\s*\{[\s\S]*?display:\s*grid;[\s\S]*?gap:\s*8px;/.test(recursionCss), 'full viewer deck renders structured cards in a compact grid');
@@ -1216,6 +1239,13 @@ try {
     'mode button exposes the current mode label'
   );
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('title'), 'Mode: Auto', 'mode button exposes compact hover tip');
+  const stableAutoModeSvg = root.querySelector('[data-recursion-mode-icon]').querySelector('svg');
+  ui.update();
+  assertEqual(
+    root.querySelector('[data-recursion-mode-icon]').querySelector('svg'),
+    stableAutoModeSvg,
+    'mode refresh preserves the current icon node so rapid pointer clicks are not lost to DOM replacement'
+  );
   assertEqual(
     root.querySelector('[data-recursion-mode-choice-auto]').getAttribute('title'),
     'Selects cards and injects composed prompt context automatically.',
@@ -1357,6 +1387,10 @@ try {
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.maxHeight, '311px', 'Cards dropdown reclamps when mobile visual viewport height changes');
   globalThis.visualViewport.height = 520;
   globalThis.visualViewport.emit('resize');
+  assert(root.querySelector('[data-recursion-card-scope-all]'), 'Cards dropdown renders an All scope action');
+  assertEqual(root.querySelector('[data-recursion-card-scope-all]').disabled, true, 'All action is disabled when every card focus item is already selected');
+  assertEqual(root.querySelector('[data-recursion-card-scope-all]').textContent, 'All', 'Cards full-scope action uses concise All copy');
+  assertEqual(root.querySelector('[data-recursion-card-scope-all]').getAttribute('title'), 'All card focus items are already selected.', 'disabled All action explains current full selection');
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-family]').length, CARD_SCOPE_CATALOG.length, 'Cards dropdown renders every fixed V1 family');
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]').length, CARD_SCOPE_TOTAL_SUB_ITEMS, 'Cards dropdown renders every fixed V1 sub-item');
   const cardScopeText = fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]'));
@@ -1381,6 +1415,15 @@ try {
   assert(sceneFamilyToggle, 'Cards dropdown exposes Scene Frame family toggle');
   sceneFamilyToggle.click();
   assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].enabled, false, 'family toggle disables the selected family scope');
+  assertEqual(root.querySelector('[data-recursion-card-scope-all]').disabled, false, 'All action enables after any card focus item is disabled');
+  assertEqual(root.querySelector('[data-recursion-card-scope-all]').getAttribute('title'), 'Select all card focus items.', 'enabled All action explains restoration');
+  root.querySelector('[data-recursion-card-scope-all]').click();
+  assertDeepEqual(settingsUpdates.at(-1).cardScope, defaultCardScope(), 'All action restores the full default card scope');
+  assertEqual(root.querySelector('[data-recursion-card-scope-all]').disabled, true, 'All action disables again immediately after restoring full scope');
+  root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
+    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame')
+    .click();
+  assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].enabled, false, 'family toggle can still disable the selected family after using All');
   assertEqual(
     root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
       .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame')
@@ -1506,6 +1549,8 @@ try {
   assert(root.querySelector('[data-recursion-settings-play]'), 'settings menu renders Play pane');
   assert(root.querySelector('[data-recursion-settings-providers]'), 'settings menu renders Providers pane');
   assert(root.querySelector('[data-recursion-settings-advanced]'), 'settings menu renders Advanced pane');
+  assert(!root.querySelector('[data-recursion-settings-save]'), 'settings menu does not render a Save Settings button');
+  assert(!root.querySelector('[data-recursion-settings-close]'), 'settings menu does not render a redundant close button');
   assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, false, 'Play pane is the default settings tab');
   assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, true, 'Providers pane starts tucked behind a tab');
   assert(!root.querySelector('[data-recursion-setting-mode]'), 'Play settings remove redundant mode control owned by compact bar');
@@ -1563,6 +1608,7 @@ try {
   for (const listener of utilitySource.eventListeners.change || []) listener({ target: utilitySource });
   assertEqual(utilityProfileContext.hidden, true, 'OpenAI-Compatible hides Utility profile fields');
   assertEqual(utilityOpenAiContext.hidden, false, 'OpenAI-Compatible shows Utility endpoint/model/key fields');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-provider-readiness-utility]')).includes('OpenAI-Compatible Endpoint'), 'readiness status follows unsaved provider source changes');
   assert(root.querySelector('[data-recursion-provider-fetch-models-utility]'), 'OpenAI-Compatible settings expose Fetch Models control');
   assert(root.querySelector('[data-recursion-provider-model-list-utility]'), 'OpenAI-Compatible settings expose fetched model selector');
   root.querySelector('[data-recursion-provider-base-url-utility]').value = 'https://models.example/v1';
@@ -1641,8 +1687,8 @@ try {
   assert(root.querySelector('[data-recursion-provider-model-reasoner]'), 'Reasoner provider section owns complete provider settings when expanded');
   assertEqual(root.querySelector('[data-recursion-provider-temperature-utility]').getAttribute('type'), 'hidden', 'provider temperature stays hidden from the compact mockup UI');
   assertEqual(root.querySelector('[data-recursion-provider-top-p-utility]').getAttribute('type'), 'hidden', 'provider top-p stays hidden from the compact mockup UI');
-  root.querySelector('[data-recursion-settings-close]').click();
-  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, true, 'settings close button closes options panel');
+  fakeDocument.body.click();
+  assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, true, 'outside click closes settings panel without a header close button');
   assertEqual(root.querySelector('[data-recursion-actions]').getAttribute('aria-expanded'), 'false', 'options button reflects closed settings state');
 
   root.querySelector('[data-recursion-hand-toggle]').click();
@@ -1730,7 +1776,10 @@ try {
   root.querySelector('[data-recursion-setting-injection-placement]').value = 'in_chat';
   root.querySelector('[data-recursion-setting-injection-role]').value = 'assistant';
   root.querySelector('[data-recursion-setting-injection-depth]').value = '7';
-  root.querySelector('[data-recursion-settings-save]').click();
+  const autoSaveBefore = settingsUpdates.length;
+  const tooltipToggle = root.querySelector('[data-recursion-setting-tooltips-enabled]');
+  for (const listener of root.querySelector('[data-recursion-settings-panel]').eventListeners.change || []) listener({ target: tooltipToggle });
+  assertEqual(settingsUpdates.length, autoSaveBefore + 1, 'settings controls auto-save as soon as a value changes');
   assertDeepEqual(settingsUpdates.at(-1), {
     strength: 'strong',
     minCards: 4,
@@ -1778,7 +1827,7 @@ try {
   root.querySelector('[data-recursion-utility-provider-clear-key]').click();
   assertDeepEqual(providerClears, ['utility'], 'utility clear session key action calls runtime');
   if (root.querySelector('[data-recursion-settings-panel]').hidden === false) {
-    root.querySelector('[data-recursion-settings-close]').click();
+    root.querySelector('[data-recursion-actions]').click();
   }
   if (root.querySelector('[data-recursion-hand-dropdown]').hidden !== false) {
     root.querySelector('[data-recursion-hand-toggle]').click();

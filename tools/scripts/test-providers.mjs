@@ -121,6 +121,32 @@ assertDeepEqual(
   'connection profiles are detected from nested object-map host state'
 );
 
+const profilesBesideCharacters = listProviderConnectionProfiles({
+  context: {
+    characters: [
+      { id: 'char-sam', name: 'Sam Vickers', avatar: 'sam.png', data: { description: 'character card' } },
+      { id: 'char-ash', name: 'Ashes of Peace', model: 'not-a-provider-model' }
+    ],
+    ConnectionManagerRequestService: {
+      getSupportedProfiles() {
+        return [{ id: 'real-profile', label: 'Real Profile', model: 'glm-real' }];
+      }
+    }
+  },
+  globals: {
+    extension_settings: {
+      characterCards: {
+        charMap: { id: 'char-map', name: 'Mapped Character Card', model: 'not-a-profile' }
+      }
+    }
+  }
+});
+assertDeepEqual(
+  profilesBesideCharacters.map((profile) => [profile.id, profile.label]),
+  [['real-profile', 'Real Profile / glm-real']],
+  'connection profile discovery rejects SillyTavern character cards'
+);
+
 const profileStatus = providerModelStatus({
   lane: 'utility',
   source: 'host-connection-profile',

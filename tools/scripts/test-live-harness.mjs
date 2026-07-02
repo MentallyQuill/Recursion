@@ -197,6 +197,11 @@ function recursionSmokeFixtureHtml({
           <span data-recursion-hand-count>Hand 0</span>
           <span data-recursion-composer>Composer Utility</span>
           <span data-recursion-reasoner>Reasoner Auto</span>
+          <button type="button" data-recursion-mode-button aria-label="Mode: Auto">Mode</button>
+          <div data-recursion-mode-menu>
+            <button type="button" data-recursion-mode-choice="auto" data-recursion-mode-choice-auto>Auto</button>
+            <button type="button" data-recursion-mode-choice="manual" data-recursion-mode-choice-manual>Manual</button>
+          </div>
           <button type="button" data-recursion-status-trigger>Status</button>
           <button type="button" data-recursion-actions>Actions</button>
           <button type="button" data-recursion-hand-toggle>Hand</button>
@@ -216,7 +221,6 @@ function recursionSmokeFixtureHtml({
           <select data-recursion-setting-mode aria-label="Mode"><option value="auto" selected>Auto</option><option value="manual">Manual</option></select>
           <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
           <input type="checkbox" data-recursion-provider-enabled-reasoner aria-label="Reasoner enabled">
-          <button type="button" data-recursion-settings-save>Save Settings</button>
           <button type="button" data-recursion-reasoner-provider-save data-recursion-provider-lane="reasoner">Save Reasoner</button>
           <button type="button" data-recursion-provider-test data-recursion-provider-lane="utility">Test Provider</button>
         </div>
@@ -338,10 +342,11 @@ function recursionSmokeFixtureHtml({
         }
         document.querySelector('[data-recursion-cards-label]').textContent = smokeContext.disabledFamilies.includes(family) ? '21/24' : 'Cards';
       });
-      document.querySelector('[data-recursion-settings-save]').addEventListener('click', () => {
-        const mode = document.querySelector('[data-recursion-setting-mode]')?.value || 'auto';
+      function applyModeChange(mode) {
         const applyMode = () => {
           smokeContext.mode = mode;
+          const modeSelect = document.querySelector('[data-recursion-setting-mode]');
+          if (modeSelect) modeSelect.value = mode;
           document.querySelector('[data-recursion-status]').textContent = smokeContext.enabled ? 'Ready' : 'Off';
           if (!${staleModeChip ? 'true' : 'false'}) {
             document.querySelector('[data-recursion-mode]').textContent = mode === 'manual' ? 'Manual' : 'Auto';
@@ -350,6 +355,14 @@ function recursionSmokeFixtureHtml({
         if ('${manualModeSave}' === 'noop' && mode === 'manual') return;
         if ('${manualModeSave}' === 'async' && mode === 'manual') setTimeout(applyMode, 150);
         else applyMode();
+      }
+      document.querySelector('[data-recursion-setting-mode]').addEventListener('change', (event) => {
+        applyModeChange(event.target?.value || 'auto');
+      });
+      document.querySelectorAll('[data-recursion-mode-choice]').forEach((button) => {
+        button.addEventListener('click', () => {
+          applyModeChange(button.getAttribute('data-recursion-mode-choice') || 'auto');
+        });
       });
       document.querySelector('[data-recursion-hand-toggle]').addEventListener('click', () => {
         const panel = document.querySelector('[data-recursion-hand-dropdown]');

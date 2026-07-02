@@ -368,7 +368,6 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
   <section class="settings-menu is-open" id="settings-menu" aria-label="Recursion settings">
     <header class="settings-head">
       <span class="settings-title">Settings</span>
-      <button class="settings-close" type="button" aria-label="Close settings">x</button>
     </header>
 
     <div class="settings-tabs" role="tablist">
@@ -964,7 +963,6 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
     optionsButton?.addEventListener('click', () => {
       setSettingsOpen(!settingsMenu?.classList.contains('is-open'));
     });
-    settingsMenu?.querySelector('.settings-close')?.addEventListener('click', () => setSettingsOpen(false));
     settingsMenu?.querySelectorAll('.settings-tab').forEach((tabButton) => {
       tabButton.addEventListener('click', () => {
         const selected = tabButton.dataset.tab;
@@ -1398,10 +1396,13 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
 }
 
 .status-popover {
+  display: flex;
+  flex-direction: column;
   position: absolute;
   top: 34px;
   left: -3px;
   width: 352px;
+  min-height: 0;
   z-index: 90;
   border: 1px solid var(--border);
   border-radius: 0 0 8px 8px;
@@ -1434,6 +1435,7 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
 .status-head {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 8px;
   min-height: 34px;
   padding: 7px 9px;
@@ -1459,7 +1461,10 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
 .status-list {
   --progress-list-visible-limit: 15;
   --progress-row-height: 30px;
+  -webkit-overflow-scrolling: touch;
+  flex: 1 1 auto;
   max-height: calc(var(--progress-list-visible-limit) * var(--progress-row-height));
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
@@ -1662,6 +1667,7 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
   min-height: 30px;
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   justify-content: space-between;
   gap: 8px;
   padding: 6px 9px;
@@ -2078,7 +2084,6 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
   font-weight: 600;
 }
 
-.settings-close,
 .settings-tab,
 .settings-foot button,
 .provider-actions button {
@@ -2089,12 +2094,6 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
   color: rgba(224, 224, 224, .68);
   font: inherit;
   line-height: 1;
-}
-
-.settings-close {
-  margin-left: auto;
-  width: 22px;
-  height: 22px;
 }
 
 .settings-tabs {
@@ -2312,7 +2311,6 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
   font-size: 10.5px;
 }
 
-.settings-close:hover,
 .settings-tab:hover,
 .settings-foot button:hover,
 .provider-actions button:hover {

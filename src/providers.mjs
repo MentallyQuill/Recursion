@@ -286,6 +286,8 @@ function profileName(profile = {}, fallback = '') {
 }
 
 const MODEL_KEY_PATTERN = /(^|_|\b)(model|modelid|model_id|modelname|model_name|selectedmodel|selected_model|chatmodel|chat_model|completionmodel|completion_model)$/i;
+const CONNECTION_PROFILE_PATH_PATTERN = /(^|\.)(connectionProfiles?|connection_profiles|connectionManagerProfiles?|profileList|supportedProfiles|ConnectionManagerRequestService)(\.|$)|connectionManager\.(profiles|profileList)$/i;
+const NON_PROVIDER_PROFILE_PATH_PATTERN = /(^|\.)(characters?|characterCards?|personas?|avatars?|groups?|cards?)(\.|$)/i;
 
 function modelFromProfile(profile = {}) {
   const seen = new Set();
@@ -312,10 +314,19 @@ function profileLike(value, path = '') {
   if (!plainObject(value)) return false;
   const id = profileId(value);
   if (!id) return false;
+  if (NON_PROVIDER_PROFILE_PATH_PATTERN.test(path) && !/connection/i.test(path)) return false;
+  const explicitProfileKeys = [
+    'profileId',
+    'profile_id',
+    'profileName',
+    'profile_name',
+    'connectionProfileId',
+    'connection_profile_id'
+  ];
+  const hasExplicitProfileKey = explicitProfileKeys.some((key) => Object.prototype.hasOwnProperty.call(value, key));
   return Boolean(
-    /profile|connection/i.test(path)
-      || profileName(value)
-      || modelFromProfile(value)
+    CONNECTION_PROFILE_PATH_PATTERN.test(path)
+      || hasExplicitProfileKey
       || value.sendRequest
       || value.api
   );

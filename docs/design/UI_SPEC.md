@@ -144,6 +144,8 @@ Reference mode selector CSS:
 
 The card scope selector is an icon-only stacked-cards button in the left bar flow. It sits immediately to the right of Mode and to the left of the Hero Pixel Array separator. Its accessible label and tooltip carry the meaning; it must not render a visible `Cards` title or selected-count text in the compact bar.
 
+Inside the Cards dropdown, the header shows `Cards`, the selected focus summary, and a small neutral `All` command. `All` restores the default card scope with every family and sub-item enabled. It is disabled or visually muted when all card focus items are already selected. Use `All`, not `Reset`, because the action selects every card focus item and must not be confused with Reset Scene Cache or other runtime reset commands.
+
 The Hero Pixel Array sits to the right of the card scope selector separator and immediately before the compact current-step text. It shows runtime state at a glance and mirrors the visible top-level rows in the progress menu:
 
 - Empty muted blocks: queued or not-yet-started progress items.
@@ -242,6 +244,8 @@ Nested child rows are the intended shape for grouped work. `Utility card batch` 
 Nested child rows are persistent once they appear during a run. They should not auto-collapse while the progress menu is open. The user setting `ui.progressChildVisibleLimit` controls how many child rows are visible inside a single parent group before that child group becomes scrollable; default `progressChildVisibleLimit: 5`, allowed range 1-20. Child group scrollbars stay hidden. When more child rows exist below the visible area, show a subtle bottom fade over the child group; when the user scrolls to the final child row, remove the bottom fade.
 
 The user setting `ui.progressListVisibleLimit` controls how many combined progress items are visible before the whole progress list becomes scrollable; default `progressListVisibleLimit: 15`, allowed range 5-80. Count top-level rows and visible child rows together, using each capped child group as part of the same progress surface. This keeps the menu compact when a turn has many top-level rows and many card subcalls.
+
+On mobile and narrow visual viewports, the progress menu must treat that list cap as a maximum, not a fixed required height. The popover shell is clamped to the visible viewport, the header and footer stay visible, and `.recursion-status-list` flex-shrinks into the remaining space as the only primary scroll surface. The footer must never be clipped below the browser controls; users must be able to scroll the list to the final visible progress row inside the popover.
 
 Parent row aggregation:
 
@@ -615,16 +619,20 @@ Reference CSS contract:
 }
 
 .recursion-status-popover {
+  display: flex;
+  flex-direction: column;
   position: absolute;
   top: 34px;
   left: -3px;
   width: 352px;
+  min-height: 0;
   z-index: 80;
   border: 1px solid var(--SmartThemeBorderColor);
   border-radius: 0 0 8px 8px;
   background: var(--SmartThemeBlurTintColor);
   box-shadow: 0 18px 38px rgba(0, 0, 0, .40);
   backdrop-filter: blur(var(--SmartThemeBlurStrength));
+  overflow: hidden;
 }
 
 /* When nested under the brand cluster, offset by the bar border plus left
@@ -1063,6 +1071,8 @@ The menu uses three tabs:
 - Providers.
 - Advanced.
 
+Play and Advanced setting controls auto-save on change. The compact settings menu must not render a broad `Save Settings` button; closing the menu should never discard changed Strength, card limits, Focus, Prompt Footprint, Injection, UI, or Diagnostics values. Provider lane configuration keeps its provider-specific Save Provider action because source-specific fields and session keys follow the Providers contract below.
+
 Switching between settings tabs is internal panel navigation. A tab click must keep the settings menu open, even though the tab switch re-renders the floating panel content; outside-click closers must ignore that handled tab-switch event.
 
 Play is the default tab. It contains one open `Behavior` disclosure for controls users are expected to tune during normal play:
@@ -1107,7 +1117,7 @@ Provider Source changes the field context inside each lane immediately, matching
 Advanced contains low-frequency controls grouped into collapsible sections:
 
 - Injection: placement, role, and depth controls for the composed prompt packet.
-- UI: Tooltips, Sub-tier Rows, and Progress Rows. Turning Tooltips off removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
+- UI: Tooltips, Sub-tier Rows, and Progress Rows. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
 - Diagnostics: journal size, safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
 
 Injection controls apply to the final conditioned prompt packet after Utility or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the composed Recursion brief to land in a different host lane or depth.

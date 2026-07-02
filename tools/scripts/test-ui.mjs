@@ -360,6 +360,9 @@ assert(/class="power-toggle is-on"/.test(barImplementationReference), 'reference
 assert(/class="activity-trigger status-array-button"/.test(barImplementationReference), 'hero pixel array and current status share one activity trigger after mode');
 assert(!/class="brand-stage/.test(barImplementationReference), 'reference bar no longer renders the Recursion wordmark stage');
 assert(/\.power-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*24px;/.test(barImplementationReference), 'reference power toggle keeps compact 24px control geometry');
+assert(/data-recursion-mode-arrow-fan/.test(barImplementationReference), 'reference Auto mode icon uses divergent three-arrow geometry');
+assert(/data-recursion-mode-arrow-parallel/.test(barImplementationReference), 'reference Manual mode icon uses parallel three-arrow geometry');
+assert(/Cards Selection button owns the stacked-cards icon/.test(uiSpec), 'UI spec assigns stacked cards to card scope selection, not mode');
 assert(/data-mode="manual"/.test(barImplementationReference), 'reference mode menu includes Manual');
 const removedModeValue = ['semi', 'auto'].join('-');
 assert(!barImplementationReference.includes(`data-mode="${removedModeValue}"`), 'reference mode menu removes the old named mode');

@@ -48,18 +48,18 @@ Recursion chrome should use explicit compact font sizing instead of inheriting S
 Canonical desktop layout:
 
 ```text
-[power] | [cards] | [blocks] Selecting turn hand...               [reasoning] v | ...
-[power] | [cards] | [blocks] Installing prompt...                 [reasoning] v | ...
-[power] | [cards] | [blocks] Manual scope active...               [reasoning] Cards v | ...
-[power-off] | [cards] |                                           [reasoning] v | ...
+[power] | [mode arrows] [cards] | [blocks] Selecting turn hand...  [reasoning] v | ...
+[power] | [mode arrows] [cards] | [blocks] Installing prompt...    [reasoning] v | ...
+[power] | [mode arrows] [cards] | [blocks] Manual scope active...  [reasoning] Cards v | ...
+[power-off] | [mode arrows] [cards] |                              [reasoning] v | ...
 ```
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
 
-The mode control is a single icon-only button beside the power toggle. It shows the stacked-cards icon for both current V1 modes:
+The mode control is a single icon-only button beside the power toggle. It uses a matching three-arrow icon pair so Auto and Manual feel equally capable but differently directed:
 
-- Stacked cards: `Auto`.
-- Stacked cards: `Manual`.
+- Divergent three-arrow fan: `Auto`. One origin splits into three directions, meaning Recursion may choose the best route from the current scene.
+- Parallel three-arrow stack: `Manual`. The same three arrows move in one direction, meaning Recursion keeps full force but follows selected constraints.
 
 Do not duplicate the mode controls on the right side of the bar. The mode icon should expose tooltip and accessible label text for the current mode and can open a compact mode selector.
 
@@ -67,8 +67,8 @@ Clicking the mode icon opens a compact mode selector menu. The selected mode cha
 
 Mode selector rows:
 
-- Stacked cards icon, `Auto`: Recursion selects cards, composes the prompt packet, and injects it automatically when ready.
-- Stacked cards icon, `Manual`: Recursion uses the selected card scope as a strict whitelist when planning, selecting, composing, and injecting context.
+- Divergent arrows icon, `Auto`: Recursion selects cards, composes the prompt packet, and injects it automatically when ready.
+- Parallel arrows icon, `Manual`: Recursion uses the selected card scope as a strict whitelist when planning, selecting, composing, and injecting context.
 
 Each mode row should show the icon, short name, and a hover/focus tip with the longer explanation. The menu should use native SillyTavern popup density and close on selection, outside click, or `Esc`.
 
@@ -89,7 +89,7 @@ Reference mode selector shape:
   <button class="recursion-mode-choice is-selected"
           data-mode="auto"
           title="Selects cards and injects composed prompt context automatically.">
-    <span class="recursion-mode-choice-icon"><!-- stacked cards --></span>
+    <span class="recursion-mode-choice-icon"><!-- divergent three-arrow fan --></span>
     <span>
       <span class="recursion-mode-choice-name">Auto</span>
       <span class="recursion-mode-choice-tip">Selects cards and injects composed prompt context automatically.</span>
@@ -102,6 +102,8 @@ Reference mode selector shape:
 ```
 
 Card scope is not a mode. The compact right-side `Cards` button opens a full-bar-width dropdown with the fixed V1 card families and their sub-item focus toggles. Its label is `Cards` when all sub-items are enabled and `selected/total` when scope is partial. Auto treats this scope as preference/focus, while Manual treats it as a strict whitelist. The UI must prevent disabling the final selected sub-item and show `Keep at least one card focus enabled.` when that guard is hit.
+
+Cards Selection button owns the stacked-cards icon. The mode button and mode menu must not reuse the cards icon, because cards now means scope selection rather than automation mode.
 
 Reference mode selector CSS:
 

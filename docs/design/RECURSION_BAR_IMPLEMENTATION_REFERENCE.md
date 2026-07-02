@@ -135,10 +135,10 @@ Runtime toggles:
       <div class="mode-menu" id="mode-menu" aria-label="Recursion mode selector">
         <button class="mode-choice is-selected" type="button" data-mode="auto" title="Selects cards and injects composed prompt context automatically.">
           <span class="mode-choice-icon">
-            <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true">
-              <rect x="3" y="5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".45"></rect>
-              <rect x="5" y="3" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".70"></rect>
-              <rect x="7" y="1.5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25"></rect>
+            <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true" data-recursion-mode-arrow-fan>
+              <path d="M3.2 8.5 11.8 3.4M9.2 2.8 11.8 3.4 10.5 5.8" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" data-recursion-mode-arrow></path>
+              <path d="M3.2 8.5h9.6M10.7 6.4 12.8 8.5 10.7 10.6" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" data-recursion-mode-arrow></path>
+              <path d="M3.2 8.5 11.8 13.6M10.5 11.2 11.8 13.6 9.2 14.2" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" data-recursion-mode-arrow></path>
             </svg>
           </span>
           <span>
@@ -149,10 +149,10 @@ Runtime toggles:
 
         <button class="mode-choice" type="button" data-mode="manual" title="Uses only selected card scope.">
           <span class="mode-choice-icon">
-            <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true">
-              <rect x="3" y="5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".45"></rect>
-              <rect x="5" y="3" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".70"></rect>
-              <rect x="7" y="1.5" width="8" height="9" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.25"></rect>
+            <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true" data-recursion-mode-arrow-parallel>
+              <path d="M3.2 5.1h9.6M10.7 3 12.8 5.1 10.7 7.2" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" data-recursion-mode-arrow></path>
+              <path d="M3.2 8.5h9.6M10.7 6.4 12.8 8.5 10.7 10.6" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" data-recursion-mode-arrow></path>
+              <path d="M3.2 11.9h9.6M10.7 9.8 12.8 11.9 10.7 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" data-recursion-mode-arrow></path>
             </svg>
           </span>
           <span>

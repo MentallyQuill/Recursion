@@ -34,9 +34,8 @@ const normalized = normalizeSettings({
     reasoner: { enabled: true, source: 'host-current-model' }
   }
 });
-const semiAutoNormalized = normalizeSettings({ mode: 'semi-auto' });
 assertEqual(normalizeSettings({ mode: 'manual' }).mode, 'manual', 'manual mode is valid');
-assertEqual(semiAutoNormalized.mode, 'auto', 'removed semi-auto normalizes to auto');
+assertEqual(normalizeSettings({ mode: 'removed-mode' }).mode, 'auto', 'removed mode normalizes to auto');
 assertEqual(normalizeSettings({ mode: 'observe' }).mode, 'auto', 'invalid mode normalizes to auto');
 assertEqual(normalized.enabled, false, 'power toggle disabled state preserved');
 const normalizedDefaultScope = normalizeSettings({}).cardScope;

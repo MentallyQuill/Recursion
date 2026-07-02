@@ -2,7 +2,7 @@
 
 This guide walks through the first useful Recursion session in SillyTavern. It assumes Recursion is installed or served as an extension and that you are using the current V1 pre-alpha contract.
 
-Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Semi-Auto mode is active. It is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing workflow.
+Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Manual mode is active. It is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing workflow.
 
 ## 1. Install And Enable
 
@@ -53,21 +53,21 @@ Auto prepares and installs the next Recursion prompt packet.
 
 Use the Last Brief dropdown and Prompt Packet panel when you want to inspect exactly what Recursion installed.
 
-## 5. Try Semi-Auto
+## 5. Try Manual
 
-Semi-Auto is the V1 mode reserved for constraining card generation to selected card types. Until that backend selector lands, it follows the same prompt-install path as Auto.
+Manual uses the Cards selector as a strict whitelist. Disabled families stay out of planning, deck reuse, hand selection, composition, and injection.
 
-1. Set mode to `Semi-Auto`.
+1. Set mode to `Manual`.
 2. Send a safe, ordinary chat message.
-3. Confirm the Hero Pixel Array progresses and prompt readiness behaves like Auto.
+3. Confirm the Hero Pixel Array progresses and prompt readiness reflects the selected card scope.
 
-<Render Needed>: assets/documentation/renders/recursion-first-run-semi-auto-pass.png - Hero Pixel Array progress menu during a Semi-Auto pass showing the same current V1 install path as Auto.
+<Render Needed>: assets/documentation/renders/recursion-first-run-manual-pass.png - Hero Pixel Array progress menu during a Manual pass with narrowed card scope.
 
 A normal Auto pass may show stages such as reading the current turn, planning the card pass, generating or reusing scene cards, selecting the turn hand, composing the prompt packet, installing the Recursion prompt, saving cache, and ready state.
 
 ## 6. Inspect Last Brief And Viewer
 
-After Auto or Semi-Auto has produced a hand:
+After Auto or Manual has produced a hand:
 
 1. Open the Last Brief dropdown arrow from the Recursion Bar.
 2. Review compact selected cards, emphasis, omission hints, and composition route.
@@ -97,7 +97,7 @@ The first run is healthy when:
 - Recursion Bar is mounted and stable.
 - Utility provider can be configured and tested.
 - Auto mode reaches prompt ready or a clear fail-soft fallback.
-- Semi-Auto mode currently reaches the same prompt-ready path as Auto.
+- Manual mode respects the selected card scope and reaches prompt ready or a clear fallback.
 - Last Brief and Full Viewer inspection are available.
 - Prompt Packet inspection shows bounded current-scene guidance.
 - Power-off or extension disable removes Recursion from the next prompt path.

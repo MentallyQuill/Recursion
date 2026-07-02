@@ -784,7 +784,7 @@ git commit -m "feat(ui): add card scope controls"
 - Modify: `tools/scripts/test-ui.mjs`
 - Modify: `tools/scripts/test-runtime.mjs`
 
-- [ ] Replace every visible `Semi-Auto`/`semi-auto` reference with the new Auto/Manual contract.
+- [x] Replace every visible `Semi-Auto`/`semi-auto` reference with the new Auto/Manual contract.
 
 Required search:
 
@@ -798,7 +798,7 @@ Expected after cleanup:
 No output.
 ```
 
-- [ ] Update `docs/design/UI_SPEC.md`:
+- [x] Update `docs/design/UI_SPEC.md`:
   - mode selector only `Auto`, `Manual`;
   - Cards button owns selected scope count;
   - all-enabled label is `Cards`, partial label is `selected/total`;
@@ -807,19 +807,19 @@ No output.
   - Auto focus exceptions must be visible;
   - Manual is strict and still auto-runs.
 
-- [ ] Update `docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md`:
+- [x] Update `docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md`:
   - remove `data-mode="semi-auto"`;
   - add `data-mode="manual"`;
   - add Cards button and sample Cards menu markup;
   - update settings row from Auto/Semi-Auto to Auto/Manual if the row remains;
   - update test assertions in `tools/scripts/test-ui.mjs` that parse this reference.
 
-- [ ] Update technical docs:
+- [x] Update technical docs:
   - `RUNTIME_TURN_SEQUENCE.md`: Auto focus vs Manual strict whitelist.
   - `STORAGE_AND_DIAGNOSTICS.md`: safe scope counts, family keys, sub-item keys, omission/exception reasons.
   - `CARD_DECK_AND_HAND.md`: sub-items are focus facets, not separate generated V1 card instances.
 
-- [ ] Update live harness mode smoke:
+- [x] Update live harness mode smoke:
   - mode sequence becomes `disabled|auto|manual|disabled`;
   - generation smoke selects Manual with a narrowed scope and proves disabled family cards are not installed;
   - old Semi-Auto prompt-install proof is removed.
@@ -834,7 +834,7 @@ for (const mode of ['disabled', 'auto', 'manual', 'disabled']) {
 sequence.join('|') === 'disabled|auto|manual|disabled'
 ```
 
-- [ ] Run doc/reference-related tests.
+- [x] Run doc/reference-related tests.
 
 Commands:
 

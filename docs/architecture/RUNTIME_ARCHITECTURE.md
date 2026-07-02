@@ -81,7 +81,7 @@ The core pipeline is:
 Mode controls change how much of the pipeline runs:
 
 - Off: remove or avoid installing Recursion prompt entries. The runtime may keep minimal UI/provider status, but it should not inspect or influence active generations.
-- Auto/Semi-Auto: build snapshots, run safe diagnostics, compose the hand, and install prompt packets. Semi-Auto currently follows Auto until card-type subset filtering lands.
+- Auto/Manual: build snapshots, run safe diagnostics, compose the hand, and install prompt packets. Manual uses card scope as a strict whitelist for planning, deck reuse, hand selection, composition, and injection.
 - Auto: run the full automatic pipeline and install prompt packets when the Auto Control Plan says a pass is useful.
 
 The Runtime Coordinator should serialize work per chat/generation attempt. A newer turn snapshot supersedes older pending work. If a late provider result arrives after the active snapshot changed, the result is discarded or recorded as stale and must not overwrite the current prompt packet.
@@ -123,7 +123,7 @@ Plan action controls runtime cost and cache churn.
 
 `compose-brief` means compose a packet from the current hand after any requested cache/card work. Local fallback also uses this action when the Arbiter is unavailable and safe fallback cards can be built from the snapshot.
 
-Action choice should be automatic by default. User controls should stay high level, such as the power toggle, Auto/Semi-Auto, refresh, intensity, provider setup, prompt footprint fallback, and optional Reasoner enablement.
+Action choice should be automatic by default. User controls should stay high level, such as the power toggle, Auto/Manual, refresh, intensity, provider setup, prompt footprint fallback, and optional Reasoner enablement.
 
 ## Scene Shift Handling
 
@@ -210,7 +210,7 @@ Runtime state should be minimal, bounded, and inspectable.
 
 In memory:
 
-- active power state and mode: Auto or Semi-Auto;
+- active power state and mode: Auto or Manual;
 - active host and chat identifiers;
 - current turn snapshot id and message fingerprint;
 - scene fingerprint and scene status;
@@ -284,7 +284,7 @@ Diagnostics should explain what Recursion did without storing sensitive provider
 
 Core event types:
 
-- `runtime.mode_changed`: Auto or Semi-Auto changed.
+- `runtime.mode_changed`: Auto or Manual changed.
 - `runtime.enabled_changed`: power toggle changed.
 - `turn.snapshot_captured`: chat id, snapshot id, message fingerprint, and size metadata.
 - `arbiter.plan_requested`: provider lane, snapshot id, and cache fingerprint.
@@ -312,7 +312,7 @@ Diagnostics should support the UI's Status and Inspector surfaces, automated tes
 V1 should be built in small vertical slices that preserve the end-to-end loop.
 
 1. Host adapter skeleton and modes
-   - Implement SillyTavern lifecycle hooks, power state, Auto/Semi-Auto mode state, snapshot capture, activity event contract, and no-op prompt clear/install methods.
+   - Implement SillyTavern lifecycle hooks, power state, Auto/Manual mode state, snapshot capture, activity event contract, and no-op prompt clear/install methods.
 
 2. Snapshot and diagnostics foundation
    - Add stable snapshot ids, message fingerprints, bounded diagnostics events, and inspector-ready last-run summaries.
@@ -336,6 +336,6 @@ V1 should be built in small vertical slices that preserve the end-to-end loop.
    - Persist settings, cache metadata, last packet metadata, and bounded diagnostics using logical keys and privacy-safe records.
 
 9. UI integration and smoke validation
-   - Connect the Recursion Bar, Hero Pixel Array progress menu, status, provider health, mode controls, and inspector diagnostics. Validate power-off, Auto, Semi-Auto, provider failure, scene refresh, storage activity, prompt install, and stale-result behavior.
+   - Connect the Recursion Bar, Hero Pixel Array progress menu, status, provider health, mode controls, and inspector diagnostics. Validate power-off, Auto, Manual, provider failure, scene refresh, storage activity, prompt install, and stale-result behavior.
 
 Each slice should keep generation usable if it fails. The first complete proof is not perfect card intelligence; it is a reliable loop from observe -> Arbiter -> card jobs/cache -> hand -> prompt packet -> host injection -> diagnostics.

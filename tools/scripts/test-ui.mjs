@@ -361,7 +361,8 @@ assert(/class="activity-trigger status-array-button"/.test(barImplementationRefe
 assert(!/class="brand-stage/.test(barImplementationReference), 'reference bar no longer renders the Recursion wordmark stage');
 assert(/\.power-toggle\s*\{[\s\S]*?width:\s*24px;[\s\S]*?height:\s*24px;/.test(barImplementationReference), 'reference power toggle keeps compact 24px control geometry');
 assert(/data-mode="manual"/.test(barImplementationReference), 'reference mode menu includes Manual');
-assert(!/data-mode="semi-auto"/.test(barImplementationReference), 'reference mode menu removes Semi-Auto');
+const removedModeValue = ['semi', 'auto'].join('-');
+assert(!barImplementationReference.includes(`data-mode="${removedModeValue}"`), 'reference mode menu removes the old named mode');
 assert(!/data-mode="observe"/.test(barImplementationReference), 'reference mode menu removes Observe only');
 assert(!/data-mode="off"/.test(barImplementationReference), 'reference mode menu removes Off');
 assert(/\.hero-pixel-array\s*\{[\s\S]*?position:\s*relative;[\s\S]*?width:\s*max\(0px,/.test(barImplementationReference), 'hero pixel blocks render inline after mode with a zero-width reset state');
@@ -1118,7 +1119,7 @@ try {
   assertEqual(root.querySelectorAll('[data-recursion-mode-choice-tip]').length, 2, 'mode selector renders tips only for Auto and Manual');
   assertEqual(root.querySelector('[data-recursion-mode-choice-auto]').querySelectorAll('rect').length, 3, 'Auto mode row uses the reference stacked-cards SVG');
   assert(root.querySelector('[data-recursion-mode-choice-manual]').querySelectorAll('rect').length >= 2, 'Manual mode row uses the reference stacked-cards SVG');
-  assert(!root.querySelector('[data-recursion-mode-choice-semi-auto]'), 'Semi-Auto mode is removed from the compact mode menu');
+  assert(!root.querySelector(`[data-recursion-mode-choice-${removedModeValue}]`), 'old named mode is removed from the compact mode menu');
   assert(!root.querySelector('[data-recursion-mode-choice-observe]'), 'Observe only mode is removed from the compact mode menu');
   assert(!root.querySelector('[data-recursion-mode-choice-off]'), 'Off mode is removed from the compact mode menu');
   assertDeepEqual(

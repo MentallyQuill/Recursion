@@ -107,7 +107,7 @@ Build a source-backed inventory before expanding public prose.
 ### Work
 
 - Audit `README.md`, `docs/README.md`, existing design docs, architecture docs, user docs, testing docs, and source READMEs.
-- Inventory user-facing surfaces: Recursion Bar, Hero Pixel Array progress menu, options menu, Last Brief dropdown, Full Viewer, Settings, Provider Controls, power toggle, Auto/Semi-Auto mode controls, warnings, fallback states, and mobile behavior.
+- Inventory user-facing surfaces: Recursion Bar, Hero Pixel Array progress menu, options menu, Last Brief dropdown, Full Viewer, Settings, Provider Controls, power toggle, Auto/Manual mode controls, warnings, fallback states, and mobile behavior.
 - Inventory technical seams: SillyTavern host adapter, generation interceptor, runtime coordinator, Utility Arbiter, card catalog, scene cache, turn hand selection, prompt packet composition, prompt injection, provider lanes, storage, activity reporting, diagnostics, and redaction.
 - Inventory verification evidence: `npm.cmd test`, `node tools\scripts\run-alpha-gate.mjs`, Playwright readiness artifacts, dedicated soak-user checks, live smoke plans, and artifact contracts.
 - Identify stale or overlapping docs that should be renamed, merged, or rewritten in place.
@@ -176,13 +176,13 @@ Capture or plan visuals before writing screenshot-backed prose.
 | Surface Or Flow | Required States |
 | --- | --- |
 | Install and enable | SillyTavern extension listed, enabled, and bar mounted. |
-| Mode controls | Power toggle, Auto, Semi-Auto, Reasoning Level, and prompt cleanup behavior. |
+| Mode controls | Power toggle, Auto, Manual, Reasoning Level, and prompt cleanup behavior. |
 | Recursion Bar | Ready, working, warning, disabled, provider issue, and prompt-ready states. |
 | Hero Pixel Array progress menu | Snapshot, Utility planning, card generation, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states. |
-| Options menu | Copy Last Prompt Packet, Open Settings, Open Viewer, provider controls, final prompt injection placement/role/depth controls, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and disabled copy state. |
+| Options menu | Copy Last Prompt Packet, Open Settings, Open Viewer, collapsible provider controls, Advanced Injection/UI/Diagnostics sections, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and disabled copy state. |
 | Last Hand dropdown | Compact selected cards, omission hints, prompt packet link, empty hand, stale hand, and error state. |
 | Full Viewer | Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections. |
-| Settings | Mode, Strength, Prompt Footprint, Focus, Reasoner Use, final prompt injection placement/role/depth, Utility provider setup, and Reasoner provider setup. |
+| Settings | Play Behavior, Strength, Prompt Footprint, Focus, collapsible Utility and Reasoner provider setup, Advanced Injection/UI/Diagnostics sections, and final prompt injection placement/role/depth. |
 | Provider Controls | Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, fallback warning. |
 | Prompt packet inspection | Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and redaction-safe diagnostics. |
 | Fail-soft states | Utility unavailable, Reasoner timeout, invalid structured output, storage write failure, injection failure, and stale async result. |
@@ -193,7 +193,7 @@ Capture or plan visuals before writing screenshot-backed prose.
 | Visual | Purpose |
 | --- | --- |
 | Runtime pipeline infographic | Host Snapshot -> Utility Arbiter -> Scene Deck -> Turn Hand -> Composer/Reasoner -> Prompt Packet -> Injection -> Diagnostics. |
-| Turn sequence diagram | Power, Auto/Semi-Auto generation lifecycle, prompt install timing, cancellation, and stale result discard. |
+| Turn sequence diagram | Power, Auto/Manual generation lifecycle, prompt install timing, cancellation, and stale result discard. |
 | Card lifecycle diagram | Create, refresh, stow, discard, select, omit, and invalidate cards. |
 | Card family matrix | Scene Frame, Active Cast, Character Motivation, Dialogue/Relationship, Continuity Risk, Environment/Items, Prose/Pacing, Open Threads. |
 | Prompt packet stack | Scene Brief, Turn Brief, Guardrails, raw critical guardrail exception. |
@@ -229,11 +229,11 @@ Create the practical guide for using Recursion in SillyTavern.
 
 - Rewrite the current operator guide around real operator tasks:
   - install and enable Recursion;
-  - use the power toggle, Auto, or Semi-Auto;
+  - use the power toggle, Auto, or Manual;
   - configure Utility;
   - optionally configure Reasoner;
   - run the first Auto pass;
-  - try the current Semi-Auto path;
+  - try the current Manual path;
   - inspect Activity, Last Brief, and Prompt Packet;
   - interpret fallback states;
   - use power-off cleanup or disable Recursion;

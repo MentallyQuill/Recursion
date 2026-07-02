@@ -267,7 +267,7 @@ Strict: true
 - Preflight: pass
 - Recursion Bar: pass
 - Progress menu: pass
-- Semi-Auto mode: pass
+- Manual mode: pass
 - Auto Utility pass: pass
 - Prompt cleanup: pass
 

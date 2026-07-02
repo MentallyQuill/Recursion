@@ -925,14 +925,14 @@ function modeSmokeReadStepScript() {
     const powerPressed = powerButton ? powerButton.getAttribute('aria-pressed') !== 'false' : true;
     const selectedValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '').toLowerCase();
     const modeLower = modeText.toLowerCase();
-    const observedMode = /semi/.test(modeLower)
-      ? 'semi-auto'
+    const observedMode = /manual/.test(modeLower)
+      ? 'manual'
       : (/auto/.test(modeLower) ? 'auto' : 'unknown');
     const promptKeys = Object.entries(context?.prompts || {})
       .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
       .map(([key]) => String(key))
       .slice(0, 24);
-    const expectedMode = mode === 'disabled' ? selectedValue : mode;
+    const expectedMode = mode === 'disabled' ? (selectedValue || observedMode) : mode;
     return {
       mode: String(mode || ''),
       selectedValue,
@@ -940,7 +940,7 @@ function modeSmokeReadStepScript() {
       powerPressed,
       modeApplied: mode === 'disabled'
         ? powerPressed === false && promptKeys.length === 0
-        : powerPressed === true && selectedValue === expectedMode && observedMode === expectedMode,
+        : powerPressed === true && (!selectedValue || selectedValue === expectedMode) && observedMode === expectedMode,
       statusText,
       modeText,
       promptCleared: promptKeys.length === 0,
@@ -962,14 +962,49 @@ function modeSmokeWaitScript() {
     const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').toLowerCase();
     const powerButton = document.querySelector('[data-recursion-power-toggle]');
     const powerPressed = powerButton ? powerButton.getAttribute('aria-pressed') !== 'false' : true;
-    const observedMode = /semi/.test(modeText)
-      ? 'semi-auto'
+    const observedMode = /manual/.test(modeText)
+      ? 'manual'
       : (/auto/.test(modeText) ? 'auto' : 'unknown');
     const promptKeys = Object.entries(context?.prompts || {})
       .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
       .map(([key]) => String(key));
     if (mode === 'disabled') return powerPressed === false && promptKeys.length === 0;
-    return powerPressed === true && selectedValue === mode && observedMode === mode;
+    return powerPressed === true && (!selectedValue || selectedValue === mode) && observedMode === mode;
+  };
+}
+
+function manualScopeProofScript() {
+  return (disabledFamily = 'Scene Frame') => {
+    const family = String(disabledFamily || 'Scene Frame');
+    const cardsButton = document.querySelector('[data-recursion-cards-button]');
+    const cardsPanel = document.querySelector('[data-recursion-cards-panel]');
+    const familyToggle = [...document.querySelectorAll('[data-recursion-card-scope-family-toggle]')]
+      .find((node) => String(node?.dataset?.recursionCardScopeFamilyName || '') === family);
+    if (!cardsButton || !cardsPanel || !familyToggle) {
+      const proof = {
+        requested: true,
+        available: false,
+        disabledFamily: family,
+        disabled: false,
+        label: '',
+        error: 'card scope controls unavailable'
+      };
+      globalThis.__recursionSmokeManualScopeProof = proof;
+      return proof;
+    }
+    if (cardsPanel.hidden) cardsButton.click();
+    familyToggle.click();
+    const label = String(document.querySelector('[data-recursion-cards-label]')?.textContent || '').replace(/\s+/g, ' ').trim();
+    const proof = {
+      requested: true,
+      available: true,
+      disabledFamily: family,
+      disabled: label !== 'Cards',
+      label,
+      error: ''
+    };
+    globalThis.__recursionSmokeManualScopeProof = proof;
+    return proof;
   };
 }
 
@@ -1029,7 +1064,7 @@ function generationRecorderInstallScript() {
   };
 }
 
-function generationSemiAutoProofScript() {
+function generationManualProofScript() {
   return async () => {
     const context = (() => {
       try {
@@ -1046,11 +1081,11 @@ function generationSemiAutoProofScript() {
       : [];
     const observedMode = (() => {
       const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').toLowerCase();
-      if (/semi/.test(modeText)) return 'semi-auto';
+      if (/manual/.test(modeText)) return 'manual';
       if (/auto/.test(modeText)) return 'auto';
       return 'unknown';
     })();
-    const modeApplied = observedMode === 'semi-auto';
+    const modeApplied = observedMode === 'manual';
 
     let disableHookOk = false;
     let interceptorOk = false;
@@ -1063,7 +1098,7 @@ function generationSemiAutoProofScript() {
       disableHookOk = true;
       if (Array.isArray(context?.__recursionSmokePromptEvents)) context.__recursionSmokePromptEvents.length = 0;
     } catch (clearError) {
-      error = String(clearError?.message || clearError || 'semi-auto baseline clear failed');
+      error = String(clearError?.message || clearError || 'manual baseline clear failed');
     }
 
     const beforePromptKeys = promptKeys();
@@ -1077,13 +1112,13 @@ function generationSemiAutoProofScript() {
       chat.push({
         mesid: chat.length,
         is_user: true,
-        name: 'Recursion Smoke Semi-Auto',
-        mes: 'Recursion live smoke: prove Semi-Auto installs prompts.'
+        name: 'Recursion Smoke Manual',
+        mes: 'Recursion live smoke: prove Manual installs prompts.'
       });
       await globalThis.recursionGenerationInterceptor(chat);
       interceptorOk = true;
     } catch (interceptorError) {
-      error = String(interceptorError?.message || interceptorError || 'semi-auto interceptor failed');
+      error = String(interceptorError?.message || interceptorError || 'manual interceptor failed');
     }
 
     const afterEvents = eventSlice();
@@ -1097,12 +1132,12 @@ function generationSemiAutoProofScript() {
       ...installedEvents.map((entry) => String(entry.key || '')),
       ...addedPromptKeys
     ])].filter(Boolean);
-    if (!error && !modeApplied) error = 'semi-auto mode was not applied';
-    if (!error && !baselineClearOk) error = 'semi-auto baseline prompt remained installed';
-    if (!error && !promptInstalled) error = 'semi-auto mode did not install prompt text';
+    if (!error && !modeApplied) error = 'manual mode was not applied';
+    if (!error && !baselineClearOk) error = 'manual baseline prompt remained installed';
+    if (!error && !promptInstalled) error = 'manual mode did not install prompt text';
     const proof = {
       requested: true,
-      mode: 'semi-auto',
+      mode: 'manual',
       observedMode,
       modeApplied,
       ok: modeApplied && baselineClearOk && interceptorOk && promptInstalled,
@@ -1114,11 +1149,11 @@ function generationSemiAutoProofScript() {
       promptEventCount: newEvents.length,
       error
     };
-    globalThis.__recursionSmokeSemiAutoProof = proof;
+    globalThis.__recursionSmokeManualProof = proof;
     globalThis.__recursionSmokeGeneration = {
       ...(globalThis.__recursionSmokeGeneration || {}),
       requested: true,
-      semiAutoProof: proof
+      manualProof: proof
     };
     return proof;
   };
@@ -1225,7 +1260,7 @@ function generationBaseSetupScript() {
     const base = {
       requested: true,
       reasonerRequested: Boolean(pageReasonerRequested),
-      semiAutoProof: globalThis.__recursionSmokeSemiAutoProof || null,
+      manualProof: globalThis.__recursionSmokeManualProof || null,
       startedAt: new Date().toISOString(),
       triggerSource,
       chatMutationSource,
@@ -1328,6 +1363,20 @@ function generationEvidenceScript() {
     const packetId = String(packet?.packetId || '').trim();
     const handId = String(packet?.handId || '').trim();
     const selectedCardRefs = Array.isArray(packet?.selectedCardRefs) ? packet.selectedCardRefs : [];
+    const normalizedSelectedCardRefs = selectedCardRefs.map((entry) => {
+      if (entry && typeof entry === 'object') {
+        return {
+          id: String(entry.id || entry.cardId || '').trim(),
+          family: String(entry.family || '').trim(),
+          role: String(entry.role || '').trim()
+        };
+      }
+      return { id: String(entry || '').trim(), family: '', role: '' };
+    }).filter((entry) => entry.id || entry.family || entry.role);
+    const manualScopeProof = base.manualScopeProof || globalThis.__recursionSmokeManualScopeProof || null;
+    const disabledFamily = String(manualScopeProof?.disabledFamily || '');
+    const selectedFamilies = normalizedSelectedCardRefs.map((entry) => entry.family).filter(Boolean);
+    const disabledFamilyInstalled = Boolean(disabledFamily && selectedFamilies.includes(disabledFamily));
     const chat = Array.isArray(context?.chat) ? context.chat : [];
     const chatLengthBefore = typeof base.hostGenerationEvidence?.chatLengthBefore === 'number'
       ? base.hostGenerationEvidence.chatLengthBefore
@@ -1374,12 +1423,25 @@ function generationEvidenceScript() {
       modeText,
       ready: /Ready/i.test(statusText),
       promptPacketVisible,
-      semiAutoProof: base.semiAutoProof || globalThis.__recursionSmokeSemiAutoProof || null,
+      manualProof: base.manualProof || globalThis.__recursionSmokeManualProof || null,
+      manualScopeProof: manualScopeProof
+        ? {
+            requested: manualScopeProof.requested === true,
+            available: manualScopeProof.available === true,
+            disabledFamily,
+            disabled: manualScopeProof.disabled === true,
+            label: String(manualScopeProof.label || ''),
+            hasFamilyMetadata: selectedFamilies.length > 0,
+            disabledFamilyInstalled,
+            promptRespectsDisabledFamily: selectedFamilies.length > 0 && disabledFamily ? disabledFamilyInstalled === false : null,
+            error: String(manualScopeProof.error || '')
+          }
+        : null,
       promptPacket: packet
         ? {
             packetId,
             handId,
-            selectedCardRefs: selectedCardRefs.map((entry) => String(entry)).filter(Boolean).slice(0, 12),
+            selectedCardRefs: normalizedSelectedCardRefs.slice(0, 12),
             diagnostics: {
               composerLane: String(packet?.diagnostics?.composerLane || ''),
               reasonerStatus: String(packet?.diagnostics?.reasonerStatus || '')
@@ -1498,6 +1560,20 @@ function generationPromptClearScript() {
   };
 }
 
+async function selectRecursionMode(page, mode, timeoutMs) {
+  const modeButton = page.locator('[data-recursion-mode-button]').first();
+  const hasModeButton = await modeButton.count()
+    .then(async (count) => count > 0 && await modeButton.isVisible().catch(() => false))
+    .catch(() => false);
+  if (hasModeButton) {
+    await modeButton.click({ timeout: timeoutMs });
+    await page.locator(`[data-recursion-mode-choice="${mode}"], [data-recursion-mode-choice-${mode}]`).first().click({ timeout: timeoutMs });
+    return;
+  }
+  await page.locator('[data-recursion-setting-mode]').selectOption(mode, { timeout: timeoutMs });
+  await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
+}
+
 async function applyRecursionModeSmokeStep(page, mode, timeoutMs) {
   if (mode === 'disabled') {
     await page.evaluate(() => {
@@ -1509,8 +1585,7 @@ async function applyRecursionModeSmokeStep(page, mode, timeoutMs) {
       const button = document.querySelector('[data-recursion-power-toggle]');
       if (button?.getAttribute('aria-pressed') === 'false') button.click();
     });
-    await page.locator('[data-recursion-setting-mode]').selectOption(mode, { timeout: timeoutMs });
-    await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
+    await selectRecursionMode(page, mode, timeoutMs);
   }
   await page.waitForFunction(modeSmokeWaitScript(), mode, { timeout: timeoutMs });
   return await page.evaluate(modeSmokeReadStepScript(), mode);
@@ -1519,12 +1594,12 @@ async function applyRecursionModeSmokeStep(page, mode, timeoutMs) {
 async function runRecursionModeSmoke(page, timeoutMs) {
   const seed = await page.evaluate(modeSmokeSeedPromptScript());
   const steps = [];
-  for (const mode of ['disabled', 'auto', 'semi-auto', 'disabled']) {
+  for (const mode of ['disabled', 'auto', 'manual', 'disabled']) {
     steps.push(await applyRecursionModeSmokeStep(page, mode, timeoutMs));
   }
   const sequence = steps.map((step) => step.mode);
   const ok = seed.seeded === true
-    && sequence.join('|') === 'disabled|auto|semi-auto|disabled'
+    && sequence.join('|') === 'disabled|auto|manual|disabled'
     && steps.every((step) => step.modeApplied === true)
     && steps[0]?.promptCleared === true
     && steps.at(-1)?.promptCleared === true;
@@ -1661,7 +1736,7 @@ async function runBrowserUiSmoke({
         throw failed;
       });
       if (!modeSmoke?.ok) {
-        const failed = new Error('Recursion mode smoke did not prove disabled/Auto/Semi-Auto/disabled cleanup.');
+        const failed = new Error('Recursion mode smoke did not prove disabled/Auto/Manual/disabled cleanup.');
         failed.status = 'fail';
         failed.result = 'browser-mode-smoke-failed';
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ modeSmoke }));
@@ -1671,16 +1746,15 @@ async function runBrowserUiSmoke({
 
     if (generationRequested) {
       await page.evaluate(generationRecorderInstallScript());
-      await page.locator('[data-recursion-setting-mode]').selectOption('semi-auto', { timeout: timeoutMs });
-      await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
+      await selectRecursionMode(page, 'manual', timeoutMs);
       try {
         await page.waitForFunction(() => {
           const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '');
           const selectValue = String(document.querySelector('[data-recursion-setting-mode]')?.value || '');
-          return selectValue === 'semi-auto' && /Semi/i.test(modeText);
+          return (!selectValue || selectValue === 'manual') && /Manual/i.test(modeText);
         }, null, { timeout: timeoutMs });
       } catch (error) {
-        const semiAutoProof = await page.evaluate(() => {
+        const manualProof = await page.evaluate(() => {
           const context = (() => {
             try {
               return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
@@ -1689,15 +1763,15 @@ async function runBrowserUiSmoke({
             }
           })();
           const modeText = String(document.querySelector('[data-recursion-mode]')?.textContent || '').toLowerCase();
-          const observedMode = /semi/.test(modeText)
-            ? 'semi-auto'
+          const observedMode = /manual/.test(modeText)
+            ? 'manual'
             : (/auto/.test(modeText) ? 'auto' : 'unknown');
           const promptKeys = Object.entries(context?.prompts || {})
             .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
             .map(([key]) => String(key));
           const proof = {
             requested: true,
-            mode: 'semi-auto',
+            mode: 'manual',
             observedMode,
             modeApplied: false,
             ok: false,
@@ -1707,18 +1781,18 @@ async function runBrowserUiSmoke({
             promptInstalled: promptKeys.length > 0,
             promptKeys,
             promptEventCount: 0,
-            error: 'semi-auto mode was not applied'
+            error: 'manual mode was not applied'
           };
-          globalThis.__recursionSmokeSemiAutoProof = proof;
+          globalThis.__recursionSmokeManualProof = proof;
           globalThis.__recursionSmokeGeneration = {
             ...(globalThis.__recursionSmokeGeneration || {}),
             requested: true,
-            semiAutoProof: proof
+            manualProof: proof
           };
           return proof;
         }).catch(() => ({
           requested: true,
-          mode: 'semi-auto',
+          mode: 'manual',
           observedMode: 'unknown',
           modeApplied: false,
           ok: false,
@@ -1728,32 +1802,48 @@ async function runBrowserUiSmoke({
           promptInstalled: false,
           promptKeys: [],
           promptEventCount: 0,
-          error: 'semi-auto mode was not applied'
+          error: 'manual mode was not applied'
         }));
-        const failed = new Error('Recursion Semi-Auto mode did not apply before Auto smoke.');
+        const failed = new Error('Recursion Manual mode did not apply before Auto smoke.');
         failed.status = 'fail';
-        failed.result = 'generation-semi-auto-mode-unavailable';
+        failed.result = 'generation-manual-mode-unavailable';
         failed.cause = error;
-        failed.generation = { requested: true, semiAutoProof };
+        failed.generation = { requested: true, manualProof };
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation: failed.generation }));
         throw failed;
       }
-      const semiAutoProof = await page.evaluate(generationSemiAutoProofScript());
-      if (!semiAutoProof?.ok) {
-        const failed = new Error('Recursion Semi-Auto mode did not install prompt text before Auto smoke.');
+      const manualScopeProof = await page.evaluate(manualScopeProofScript(), 'Scene Frame').catch((error) => ({
+        requested: true,
+        available: false,
+        disabledFamily: 'Scene Frame',
+        disabled: false,
+        label: '',
+        error: compactBrowserIssue(error)
+      }));
+      await page.evaluate((proof) => {
+        globalThis.__recursionSmokeManualScopeProof = proof;
+        globalThis.__recursionSmokeGeneration = {
+          ...(globalThis.__recursionSmokeGeneration || {}),
+          requested: true,
+          manualScopeProof: proof
+        };
+      }, manualScopeProof).catch(() => {});
+      const manualProof = await page.evaluate(generationManualProofScript());
+      if (!manualProof?.ok) {
+        const failed = new Error('Recursion Manual mode did not install prompt text before Auto smoke.');
         failed.status = 'fail';
-        failed.result = 'generation-semi-auto-install-failed';
-        failed.generation = { requested: true, semiAutoProof };
+        failed.result = 'generation-manual-install-failed';
+        failed.generation = { requested: true, manualProof };
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation: failed.generation }));
         throw failed;
       }
-      await page.locator('[data-recursion-setting-mode]').selectOption('auto', { timeout: timeoutMs });
+      await selectRecursionMode(page, 'auto', timeoutMs);
       if (reasonerRequested) {
         await page.locator('[data-recursion-setting-reasoner]').selectOption('always', { timeout: timeoutMs }).catch(() => {});
         await page.locator('[data-recursion-provider-enabled-reasoner]').check({ timeout: timeoutMs }).catch(() => {});
         await page.locator('[data-recursion-reasoner-provider-save]').click({ timeout: timeoutMs }).catch(() => {});
       }
-      await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs });
+      await page.locator('[data-recursion-settings-save]').click({ timeout: timeoutMs }).catch(() => {});
       await page.waitForFunction(() => /Auto/i.test(document.querySelector('[data-recursion-mode]')?.textContent || ''), null, { timeout: timeoutMs });
     }
 
@@ -2033,22 +2123,35 @@ function promptMetadataFromBrowserResult(report, browserResult) {
     triggerSource: String(generation?.triggerSource || ''),
     chatMutationSource: String(generation?.chatMutationSource || ''),
     hostGenerationContinued: generation?.hostGenerationContinued === null ? null : generation?.hostGenerationContinued === true,
-    semiAutoProof: generation?.semiAutoProof
+    manualProof: generation?.manualProof
       ? {
-          requested: generation.semiAutoProof.requested === true,
-          mode: String(generation.semiAutoProof.mode || ''),
-          observedMode: String(generation.semiAutoProof.observedMode || ''),
-          modeApplied: generation.semiAutoProof.modeApplied === true,
-          ok: generation.semiAutoProof.ok === true,
-          disableHookOk: generation.semiAutoProof.disableHookOk === true,
-          baselineClearOk: generation.semiAutoProof.baselineClearOk === true,
-          interceptorOk: generation.semiAutoProof.interceptorOk === true,
-          promptInstalled: generation.semiAutoProof.promptInstalled === true,
-          promptKeys: Array.isArray(generation.semiAutoProof.promptKeys)
-            ? generation.semiAutoProof.promptKeys.map((entry) => String(entry)).filter(Boolean).slice(0, 24)
+          requested: generation.manualProof.requested === true,
+          mode: String(generation.manualProof.mode || ''),
+          observedMode: String(generation.manualProof.observedMode || ''),
+          modeApplied: generation.manualProof.modeApplied === true,
+          ok: generation.manualProof.ok === true,
+          disableHookOk: generation.manualProof.disableHookOk === true,
+          baselineClearOk: generation.manualProof.baselineClearOk === true,
+          interceptorOk: generation.manualProof.interceptorOk === true,
+          promptInstalled: generation.manualProof.promptInstalled === true,
+          promptKeys: Array.isArray(generation.manualProof.promptKeys)
+            ? generation.manualProof.promptKeys.map((entry) => String(entry)).filter(Boolean).slice(0, 24)
             : [],
-          promptEventCount: Number(generation.semiAutoProof.promptEventCount) || 0,
-          error: sanitizeHarnessText(generation.semiAutoProof.error || '', 240)
+          promptEventCount: Number(generation.manualProof.promptEventCount) || 0,
+          error: sanitizeHarnessText(generation.manualProof.error || '', 240)
+        }
+      : null,
+    manualScopeProof: generation?.manualScopeProof
+      ? {
+          requested: generation.manualScopeProof.requested === true,
+          available: generation.manualScopeProof.available === true,
+          disabledFamily: sanitizeHarnessText(generation.manualScopeProof.disabledFamily || '', 80),
+          disabled: generation.manualScopeProof.disabled === true,
+          label: sanitizeHarnessText(generation.manualScopeProof.label || '', 80),
+          hasFamilyMetadata: generation.manualScopeProof.hasFamilyMetadata === true,
+          disabledFamilyInstalled: generation.manualScopeProof.disabledFamilyInstalled === true,
+          promptRespectsDisabledFamily: generation.manualScopeProof.promptRespectsDisabledFamily === null ? null : generation.manualScopeProof.promptRespectsDisabledFamily === true,
+          error: sanitizeHarnessText(generation.manualScopeProof.error || '', 240)
         }
       : null,
     available,
@@ -2064,7 +2167,15 @@ function promptMetadataFromBrowserResult(report, browserResult) {
             reasonerStatus: sanitizeHarnessText(packet.diagnostics?.reasonerStatus || '', 80)
           },
           selectedCardRefs: Array.isArray(packet.selectedCardRefs)
-            ? packet.selectedCardRefs.map((entry) => String(entry)).filter(Boolean).slice(0, 24)
+            ? packet.selectedCardRefs.map((entry) => (
+                entry && typeof entry === 'object'
+                  ? {
+                      id: sanitizeHarnessText(entry.id || '', 80),
+                      family: sanitizeHarnessText(entry.family || '', 80),
+                      role: sanitizeHarnessText(entry.role || '', 80)
+                    }
+                  : { id: sanitizeHarnessText(entry || '', 80), family: '', role: '' }
+              )).slice(0, 24)
             : []
         }
       : null,
@@ -2131,14 +2242,24 @@ function activityLatestRunFromReport(report, liveLog, browserResult) {
                   triggerSource: browserGeneration.triggerSource || '',
                   chatMutationSource: browserGeneration.chatMutationSource || '',
                   hostGenerationContinued: browserGeneration.hostGenerationContinued === null ? null : browserGeneration.hostGenerationContinued === true,
-                  semiAutoProof: browserGeneration.semiAutoProof
+                  manualProof: browserGeneration.manualProof
                     ? {
-                        ok: browserGeneration.semiAutoProof.ok === true,
-                        mode: browserGeneration.semiAutoProof.mode || '',
-                        observedMode: browserGeneration.semiAutoProof.observedMode || '',
-                        modeApplied: browserGeneration.semiAutoProof.modeApplied === true,
-                        promptInstalled: browserGeneration.semiAutoProof.promptInstalled === true,
-                        promptEventCount: browserGeneration.semiAutoProof.promptEventCount || 0
+                        ok: browserGeneration.manualProof.ok === true,
+                        mode: browserGeneration.manualProof.mode || '',
+                        observedMode: browserGeneration.manualProof.observedMode || '',
+                        modeApplied: browserGeneration.manualProof.modeApplied === true,
+                        promptInstalled: browserGeneration.manualProof.promptInstalled === true,
+                        promptEventCount: browserGeneration.manualProof.promptEventCount || 0
+                      }
+                    : null,
+                  manualScopeProof: browserGeneration.manualScopeProof
+                    ? {
+                        available: browserGeneration.manualScopeProof.available === true,
+                        disabledFamily: browserGeneration.manualScopeProof.disabledFamily || '',
+                        disabled: browserGeneration.manualScopeProof.disabled === true,
+                        hasFamilyMetadata: browserGeneration.manualScopeProof.hasFamilyMetadata === true,
+                        disabledFamilyInstalled: browserGeneration.manualScopeProof.disabledFamilyInstalled === true,
+                        promptRespectsDisabledFamily: browserGeneration.manualScopeProof.promptRespectsDisabledFamily === null ? null : browserGeneration.manualScopeProof.promptRespectsDisabledFamily === true
                       }
                     : null,
                   interceptorOk: browserGeneration.interceptorOk === true,
@@ -3193,13 +3314,21 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
                     triggerSource: browserResult.snapshot.generation.triggerSource,
                     chatMutationSource: browserResult.snapshot.generation.chatMutationSource,
                     hostGenerationContinued: browserResult.snapshot.generation.hostGenerationContinued,
-                    semiAutoProof: browserResult.snapshot.generation.semiAutoProof
+                    manualProof: browserResult.snapshot.generation.manualProof
                       ? {
-                          ok: browserResult.snapshot.generation.semiAutoProof.ok === true,
-                          mode: browserResult.snapshot.generation.semiAutoProof.mode || '',
-                          observedMode: browserResult.snapshot.generation.semiAutoProof.observedMode || '',
-                          modeApplied: browserResult.snapshot.generation.semiAutoProof.modeApplied === true,
-                          promptInstalled: browserResult.snapshot.generation.semiAutoProof.promptInstalled === true
+                          ok: browserResult.snapshot.generation.manualProof.ok === true,
+                          mode: browserResult.snapshot.generation.manualProof.mode || '',
+                          observedMode: browserResult.snapshot.generation.manualProof.observedMode || '',
+                          modeApplied: browserResult.snapshot.generation.manualProof.modeApplied === true,
+                          promptInstalled: browserResult.snapshot.generation.manualProof.promptInstalled === true
+                        }
+                      : null,
+                    manualScopeProof: browserResult.snapshot.generation.manualScopeProof
+                      ? {
+                          available: browserResult.snapshot.generation.manualScopeProof.available === true,
+                          disabledFamily: browserResult.snapshot.generation.manualScopeProof.disabledFamily || '',
+                          disabled: browserResult.snapshot.generation.manualScopeProof.disabled === true,
+                          promptRespectsDisabledFamily: browserResult.snapshot.generation.manualScopeProof.promptRespectsDisabledFamily === null ? null : browserResult.snapshot.generation.manualScopeProof.promptRespectsDisabledFamily === true
                         }
                       : null,
                     interceptorOk: browserResult.snapshot.generation.interceptorOk,
@@ -3232,13 +3361,21 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
                   triggerSource: browserResult.snapshot.generation.triggerSource,
                   chatMutationSource: browserResult.snapshot.generation.chatMutationSource,
                   hostGenerationContinued: browserResult.snapshot.generation.hostGenerationContinued,
-                  semiAutoProof: browserResult.snapshot.generation.semiAutoProof
+                  manualProof: browserResult.snapshot.generation.manualProof
                     ? {
-                        ok: browserResult.snapshot.generation.semiAutoProof.ok === true,
-                        mode: browserResult.snapshot.generation.semiAutoProof.mode || '',
-                        observedMode: browserResult.snapshot.generation.semiAutoProof.observedMode || '',
-                        modeApplied: browserResult.snapshot.generation.semiAutoProof.modeApplied === true,
-                        promptInstalled: browserResult.snapshot.generation.semiAutoProof.promptInstalled === true
+                        ok: browserResult.snapshot.generation.manualProof.ok === true,
+                        mode: browserResult.snapshot.generation.manualProof.mode || '',
+                        observedMode: browserResult.snapshot.generation.manualProof.observedMode || '',
+                        modeApplied: browserResult.snapshot.generation.manualProof.modeApplied === true,
+                        promptInstalled: browserResult.snapshot.generation.manualProof.promptInstalled === true
+                      }
+                    : null,
+                  manualScopeProof: browserResult.snapshot.generation.manualScopeProof
+                    ? {
+                        available: browserResult.snapshot.generation.manualScopeProof.available === true,
+                        disabledFamily: browserResult.snapshot.generation.manualScopeProof.disabledFamily || '',
+                        disabled: browserResult.snapshot.generation.manualScopeProof.disabled === true,
+                        promptRespectsDisabledFamily: browserResult.snapshot.generation.manualScopeProof.promptRespectsDisabledFamily === null ? null : browserResult.snapshot.generation.manualScopeProof.promptRespectsDisabledFamily === true
                       }
                     : null,
                   promptInstalled: browserResult.snapshot.generation.promptInstalled,

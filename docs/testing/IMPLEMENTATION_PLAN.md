@@ -173,7 +173,7 @@ Tests:
 - Reasoner timeout, provider failure, or invalid schema falls back to Utility composition.
 - Explicit conditioned final-prompt injection settings override packet block placement, role, and depth after Utility/Reasoner composition.
 - Injection installs, replaces, and clears by Recursion-owned key.
-- Semi-Auto mode remains selectable and currently follows the Auto prompt-install path.
+- Manual mode remains selectable and currently follows the Auto prompt-install path.
 
 Exit criteria:
 
@@ -230,7 +230,7 @@ Tests:
 
 - Offline Playwright readiness: browser launch, role-locator click, desktop/phone screenshots, trace, and report writing without contacting SillyTavern.
 - Dedicated user preflight rejects `default-user` and proves `recursion-soak-*` storage isolation.
-- Live SillyTavern smoke: initialize, configure Utility, Auto mode, Semi-Auto mode, prompt packet install, prompt packet clear, and power-off cleanup.
+- Live SillyTavern smoke: initialize, configure Utility, Auto mode, Manual mode, prompt packet install, prompt packet clear, and power-off cleanup.
 - Chat change invalidates active scene cache.
 - Provider failure falls back without blocking generation.
 - Hero Pixel Array progress menu visibly reports model work, cache use, storage progress, prompt readiness, and fallbacks.

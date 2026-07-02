@@ -160,12 +160,12 @@ const readyPendingProgress = createProgressRunModel({
 assertEqual(readyPendingProgress.steps.length, 0, 'ready pending-only progress is discarded even without raw activity');
 
 const derivedIdlePromptClearProgress = createProgressRunModel({
-  settings: { mode: 'semi-auto' },
+  settings: { mode: 'manual' },
   activity: { phase: 'idle' }
 });
-assertEqual(derivedIdlePromptClearProgress.title, 'Ready', 'derived idle semi-auto progress keeps a ready title');
-assertEqual(derivedIdlePromptClearProgress.steps.length, 0, 'derived idle semi-auto progress does not render stale waiting rows');
-assertEqual(createHeroPixelBlocks(derivedIdlePromptClearProgress).length, 0, 'derived idle semi-auto progress clears hero pixel blocks between turns');
+assertEqual(derivedIdlePromptClearProgress.title, 'Ready', 'derived idle manual progress keeps a ready title');
+assertEqual(derivedIdlePromptClearProgress.steps.length, 0, 'derived idle manual progress does not render stale waiting rows');
+assertEqual(createHeroPixelBlocks(derivedIdlePromptClearProgress).length, 0, 'derived idle manual progress clears hero pixel blocks between turns');
 
 const settledDoneProgress = createProgressRunModel({
   activity: { phase: 'idle' },
@@ -180,34 +180,34 @@ const settledDoneProgress = createProgressRunModel({
 assertEqual(settledDoneProgress.steps.length, 1, 'idle completed progress remains visible');
 assertEqual(settledDoneProgress.steps[0].state, 'done', 'idle completed progress keeps its terminal state');
 
-const semiAutoSettledWarningProgress = createProgressRunModel({
-  settings: { mode: 'semi-auto' },
+const manualSettledWarningProgress = createProgressRunModel({
+  settings: { mode: 'manual' },
   lastPlan: { cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame' }] },
   activityHistory: [
-    { runId: 'semi-auto-settled-warning', phase: 'started', label: 'Reading current turn', recordedAt: '1' },
-    { runId: 'semi-auto-settled-warning', phase: 'cardBatchRunning', label: 'Utility card batch', recordedAt: '2' },
+    { runId: 'manual-settled-warning', phase: 'started', label: 'Reading current turn', recordedAt: '1' },
+    { runId: 'manual-settled-warning', phase: 'cardBatchRunning', label: 'Utility card batch', recordedAt: '2' },
     {
-      runId: 'semi-auto-settled-warning',
+      runId: 'manual-settled-warning',
       phase: 'cardProgress',
       detail: { parentStepId: 'utility-card-batch', roleId: 'sceneFrameCard', state: 'warning', source: 'fallback' },
       recordedAt: '3'
     },
-    { runId: 'semi-auto-settled-warning', phase: 'handSelected', label: 'Selecting turn hand', severity: 'success', recordedAt: '4' },
-    { runId: 'semi-auto-settled-warning', phase: 'storageComplete', label: 'Saving scene cache', severity: 'success', recordedAt: '5' },
-    { runId: 'semi-auto-settled-warning', phase: 'settled', label: 'Recursion prompt ready.', severity: 'success', recordedAt: '6' }
+    { runId: 'manual-settled-warning', phase: 'handSelected', label: 'Selecting turn hand', severity: 'success', recordedAt: '4' },
+    { runId: 'manual-settled-warning', phase: 'storageComplete', label: 'Saving scene cache', severity: 'success', recordedAt: '5' },
+    { runId: 'manual-settled-warning', phase: 'settled', label: 'Recursion prompt ready.', severity: 'success', recordedAt: '6' }
   ],
   activity: {
-    runId: 'semi-auto-settled-warning',
+    runId: 'manual-settled-warning',
     phase: 'settled',
     label: 'Recursion prompt ready.',
     severity: 'success',
     recordedAt: '6'
   }
 });
-const semiAutoSettledStepIds = semiAutoSettledWarningProgress.steps.map((step) => step.id);
-assert(!semiAutoSettledStepIds.includes('composing-prompt-packet'), 'settled semi-auto progress drops planned compose step that never ran');
-assert(!semiAutoSettledStepIds.includes('installing-recursion-prompt'), 'settled semi-auto progress drops planned prompt-install step that never ran');
-assert(semiAutoSettledWarningProgress.steps.some((step) => step.id === 'utility-card-batch' && step.state === 'warning'), 'settled semi-auto progress keeps material warning rows');
-assertEqual(createHeroPixelBlocks(semiAutoSettledWarningProgress).some((block) => block.state === 'pending'), false, 'settled semi-auto progress does not leave empty hero pixels after ready');
+const manualSettledStepIds = manualSettledWarningProgress.steps.map((step) => step.id);
+assert(!manualSettledStepIds.includes('composing-prompt-packet'), 'settled manual progress drops planned compose step that never ran');
+assert(!manualSettledStepIds.includes('installing-recursion-prompt'), 'settled manual progress drops planned prompt-install step that never ran');
+assert(manualSettledWarningProgress.steps.some((step) => step.id === 'utility-card-batch' && step.state === 'warning'), 'settled manual progress keeps material warning rows');
+assertEqual(createHeroPixelBlocks(manualSettledWarningProgress).some((block) => block.state === 'pending'), false, 'settled manual progress does not leave empty hero pixels after ready');
 
 console.log('[pass] progress');

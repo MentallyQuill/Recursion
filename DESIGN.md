@@ -219,7 +219,7 @@ Do not introduce large rounded cards or soft marketing panels. Keep cards at 8px
 
 **Last Brief dropdown:** A read-only trust surface. Rows use category icons, compact one-line card text, and subtle metachips. Priority is the only strong chip color.
 
-**Settings panel:** Three tabs: Play, Providers, Advanced. Keep normal-play controls high level. Disable advanced commands that have no V1 runtime handler instead of showing fake working controls.
+**Settings panel:** Three tabs: Play, Providers, Advanced. Keep normal-play controls high level in a Play Behavior disclosure, provider lanes collapsible, and Advanced grouped into Injection, UI, and Diagnostics disclosures. Disable advanced commands that have no V1 runtime handler instead of showing fake working controls.
 
 **Full viewer:** An observatory, not a play surface. Use it for Now, Deck, Activity, Prompt Packet, Settings, and Providers. It can be larger than the bar menus, but it should remain utilitarian and dismissible.
 

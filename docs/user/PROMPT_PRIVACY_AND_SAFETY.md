@@ -163,7 +163,7 @@ Before using Auto:
 
 1. Confirm Utility is healthy.
 2. Confirm Reasoner is intentionally enabled or disabled.
-3. Inspect Last Brief and Prompt Packet after a safe Auto or Semi-Auto pass if you are unsure what Recursion compiled.
+3. Inspect Last Brief and Prompt Packet after a safe Auto or Manual pass if you are unsure what Recursion compiled.
 4. Inspect Prompt Packet when output quality or privacy matters.
 5. Confirm the packet is current-scene guidance, not lore, memory, or hidden planning.
 

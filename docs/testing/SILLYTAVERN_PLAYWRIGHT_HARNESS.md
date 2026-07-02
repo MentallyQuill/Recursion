@@ -158,7 +158,7 @@ When only one user is configured, the script verifies that user's storage but em
 - locate the Recursion Bar;
 - open the options/settings menu;
 - open the Hero Pixel Array progress menu;
-- switch disabled power, Auto, and Semi-Auto states;
+- switch disabled power, Auto, and Manual states;
 - seed and clear a Recursion-owned prompt sentinel during no-generation mode smoke;
 - run Test Provider actions through visible controls when configured;
 - send a safe test message only when the live run explicitly allows chat mutation;
@@ -167,7 +167,7 @@ When only one user is configured, the script verifies that user's storage but em
 - capture screenshots for desktop and phone viewports during no-generation UI runs;
 - clear prompt injection through power-off or teardown.
 
-No-generation browser snapshots include a sanitized `modeSmoke` object with the exact disabled -> Auto -> Semi-Auto -> disabled sequence, observed mode labels, power state, and Recursion prompt key names. Prompt text is not captured.
+No-generation browser snapshots include a sanitized `modeSmoke` object with the exact disabled -> Auto -> Manual -> disabled sequence, observed mode labels, power state, and Recursion prompt key names. Prompt text is not captured.
 
 `page.evaluate()` is acceptable for:
 

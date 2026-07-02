@@ -16,7 +16,7 @@ The fast contract suite is the normal maintained confidence gate in this checkou
 Highest-priority invariants:
 
 - Power-off performs no chat inspection, provider calls, card updates, or prompt injection.
-- Semi-Auto mode currently follows the Auto install path and must remain a distinct selectable mode for future card-type constraints.
+- Manual mode uses card scope as a strict whitelist and must remain a distinct selectable mode.
 - Auto mode may install prompt packets only through Recursion-owned SillyTavern prompt keys.
 - Prompt packet installation is replace-or-clear by Recursion metadata, not blind append.
 - Stale provider results cannot update the active scene cache or active prompt packet.
@@ -88,9 +88,9 @@ Live smoke must start with these gates:
 Primary live scenarios:
 
 - extension mount and Recursion Bar render;
-- mode transitions: disabled power, Auto, Semi-Auto;
+- mode transitions: disabled power, Auto, Manual;
 - provider setup display and Test Provider action for Utility and Reasoner;
-- Semi-Auto prompt-install proof through the current Auto-equivalent path;
+- Manual prompt-install proof through the strict card-scope path;
 - Auto mode Utility Arbiter pass, card refresh, hand selection, prompt packet composition, and prompt installation;
 - Last Brief dropdown reflects the cards used for the last prompt packet;
 - Hero Pixel Array progress menu shows model-call, cache, storage, composition, injection, fallback, and settled states;

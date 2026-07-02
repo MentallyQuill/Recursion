@@ -1,6 +1,6 @@
 # Recursion Operator Manual
 
-Recursion is a pre-alpha SillyTavern extension that compiles compact, current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Semi-Auto mode is active.
+Recursion is a pre-alpha SillyTavern extension that compiles compact, current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Manual mode is active.
 
 Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, character database, or card-editing product. It does not own durable canon. It improves the next response by preparing a bounded writing brief from the scene in front of the user.
 
@@ -8,19 +8,19 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 <Render Needed>: assets/documentation/renders/recursion-operator-install-enable.png - Install and enable flow with SillyTavern extension list, Recursion enabled state, and mounted Recursion Bar.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-mode-controls.png - Power toggle, Auto/Semi-Auto mode controls, Reasoning Level, and prompt cleanup behavior.
+<Render Needed>: assets/documentation/renders/recursion-operator-mode-controls.png - Power toggle, Auto/Manual mode controls, Reasoning Level, and prompt cleanup behavior.
 
 ![Recursion Bar states](../../assets/documentation/renders/recursion-operator-bar-states.png)
 
 ![Hero Pixel Array progress menu states](../../assets/documentation/renders/recursion-operator-progress-menu-states.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-options-menu.png - Options/settings menu with Play, Providers, Advanced, Reasoning Level, provider controls, prompt injection placement/role/depth, diagnostics limits, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and Full Viewer entry point.
+<Render Needed>: assets/documentation/renders/recursion-operator-options-menu.png - Options/settings menu with Play, Providers, Advanced, collapsible provider lanes, Injection/UI/Diagnostics sections, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and Full Viewer entry point.
 
 ![Last Brief dropdown states](../../assets/documentation/renders/recursion-operator-last-brief-states.png)
 
 <Render Needed>: assets/documentation/renders/recursion-operator-full-viewer-sections.png - Full Viewer showing Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-settings.png - Settings view showing Play, Providers, Advanced, Mode, Reasoning Level, Strength, Prompt Footprint, Focus, prompt injection placement/role/depth, Utility provider setup, and Reasoner provider setup.
+<Render Needed>: assets/documentation/renders/recursion-operator-settings.png - Settings view showing Play Behavior, collapsible Utility and Reasoner provider setup, Advanced Injection/UI/Diagnostics sections, Strength, Prompt Footprint, Focus, and prompt injection placement/role/depth.
 
 <Render Needed>: assets/documentation/renders/recursion-operator-provider-controls.png - Provider controls for Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, and fallback warning.
 
@@ -38,7 +38,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 
 - runtime health: Ready, Working, Paused, Issue, or Off;
 - power toggle;
-- icon-only mode control: Auto or Semi-Auto;
+- icon-only mode control: Auto or Manual;
 - Hero Pixel Array plus current-step text;
 - Reasoning Level chain;
 - Last Brief dropdown arrow;
@@ -72,9 +72,9 @@ The ellipsis opens the integrated settings/options menu. It is configuration-fir
 
 Main controls:
 
-- Play: Mode, Reasoning Level, Strength, Prompt Footprint, and Focus.
-- Providers: Utility and Reasoner provider setup, test controls, and session key controls.
-- Advanced: final prompt injection placement/role/depth, progress row limits, diagnostics settings, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point.
+- Play: a Behavior section containing Strength, Prompt Footprint, and Focus.
+- Providers: collapsible Utility and Reasoner provider setup, test controls, and session key controls.
+- Advanced: collapsible Injection, UI, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, diagnostics settings, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 
@@ -107,21 +107,19 @@ The power toggle stops Recursion from preparing prompt packets. Turning it off s
 
 Auto lets Recursion compile and install the next prompt packet. It should finish, reuse valid cache, or fail soft before the next Recursion packet is trusted.
 
-### Semi-Auto
+### Manual
 
-Semi-Auto is the V1 mode reserved for constraining card generation to selected card types. Until that backend selector lands, it follows the same runtime path as Auto.
+Manual uses the Cards selector as a strict whitelist. Disabled families stay out of planning, deck reuse, hand selection, composition, and injection.
 
 ## Settings
 
-Operator settings should stay broad:
+Operator settings should stay broad. Mode and Reasoning Level live in the compact bar, not in Settings.
 
-- Mode: Auto, Semi-Auto.
-- Reasoning Level: Low, Medium, High, Ultra.
-- Strength: Light, Balanced, Strong.
-- Prompt Footprint: Compact, Normal, Rich.
-- Focus: Balanced, Character, Continuity, Prose, Plot.
-- Utility and Reasoner provider setup in the settings panel.
-- Advanced final-prompt injection compatibility controls: Placement `Default | In Prompt | In Chat`, Role `System | User | Assistant`, and Depth `Default | 0..10`.
+- Play / Behavior: Strength `Light | Balanced | Strong`, Prompt Footprint `Compact | Normal | Rich`, and Focus `Balanced | Character | Continuity | Prose | Plot`.
+- Providers: collapsible Utility and Reasoner setup in the settings panel.
+- Advanced / Injection: final-prompt injection compatibility controls: Placement `Default | In Prompt | In Chat`, Role `System | User | Assistant`, and Depth `Default | 0..10`.
+- Advanced / UI: progress row limits.
+- Advanced / Diagnostics: journal limits, safe excerpts, Reset Scene Cache, Clear Run Journal, and Export Diagnostics.
 
 Default injection settings preserve Recursion's section template. Explicit injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
 
@@ -158,7 +156,7 @@ Use this first-run path:
 6. Send a safe ordinary turn.
 7. Confirm progress reaches prompt ready or a clear fallback.
 8. Inspect Last Brief and Prompt Packet.
-9. Try Semi-Auto and confirm it follows the same current V1 install path.
+9. Try Manual with a narrowed Cards scope and confirm prompt readiness respects that scope.
 10. Use the power toggle to verify prompt cleanup.
 
 See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.
@@ -256,7 +254,7 @@ Use this checklist for a practical browser pass:
 5. Configure and test Utility when provider work is intended.
 6. Turn power off and confirm prompt lanes are absent or cleared.
 7. Set Auto and confirm Recursion is ready to compile.
-8. Set Semi-Auto and confirm it applies as a distinct mode.
+8. Set Manual and confirm it applies as a distinct mode.
 9. Run a safe Auto pass only when provider and live mutation are intended.
 10. Confirm Activity reaches ready or a clear fallback.
 11. Inspect Last Brief and the final Prompt Packet text.

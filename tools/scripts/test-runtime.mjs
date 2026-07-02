@@ -885,6 +885,30 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 }
 
 {
+  const { runtime, storage, adapter } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' }
+  });
+  await runtime.prepareForGeneration({ userMessage: 'Export diagnostics without raw prompt text.' });
+  const before = await storage.loadRunJournal('chat-1');
+  assert(before.entries.length > 0, 'runtime created run journal before maintenance clear');
+  const exported = await runtime.exportDiagnostics();
+  assertEqual(exported.ok, true, 'runtime diagnostics export succeeds');
+  const serialized = assertNoSecretText(exported, 'runtime diagnostics export');
+  assert(serialized.includes('recursion.diagnosticsExport.v1'), 'diagnostics export includes schema');
+  assert(serialized.includes('promptPacketHash'), 'diagnostics export includes prompt packet hash');
+  assert(!serialized.includes('Scene brief:'), 'diagnostics export omits prompt packet sections');
+  assert(!serialized.includes('The lamp breaks.'), 'diagnostics export omits transcript and card prompt text');
+  assert(!serialized.includes('Export diagnostics without raw prompt text.'), 'diagnostics export omits pending user message text');
+
+  const cleared = await runtime.clearRunJournal();
+  assertEqual(cleared.ok, true, 'runtime clearRunJournal succeeds');
+  assertEqual(runtime.view().activity.label, 'Run journal cleared.', 'runtime clearRunJournal surfaces success');
+  assert(!Object.prototype.hasOwnProperty.call(adapter.dump(), 'recursion-run-journal-chat-1.v1.json'), 'runtime clearRunJournal deletes owned journal file');
+  const afterIndex = await storage.readIndex();
+  assert(!afterIndex.records['recursion-run-journal-chat-1.v1.json'], 'runtime clearRunJournal removes index entry');
+}
+
+{
   let releaseClear;
   let updateResolved = false;
   const { runtime, calls } = createRuntimeHarness({

@@ -179,10 +179,10 @@ Capture or plan visuals before writing screenshot-backed prose.
 | Mode controls | Power toggle, Auto, Semi-Auto, Reasoning Level, and prompt cleanup behavior. |
 | Recursion Bar | Ready, working, warning, disabled, provider issue, and prompt-ready states. |
 | Hero Pixel Array progress menu | Snapshot, Utility planning, card generation, prompt composition, Reasoner pass or skip, prompt install, fallback, and settled states. |
-| Options menu | Copy Last Prompt Packet, Open Settings, Open Viewer, provider controls, and disabled planned commands. |
+| Options menu | Copy Last Prompt Packet, Open Settings, Open Viewer, provider controls, final prompt injection placement/role/depth controls, Clear Run Journal, Export Diagnostics, disabled Reset Scene Cache, and disabled copy state. |
 | Last Hand dropdown | Compact selected cards, omission hints, prompt packet link, empty hand, stale hand, and error state. |
 | Full Viewer | Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections. |
-| Settings | Mode, Strength, Prompt Footprint, Focus, Reasoner Use, Utility provider setup, and Reasoner provider setup. |
+| Settings | Mode, Strength, Prompt Footprint, Focus, Reasoner Use, final prompt injection placement/role/depth, Utility provider setup, and Reasoner provider setup. |
 | Provider Controls | Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, fallback warning. |
 | Prompt packet inspection | Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and redaction-safe diagnostics. |
 | Fail-soft states | Utility unavailable, Reasoner timeout, invalid structured output, storage write failure, injection failure, and stale async result. |

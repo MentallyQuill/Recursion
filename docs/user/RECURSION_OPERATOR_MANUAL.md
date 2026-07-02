@@ -14,13 +14,13 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 ![Hero Pixel Array progress menu states](../../assets/documentation/renders/recursion-operator-progress-menu-states.png)
 
-<Render Needed>: assets/documentation/renders/recursion-operator-options-menu.png - Options/settings menu with Play, Providers, Advanced, Reasoning Level, provider controls, diagnostics limits, disabled planned commands, and Full Viewer entry point.
+<Render Needed>: assets/documentation/renders/recursion-operator-options-menu.png - Options/settings menu with Play, Providers, Advanced, Reasoning Level, provider controls, prompt injection placement/role/depth, diagnostics limits, Clear Run Journal, Export Diagnostics, disabled Reset Scene Cache, and Full Viewer entry point.
 
 ![Last Brief dropdown states](../../assets/documentation/renders/recursion-operator-last-brief-states.png)
 
 <Render Needed>: assets/documentation/renders/recursion-operator-full-viewer-sections.png - Full Viewer showing Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-settings.png - Settings view showing Play, Providers, Advanced, Mode, Reasoning Level, Strength, Prompt Footprint, Focus, Utility provider setup, and Reasoner provider setup.
+<Render Needed>: assets/documentation/renders/recursion-operator-settings.png - Settings view showing Play, Providers, Advanced, Mode, Reasoning Level, Strength, Prompt Footprint, Focus, prompt injection placement/role/depth, Utility provider setup, and Reasoner provider setup.
 
 <Render Needed>: assets/documentation/renders/recursion-operator-provider-controls.png - Provider controls for Utility setup, Reasoner setup, session-only key state, test connection, Reasoner off, and fallback warning.
 
@@ -74,7 +74,7 @@ Main controls:
 
 - Play: Mode, Reasoning Level, Strength, Prompt Footprint, and Focus.
 - Providers: Utility and Reasoner provider setup, test controls, and session key controls.
-- Advanced: progress row limits, diagnostics settings, disabled planned maintenance commands, and the Full Viewer entry point.
+- Advanced: final prompt injection placement/role/depth, progress row limits, diagnostics settings, Clear Run Journal, Export Diagnostics, disabled Reset Scene Cache, and the Full Viewer entry point.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 
@@ -121,8 +121,9 @@ Operator settings should stay broad:
 - Prompt Footprint: Compact, Normal, Rich.
 - Focus: Balanced, Character, Continuity, Prose, Plot.
 - Utility and Reasoner provider setup in the settings panel.
+- Advanced final-prompt injection compatibility controls: Placement `Default | In Prompt | In Chat`, Role `System | User | Assistant`, and Depth `Default | 0..10`.
 
-Users should not need to manage per-turn action, card families, relevance rules, or prompt depths turn by turn.
+Default injection settings preserve Recursion's section template. Explicit injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
 
 ## Provider Controls
 
@@ -228,7 +229,8 @@ Recursion storage is cache-oriented. The runtime owns scene cache, run journal, 
 - power-toggle cleanup;
 - Clear Session Key for each provider lane;
 - diagnostics row-limit and excerpt settings;
-- disabled planned maintenance commands until runtime handlers exist;
+- Clear Run Journal and Export Diagnostics;
+- disabled Reset Scene Cache until a dedicated runtime handler exists;
 - extension disable when Recursion should be fully inactive.
 
 These controls must touch only Recursion-owned settings, scene caches, journals, prompt lanes, and diagnostics. They must not delete SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or other extension records.

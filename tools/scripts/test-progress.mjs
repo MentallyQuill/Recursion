@@ -71,6 +71,56 @@ const controlOnlyPromptProgress = createProgressRunModel({
 assertEqual(controlOnlyPromptProgress.steps.length, 0, 'successful control-only prompt work does not populate the progress menu');
 assertEqual(createHeroPixelBlocks(controlOnlyPromptProgress).length, 0, 'successful control-only prompt work does not create compact hero pixel blocks');
 
+const controlOnlyPromptProgressWithStalePlan = createProgressRunModel({
+  settings: { enabled: false, mode: 'auto', reasonerUse: 'always' },
+  lastPlan: {
+    cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame' }],
+    reasonerDecision: { mode: 'use' }
+  },
+  activityHistory: [
+    {
+      runId: 'settings-control-stale-plan',
+      phase: 'promptClearing',
+      label: 'Clearing Recursion prompt...',
+      chips: ['Prompt']
+    }
+  ],
+  activity: {
+    runId: 'settings-control-stale-plan',
+    phase: 'promptClearing',
+    label: 'Clearing Recursion prompt...',
+    chips: ['Prompt']
+  }
+});
+assertEqual(controlOnlyPromptProgressWithStalePlan.steps.length, 0, 'power/settings prompt clear ignores stale turn plans');
+assertEqual(createHeroPixelBlocks(controlOnlyPromptProgressWithStalePlan).length, 0, 'power/settings prompt clear with stale plans does not create hero pixels');
+
+const reasoningSettingOnlyProgress = createProgressRunModel({
+  settings: { enabled: true, mode: 'auto', reasonerUse: 'always' },
+  activity: { phase: 'idle' }
+});
+assertEqual(reasoningSettingOnlyProgress.steps.length, 0, 'reasoning setting alone does not create pending progress');
+assertEqual(createHeroPixelBlocks(reasoningSettingOnlyProgress).length, 0, 'reasoning setting alone does not create hero pixels');
+
+const reasoningSettingDuringRunProgress = createProgressRunModel({
+  settings: { enabled: true, mode: 'auto', reasonerUse: 'always' },
+  activityHistory: [
+    { runId: 'run-reasoning-click', phase: 'started', label: 'Reading current turn...', providerLane: 'utility' },
+    { runId: 'run-reasoning-click', phase: 'cardBatchRunning', label: 'Generating scene cards...', providerLane: 'utility', cardCounts: { requested: 1 } }
+  ],
+  activity: {
+    runId: 'run-reasoning-click',
+    phase: 'cardBatchRunning',
+    label: 'Generating scene cards...',
+    providerLane: 'utility',
+    cardCounts: { requested: 1 }
+  },
+  lastPlan: {
+    cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame' }]
+  }
+});
+assert(!reasoningSettingDuringRunProgress.steps.some((step) => step.id === 'reasoner-brief'), 'reasoning setting alone does not add a Reasoner row to an active run');
+
 const controlOnlyWarningProgress = createProgressRunModel({
   settings: { enabled: false, mode: 'auto' },
   activity: {

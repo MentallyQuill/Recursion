@@ -126,6 +126,21 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
 {
   const adapter = createMemoryStorageAdapter();
   const repo = createStorageRepository({ storage: adapter });
+  await repo.appendJournal('Journal Clear Chat', { event: 'runtime.started', summary: 'started' });
+  assert(adapter.dump()[runJournalKey('Journal Clear Chat')], 'run journal exists before clear');
+  let index = await repo.readIndex();
+  assert(index.records[runJournalKey('Journal Clear Chat')], 'run journal is indexed before clear');
+  const result = await repo.clearRunJournal('Journal Clear Chat');
+  assertEqual(result.ok, true, 'clearRunJournal succeeds');
+  assertEqual(result.key, runJournalKey('Journal Clear Chat'), 'clearRunJournal reports owned key');
+  assert(!adapter.dump()[runJournalKey('Journal Clear Chat')], 'run journal file removed');
+  index = await repo.readIndex();
+  assert(!index.records[runJournalKey('Journal Clear Chat')], 'run journal index entry removed');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
   await repo.saveSceneCache('Card Privacy Chat', 'Scene One', {
     cards: [{
       id: 'privacy-card',

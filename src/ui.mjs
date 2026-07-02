@@ -86,6 +86,20 @@ const PROVIDER_SOURCE_OPTIONS = Object.freeze([
   ['host-connection-profile', 'Host Connection Profile'],
   ['openai-compatible', 'OpenAI-Compatible Endpoint']
 ]);
+const INJECTION_PLACEMENT_OPTIONS = Object.freeze([
+  ['default', 'Default'],
+  ['in_prompt', 'In Prompt'],
+  ['in_chat', 'In Chat']
+]);
+const INJECTION_ROLE_OPTIONS = Object.freeze([
+  ['system', 'System'],
+  ['user', 'User'],
+  ['assistant', 'Assistant']
+]);
+const INJECTION_DEPTH_OPTIONS = Object.freeze([
+  ['default', 'Default'],
+  ...Array.from({ length: 11 }, (_, index) => [String(index), String(index)])
+]);
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -1073,8 +1087,28 @@ function renderAdvancedSettings(panel, settings) {
   const group = el('section', { className: 'recursion-settings-group' });
   const ui = asObject(settings.ui);
   const diagnostics = asObject(settings.diagnostics);
+  const injection = asObject(settings.injection);
   const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
+  const defaultInjection = DEFAULT_RECURSION_SETTINGS.injection;
   group.appendChild(el('h3', { text: 'Advanced' }));
+  group.appendChild(settingsSelectRow(
+    'Injection Placement',
+    'recursionSettingInjectionPlacement',
+    cleanText(injection.placement, defaultInjection.placement),
+    INJECTION_PLACEMENT_OPTIONS
+  ));
+  group.appendChild(settingsSelectRow(
+    'Injection Role',
+    'recursionSettingInjectionRole',
+    cleanText(injection.role, defaultInjection.role),
+    INJECTION_ROLE_OPTIONS
+  ));
+  group.appendChild(settingsSelectRow(
+    'Injection Depth',
+    'recursionSettingInjectionDepth',
+    String(injection.depth ?? defaultInjection.depth),
+    INJECTION_DEPTH_OPTIONS
+  ));
   group.appendChild(controlRow('Sub-tier Rows', inputControl({
     value: integerInRange(ui.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20),
     type: 'number',
@@ -1107,17 +1141,15 @@ function renderAdvancedSettings(panel, settings) {
     dataset: { recursionSettingIncludeExcerpts: '' },
     ariaLabel: 'Include sanitized excerpts in diagnostics'
   })));
-  const unavailableActions = [
-    button('Reset Scene Cache', 'recursionResetSceneCache', 'Reset Recursion scene cache'),
+  const resetSceneCache = button('Reset Scene Cache', 'recursionResetSceneCache', 'Reset Recursion scene cache');
+  resetSceneCache.disabled = true;
+  resetSceneCache.setAttribute('disabled', 'disabled');
+  resetSceneCache.setAttribute('title', 'Planned diagnostic command; not wired in this V1 surface yet.');
+  group.appendChild(el('div', { className: 'recursion-provider-actions' }, [
+    resetSceneCache,
     button('Clear Run Journal', 'recursionClearRunJournal', 'Clear Recursion run journal'),
     button('Export Diagnostics', 'recursionExportDiagnostics', 'Export sanitized Recursion diagnostics')
-  ];
-  for (const action of unavailableActions) {
-    action.disabled = true;
-    action.setAttribute('disabled', 'disabled');
-    action.setAttribute('title', 'Planned diagnostic command; not wired in this V1 surface yet.');
-  }
-  group.appendChild(el('div', { className: 'recursion-provider-actions' }, unavailableActions));
+  ]));
   panel.appendChild(group);
 }
 
@@ -1993,6 +2025,18 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const packetText = promptPacketText(view.lastPacket, view.lastHand);
       runAction(globalThis.navigator?.clipboard?.writeText?.(packetText));
     }
+    if (control('recursionClearRunJournal')) {
+      runAction(runtime?.clearRunJournal?.(), () => {
+        settingsPanelRendered = false;
+        update();
+      });
+    }
+    if (control('recursionExportDiagnostics')) {
+      runAction(Promise.resolve(runtime?.exportDiagnostics?.()).then((result) => {
+        const payload = result?.diagnostics || result || {};
+        return globalThis.navigator?.clipboard?.writeText?.(safeJson(payload, { maxString: 5000 }));
+      }));
+    }
     const modeChoice = control('recursionModeChoice');
     if (modeChoice) {
       runAction(runtime?.updateSettings?.({ mode: modeChoice.dataset.recursionModeChoice }));
@@ -2122,7 +2166,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function readSettingsPatch(sourceRoot) {
     const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
+    const defaultInjection = DEFAULT_RECURSION_SETTINGS.injection;
     const reasoningLevel = normalizeReasoningLevel(controlValue(sourceRoot, '[data-recursion-setting-reasoning-level]'));
+    const injectionDepth = controlValue(sourceRoot, '[data-recursion-setting-injection-depth]');
     return {
       mode: controlValue(sourceRoot, '[data-recursion-setting-mode]'),
       reasoningLevel,
@@ -2152,6 +2198,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
           500
         ),
         includeExcerpts: controlChecked(sourceRoot, '[data-recursion-setting-include-excerpts]')
+      },
+      injection: {
+        placement: controlValue(sourceRoot, '[data-recursion-setting-injection-placement]') || defaultInjection.placement,
+        role: controlValue(sourceRoot, '[data-recursion-setting-injection-role]') || defaultInjection.role,
+        depth: injectionDepth === 'default' || !injectionDepth
+          ? defaultInjection.depth
+          : integerInRange(injectionDepth, defaultInjection.depth, 0, 10)
       }
     };
   }

@@ -1045,6 +1045,12 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
       return { ok: true, key, record, journalEntry };
     },
     loadRunJournal,
+    async clearRunJournal(chatKey) {
+      const key = runJournalKey(chatKey);
+      const deleted = await storage.deleteJson(key);
+      await removeIndexEntry(key);
+      return { ok: deleted?.ok !== false, key, deleted: deleted?.ok !== false };
+    },
     appendJournal,
     repairIndex,
     pruneSceneCaches,

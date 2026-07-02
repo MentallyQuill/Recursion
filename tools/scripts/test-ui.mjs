@@ -885,6 +885,8 @@ try {
   const providerUpdates = [];
   const providerTests = [];
   const providerClears = [];
+  let clearRunJournalCalls = 0;
+  let exportDiagnosticsCalls = 0;
   let view = {
     settings: {
       mode: 'auto',
@@ -1068,6 +1070,20 @@ try {
           }
         };
         return view.settings.providers[lane];
+      },
+      clearRunJournal: () => {
+        clearRunJournalCalls += 1;
+        return { ok: true };
+      },
+      exportDiagnostics: () => {
+        exportDiagnosticsCalls += 1;
+        return {
+          ok: true,
+          diagnostics: {
+            schema: 'recursion.diagnosticsExport.v1',
+            promptPacketHash: 'packet-hash'
+          }
+        };
       }
     },
     mountPoint: fakeDocument.body
@@ -1240,6 +1256,21 @@ try {
   root.querySelector('[data-recursion-settings-tab-advanced]').click({ ignoreStopPropagation: true });
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open even when document outside-click also receives the rerendered event');
   assertEqual(root.querySelector('[data-recursion-settings-advanced]').hidden, false, 'clicking Advanced shows advanced controls');
+  assertEqual(root.querySelector('[data-recursion-clear-run-journal]').disabled, false, 'Clear Run Journal is enabled when runtime handler exists');
+  assertEqual(root.querySelector('[data-recursion-export-diagnostics]').disabled, false, 'Export Diagnostics is enabled when runtime handler exists');
+  assertEqual(root.querySelector('[data-recursion-reset-scene-cache]').disabled, true, 'Reset Scene Cache stays disabled until runtime handler exists');
+  assert(root.querySelector('[data-recursion-setting-injection-placement]'), 'Advanced settings render injection placement control');
+  assert(root.querySelector('[data-recursion-setting-injection-role]'), 'Advanced settings render injection role control');
+  assert(root.querySelector('[data-recursion-setting-injection-depth]'), 'Advanced settings render injection depth control');
+  assertEqual(root.querySelector('[data-recursion-setting-injection-placement]').value, 'default', 'injection placement defaults to template plan');
+  assertEqual(root.querySelector('[data-recursion-setting-injection-role]').value, 'system', 'injection role defaults to system');
+  assertEqual(root.querySelector('[data-recursion-setting-injection-depth]').value, 'default', 'injection depth defaults to template plan');
+  root.querySelector('[data-recursion-clear-run-journal]').click();
+  assertEqual(clearRunJournalCalls, 1, 'Clear Run Journal action calls runtime');
+  root.querySelector('[data-recursion-export-diagnostics]').click();
+  await Promise.resolve();
+  assertEqual(exportDiagnosticsCalls, 1, 'Export Diagnostics action calls runtime');
+  assert(copied.at(-1).includes('recursion.diagnosticsExport.v1'), 'Export Diagnostics copies sanitized diagnostics JSON');
   assert(root.querySelector('[data-recursion-provider-grid]'), 'Providers pane renders the compact reference provider grid');
   assertEqual(root.querySelectorAll('[data-recursion-provider-section]').length, 2, 'Providers pane renders Utility plus collapsed Reasoner sections');
   assert(!root.querySelector('[data-recursion-provider-model-reasoner]'), 'Reasoner provider stays collapsed to the reference summary row');
@@ -1331,6 +1362,9 @@ try {
   root.querySelector('[data-recursion-setting-progress-list-limit]').value = '22';
   root.querySelector('[data-recursion-setting-journal-limit]').value = '120';
   root.querySelector('[data-recursion-setting-include-excerpts]').checked = true;
+  root.querySelector('[data-recursion-setting-injection-placement]').value = 'in_chat';
+  root.querySelector('[data-recursion-setting-injection-role]').value = 'assistant';
+  root.querySelector('[data-recursion-setting-injection-depth]').value = '7';
   root.querySelector('[data-recursion-settings-save]').click();
   assertDeepEqual(settingsUpdates.at(-1), {
     mode: 'semi-auto',
@@ -1346,6 +1380,11 @@ try {
     diagnostics: {
       maxJournalEntries: 120,
       includeExcerpts: true
+    },
+    injection: {
+      placement: 'in_chat',
+      role: 'assistant',
+      depth: 7
     }
   }, 'settings panel saves broad behavior controls without owning the power state');
 
@@ -1369,12 +1408,23 @@ try {
   assertDeepEqual(providerTests, ['utility'], 'utility provider test action calls runtime');
   root.querySelector('[data-recursion-utility-provider-clear-key]').click();
   assertDeepEqual(providerClears, ['utility'], 'utility clear session key action calls runtime');
-  root.querySelector('[data-recursion-actions]').click();
+  if (root.querySelector('[data-recursion-settings-panel]').hidden === false) {
+    root.querySelector('[data-recursion-settings-close]').click();
+  }
+  if (root.querySelector('[data-recursion-hand-dropdown]').hidden !== false) {
+    root.querySelector('[data-recursion-hand-toggle]').click();
+  }
+  if (root.querySelector('[data-recursion-prompt-packet-panel]').hidden !== false) {
+    root.querySelector('[data-recursion-prompt-packet-button]').click();
+  }
+  const copiedBeforePromptPacket = copied.length;
   root.querySelector('[data-recursion-copy-prompt-packet]').click();
   await Promise.resolve();
-  assert(copied[0].includes('Recursion Scene Brief'), 'copy prompt packet writes the injected prompt text');
-  assert(!copied[0].includes('"packetId"'), 'copy prompt packet omits packet JSON wrapper');
-  assert(copied[0].includes('Door stays blocked and the brass lock remains warped.'), 'copy prompt packet includes actual injected prompt text');
+  const copiedPromptPacket = copied.at(-1);
+  assertEqual(copied.length, copiedBeforePromptPacket + 1, 'copy prompt packet writes a fresh clipboard item');
+  assert(copiedPromptPacket.includes('Recursion Scene Brief'), 'copy prompt packet writes the injected prompt text');
+  assert(!copiedPromptPacket.includes('"packetId"'), 'copy prompt packet omits packet JSON wrapper');
+  assert(copiedPromptPacket.includes('Door stays blocked and the brass lock remains warped.'), 'copy prompt packet includes actual injected prompt text');
 
   const viewer = root.querySelector('[data-recursion-viewer]');
   let showModalCount = 0;

@@ -162,6 +162,7 @@ Build:
 - Prompt packet schema.
 - Footprint profiles: compact, normal, rich.
 - Omission reasons.
+- Final prompt injection settings contract: placement `default | in_prompt | in_chat`, role `system | user | assistant`, and depth `default | 0..10`.
 - Prompt injection adapter.
 - Prompt clear/replace behavior.
 
@@ -170,6 +171,7 @@ Tests:
 - Packet composition from selected hand.
 - Reasoner composition cannot add unsupported lore fields.
 - Reasoner timeout, provider failure, or invalid schema falls back to Utility composition.
+- Explicit final-prompt injection settings override packet block placement, role, and depth after Utility/Reasoner composition.
 - Injection installs, replaces, and clears by Recursion-owned key.
 - Semi-Auto mode remains selectable and currently follows the Auto prompt-install path.
 
@@ -189,6 +191,7 @@ Build:
 - Last Brief dropdown.
 - Full viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers.
 - High-level settings controls.
+- Advanced final-prompt injection controls for placement, role, and depth, defaulted to the template plan.
 - Provider controls.
 - SillyTavern-native graphite styling.
 
@@ -200,6 +203,7 @@ Tests:
 - Warning/error states persist until dismissed or superseded.
 - Last Brief shows used cards from the prior run.
 - Viewer handles empty/corrupt diagnostics gracefully.
+- Settings save persists final-prompt injection placement, role, and depth without exposing card-level micromanagement.
 - Mobile/narrow layout does not overlap chat controls.
 
 Exit criteria:
@@ -226,7 +230,7 @@ Tests:
 
 - Offline Playwright readiness: browser launch, role-locator click, desktop/phone screenshots, trace, and report writing without contacting SillyTavern.
 - Dedicated user preflight rejects `default-user` and proves `recursion-soak-*` storage isolation.
-- Live SillyTavern smoke: initialize, configure Utility, observe mode, auto mode, prompt packet install, prompt packet clear.
+- Live SillyTavern smoke: initialize, configure Utility, Auto mode, Semi-Auto mode, prompt packet install, prompt packet clear, and power-off cleanup.
 - Chat change invalidates active scene cache.
 - Provider failure falls back without blocking generation.
 - Hero Pixel Array progress menu visibly reports model work, cache use, storage progress, prompt readiness, and fallbacks.

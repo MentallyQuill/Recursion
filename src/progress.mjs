@@ -437,10 +437,9 @@ function planWantsReasoner(view) {
   const source = asObject(view);
   const plan = asObject(source.lastPlan);
   const decision = cleanText(plan.reasonerDecision?.mode).toLowerCase();
-  const reasonerUse = cleanText(source.settings?.reasonerUse).toLowerCase();
   const lastStatus = cleanText(source.lastPacket?.diagnostics?.reasonerStatus).toLowerCase();
   const composerLane = cleanText(source.lastPacket?.diagnostics?.composerLane).toLowerCase();
-  return decision === 'use' || reasonerUse === 'always' || lastStatus === 'used' || composerLane === 'reasoner';
+  return decision === 'use' || lastStatus === 'used' || composerLane === 'reasoner';
 }
 
 function planWantsCards(view, currentActivity) {
@@ -545,6 +544,14 @@ function shouldDiscardSuccessfulControlOnlyProgress(progress) {
   return !steps.some((step) => ['warning', 'failed'].includes(normalizeState(step.state)));
 }
 
+function isControlOnlySettingsProgress(runId, steps = []) {
+  const id = cleanText(runId).toLowerCase();
+  const list = Array.isArray(steps) ? steps : [];
+  return id.startsWith('settings-')
+    && list.length > 0
+    && list.every((step) => HERO_CONTROL_ONLY_STEP_IDS.has(step.id));
+}
+
 function deriveProgressRun(view) {
   const events = sourceEvents(view);
   const current = asObject(asObject(view).activity);
@@ -575,8 +582,11 @@ function deriveProgressRun(view) {
       order: eventOrder
     }, eventOrder));
   }
-  appendPendingPlanSteps(steps, view, order);
-  appendPendingChildSteps(steps, view, order);
+  const beforePlanSteps = [...steps.values()];
+  if (!isControlOnlySettingsProgress(runId, beforePlanSteps)) {
+    appendPendingPlanSteps(steps, view, order);
+    appendPendingChildSteps(steps, view, order);
+  }
   const derived = finalizeProgress({
     runId,
     title: progressTitle([...steps.values()]),

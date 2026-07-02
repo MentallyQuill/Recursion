@@ -1078,6 +1078,9 @@ Providers contains the complete provider setup surface:
 
 Advanced contains low-frequency controls:
 
+- Injection Placement: `Default`, `In Prompt`, or `In Chat`. Default preserves the packet template.
+- Injection Role: `System`, `User`, or `Assistant`. Default is `System`.
+- Injection Depth: `Default` or integer `0..10`. Default preserves each packet section's template depth.
 - Sub-tier Rows: numeric control for `ui.progressChildVisibleLimit`; default 5, minimum 1, maximum 20.
 - Progress Rows: numeric control for `ui.progressListVisibleLimit`; default 15, minimum 5, maximum 80.
 - Diagnostics journal size.
@@ -1086,7 +1089,9 @@ Advanced contains low-frequency controls:
 - Export sanitized diagnostics.
 - Clear run journal.
 
-Advanced commands without V1 runtime handlers must render disabled with tooltip copy. They should not appear active until they perform the named action.
+Injection controls apply to the final conditioned prompt packet after Utility or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the composed Recursion brief to land in a different host lane or depth.
+
+Advanced commands without V1 runtime handlers must render disabled with tooltip copy. They should not appear active until they perform the named action. V1 wires `Export Diagnostics` and `Clear Run Journal`; `Reset Scene Cache` remains disabled until a dedicated current-chat cache reset handler lands.
 
 Checkboxes inside Recursion settings must use the compact dark Recursion control skin instead of SillyTavern's global checkbox background. The unchecked state is a dark 20px square with a subtle hairline border; the checked state fills with the Recursion cyan and shows a small checkmark.
 

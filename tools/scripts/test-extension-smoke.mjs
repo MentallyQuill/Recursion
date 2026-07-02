@@ -74,6 +74,30 @@ function createFakeSillyTavernContext(label) {
   return fake;
 }
 
+function createFakeEventSource() {
+  const listeners = new Map();
+  return {
+    on(eventName, handler) {
+      const key = String(eventName);
+      const list = listeners.get(key) || [];
+      list.push(handler);
+      listeners.set(key, list);
+    },
+    removeListener(eventName, handler) {
+      const key = String(eventName);
+      const list = listeners.get(key) || [];
+      listeners.set(key, list.filter((entry) => entry !== handler));
+    },
+    listenerCount(eventName) {
+      return (listeners.get(String(eventName)) || []).length;
+    },
+    async emit(eventName, payload = {}) {
+      const list = [...(listeners.get(String(eventName)) || [])];
+      await Promise.all(list.map((handler) => handler(payload)));
+    }
+  };
+}
+
 async function assertLifecycleClearsInstalledPrompt(hookName) {
   const fake = createFakeSillyTavernContext(hookName);
   globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
@@ -146,6 +170,38 @@ try {
 }
 if (lifecycleFailures.length) {
   throw new Error(lifecycleFailures.join('\n'));
+}
+
+{
+  const fake = createFakeSillyTavernContext('chat-change-event');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = { CHAT_CHANGED: 'chat_changed' };
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionGenerationInterceptor('chat-change-event-payload'), 'chat-change-event-payload', 'chat-change event setup keeps original chat');
+  assertEqual(eventSource.listenerCount('chat_changed'), 1, 'bootstrap subscribes to SillyTavern chat change event');
+  for (const key of RECURSION_PROMPT_KEYS) {
+    assert(fake.promptState.get(key), `chat-change setup installs ${key}`);
+  }
+  const clearStart = fake.promptWrites.length;
+  await eventSource.emit('chat_changed');
+  const cleanupWrites = fake.promptWrites.slice(clearStart);
+  for (const key of RECURSION_PROMPT_KEYS) {
+    assert(
+      cleanupWrites.some((entry) => entry.key === key && entry.text === ''),
+      `chat-change event clears ${key}`
+    );
+    assertEqual(fake.promptState.get(key), '', `chat-change event leaves ${key} empty`);
+  }
+  await globalThis.recursionOnDelete();
+  assertEqual(eventSource.listenerCount('chat_changed'), 0, 'teardown unsubscribes from SillyTavern chat change event');
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
 }
 
 {

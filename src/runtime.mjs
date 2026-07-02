@@ -1277,6 +1277,14 @@ export function createRecursionRuntime({
     activeRunController = null;
   }
 
+  function clearVolatileSceneState() {
+    lastPacket = null;
+    lastHand = { cards: [], omitted: [] };
+    lastPlan = null;
+    lastSnapshot = null;
+    lastSavedSceneCacheRef = null;
+  }
+
   function supersededResult(runId) {
     return { ok: false, superseded: true, runId };
   }
@@ -1656,6 +1664,44 @@ export function createRecursionRuntime({
         chips: ['Cache', 'Prompt']
       });
       return { ok: true, chatKey, sceneKey, result: redact(result), clear };
+    });
+  }
+
+  async function handleChatChanged() {
+    const runId = makeId('chat-change');
+    supersedeActiveRun();
+    return trackRuntimeMutation(async () => {
+      const clearContext = promptClearContext();
+      startRuntimeActivity({
+        runId,
+        phase: 'promptClearing',
+        mode: 'review',
+        severity: 'info',
+        label: 'Clearing Recursion prompt after chat change...',
+        chips: ['Chat', 'Prompt']
+      });
+      await invalidateActiveSceneCacheBestEffort('chat-changed', {
+        source: 'host-event'
+      });
+      clearVolatileSceneState();
+      const clear = await runPromptMutationSection(null, async () => {
+        const clearResult = await clearPromptBestEffort(host);
+        await appendPromptClearedJournal(runId, clearContext, clearResult, 'chat-changed');
+        return clearResult;
+      });
+      if (clear?.ok === false) {
+        reportClearWarning(runId, clear);
+        return { ok: false, clear };
+      }
+      settleRuntimeActivity({
+        runId,
+        outcome: 'success',
+        phase: 'settled',
+        severity: 'success',
+        label: 'Chat changed. Recursion prompt cleared.',
+        chips: ['Chat', 'Prompt']
+      });
+      return { ok: true, clear };
     });
   }
 
@@ -2701,6 +2747,7 @@ export function createRecursionRuntime({
     async refreshScene() {
       return prepareForGeneration({ refreshReason: 'user-refresh' });
     },
+    handleChatChanged,
     updateSettings,
     updateProvider,
     clearProviderKey,

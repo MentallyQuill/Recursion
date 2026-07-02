@@ -4692,6 +4692,65 @@ for (const scenario of [
 
 {
   let releaseArbiter;
+  const { runtime, calls } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'chat-change regression only needs utility arbiter');
+        await new Promise((resolve) => {
+          releaseArbiter = resolve;
+        });
+        assertEqual(request.signal?.aborted, true, 'chat change aborts in-flight provider signal');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'compose-brief',
+            diagnostics: ['chat-change-regression']
+          }
+        };
+      }
+    }
+  });
+  const pending = runtime.prepareForGeneration({ userMessage: 'Turn changes before install.' });
+  await waitUntil(() => typeof releaseArbiter === 'function', 'chat-change run did not enter arbiter');
+  assertEqual(typeof runtime.handleChatChanged, 'function', 'runtime exposes chat-change cleanup');
+  const chatChange = runtime.handleChatChanged();
+  releaseArbiter();
+  const [chatChangeResult, pendingResult] = await Promise.all([chatChange, pending]);
+  assertEqual(pendingResult.superseded, true, 'chat change supersedes in-flight generation preparation');
+  assertEqual(chatChangeResult.ok, true, 'chat change cleanup succeeds');
+  assertEqual(calls.clear, 1, 'chat change clears host prompt');
+  const view = runtime.view();
+  assertEqual(view.activeRunId, null, 'chat change clears active run id');
+  assertEqual(view.lastPacket, null, 'chat change clears in-memory prompt packet');
+  assertEqual(view.lastHand.cards.length, 0, 'chat change clears in-memory hand');
+  assertEqual(view.lastPlan, null, 'chat change clears in-memory plan');
+  assertEqual(view.lastSnapshot, null, 'chat change clears in-memory snapshot');
+  assertEqual(view.activity.label, 'Chat changed. Recursion prompt cleared.', 'chat change surfaces prompt cleanup');
+}
+
+{
+  const { runtime, calls, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' }
+  });
+  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare prompt before chat change.' });
+  assertEqual(setup.ok, true, 'chat-change setup prepares generation');
+  const setupSnapshot = runtime.view().lastSnapshot;
+  const result = await runtime.handleChatChanged();
+  assertEqual(result.ok, true, 'chat change cleanup returns ok');
+  assertEqual(calls.clear, 1, 'chat change clears installed prompt');
+  const cache = await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey);
+  assertEqual(cache.cacheState, 'stale', 'chat change marks previous active scene cache stale');
+  assertEqual(cache.invalidation.reason, 'chat-changed', 'chat change records cache invalidation reason');
+  const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
+  assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'chat-changed'), 'chat change records prompt clear journal');
+  assertEqual(runtime.view().lastSnapshot, null, 'chat change clears previous snapshot after journaling');
+}
+
+{
+  let releaseArbiter;
   const { runtime, installed } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {

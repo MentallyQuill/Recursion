@@ -34,6 +34,12 @@ Document-ready bootstrap mounts Recursion when a SillyTavern context is availabl
 
 Enable and activate call bootstrap. Disable and delete dispose the runtime, clear prompt keys best-effort, destroy the UI, and drop host/runtime references. Cleanup is intentionally light because Recursion records are cache-oriented and user-visible cleanup actions belong to settings, storage diagnostics, or cache controls.
 
+## Host Events
+
+When SillyTavern exposes `eventSource` plus `event_types.CHAT_CHANGED`, the entrypoint subscribes during bootstrap and removes the listener during teardown. The handler calls `runtime.handleChatChanged()` and remains fail-soft: cleanup errors are logged, but host navigation must continue.
+
+Chat-change cleanup clears volatile Recursion state, clears Recursion-owned prompt keys, and best-effort marks the previously active scene cache stale with reason `chat-changed`. It does not run provider calls or compile a new packet for the newly selected chat.
+
 ## Generation Interceptor Boundary
 
 The generation interceptor calls `runtime.prepareForGeneration()` before returning the chat to SillyTavern. It catches and logs sanitized failures so the host generation can continue.

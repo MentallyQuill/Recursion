@@ -143,7 +143,7 @@ The storage repository exposes `invalidateSceneCache(chatKey, sceneKey, options)
 
 The journal entry uses `event: 'cache.invalidated'`, `severity: 'info'`, the sanitized `sceneKey`, optional `runId`, and redacted reason/details. If no cache file exists, `invalidateSceneCache` returns `{ ok: false, reason: 'missing-cache', key }` and does not create a stale cache.
 
-Runtime V1 reasons are `user-refresh`, `settings-changed`, `provider-changed`, and `provider-key-cleared`. Details must not persist API keys, bearer tokens, `sk-...` tokens, private secrets, raw provider payloads, or hidden reasoning.
+Runtime V1 reasons are `user-refresh`, `settings-changed`, `provider-changed`, `provider-key-cleared`, and `chat-changed`. Chat-change invalidation is best-effort against the previously active scene cache when a cache reference exists; it does not create a new cache for the newly selected chat. Details must not persist API keys, bearer tokens, `sk-...` tokens, private secrets, raw provider payloads, or hidden reasoning.
 
 Pre-alpha records can be invalidated and rebuilt instead of migrated through compatibility shims.
 

@@ -8,10 +8,21 @@ import { mountRecursionUi } from '../ui.mjs';
 let runtime = null;
 let ui = null;
 let host = null;
+let hostEventUnsubscribers = [];
 
 function hasSillyTavernContext() {
   return typeof globalThis.SillyTavern?.getContext === 'function'
     || typeof globalThis.getContext === 'function';
+}
+
+function getSillyTavernContextSafe() {
+  try {
+    if (typeof globalThis.SillyTavern?.getContext === 'function') return globalThis.SillyTavern.getContext() || {};
+    if (typeof globalThis.getContext === 'function') return globalThis.getContext() || {};
+  } catch (error) {
+    warn('Read SillyTavern context failed.', error);
+  }
+  return {};
 }
 
 function warn(label, error) {
@@ -27,6 +38,57 @@ function destroyUi() {
   } finally {
     ui = null;
   }
+}
+
+function clearHostEventSubscriptions() {
+  const unsubscribers = hostEventUnsubscribers;
+  hostEventUnsubscribers = [];
+  for (const unsubscribe of unsubscribers) {
+    try {
+      unsubscribe();
+    } catch (error) {
+      warn('Host event unsubscribe failed.', error);
+    }
+  }
+}
+
+function subscribeHostEvent(eventSource, eventName, handler) {
+  if (!eventSource || !eventName || typeof handler !== 'function') return null;
+  if (typeof eventSource.on === 'function') {
+    eventSource.on(eventName, handler);
+    return () => {
+      if (typeof eventSource.removeListener === 'function') eventSource.removeListener(eventName, handler);
+      else if (typeof eventSource.off === 'function') eventSource.off(eventName, handler);
+    };
+  }
+  if (typeof eventSource.addEventListener === 'function') {
+    eventSource.addEventListener(eventName, handler);
+    return () => eventSource.removeEventListener?.(eventName, handler);
+  }
+  return null;
+}
+
+function resolveChatChangedEvent(context) {
+  const eventTypes = context?.event_types
+    || context?.eventTypes
+    || globalThis.event_types
+    || globalThis.eventTypes
+    || {};
+  return eventTypes.CHAT_CHANGED || '';
+}
+
+function registerHostEvents(nextRuntime) {
+  clearHostEventSubscriptions();
+  const context = getSillyTavernContextSafe();
+  const eventSource = context.eventSource || globalThis.eventSource;
+  const chatChangedEvent = resolveChatChangedEvent(context);
+  const unsubscribe = subscribeHostEvent(eventSource, chatChangedEvent, () => {
+    const activeRuntime = runtime || nextRuntime;
+    return Promise.resolve(activeRuntime?.handleChatChanged?.()).catch((error) => {
+      warn('Chat change cleanup failed.', error);
+    });
+  });
+  if (typeof unsubscribe === 'function') hostEventUnsubscribers.push(unsubscribe);
 }
 
 function createProviderJournal(storage, currentHost) {
@@ -142,9 +204,11 @@ export function bootstrapRecursion() {
     host = nextHost;
     runtime = nextRuntime;
     ui = nextUi;
+    registerHostEvents(nextRuntime);
     return runtime;
   } catch (error) {
     warn('Bootstrap failed.', error);
+    clearHostEventSubscriptions();
     destroyUi();
     host = null;
     runtime = null;
@@ -163,6 +227,7 @@ async function clearPromptBestEffort(label) {
 }
 
 async function teardownRecursion(label) {
+  clearHostEventSubscriptions();
   try {
     await runtime?.dispose?.();
   } catch (error) {

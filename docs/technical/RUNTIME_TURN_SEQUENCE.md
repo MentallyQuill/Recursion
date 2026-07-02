@@ -105,6 +105,8 @@ Storage writes are sequenced separately from prompt mutations. Storage failure r
 
 Runtime keeps one active run id and an abort controller. Settings changes, provider changes, mode changes, refreshes, dispose, chat changes that supersede work, and newer generation attempts invalidate earlier work.
 
+When the SillyTavern entrypoint receives `event_types.CHAT_CHANGED`, runtime aborts active provider work, clears volatile packet/hand/plan/snapshot state, best-effort marks the previously active scene cache stale with reason `chat-changed`, clears Recursion prompt keys, and journals the prompt-clear result against the previous chat when known. It does not call Utility or Reasoner for the newly selected chat until the next generation or explicit refresh.
+
 ```mermaid
 flowchart TD
     Start["Run starts"] --> Work["Provider, storage, or prompt work"]

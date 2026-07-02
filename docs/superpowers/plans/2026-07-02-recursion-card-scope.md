@@ -868,7 +868,7 @@ git commit -m "docs: document card scope controls"
 **Files:**
 - No planned edits unless verification finds defects.
 
-- [ ] Run focused tests first.
+- [x] Run focused tests first.
 
 Commands:
 
@@ -892,7 +892,7 @@ Expected output includes:
 [pass] live-harness
 ```
 
-- [ ] Run the full deterministic suite.
+- [x] Run the full deterministic suite.
 
 Command:
 
@@ -907,7 +907,7 @@ Expected output:
 [pass] <number> test scripts
 ```
 
-- [ ] Run alpha gate if deterministic suite is green.
+- [x] Run alpha gate if deterministic suite is green.
 
 Command:
 
@@ -923,7 +923,7 @@ Expected output:
 
 If the exact alpha output differs, preserve the command output in the final implementation report.
 
-- [ ] Run Playwright readiness if UI/reference changed.
+- [x] Run Playwright readiness if UI/reference changed.
 
 Command:
 
@@ -933,7 +933,7 @@ npm.cmd run check:playwright
 
 Expected output should report ready browser/runtime state or the exact missing dependency.
 
-- [ ] If a live SillyTavern host is available, run the live smoke after deterministic tests.
+- [x] If a live SillyTavern host is available, run the live smoke after deterministic tests.
 
 Command:
 
@@ -947,7 +947,9 @@ Expected proof:
 - Manual narrowed card scope prevents disabled-family cards from reaching the installed prompt;
 - Auto all-enabled still produces normal prompt install.
 
-- [ ] Final stale-reference scan.
+Current verification note: `npm.cmd run smoke:sillytavern` was run without `--live` because this shell had no `SILLYTAVERN_BASE_URL` or `RECURSION_SILLYTAVERN_USER`; it returned `status: "skipped"`, `result: "dry-run"`, and reported no browser, chat, storage, prompt, or provider mutation.
+
+- [x] Final stale-reference scan.
 
 Commands:
 
@@ -961,13 +963,13 @@ Expected:
 - first command has no output;
 - second command shows intentional Auto/Manual implementation and tests.
 
-- [ ] Review sanitized diagnostics manually:
+- [x] Review sanitized diagnostics manually:
   - no raw provider prompts;
   - no prompt text in scope omission/exception records;
   - no secrets;
   - no transcript excerpts introduced by scope diagnostics.
 
-- [ ] Review `git diff --stat` and `git diff --check`.
+- [x] Review `git diff --stat` and `git diff --check`.
 
 Commands:
 
@@ -986,23 +988,23 @@ No output.
 
 ## Acceptance Checklist
 
-- [ ] Visible mode selector shows only Auto and Manual.
-- [ ] New/default settings start in Auto with every family and sub-item enabled.
-- [ ] Cards button opens a family/sub-item tree for the eight fixed V1 families.
-- [ ] Cards button label is `Cards` when all sub-items are enabled.
-- [ ] Cards button label is `selected/total` when partial.
-- [ ] Family off disables all sub-items.
-- [ ] Family on restores all sub-items.
-- [ ] Partial sub-item selection shows mixed family state.
-- [ ] UI prevents disabling the final selected sub-item.
-- [ ] Auto sends full catalog and selected scope preference to Utility Arbiter.
-- [ ] Auto critical unselected continuity exceptions are visible when they happen.
-- [ ] Manual sends only enabled scope to Utility Arbiter.
-- [ ] Manual filters generated, cached, fallback, selected, composed, and injected cards to enabled scope.
-- [ ] Sub-items guide family focus and do not create separate generated card instances.
-- [ ] `Semi-Auto` and `semi-auto` are gone from source, tests, product design/technical docs, and harness.
-- [ ] Deterministic test suite is green.
-- [ ] Live smoke is run or explicitly reported as not run with reason.
+- [x] Visible mode selector shows only Auto and Manual.
+- [x] New/default settings start in Auto with every family and sub-item enabled.
+- [x] Cards button opens a family/sub-item tree for the eight fixed V1 families.
+- [x] Cards button label is `Cards` when all sub-items are enabled.
+- [x] Cards button label is `selected/total` when partial.
+- [x] Family off disables all sub-items.
+- [x] Family on restores all sub-items.
+- [x] Partial sub-item selection shows mixed family state.
+- [x] UI prevents disabling the final selected sub-item.
+- [x] Auto sends full catalog and selected scope preference to Utility Arbiter.
+- [x] Auto critical unselected continuity exceptions are visible when they happen.
+- [x] Manual sends only enabled scope to Utility Arbiter.
+- [x] Manual filters generated, cached, fallback, selected, composed, and injected cards to enabled scope.
+- [x] Sub-items guide family focus and do not create separate generated card instances.
+- [x] `Semi-Auto` and `semi-auto` are gone from source, tests, product design/technical docs, and harness.
+- [x] Deterministic test suite is green.
+- [x] Live smoke is run or explicitly reported as not run with reason.
 
 ---
 
@@ -1020,10 +1022,10 @@ No output.
 
 ## Self-Review Before Execution
 
-- [ ] Every task names exact files to edit.
-- [ ] Every behavior change has a test target.
-- [ ] Manual strictness is enforced in runtime, not only requested from the Arbiter.
-- [ ] Auto focus keeps full catalog available and records exceptions visibly.
-- [ ] UI zero-selection guard exists in both helper tests and fake DOM tests.
-- [ ] Docs, tests, runtime, settings, UI, and live harness remove Semi-Auto together.
-- [ ] Verification commands are concrete and use `npm.cmd` for Windows PowerShell.
+- [x] Every task names exact files to edit.
+- [x] Every behavior change has a test target.
+- [x] Manual strictness is enforced in runtime, not only requested from the Arbiter.
+- [x] Auto focus keeps full catalog available and records exceptions visibly.
+- [x] UI zero-selection guard exists in both helper tests and fake DOM tests.
+- [x] Docs, tests, runtime, settings, UI, and live harness remove Semi-Auto together.
+- [x] Verification commands are concrete and use `npm.cmd` for Windows PowerShell.

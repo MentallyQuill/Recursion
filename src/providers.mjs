@@ -792,7 +792,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
     let retryCount = 0;
     let lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
 
-    runId = activityStart(activity, {
+    const activityRunId = activityStart(activity, {
       runId,
       phase: 'providerCallStarted',
       mode: 'background',
@@ -801,7 +801,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
       composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
       label: `${lane === 'reasoner' ? 'Reasoner' : 'Utility'} provider call started.`,
       detail: lastDiagnostics
-    }) || runId;
+    });
+    if (options.lockRunId !== true) runId = activityRunId || runId;
     lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
     queueJournalAppend({
       ...lastDiagnostics,
@@ -1017,7 +1018,11 @@ export function createGenerationRouter({ client, activity = null, journal = null
           results[entry.index] = await failureResult(entry, entry.normalizationError);
           continue;
         }
-        results[entry.index] = await generate(entry.roleId, entry.request, options);
+        results[entry.index] = await generate(entry.roleId, entry.request, {
+          ...options,
+          runId: batchRunId,
+          lockRunId: true
+        });
       }
       return results;
     }

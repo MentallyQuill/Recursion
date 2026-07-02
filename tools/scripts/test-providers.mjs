@@ -622,6 +622,37 @@ assertDeepEqual(
   ['recursion.utilityArbiter.v1', 'recursion.providerTest.v1'],
   'router batch sequential fallback validates response schemas'
 );
+assert(routerSequentialFallback[0].diagnostics.runId.startsWith('provider-batch-'), 'router sequential fallback mints a batch run id');
+assertEqual(
+  routerSequentialFallback[1].diagnostics.runId,
+  routerSequentialFallback[0].diagnostics.runId,
+  'router sequential fallback uses one shared batch run id'
+);
+
+let routerSequentialFallbackActivityStarts = 0;
+const routerSequentialFallbackActivity = await createGenerationRouter({
+  client: {
+    async generate(roleId, request) {
+      return { text: responseTextForRole(roleId, { lane: request.lane || 'utility' }) };
+    }
+  },
+  activity: {
+    start(event) {
+      routerSequentialFallbackActivityStarts += 1;
+      return { ...event, runId: `${event.runId}-activity-${routerSequentialFallbackActivityStarts}` };
+    }
+  }
+}).batch([
+  { roleId: 'utilityArbiter', prompt: 'A', runId: 'slot-a-run' },
+  { roleId: 'providerTest', prompt: 'B', runId: 'slot-b-run' }
+]);
+assertEqual(routerSequentialFallbackActivityStarts, 2, 'router sequential fallback still emits per-slot start activity');
+assert(routerSequentialFallbackActivity[0].diagnostics.runId.startsWith('provider-batch-'), 'router sequential fallback ignores per-slot request run ids');
+assertEqual(
+  routerSequentialFallbackActivity[1].diagnostics.runId,
+  routerSequentialFallbackActivity[0].diagnostics.runId,
+  'router sequential fallback keeps shared run id even when activity returns per-slot ids'
+);
 
 const badHostBatchClient = createProviderClient({
   host: {

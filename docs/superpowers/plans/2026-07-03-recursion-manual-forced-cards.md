@@ -48,8 +48,10 @@ import {
   CARD_SCOPE_CATALOG,
   manualSelectionCap,
   manualSelectedFamilies,
+  normalizeCardScope,
   rankManualSelectedFamilies,
   enforceManualSelectionCap,
+  setFamilyEnabled,
   setFamilyEnabledWithCap
 } from '../../src/card-scope.mjs';
 
@@ -76,6 +78,12 @@ assertDeepEqual(
   ['Open Threads', 'Environment', 'Scene Frame'],
   'Manual ranking preserves preferred order before catalog fallback'
 );
+const underCap = setFamilyEnabled(defaultCardScope(), CARD_SCOPE_CATALOG[5].family, false).scope;
+const underCapResult = enforceManualSelectionCap(underCap, { maxCards: 20 }, {
+  preferredFamilies: ['Open Threads', 'Environment']
+});
+assertEqual(underCapResult.trimmed, false, 'under-cap Manual transition does not trim');
+assertDeepEqual(underCapResult.scope, normalizeCardScope(underCap), 'under-cap Manual transition preserves selected families and facets exactly');
 
 const capValue = manualSelectionCap({ maxCards: 0 });
 assertEqual(capValue, 1, 'Manual selection cap floors to one selected family');

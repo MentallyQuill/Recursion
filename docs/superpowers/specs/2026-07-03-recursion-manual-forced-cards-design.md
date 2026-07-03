@@ -182,6 +182,8 @@ Never trim randomly. When Auto scope contains more selected families than Manual
 
 This matches what the user most recently saw Recursion use, then what the current scene already has in memory, then the user's broad Focus setting, then the catalog's default safety/coherence priority. The mode switch should not perform storage reads just to rank overflow selections. If no Last Brief or loaded cache context exists, the result falls back to Focus and catalog priority.
 
+If Auto scope is already at or below `manualSelectionCap`, switching to Manual must preserve the selected families and their selected sub-items exactly. Do not reorder, reset, or replace under-cap selections just because the enforcement mode changed.
+
 If stored settings contain an over-cap Manual selection, normalize in place with that ranking, dropping the rest, and showing:
 
 ```text

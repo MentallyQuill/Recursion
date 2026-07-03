@@ -959,6 +959,12 @@
   padding: 0;
 }
 
+.recursion-hand-dropdown.is-clearing .recursion-brief-scroll,
+.recursion-hand-dropdown.is-clearing .recursion-prompt-packet-panel {
+  opacity: 0;
+  transition: opacity .16s ease;
+}
+
 .recursion-cards-panel {
   backdrop-filter: blur(12px);
   display: block;

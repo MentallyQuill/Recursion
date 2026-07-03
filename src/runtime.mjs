@@ -1853,6 +1853,14 @@ export function createRecursionRuntime({
   let lastHand = { cards: [], omitted: [] };
   let lastPlan = null;
   let lastSnapshot = null;
+  let lastBrief = {
+    status: 'empty',
+    reason: 'initial',
+    packetId: '',
+    handId: '',
+    cardCount: 0,
+    updatedAt: nowIso()
+  };
   let lastRapidWarmView = rapidWarmStatusView({ pipelineMode: settingsStore.get().pipelineMode });
   let lastSavedSceneCacheRef = null;
   let pendingLatestAssistantSwipeRetry = null;
@@ -2002,10 +2010,40 @@ export function createRecursionRuntime({
     pendingLatestAssistantSwipeRetry = null;
   }
 
+  function readyLastBrief(packet = lastPacket, hand = lastHand, { runId = '', reason = 'packet-ready' } = {}) {
+    const cards = Array.isArray(hand?.cards) ? hand.cards : [];
+    lastBrief = {
+      status: 'ready',
+      reason,
+      runId: safeText(runId, 160),
+      packetId: safeText(packet?.packetId || '', 180),
+      handId: safeText(hand?.handId || '', 180),
+      cardCount: cards.length,
+      updatedAt: nowIso()
+    };
+  }
+
+  function clearLastBrief({ status = 'clearing', reason = 'generation-started', runId = '' } = {}) {
+    const previousCards = Array.isArray(lastHand?.cards) ? lastHand.cards : [];
+    lastBrief = {
+      status: ['clearing', 'empty'].includes(status) ? status : 'clearing',
+      reason: safeText(reason, 120),
+      runId: safeText(runId, 160),
+      packetId: '',
+      handId: '',
+      cardCount: 0,
+      previousPacketId: safeText(lastPacket?.packetId || lastBrief.packetId || '', 180),
+      previousHandId: safeText(lastHand?.handId || lastBrief.handId || '', 180),
+      previousCardCount: previousCards.length,
+      updatedAt: nowIso()
+    };
+  }
+
   function markLatestAssistantSwipeRetry(details = {}) {
     const source = asObject(details);
     const eventName = safeText(source.eventName || source.event || 'message_swiped', 80);
     const messageId = finiteNumberOrNull(source.messageId ?? source.mesid ?? source.id);
+    clearLastBrief({ status: 'clearing', reason: 'latest-assistant-swipe' });
     pendingLatestAssistantSwipeRetry = {
       eventName,
       ...(messageId !== null ? { messageId } : {}),
@@ -2093,6 +2131,7 @@ export function createRecursionRuntime({
     lastSnapshot = null;
     lastSavedSceneCacheRef = null;
     pendingLatestAssistantSwipeRetry = null;
+    clearLastBrief({ status: 'empty', reason: 'source-cleared' });
   }
 
   function supersededResult(runId) {
@@ -2508,6 +2547,7 @@ export function createRecursionRuntime({
       lastPlan = null;
       lastSavedSceneCacheRef = null;
       pendingLatestAssistantSwipeRetry = null;
+      clearLastBrief({ status: 'empty', reason: 'scene-cache-reset' });
       stageRuntimeActivity({
         runId,
         phase: 'promptClearing',
@@ -3858,6 +3898,7 @@ export function createRecursionRuntime({
       lastSnapshot = promptSnapshot;
       lastHand = hand;
       lastPacket = packet;
+      readyLastBrief(packet, hand, { runId, reason: installOk ? 'rapid-packet-installed' : 'rapid-install-failed' });
       await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
       await appendJournalSafe(runId, promptSnapshot.chatKey, {
         event: installOk ? 'prompt.installed' : 'prompt.install_failed',
@@ -4274,6 +4315,8 @@ export function createRecursionRuntime({
       return result;
     });
     if (install?.superseded) return install;
+    const installOk = install?.ok !== false;
+    readyLastBrief(packet, hand, { runId, reason: installOk ? 'same-turn-swipe-retry' : 'same-turn-swipe-install-failed' });
     return {
       ok: true,
       reused: true,
@@ -4303,6 +4346,7 @@ export function createRecursionRuntime({
         await appendPromptClearedJournal(clearRunId, promptClearContext(), result, 'disabled');
         return result;
       });
+      clearLastBrief({ status: 'empty', reason: 'disabled', runId: clearRunId });
       if (clear?.ok === false) reportClearWarning(clearRunId, clear);
       else safeActivity(activity, 'clear');
       return { ok: true, skipped: true, reason: 'disabled', clear };
@@ -4314,6 +4358,13 @@ export function createRecursionRuntime({
     const signal = startRun(runId);
     const modeChip = settings.mode === 'manual' ? 'Manual' : 'Auto';
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: [modeChip] });
+    if (lastBrief.status !== 'clearing') {
+      clearLastBrief({
+        status: 'clearing',
+        reason: pendingLatestAssistantSwipeRetry ? 'latest-assistant-swipe' : (refreshReason || 'generation-started'),
+        runId
+      });
+    }
     try {
       const hostSnapshot = await readSnapshot();
       const baseSnapshot = settings.pipelineMode === 'rapid' && !refreshReason
@@ -4646,6 +4697,7 @@ export function createRecursionRuntime({
         }
         const install = await installPrompt(host, packet);
         const installOk = install?.ok !== false;
+        readyLastBrief(packet, hand, { runId, reason: installOk ? 'packet-installed' : 'install-failed' });
         await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
         await appendJournalSafe(runId, promptSnapshot.chatKey, {
           event: installOk ? 'prompt.installed' : 'prompt.install_failed',
@@ -4719,6 +4771,7 @@ export function createRecursionRuntime({
         lastHand,
         lastPlan,
         lastSnapshot: viewSnapshot(lastSnapshot),
+        lastBrief: { ...lastBrief },
         rapidWarm: rapidWarmStatusView({
           ...lastRapidWarmView,
           pipelineMode: settingsStore.get().pipelineMode

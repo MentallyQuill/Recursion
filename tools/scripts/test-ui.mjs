@@ -120,6 +120,15 @@ assertEqual(
   'Ready for Recursion.',
   'rapid warm status does not override Standard pipeline status'
 );
+const clearingBriefModel = createRecursionViewModel({
+  settings: { mode: 'auto', enabled: true },
+  lastBrief: { status: 'clearing', reason: 'generation-started' },
+  activity: { phase: 'cardBatchRunning' },
+  lastHand: { cards: [{ id: 'old-card' }] },
+  lastPacket: { packetId: 'old-packet', diagnostics: { composerLane: 'utility' } }
+});
+assertEqual(clearingBriefModel.handCount, 0, 'clearing Last Brief hides old cards from compact hand count');
+assertEqual(clearingBriefModel.lastBriefStatus, 'clearing', 'view model exposes Last Brief lifecycle state');
 
 const explicitProgress = createProgressRunModel({
   progressRun: {
@@ -548,6 +557,7 @@ assert(!/\.recursion-settings-panel\.is-beside-progress/.test(recursionCss), 'pr
 assert(!/\.recursion-settings-panel\s*\{[\s\S]*?left:\s*360px;/.test(recursionCss), 'production settings panel CSS fallback is full-width, not side-by-side');
 assert(/\.recursion-status-foot \.recursion-mini-chip\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*2px 5px 3px;/.test(recursionCss), 'production progress footer Live chip uses the reference tiny-chip compactness');
 assert(/\.recursion-hand-dropdown\s*\{[\s\S]*?display:\s*block;[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production Last Brief dropdown removes the old padded grid shell');
+assert(/\.recursion-hand-dropdown\.is-clearing \.recursion-brief-scroll/.test(recursionCss), 'production Last Brief dropdown fades old cards while clearing');
 assert(/\.recursion-hand-dropdown::before/.test(recursionCss), 'production Last Brief dropdown keeps the reference top accent line');
 assert(/\.recursion-brief-head\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?padding:\s*7px 9px;/.test(recursionCss), 'production Last Brief header uses the reference 34px compactness');
 assert(/\.recursion-brief-foot \.recursion-mini-chip\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*2px 5px 3px;/.test(recursionCss), 'production Last Brief footer Esc chip uses the reference tiny-chip compactness');
@@ -2149,6 +2159,42 @@ try {
   assertEqual(root.querySelector('[data-recursion-prompt-packet-preview]').scrollTop, 52, 'prompt packet preview preserves scroll position across rerender');
   assertEqual(root.querySelector('[data-recursion-prompt-packet-panel]').hidden, false, 'prompt packet panel stays open across rerender');
   assertEqual(root.querySelector('[data-recursion-brief-card]').getAttribute('aria-expanded'), 'true', 'expanded brief card stays expanded across rerender');
+  const readyBriefView = view;
+  const handPanel = root.querySelector('[data-recursion-hand-dropdown]');
+  view = {
+    ...readyBriefView,
+    lastBrief: { status: 'clearing', reason: 'generation-started', previousPacketId: 'packet-ui' }
+  };
+  ui.update();
+  assertEqual(handPanel.dataset.recursionLastBriefState, 'clearing', 'open Last Brief marks clearing lifecycle state');
+  assert(handPanel.className.includes('is-clearing'), 'open Last Brief applies fade-out class while clearing');
+  assert(fakeDocument.textTree(handPanel).includes('Door stays blocked and the brass lock remains warped.'), 'open Last Brief keeps old cards visible during fade-out');
+  runNextTimeout(160);
+  assert(!fakeDocument.textTree(handPanel).includes('Door stays blocked and the brass lock remains warped.'), 'old Last Brief cards are removed after fade-out');
+  assert(fakeDocument.textTree(handPanel).includes('Preparing next prompt packet.'), 'Last Brief shows preparing empty state after fade-out');
+  assertEqual(root.querySelectorAll('[data-recursion-brief-card]').length, 0, 'Last Brief has no card rows after clearing fade');
+  view = {
+    ...readyBriefView,
+    lastBrief: { status: 'ready', packetId: 'packet-ui', handId: 'hand-ui', cardCount: 2 }
+  };
+  ui.update();
+  assert(fakeDocument.textTree(handPanel).includes('Door stays blocked and the brass lock remains warped.'), 'ready Last Brief cards return after packet promotion');
+  root.querySelector('[data-recursion-hand-toggle]').click();
+  assertEqual(handPanel.hidden, true, 'brief dropdown closes before closed-state clearing test');
+  view = {
+    ...readyBriefView,
+    lastBrief: { status: 'clearing', reason: 'latest-assistant-swipe', previousPacketId: 'packet-ui' }
+  };
+  ui.update();
+  root.querySelector('[data-recursion-hand-toggle]').click();
+  assertEqual(handPanel.hidden, false, 'brief dropdown reopens during clearing state');
+  assert(!fakeDocument.textTree(handPanel).includes('Door stays blocked and the brass lock remains warped.'), 'closed Last Brief does not show stale cards when opened after clearing starts');
+  assert(fakeDocument.textTree(handPanel).includes('Preparing next prompt packet.'), 'closed Last Brief opens directly to preparing state');
+  view = {
+    ...readyBriefView,
+    lastBrief: { status: 'ready', packetId: 'packet-ui', handId: 'hand-ui', cardCount: 2 }
+  };
+  ui.update();
   view = {
     ...view,
     progressRun: {

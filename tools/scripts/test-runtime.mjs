@@ -1673,6 +1673,7 @@ for (const pipelineMode of ['standard', 'rapid']) {
   const first = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
   assertEqual(first.ok, true, `${pipelineMode} latest-assistant swipe setup installs`);
   assertEqual(installed.length, 1, `${pipelineMode} latest-assistant swipe setup installs one packet`);
+  assertEqual(runtime.view().lastBrief?.status, 'ready', `${pipelineMode} latest-assistant swipe setup marks Last Brief ready`);
   const callsAfterFirst = providerCalls;
   activeSnapshot = snapshotFromMessages([
     ...initialMessages,
@@ -1690,6 +1691,8 @@ for (const pipelineMode of ['standard', 'rapid']) {
   assertEqual(typeof runtime.handleLatestAssistantSwipeRetry, 'function', `${pipelineMode} exposes latest-assistant swipe retry marker`);
   const marked = await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped', messageId: 11 });
   assertEqual(marked.ok, true, `${pipelineMode} latest-assistant swipe retry marker succeeds`);
+  assertEqual(runtime.view().lastBrief?.status, 'clearing', `${pipelineMode} latest-assistant swipe immediately clears Last Brief visually`);
+  assertEqual(runtime.view().lastBrief?.reason, 'latest-assistant-swipe', `${pipelineMode} latest-assistant swipe records clear reason`);
   const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
   assertEqual(second.ok, true, `${pipelineMode} latest-assistant swipe retry succeeds`);
   assertEqual(second.reused, true, `${pipelineMode} latest-assistant swipe retry reuses previous packet`);
@@ -1697,7 +1700,90 @@ for (const pipelineMode of ['standard', 'rapid']) {
   assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} latest-assistant swipe retry does not call providers again`);
   assertEqual(installed.length, 2, `${pipelineMode} latest-assistant swipe retry reinstalls previous packet`);
   assertEqual(installed[0].packetId, installed[1].packetId, `${pipelineMode} latest-assistant swipe retry keeps packet identity`);
+  assertEqual(runtime.view().lastBrief?.status, 'ready', `${pipelineMode} latest-assistant swipe reuse restores Last Brief after reinstall`);
+  assertEqual(runtime.view().lastBrief?.packetId, installed[0].packetId, `${pipelineMode} latest-assistant swipe reuse restores original packet id`);
   assertEqual(runtime.view().lastSnapshot.latestMesId, 10, `${pipelineMode} latest-assistant swipe retry keeps original user-turn snapshot`);
+}
+
+{
+  let utilityCallCount = 0;
+  let releaseSecondArbiter;
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          utilityCallCount += 1;
+          if (utilityCallCount === 2) {
+            await new Promise((resolve) => {
+              releaseSecondArbiter = resolve;
+            });
+          }
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', reason: 'Last Brief lifecycle test.' }],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'last brief lifecycle test', signals: [] },
+              diagnostics: ['last-brief-lifecycle']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneFrameCard',
+              family: 'Scene Frame',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: 'Last Brief lifecycle card guidance.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 8
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Last Brief lifecycle guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['last-brief-lifecycle-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected Last Brief lifecycle role ${roleId}`);
+      }
+    }
+  });
+  const first = await runtime.prepareForGeneration({ userMessage: 'Build visible Last Brief.' });
+  assertEqual(first.ok, true, 'Last Brief lifecycle setup installs first packet');
+  const firstView = runtime.view();
+  assertEqual(firstView.lastBrief?.status, 'ready', 'Last Brief is ready after first packet install');
+  assert(firstView.lastBrief?.packetId, 'Last Brief ready state includes packet id');
+  assertEqual(firstView.lastBrief?.cardCount, firstView.lastHand.cards.length, 'Last Brief ready state records card count');
+
+  const second = runtime.prepareForGeneration({ userMessage: 'Start next turn and clear visible Last Brief.' });
+  await waitUntil(() => typeof releaseSecondArbiter === 'function', 'second Last Brief lifecycle run did not enter Arbiter');
+  const during = runtime.view();
+  assertEqual(during.lastBrief?.status, 'clearing', 'Last Brief enters clearing state as soon as a new send starts');
+  assertEqual(during.lastBrief?.reason, 'generation-started', 'new send records generation-started clear reason');
+  assertEqual(during.lastBrief?.previousPacketId, firstView.lastBrief.packetId, 'clearing state points at the packet being cleared');
+  releaseSecondArbiter();
+  const secondResult = await second;
+  assertEqual(secondResult.ok, true, 'second Last Brief lifecycle run installs');
+  assertEqual(runtime.view().lastBrief?.status, 'ready', 'Last Brief becomes ready again after next packet install');
 }
 
 {

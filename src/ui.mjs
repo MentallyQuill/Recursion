@@ -54,6 +54,7 @@ const VALID_SEVERITIES = new Set(['info', 'success', 'warning', 'error']);
 const READY_PHASES = new Set(['idle', 'settled', '', undefined, null]);
 const REASONER_ACTIVE_PHASES = new Set(['reasonerComposing']);
 const STANDBY_STATUS_TIMEOUT_MS = 4000;
+const LAST_BRIEF_CLEAR_ANIMATION_MS = 160;
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SVG_TAGS = new Set(['svg', 'rect', 'path', 'circle']);
@@ -269,6 +270,12 @@ function modeLabel(value) {
 
 function normalizePipelineMode(value) {
   return cleanText(value, 'standard').toLowerCase() === 'rapid' ? 'rapid' : 'standard';
+}
+
+function normalizeLastBriefStatus(value, hasCards = false, hasPacket = false) {
+  const status = cleanText(value, '').toLowerCase();
+  if (['ready', 'clearing', 'preparing', 'empty'].includes(status)) return status;
+  return hasCards || hasPacket ? 'ready' : 'empty';
 }
 
 function pipelineLabel(value) {
@@ -740,7 +747,9 @@ export function createRecursionViewModel(view = {}) {
   const mode = normalizeMode(settings.mode);
   const pipelineMode = normalizePipelineMode(settings.pipelineMode);
   const cardScope = normalizeCardScope(settings.cardScope || defaultCardScope());
-  const cards = Array.isArray(source.lastHand?.cards) ? source.lastHand.cards : [];
+  const rawCards = Array.isArray(source.lastHand?.cards) ? source.lastHand.cards : [];
+  const lastBriefStatus = normalizeLastBriefStatus(source.lastBrief?.status, rawCards.length > 0, Boolean(source.lastPacket));
+  const cards = lastBriefStatus === 'ready' ? rawCards : [];
   const composerLane = source.lastPacket?.diagnostics?.composerLane || activity.composerLane || activity.providerLane || 'utility';
   const progressRun = createProgressRunModel(source);
   const heroPixelBlocks = createHeroPixelBlocks(progressRun);
@@ -762,6 +771,8 @@ export function createRecursionViewModel(view = {}) {
   return {
     mode,
     pipelineMode,
+    lastBriefStatus,
+    lastBriefReason: cleanText(source.lastBrief?.reason || ''),
     enabled,
     modeLabel: modeLabel(mode),
     pipelineLabel: pipelineLabel(pipelineMode),
@@ -1425,6 +1436,8 @@ function briefCardDomId(card, index) {
 function handDropdownRenderKey(view, model, cards, packetText, packetMeta) {
   return stableStringify({
     tooltipsEnabled: model.tooltipsEnabled,
+    lastBriefStatus: model.lastBriefStatus,
+    lastBriefReason: model.lastBriefReason,
     hasPacket: Boolean(view.lastPacket),
     packetId: cleanText(view.lastPacket?.packetId || ''),
     packetText,
@@ -1451,12 +1464,57 @@ function handDropdownRenderKey(view, model, cards, packetText, packetMeta) {
   });
 }
 
-function renderHandDropdown(panel, view, model) {
+function clearHandDropdownFadeTimer(panel) {
+  if (panel?.__recursionLastBriefClearTimer && typeof clearTimeout === 'function') {
+    clearTimeout(panel.__recursionLastBriefClearTimer);
+  }
+  if (panel) panel.__recursionLastBriefClearTimer = null;
+}
+
+function lastBriefEmptyText(model) {
+  const status = model.lastBriefStatus;
+  if (status === 'clearing' || status === 'preparing') return 'Preparing next prompt packet.';
+  return 'No hand has been composed for this chat.';
+}
+
+function renderHandDropdown(panel, view, model, options = {}) {
   const cards = model.cards;
-  const packetPreview = promptPacketPreview(view.lastPacket, view.lastHand);
-  const packetText = promptPacketText(view.lastPacket, view.lastHand);
+  const lastBriefStatus = model.lastBriefStatus || 'empty';
+  const clearingBrief = lastBriefStatus === 'clearing' || lastBriefStatus === 'preparing';
+  const briefPacket = clearingBrief ? null : view.lastPacket;
+  const briefHand = clearingBrief ? { cards: [] } : view.lastHand;
+  const packetPreview = promptPacketPreview(briefPacket, briefHand);
+  const packetText = promptPacketText(briefPacket, briefHand);
   const packetMeta = promptPacketMeta(packetPreview);
-  const renderKey = handDropdownRenderKey(view, model, cards, packetText, packetMeta);
+  const renderKey = handDropdownRenderKey({ ...view, lastPacket: briefPacket }, model, cards, packetText, packetMeta);
+  panel.dataset.recursionLastBriefState = lastBriefStatus;
+  if (!clearingBrief) {
+    clearHandDropdownFadeTimer(panel);
+    panel.classList?.toggle('is-clearing', false);
+    panel.dataset.recursionBriefClearingKey = '';
+  }
+  const hasVisibleBriefRows = Boolean(panel.querySelector?.('[data-recursion-brief-card]'));
+  if (clearingBrief
+    && options.forceClear !== true
+    && panel.hidden === false
+    && hasVisibleBriefRows
+    && panel.dataset?.recursionBriefClearingKey !== renderKey) {
+    panel.dataset.recursionBriefClearingKey = renderKey;
+    panel.classList?.toggle('is-clearing', true);
+    clearHandDropdownFadeTimer(panel);
+    if (typeof setTimeout === 'function') {
+      panel.__recursionLastBriefClearTimer = setTimeout(() => {
+        panel.__recursionLastBriefClearTimer = null;
+        if (panel.dataset?.recursionLastBriefState !== lastBriefStatus) return;
+        renderHandDropdown(panel, view, model, { forceClear: true });
+      }, LAST_BRIEF_CLEAR_ANIMATION_MS);
+    } else {
+      renderHandDropdown(panel, view, model, { forceClear: true });
+    }
+    return;
+  }
+  if (clearingBrief) panel.classList?.toggle('is-clearing', false);
+  if (options.forceClear === true) panel.dataset.recursionHandRenderKey = '';
   if (panel.hidden === false && panel.dataset?.recursionHandRenderKey === renderKey) return;
 
   const packetPanelWasOpen = panel.querySelector?.('[data-recursion-prompt-packet-panel]')?.hidden === false;
@@ -1475,11 +1533,11 @@ function renderHandDropdown(panel, view, model) {
     attrs: { type: 'button', 'aria-label': 'Open last prompt packet', 'aria-expanded': packetPanelWasOpen ? 'true' : 'false' },
     dataset: { recursionPromptPacketButton: '' }
   });
-  if (!view.lastPacket) {
+  if (!briefPacket) {
     packetButton.disabled = true;
     packetButton.setAttribute('disabled', 'disabled');
   }
-  setTooltip(packetButton, model.tooltipsEnabled, view.lastPacket ? 'Open injected prompt packet' : 'No prompt packet has been composed yet.');
+  setTooltip(packetButton, model.tooltipsEnabled, briefPacket ? 'Open injected prompt packet' : 'No prompt packet has been composed yet.');
   panel.appendChild(el('div', { className: 'recursion-brief-head' }, [
     el('span', {
       className: 'recursion-dropdown-title',
@@ -1515,19 +1573,19 @@ function renderHandDropdown(panel, view, model) {
     ]),
     packetPreviewNode
   ]);
-  packetPanel.hidden = !packetPanelWasOpen || !view.lastPacket;
+  packetPanel.hidden = !packetPanelWasOpen || !briefPacket;
   const nextPacketScrollTop = packetTextUnchanged ? previousPacketScrollTop : 0;
   packetButton.addEventListener?.('click', () => {
-    if (!view.lastPacket) return;
+    if (!briefPacket) return;
     packetPanel.hidden = !packetPanel.hidden;
     packetButton.setAttribute('aria-expanded', packetPanel.hidden ? 'false' : 'true');
   });
   panel.appendChild(packetPanel);
   packetPreviewNode.scrollTop = nextPacketScrollTop;
   if (!cards.length) {
-    panel.appendChild(el('p', { className: 'recursion-empty', text: 'No hand has been composed for this chat.' }));
+    panel.appendChild(el('p', { className: 'recursion-empty', text: lastBriefEmptyText(model) }));
     panel.appendChild(el('div', { className: 'recursion-brief-foot' }, [
-      el('span', { text: 'Waiting for first composed brief' }),
+      el('span', { text: clearingBrief ? 'Waiting for next composed brief' : 'Waiting for first composed brief' }),
       el('span', { className: 'recursion-mini-chip', text: 'Esc' })
     ]));
     panel.dataset.recursionHandRenderKey = renderKey;
@@ -1596,8 +1654,8 @@ function renderHandDropdown(panel, view, model) {
   if (previousBriefScrollTop > 0) scroll.scrollTop = previousBriefScrollTop;
   panel.appendChild(el('div', { className: 'recursion-brief-foot' }, [
     el('span', {
-      text: view.lastPacket?.composedAt
-        ? `Generated ${safeText(view.lastPacket.composedAt, 80)}`
+      text: briefPacket?.composedAt
+        ? `Generated ${safeText(briefPacket.composedAt, 80)}`
         : 'Generated for last composed brief'
     }),
     el('span', { className: 'recursion-mini-chip', text: 'Esc' })

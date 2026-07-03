@@ -174,7 +174,8 @@ function recursionSmokeFixtureHtml({
   reasonerFallback = false,
   directBridgeNeverResolves = false,
   visibleSendButtonClicksIgnored = false,
-  sendSurface = 'complete'
+  sendSurface = 'complete',
+  storyChatAvailable = false
 } = {}) {
   const disableHookScript = missingDisableHook
     ? ''
@@ -248,11 +249,39 @@ function recursionSmokeFixtureHtml({
     <script>
       const smokeContext = {
         chat: [],
+        characters: [
+          { name: 'Assistant', avatar: 'default_Assistant.png', chat: 'Assistant - fixture' },
+          { name: 'Story', avatar: 'Story.png', chat: 'Branch #790 - 2025-08-28@18h02m24s' }
+        ],
+        characterId: 0,
+        chatId: 'Assistant - fixture',
         prompts: {},
         enabled: true,
         mode: 'auto',
         disabledFamilies: [],
         unclearedPromptOnDisable: ${unclearedPromptOnDisable ? 'true' : 'false'},
+        async selectCharacterById(id) {
+          const normalized = Number(id);
+          if (!Number.isInteger(normalized) || !this.characters[normalized]) throw new Error('character missing');
+          this.characterId = normalized;
+          this.chatId = this.characters[normalized].chat;
+          return true;
+        },
+        async openCharacterChat(fileName) {
+          const active = this.characters[this.characterId];
+          if (!active) throw new Error('active character missing');
+          if (active.name !== 'Story' || fileName !== 'Branch #790 - 2025-08-28@18h02m24s' || !${storyChatAvailable ? 'true' : 'false'}) {
+            throw new Error('chat missing');
+          }
+          active.chat = fileName;
+          this.chatId = fileName;
+          this.chat = [
+            { mesid: 0, is_user: false, name: 'Hermione Granger', mes: 'Story branch seed assistant line.' },
+            { mesid: 1, is_user: true, name: 'Keptin', mes: 'Story branch seed user line.' },
+            { mesid: 2, is_user: false, name: 'Hermione Granger', mes: 'Story branch #790 seed ready.' }
+          ];
+          return true;
+        },
         setExtensionPrompt(key, text, position, depth, scan, role) {
           if (${ignorePromptClear ? 'true' : 'false'} && String(key || '').startsWith('recursion.') && String(text || '') === '') return;
           this.prompts[key] = { text, position, depth, scan, role };
@@ -435,7 +464,8 @@ async function createSillyTavernSmokeFixtureServer({
   reasonerFallback = false,
   directBridgeNeverResolves = false,
   visibleSendButtonClicksIgnored = false,
-  sendSurface = 'complete'
+  sendSurface = 'complete',
+  storyChatAvailable = false
 } = {}) {
   const sessions = new Map();
   let nextSession = 1;
@@ -595,7 +625,8 @@ async function createSillyTavernSmokeFixtureServer({
         reasonerFallback,
         directBridgeNeverResolves,
         visibleSendButtonClicksIgnored,
-        sendSurface
+        sendSurface,
+        storyChatAvailable
       }));
       return;
     }
@@ -1023,7 +1054,34 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
       report.browser.snapshot.generation.visibleSend.inputMethod.includes('keyboard-enter'),
       `visible send retry records keyboard-enter activation: ${JSON.stringify(report.browser.snapshot.generation.visibleSend)}`
     );
+    assertEqual(report.browser.snapshot.generation.visibleSend.acceptedAfter, 'keyboard-enter', 'visible send retry records accepted activation method');
+    assert(report.browser.snapshot.generation.visibleSend.inputValueLength > 0, 'visible send retry records input value length');
+    assertEqual(report.browser.snapshot.generation.visibleSend.activationAttempts.length, 2, 'visible send retry records each activation attempt before success');
     assertEqual(report.browser.snapshot.generation.hostGenerationContinued, true, 'visible send retry proves host generation continued');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ storyChatAvailable: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1',
+        RECURSION_LIVE_CHARACTER_NAME: 'Story',
+        RECURSION_LIVE_CHAT_FILE: 'Branch #790 - 2025-08-28@18h02m24s'
+      }
+    });
+    assertEqual(report.status, 'pass', 'seeded story chat live smoke passes');
+    assertEqual(report.browser.snapshot.seedChat?.status, 'pass', 'seeded story chat is selected before generation');
+    assertEqual(report.browser.snapshot.seedChat?.characterName, 'Story', 'seeded story chat records selected character');
+    assertEqual(report.browser.snapshot.seedChat?.chatFile, 'Branch #790 - 2025-08-28@18h02m24s', 'seeded story chat records selected chat file');
+    assert(report.browser.snapshot.seedChat?.chatLength >= 3, 'seeded story chat loads existing story messages');
+    assertEqual(report.browser.snapshot.generation.hostGenerationEvidence.chatLengthBefore, 3, 'generation starts from seeded story chat');
   } finally {
     await server.close();
   }

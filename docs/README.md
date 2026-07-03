@@ -4,7 +4,7 @@ This folder holds the Recursion documentation set: the canonical index, release 
 
 Use [Documentation Index](DOCUMENTATION_INDEX.md) as the main map. Use [Release Notes](release/README.md) for release-facing status.
 
-Render status is tracked in [Documentation Render Tracking](testing/DOCUMENTATION_RENDER_TRACKING.md). Static infographics can be promoted before the UI settles; live SillyTavern screenshots stay marked as `<Render Needed>` until the real extension surface is stable enough to capture.
+Render status is tracked in [Documentation Render Tracking](testing/DOCUMENTATION_RENDER_TRACKING.md). Explanatory diagrams should stay text-native as Mermaid graphs or markdown tables; live SillyTavern screenshots stay marked as `<Render Needed>` until the real extension surface is stable enough to capture.
 
 ## Folder Guide
 

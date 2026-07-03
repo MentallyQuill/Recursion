@@ -100,6 +100,16 @@ Shared redaction treats `rawPrompt`, `rawResponse`, `providerPrompt`, `providerR
 
 ```mermaid
 flowchart TD
+    Settings["extension_settings.recursion"] --> Index["recursion-system-index.v1.json"]
+    Index --> Scene["recursion-scene-{chatKey}-{sceneKey}.v1.json"]
+    Index --> Journal["recursion-run-journal-{chatKey}.v1.json"]
+    Scene --> Deck["Scene deck and source variants"]
+    Scene --> Hand["Latest hand metadata"]
+    Journal --> Events["Bounded sanitized events"]
+```
+
+```mermaid
+flowchart TD
     Runtime["Runtime events"] --> Redact["Redaction boundary"]
     Provider["Provider diagnostics"] --> Redact
     Prompt["Prompt metadata"] --> Redact
@@ -109,10 +119,6 @@ flowchart TD
     Redact --> Artifacts["Sanitized artifacts"]
     Secrets["Secrets and raw payloads"] -. "blocked" .-> Redact
 ```
-
-![Storage key map visual](../../assets/documentation/renders/recursion-storage-key-map.png)
-
-![Storage redaction boundary](../../assets/documentation/renders/recursion-storage-redaction-boundary.png)
 
 ## Invalidation
 
@@ -152,7 +158,7 @@ The storage repository exposes `invalidateSceneCache(chatKey, sceneKey, options)
 
 The journal entry uses `event: 'cache.invalidated'`, `severity: 'info'`, the sanitized `sceneKey`, optional `runId`, and redacted reason/details. If no cache file exists, `invalidateSceneCache` returns `{ ok: false, reason: 'missing-cache', key }` and does not create a stale cache.
 
-Runtime V1 reasons are `user-refresh`, `settings-changed`, `provider-changed`, `provider-key-cleared`, `chat-changed`, and `source-changed`. Chat-change invalidation is best-effort against the previously active scene cache when a cache reference exists; it does not create a new cache for the newly selected chat. Source-change invalidation is best-effort when SillyTavern reports a message delete, update, or swipe event; runtime clears the stale prompt immediately and leaves later source-window validation to reject any cached card whose evidence no longer matches. On a later swipe back to an earlier source revision, runtime may reuse that exact source variant if contracts and card evidence still validate. Details must not persist API keys, bearer tokens, `sk-...` tokens, private secrets, raw provider payloads, hidden reasoning, or raw message text.
+Runtime V1 reasons are `user-refresh`, `settings-changed`, `provider-changed`, `provider-key-cleared`, `chat-changed`, and `source-changed`. Chat-change invalidation is best-effort against the previously active scene cache when a cache reference exists; it does not create a new cache for the newly selected chat. Source-change invalidation is best-effort when SillyTavern reports a message delete, update, or older-message swipe event; runtime clears the stale prompt immediately and leaves later source-window validation to reject any cached card whose evidence no longer matches. A latest-assistant swipe retry keeps the existing prompt packet and is not recorded as `source-changed`. On a later swipe back to an earlier source revision, runtime may reuse that exact source variant if contracts and card evidence still validate. Details must not persist API keys, bearer tokens, `sk-...` tokens, private secrets, raw provider payloads, hidden reasoning, or raw message text.
 
 Pre-alpha records can be invalidated and rebuilt instead of migrated through compatibility shims.
 

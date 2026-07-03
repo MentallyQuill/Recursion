@@ -267,6 +267,7 @@ function createRuntimeHarness({
   settings = {},
   snapshot = null,
   hostPrompt = {},
+  hostGeneration = {},
   generationRouter = undefined,
   activity = createActivityReporter(),
   storage: providedStorage = null,
@@ -315,7 +316,8 @@ function createRuntimeHarness({
         return { ok: true, cleared: true };
       },
       ...hostPrompt.methods
-    }
+    },
+    generation: hostGeneration
   };
   const runtime = createRecursionRuntime({ host, settingsStore, storage, activity, generationRouter: resolvedGenerationRouter, rapidHedgeDelayMs });
   return { runtime, calls, installed, cleared, storage, settingsStore, activity, adapter };
@@ -909,6 +911,92 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(cache.activeSourceRevisionHash, preparedSwipeARevision, 'scene cache marks active swipe revision');
   assert(cache.variants[preparedSwipeARevision], 'scene cache keeps A source variant');
   assert(cache.variants[preparedSwipeBRevision], 'scene cache keeps B source variant');
+}
+
+for (const pipelineMode of ['standard', 'rapid']) {
+  let providerCalls = 0;
+  const baseSnapshot = {
+    chatId: `same-turn-${pipelineMode}-chat`,
+    chatKey: `same-turn-${pipelineMode}-chat`,
+    sceneKey: `same-turn-${pipelineMode}-scene`,
+    sceneFingerprint: `same-turn-${pipelineMode}-scene-fp`,
+    turnFingerprint: `same-turn-${pipelineMode}-turn-fp`,
+    latestMesId: 2,
+    messages: [
+      { mesid: 2, role: 'assistant', text: 'The prior reply waits for a swipe retry.', visible: true }
+    ]
+  };
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { pipelineMode, mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => baseSnapshot,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        providerCalls += 1;
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'same turn retry setup', signals: [] },
+              diagnostics: ['same-turn-retry-standard']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneFrameCard',
+              family: 'Scene Frame',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: 'Same-turn retry card guidance.',
+                evidenceRefs: ['message:3'],
+                tokenEstimate: 8
+              }]
+            }
+          };
+        }
+        if (roleId === 'rapidFastStartPack') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidFastStartPack.v1',
+              snapshotHash: request.snapshotHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              sceneBrief: 'Same-turn retry rapid scene.',
+              turnBrief: 'Same-turn retry rapid turn.',
+              guardrails: [],
+              omissions: [],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['same-turn-retry-rapid']
+            }
+          };
+        }
+        throw new Error(`unexpected same-turn retry role ${roleId}`);
+      }
+    }
+  });
+  const userMessage = 'Retry this response as another swipe.';
+  const first = await runtime.prepareForGeneration({ userMessage });
+  assertEqual(first.ok, true, `${pipelineMode} first same-turn run installs`);
+  assertEqual(installed.length, 1, `${pipelineMode} first same-turn run installs one packet`);
+  const callsAfterFirst = providerCalls;
+  const second = await runtime.prepareForGeneration({ userMessage });
+  assertEqual(second.ok, true, `${pipelineMode} same-turn retry succeeds`);
+  assertEqual(second.reused, true, `${pipelineMode} same-turn retry reuses prior packet`);
+  assertEqual(second.reason, 'same-turn-swipe-retry', `${pipelineMode} same-turn retry reports reuse reason`);
+  assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} same-turn retry does not call providers again`);
+  assertEqual(installed.length, 2, `${pipelineMode} same-turn retry reinstalls the existing packet`);
+  assertEqual(installed[0].packetId, installed[1].packetId, `${pipelineMode} same-turn retry keeps packet identity`);
 }
 
 {
@@ -6038,8 +6126,15 @@ for (const scenario of [
 
 {
   let releaseArbiter;
+  const hostStopCalls = [];
   const { runtime, calls, installed } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
+    hostGeneration: {
+      async stop(details = {}) {
+        hostStopCalls.push(details);
+        return { ok: true, stopped: true, eventEmitted: false, source: 'test-host-stop' };
+      }
+    },
     generationRouter: {
       async generate(roleId, request = {}) {
         assertEqual(roleId, 'utilityArbiter', 'host-stop regression only needs utility arbiter');
@@ -6059,17 +6154,22 @@ for (const scenario of [
       }
     }
   });
-  const pending = runtime.prepareForGeneration({ userMessage: 'Stop before install.' });
+  const pending = runtime.prepareForGeneration({ userMessage: 'Stop before install.', hostGeneration: true });
   await waitUntil(() => typeof releaseArbiter === 'function', 'host-stop run did not enter arbiter');
-  assertEqual(typeof runtime.handleHostGenerationStopped, 'function', 'runtime exposes host generation stop cleanup');
-  const stopped = runtime.handleHostGenerationStopped({ eventName: 'generation_stopped' });
+  assertEqual(runtime.view().hostGenerationActive, true, 'runtime tracks host generation while interceptor-owned generation is active');
+  assertEqual(typeof runtime.stopGeneration, 'function', 'runtime exposes unified stop action');
+  const stopped = runtime.stopGeneration({ source: 'recursion-ui' });
   releaseArbiter();
   const [stopResult, pendingResult] = await Promise.all([stopped, pending]);
   assertEqual(pendingResult.superseded, true, 'host generation stop supersedes in-flight generation preparation');
-  assertEqual(stopResult.ok, true, 'host generation stop cleanup succeeds');
+  assertEqual(stopResult.ok, true, 'unified stop cleanup succeeds');
+  assertEqual(stopResult.hostStop.ok, true, 'unified stop returns host stop result');
+  assertEqual(hostStopCalls.length, 1, 'unified stop calls host generation stop once');
+  assertEqual(hostStopCalls[0].source, 'recursion-ui', 'unified stop passes UI source to host generation stop');
   assertEqual(calls.clear, 1, 'host generation stop clears host prompt');
   assertEqual(installed.length, 0, 'host generation stop prevents prompt install');
   const view = runtime.view();
+  assertEqual(view.hostGenerationActive, false, 'unified stop clears host generation active state');
   assertEqual(view.activeRunId, null, 'host generation stop clears active run id');
   assertEqual(view.lastPacket, null, 'host generation stop clears in-memory prompt packet');
   assertEqual(view.lastHand.cards.length, 0, 'host generation stop clears in-memory hand');
@@ -6077,6 +6177,26 @@ for (const scenario of [
   assertEqual(view.lastSnapshot, null, 'host generation stop clears in-memory snapshot');
   assertEqual(view.activity.label, 'Generation canceled. Recursion prompt cleared.', 'host generation stop surfaces canceled cleanup');
   assertEqual(view.activity.outcome, 'skipped', 'host generation stop activity is neutral skipped outcome');
+}
+
+{
+  let releaseClear;
+  const { runtime, calls } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    hostPrompt: {
+      clear: () => new Promise((resolve) => {
+        releaseClear = () => resolve({ ok: true, cleared: true });
+      })
+    }
+  });
+  const firstStop = runtime.handleHostGenerationStopped({ eventName: 'generation_stopped' });
+  const secondStop = runtime.handleHostGenerationStopped({ eventName: 'generation_stopped' });
+  await waitUntil(() => typeof releaseClear === 'function', 'host stop cleanup did not start prompt clear');
+  releaseClear();
+  const [firstResult, secondResult] = await Promise.all([firstStop, secondStop]);
+  assertEqual(firstResult.ok, true, 'first duplicate host stop cleanup succeeds');
+  assertEqual(secondResult.ok, true, 'second duplicate host stop cleanup shares cleanup result');
+  assertEqual(calls.clear, 1, 'concurrent duplicate host stop events share one prompt clear');
 }
 
 {
@@ -6096,6 +6216,19 @@ for (const scenario of [
   const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
   assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'host-generation-stopped'), 'host generation stop records prompt clear journal');
   assertEqual(runtime.view().lastSnapshot, null, 'host generation stop clears previous snapshot after journaling');
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' }
+  });
+  assertEqual(runtime.view().hostGenerationActive, false, 'runtime starts with host generation inactive');
+  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare host generation state.', hostGeneration: true });
+  assertEqual(setup.ok, true, 'host generation state setup prepares prompt');
+  assertEqual(runtime.view().hostGenerationActive, true, 'runtime keeps stop affordance active after prompt preparation until host settles');
+  assertEqual(typeof runtime.handleHostGenerationEnded, 'function', 'runtime exposes host generation end handler');
+  runtime.handleHostGenerationEnded({ eventName: 'generation_ended' });
+  assertEqual(runtime.view().hostGenerationActive, false, 'host generation end clears stop affordance state');
 }
 
 {

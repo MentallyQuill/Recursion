@@ -37,7 +37,15 @@ The robust approach is:
 
 Recursion should not implement brittle deterministic relevance scoring. Runtime must not decide that a character is emotionally important, that a plot thread matters, or that a scene constraint applies. Runtime can safely enforce budgets, ordering, caps, boosts, fallback, routing eligibility, and diagnostic labels.
 
-![Behavior policy flow](../../assets/documentation/renders/recursion-behavior-policy.png)
+```mermaid
+flowchart LR
+    Settings["Strength, Focus, Prompt Footprint"] --> Policy["Derived behavior policy"]
+    Policy --> Arbiter["Arbiter prompt lines"]
+    Policy --> Plan["Plan shaping"]
+    Policy --> Hand["Hand selection pressure"]
+    Policy --> Compose["Composer guidance"]
+    Policy --> Diagnostics["Visible safe diagnostics"]
+```
 
 ## Goals
 

@@ -101,13 +101,27 @@ A safe provider test should:
 
 Provider tests should not store raw prompt bodies, raw responses, API keys, or unbounded error text.
 
-![Provider test flow](../../assets/documentation/renders/recursion-provider-test-flow.png)
+```mermaid
+flowchart LR
+    Configure["Configure provider source"] --> Test["Run Test Provider"]
+    Test --> Schema["Validate structured response"]
+    Schema --> Status["Show pass or fail status"]
+    Status --> Diagnostics["Store compact sanitized diagnostics"]
+    Secrets["Session key and raw response"] -. "not persisted" .-> Diagnostics
+```
 
 ## Fallback Behavior
 
 Fallbacks should be visible in the Recursion Bar, Hero Pixel Array progress menu, and Full Viewer Activity section.
 
-![Provider fallback states](../../assets/documentation/renders/recursion-provider-fallback-states.png)
+```mermaid
+flowchart TD
+    Failure["Provider failure"] --> Kind{"Where did it fail?"}
+    Kind -- "Utility unavailable" --> Reuse["Reuse safe cache or skip Recursion guidance"]
+    Kind -- "Invalid Utility output" --> Conservative["Reject output and use conservative fallback"]
+    Kind -- "Reasoner unavailable" --> Utility["Compose with Utility"]
+    Kind -- "Prompt install failure" --> Continue["Continue host generation without trusted packet"]
+```
 
 Expected fallback behavior:
 

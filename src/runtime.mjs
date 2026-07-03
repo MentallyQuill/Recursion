@@ -1787,6 +1787,8 @@ export function createRecursionRuntime({
 } = {}) {
   let activeRunId = null;
   let activeRunController = null;
+  let hostGenerationActive = false;
+  let hostStopCleanupPromise = null;
   let lastPacket = null;
   let lastHand = { cards: [], omitted: [] };
   let lastPlan = null;
@@ -1833,6 +1835,10 @@ export function createRecursionRuntime({
     if (runId && activeRunId !== runId) return;
     activeRunId = null;
     activeRunController = null;
+  }
+
+  function setHostGenerationActive(value) {
+    hostGenerationActive = Boolean(value);
   }
 
   function clearVolatileSceneState() {
@@ -2280,6 +2286,38 @@ export function createRecursionRuntime({
     });
   }
 
+  async function requestHostGenerationStop(details = {}) {
+    const source = asObject(details);
+    if (typeof host?.generation?.stop !== 'function') {
+      return {
+        ok: false,
+        stopped: false,
+        eventEmitted: false,
+        error: {
+          code: 'RECURSION_HOST_STOP_UNAVAILABLE',
+          message: 'SillyTavern stop generation API is unavailable.'
+        }
+      };
+    }
+    try {
+      const result = await host.generation.stop({
+        source: safeText(source.source || 'recursion-ui', 80),
+        reason: safeText(source.reason || 'stop-generation', 80)
+      });
+      return asObject(result);
+    } catch (error) {
+      return {
+        ok: false,
+        stopped: false,
+        eventEmitted: false,
+        error: {
+          code: safeText(error?.code || error?.name || 'RECURSION_HOST_STOP_FAILED', 120),
+          message: safeText(error?.message || error || 'SillyTavern stop generation failed.', 300)
+        }
+      };
+    }
+  }
+
   async function clearForHostEvent({
     idPrefix,
     reason,
@@ -2355,21 +2393,46 @@ export function createRecursionRuntime({
   }
 
   async function handleHostGenerationStopped(details = {}) {
+    if (hostStopCleanupPromise) return hostStopCleanupPromise;
     const source = asObject(details);
     const eventName = safeText(source.eventName || source.event || 'generation_stopped', 80);
-    return clearForHostEvent({
+    setHostGenerationActive(false);
+    hostStopCleanupPromise = clearForHostEvent({
       idPrefix: 'host-stop',
       reason: 'host-generation-stopped',
       invalidationDetails: {
-        source: 'host-event',
-        ...(eventName ? { eventName } : {})
+        source: safeText(source.source || 'host-event', 80),
+        ...(eventName ? { eventName } : {}),
+        ...(source.hostStop ? { hostStop: redact(source.hostStop) } : {})
       },
       startLabel: 'Stopping Recursion after generation cancel...',
       successLabel: 'Generation canceled. Recursion prompt cleared.',
       chips: ['Stop', 'Prompt'],
       outcome: 'skipped',
       settleSeverity: 'info'
+    }).finally(() => {
+      hostStopCleanupPromise = null;
     });
+    return hostStopCleanupPromise;
+  }
+
+  function handleHostGenerationEnded() {
+    setHostGenerationActive(false);
+    return { ok: true };
+  }
+
+  async function stopGeneration(details = {}) {
+    setHostGenerationActive(false);
+    const hostStop = await requestHostGenerationStop(details);
+    const cleanup = await handleHostGenerationStopped({
+      source: 'recursion-ui',
+      eventName: 'recursion_stop_button',
+      hostStop
+    });
+    return {
+      ...asObject(cleanup),
+      hostStop
+    };
   }
 
   function providerTestPrompt(lane) {
@@ -3522,8 +3585,65 @@ export function createRecursionRuntime({
     });
   }
 
-  async function prepareForGeneration({ userMessage = '', refreshReason = '' } = {}) {
+  function canReuseLastPacketForSnapshot(snapshot) {
+    if (!lastPacket || typeof lastPacket !== 'object') return false;
+    if (!lastHand || !Array.isArray(lastHand.cards)) return false;
+    return safeText(lastPacket.snapshotHash || '', 180) === hashJson(snapshot)
+      && safeText(lastPacket.chatId || '', 160) === safeText(snapshot.chatId || DEFAULT_CHAT_ID, 160)
+      && safeText(lastPacket.sceneFingerprint || '', 180) === safeText(snapshot.sceneFingerprint || '', 180)
+      && safeText(lastPacket.turnFingerprint || '', 180) === safeText(snapshot.turnFingerprint || '', 180);
+  }
+
+  async function reinstallLastPacketForSameTurn(runId, snapshot) {
+    const packet = lastPacket;
+    const hand = lastHand;
+    const install = await runPromptMutationSection(runId, async () => {
+      stageRuntimeActivity({
+        runId,
+        phase: 'promptInstalling',
+        label: 'Reinstalling Recursion prompt for swipe retry...',
+        chips: ['Prompt', 'Swipe']
+      });
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      const result = await installPrompt(host, packet);
+      const installOk = result?.ok !== false;
+      await appendJournalSafe(runId, snapshot.chatKey, {
+        event: installOk ? 'prompt.reinstalled' : 'prompt.install_failed',
+        severity: installOk ? 'info' : 'warn',
+        summary: installOk
+          ? 'Reinstalled existing Recursion prompt for same-turn swipe retry.'
+          : installSummary(result),
+        runId,
+        sceneKey: snapshot.sceneKey,
+        details: {
+          reason: 'same-turn-swipe-retry',
+          ...installJournalDetails(result)
+        },
+        hashes: { promptPacketHash: hashJson(packet) }
+      });
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      settleRuntimeActivity({
+        runId,
+        outcome: installOk ? 'success' : 'warning',
+        label: installOk ? 'Recursion prompt reused for swipe retry.' : INSTALL_FAILURE_LABEL,
+        chips: ['Prompt', 'Swipe']
+      });
+      return result;
+    });
+    if (install?.superseded) return install;
+    return {
+      ok: true,
+      reused: true,
+      reason: 'same-turn-swipe-retry',
+      packet,
+      hand,
+      install
+    };
+  }
+
+  async function prepareForGeneration({ userMessage = '', refreshReason = '', hostGeneration = false } = {}) {
     const settings = settingsStore.get();
+    setHostGenerationActive(hostGeneration);
     if (settings.enabled === false) {
       await waitForExternalMutations();
       supersedeActiveRun();
@@ -3554,6 +3674,10 @@ export function createRecursionRuntime({
       const baseSnapshot = await readSnapshot();
       const snapshot = snapshotWithPendingUserMessage(baseSnapshot, pendingUserMessage);
       if (!isActiveRun(runId)) return supersededResult(runId);
+      if (!refreshReason && canReuseLastPacketForSnapshot(snapshot)) {
+        lastSnapshot = snapshot;
+        return await reinstallLastPacketForSameTurn(runId, snapshot);
+      }
       lastSnapshot = snapshot;
       if (refreshReason && typeof storage.invalidateSceneCache === 'function') {
         await runStorageSaveSection(runId, async () => {
@@ -3913,6 +4037,8 @@ export function createRecursionRuntime({
     handleChatChanged,
     handleSourceChanged,
     handleHostGenerationStopped,
+    handleHostGenerationEnded,
+    stopGeneration,
     updateSettings,
     updateProvider,
     clearProviderKey,
@@ -3924,6 +4050,7 @@ export function createRecursionRuntime({
     view() {
       return {
         activeRunId,
+        hostGenerationActive,
         lastPacket,
         lastHand,
         lastPlan,

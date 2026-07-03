@@ -72,8 +72,6 @@ flowchart TD
     Validate --> Runtime["Runtime fallback or success"]
 ```
 
-![Provider routing visual](../../assets/documentation/renders/recursion-provider-routing.png)
-
 ## Structured Output Validation
 
 All provider work must return a JSON object. OpenAI-compatible responses are normalized before JSON parsing so empty visible output, reasoning-only payloads, and token-limit truncation are reported as provider failures with stable error codes. The router rejects undeclared role ids, parses visible text through the structured JSON parser, validates the expected role schema, and returns either `ok: true` with parsed data or `ok: false` with sanitized diagnostics. Runtime consumers still validate role-specific payload details; for example, provider tests pass only when the router succeeds and the parsed payload contains `schema: "recursion.providerTest.v1"` plus explicit `ok: true`.

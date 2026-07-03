@@ -6,8 +6,8 @@ These manuals explain how Recursion works behind the SillyTavern UI. They are re
 
 | Manual | Purpose |
 | --- | --- |
-| [Recursion Technical Manual](RECURSION_TECHNICAL_MANUAL.md) | System overview, boundaries, runtime spine, component ownership, UI observability, fail-soft invariants, evidence, and non-goals. |
-| [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md) | Power toggle, Auto, and Manual lifecycle from snapshot capture through Arbiter decisions, card scope, cards, composition, injection, storage, cancellation, and failure branches. |
+| [Recursion Technical Manual](RECURSION_TECHNICAL_MANUAL.md) | System overview, boundaries, runtime spine, Standard/Rapid pipelines, component ownership, UI observability, fail-soft invariants, evidence, and non-goals. |
+| [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md) | Power toggle, Auto/Manual lifecycle, Standard foreground flow, Rapid warm/delta/fast-start flow, card scope, injection, storage, cancellation, and failure branches. |
 | [Card Deck And Hand](CARD_DECK_AND_HAND.md) | Fixed V1 card families, card contract, deck lifecycle, hand selection, invalidation, Character Motivation safety, and inspector visibility. |
 | [Prompt Packet And Injection](PROMPT_PACKET_AND_INJECTION.md) | Scene Brief, Turn Brief, Guardrails, composer inputs, Utility/Reasoner composition, budgets, omissions, injection lanes, cleanup, and privacy guardrails. |
 | [Model Calls And Provider Routing](MODEL_CALLS_AND_PROVIDER_ROUTING.md) | Utility and Reasoner lanes, provider sources, machine-JSON schema metadata, generation roles, structured output validation, retries, fallbacks, journals, secrets, aborts, and provider status. |
@@ -33,7 +33,7 @@ These manuals explain how Recursion works behind the SillyTavern UI. They are re
 
 | Source Area | Primary Manual |
 | --- | --- |
-| `src/runtime.mjs`, `src/settings-policy.mjs`, `src/activity.mjs`, `src/progress.mjs` | [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md) and [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) |
+| `src/runtime.mjs`, `src/rapid-pipeline.mjs`, `src/settings-policy.mjs`, `src/activity.mjs`, `src/progress.mjs` | [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md) and [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) |
 | `src/cards.mjs`, `src/card-scope.mjs` | [Card Deck And Hand](CARD_DECK_AND_HAND.md) and [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) |
 | `src/prompt.mjs` | [Prompt Packet And Injection](PROMPT_PACKET_AND_INJECTION.md) and [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) |
 | `src/providers.mjs`, provider settings in `src/settings.mjs` | [Model Calls And Provider Routing](MODEL_CALLS_AND_PROVIDER_ROUTING.md) |

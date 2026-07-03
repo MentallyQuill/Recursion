@@ -7,9 +7,17 @@ Recursion testing should prove the extension is useful and safe without turning 
 | Fast contract suite | Runtime contracts, schemas, card lifecycle, provider routing, storage, redaction, and prompt packet rules work without a live host. | Maintained deterministic gate: `node tools\scripts\run-alpha-gate.mjs`; focused scripts: `tools/scripts/test-*.mjs`. |
 | Playwright readiness | Offline probe proves the local machine can launch/control Chromium through Playwright, use a role locator, switch desktop/phone viewports, and write trace/screenshot artifacts. If Playwright is unavailable, it returns `environment-fail` without contacting SillyTavern. | Current evidence: `check-playwright-readiness` report, trace, and viewport screenshots when Playwright is installed; otherwise a sanitized environment-fail report. |
 | Focused live SillyTavern smoke | Current preflight proves dedicated-user rejection, dry-run behavior, report shape, fail-closed semantics, Recursion-owned storage probes, served-extension freshness, no-generation UI mount/open behavior, pipeline dropdown behavior, and opt-in generation bridge prompt-install evidence. | Current evidence: `check-sillytavern-soak-users`, `smoke-sillytavern-live`, and `prove-live-pipelines` reports, no-generation screenshots/trace, live log, served-extension comparison, storage probe artifact, browser snapshot, prompt-key hashes, Standard hand readiness, Rapid packet readiness, and prompt-packet metadata. |
-| Documentation render tracking | Open screenshot, diagram, and static visual needs remain visible until promoted. | [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md), visible `<Render Needed>` markers, and promoted assets under `assets/documentation/renders/`. |
+| Documentation render tracking | Open screenshot needs remain visible until promoted; explanatory diagrams stay inline as Mermaid graphs or markdown tables. | [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md), visible `<Render Needed>` markers, and promoted live UI assets under `assets/documentation/renders/`. |
 
-![Recursion verification gates](../../assets/documentation/renders/recursion-testing-gates.png)
+```mermaid
+flowchart LR
+    Contract["Fast contract suite"] --> Alpha["Alpha gate"]
+    Alpha --> Playwright["Playwright readiness"]
+    Playwright --> Soak["Dedicated-user preflight"]
+    Soak --> Smoke["Guarded live smoke"]
+    Smoke --> Artifacts["Redacted artifacts"]
+    Artifacts --> Docs["Documentation evidence"]
+```
 
 The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, offline Playwright readiness, SillyTavern storage probes when dedicated users are available, no-generation SillyTavern UI evidence, pipeline-specific visible-send proof, and opt-in generation bridge evidence when Recursion is installed for a dedicated user.
 
@@ -28,7 +36,7 @@ Highest-priority invariants:
 - Rapid invalid provider output and mandatory gaps escalate to Standard for the same pending user message.
 - Prompt packet installation is replace-or-clear by Recursion metadata, not blind append.
 - Stale provider results cannot update the active scene cache or active prompt packet.
-- SillyTavern swipe changes clear stale Recursion prompts and cannot reuse cards from a different active source revision.
+- Older SillyTavern swipe changes clear stale Recursion prompts and cannot reuse cards from a different active source revision; latest-assistant swipe retries reuse the same prompt packet without provider work.
 - Utility is the default provider lane for Arbiter and composition work.
 - Reasoner composition is optional and must fall back to Utility or local composition on timeout, failure, off state, or invalid schema.
 - Direct endpoint API keys are session-only and never written to settings, cache, journals, reports, screenshots, artifacts, or prompt packets.

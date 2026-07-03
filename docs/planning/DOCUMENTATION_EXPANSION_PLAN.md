@@ -12,8 +12,8 @@ Recursion is pre-alpha. Documentation should describe the best current V1 contra
 2. Add `docs/DOCUMENTATION_INDEX.md` as the complete navigable map.
 3. Expand the operator documentation into a practical surface-by-surface manual.
 4. Add a technical manual family that explains the actual runtime loop, card system, prompt packet, provider routing, storage, diagnostics, and host adapter boundary.
-5. Treat renders, screenshots, diagrams, and infographics as part of the documentation deliverable.
-6. Mark missing visuals directly in the target documents with the visible literal marker `<Render Needed>` so the gaps can be found and replaced later.
+5. Treat live renders and screenshots as documentation evidence, and keep explanatory diagrams text-native with Mermaid graphs or markdown tables.
+6. Mark missing live visuals directly in the target documents with the visible literal marker `<Render Needed>` so the gaps can be found and replaced later.
 7. Keep product claims grounded in current source, current tests, and current live or fixture evidence.
 
 ## Current Baseline
@@ -63,7 +63,7 @@ Existing design and architecture docs should remain available as source referenc
 
 ## Render Marker Contract
 
-Every missing render, screenshot, diagram, or infographic requested by a document must be marked in that target document with a visible line containing the literal marker `<Render Needed>`.
+Every missing render or screenshot requested by a document must be marked in that target document with a visible line containing the literal marker `<Render Needed>`. Explanatory diagrams should be authored directly in Markdown as Mermaid graphs or tables instead of tracked as PNG render needs.
 
 Use this format:
 
@@ -107,7 +107,7 @@ Build a source-backed inventory before expanding public prose.
 ### Work
 
 - Audit `README.md`, `docs/README.md`, existing design docs, architecture docs, user docs, testing docs, and source READMEs.
-- Inventory user-facing surfaces: Recursion Bar, Hero Pixel Array progress menu, options menu, Last Brief dropdown, Full Viewer, Settings, Provider Controls, power toggle, Auto/Manual mode controls, warnings, fallback states, and mobile behavior.
+- Inventory user-facing surfaces: Recursion Bar, Hero Pixel Array progress menu, options menu, Last Brief dropdown, Full Viewer, Settings, Provider Controls, power toggle, Standard/Rapid Pipeline control, Auto/Manual mode controls, warnings, fallback states, and mobile behavior.
 - Inventory technical seams: SillyTavern host adapter, generation interceptor, runtime coordinator, Utility Arbiter, card catalog, scene cache, turn hand selection, prompt packet composition, prompt injection, provider lanes, storage, activity reporting, diagnostics, and redaction.
 - Inventory verification evidence: `npm.cmd test`, `node tools\scripts\run-alpha-gate.mjs`, Playwright readiness artifacts, dedicated soak-user checks, live smoke plans, and artifact contracts.
 - Identify stale or overlapping docs that should be renamed, merged, or rewritten in place.
@@ -158,13 +158,13 @@ Capture or plan visuals before writing screenshot-backed prose.
 - Create `docs/testing/DOCUMENTATION_RENDER_TRACKING.md`.
 - Add `<Render Needed>` markers to docs as visual gaps are introduced.
 - Capture current SillyTavern-hosted Recursion UI only after the target surface exists in the real extension and is stable enough to document.
-- Use fixture or static diagrams only when live host capture is not required for the claim; label them as explanatory infographics rather than live UI proof.
+- Use Mermaid graphs or markdown tables for source-backed explanatory diagrams; reserve promoted PNG assets for reviewed UI evidence.
 - Promote durable assets into `assets/documentation/renders/`.
 - Keep raw Playwright traces, temporary screenshots, and run reports in `artifacts/`.
 
 ### Current Render Pass Status
 
-The 2026-07-02 render pass promotes 22 source-backed static infographics and 20 live-served UI screenshots. Static diagrams document runtime, cards, prompt packet, provider routing, storage, diagnostics, host boundary, redaction, fail-soft behavior, verification gates, and behavior settings policy. Live UI screenshots now cover the Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief, provider setup, prompt packet viewer, Full Viewer, release smoke overview, and mobile layout.
+The 2026-07-03 documentation pass retires source-backed diagram PNGs in favor of Mermaid graphs and markdown tables embedded directly in the relevant docs. Live UI screenshots now cover the Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief, provider setup, prompt packet viewer, Full Viewer, release smoke overview, and mobile layout.
 
 ### README Render Needs
 
@@ -192,11 +192,11 @@ The 2026-07-02 render pass promotes 22 source-backed static infographics and 20 
 | Fail-soft states | Utility unavailable, Reasoner timeout, invalid structured output, storage write failure, injection failure, and stale async result. |
 | Mobile behavior | Bar wrap behavior, menu access, viewer layout, and touch-safe controls. |
 
-### Technical Manual Render And Infographic Needs
+### Technical Manual Diagram Needs
 
 | Visual | Purpose |
 | --- | --- |
-| Runtime pipeline infographic | Host Snapshot -> Utility Arbiter -> Scene Deck -> Turn Hand -> Composer/Reasoner -> Prompt Packet -> Injection -> Diagnostics. |
+| Runtime pipeline diagram | Host Snapshot -> Utility Arbiter -> Scene Deck -> Turn Hand -> Composer/Reasoner -> Prompt Packet -> Injection -> Diagnostics. |
 | Turn sequence diagram | Power, Auto/Manual generation lifecycle, prompt install timing, cancellation, and stale result discard. |
 | Card lifecycle diagram | Create, refresh, stow, discard, select, omit, and invalidate cards. |
 | Card family matrix | Scene Frame, Active Cast, Character Motivation, Relationship, Social Subtext, Scene Constraints, Knowledge, Consequences, Environment, Items, Open Threads. |
@@ -206,7 +206,7 @@ The 2026-07-02 render pass promotes 22 source-backed static infographics and 20 
 | Storage key map | Settings, system index, scene cache, run journal, prompt metadata, and sanitized artifact boundary. |
 | Redaction boundary diagram | Data that may appear in UI/journals/artifacts versus raw provider payloads and session secrets that must not persist. |
 | Host adapter boundary | SillyTavern context, generation, prompt, settings, file storage, UI lifecycle, and host-neutral runtime interfaces. |
-| Testing gate flow | Unit scripts, alpha gate, Playwright readiness, soak-user preflight, guarded live smoke, artifact review, and render promotion. Promoted as `assets/documentation/renders/recursion-testing-gates.png`. |
+| Testing gate flow | Unit scripts, alpha gate, Playwright readiness, soak-user preflight, guarded live smoke, artifact review, and documentation evidence. |
 
 ## Stage 3: README Expansion
 
@@ -270,7 +270,7 @@ Explain how Recursion actually works behind the UI.
   - storage and diagnostics;
   - host integration.
 - Anchor claims to `src/`, `styles/`, `tests/`, and `tools/`.
-- Use Mermaid diagrams for data flow where a screenshot would be less useful.
+- Use Mermaid diagrams or markdown tables for data flow where a screenshot would be less useful.
 - Use sanitized UI/diagnostic captures where operator-facing evidence matters.
 
 ### Outputs
@@ -365,7 +365,7 @@ The operator manual should wait for at least a render inventory. The technical m
 - Operator docs cover install, first run, modes, providers, activity, inspection, fallback, prompt safety, and mobile behavior.
 - Technical docs explain the runtime loop, card/hand system, prompt packet, provider routing, storage, diagnostics, and host integration.
 - Testing docs explain local gates, live guardrails, artifacts, and render capture expectations.
-- Missing visual assets are marked where they belong with visible `<Render Needed>` lines.
+- Missing live visual assets are marked where they belong with visible `<Render Needed>` lines.
 - Promoted renders live under `assets/documentation/renders/`.
 - Stale docs are updated in place or clearly labeled as historical source material.
 - Verification commands and remaining render gaps are recorded before release-facing completion is claimed.

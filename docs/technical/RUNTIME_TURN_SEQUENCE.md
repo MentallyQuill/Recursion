@@ -7,8 +7,9 @@ This manual describes the turn lifecycle implemented by `src/runtime.mjs` and th
 | Control state | Runtime behavior |
 | --- | --- |
 | Power off | Supersedes active Recursion work, clears Recursion prompt entries, and returns without chat inspection or prompt compilation. |
-| Auto | Captures a snapshot, sends the full fixed catalog plus card-scope focus preferences to the Utility Arbiter, runs the full pipeline, installs validated prompt blocks, writes bounded diagnostics, and settles the progress surface. |
-| Manual | Captures a snapshot, sends only enabled card-scope families/sub-items to the Utility Arbiter, strictly filters disabled card jobs/cards before generation and hand selection, then runs the same prompt-compile pipeline when useful. |
+| Stop generation | Requests SillyTavern host generation stop, aborts active Recursion work, clears Recursion prompt entries, and settles the canceled attempt as skipped/neutral. |
+| Auto | Captures a snapshot, sends the full fixed catalog plus card-scope focus preferences to the selected pipeline, installs validated prompt blocks when useful, writes bounded diagnostics, and settles the progress surface. |
+| Manual | Captures a snapshot, treats enabled card-scope families/sub-items as a strict whitelist, filters disabled card jobs/cards before generation and hand selection, then runs the selected prompt-compile pipeline when useful. |
 
 Pipeline selection is separate from Auto/Manual. The compact bar owns the Pipeline selector as an icon-only dropdown immediately to the left of the Mode button. `Standard` runs the full foreground pipeline on send. `Rapid` keeps provider-generated scene work warm in the background and uses a short foreground Utility delta on send. Settings may persist `pipelineMode`, but Settings must not render a second Standard/Rapid toggle.
 
@@ -45,11 +46,36 @@ sequenceDiagram
     Runtime->>UI: Recursion prompt ready or warning
 ```
 
-![Runtime turn sequence visual](../../assets/documentation/renders/recursion-runtime-turn-sequence.png)
-
 ## Rapid Sequence
 
 Rapid changes when provider work happens, not who authors the guidance. It never creates local fallback cards, local scene briefs, or local turn briefs for the Rapid path.
+
+```mermaid
+sequenceDiagram
+    participant Host as SillyTavern Host
+    participant Runtime as Runtime
+    participant Utility as Utility
+    participant Storage as Storage
+    participant Adapter as Prompt Adapter
+
+    Host->>Runtime: assistant landed or chat idle
+    Runtime->>Utility: warm provider scene artifact
+    Utility-->>Runtime: warm cards and conditioned scene guidance
+    Runtime->>Storage: save exact-source rapid metadata
+    Host->>Runtime: next generation interceptor
+    Runtime->>Storage: load matching warm artifact
+    alt warm artifact usable
+        Runtime->>Utility: rapidTurnDelta
+    else warm artifact missing
+        Runtime->>Utility: rapidFastStartPack
+    end
+    Utility-->>Runtime: provider-authored Rapid packet guidance
+    alt valid Rapid output
+        Runtime->>Adapter: install Recursion prompt keys
+    else mandatory gap or invalid output
+        Runtime->>Runtime: continue through Standard
+    end
+```
 
 Background warm:
 
@@ -145,9 +171,11 @@ Runtime keeps one active run id and an abort controller. Settings changes, provi
 
 When the SillyTavern entrypoint receives `event_types.CHAT_CHANGED`, runtime aborts active provider work, clears volatile packet/hand/plan/snapshot state, best-effort marks the previously active scene cache stale with reason `chat-changed`, clears Recursion prompt keys, and journals the prompt-clear result against the previous chat when known. It does not call Utility or Reasoner for the newly selected chat until the next generation or explicit refresh.
 
-When the entrypoint receives source mutation events such as `MESSAGE_DELETED`, `MESSAGE_UPDATED`, or `MESSAGE_SWIPED`, runtime follows the same prompt-safe cleanup path with reason `source-changed`. It clears the stale prompt immediately and stores only compact event metadata such as event name and message id; it does not persist changed message text. The next generation reads the current active source revision and starts fresh progress, so old warning or failed rows do not carry forward. If the user swiped back to an earlier revision and that exact variant still exists and validates, runtime can reuse it with cached/purple progress; otherwise it regenerates or skips according to the Arbiter plan.
+When the entrypoint receives source mutation events such as `MESSAGE_DELETED`, `MESSAGE_UPDATED`, or older-message `MESSAGE_SWIPED`, runtime follows the same prompt-safe cleanup path with reason `source-changed`. It clears the stale prompt immediately and stores only compact event metadata such as event name and message id; it does not persist changed message text. A `MESSAGE_SWIPED` event for the latest visible assistant message is different: it is treated as a same-turn swipe retry, so Recursion keeps the existing prompt and Rapid does not prewarm again. If SillyTavern invokes the generation interceptor again for that same pending user turn, runtime reinstalls the previous packet without running Standard, Rapid, Utility, or Reasoner work. The next distinct user message reads the current active source revision and starts fresh progress. If the user swiped back to an earlier revision and that exact variant still exists and validates, runtime can reuse it with cached/purple progress; otherwise it regenerates or skips according to the Arbiter plan.
 
 When the player cancels SillyTavern generation, the entrypoint receives `event_types.GENERATION_STOPPED` (`generation_stopped`). Runtime treats that as `host-generation-stopped`: it aborts the active run controller so in-flight Utility/Reasoner calls receive an abort signal, clears volatile packet/hand/plan/snapshot state, clears Recursion prompt keys, and refuses to install any late packet from the canceled run. If a scene cache had already been written for that canceled attempt, runtime marks it stale with reason `host-generation-stopped`. The progress outcome is `skipped`/neutral so user cancellation is not displayed as a provider warning or failure.
+
+The Recursion Bar Stop generation button calls `runtime.stopGeneration()`. Runtime first asks `host.generation.stop()` to run SillyTavern's own generation stop path, then runs the same host-stop cleanup path used by the host event. Duplicate stop notifications collapse onto the in-flight cleanup promise so a button click plus SillyTavern `GENERATION_STOPPED` event clears Recursion prompt lanes once. Assistant-landed events call `handleHostGenerationEnded()` to hide the stop affordance after a normal generation completes.
 
 ```mermaid
 flowchart TD
@@ -158,7 +186,15 @@ flowchart TD
     Stale --> NoMutate["Do not mutate active prompt or cache"]
 ```
 
-![Stale result discard](../../assets/documentation/renders/recursion-stale-result-discard.png)
+```mermaid
+flowchart LR
+    RunA["Run A starts"] --> Provider["Provider work in flight"]
+    RunB["Run B starts"] --> Supersede["Active run id changes"]
+    Supersede --> Late["Run A returns late"]
+    Late --> Discard["Discard stale result"]
+    Discard --> NoMutation["No prompt install or cache overwrite"]
+    RunB --> Owns["Run B owns prompt state"]
+```
 
 ## Failure Branches
 
@@ -177,5 +213,6 @@ flowchart TD
 | Reasoner call failed | Compose with Utility and record Reasoner fallback metadata. |
 | Prompt install failed | Record warning; normal SillyTavern generation continues. |
 | Prompt clear failed | Record warning because a stale prompt may remain in host state. |
+| Host stop API unavailable | Abort Recursion work and clear prompt lanes; report `RECURSION_HOST_STOP_UNAVAILABLE` in the stop result. |
 | Storage write failed | Continue in memory for current turn and show storage warning. |
 | Runtime exception | Settle activity as error and throw a sanitized runtime error. |

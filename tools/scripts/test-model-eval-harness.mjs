@@ -35,6 +35,8 @@ const parsed = parseEvalArgs([
   '--user', 'recursion-soak-a',
   '--target-model', 'target-model',
   '--judge-model', 'judge-model',
+  '--character-name', 'Story',
+  '--chat-file', 'Branch #790 - 2025-08-28@18h02m24s',
   '--max-provider-calls', '30',
   '--write-artifacts'
 ]);
@@ -45,6 +47,8 @@ assertEqual(parsed.runs, 2, 'parseEvalArgs records numeric runs');
 assertEqual(parsed.user, 'recursion-soak-a', 'parseEvalArgs records soak user');
 assertEqual(parsed.targetModel, 'target-model', 'parseEvalArgs records target model');
 assertEqual(parsed.judgeModel, 'judge-model', 'parseEvalArgs records judge model');
+assertEqual(parsed.characterName, 'Story', 'parseEvalArgs records live seed character');
+assertEqual(parsed.chatFile, 'Branch #790 - 2025-08-28@18h02m24s', 'parseEvalArgs records live seed chat file');
 assertEqual(parsed.maxProviderCalls, 30, 'parseEvalArgs records provider-call cap');
 
 const smokeScenarios = loadScenarioPack('smoke');
@@ -176,6 +180,8 @@ const traversalOnly = await runModelEval({
     '--user', 'recursion-soak-a',
     '--target-model', 'target-model',
     '--judge-model', 'judge-model',
+    '--character-name', 'Story',
+    '--chat-file', 'Branch #790 - 2025-08-28@18h02m24s',
     '--max-provider-calls', '100'
   ],
   env: { SILLYTAVERN_BASE_URL: 'http://127.0.0.1:8000' },
@@ -198,6 +204,8 @@ const traversalOnly = await runModelEval({
 assertEqual(smokeRunnerEnv.RECURSION_LIVE_REASONER, '1', 'live eval enables Reasoner model-call smoke for Playwright traversal');
 assertEqual(smokeRunnerEnv.RECURSION_LIVE_TIMEOUT_MS, '120000', 'live eval gives real model calls a longer traversal timeout');
 assertEqual(smokeRunnerEnv.RECURSION_SILLYTAVERN_USER, 'recursion-soak-a', 'live eval passes dedicated user to Playwright traversal');
+assertEqual(smokeRunnerEnv.RECURSION_LIVE_CHARACTER_NAME, 'Story', 'live eval forwards seeded story character to Playwright traversal');
+assertEqual(smokeRunnerEnv.RECURSION_LIVE_CHAT_FILE, 'Branch #790 - 2025-08-28@18h02m24s', 'live eval forwards seeded story chat to Playwright traversal');
 assertEqual(traversalOnly.status, 'skipped', 'live eval does not claim full pass before model-effectiveness judging exists');
 assertEqual(traversalOnly.result, 'model-effectiveness-not-implemented', 'live eval records pending model-effectiveness lane');
 assertEqual(traversalOnly.live.servedStatus, 'served-extension-match', 'live eval records served extension status from Playwright smoke');
@@ -223,7 +231,13 @@ const traversalFailure = await runModelEval({
         generation: {
           triggerSource: 'ui-send',
           promptInstalled: true,
-          hostGenerationContinued: false
+          hostGenerationContinued: false,
+          visibleSend: {
+            inputMethod: 'fill+button-click+keyboard-enter+dom-click',
+            inputValueLength: 73,
+            acceptedAfter: '',
+            activationAttempts: [{ method: 'button-click', chatLength: 2, accepted: false }]
+          }
         }
       }
     }
@@ -235,6 +249,8 @@ assertEqual(traversalFailure.defects[0].layer, 'live-host', 'traversal failure d
 assertEqual(traversalFailure.defects[0].severity, 'high', 'host continuation traversal defect is high severity');
 assert(traversalFailure.defects[0].reproduction.command.includes('eval-recursion-models.mjs'), 'defect includes reproduction command');
 assert(traversalFailure.defects[0].regressionTarget.includes('test-live-harness'), 'defect names regression target');
+assertEqual(traversalFailure.defects[0].evidence.visibleSend.inputValueLength, 73, 'defect includes visible-send diagnostic evidence');
+assertEqual(traversalFailure.defects[0].evidence.visibleSend.acceptedAfter, '', 'defect records that visible send was not accepted');
 assertEqual(traversalFailure.repairSummary.openDefects, 1, 'live eval summarizes open defects');
 
 console.log('[pass] model eval harness');

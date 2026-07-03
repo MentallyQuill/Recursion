@@ -2,7 +2,7 @@
 
 This guide walks through the first useful Recursion session in SillyTavern. It assumes Recursion is installed or served as an extension and that you are using the current V1 pre-alpha contract.
 
-Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Manual mode is active. It is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing workflow.
+Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Manual mode is active. Pipeline selection is separate from Auto and Manual: Standard runs the full foreground pass on send, while Rapid warms provider-generated scene guidance in the background and uses a shorter foreground delta. Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing workflow.
 
 ## 1. Install And Enable
 
@@ -13,7 +13,7 @@ Recursion is a current-scene prompt compiler. It observes the active chat, build
 
 ![SillyTavern with Recursion enabled and the Recursion Bar mounted](../../assets/documentation/renders/recursion-first-run-install-enable.png)
 
-The bar should expose the power toggle, icon-only mode control, Cards selector, Hero Pixel Array plus current-step text, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, extra details may collapse into compact menus.
+The bar should expose the power toggle, icon-only Pipeline control, icon-only mode control, Cards selector, Hero Pixel Array plus current-step text, active-only Stop generation button during a running turn, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, extra details may collapse into compact menus.
 
 ![Recursion Bar mounted below the SillyTavern chat header](../../assets/documentation/renders/recursion-first-run-bar-mounted.png)
 
@@ -44,11 +44,13 @@ Reasoning Level controls how strongly Recursion tries to use Reasoner. Low is Ut
 Auto prepares and installs the next Recursion prompt packet.
 
 1. Confirm the power toggle is on.
-2. Set mode to `Auto`.
-3. Send a safe, ordinary chat message.
-4. Watch the Hero Pixel Array progress menu for visible progress.
-5. Wait for `Recursion prompt ready.` or a clear fallback state.
-6. Let SillyTavern generation continue normally.
+2. Set Pipeline to `Standard`.
+3. Set mode to `Auto`.
+4. Send a safe, ordinary chat message.
+5. Watch the Hero Pixel Array progress menu for visible progress.
+6. Wait for `Recursion prompt ready.` or a clear fallback state.
+7. Confirm the Stop generation button is visible while the host turn remains active.
+8. Let SillyTavern generation continue normally.
 
 ![Hero Pixel Array progress menu during a first Auto pass](../../assets/documentation/renders/recursion-first-run-auto-pass.png)
 
@@ -66,7 +68,26 @@ Manual uses the Cards selector as a strict whitelist. Disabled families stay out
 
 A normal Auto pass may show stages such as reading the current turn, planning the card pass, generating or reusing scene cards, selecting the turn hand, composing the prompt packet, installing the Recursion prompt, saving cache, and ready state.
 
-## 6. Inspect Last Brief And Viewer
+## 6. Try Rapid
+
+Rapid is useful after Standard is already working. It does not skip provider-authored guidance; instead, it moves scene work into a background warm step and uses a short Utility foreground delta on the next send.
+
+1. Confirm Utility is configured and passing provider tests.
+2. Set Pipeline to `Rapid`.
+3. Let an assistant message land or wait for the scene to settle so Recursion can warm a Rapid scene artifact.
+4. Send a safe, ordinary chat message.
+5. Confirm the progress text reports Rapid warm, Rapid turn delta, Rapid fast-start, Standard escalation, or a clear fallback honestly.
+
+```mermaid
+flowchart LR
+    Standard["Standard first"] --> Confirm["Confirm prompt ready or clear fallback"]
+    Confirm --> Rapid["Switch to Rapid"]
+    Rapid --> Warm["Let scene warm"]
+    Warm --> Send["Send next message"]
+    Send --> Outcome["Rapid delta, fast-start, Standard escalation, or clear fallback"]
+```
+
+## 7. Inspect Last Brief And Viewer
 
 After Auto or Manual has produced a hand:
 
@@ -81,11 +102,12 @@ After Auto or Manual has produced a hand:
 
 The prompt packet should be bounded and inspectable. It should contain current-scene guidance, not raw provider output, hidden reasoning, broad lore, or transcript-scale summaries.
 
-## 7. Clear Or Disable Safely
+## 8. Clear Or Disable Safely
 
 Use these controls when you want Recursion out of the next generation:
 
 - Click the power toggle off to stop Recursion and clear or skip Recursion-owned prompt lanes.
+- During an active generation, click Stop generation to stop the SillyTavern generation, abort Recursion work, and clear Recursion-owned prompt lanes in one action.
 - Disable the extension if you want Recursion fully inactive.
 - Clear session keys when you are finished with direct endpoint testing.
 
@@ -97,8 +119,10 @@ The first run is healthy when:
 
 - Recursion Bar is mounted and stable.
 - Utility provider can be configured and tested.
-- Auto mode reaches prompt ready or a clear fail-soft fallback.
+- Standard Auto mode reaches prompt ready or a clear fail-soft fallback.
 - Manual mode respects the selected card scope and reaches prompt ready or a clear fallback.
+- Rapid mode reports warm, turn-delta, fast-start, Standard escalation, or clear fallback states without installing local substitute Rapid guidance.
+- Active Stop generation cancels both the host generation and Recursion prompt work without showing a provider failure.
 - Last Brief and Full Viewer inspection are available.
 - Prompt Packet inspection shows bounded current-scene guidance.
 - Power-off or extension disable removes Recursion from the next prompt path.

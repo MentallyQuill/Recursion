@@ -20,19 +20,40 @@ const model = createRecursionViewModel({
 assertEqual(model.runtimeHealthLabel, 'Ready', 'runtime health label built');
 assertEqual(model.modeLabel, 'Auto', 'mode label built');
 assertEqual(model.statusText, undefined, 'view model does not expose combined runtime/mode status');
-assertEqual(model.standbyStatusText, 'Recursion prompt ready', 'settled prompt-ready activity exposes compact standby text');
+assertEqual(model.standbyStatusText, 'Recursion prompt ready.', 'settled prompt-ready activity exposes compact standby text with punctuation');
+assertEqual(model.generationStopVisible, false, 'settled prompt-ready view hides the stop generation button');
 assertEqual(model.handCount, 2, 'hand count built');
 assertEqual(model.composerLabel, 'Utility', 'composer label built');
 assertEqual(model.tooltipsEnabled, true, 'view model defaults tooltip hover help on');
 assertEqual(createRecursionViewModel({ settings: { ui: { tooltipsEnabled: false } } }).tooltipsEnabled, false, 'view model can disable tooltip hover help');
 assertEqual(
   createRecursionViewModel({
+    activeRunId: 'run-active-stop',
+    settings: { mode: 'auto', enabled: true },
+    activity: { phase: 'cardBatchRunning' },
+    lastHand: { cards: [] }
+  }).generationStopVisible,
+  true,
+  'active Recursion run exposes stop generation button'
+);
+assertEqual(
+  createRecursionViewModel({
+    hostGenerationActive: true,
+    settings: { mode: 'auto', enabled: true },
+    activity: { phase: 'settled', severity: 'success', label: 'Recursion prompt ready.' },
+    lastHand: { cards: [] }
+  }).generationStopVisible,
+  true,
+  'active host generation keeps stop generation button visible after prompt preparation'
+);
+assertEqual(
+  createRecursionViewModel({
     settings: { mode: 'auto', enabled: true },
     activity: { phase: 'idle' },
     lastHand: { cards: [] }
   }).standbyStatusText,
-  'Ready for Recursion',
-  'fresh enabled idle view exposes first-load standby text'
+  'Ready for Recursion.',
+  'fresh enabled idle view exposes first-load standby text with punctuation'
 );
 assertEqual(
   createRecursionViewModel({
@@ -40,8 +61,8 @@ assertEqual(
     activity: { phase: 'idle' },
     lastHand: { cards: [] }
   }).standbyStatusText,
-  'Recursion off',
-  'disabled idle view exposes off standby text'
+  'Recursion off.',
+  'disabled idle view exposes off standby text with punctuation'
 );
 assertEqual(
   createRecursionViewModel({
@@ -49,8 +70,8 @@ assertEqual(
     activity: { phase: 'idle' },
     lastHand: { cards: [{ id: 'manual-card' }] }
   }).standbyStatusText,
-  'Manual scope armed',
-  'manual idle view exposes scoped standby text'
+  'Manual scope armed.',
+  'manual idle view exposes scoped standby text with punctuation'
 );
 assertEqual(
   createRecursionViewModel({
@@ -58,8 +79,8 @@ assertEqual(
     activity: { phase: 'idle' },
     lastHand: { cards: [{ id: 'deck-card' }] }
   }).standbyStatusText,
-  'Scene deck standing by',
-  'auto idle view with cards exposes scene deck standby text'
+  'Scene deck standing by.',
+  'auto idle view with cards exposes scene deck standby text with punctuation'
 );
 assertEqual(
   createRecursionViewModel({
@@ -67,8 +88,8 @@ assertEqual(
     activity: { phase: 'rapidWarmReady', severity: 'success', label: 'Rapid deck ready.' },
     lastHand: { cards: [{ id: 'rapid-card' }] }
   }).standbyStatusText,
-  'Rapid deck ready',
-  'rapid warm success exposes rapid standby text'
+  'Rapid deck ready.',
+  'rapid warm success exposes rapid standby text with punctuation'
 );
 
 const explicitProgress = createProgressRunModel({
@@ -1105,6 +1126,7 @@ try {
   let resetSceneCacheCalls = 0;
   let clearRunJournalCalls = 0;
   let exportDiagnosticsCalls = 0;
+  let stopGenerationCalls = 0;
   let view = {
     settings: {
       mode: 'auto',
@@ -1321,6 +1343,10 @@ try {
             promptPacketHash: 'packet-hash'
           }
         };
+      },
+      stopGeneration: (details = {}) => {
+        stopGenerationCalls += 1;
+        return { ok: true, details };
       }
     },
     mountPoint: fakeDocument.body
@@ -1412,6 +1438,9 @@ try {
   );
   assert(root.querySelector('[data-recursion-status-trigger]'), 'compact bar renders the progress activity trigger');
   assert(root.querySelector('[data-recursion-hero-array]'), 'compact bar renders the Hero Pixel Array');
+  assert(root.querySelector('[data-recursion-stop-generation]'), 'compact bar renders the active stop generation button');
+  assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, false, 'active run shows stop generation button');
+  assert(root.querySelector('[data-recursion-stop-generation]').querySelector('[data-recursion-stop-icon]'), 'stop generation button uses a square stop icon');
   assert(root.querySelector('[data-recursion-status-popover]'), 'compact bar renders the progress popover');
   assert(root.querySelector('[data-recursion-current-step]'), 'compact bar renders one current-step status text');
   assert(root.querySelector('[data-recursion-reasoning-chain]'), 'compact bar renders the reasoning level chain');
@@ -1458,6 +1487,8 @@ try {
   assertEqual(root.querySelector('[data-recursion-pipeline-button]').getAttribute('aria-expanded'), 'false', 'pipeline menu trigger starts collapsed');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'false', 'progress activity trigger starts collapsed');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('title'), 'Open generation progress', 'progress activity trigger exposes hover tip copy');
+  assertEqual(root.querySelector('[data-recursion-stop-generation]').getAttribute('title'), 'Stop generation', 'stop generation button exposes hover tip copy');
+  assertEqual(root.querySelector('[data-recursion-stop-generation]').getAttribute('aria-label'), 'Stop generation', 'stop generation button exposes accessible copy');
   assertEqual(root.querySelector('[data-recursion-hand-toggle]').getAttribute('aria-expanded'), 'false', 'brief dropdown trigger starts collapsed');
   assertEqual(root.querySelector('[data-recursion-hand-toggle]').getAttribute('title'), 'Open last brief preview', 'brief dropdown trigger exposes hover tip copy');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode menu trigger starts collapsed');
@@ -1523,6 +1554,9 @@ try {
   root.querySelector('[data-recursion-power-toggle]').click();
   assertDeepEqual(settingsUpdates.at(-1), { enabled: false }, 'power toggle disables Recursion without changing mode');
   assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'power toggle does not open progress popover');
+  root.querySelector('[data-recursion-stop-generation]').click();
+  assertEqual(stopGenerationCalls, 1, 'stop generation button calls unified runtime stop action');
+  assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, true, 'stop generation button does not open progress popover');
   root.querySelector('[data-recursion-status-trigger]').click();
   assertEqual(root.querySelector('[data-recursion-status-popover]').hidden, false, 'activity trigger opens progress popover');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'true', 'activity trigger reflects open progress popover');
@@ -2149,11 +2183,16 @@ try {
   ui.update();
   assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Ready', 'update refreshes runtime health');
   assertEqual(root.querySelector('[data-recursion-mode]').textContent, 'Auto', 'update refreshes mode text');
-  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Recursion prompt ready', 'settled prompt ready renders compact standby text');
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Recursion prompt ready.', 'settled prompt ready renders compact standby text with punctuation');
   runNextTimeout(2000);
   assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, true, 'success ribbon collapses after the success timeout');
   ui.update();
   assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, true, 'success ribbon stays collapsed while the same success activity is polled');
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Recursion prompt ready.', 'settled standby text survives success ribbon collapse');
+  runNextTimeout(4000);
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, '', 'settled standby text clears after four seconds');
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, '', 'same settled standby text does not reappear after the four-second expiry');
   view = { ...view, activity: { phase: 'providerIssue', severity: 'warning', label: 'Provider test failed.' } };
   ui.update();
   assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, false, 'warning ribbon appears immediately and persists');
@@ -2162,7 +2201,14 @@ try {
 
   view = { settings: { mode: 'auto' }, activity: { phase: 'idle' }, lastHand: { cards: [] } };
   ui.update();
-  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Ready for Recursion', 'fresh idle view renders first-load standby text');
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Ready for Recursion.', 'fresh idle view renders first-load standby text with punctuation');
+  runNextTimeout(4000);
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, '', 'fresh idle standby text clears after four seconds');
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, '', 'same fresh idle standby text does not reappear after expiry');
+  view = { settings: { mode: 'manual' }, activity: { phase: 'idle' }, lastHand: { cards: [] } };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Manual scope armed.', 'new standby text appears when standby key changes');
   const idleViewerText = fakeDocument.textTree(viewer);
   assert(!idleViewerText.includes('Recursion is working...'), 'idle viewer does not report active work');
 

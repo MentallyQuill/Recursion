@@ -27,16 +27,47 @@ flowchart TD
     Activity --> Storage["Scene cache and run journal"]
 ```
 
-![Runtime pipeline visual](../../assets/documentation/renders/recursion-technical-runtime-pipeline.png)
-
 The runtime spine is implemented across `src/runtime.mjs`, `src/settings-policy.mjs`, `src/cards.mjs`, `src/card-scope.mjs`, `src/progress.mjs`, `src/prompt.mjs`, `src/providers.mjs`, `src/storage.mjs`, `src/activity.mjs`, and `src/hosts/sillytavern/host.mjs`.
+
+Pipeline selection is controlled by `settings.pipelineMode` and is independent from Auto/Manual mode. `standard` is the default normalized value. `rapid` is accepted as the alternate value, but invalid pipeline names normalize back to Standard.
+
+Standard is the reference foreground implementation. It captures the turn, calls the Utility Arbiter, runs provider or cache card work, selects the hand, composes through Utility or Reasoner, validates the packet, installs Recursion-owned prompt keys, and records sanitized activity and journal evidence before generation continues.
+
+```mermaid
+flowchart LR
+    Send["User send"] --> Snapshot["Snapshot"]
+    Snapshot --> Arbiter["Utility Arbiter"]
+    Arbiter --> Cards["Cards"]
+    Cards --> Hand["Hand"]
+    Hand --> Compose["Compose and validate"]
+    Compose --> Install["Prompt install"]
+    Install --> Continue["Host generation"]
+```
+
+Rapid changes when provider work happens, not who authors the guidance. `warmRapidScene()` runs only when Recursion is enabled and `pipelineMode` is `rapid`; it captures an exact source revision, builds provider-generated warm artifacts, and stores `variant.rapid` metadata without installing prompt text. On the foreground send path, Rapid uses `rapidTurnDelta` when the warm artifact matches the active source and contract hashes, or `rapidFastStartPack` when no usable warm artifact exists. Rapid foreground Utility calls may hedge, and invalid Rapid output, mandatory missing cards, or provider-declared Standard escalation continue through the Standard pipeline for that same pending user message.
+
+```mermaid
+flowchart LR
+    Settle["Assistant lands or scene settles"] --> Warm["Background warm"]
+    Warm --> Artifact["Exact-source warm artifact"]
+    Artifact --> Send["Next send"]
+    Send --> Check{"Warm usable?"}
+    Check -- "yes" --> Delta["rapidTurnDelta"]
+    Check -- "no" --> FastStart["rapidFastStartPack"]
+    Delta --> Install["Prompt install"]
+    FastStart --> Install
+    Delta -. "invalid or mandatory gap" .-> Standard["Standard escalation"]
+    FastStart -. "invalid or mandatory gap" .-> Standard
+```
+
+Rapid must not gain speed by using local fallback cards, local scene briefs, local turn briefs, or timeout-based quality cuts. Its latency win comes from background provider warm work, exact-source cache reuse, a small foreground Utility delta, and optional hedged Rapid Utility calls.
 
 ## Component Ownership
 
 | Component | Owner module | Responsibility |
 | --- | --- | --- |
 | Core helpers | `src/core.mjs` | Stable hashing, safe ids, truncation, JSON parsing, cloning, timestamps, and redaction. |
-| Settings | `src/settings.mjs` | Mode, Reasoning Level, strength, footprint, focus, provider preferences, injection settings, UI limits, and session-only API key handling. |
+| Settings | `src/settings.mjs` | Mode, Standard/Rapid pipeline mode, Reasoning Level, strength, footprint, focus, provider preferences, injection settings, UI limits, and session-only API key handling. |
 | Behavior policy | `src/settings-policy.mjs` | Source-backed Strength, Min/Max Cards, Focus, Prompt Footprint, policy prompt lines, effective footprint, and diagnostics summaries. |
 | Activity | `src/activity.mjs` | Sanitized user-facing activity events for the bar, progress menu, viewer, and diagnostics. |
 | Progress model | `src/progress.mjs` | Hero Pixel Array blocks, progress-menu rows, nested card/model-call status, and compact current-step text. |
@@ -45,7 +76,7 @@ The runtime spine is implemented across `src/runtime.mjs`, `src/settings-policy.
 | Card scope | `src/card-scope.mjs` | Fixed family/sub-item scope catalog, Auto focus payloads, Manual whitelist enforcement helpers, and safe scope summaries. |
 | Prompt | `src/prompt.mjs` | Packet sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
 | Storage | `src/storage.mjs` | Logical scene-cache and run-journal records, key safety, redaction, index maintenance, and bounded retention. |
-| Runtime | `src/runtime.mjs` | Power toggle, Auto/Manual orchestration, snapshot use, Utility Arbiter plan handling, card-scope enforcement, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
+| Runtime | `src/runtime.mjs` | Power toggle, Auto/Manual orchestration, Standard/Rapid pipeline orchestration, snapshot use, Utility Arbiter plan handling, card-scope enforcement, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
 | UI | `src/ui.mjs` | Recursion Bar, Hero Pixel Array progress menu, options/settings, Last Brief, Full Viewer, settings, and provider controls. |
 | SillyTavern host | `src/hosts/sillytavern/host.mjs` | Snapshot capture, prompt install/clear, provider bridge, settings store, and user-file storage adapter selection. |
 | Entrypoint | `src/extension/index.js` | Extension lifecycle hooks, runtime bootstrap, UI mount, generation interceptor, and teardown cleanup. |
@@ -54,9 +85,9 @@ The runtime spine is implemented across `src/runtime.mjs`, `src/settings-policy.
 
 Power-off clears or avoids Recursion prompt entries and does not inspect chat for prompt compilation.
 
-Manual captures the current turn and follows the normal prompt-install path, but it constrains card generation and cached-card reuse to the selected card families. Disabled families are omitted before provider card jobs run and filtered again before deck and hand selection.
+Manual captures the current turn and follows the selected prompt-install pipeline, but it constrains card generation and cached-card reuse to the selected card families. Disabled families are omitted before provider card jobs run and filtered again before deck and hand selection.
 
-Auto mode runs the full pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the Utility Arbiter or local fallback path produces useful guidance. User-selected card families and sub-items are preferred in Auto, but the Utility Arbiter still sees the full fixed catalog and can request unselected families when they have high relevance to scene constraints, scene coherence, or the current user message.
+Auto mode runs the selected pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the selected path produces useful guidance. User-selected card families and sub-items are preferred in Auto, but the Utility Arbiter still sees the full fixed catalog in Standard and can request unselected families when they have high relevance to scene constraints, scene coherence, or the current user message.
 
 Settings and provider changes supersede the active run, abort stale provider work where possible, and await prompt cleanup before their operation results resolve. `updateSettings` returns updated settings plus the prompt-clear result; `updateProvider` and `clearProviderKey` return updated provider settings plus the prompt-clear result. Clear failure leaves the setting or provider change applied, returns `ok: false`, and surfaces the sanitized prompt-clear warning.
 
@@ -107,7 +138,15 @@ Settings stay in `extension_settings.recursion`. Larger records use logical JSON
 
 Diagnostics are bounded and sanitized. Normal records may include hashes, ids, card families, statuses, token estimates, provider lane labels, durations, and compact errors. They must not include API keys, raw provider prompts, raw provider responses, full transcripts, hidden reasoning, private story plans, or unbounded local paths.
 
-![Diagnostics boundary](../../assets/documentation/renders/recursion-diagnostics-boundary.png)
+```mermaid
+flowchart LR
+    Runtime["Runtime"] --> Redaction["Redaction boundary"]
+    Providers["Providers"] --> Redaction
+    Storage["Storage"] --> Redaction
+    Redaction --> Activity["Activity UI"]
+    Redaction --> Journal["Run journal"]
+    Redaction --> Export["Diagnostics export"]
+```
 
 ## Host Adapter
 

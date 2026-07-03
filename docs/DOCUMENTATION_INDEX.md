@@ -12,8 +12,8 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Root README](../README.md) - Public route map and fast start.
 - [Docs Folder Guide](README.md) - Folder-level guide for this documentation tree.
 - [User Guides](user/README.md) - Operator-facing table of contents.
-- [First Run Workflow](user/FIRST_RUN_WORKFLOW.md) - First-session path from install through Auto, Manual, inspection, and power-toggle cleanup.
-- [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for UI surfaces, modes, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
+- [First Run Workflow](user/FIRST_RUN_WORKFLOW.md) - First-session path from install through Standard Auto, Manual, Rapid trial, inspection, and power-toggle cleanup.
+- [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for UI surfaces, Standard/Rapid pipelines, modes, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
 
 ## Provider, Privacy, And Safety Docs
 
@@ -25,8 +25,8 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 ## Technical Manuals
 
 - [Technical Manuals](technical/README.md) - Table of contents for the technical manual family.
-- [Recursion Technical Manual](technical/RECURSION_TECHNICAL_MANUAL.md) - Product boundary, runtime spine, component ownership, modes, provider lanes, card/hand system, prompt packet, storage, diagnostics, host adapter, UI observability, fail-soft invariants, testing evidence, and non-goals.
-- [Runtime Turn Sequence](technical/RUNTIME_TURN_SEQUENCE.md) - Power toggle, Auto, and Manual lifecycle from snapshot capture through Utility planning, card jobs, hand selection, composition, injection, storage, cancellation, stale results, and failure branches.
+- [Recursion Technical Manual](technical/RECURSION_TECHNICAL_MANUAL.md) - Product boundary, runtime spine, component ownership, Standard/Rapid pipelines, modes, provider lanes, card/hand system, prompt packet, storage, diagnostics, host adapter, UI observability, fail-soft invariants, testing evidence, and non-goals.
+- [Runtime Turn Sequence](technical/RUNTIME_TURN_SEQUENCE.md) - Power toggle, Auto/Manual lifecycle, Standard foreground flow, Rapid warm/delta/fast-start flow, cancellation, stale results, and failure branches.
 - [Card Deck And Hand](technical/CARD_DECK_AND_HAND.md) - Fixed V1 card families, card contract, lifecycle, Arbiter decisions, deck/hand separation, invalidation, Character Motivation safety, and inspector visibility.
 - [Prompt Packet And Injection](technical/PROMPT_PACKET_AND_INJECTION.md) - Packet sections, composer inputs, Utility and Reasoner composition, budgets, omissions, critical guardrail exception policy, SillyTavern injection lanes, cleanup, and privacy guardrails.
 - [Model Calls And Provider Routing](technical/MODEL_CALLS_AND_PROVIDER_ROUTING.md) - Utility and Reasoner lanes, provider sources, generation roles, structured output validation, retries, fallbacks, model-call journal, session secret boundary, abort handling, and provider states.
@@ -60,7 +60,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Artifact Contract](testing/ARTIFACT_CONTRACT.md)
 - [Documentation Render Tracking](testing/DOCUMENTATION_RENDER_TRACKING.md)
 - [Implementation Plan](testing/IMPLEMENTATION_PLAN.md)
-- Static infographics promoted under `assets/documentation/renders/` are tracked in Documentation Render Tracking; live UI screenshot gaps stay marked inline with `<Render Needed>` until real SillyTavern surfaces are stable.
+- Text diagrams live inline as Mermaid graphs or markdown tables; live UI screenshot gaps stay marked inline with `<Render Needed>` until real SillyTavern surfaces are stable.
 - [Testing Folder Guide](testing/README.md)
 
 ## Planning Docs

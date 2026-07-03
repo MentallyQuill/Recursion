@@ -71,7 +71,7 @@ $env:RECURSION_LIVE_SWIPE='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts
 ```
 
-This command uses the no-generation browser smoke path, then creates a temporary in-page chat state with an assistant message that has two swipes. It emits SillyTavern's real `MESSAGE_SWIPED` event path, verifies Recursion clears seeded prompt text, verifies the activity ribbon reports source cleanup, and records hashed A/B/A source revision evidence. It restores the original chat after the proof and does not call providers.
+This command uses the no-generation browser smoke path, then creates a temporary in-page chat state with an older assistant message that has two swipes and a later user message. It emits SillyTavern's real `MESSAGE_SWIPED` event path, verifies Recursion clears seeded prompt text for that source mutation, verifies the activity ribbon reports source cleanup, and records hashed A/B/A source revision evidence. Latest-assistant swipe retry coverage is deterministic: extension smoke verifies it does not clear prompt lanes or Rapid-warm again, and runtime smoke verifies the same pending user turn reinstalls the previous packet without provider work. The live swipe proof restores the original chat after the proof and does not call providers.
 
 Generation-enabled Utility smoke target:
 
@@ -99,8 +99,9 @@ Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIV
 | Scenario | Mutates chat | Requires provider | Must prove |
 | --- | --- | --- | --- |
 | Mount smoke | no | no | Recursion extension loads, Recursion Bar renders, Hero Pixel Array progress menu can open, settings/options can open, viewer can open. |
+| Pipeline smoke | no | no | Pipeline button appears immediately left of Mode, opens the Standard/Rapid menu, persists selected pipeline mode, and does not duplicate Pipeline controls in Settings. |
 | Mode smoke | no | no | Disabled power, Auto, Manual, and return-to-disabled controls update runtime state, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
-| Swipe smoke | temporary in-page only | no | Real `MESSAGE_SWIPED` path clears Recursion prompts, changes active source revision A -> B, and returns to the same A revision on swipe back. |
+| Swipe smoke | temporary in-page only | no | Older-message `MESSAGE_SWIPED` clears Recursion prompts, changes active source revision A -> B, and returns to the same A revision on swipe back; deterministic latest-assistant retry tests prove no clear, no Rapid warm, and same-packet reinstall. |
 | Storage probe | files only | no | Dedicated user can write/read/delete Recursion-owned files and records are isolated from other users. |
 | Manual smoke | optional | Utility | Manual applies as a distinct mode, installs prompts, and records sanitized proof for the Manual branch. |
 | Utility provider smoke | yes | Utility | Arbiter/card/composer work runs, progress menu reports it, prompt packet installs, and generation continues. |
@@ -143,11 +144,12 @@ The smoke should fail if controls overlap chat input, if text escapes compact co
 
 - Seed a Recursion-owned prompt key as a cleanup sentinel.
 - Turn power off and verify prompt keys are absent or cleared.
+- Open the Pipeline menu and verify Standard and Rapid choices are present, selectable, and persisted through `pipelineMode`.
 - Set Auto mode and verify the runtime is ready to compile when a generation begins.
 - Set Manual mode and verify it applies as a distinct mode.
 - Return to power off and verify cleanup.
 
-Mode and power changes should be visible in the bar and should append sanitized activity events. The no-generation browser snapshot should include `modeSmoke.sequence: ["disabled", "auto", "manual", "disabled"]`, per-step selected/observed modes, power state, and prompt-key names only. It must not store seeded prompt text.
+Pipeline, mode, and power changes should be visible in the bar and should append sanitized activity events. The no-generation browser snapshot should include `modeSmoke.sequence: ["disabled", "auto", "manual", "disabled"]`, per-step selected/observed modes, selected/observed pipeline modes, power state, and prompt-key names only. It must not store seeded prompt text.
 
 ### 4. Provider Controls
 

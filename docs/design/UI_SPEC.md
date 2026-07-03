@@ -31,13 +31,13 @@ Recursion should use its own chat-attached top bar instead of adopting the Direc
 Default desktop shape:
 
 ```text
-[power] [pipeline icon] [mode icon] [cards] | [Hero Pixel Array] Selecting turn hand...     [reasoning] v | ...
+[power] [pipeline icon] [mode icon] [cards] | [Hero Pixel Array] Selecting turn hand... [stop]    [reasoning] v | ...
 ```
 
 Narrow/mobile shape:
 
 ```text
-[power] [pipeline] [mode] [cards] | [Hero Pixel Array] Selecting...      v | ...
+[power] [pipeline] [mode] [cards] | [Hero Pixel Array] Selecting... [stop]     v | ...
 ```
 
 The desktop bar uses one compact row with distinct zones for power, pipeline, mode, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
@@ -49,13 +49,15 @@ Recursion chrome should use explicit compact font sizing instead of inheriting S
 Canonical desktop layout:
 
 ```text
-[power] [pipeline] [mode arrows] [cards] | [blocks] Selecting turn hand...  [reasoning] v | ...
-[power] [pipeline] [mode arrows] [cards] | [blocks] Installing prompt...    [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] | [blocks] Selecting turn hand... [stop] [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] | [blocks] Installing prompt...   [stop] [reasoning] v | ...
 [power] [pipeline] [mode arrows] [cards] | [blocks] Manual scope active...  [reasoning] Cards v | ...
 [power-off] [pipeline] [mode arrows] [cards] |                              [reasoning] v | ...
 ```
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
+
+The Stop generation button is a separate active-only control, not a second power state. It appears while Recursion is preparing a prompt for a SillyTavern generation or while that host generation is still active. The button uses a square stop icon with accessible label and hover tooltip copy `Stop generation`. Clicking it must call the unified stop path: request SillyTavern generation stop through the host adapter, abort active Recursion provider work, prevent stale prompt installation, clear Recursion-owned prompt keys, mark the canceled attempt neutral/skipped, and close any active progress popover. When no active run or host generation exists, the button is hidden and removed from keyboard focus.
 
 The pipeline control is a single icon-only button immediately to the left of the Mode button. It is not duplicated in Settings. It opens a compact dropdown with two choices:
 
@@ -169,17 +171,17 @@ Blocks build down from the top of a three-row column, then start the next column
 
 The Hero Pixel Array must respect reduced-motion preferences. It may pulse active blocks while work is running, but it must not animate when `prefers-reduced-motion: reduce` is active.
 
-The bar may show exactly one live generation status: the current in-progress step, rendered as short muted text to the right of the Hero Pixel Array. The full step list belongs in the Hero Pixel Array menu. When no work is active, the same text slot may show one quiet standby phrase. Standby phrases are display-only and must not create progress rows, Hero Pixel Array blocks, or activity-ribbon events.
+The bar may show exactly one live generation status: the current in-progress step, rendered as short muted text to the right of the Hero Pixel Array. The full step list belongs in the Hero Pixel Array menu. When no work is active, the same text slot may show one quiet standby phrase for roughly four seconds. Standby phrases are display-only and must not create progress rows, Hero Pixel Array blocks, or activity-ribbon events. Each standby phrase must end with proper punctuation; active work phrases keep action ellipses such as `Installing Recursion prompt...`.
 
 Standby phrase defaults:
 
-- Fresh enabled load or newly opened chat with no composed hand: `Ready for Recursion`.
-- Settled prompt install: `Recursion prompt ready`.
-- Idle Standard mode with selected cached/generated cards available: `Scene deck standing by`.
-- Idle Rapid mode with a warmed hand available: `Rapid deck standing by`; `rapidWarmReady` activity may show `Rapid deck ready`.
-- Idle Manual mode: `Manual scope armed`.
-- Disabled: `Recursion off`.
-- Warning or error standby: `Needs attention`.
+- Fresh enabled load or newly opened chat with no composed hand: `Ready for Recursion.`
+- Settled prompt install: `Recursion prompt ready.`
+- Idle Standard mode with selected cached/generated cards available: `Scene deck standing by.`
+- Idle Rapid mode with a warmed hand available: `Rapid deck standing by.`; `rapidWarmReady` activity may show `Rapid deck ready.`
+- Idle Manual mode: `Manual scope armed.`
+- Disabled: `Recursion off.`
+- Warning or error standby: `Needs attention.`
 
 Pending or waiting progress rows must not appear as the compact current-step text. They remain visible in the progress menu as empty/waiting rows while the bar stays quiet until work is actually running, warning, or failed.
 
@@ -200,6 +202,7 @@ The bar should visually align with nearby SillyTavern chrome. Its height, border
 Color grammar:
 
 - The power, pipeline, and mode controls use muted SillyTavern foreground text, not bright brand color.
+- The active Stop generation control may use a muted error tint, but only as a compact 24px icon button.
 - Reasoning level controls use muted SillyTavern foreground grey-white, so they read as chrome rather than runtime state.
 - The Hero Pixel Array owns compact state color.
 - The bar itself should remain mostly neutral; amber/red should appear only in the array or disclosed menus for attention or blocking conditions.
@@ -395,7 +398,7 @@ Every active progress-row ring must continue to use the same small spinner visua
 
 The inner cutout must not be transparent. It should use the same dark cutout fill and subtle inner border for every active row ring; otherwise active progress rows read as colored dots instead of rings.
 
-The active work also appears inline in the bar as the current status, immediately after the Hero Pixel Array. Use concise phrases such as `Reading current turn...`, `2 model calls running...`, `Composing prompt packet...`, `Installing prompt...`, and `Saving cache...`. When idle, use the standby phrase contract above instead of generic `Ready`.
+The active work also appears inline in the bar as the current status, immediately after the Hero Pixel Array. Use concise phrases such as `Reading current turn...`, `2 model calls running...`, `Composing prompt packet...`, `Installing prompt...`, and `Saving cache...`. When idle, use the timed standby phrase contract above instead of generic `Ready`.
 
 The status menu should use friendly stage text, not internal event names. It must not show raw prompts, raw provider responses, stack traces, hidden reasoning, private story plans, or unbounded provider error text.
 
@@ -1252,7 +1255,7 @@ Provider fallback states should appear in the Hero Pixel Array Progress Menu and
 
 On narrow viewports:
 
-- Keep the power toggle, mode icon, Hero Pixel Array, last-brief arrow, and ellipsis visible when possible.
+- Keep the power toggle, mode icon, Hero Pixel Array, active Stop generation button when visible, last-brief arrow, and ellipsis visible when possible.
 - Collapse provider details, viewer entry points, and advanced commands into the ellipsis options menu.
 - Use `[power] | [mode] | [array] v ...` as the default collapsed shape.
 - Put mode selection, provider details, settings, last brief, and viewer links inside menus when there is not enough width.

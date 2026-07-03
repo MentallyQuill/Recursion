@@ -113,7 +113,16 @@ Forbidden by default:
 
 Redaction should remove sensitive field names such as `apiKey`, `authorization`, `cookie`, `token`, `password`, `secret`, and `sessionKey`, plus forbidden diagnostic payload fields such as `rawPrompt`, `rawResponse`, `providerPrompt`, `providerResponse`, `hiddenReasoning`, `privateStoryPlan`, `privatePlan`, and `sessionId`. It should also cap strings in diagnostics and artifacts while preserving safe counters such as `tokenCount` and `sessionCount`.
 
-![Redaction boundary diagram](../../assets/documentation/renders/recursion-redaction-boundary.png)
+```mermaid
+flowchart TD
+    Provider["Provider metadata"] --> Redact["Redaction boundary"]
+    Runtime["Runtime events"] --> Redact
+    Prompt["Prompt packet metadata"] --> Redact
+    Redact --> Activity["Activity UI"]
+    Redact --> Journal["Run journal"]
+    Redact --> Artifacts["Safe diagnostics export"]
+    Secrets["Secrets, raw prompts, raw responses, full transcript text"] -. "blocked" .-> Redact
+```
 
 ## External Extension Coexistence
 
@@ -129,7 +138,16 @@ Recursion coexists with other SillyTavern context systems. It should not replace
 
 Recursion should mark omitted candidates with reasons such as `external_owner` or `already_in_external_context` when the host exposes enough information. If external context conflicts with selected-hand evidence, Recursion should stay conservative and flag a scene-constraint risk rather than silently override another system.
 
-![External context coexistence diagram](../../assets/documentation/renders/recursion-external-coexistence.png)
+```mermaid
+flowchart LR
+    Host["SillyTavern host context"] --> Prompt["Final generation prompt"]
+    Recursion["Recursion packet"] --> Prompt
+    WorldInfo["World Info and Memory Books"] --> Prompt
+    Summary["Summary and recall extensions"] --> Prompt
+    Notes["Author notes and user prompts"] --> Prompt
+    Recursion -. "does not mutate" .-> WorldInfo
+    Recursion -. "does not replace" .-> Summary
+```
 
 ## Diagnostics And Artifact Posture
 

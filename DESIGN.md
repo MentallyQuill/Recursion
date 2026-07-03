@@ -187,7 +187,7 @@ The Recursion Bar should stay around 30 to 38px high. Icon buttons and compact c
 
 Use small spacing steps: 2px for pixel/grid gaps, 4px for micro-adjustments, 6px for adjacent controls, 8px for standard panel padding, 10px to 12px when text needs breathing room. Avoid large gutters, oversized hero sections, marketing composition, and cards inside cards.
 
-On narrow viewports, preserve the power toggle, mode icon, Hero Pixel Array, last-brief arrow, and ellipsis first. Collapse details into menus and keep the bar away from SillyTavern message input controls.
+On narrow viewports, preserve the power toggle, mode icon, Hero Pixel Array, active stop button when visible, last-brief arrow, and ellipsis first. Collapse details into menus and keep the bar away from SillyTavern message input controls.
 
 ## Elevation & Depth
 
@@ -209,9 +209,9 @@ Do not introduce large rounded cards or soft marketing panels. Keep cards at 8px
 
 ## Components
 
-**Recursion Bar:** One compact chat-attached row with power, pipeline selector, mode, icon-only card scope, Hero Pixel Array/current step, reasoning chain, Last Brief arrow, and options ellipsis. The Pipeline selector is an icon-only button immediately left of Mode with a compact Standard/Rapid dropdown. When no work is active, the current-step slot may show quiet standby copy such as `Ready for Recursion`, `Recursion prompt ready`, `Scene deck standing by`, or `Manual scope armed`; this is display-only and must not create Hero Pixel Array blocks or progress rows. The bar is neutral graphite chrome; it should not become a message strip or dashboard.
+**Recursion Bar:** One compact chat-attached row with power, pipeline selector, mode, icon-only card scope, Hero Pixel Array/current step, active-only Stop generation button, reasoning chain, Last Brief arrow, and options ellipsis. The Pipeline selector is an icon-only button immediately left of Mode with a compact Standard/Rapid dropdown. The Stop generation button appears only while Recursion owns an active prompt-preparation or host-generation turn; it uses a square stop icon and calls the unified stop path that stops SillyTavern generation, aborts Recursion work, and clears Recursion prompt lanes. When no work is active, the current-step slot may show quiet punctuated standby copy such as `Ready for Recursion.`, `Recursion prompt ready.`, `Scene deck standing by.`, or `Manual scope armed.` for roughly four seconds; this is display-only and must not create Hero Pixel Array blocks or progress rows. The bar is neutral graphite chrome; it should not become a message strip or dashboard.
 
-**Icon buttons:** Familiar controls should be icon-first, 24px square, with accessible labels and tooltips. Power, pipeline, and mode use muted foreground, not bright brand color.
+**Icon buttons:** Familiar controls should be icon-first, 24px square, with accessible labels and tooltips. Power, pipeline, and mode use muted foreground, not bright brand color. Active Stop generation may use a muted error tint, but it must stay compact and chrome-like rather than becoming a large alert.
 
 **Hero Pixel Array:** The primary state indicator. Running is cyan, done is green, cached is purple, warning is amber, failed is red, pending is empty muted. Respect reduced-motion preferences and never rely on animation alone.
 

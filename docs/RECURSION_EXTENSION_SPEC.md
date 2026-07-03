@@ -17,7 +17,7 @@ Start here, then follow the focused specs:
 - [Product Scope](design/RECURSION_PRODUCT_SCOPE.md): product promise, V1 scope, non-goals, success criteria.
 - [Card System Spec](design/CARD_SYSTEM_SPEC.md): scene-local cards, card families, lifecycle, Utility Arbiter responsibilities, turn hand.
 - [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md): Strength, Min/Max Cards, Focus, and Prompt Footprint backend effects.
-- [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md): host boundary, turn pipeline, Auto Control Plan, failure behavior, implementation slices.
+- [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md): host boundary, Standard/Rapid turn pipelines, Auto Control Plan, failure behavior, implementation slices.
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md): Utility and Reasoner lanes, source routing, machine-JSON schema metadata, structured calls, validation, session-only secrets, model-call journal.
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md): prompt packet contract, Utility/Reasoner composition, injection lanes, footprint profiles, omissions.
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md): settings, logical JSON records, scene cache, run journal, activity events, redaction, invalidation.
@@ -39,6 +39,8 @@ Current V1 decisions:
 - Ship the full fixed V1 card catalog described in [Card System Spec](design/CARD_SYSTEM_SPEC.md).
 - Build provider settings, provider contracts, and structured call contracts before the card loop depends on them.
 - The first working loop must support both Utility Composer and Reasoner Composer, with Utility Composer as the default and fail-soft path.
+- Pipeline selection is separate from Auto/Manual. Standard is the default full foreground path; Rapid warms provider-generated scene guidance in the background and uses foreground Utility `rapidTurnDelta` or `rapidFastStartPack` roles.
+- Rapid must not create local fallback cards, local scene briefs, or local turn briefs. Missing mandatory guidance, invalid Rapid output, or provider-declared escalation continues through Standard for the same pending user message.
 - Support all three provider sources for both lanes where the host permits it: current host model, host connection profile, and OpenAI-compatible endpoint.
 - Machine-readable Recursion provider jobs carry the expected response schema, request structured output where the host supports it, and still validate visible JSON before runtime trusts the result.
 - Advanced users can control where the conditioned final prompt packet is injected by setting placement, role, and depth; defaults use the recommended concrete `in_prompt`, `system`, depth `4` plan.
@@ -77,12 +79,12 @@ Recursion does not own:
 
 1. The SillyTavern host adapter captures a stable turn snapshot.
 2. Runtime derives the behavior influence policy for Strength, Min/Max Cards, Focus, and Prompt Footprint.
-3. The Utility Arbiter receives the snapshot, current scene cache metadata, fixed V1 card catalog, provider status, behavior influence policy, and prompt budget context.
-4. The Arbiter returns an Auto Control Plan: action, scene status, prompt footprint, card jobs, card lifecycle decisions, Reasoner decision, and budgets.
-5. Runtime validates the plan, enforces schema and budget caps, applies current behavior policy and card-scope policy, and executes requested card jobs from one frozen snapshot.
-6. The scene deck is updated with generated, refreshed, stowed, discarded, or stale cards.
-7. The Arbiter-selected turn hand is passed to prompt composition.
-8. Utility Composer builds the prompt packet, or Reasoner Composer assists when enabled, available, and justified.
+3. Runtime selects the Standard or Rapid pipeline from normalized settings.
+4. Standard sends the snapshot, current scene cache metadata, fixed V1 card catalog, provider status, behavior influence policy, and prompt budget context to the Utility Arbiter.
+5. Standard validates the Arbiter plan, enforces schema and budget caps, applies current behavior policy and card-scope policy, and executes requested card jobs from one frozen snapshot.
+6. Standard updates the scene deck with generated, refreshed, stowed, discarded, or stale cards, then passes the selected turn hand to prompt composition.
+7. Rapid uses exact-source warm provider artifacts when available, or asks Utility for a compact fast-start pack when no warm artifact is ready.
+8. Utility Composer builds the prompt packet, Reasoner Composer assists when enabled and justified, or Rapid formats provider-authored Rapid packet sections into the normal prompt-install contract.
 9. Runtime validates the packet and installs it through Recursion-owned SillyTavern prompt keys.
 10. The UI and storage layers receive sanitized diagnostics and latest-hand metadata.
 
@@ -141,12 +143,13 @@ Advanced Injection settings can override the conditioned final packet's SillyTav
 The primary UI is a Recursion Bar attached to the chat surface:
 
 ```text
-RECURSION | Power | Mode | Cards | Hero Pixel Array + current step        Reasoning Level | Last Brief v | Options ...
+RECURSION | Power | Pipeline | Mode | Cards | Hero Pixel Array + current step        Reasoning Level | Last Brief v | Options ...
 ```
 
 It replaces the earlier shelf/drawer idea. The bar is thin, stable, mostly observational, and paired with:
 
 - a Hero Pixel Array progress menu for live status, model-call progress, cache writes, prompt installation, and fallback visibility;
+- an icon-only Pipeline menu for Standard and Rapid;
 - an icon-only Cards scope menu that Auto treats as focus and Manual treats as a strict whitelist;
 - an options/settings menu opened from the ellipsis;
 - a Last Brief dropdown opened from the dropdown arrow;

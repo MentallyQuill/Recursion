@@ -90,8 +90,6 @@ stateDiagram-v2
     Discarded --> [*]
 ```
 
-![Card lifecycle visual](../../assets/documentation/renders/recursion-card-lifecycle.png)
-
 Runtime normalizes cards, enforces text and evidence limits, validates catalog membership, caps token estimates, and rejects malformed records. The Utility Arbiter owns semantic utility decisions such as which families matter, which cards are stale, and which cards belong in the next hand.
 
 ## Arbiter Decisions
@@ -155,4 +153,12 @@ The UI can show:
 
 The inspector is read-oriented. V1 actions stay broad: refresh scene, copy prompt packet metadata, open settings, test providers, clear OpenAI-compatible session keys, and inspect diagnostics.
 
-![Card family matrix](../../assets/documentation/renders/recursion-card-family-matrix.png)
+## Card Family Matrix
+
+| Family group | Families | Main prompt pressure |
+| --- | --- | --- |
+| Scene frame | Scene Frame, Active Cast | Keep the current location, cast, and immediate situation coherent. |
+| Character and relationship | Character Motivation, Relationship, Social Subtext | Shape behavior, tone, subtext, and visible interpersonal pressure without private thought injection. |
+| Constraints and knowledge | Scene Constraints, Knowledge | Prevent contradiction, premature reveals, and impossible actions. |
+| Pressure and affordance | Consequences, Environment, Items | Keep timing, space, hazards, props, and object control active in the next reply. |
+| Continuation | Open Threads | Preserve visible obligations, pending actions, and unresolved near-term hooks. |

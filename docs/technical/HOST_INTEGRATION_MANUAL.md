@@ -11,6 +11,7 @@ The SillyTavern adapter:
 - captures active swipe id/count metadata and a source revision hash for the current visible source
 - exposes settings through `extension_settings.recursion`
 - bridges host generation APIs to provider routing
+- exposes host generation stop through `generation.stop()`
 - installs and clears Recursion prompt blocks
 - selects SillyTavern user-file storage when available
 - falls back to memory storage when user-file storage cannot be used
@@ -41,15 +42,15 @@ When SillyTavern exposes `eventSource` plus `event_types.CHAT_CHANGED`, the entr
 
 Chat-change cleanup clears volatile Recursion state, clears Recursion-owned prompt keys, and best-effort marks the previously active scene cache stale with reason `chat-changed`. It does not run provider calls or compile a new packet for the newly selected chat.
 
-The entrypoint also subscribes to source mutation events when available: `MESSAGE_DELETED`, `MESSAGE_UPDATED`, and `MESSAGE_SWIPED`. Those handlers call `runtime.handleSourceChanged()` so edits, deletes, and swipe changes do not leave an old Recursion prompt installed. The cleanup records only compact event metadata such as event name and message id.
+The entrypoint also subscribes to source mutation events when available: `MESSAGE_DELETED`, `MESSAGE_UPDATED`, and `MESSAGE_SWIPED`. Delete/update handlers and older-message swipe handlers call `runtime.handleSourceChanged()` so source changes do not leave an old Recursion prompt installed. A `MESSAGE_SWIPED` event for the latest visible assistant message is treated as a same-turn swipe retry: the entrypoint does not clear prompt keys, and Rapid does not warm again for the same assistant message id. The cleanup records only compact event metadata such as event name and message id.
 
 For swiped assistant messages, the SillyTavern adapter records the active `swipe_id`, swipe count, and active-swipe text hash in the normalized message. The source revision hash includes the active swipe metadata, not inactive swipe bodies. Changing inactive swipe text does not invalidate the source revision until that swipe becomes active.
 
-The entrypoint subscribes to SillyTavern's player Stop signal through `event_types.GENERATION_STOPPED`, with `generation_stopped` as a fallback event name. That handler calls `runtime.handleHostGenerationStopped()`. Runtime aborts active Recursion provider signals, prevents stale packet installation, clears Recursion-owned prompt keys, marks any active scene cache stale with reason `host-generation-stopped`, and surfaces the progress outcome as skipped rather than warning or failure.
+The entrypoint subscribes to SillyTavern's player Stop signal through `event_types.GENERATION_STOPPED`, with `generation_stopped` as a fallback event name. That handler calls `runtime.handleHostGenerationStopped()`. Runtime aborts active Recursion provider signals, prevents stale packet installation, clears Recursion-owned prompt keys, marks any active scene cache stale with reason `host-generation-stopped`, and surfaces the progress outcome as skipped rather than warning or failure. Assistant-landed events clear the runtime's host-generation-active state so the Recursion Bar stop affordance disappears when the host turn settles.
 
 ## Generation Interceptor Boundary
 
-The generation interceptor calls `runtime.prepareForGeneration()` before returning the chat to SillyTavern. It catches and logs sanitized failures so the host generation can continue.
+The generation interceptor calls `runtime.prepareForGeneration({ hostGeneration: true })` before returning the chat to SillyTavern. It catches and logs sanitized failures so the host generation can continue. While that intercepted turn is active, `runtime.view().hostGenerationActive` allows the UI to expose the active-only Stop generation button.
 
 ```mermaid
 sequenceDiagram
@@ -64,8 +65,6 @@ sequenceDiagram
     Runtime-->>Entry: prompt ready, skipped, observe, or warning
     Entry-->>ST: original chat continues
 ```
-
-![Host adapter boundary](../../assets/documentation/renders/recursion-host-adapter-boundary.png)
 
 ## Prompt Adapter
 
@@ -106,9 +105,11 @@ Host connection profile routing uses `ConnectionManagerRequestService.sendReques
 
 If only `generateQuietPrompt` is available, host connection profiles are unsupported and current-host-model generation can still run. Missing generation APIs produce a provider failure, not a host-blocking exception.
 
+The stop adapter exposes `generation.stop(details)`. It prefers SillyTavern's extension-context `stopGeneration()` function, which triggers the same host stop path as the native Stop control. If that API is absent, it falls back to clicking the native `#mes_stop` / `.mes_stop` button. If neither seam exists, it returns `RECURSION_HOST_STOP_UNAVAILABLE` so runtime can still abort Recursion work and clear prompt lanes without claiming the host model was stopped.
+
 ## UI Mount
 
-The UI mounts a chat-attached Recursion root near the `#chat` element when possible, otherwise into a stable parent. It renders the Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, settings panel, and Full Viewer. The UI updates from `runtime.view()` on a short interval and uses sanitized view data.
+The UI mounts a chat-attached Recursion root near the `#chat` element when possible, otherwise into a stable parent. It renders the Recursion Bar, active-only Stop generation button, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, settings panel, and Full Viewer. The UI updates from `runtime.view()` on a short interval and uses sanitized view data.
 
 ## Fake And Contract Tests
 

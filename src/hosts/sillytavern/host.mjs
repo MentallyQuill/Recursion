@@ -318,6 +318,53 @@ function normalizeGenerationFailure(error) {
   };
 }
 
+function stopUnavailableResult() {
+  return {
+    ok: false,
+    stopped: false,
+    eventEmitted: false,
+    error: {
+      code: 'RECURSION_HOST_STOP_UNAVAILABLE',
+      message: 'SillyTavern stop generation API is unavailable.'
+    }
+  };
+}
+
+function stopFailedResult(error) {
+  const code = stringValue(error?.code || error?.name || 'RECURSION_HOST_STOP_FAILED').trim()
+    || 'RECURSION_HOST_STOP_FAILED';
+  const message = stringValue(error?.message || error || 'SillyTavern stop generation failed.').replace(/\s+/g, ' ').trim()
+    || 'SillyTavern stop generation failed.';
+  return {
+    ok: false,
+    stopped: false,
+    eventEmitted: false,
+    error: {
+      code: code.slice(0, 120),
+      message: message.slice(0, 300)
+    }
+  };
+}
+
+function findStopButton(context) {
+  const documentRef = context?.document || globalThis.document;
+  if (typeof documentRef?.querySelector !== 'function') return null;
+  return documentRef.querySelector('#mes_stop') || documentRef.querySelector('.mes_stop');
+}
+
+function clickStopButton(button) {
+  if (!button) return false;
+  if (typeof button.click === 'function') {
+    button.click();
+    return true;
+  }
+  if (typeof button.dispatchEvent === 'function' && typeof globalThis.Event === 'function') {
+    button.dispatchEvent(new globalThis.Event('click', { bubbles: true, cancelable: true }));
+    return true;
+  }
+  return false;
+}
+
 function notifyBatchSlotSettled(onSlotSettled, slot) {
   if (typeof onSlotSettled !== 'function') return;
   try {
@@ -616,6 +663,31 @@ export function createSillyTavernHost({
   };
 
   const generation = {
+    async stop(details = {}) {
+      const context = currentContext(contextFactory);
+      try {
+        if (typeof context.stopGeneration === 'function') {
+          context.stopGeneration(details);
+          return {
+            ok: true,
+            stopped: true,
+            eventEmitted: true,
+            source: 'context.stopGeneration'
+          };
+        }
+        if (clickStopButton(findStopButton(context))) {
+          return {
+            ok: true,
+            stopped: true,
+            eventEmitted: true,
+            source: 'dom.mes_stop'
+          };
+        }
+        return stopUnavailableResult();
+      } catch (error) {
+        return stopFailedResult(error);
+      }
+    },
     async generate(request = {}) {
       const context = currentContext(contextFactory);
       if (profileGenerationRequested(request) && connectionProfileService(context)) {
@@ -675,6 +747,10 @@ export function createSillyTavernHost({
       slotIsolation: true,
       supportsAbortSignal: true,
       source: 'sillytavern-host-adapter'
+    },
+    stop: {
+      source: 'sillytavern-host-adapter',
+      event: 'generation_stopped'
     }
   };
 

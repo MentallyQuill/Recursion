@@ -543,6 +543,42 @@ assertEqual(quietResponse.text, 'quiet text', 'quiet generation result normalize
 assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
 
 {
+  const stopCalls = [];
+  const stopHost = createSillyTavernHost({
+    contextFactory: () => ({
+      currentChatId: 'stop-chat',
+      chat: [],
+      stopGeneration: () => {
+        stopCalls.push('stop');
+        return true;
+      }
+    }),
+    settingsRoot: {}
+  });
+  assertEqual(typeof stopHost.generation.stop, 'function', 'host exposes generation stop');
+  const stopResult = await stopHost.generation.stop({ source: 'recursion-ui' });
+  assertDeepEqual(
+    stopResult,
+    { ok: true, stopped: true, eventEmitted: true, source: 'context.stopGeneration' },
+    'host stop uses SillyTavern context stopGeneration'
+  );
+  assertDeepEqual(stopCalls, ['stop'], 'host stop calls SillyTavern generation stop once');
+}
+
+{
+  const unavailableStopHost = createSillyTavernHost({
+    contextFactory: () => ({
+      currentChatId: 'stop-unavailable-chat',
+      chat: []
+    }),
+    settingsRoot: {}
+  });
+  const stopResult = await unavailableStopHost.generation.stop({ source: 'recursion-ui' });
+  assertEqual(stopResult.ok, false, 'host stop reports unavailable stop support');
+  assertEqual(stopResult.error.code, 'RECURSION_HOST_STOP_UNAVAILABLE', 'host stop returns stable unavailable error code');
+}
+
+{
   const batchCalls = [];
   const batchSlotEvents = [];
   let releaseFirst = null;

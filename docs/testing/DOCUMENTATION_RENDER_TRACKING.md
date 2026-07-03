@@ -25,10 +25,8 @@ Rules:
 Use these source labels in the inventory:
 
 - `live host`: captured from a real SillyTavern session with Recursion installed for a dedicated `recursion-soak-*` user.
-- `fixture/static`: captured from a deterministic local fixture, mocked UI state, or static composition that does not require a live host.
-- `diagram/static`: produced as a diagram or static explanatory visual from docs, schemas, tests, and source.
 
-Every inventory row must use one of those concrete labels. If the source cannot be determined, clarify the target documentation before adding or keeping the marker.
+Every inventory row must use that concrete label. If the source cannot be determined, clarify the target documentation before adding or keeping the marker. Explanatory diagrams belong directly in Markdown as Mermaid graphs or tables, not in this PNG asset inventory.
 
 ## Target Assets
 
@@ -48,7 +46,7 @@ That path is ignored because it is tooling output. Promotion means copying only 
 
 ## Current Pass Status
 
-The 2026-07-02 render pass promotes 18 source-backed static infographics and 24 live UI screenshot assets. UI renders were captured through the local `.recursion-doc-renderer/` harness against the `recursion-soak-ui` SillyTavern render profile. Screenshots use the live-served Recursion UI module plus redaction-safe documentation fixture state, so final assets show the actual mounted UI without provider secrets, raw provider payloads, or private transcripts.
+The 2026-07-03 render pass promotes 25 live UI screenshot assets. Explanatory pipeline, storage, provider, redaction, testing, and behavior-policy diagrams now live directly in Markdown as Mermaid graphs or tables instead of promoted PNG assets. UI renders were captured through the local `.recursion-doc-renderer/` harness against the `recursion-soak-ui` SillyTavern render profile. Screenshots use the live-served Recursion UI module plus redaction-safe documentation fixture state, so final assets show the actual mounted UI without provider secrets, raw provider payloads, or private transcripts.
 
 State-set renders such as bar states, progress states, Last Brief states, and fail-soft states are contact sheets composed from fresh live-mounted source captures. Their raw source tiles stay in `.recursion-doc-renderer/` and are not promoted separately.
 
@@ -84,30 +82,10 @@ Documentation renders must not expose:
 
 Live host screenshots must use dedicated `recursion-soak-*` users. Automated evidence must reject `default-user`. Generation-enabled live smoke suppresses screenshots and Playwright traces; use sanitized metadata or a no-generation UI state for documentation visuals when binary capture would risk chat or model text.
 
-## Promoted Static Infographics
+## Text Diagrams
 
-These assets are promoted and may be embedded directly from `assets/documentation/renders/`. They are explanatory infographics, not proof of a finished live UI state.
+Explanatory pipeline, storage, provider, redaction, testing, card, prompt, host-boundary, diagnostics, and behavior-policy diagrams are maintained directly in Markdown as Mermaid graphs or tables. They are not promoted as PNG assets and should not be counted in the render inventory.
 
-| Asset | Source Type | Current Primary Doc | Visual Scope |
-| --- | --- | --- | --- |
-| `recursion-technical-runtime-pipeline.png` | diagram/static | `docs/technical/RECURSION_TECHNICAL_MANUAL.md` | End-to-end runtime spine from SillyTavern snapshot through prompt install and diagnostics. |
-| `recursion-runtime-turn-sequence.png` | diagram/static | `docs/technical/RUNTIME_TURN_SEQUENCE.md` | Power, Auto/Manual lifecycle, cancellation, stale-result discard, and fail-soft branches. |
-| `recursion-stale-result-discard.png` | diagram/static | `docs/technical/RUNTIME_TURN_SEQUENCE.md` | Run-id guard that blocks stale provider, storage, or prompt work from mutating active state. |
-| `recursion-card-family-matrix.png` | diagram/static | `docs/technical/CARD_DECK_AND_HAND.md` | Fixed V1 card families, including Social Subtext, Knowledge, Consequences, Environment, and Items. |
-| `recursion-card-lifecycle.png` | diagram/static | `docs/technical/CARD_DECK_AND_HAND.md` | Create, refresh, stow, discard, select, omit, and invalidate flow. |
-| `recursion-prompt-packet-stack.png` | diagram/static | `docs/technical/PROMPT_PACKET_AND_INJECTION.md` | Scene Brief, Turn Brief, Guardrails, critical guardrail exception, omissions, and metadata. |
-| `recursion-prompt-injection-lanes.png` | diagram/static | `docs/technical/PROMPT_PACKET_AND_INJECTION.md` | Recursion-owned prompt lanes, placement metadata, stale clear, and host boundary. |
-| `recursion-provider-routing.png` | diagram/static | `docs/technical/MODEL_CALLS_AND_PROVIDER_ROUTING.md` | Utility and Reasoner lanes, source selection, retries, fallback, and journal metadata. |
-| `recursion-storage-key-map.png` | diagram/static | `docs/technical/STORAGE_AND_DIAGNOSTICS.md` | Settings, system index, scene cache, run journal, prompt metadata, and artifact boundary. |
-| `recursion-storage-redaction-boundary.png` | diagram/static | `docs/technical/STORAGE_AND_DIAGNOSTICS.md` | Storage redaction boundary and blocked secret/raw-provider data. |
-| `recursion-redaction-boundary.png` | diagram/static | `docs/user/PROMPT_PRIVACY_AND_SAFETY.md` | User-facing allowed/blocked data boundary. |
-| `recursion-external-coexistence.png` | diagram/static | `docs/user/PROMPT_PRIVACY_AND_SAFETY.md` | Recursion coexistence with SillyTavern context systems and other extensions. |
-| `recursion-host-adapter-boundary.png` | diagram/static | `docs/technical/HOST_INTEGRATION_MANUAL.md` | SillyTavern adapter APIs and host-neutral runtime interfaces. |
-| `recursion-diagnostics-boundary.png` | diagram/static | `docs/technical/RECURSION_TECHNICAL_MANUAL.md` | Diagnostics, redaction, artifact, and journal boundary. |
-| `recursion-testing-gates.png` | diagram/static | `docs/testing/TESTING_STRATEGY.md` | Deterministic tests, Playwright readiness, soak-user preflight, guarded live smoke, artifacts, and render promotion. |
-| `recursion-provider-test-flow.png` | diagram/static | `docs/user/PROVIDER_SETUP.md` | Provider test states from idle through pass/fail/fallback. |
-| `recursion-provider-fallback-states.png` | diagram/static | `docs/user/PROVIDER_SETUP.md` | Utility/Reasoner fallback and degraded operation states. |
-| `recursion-behavior-policy.png` | diagram/static | `docs/design/BEHAVIOR_SETTINGS_POLICY_SPEC.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md` | Strength, Focus, and Prompt Footprint ownership, policy flow, and backend effect boundaries. |
 ## Promoted Live UI Renders
 
 These assets are promoted live UI documentation renders and may be embedded directly from `assets/documentation/renders/`.
@@ -119,6 +97,7 @@ These assets are promoted live UI documentation renders and may be embedded dire
 | `recursion-full-viewer-overview.png` | live host | `README.md` | Full Viewer in real SillyTavern showing Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics access without redaction leaks. |
 | `recursion-bar-mobile.png` | live host | `README.md` | Recursion Bar in a phone-width real SillyTavern viewport showing touch-safe controls and collapsed menu access. |
 | `recursion-operator-install-enable.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Install and enable flow in real SillyTavern with Recursion enabled and the Recursion Bar mounted on the active chat. |
+| `recursion-operator-pipeline-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Standard/Rapid pipeline dropdown in the compact Recursion Bar, including visible Standard and Rapid options. |
 | `recursion-operator-mode-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Auto and Manual mode controls in the compact Recursion Bar, including visible current mode and mode switch interaction. |
 | `recursion-operator-bar-states.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Real Recursion Bar state set for Ready, Working, Paused, Issue, Off, provider warning, and prompt-ready behavior. |
 | `recursion-operator-progress-menu-states.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Hero Pixel Array progress menu state set showing top-level rows, child rows, pass, fallback, and ready states from live UI. |
@@ -178,5 +157,5 @@ node .recursion-doc-renderer/check-doc-images.mjs
 Render inventory check:
 
 ```powershell
-node -e "const fs=require('fs');const tracking=fs.readFileSync('docs/testing/DOCUMENTATION_RENDER_TRACKING.md','utf8');const rows=tracking.split(/\r?\n/).filter(line=>line.startsWith('| `')&&(line.includes('| diagram/static |')||line.includes('| fixture/static |')||line.includes('| live host |'))).length;const files=fs.readdirSync('assets/documentation/renders').filter(f=>f.endsWith('.png')).length;if(rows!==files){console.error(JSON.stringify({inventoryRows:rows,renderPngs:files},null,2));process.exit(1);}console.log('render inventory ok ('+files+' PNGs)');"
+node -e "const fs=require('fs');const tracking=fs.readFileSync('docs/testing/DOCUMENTATION_RENDER_TRACKING.md','utf8');const rows=tracking.split(/\r?\n/).filter(line=>line.startsWith('| `')&&line.includes('| live host |')).length;const files=fs.readdirSync('assets/documentation/renders').filter(f=>f.endsWith('.png')).length;if(rows!==files){console.error(JSON.stringify({liveRows:rows,renderPngs:files},null,2));process.exit(1);}console.log('render inventory ok ('+files+' live PNGs)');"
 ```

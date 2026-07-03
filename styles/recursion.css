@@ -37,6 +37,7 @@
 }
 
 .recursion-power-toggle,
+.recursion-stop-generation,
 .recursion-pipeline-button,
 .recursion-mode-button,
 .recursion-activity-trigger,
@@ -64,11 +65,43 @@
   width: 24px;
 }
 
+.recursion-stop-generation {
+  align-items: center;
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--recursion-error) 70%, var(--SmartThemeBodyColor, #d8d8d8));
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 24px;
+  height: 24px;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0;
+  position: relative;
+  width: 24px;
+}
+
+.recursion-stop-generation[hidden] {
+  display: none !important;
+}
+
 .recursion-power-toggle:hover,
-.recursion-power-toggle:focus-visible {
+.recursion-power-toggle:focus-visible,
+.recursion-stop-generation:hover,
+.recursion-stop-generation:focus-visible {
   background: color-mix(in srgb, var(--recursion-panel) 72%, var(--recursion-hover));
   outline: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 28%, transparent);
   outline-offset: 1px;
+}
+
+.recursion-stop-generation:hover,
+.recursion-stop-generation:focus-visible {
+  background: color-mix(in srgb, var(--recursion-error) 14%, var(--recursion-panel));
+  outline-color: color-mix(in srgb, var(--recursion-error) 36%, transparent);
+}
+
+.recursion-stop-generation:disabled {
+  cursor: default;
+  opacity: .42;
 }
 
 .recursion-power-toggle.is-on {
@@ -174,7 +207,8 @@
 }
 
 .recursion-pipeline-icon,
-.recursion-mode-icon {
+.recursion-mode-icon,
+.recursion-stop-generation-icon {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 70%, transparent);
   display: inline-grid;
   height: 16px;
@@ -183,7 +217,20 @@
   width: 16px;
 }
 
+.recursion-stop-generation-icon {
+  color: currentColor;
+}
+
+.recursion-mode-icon {
+  pointer-events: none;
+}
+
 .recursion-pipeline-icon *,
+.recursion-mode-icon *,
+.recursion-stop-generation-icon * {
+  pointer-events: none;
+}
+
 .recursion-mode-icon * {
   pointer-events: none;
 }

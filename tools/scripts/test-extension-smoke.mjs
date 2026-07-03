@@ -291,6 +291,59 @@ if (lifecycleFailures.length) {
 }
 
 {
+  const fake = createFakeSillyTavernContext('latest-assistant-swipe-event');
+  const eventSource = createFakeEventSource();
+  const prompts = [];
+  fake.context.eventSource = eventSource;
+  fake.context.chat = [{
+    mesid: 923,
+    is_user: false,
+    mes: 'Latest assistant swipe A.',
+    swipe_id: 0,
+    swipes: ['Latest assistant swipe A.', 'Latest assistant swipe B.']
+  }];
+  fake.context.event_types = {
+    MESSAGE_SWIPED: 'message_swiped',
+    GENERATION_ENDED: 'generation_ended'
+  };
+  fake.context.generateRaw = async (request = {}) => {
+    prompts.push(String(request.prompt || ''));
+    return {
+      text: JSON.stringify({
+        schema: 'recursion.utilityArbiter.v1',
+        snapshotHash: request.snapshotHash,
+        action: 'skip',
+        reasonerDecision: { mode: 'skip', reason: 'latest assistant swipe smoke', signals: [] },
+        budgets: { targetBriefTokens: 500, maxCards: 6 },
+        diagnostics: ['latest-assistant-swipe-smoke']
+      })
+    };
+  };
+  globalThis.extension_settings = { recursion: { pipelineMode: 'rapid', mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionOnActivate(), true, 'latest assistant swipe setup activates');
+  assertEqual(eventSource.listenerCount('message_swiped'), 1, 'bootstrap subscribes to latest assistant swipe event');
+  const clearStart = fake.promptWrites.length;
+  fake.context.chat[0].swipe_id = 1;
+  fake.context.chat[0].mes = fake.context.chat[0].swipes[1];
+  await eventSource.emit('message_swiped', { mesid: 923 });
+  await eventSource.emit('generation_ended', { mesid: 923 });
+  const cleanupWrites = fake.promptWrites.slice(clearStart);
+  assert(
+    cleanupWrites.every((entry) => entry.text !== ''),
+    'latest assistant swipe retry does not clear existing Recursion prompt lanes'
+  );
+  assertEqual(prompts.length, 0, 'latest assistant swipe retry does not warm Rapid');
+  await globalThis.recursionOnDelete();
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const fake = createFakeSillyTavernContext('generation-stopped-event');
   const eventSource = createFakeEventSource();
   fake.context.eventSource = eventSource;
@@ -349,7 +402,10 @@ if (lifecycleFailures.length) {
   const prompts = [];
   const context = {
     chatId: 'rapid-assistant-landed-chat',
-    chat: [{ mesid: 0, is_user: false, mes: 'Assistant message landed.' }],
+    chat: [
+      { mesid: 0, is_user: false, mes: 'Previous assistant message.' },
+      { mesid: 1, is_user: true, mes: 'User asks for the next beat.' }
+    ],
     extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
     extension_prompt_roles: { SYSTEM: 'SYSTEM' },
     eventSource,
@@ -380,7 +436,16 @@ if (lifecycleFailures.length) {
   await globalThis.recursionOnDelete();
   assertEqual(await globalThis.recursionOnActivate(), true, 'rapid assistant-landed setup activates');
   assertEqual(eventSource.listenerCount('generation_ended'), 1, 'bootstrap subscribes to assistant-landed generation ended event');
-  await eventSource.emit('generation_ended', { mesid: 12 });
+  await eventSource.emit('generation_ended', { mesid: 1 });
+  assertEqual(prompts.length, 0, 'assistant-landed event without a new assistant message does not warm Rapid');
+  context.chatId = 'rapid-assistant-landed-other-chat';
+  context.chat = [{ mesid: 0, is_user: false, mes: 'Existing assistant in switched chat.' }];
+  await eventSource.emit('chat_changed');
+  await eventSource.emit('generation_ended', { mesid: 0 });
+  assertEqual(prompts.length, 0, 'assistant-landed event after chat change without a new assistant message does not warm Rapid');
+  context.chat.push({ mesid: 1, is_user: true, mes: 'User asks in the switched chat.' });
+  context.chat.push({ mesid: 2, is_user: false, mes: 'New assistant message landed.' });
+  await eventSource.emit('generation_ended', { mesid: 2 });
   await waitUntil(
     () => prompts.some((prompt) => prompt.includes('Return a Recursion Utility Arbiter plan')),
     'assistant landing schedules Rapid warm'

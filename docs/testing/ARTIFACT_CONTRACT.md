@@ -267,8 +267,10 @@ Strict: true
 - Preflight: pass
 - Recursion Bar: pass
 - Progress menu: pass
+- Pipeline control: pass
 - Manual mode: pass
 - Auto Utility pass: pass
+- Rapid pipeline proof: pass
 - Prompt cleanup: pass
 
 ## Artifacts

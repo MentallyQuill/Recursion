@@ -29,7 +29,7 @@ The real-call model evaluation runner is opt-in:
 ```powershell
 npm run test:model-eval
 node tools\scripts\eval-recursion-models.mjs --dry-run --pack smoke --profile auto-normal --runs 1 --write-artifacts
-node tools\scripts\eval-recursion-models.mjs --live --pack smoke --profile auto-normal --runs 1 --user recursion-soak-a --target-model <model-id> --judge-model <model-id> --write-artifacts
+node tools\scripts\eval-recursion-models.mjs --live --pack smoke --profile auto-normal --runs 1 --user recursion-soak-a --target-model <model-id> --judge-model <model-id> --character-name Story --chat-file "Branch #790 - 2025-08-28@18h02m24s" --write-artifacts
 ```
 
-Use live model evaluation only with a dedicated `recursion-soak-*` user and explicit provider-call or cost caps.
+Use live model evaluation only with a dedicated `recursion-soak-*` user and explicit provider-call or cost caps. Story-chat runs require the character card and chat file to be seeded into that soak user before running the command.

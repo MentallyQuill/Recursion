@@ -28,8 +28,6 @@ flowchart TD
     Packet --> Blocks["SillyTavern prompt blocks"]
 ```
 
-![Prompt packet stack visual](../../assets/documentation/renders/recursion-prompt-packet-stack.png)
-
 ## Composer Inputs
 
 The composer receives:
@@ -119,8 +117,6 @@ Advanced user settings control the composed packet's effective insertion lane wi
 These settings apply to the composed Recursion packet blocks after Utility/Reasoner composition and before host install. They are intended for model/preset compatibility, not per-card prompt engineering. Invalid or unsupported host combinations must normalize to the concrete safe system-role plan and emit a compact activity warning.
 
 Power-off, extension disable, delete, and runtime teardown clear Recursion prompt keys best-effort.
-
-![Prompt injection lanes](../../assets/documentation/renders/recursion-prompt-injection-lanes.png)
 
 ## Privacy Guardrails
 

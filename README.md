@@ -40,19 +40,55 @@ Instead of generating one stream of character thoughts, Recursion builds a scene
 On a run, Recursion turns the active SillyTavern chat into a short-lived reasoning brief for the next generation:
 
 1. It builds a bounded snapshot of the current scene.
-2. It uses the Utility provider to plan, update scene cards, and select the turn hand.
-3. It can use the Reasoner provider for deeper synthesis at higher reasoning levels.
-4. It composes a prompt packet with a Scene Brief, Turn Brief, guardrails, card references, omissions, and metadata.
-5. It injects the packet through Recursion-owned SillyTavern prompt entries.
+2. It runs either the Standard or Rapid pipeline, depending on the selected pipeline mode.
+3. It uses the Utility provider to plan, update scene cards, select the turn hand, or run a Rapid foreground delta.
+4. It can use the Reasoner provider for deeper synthesis at higher reasoning levels.
+5. It composes a prompt packet with a Scene Brief, Turn Brief, guardrails, card references, omissions, and metadata.
+6. It injects the packet through Recursion-owned SillyTavern prompt entries.
+
+## Standard vs Rapid Pipelines
+
+Pipeline controls are separate from Auto and Manual. Auto and Manual decide when Recursion prepares guidance; Standard and Rapid decide how much scene work happens in the send path.
+
+Standard is the default reference pipeline. When you send a message, Recursion performs the full foreground sequence: snapshot, Utility Arbiter planning, card generation or reuse, hand selection, composition, validation, and prompt install. Use Standard when you want maximum coverage, when a scene has shifted, or when you want the most debuggable behavior.
+
+```mermaid
+flowchart LR
+    Send["User sends message"] --> Snapshot["Capture scene snapshot"]
+    Snapshot --> Arbiter["Utility Arbiter plans card work"]
+    Arbiter --> Cards["Generate or reuse scene cards"]
+    Cards --> Hand["Select turn hand"]
+    Hand --> Compose["Compose and validate packet"]
+    Compose --> Install["Install Recursion prompt keys"]
+    Install --> Continue["Host generation continues"]
+```
+
+Rapid is the lower-latency pipeline. It warms provider-generated scene guidance in the background after an assistant message lands or the scene settles, then uses a short Utility `rapidTurnDelta` on the next send. If no exact warm artifact is ready, Rapid asks Utility for a compact `rapidFastStartPack`. If Rapid output is invalid or the provider marks a mandatory gap, Recursion escalates that turn to Standard rather than inventing local Rapid guidance.
+
+```mermaid
+flowchart LR
+    Settle["Assistant lands or scene settles"] --> Warm["Warm provider-generated scene artifact"]
+    Warm --> Cache["Store exact-source Rapid metadata"]
+    Cache --> Send["User sends next message"]
+    Send --> Decision{"Warm artifact usable?"}
+    Decision -- "yes" --> Delta["Utility rapidTurnDelta"]
+    Decision -- "no" --> FastStart["Utility rapidFastStartPack"]
+    Delta --> Packet["Install valid Rapid packet"]
+    FastStart --> Packet
+    Delta -. "mandatory gap or invalid output" .-> Standard["Escalate to Standard"]
+    FastStart -. "mandatory gap or invalid output" .-> Standard
+```
 
 ![Full Viewer overview with Now, Deck, Activity, Prompt Packet, Settings, and Providers](assets/documentation/renders/recursion-full-viewer-overview.png)
 
 ## Fast Start
 
 1. Install as a SillyTavern extension and refresh your browser.
-2. Configure and test the Utility provider, and optional Reasoner provider for a deeper sythesis lane.
-3. Use `Auto` when you want Recursion to prepare the next reply on its own. Use `Manual` for explicit card selection.
-4. Open `Last Brief` or the Full Viewer whenever you want to see what Recursion prepared.
+2. Configure and test the Utility provider, and add the optional Reasoner provider if you want a deeper synthesis lane.
+3. Start with the `Standard` pipeline while you confirm behavior in a scene.
+4. Use `Auto` when you want Recursion to prepare the next reply on its own. Use `Manual` for explicit card selection.
+5. Switch to `Rapid` when you want warmed scene guidance plus a shorter send-time delta.
+6. Open `Last Brief` or the Full Viewer whenever you want to see what Recursion prepared.
 
 For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md). For the full surface-by-surface guide, use the [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md).
 
@@ -60,7 +96,7 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 
 | Surface | Purpose |
 | --- | --- |
-| Recursion Bar | Chat-attached controls for power, Auto/Manual mode, Cards scope, Hero Pixel Array progress, reasoning level, Last Brief, settings, and viewer access. |
+| Recursion Bar | Chat-attached controls for power, Standard/Rapid pipeline, Auto/Manual mode, Cards scope, Hero Pixel Array progress, reasoning level, Last Brief, settings, and viewer access. |
 | Hero Pixel Array | Compact progress menu for snapshot reading, Utility planning, card generation, prompt composition, prompt install, fallback, and ready states. |
 | Last Brief | Quick inspection surface for the latest scene and turn brief without leaving the chat. |
 | Full Viewer | Detailed view of Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics. |

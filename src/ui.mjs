@@ -51,6 +51,7 @@ const PHASE_LABELS = Object.freeze({
 const VALID_SEVERITIES = new Set(['info', 'success', 'warning', 'error']);
 const READY_PHASES = new Set(['idle', 'settled', '', undefined, null]);
 const REASONER_ACTIVE_PHASES = new Set(['reasonerComposing']);
+const STANDBY_STATUS_TIMEOUT_MS = 4000;
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SVG_TAGS = new Set(['svg', 'rect', 'path', 'circle']);
@@ -209,6 +210,13 @@ function safeText(value, limit = 900) {
   return truncateText(String(value ?? '').replace(SECRET_TEXT_PATTERN, '[redacted]'), limit);
 }
 
+function terminalStatusText(value) {
+  const text = cleanText(value);
+  if (!text) return '';
+  if (/[.!?]$|\.{3}$/.test(text)) return text;
+  return `${text}.`;
+}
+
 function titleCase(value, fallback = '') {
   const text = cleanText(value, fallback).toLowerCase();
   if (!text) return fallback;
@@ -318,6 +326,11 @@ function modeIconSvg(kind) {
     return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
       el('path', { attrs: { d: 'M8 1.7v6', stroke: 'currentColor', 'stroke-width': '1.4', 'stroke-linecap': 'round' } }),
       el('path', { attrs: { d: 'M5 3.8a5 5 0 1 0 6 0', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linecap': 'round' } })
+    ]);
+  }
+  if (kind === 'stop') {
+    return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true', 'data-recursion-stop-icon': '' } }, [
+      el('rect', { attrs: { x: '4.25', y: '4.25', width: '7.5', height: '7.5', rx: '1.2', fill: 'currentColor' } })
     ]);
   }
   return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
@@ -668,25 +681,25 @@ function runtimeHealthLabel(activity, progressRun) {
 }
 
 function standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards) {
-  if (!enabled) return 'Recursion off';
+  if (!enabled) return terminalStatusText('Recursion off');
   if (progressRun?.currentStepText) return '';
   const severity = normalizeSeverity(activity.severity);
-  if (severity === 'error') return 'Needs attention';
-  if (severity === 'warning') return 'Needs attention';
+  if (severity === 'error') return terminalStatusText('Needs attention');
+  if (severity === 'warning') return terminalStatusText('Needs attention');
   const phase = cleanText(activity.phase, 'idle');
-  if (phase === 'rapidWarmReady') return 'Rapid deck ready';
-  if (phase === 'rapidWarmStale') return 'Rapid deck stale';
+  if (phase === 'rapidWarmReady') return terminalStatusText('Rapid deck ready');
+  if (phase === 'rapidWarmStale') return terminalStatusText('Rapid deck stale');
   const label = cleanText(activity.label).replace(/\.+$/g, '');
   if (phase === 'settled' || phase === 'promptPacketBuilt') {
-    if (/recursion prompt ready/i.test(label)) return 'Recursion prompt ready';
-    if (/generation canceled/i.test(label)) return 'Generation canceled';
-    return label || 'Ready for next turn';
+    if (/recursion prompt ready/i.test(label)) return terminalStatusText('Recursion prompt ready');
+    if (/generation canceled/i.test(label)) return terminalStatusText('Generation canceled');
+    return terminalStatusText(label || 'Ready for next turn');
   }
   if (!READY_PHASES.has(activity.phase)) return '';
-  if (mode === 'manual') return 'Manual scope armed';
-  if (pipelineMode === 'rapid' && Array.isArray(cards) && cards.length > 0) return 'Rapid deck standing by';
-  if (Array.isArray(cards) && cards.length > 0) return 'Scene deck standing by';
-  return 'Ready for Recursion';
+  if (mode === 'manual') return terminalStatusText('Manual scope armed');
+  if (pipelineMode === 'rapid' && Array.isArray(cards) && cards.length > 0) return terminalStatusText('Rapid deck standing by');
+  if (Array.isArray(cards) && cards.length > 0) return terminalStatusText('Scene deck standing by');
+  return terminalStatusText('Ready for Recursion');
 }
 
 export function createRecursionViewModel(view = {}) {
@@ -701,6 +714,11 @@ export function createRecursionViewModel(view = {}) {
   const composerLane = source.lastPacket?.diagnostics?.composerLane || activity.composerLane || activity.providerLane || 'utility';
   const progressRun = createProgressRunModel(source);
   const heroPixelBlocks = createHeroPixelBlocks(progressRun);
+  const generationStopVisible = enabled && (
+    Boolean(cleanText(source.activeRunId))
+    || source.hostGenerationActive === true
+    || Number(progressRun.activeCount || 0) > 0
+  );
   const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
   const progressChildVisibleLimit = integerInRange(settings.ui?.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20);
   const progressListVisibleLimit = integerInRange(settings.ui?.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80);
@@ -726,6 +744,7 @@ export function createRecursionViewModel(view = {}) {
     activitySeverity: normalizeSeverity(activity.severity),
     activityChips,
     progressRun,
+    generationStopVisible,
     currentStepText: progressRun.currentStepText,
     standbyStatusText: standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards),
     heroPixelBlocks,
@@ -2523,6 +2542,15 @@ function buildRoot() {
       }),
       el('span', { className: 'recursion-status-text', dataset: { recursionStatus: '' } })
     ]),
+    el('button', {
+      className: 'recursion-stop-generation',
+      attrs: { type: 'button', 'aria-label': 'Stop generation', title: 'Stop generation' },
+      dataset: { recursionStopGeneration: '' }
+    }, [
+      el('span', { className: 'recursion-stop-generation-icon', attrs: { 'aria-hidden': 'true' } }, [
+        modeIconSvg('stop')
+      ])
+    ]),
     el('span', { className: 'recursion-chip recursion-legacy-hand-count', dataset: { recursionHandCount: '' } }),
     el('span', { className: 'recursion-chip recursion-legacy-composer', dataset: { recursionComposer: '' } }),
     el('span', { className: 'recursion-chip recursion-reasoner-chip', dataset: { recursionReasoner: '' } }),
@@ -2686,6 +2714,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const pipelineButton = root.querySelector('[data-recursion-pipeline-button]');
   const modeButton = root.querySelector('[data-recursion-mode-button]');
   const statusButton = root.querySelector('[data-recursion-status-trigger]');
+  const stopGenerationButton = root.querySelector('[data-recursion-stop-generation]');
   const reasoningChain = root.querySelector('[data-recursion-reasoning-chain]');
   const pipelineMenu = root.querySelector('[data-recursion-pipeline-menu]');
   const modeMenu = root.querySelector('[data-recursion-mode-menu]');
@@ -2702,6 +2731,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let transientCurrentStepText = '';
   let transientCurrentStepStatusKey = '';
   let transientCurrentStepTimer = null;
+  let standbyStatusKey = '';
+  let expiredStandbyStatusKey = '';
+  let standbyStatusTimer = null;
   let cardScopeNotice = '';
   let pendingCardScope = null;
   const focusOriginByPanel = typeof WeakMap === 'function' ? new WeakMap() : new Map();
@@ -2741,6 +2773,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (updateView) update();
   }
 
+  function clearStandbyStatusTimer() {
+    if (standbyStatusTimer !== null && typeof clearTimeout === 'function') clearTimeout(standbyStatusTimer);
+    standbyStatusTimer = null;
+  }
+
   function statusFingerprint(view, model) {
     const activity = asObject(view.activity);
     return [
@@ -2757,11 +2794,55 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     ].map((entry) => String(entry)).join('|');
   }
 
+  function standbyStatusFingerprint(view, model) {
+    const activity = asObject(view.activity);
+    return [
+      model.standbyStatusText || '',
+      model.enabled ? 'on' : 'off',
+      model.mode || '',
+      model.pipelineMode || '',
+      model.handCount ?? '',
+      cleanText(view.lastHand?.handId),
+      cleanText(view.lastPacket?.packetId),
+      cleanText(view.lastSnapshot?.chatKey || view.lastSnapshot?.chatId),
+      cleanText(view.lastSnapshot?.sceneKey),
+      activity.runId || '',
+      activity.recordedAt || '',
+      activity.phase || '',
+      activity.severity || '',
+      activity.label || ''
+    ].map((entry) => String(entry)).join('|');
+  }
+
+  function standbyStatusTextForRender(view, model) {
+    if (!model.standbyStatusText || model.currentStepText) {
+      clearStandbyStatusTimer();
+      standbyStatusKey = '';
+      expiredStandbyStatusKey = '';
+      return '';
+    }
+    const key = standbyStatusFingerprint(view, model);
+    if (key !== standbyStatusKey) {
+      clearStandbyStatusTimer();
+      standbyStatusKey = key;
+      expiredStandbyStatusKey = '';
+    }
+    if (expiredStandbyStatusKey === key) return '';
+    if (standbyStatusTimer === null && typeof setTimeout === 'function') {
+      standbyStatusTimer = setTimeout(() => {
+        standbyStatusTimer = null;
+        expiredStandbyStatusKey = key;
+        update();
+      }, STANDBY_STATUS_TIMEOUT_MS);
+    }
+    return model.standbyStatusText;
+  }
+
   function currentStepTextForRender(view, model) {
-    if (!transientCurrentStepText) return model.currentStepText || model.standbyStatusText || '';
+    if (!transientCurrentStepText) return model.currentStepText || standbyStatusTextForRender(view, model);
     if (statusFingerprint(view, model) !== transientCurrentStepStatusKey) {
       clearTransientCurrentStepText();
-      return model.currentStepText || model.standbyStatusText || '';
+      return model.currentStepText || standbyStatusTextForRender(view, model);
     }
     return transientCurrentStepText;
   }
@@ -3177,6 +3258,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   statusButton?.addEventListener('click', () => {
     setProgressPopoverOpen(statusPopover.hidden);
   });
+  stopGenerationButton?.addEventListener('click', (event) => {
+    consumeClickEvent(event);
+    setProgressPopoverOpen(false);
+    const action = runtime?.stopGeneration?.({ source: 'recursion-ui' });
+    update();
+    runAction(action, () => update());
+  });
   reasoningChain?.addEventListener('keydown', handleReasoningKeydown);
   const handleSettingsAutoSave = (event) => {
     const target = event?.target;
@@ -3553,6 +3641,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setTooltip(powerButton, model.tooltipsEnabled, powerTip);
       powerButton.className = model.enabled ? 'recursion-power-toggle is-on' : 'recursion-power-toggle is-off';
     }
+    if (stopGenerationButton) {
+      stopGenerationButton.hidden = !model.generationStopVisible;
+      stopGenerationButton.disabled = !model.generationStopVisible;
+      stopGenerationButton.setAttribute('aria-hidden', model.generationStopVisible ? 'false' : 'true');
+      stopGenerationButton.setAttribute('tabindex', model.generationStopVisible ? '0' : '-1');
+      setTooltip(stopGenerationButton, model.tooltipsEnabled, 'Stop generation');
+    }
     renderPipelineMenuSelection(model.pipelineMode);
     renderModeMenuSelection(model.mode);
     setText(root, '[data-recursion-hand-count]', `Hand ${model.handCount}`);
@@ -3586,6 +3681,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       clearRibbonRevealTimer();
       clearRibbonSuccessTimer();
       clearTransientCurrentStepText();
+      clearStandbyStatusTimer();
       document.removeEventListener?.('click', handleDocumentClick);
       document.removeEventListener?.('keydown', handleDocumentKeydown);
       globalThis.visualViewport?.removeEventListener?.('resize', handleViewportChange);

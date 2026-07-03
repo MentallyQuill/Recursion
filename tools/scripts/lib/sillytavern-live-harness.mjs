@@ -888,6 +888,7 @@ function browserSnapshotScript() {
       viewerOpened: globalThis.__recursionSmokeViewerOpened === true,
       modeSmoke: globalThis.__recursionSmokeModeSmoke || null,
       swipeProof: globalThis.__recursionSmokeSwipeProof || null,
+      seedChat: globalThis.__recursionSmokeSeedChat || null,
       generation: globalThis.__recursionSmokeGeneration || null,
       bridge: {
         interceptor: typeof globalThis.recursionGenerationInterceptor === 'function',
@@ -907,6 +908,85 @@ function browserSnapshotScript() {
         .filter((value) => /Recursion|third-party\/Recursion|recursion/i.test(value))
         .slice(0, 12)
     };
+  };
+}
+
+function seedLiveChatScript() {
+  return async ({ characterName, chatFile }) => {
+    const requestedCharacter = String(characterName || '').trim();
+    const requestedChatFile = String(chatFile || '').trim().replace(/\.jsonl$/i, '');
+    const skipped = {
+      requested: Boolean(requestedCharacter || requestedChatFile),
+      status: 'skipped',
+      characterName: requestedCharacter,
+      chatFile: requestedChatFile,
+      chatLength: null,
+      error: ''
+    };
+    if (!requestedCharacter && !requestedChatFile) {
+      globalThis.__recursionSmokeSeedChat = skipped;
+      return skipped;
+    }
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const fail = (message, details = {}) => {
+      const result = {
+        ...skipped,
+        ...details,
+        status: 'fail',
+        error: String(message || 'seed chat failed')
+      };
+      globalThis.__recursionSmokeSeedChat = result;
+      return result;
+    };
+    if (!context) return fail('SillyTavern context unavailable');
+    const characters = Array.isArray(context.characters) ? context.characters : [];
+    let characterIndex = typeof context.characterId === 'number' || typeof context.characterId === 'string'
+      ? Number(context.characterId)
+      : -1;
+    if (requestedCharacter) {
+      const normalized = requestedCharacter.toLowerCase();
+      characterIndex = characters.findIndex((entry) => {
+        const name = String(entry?.name || '').trim().toLowerCase();
+        const avatar = String(entry?.avatar || '').trim().toLowerCase();
+        const avatarBase = avatar.replace(/\.png$/i, '');
+        return name === normalized || avatar === normalized || avatarBase === normalized;
+      });
+      if (characterIndex < 0) return fail(`Character not found: ${requestedCharacter}`);
+      if (typeof context.selectCharacterById === 'function') {
+        await context.selectCharacterById(characterIndex);
+      }
+    }
+    const activeCharacter = characters[characterIndex] || null;
+    const fileName = requestedChatFile || String(activeCharacter?.chat || context.chatId || '').replace(/\.jsonl$/i, '');
+    if (!fileName) return fail('Chat file not specified', { characterName: String(activeCharacter?.name || requestedCharacter) });
+    if (typeof context.openCharacterChat !== 'function') return fail('openCharacterChat unavailable');
+    await context.openCharacterChat(fileName);
+    const refreshedContext = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || context;
+      } catch {
+        return context;
+      }
+    })();
+    const refreshedCharacters = Array.isArray(refreshedContext?.characters) ? refreshedContext.characters : characters;
+    const refreshedCharacter = refreshedCharacters[characterIndex] || activeCharacter || null;
+    const result = {
+      requested: true,
+      status: 'pass',
+      characterName: String(refreshedCharacter?.name || requestedCharacter || ''),
+      characterAvatar: String(refreshedCharacter?.avatar || ''),
+      chatFile: String(refreshedCharacter?.chat || refreshedContext?.chatId || fileName || '').replace(/\.jsonl$/i, ''),
+      chatLength: Array.isArray(refreshedContext?.chat) ? refreshedContext.chat.length : null,
+      error: ''
+    };
+    globalThis.__recursionSmokeSeedChat = result;
+    return result;
   };
 }
 
@@ -1217,6 +1297,11 @@ function swipeProofScript() {
         mes: 'Swipe A source state.',
         swipe_id: 0,
         swipes: ['Swipe A source state.', 'Swipe B source state.']
+      }, {
+        mesid: 2,
+        is_user: true,
+        name: 'Recursion Swipe Smoke',
+        mes: 'Later user message makes the swiped assistant an older source mutation.'
       });
       context.generateRaw = async () => ({
         text: JSON.stringify({
@@ -1529,26 +1614,81 @@ async function waitForVisibleSendAccepted(page, chatLengthBefore, timeoutMs) {
     .catch(() => false);
 }
 
+async function visibleSendDomState(page, chatLengthBefore) {
+  return page.evaluate((before) => {
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+    const input = document.querySelector('#send_textarea, textarea#send_textarea, textarea[name="send_textarea"], textarea[aria-label*="message" i], [contenteditable="true"]');
+    const button = document.querySelector('#send_but, button#send_but, button[aria-label*="send" i], button[title*="send" i]');
+    const chatLength = Array.isArray(context?.chat) ? context.chat.length : null;
+    const value = input?.isContentEditable ? input.textContent : input?.value;
+    return {
+      chatLength,
+      accepted: typeof before === 'number' && typeof chatLength === 'number' ? chatLength > before : false,
+      inputValueLength: String(value || '').length,
+      inputDisabled: input?.disabled === true,
+      buttonDisabled: button?.disabled === true,
+      buttonAriaDisabled: String(button?.getAttribute?.('aria-disabled') || ''),
+      activeElementId: String(document.activeElement?.id || ''),
+      activeElementTag: String(document.activeElement?.tagName || '')
+    };
+  }, chatLengthBefore).catch(() => ({
+    chatLength: null,
+    accepted: false,
+    inputValueLength: 0,
+    inputDisabled: false,
+    buttonDisabled: false,
+    buttonAriaDisabled: '',
+    activeElementId: '',
+    activeElementTag: ''
+  }));
+}
+
 async function activateVisibleSend(page, inputLocator, buttonLocator, timeoutMs) {
-  const methods = [];
+  const attempts = [];
   const chatLengthBefore = await readVisibleSendChatLength(page);
-  methods.push('button-click');
   await buttonLocator.click({ timeout: timeoutMs });
-  if (await waitForVisibleSendAccepted(page, chatLengthBefore, timeoutMs)) {
-    return methods.join('+');
+  await waitForVisibleSendAccepted(page, chatLengthBefore, timeoutMs);
+  let state = await visibleSendDomState(page, chatLengthBefore);
+  attempts.push({ method: 'button-click', ...state });
+  if (state.accepted) {
+    return {
+      inputMethod: attempts.map((entry) => entry.method).join('+'),
+      acceptedAfter: 'button-click',
+      activationAttempts: attempts,
+      inputValueLength: state.inputValueLength
+    };
   }
 
-  methods.push('keyboard-enter');
   await inputLocator.focus({ timeout: timeoutMs }).catch(() => {});
   await page.keyboard.press('Enter');
-  if (await waitForVisibleSendAccepted(page, chatLengthBefore, timeoutMs)) {
-    return methods.join('+');
+  await waitForVisibleSendAccepted(page, chatLengthBefore, timeoutMs);
+  state = await visibleSendDomState(page, chatLengthBefore);
+  attempts.push({ method: 'keyboard-enter', ...state });
+  if (state.accepted) {
+    return {
+      inputMethod: attempts.map((entry) => entry.method).join('+'),
+      acceptedAfter: 'keyboard-enter',
+      activationAttempts: attempts,
+      inputValueLength: state.inputValueLength
+    };
   }
 
-  methods.push('dom-click');
   await buttonLocator.evaluate((button) => button?.click?.()).catch(() => {});
   await waitForVisibleSendAccepted(page, chatLengthBefore, timeoutMs);
-  return methods.join('+');
+  state = await visibleSendDomState(page, chatLengthBefore);
+  attempts.push({ method: 'dom-click', ...state });
+  return {
+    inputMethod: attempts.map((entry) => entry.method).join('+'),
+    acceptedAfter: state.accepted ? 'dom-click' : '',
+    activationAttempts: attempts,
+    inputValueLength: state.inputValueLength
+  };
 }
 
 async function proveReasonerProviderReady(page, timeoutMs, browserPhase = () => {}) {
@@ -2255,6 +2395,29 @@ async function runBrowserUiSmoke({
       }
     }
 
+    const seedCharacterName = String(env.RECURSION_LIVE_CHARACTER_NAME || '').trim();
+    const seedChatFile = String(env.RECURSION_LIVE_CHAT_FILE || '').trim();
+    if (seedCharacterName || seedChatFile) {
+      browserPhase('seed-chat-start', { characterName: seedCharacterName, chatFile: seedChatFile.replace(/\.jsonl$/i, '') });
+      const seedChat = await page.evaluate(seedLiveChatScript(), {
+        characterName: seedCharacterName,
+        chatFile: seedChatFile
+      });
+      browserPhase('seed-chat-completed', {
+        status: seedChat?.status || '',
+        characterName: seedChat?.characterName || '',
+        chatFile: seedChat?.chatFile || '',
+        chatLength: seedChat?.chatLength ?? null
+      });
+      if (seedChat?.status !== 'pass') {
+        const failed = new Error('Recursion live seed chat could not be loaded.');
+        failed.status = 'fail';
+        failed.result = 'seed-chat-failed';
+        failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ seedChat }));
+        throw failed;
+      }
+    }
+
     if (generationRequested) {
       await page.evaluate(generationRecorderInstallScript());
       await setRecursionPower(page, true);
@@ -2440,17 +2603,18 @@ async function runBrowserUiSmoke({
       if (triggerSource === 'ui-send') {
         try {
           const inputMethod = await fillVisibleSendInput(page, surface.input.locator, setup.smokeMessageText || '', timeoutMs);
-          const activationMethod = await activateVisibleSend(page, surface.input.locator, surface.button.locator, timeoutMs);
-          generation = await page.evaluate(({ inputMethod, activationMethod }) => {
+          const activationEvidence = await activateVisibleSend(page, surface.input.locator, surface.button.locator, timeoutMs);
+          generation = await page.evaluate(({ inputMethod, activationEvidence }) => {
             const base = globalThis.__recursionSmokeGenerationBase || {};
             base.visibleSend = {
               ...(base.visibleSend || {}),
-              inputMethod: [inputMethod, activationMethod].filter(Boolean).join('+')
+              ...activationEvidence,
+              inputMethod: [inputMethod, activationEvidence?.inputMethod].filter(Boolean).join('+')
             };
             globalThis.__recursionSmokeGenerationBase = base;
             globalThis.__recursionSmokeGeneration = { ...(globalThis.__recursionSmokeGeneration || {}), visibleSend: base.visibleSend };
             return base;
-          }, { inputMethod, activationMethod }).catch(() => generation);
+          }, { inputMethod, activationEvidence }).catch(() => generation);
         } catch (error) {
           generation = await page.evaluate(generationEvidenceScript()).catch(() => generation);
           const failed = new Error('Recursion visible send action failed.');
@@ -4067,7 +4231,7 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
               name: 'swipe-live-smoke',
               status: swipeProofStatus,
               summary: swipeProof?.ok === true
-                ? 'Live SillyTavern MESSAGE_SWIPED path cleared Recursion prompt and changed active source revision.'
+                ? 'Live SillyTavern older-message MESSAGE_SWIPED path cleared Recursion prompt and changed active source revision.'
                 : 'Live SillyTavern swipe proof did not pass.',
               details: {
                 releaseProof: swipeProofStatus === 'pass',

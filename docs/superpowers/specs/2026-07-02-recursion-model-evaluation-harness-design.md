@@ -709,7 +709,7 @@ The redaction scan must run before reporting success. It should fail on obvious 
 The first implementation should add:
 
 ```powershell
-node tools\scripts\eval-recursion-models.mjs --live --pack smoke --profile auto-normal --runs 1 --target-model <model-id> --judge-model <model-id> --write-artifacts
+node tools\scripts\eval-recursion-models.mjs --live --pack smoke --profile auto-normal --runs 1 --user recursion-soak-a --target-model <model-id> --judge-model <model-id> --character-name Story --chat-file "Branch #790 - 2025-08-28@18h02m24s" --write-artifacts
 node tools\scripts\eval-recursion-models.mjs --live --pack core --profile auto-normal --runs 3 --target-model <model-id> --judge-model <model-id> --write-artifacts
 ```
 
@@ -718,6 +718,8 @@ Useful flags:
 - `--live`
 - `--base-url <url>`
 - `--user recursion-soak-a`
+- `--character-name <character name>`
+- `--chat-file <chat file without .jsonl>`
 - `--pack smoke|core|stress`
 - `--traversal traversal-smoke|traversal-core|traversal-regression`
 - `--profile auto-normal|manual-focused|auto-rich-reasoner|low-lean|ultra-wide`
@@ -736,6 +738,8 @@ Useful flags:
 - `--strict`
 
 The runner should refuse a full exercise run without `--live`, a reachable base URL, a dedicated soak user, served-extension freshness proof, and provider configuration for real Utility, target, and judge calls. It should print the estimated number of Utility, Reasoner, target, and judge model calls before making calls.
+
+For live story-surface testing, seed the dedicated soak user with the selected character card and chat file, then pass `--character-name` and `--chat-file`. The maintained Branch #790 smoke lane uses `Story` plus `Branch #790 - 2025-08-28@18h02m24s` so the Playwright traversal runs against an actual long-form story chat instead of the default assistant scratch chat.
 
 ## Cost And Reproducibility
 

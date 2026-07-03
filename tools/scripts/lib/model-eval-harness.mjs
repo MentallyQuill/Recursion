@@ -51,6 +51,8 @@ export function parseEvalArgs(argv = []) {
     baseUrl: '',
     scenario: '',
     traversal: '',
+    characterName: '',
+    chatFile: '',
     utilityModel: '',
     reasonerModel: '',
     targetModel: '',
@@ -302,6 +304,7 @@ function timeoutFloor(value, floorMs) {
 function traversalDefectFromSmoke(smoke = {}, args = {}) {
   const result = String(smoke?.result || 'playwright-traversal-failed');
   const generation = smoke?.browser?.snapshot?.generation || {};
+  const visibleSend = generation.visibleSend && typeof generation.visibleSend === 'object' ? generation.visibleSend : {};
   const layer = result.includes('host-continuation') ? 'live-host' : 'runtime';
   const severity = result.includes('secret') || result.includes('prompt-clear') || result.includes('host-continuation')
     ? 'high'
@@ -331,7 +334,19 @@ function traversalDefectFromSmoke(smoke = {}, args = {}) {
     evidence: {
       triggerSource: String(generation.triggerSource || ''),
       promptInstalled: generation.promptInstalled === true,
-      hostGenerationContinued: generation.hostGenerationContinued === null ? null : generation.hostGenerationContinued === true
+      hostGenerationContinued: generation.hostGenerationContinued === null ? null : generation.hostGenerationContinued === true,
+      visibleSend: {
+        inputMethod: String(visibleSend.inputMethod || ''),
+        inputValueLength: Number(visibleSend.inputValueLength) || 0,
+        acceptedAfter: String(visibleSend.acceptedAfter || ''),
+        activationAttempts: Array.isArray(visibleSend.activationAttempts)
+          ? visibleSend.activationAttempts.map((entry) => ({
+              method: String(entry?.method || ''),
+              chatLength: typeof entry?.chatLength === 'number' ? entry.chatLength : null,
+              accepted: entry?.accepted === true
+            })).slice(0, 5)
+          : []
+      }
     },
     regressionTarget: 'tools/scripts/test-live-harness.mjs'
   };
@@ -449,7 +464,9 @@ export async function runModelEval({ argv = [], env = process.env, artifactRoot 
       SILLYTAVERN_BASE_URL: args.baseUrl,
       RECURSION_SILLYTAVERN_USER: args.user,
       RECURSION_LIVE_TIMEOUT_MS: timeoutFloor(env.RECURSION_LIVE_TIMEOUT_MS, 120000),
-      RECURSION_LIVE_REASONER: '1'
+      RECURSION_LIVE_REASONER: '1',
+      RECURSION_LIVE_CHARACTER_NAME: args.characterName || env.RECURSION_LIVE_CHARACTER_NAME || '',
+      RECURSION_LIVE_CHAT_FILE: args.chatFile || env.RECURSION_LIVE_CHAT_FILE || ''
     };
     const smoke = await liveSmokeRunner({
       argv: ['--live', '--strict', ...(args.writeArtifacts ? ['--write-artifacts'] : [])],

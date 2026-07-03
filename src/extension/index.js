@@ -152,6 +152,51 @@ function resolveAssistantLandedEvents(context) {
   ].filter(Boolean))];
 }
 
+function isRawAssistantChatMessage(message) {
+  return Boolean(message && typeof message === 'object' && message.is_user !== true && !isSuppressedMessage(message));
+}
+
+function latestAssistantMessageIdentity(context) {
+  const messages = chatMessagesFromPayload(context);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!isRawAssistantChatMessage(message)) continue;
+    const text = messageText(message);
+    if (!text) continue;
+    return [
+      String(context?.chatId || context?.chat_id || ''),
+      String(messageMesId(message) ?? index)
+    ].join('::');
+  }
+  return '';
+}
+
+function isSwipeEventName(eventName) {
+  return String(eventName || '').toLowerCase() === 'message_swiped';
+}
+
+function latestVisibleChatMessage(context) {
+  const messages = chatMessagesFromPayload(context);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (isSuppressedMessage(message)) continue;
+    if (!messageText(message)) continue;
+    return { message, index };
+  }
+  return null;
+}
+
+function isLatestAssistantSwipe(context, details = {}) {
+  if (!isSwipeEventName(details.eventName)) return false;
+  const messageId = Number(details.messageId);
+  const latestVisible = latestVisibleChatMessage(context);
+  if (!latestVisible || !isRawAssistantChatMessage(latestVisible.message)) return false;
+  const latestAssistantId = Number(messageMesId(latestVisible.message) ?? latestVisible.index);
+  return Number.isFinite(messageId)
+    && Number.isFinite(latestAssistantId)
+    && messageId === latestAssistantId;
+}
+
 function sourceEventDetails(eventName, payload) {
   const source = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
   const rawId = Number(source.messageId ?? source.mesid ?? source.id ?? source.message_id ?? payload);
@@ -177,27 +222,51 @@ function registerHostEvents(nextRuntime) {
   clearHostEventSubscriptions();
   const context = getSillyTavernContextSafe();
   const eventSource = context.eventSource || globalThis.eventSource;
+  let lastAssistantIdentity = latestAssistantMessageIdentity(context);
+  const refreshAssistantSignature = () => {
+    lastAssistantIdentity = latestAssistantMessageIdentity(getSillyTavernContextSafe());
+  };
   const chatChangedEvent = resolveChatChangedEvent(context);
   registerRuntimeHostEvent(eventSource, chatChangedEvent, () => {
+    refreshAssistantSignature();
     runtime ||= nextRuntime;
     return invokeRuntimeCleanup('handleChatChanged', 'Chat change cleanup failed.');
   });
   for (const eventName of resolveSourceChangedEvents(context)) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
+      const details = sourceEventDetails(eventName, payload);
+      const currentContext = getSillyTavernContextSafe();
+      if (isLatestAssistantSwipe(currentContext, details)) {
+        refreshAssistantSignature();
+        return { ok: true, skipped: true, reason: 'latest-assistant-swipe-retry' };
+      }
+      refreshAssistantSignature();
       runtime ||= nextRuntime;
-      return invokeRuntimeCleanup('handleSourceChanged', 'Source change cleanup failed.', sourceEventDetails(eventName, payload));
+      return invokeRuntimeCleanup('handleSourceChanged', 'Source change cleanup failed.', details);
     });
   }
   for (const eventName of resolveGenerationStoppedEvents(context)) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
+      refreshAssistantSignature();
       runtime ||= nextRuntime;
       return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', sourceEventDetails(eventName, payload));
     });
   }
   for (const eventName of resolveAssistantLandedEvents(context)) {
-    registerRuntimeHostEvent(eventSource, eventName, () => {
+    registerRuntimeHostEvent(eventSource, eventName, (payload) => {
+      const currentContext = getSillyTavernContextSafe();
+      const nextAssistantIdentity = latestAssistantMessageIdentity(currentContext);
       runtime ||= nextRuntime;
-      return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
+      const ended = invokeRuntimeCleanup(
+        'handleHostGenerationEnded',
+        'Generation end cleanup failed.',
+        sourceEventDetails(eventName, payload)
+      );
+      if (!nextAssistantIdentity || nextAssistantIdentity === lastAssistantIdentity) {
+        return ended.then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }));
+      }
+      lastAssistantIdentity = nextAssistantIdentity;
+      return ended.then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }));
     });
   }
 }
@@ -363,7 +432,10 @@ export async function recursionGenerationInterceptor(chat) {
   if (!activeRuntime) return chat;
 
   try {
-    await activeRuntime.prepareForGeneration({ userMessage: latestPendingUserMessageFromPayload(chat) });
+    await activeRuntime.prepareForGeneration({
+      userMessage: latestPendingUserMessageFromPayload(chat),
+      hostGeneration: true
+    });
   } catch (error) {
     warn('Generation preparation failed.', error);
   }

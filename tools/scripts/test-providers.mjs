@@ -39,6 +39,8 @@ function assertNoProviderMarker(value, marker, message) {
 function responseSchemaForRole(roleId) {
   if (roleId === 'reasonerComposer') return 'recursion.reasonerComposer.v1';
   if (roleId === 'utilityArbiter') return 'recursion.utilityArbiter.v1';
+  if (roleId === 'rapidTurnDelta') return 'recursion.rapidTurnDelta.v1';
+  if (roleId === 'rapidFastStartPack') return 'recursion.rapidFastStartPack.v1';
   if (roleId === 'briefUtilityComposer') return 'recursion.briefUtilityComposer.v1';
   if (roleId === 'providerTest') return 'recursion.providerTest.v1';
   return 'recursion.card.v1';
@@ -65,6 +67,8 @@ const expectedUtilityRoles = [
   'environmentAffordancesCard',
   'possessionsItemsCard',
   'openThreadsCard',
+  'rapidTurnDelta',
+  'rapidFastStartPack',
   'briefUtilityComposer',
   'providerTest'
 ];
@@ -284,6 +288,12 @@ assertEqual(calls[0].roleId, 'utilityArbiter', 'role id passed to host');
 assertEqual(calls[0].providerSource, 'host-current-model', 'provider source passed to host');
 assertEqual(calls[0].responseSchema, 'recursion.utilityArbiter.v1', 'provider request carries expected response schema');
 assertEqual(calls[0].machineJson, true, 'provider request marks machine JSON calls');
+await router.generate('rapidTurnDelta', { prompt: 'Rapid delta' });
+assertEqual(calls.at(-1).lane, 'utility', 'rapidTurnDelta uses utility lane');
+assertEqual(calls.at(-1).responseSchema, 'recursion.rapidTurnDelta.v1', 'rapidTurnDelta request carries expected response schema');
+await router.generate('rapidFastStartPack', { prompt: 'Rapid fast start' });
+assertEqual(calls.at(-1).lane, 'utility', 'rapidFastStartPack uses utility lane');
+assertEqual(calls.at(-1).responseSchema, 'recursion.rapidFastStartPack.v1', 'rapidFastStartPack request carries expected response schema');
 
 store.update({ reasonerUse: 'always' });
 store.updateProvider('reasoner', { enabled: true });

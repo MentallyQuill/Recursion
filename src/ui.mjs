@@ -25,6 +25,11 @@ const PHASE_LABELS = Object.freeze({
   activity: 'Recursion is working...',
   sceneChecking: 'Checking scene shift...',
   arbiterPlanning: 'Planning card pass...',
+  rapidWarming: 'Rapid warming scene deck...',
+  rapidDeltaRunning: 'Rapid selecting turn delta...',
+  rapidFastStartRunning: 'Rapid fast-start pack...',
+  rapidWarmReady: 'Rapid deck ready.',
+  rapidWarmStale: 'Rapid deck stale.',
   cacheReusing: 'Reusing scene deck...',
   cardBatchRunning: 'Generating scene cards...',
   cardValidating: 'Validating cards...',
@@ -61,6 +66,20 @@ const MODE_MENU_OPTIONS = Object.freeze([
     label: 'Manual',
     title: 'Uses only selected card scope.',
     tip: 'Uses only selected card scope.'
+  }
+]);
+const PIPELINE_MENU_OPTIONS = Object.freeze([
+  {
+    value: 'standard',
+    label: 'Standard',
+    title: 'Standard Pipeline',
+    tip: 'Runs the full foreground Arbiter, card, compose, and install pipeline.'
+  },
+  {
+    value: 'rapid',
+    label: 'Rapid',
+    title: 'Rapid Pipeline',
+    tip: 'Uses provider-warmed scene guidance plus a foreground turn delta.'
   }
 ]);
 const STRENGTH_OPTIONS = Object.freeze([
@@ -237,6 +256,14 @@ function modeLabel(value) {
   return 'Auto';
 }
 
+function normalizePipelineMode(value) {
+  return cleanText(value, 'standard').toLowerCase() === 'rapid' ? 'rapid' : 'standard';
+}
+
+function pipelineLabel(value) {
+  return normalizePipelineMode(value) === 'rapid' ? 'Rapid Pipeline' : 'Standard Pipeline';
+}
+
 function normalizeMode(value) {
   return cleanText(value, 'auto').toLowerCase() === 'manual' ? 'manual' : 'auto';
 }
@@ -245,6 +272,22 @@ function modeIcon(value) {
   const mode = normalizeMode(value);
   if (mode === 'manual') return 'manual';
   return 'auto';
+}
+
+function pipelineIcon(value) {
+  return normalizePipelineMode(value);
+}
+
+function pipelineIconSvg(kind) {
+  if (kind === 'rapid') {
+    return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true', 'data-recursion-pipeline-rapid': '' } }, [
+      el('path', { attrs: { d: 'M9.5 1.8 4.2 9h3.2l-.9 6.2 6.3-8.1H9.3l.2-5.3Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' } })
+    ]);
+  }
+  return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true', 'data-recursion-pipeline-standard': '' } }, [
+    el('path', { attrs: { d: 'M3.2 4.1h7.5M3.2 8.5h10.6M3.2 12.9h7.5', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linecap': 'round' } }),
+    el('path', { attrs: { d: 'M11.1 2.6 13.8 4.1 11.1 5.6M11.1 11.4 13.8 12.9 11.1 14.4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
+  ]);
 }
 
 function modeIconSvg(kind) {
@@ -286,6 +329,48 @@ function renderModeIcon(container, kind) {
   if (container.dataset.recursionRenderedModeKind === kind) return;
   container.dataset.recursionRenderedModeKind = kind;
   container.replaceChildren(modeIconSvg(kind));
+}
+
+function renderPipelineIcon(container, kind) {
+  if (!container) return;
+  if (container.dataset.recursionRenderedPipelineKind === kind) return;
+  container.dataset.recursionRenderedPipelineKind = kind;
+  container.replaceChildren(pipelineIconSvg(kind));
+}
+
+function pipelineMenuChoice(option) {
+  const kind = pipelineIcon(option.value);
+  return el('button', {
+    className: 'recursion-pipeline-choice',
+    attrs: {
+      type: 'button',
+      title: option.title,
+      'aria-current': 'false'
+    },
+    dataset: {
+      recursionPipelineChoice: option.value,
+      [`recursionPipelineChoice${datasetSuffix(option.value)}`]: '',
+      recursionPipelineKind: kind
+    }
+  }, [
+    el('span', {
+      className: 'recursion-pipeline-choice-icon',
+      attrs: { 'aria-hidden': 'true' },
+      dataset: { recursionPipelineChoiceIcon: '' }
+    }, [pipelineIconSvg(kind)]),
+    el('span', { className: 'recursion-pipeline-choice-copy' }, [
+      el('span', {
+        className: 'recursion-pipeline-choice-name',
+        text: option.label,
+        dataset: { recursionPipelineChoiceName: '' }
+      }),
+      el('span', {
+        className: 'recursion-pipeline-choice-tip',
+        text: option.tip,
+        dataset: { recursionPipelineChoiceTip: '' }
+      })
+    ])
+  ]);
 }
 
 function modeMenuChoice(option) {
@@ -586,6 +671,7 @@ export function createRecursionViewModel(view = {}) {
   const activity = asObject(source.activity);
   const enabled = settings.enabled !== false;
   const mode = normalizeMode(settings.mode);
+  const pipelineMode = normalizePipelineMode(settings.pipelineMode);
   const cardScope = normalizeCardScope(settings.cardScope || defaultCardScope());
   const cards = Array.isArray(source.lastHand?.cards) ? source.lastHand.cards : [];
   const composerLane = source.lastPacket?.diagnostics?.composerLane || activity.composerLane || activity.providerLane || 'utility';
@@ -603,8 +689,10 @@ export function createRecursionViewModel(view = {}) {
 
   return {
     mode,
+    pipelineMode,
     enabled,
     modeLabel: modeLabel(mode),
+    pipelineLabel: pipelineLabel(pipelineMode),
     cardScope,
     cardScopeLabel: cardScopeLabel(cardScope),
     cardScopeCounts: cardScopeCounts(cardScope),
@@ -1223,6 +1311,7 @@ function syncStaticTooltips(root, model) {
     return;
   }
   root.dataset.recursionTooltips = 'on';
+  setTooltip(root.querySelector('[data-recursion-pipeline-button]'), true, `Pipeline: ${model.pipelineLabel}`);
   setTooltip(root.querySelector('[data-recursion-mode-button]'), true, `Mode: ${model.modeLabel}`);
   setTooltip(root.querySelector('[data-recursion-cards-button]'), true, 'Open card scope selector. Auto treats scope as preference; Manual uses scope as a strict whitelist.');
   setTooltip(root.querySelector('[data-recursion-status-trigger]'), true, 'Open generation progress');
@@ -1230,6 +1319,10 @@ function syncStaticTooltips(root, model) {
   setTooltip(root.querySelector('[data-recursion-options-button]'), true, 'Open Recursion settings');
   for (const option of MODE_MENU_OPTIONS) {
     const node = root.querySelector(`[data-recursion-mode-choice-${option.value}]`);
+    setTooltip(node, true, option.title);
+  }
+  for (const option of PIPELINE_MENU_OPTIONS) {
+    const node = root.querySelector(`[data-recursion-pipeline-choice-${option.value}]`);
     setTooltip(node, true, option.title);
   }
   for (const [level, label] of REASONING_LEVEL_OPTIONS) {
@@ -2361,6 +2454,17 @@ function buildRoot() {
         modeIconSvg('power')
       ])
     ]),
+    el('div', { className: 'recursion-pipeline-cluster' }, [
+      el('button', {
+        className: 'recursion-pipeline-button',
+        attrs: { type: 'button', 'aria-label': 'Pipeline', 'aria-expanded': 'false' },
+        dataset: { recursionPipelineButton: '', recursionPipelineKind: 'standard' }
+      }, [
+        el('span', { className: 'recursion-pipeline-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionPipelineIcon: '' } }, [pipelineIconSvg('standard')])
+      ]),
+      el('div', { className: 'recursion-pipeline-menu', attrs: { 'aria-label': 'Recursion pipeline selector' }, dataset: { recursionPipelineMenu: '' } },
+        PIPELINE_MENU_OPTIONS.map(pipelineMenuChoice))
+    ]),
     el('div', { className: 'recursion-mode-cluster' }, [
       el('button', {
         className: 'recursion-mode-button',
@@ -2496,6 +2600,7 @@ function buildRoot() {
   root.appendChild(settingsPanel);
   root.appendChild(hiddenViewerToggle);
   root.appendChild(viewer);
+  root.querySelector('[data-recursion-pipeline-menu]').hidden = true;
   root.querySelector('[data-recursion-mode-menu]').hidden = true;
   return root;
 }
@@ -2553,9 +2658,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const powerButton = root.querySelector('[data-recursion-power-toggle]');
   const handButton = root.querySelector('[data-recursion-hand-toggle]');
   const cardsButton = root.querySelector('[data-recursion-cards-button]');
+  const pipelineButton = root.querySelector('[data-recursion-pipeline-button]');
   const modeButton = root.querySelector('[data-recursion-mode-button]');
   const statusButton = root.querySelector('[data-recursion-status-trigger]');
   const reasoningChain = root.querySelector('[data-recursion-reasoning-chain]');
+  const pipelineMenu = root.querySelector('[data-recursion-pipeline-menu]');
   const modeMenu = root.querySelector('[data-recursion-mode-menu]');
   const viewer = root.querySelector('[data-recursion-viewer]');
   const ribbon = root.querySelector('[data-recursion-activity-ribbon]');
@@ -2759,6 +2866,15 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     setFixedPanelGeometry(handPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10010 });
     setFixedPanelGeometry(cardsPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10016 });
     setFixedPanelGeometry(settingsPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10022 });
+    if (pipelineMenu?.style) {
+      const pipelineRect = root.querySelector('[data-recursion-pipeline-button]')?.getBoundingClientRect?.();
+      if (pipelineRect) setFixedPanelGeometry(pipelineMenu, {
+        left: Math.max(viewportLeft, Math.min(pipelineRect.left + 6, viewportRight - 222)),
+        top: progressTop,
+        width: Math.min(222, viewportWidth),
+        zIndex: 10018
+      });
+    }
     if (modeMenu?.style) {
       const modeRect = root.querySelector('[data-recursion-mode-button]')?.getBoundingClientRect?.();
       if (modeRect) setFixedPanelGeometry(modeMenu, {
@@ -2778,6 +2894,23 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     else restorePanelFocus(modeMenu, modeButton);
   }
 
+  function setPipelineMenuOpen(open) {
+    if (!pipelineMenu) return;
+    pipelineMenu.hidden = !open;
+    pipelineButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) rememberPanelFocus(pipelineMenu, pipelineButton);
+    else restorePanelFocus(pipelineMenu, pipelineButton);
+  }
+
+  function renderPipelineMenuSelection(pipelineMode) {
+    const selectedPipeline = normalizePipelineMode(pipelineMode);
+    for (const choice of root.querySelectorAll('[data-recursion-pipeline-choice]')) {
+      const selected = cleanText(choice.dataset.recursionPipelineChoice).toLowerCase() === selectedPipeline;
+      choice.className = selected ? 'recursion-pipeline-choice is-selected' : 'recursion-pipeline-choice';
+      choice.setAttribute('aria-current', selected ? 'true' : 'false');
+    }
+  }
+
   function renderModeMenuSelection(mode) {
     const selectedMode = normalizeMode(mode);
     for (const choice of root.querySelectorAll('[data-recursion-mode-choice]')) {
@@ -2789,6 +2922,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function setProgressPopoverOpen(open) {
     if (open) setModeMenuOpen(false);
+    if (open) setPipelineMenuOpen(false);
     if (open && settingsPanel.hidden === false) setSettingsPanelOpen(false);
     if (open && cardsPanel.hidden === false) setCardsPanelOpen(false);
     statusPopover.hidden = !open;
@@ -2799,7 +2933,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function setHandPanelOpen(open) {
-    if (open && cardsPanel.hidden === false) setCardsPanelOpen(false);
+    if (open) {
+      if (cardsPanel.hidden === false) setCardsPanelOpen(false);
+      setModeMenuOpen(false);
+      setPipelineMenuOpen(false);
+    }
     handPanel.hidden = !open;
     handButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) rememberPanelFocus(handPanel, handButton);
@@ -2815,6 +2953,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (open) {
       setHandPanelOpen(false);
       setModeMenuOpen(false);
+      setPipelineMenuOpen(false);
       settingsPanelRendered = false;
       update();
       rememberPanelFocus(settingsPanel, actionsButton);
@@ -2830,6 +2969,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setHandPanelOpen(false);
       setSettingsPanelOpen(false);
       setModeMenuOpen(false);
+      setPipelineMenuOpen(false);
     }
     cardsPanel.hidden = !open;
     cardsButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -2974,6 +3114,21 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   cardsButton?.addEventListener('click', () => {
     setCardsPanelOpen(cardsPanel.hidden);
   });
+  pipelineButton?.addEventListener('click', (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    panelRerenderClickEvents?.add(event);
+    const open = pipelineMenu?.hidden !== false;
+    if (open) {
+      setProgressPopoverOpen(false);
+      setHandPanelOpen(false);
+      setSettingsPanelOpen(false);
+      setCardsPanelOpen(false);
+      setModeMenuOpen(false);
+    }
+    setPipelineMenuOpen(open);
+    syncFloatingPanelGeometry();
+  });
   modeButton?.addEventListener('click', (event) => {
     event?.preventDefault?.();
     event?.stopPropagation?.();
@@ -2984,6 +3139,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setHandPanelOpen(false);
       setSettingsPanelOpen(false);
       setCardsPanelOpen(false);
+      setPipelineMenuOpen(false);
     }
     setModeMenuOpen(open);
     syncFloatingPanelGeometry();
@@ -3040,6 +3196,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setCardsPanelOpen(false);
       setSettingsPanelOpen(false);
       setModeMenuOpen(false);
+      setPipelineMenuOpen(false);
       openViewer(viewerToggle);
     }
     if (control('recursionCopyPromptPacket')) {
@@ -3083,6 +3240,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (modeChoice) {
       runAction(runtime?.updateSettings?.({ mode: modeChoice.dataset.recursionModeChoice }));
       setModeMenuOpen(false);
+    }
+    const pipelineChoice = control('recursionPipelineChoice');
+    if (pipelineChoice) {
+      runAction(runtime?.updateSettings?.({ pipelineMode: normalizePipelineMode(pipelineChoice.dataset.recursionPipelineChoice) }));
+      setPipelineMenuOpen(false);
     }
     const familyToggle = control('recursionCardScopeFamilyToggle');
     if (familyToggle) {
@@ -3165,6 +3327,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       statusPopover,
       statusButton,
       powerButton,
+      pipelineButton,
+      pipelineMenu,
       handButton,
       handPanel,
       cardsButton,
@@ -3176,6 +3340,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     if (modeMenu?.hidden === false && !eventWithin(event, [modeMenu, modeButton])) {
       setModeMenuOpen(false);
+    }
+    if (pipelineMenu?.hidden === false && !eventWithin(event, [pipelineMenu, pipelineButton])) {
+      setPipelineMenuOpen(false);
     }
     if (handPanel.hidden === false && !eventWithin(event, [handPanel, handButton, statusPopover])) {
       setHandPanelOpen(false);
@@ -3199,6 +3366,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function handleDocumentKeydown(event) {
     if (event?.key !== 'Escape') return;
     setModeMenuOpen(false);
+    setPipelineMenuOpen(false);
     setProgressPopoverOpen(false);
     setHandPanelOpen(false);
     setCardsPanelOpen(false);
@@ -3333,6 +3501,15 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     setText(root, '[data-recursion-status]', model.runtimeHealthLabel);
     setText(root, '[data-recursion-mode]', model.modeLabel);
     setText(root, '[data-recursion-current-step]', currentStepTextForRender(view, model));
+    const pipelineButton = root.querySelector('[data-recursion-pipeline-button]');
+    if (pipelineButton) {
+      const pipelineKind = pipelineIcon(model.pipelineMode);
+      const pipelineTitle = `Pipeline: ${model.pipelineLabel}`;
+      pipelineButton.dataset.recursionPipelineKind = pipelineKind;
+      pipelineButton.setAttribute('aria-label', pipelineTitle);
+      setTooltip(pipelineButton, model.tooltipsEnabled, pipelineTitle);
+      renderPipelineIcon(root.querySelector('[data-recursion-pipeline-icon]'), pipelineKind);
+    }
     const modeButton = root.querySelector('[data-recursion-mode-button]');
     if (modeButton) {
       const modeKind = modeIcon(model.mode);
@@ -3350,6 +3527,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setTooltip(powerButton, model.tooltipsEnabled, powerTip);
       powerButton.className = model.enabled ? 'recursion-power-toggle is-on' : 'recursion-power-toggle is-off';
     }
+    renderPipelineMenuSelection(model.pipelineMode);
     renderModeMenuSelection(model.mode);
     setText(root, '[data-recursion-hand-count]', `Hand ${model.handCount}`);
     setText(root, '[data-recursion-composer]', model.composerLabel);

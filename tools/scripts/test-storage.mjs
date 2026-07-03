@@ -237,6 +237,52 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
 {
   const adapter = createMemoryStorageAdapter();
   const repo = createStorageRepository({ storage: adapter });
+  await repo.saveSceneCache('Rapid Cache Chat', 'Rapid Scene', {
+    activeSourceRevisionHash: 'base-source',
+    variantOrder: ['base-source'],
+    variants: {
+      'base-source': {
+        sourceRevisionHash: 'base-source',
+        cards: [],
+        rapid: {
+          pipelineVersion: 1,
+          status: 'ready',
+          warmArtifactId: 'rapid-warm-1',
+          baseSourceRevisionHash: 'base-source',
+          conditionedSceneBrief: 'Provider scene brief.',
+          candidateCardIds: ['card-a'],
+          cardIds: ['card-a'],
+          settingsHash: 'settings-hash',
+          providerContractHash: 'provider-hash',
+          cardCatalogHash: 'catalog-hash',
+          promptContractHash: 'prompt-hash',
+          diagnostics: ['rapid-warm-ready'],
+          rawProviderResponse: 'must not persist'
+        }
+      }
+    }
+  });
+  const rapidCache = await repo.loadSceneCache('Rapid Cache Chat', 'Rapid Scene');
+  assertEqual(
+    rapidCache.variants['base-source'].rapid.warmArtifactId,
+    'rapid-warm-1',
+    'rapid warm artifact id persists'
+  );
+  assertEqual(
+    rapidCache.variants['base-source'].rapid.rawProviderResponse,
+    undefined,
+    'rapid raw provider response is dropped'
+  );
+  assertEqual(
+    rapidCache.variants['base-source'].rapid.status,
+    'ready',
+    'rapid warm status persists'
+  );
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
   await repo.saveSceneCache('Swipe Variant Bound Chat', 'Scene One', {
     activeSourceRevisionHash: 'source-rev-e',
     variantOrder: ['source-rev-a', 'source-rev-b', 'source-rev-c', 'source-rev-d', 'source-rev-e'],

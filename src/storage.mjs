@@ -8,6 +8,7 @@ const MAX_SCENE_CACHE_VARIANTS = 4;
 const SCENE_CACHE_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
 const RUN_JOURNAL_KEY_PATTERN = /^recursion-run-journal-[A-Za-z0-9_.-]+\.v1\.json$/;
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
+const RAPID_WARM_STATUSES = new Set(['queued', 'warming', 'ready', 'stale', 'failed']);
 const UNSAFE_JOURNAL_TEXT_PATTERN = /\b(raw[-_\s]*prompt|rawPrompt|raw[-_\s]*response|rawResponse|provider[-_\s]*prompt|providerPrompt|provider[-_\s]*response|providerResponse|hidden[-_\s]*reasoning|hiddenReasoning|private[-_\s]*story[-_\s]*plan|privateStoryPlan|private[-_\s]*plan|privatePlan|session[-_\s]*id|sessionId|session[-_\s]*key\s*[:=]|sessionKey\s*[:=]|session[-_\s]*token|credentials?|password\s*[:=]|token\s*[:=]|api[-_\s]*key\s*[:=]|apiKey\s*[:=]|authorization\s*[:=]|set-cookie\s*[:=]|cookie\s*[:=]|bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/i;
 const PATH_LIKE_TEXT_PATTERN = /(^|[\s"'`=:(\[])(?:[A-Za-z]:[\\/]|\\\\|\/\/|\.{1,2}[\\/]|\/[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)+|[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.\\/-]*|[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.\\/-]*\.(?:jsonl?|mjs|js|css|md|txt|png|jpe?g|webp|db|sqlite)\b)/i;
 const FORBIDDEN_STORAGE_KEY_PARTS = [
@@ -341,6 +342,29 @@ function normalizeVariantKey(value) {
   return safeMetadataText(value, 180, '');
 }
 
+function normalizeRapidWarmArtifact(source = {}) {
+  const value = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
+  const status = RAPID_WARM_STATUSES.has(value.status) ? value.status : '';
+  const warmArtifactId = safeMetadataText(value.warmArtifactId || '', 160, '');
+  if (!status && !warmArtifactId) return null;
+  return {
+    pipelineVersion: Math.max(1, Math.floor(Number(value.pipelineVersion) || 1)),
+    status: status || 'stale',
+    warmArtifactId,
+    baseSourceRevisionHash: safeMetadataText(value.baseSourceRevisionHash || '', 180, ''),
+    conditionedSceneBrief: safeMetadataText(value.conditionedSceneBrief || '', 1600, ''),
+    candidateCardIds: safeMetadataList(value.candidateCardIds, 180, 32),
+    cardIds: safeMetadataList(value.cardIds, 180, 32),
+    settingsHash: safeMetadataText(value.settingsHash || '', 180, ''),
+    providerContractHash: safeMetadataText(value.providerContractHash || '', 180, ''),
+    cardCatalogHash: safeMetadataText(value.cardCatalogHash || '', 180, ''),
+    promptContractHash: safeMetadataText(value.promptContractHash || '', 180, ''),
+    builtAt: safeMetadataText(value.builtAt || '', 80, ''),
+    runId: safeMetadataText(value.runId || '', 120, ''),
+    diagnostics: safeMetadataList(value.diagnostics, 120, 24)
+  };
+}
+
 function normalizeSceneCacheVariant(key, value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const sourceRevisionHash = normalizeVariantKey(source.sourceRevisionHash || key);
@@ -355,6 +379,8 @@ function normalizeSceneCacheVariant(key, value = {}) {
     latestHand: normalizeLatestHand(source.latestHand),
     updatedAt: timestampValue(source.updatedAt)
   };
+  const rapid = normalizeRapidWarmArtifact(source.rapid);
+  if (rapid) variant.rapid = rapid;
   if (!variant.source.sourceRevisionHash) variant.source.sourceRevisionHash = sourceRevisionHash;
   return variant;
 }

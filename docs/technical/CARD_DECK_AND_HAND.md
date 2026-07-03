@@ -129,6 +129,8 @@ Hard invalidation retires or replaces the deck when chat identity, scene fingerp
 
 Soft invalidation marks the deck stale for Arbiter review when manual scene refresh is invoked, provider settings change, the source window advances, the prompt budget changes, or runtime rejects cards for schema, size, freshness, or safety reasons. Manual refresh uses reason `user-refresh` and rechecks the current host snapshot without adding synthetic chat content.
 
+Rapid may attach a `rapid` object to a source variant. This object stores sanitized warm-artifact metadata and provider-generated conditioned scene guidance for that exact source revision. It is not a separate memory layer, and it must not contain raw provider prompts, raw provider responses, hidden reasoning, API keys, inactive swipe text, or prompt packets.
+
 Pre-alpha storage can invalidate old experimental records instead of carrying compatibility layers.
 
 ## Character Motivation Safety

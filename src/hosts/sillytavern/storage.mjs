@@ -76,6 +76,22 @@ function serializeStorageJson(value) {
   return jsonText;
 }
 
+async function verifyUserFileExists(fetchImpl, context, fileName) {
+  const encodedPath = `/user/files/${encodeURIComponent(fileName)}`;
+  const plainPath = `/user/files/${fileName}`;
+  const response = await fetchImpl('/api/files/verify', {
+    method: 'POST',
+    headers: await requestHeaders(context),
+    body: JSON.stringify({ urls: [encodedPath] })
+  });
+  if (!response?.ok) return null;
+  const result = await parseJsonResponse(response);
+  if (!result || typeof result !== 'object') return null;
+  if (Object.prototype.hasOwnProperty.call(result, encodedPath)) return result[encodedPath] === true;
+  if (Object.prototype.hasOwnProperty.call(result, plainPath)) return result[plainPath] === true;
+  return null;
+}
+
 export function createSillyTavernUserFileStorageAdapter({ contextFactory = null, fetchImpl } = {}) {
   if (typeof fetchImpl !== 'function') return createMemoryStorageAdapter();
 
@@ -104,7 +120,10 @@ export function createSillyTavernUserFileStorageAdapter({ contextFactory = null,
     async readJson(key) {
       const fileName = validateStorageFileName(key);
       if (fallbackStorage) return readMemory(fileName);
+      const context = currentContext(contextFactory);
       try {
+        const exists = await verifyUserFileExists(fetchImpl, context, fileName);
+        if (exists === false) return null;
         const response = await fetchImpl(`/user/files/${encodeURIComponent(fileName)}`, { method: 'GET' });
         if (response?.status === 404) return null;
         assertOk(response, 'read', fileName);

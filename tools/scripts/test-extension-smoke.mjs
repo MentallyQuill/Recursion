@@ -345,6 +345,55 @@ if (lifecycleFailures.length) {
 }
 
 {
+  const eventSource = createFakeEventSource();
+  const prompts = [];
+  const context = {
+    chatId: 'rapid-assistant-landed-chat',
+    chat: [{ mesid: 0, is_user: false, mes: 'Assistant message landed.' }],
+    extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+    extension_prompt_roles: { SYSTEM: 'SYSTEM' },
+    eventSource,
+    event_types: {
+      CHAT_CHANGED: 'chat_changed',
+      GENERATION_ENDED: 'generation_ended'
+    },
+    setExtensionPrompt() {},
+    async generateRaw(request = {}) {
+      prompts.push(String(request.prompt || ''));
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.utilityArbiter.v1',
+          snapshotHash: request.snapshotHash,
+          action: 'refresh-cards',
+          sceneStatus: 'same-scene',
+          cardJobs: [],
+          reasonerDecision: { mode: 'skip', reason: 'rapid warm smoke', signals: [] },
+          budgets: { targetBriefTokens: 500, maxCards: 6 },
+          diagnostics: ['rapid-warm-smoke']
+        })
+      };
+    }
+  };
+  globalThis.extension_settings = { recursion: { pipelineMode: 'rapid', mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = { getContext: () => context };
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionOnActivate(), true, 'rapid assistant-landed setup activates');
+  assertEqual(eventSource.listenerCount('generation_ended'), 1, 'bootstrap subscribes to assistant-landed generation ended event');
+  await eventSource.emit('generation_ended', { mesid: 12 });
+  await waitUntil(
+    () => prompts.some((prompt) => prompt.includes('Return a Recursion Utility Arbiter plan')),
+    'assistant landing schedules Rapid warm'
+  );
+  await globalThis.recursionOnDelete();
+  assertEqual(eventSource.listenerCount('generation_ended'), 0, 'teardown unsubscribes assistant-landed generation ended event');
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const prompts = [];
   globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
   globalThis.SillyTavern = {

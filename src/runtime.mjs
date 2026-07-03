@@ -10,6 +10,16 @@ import {
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { composePromptPacket, PROMPT_PACKET_VERSION } from './prompt.mjs';
 import { PROVIDER_CONTRACT_HASH, fetchOpenAICompatibleModels } from './providers.mjs';
+import {
+  RAPID_PIPELINE_VERSION,
+  buildRapidFastStartPrompt,
+  buildRapidTurnDeltaPrompt,
+  chooseRapidHedgeWinner,
+  normalizeRapidFastStartPack,
+  normalizeRapidTurnDelta,
+  rapidArtifactHash,
+  rapidWarmArtifactIsUsable
+} from './rapid-pipeline.mjs';
 import { reasoningRequestMetadata } from './reasoning-policy.mjs';
 import { createSettingsStore, normalizeCardBudgetSettings, normalizeSettings } from './settings.mjs';
 import { behaviorPolicyPromptLines, influencePolicyForSettings, runPolicyForEffectivePlan } from './settings-policy.mjs';
@@ -37,6 +47,16 @@ const DEFAULT_NORMAL_REASONING_MAX_CARDS = 6;
 const DEFAULT_ULTRA_REASONING_MAX_CARDS = 10;
 const HIGH_REASONER_CARD_PRIORITY = 88;
 const MAX_SCENE_CACHE_VARIANTS = 4;
+const RAPID_SECTION_BUDGETS = Object.freeze({
+  sceneBrief: 1600,
+  turnBrief: 1200,
+  guardrails: 900
+});
+const RAPID_INJECTION_TEMPLATE = Object.freeze([
+  Object.freeze({ id: 'sceneBrief', promptKey: 'recursion.sceneBrief', title: 'Recursion Scene Brief' }),
+  Object.freeze({ id: 'turnBrief', promptKey: 'recursion.turnBrief', title: 'Recursion Turn Brief' }),
+  Object.freeze({ id: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails' })
+]);
 const REASONING_LEVEL_POLICIES = Object.freeze({
   low: {
     level: 'low',
@@ -144,6 +164,7 @@ function cacheSettingsSignature(settings = {}) {
   return {
     enabled: normalized.enabled,
     mode: normalized.mode,
+    pipelineMode: normalized.pipelineMode,
     cardScope: normalized.cardScope,
     strength: normalized.strength,
     minCards: normalized.minCards,
@@ -931,7 +952,7 @@ function cloneCacheVariants(cache) {
   return output;
 }
 
-function sceneCachePayload(snapshot, deck, hand, plan, packet = null, settings = {}, previousCache = null) {
+function sceneCachePayload(snapshot, deck, hand, plan, packet = null, settings = {}, previousCache = null, options = {}) {
   const sourceRevisionHash = activeSourceRevisionHash(snapshot);
   const range = sourceWindowRange(snapshot);
   const variants = cloneCacheVariants(previousCache);
@@ -957,6 +978,7 @@ function sceneCachePayload(snapshot, deck, hand, plan, packet = null, settings =
     latestHand,
     updatedAt: nowIso()
   };
+  if (options.rapid) variants[sourceRevisionHash].rapid = options.rapid;
   const variantOrder = [...existingOrder.filter((key) => key !== sourceRevisionHash), sourceRevisionHash]
     .filter((key) => variants[key])
     .slice(-MAX_SCENE_CACHE_VARIANTS);
@@ -971,6 +993,116 @@ function sceneCachePayload(snapshot, deck, hand, plan, packet = null, settings =
     variants: prunedVariants,
     cards: deck.cards,
     latestHand
+  };
+}
+
+function promptFootprintFromSettings(settings = {}) {
+  const footprint = safeText(settings.promptFootprint || 'normal', 40);
+  return PROMPT_FOOTPRINTS.has(footprint) ? footprint : 'normal';
+}
+
+function rapidSection(label, lines = [], fallback = '') {
+  const content = (Array.isArray(lines) ? lines : [lines])
+    .map((line) => safeText(line, 1200))
+    .filter(Boolean);
+  const body = content.length
+    ? content.map((line) => `- ${line}`).join('\n')
+    : safeText(fallback, 400);
+  return `${label}:\n${body || '- Provider returned no applicable guidance.'}`;
+}
+
+function rapidInjectionPlan(settings = {}, sectionSources = {}) {
+  const injection = asObject(settings.injection);
+  const placement = ['in_prompt', 'in_chat'].includes(injection.placement) ? injection.placement : 'in_prompt';
+  const role = ['system', 'user', 'assistant'].includes(injection.role) ? injection.role : 'system';
+  const depth = Number.isInteger(Number(injection.depth))
+    ? Math.max(0, Math.min(10, Math.round(Number(injection.depth))))
+    : 4;
+  return RAPID_INJECTION_TEMPLATE.map((block) => ({
+    ...block,
+    section: block.id,
+    placement,
+    depth,
+    role,
+    maxChars: RAPID_SECTION_BUDGETS[block.id],
+    sourceIds: (Array.isArray(sectionSources[block.id]) ? sectionSources[block.id] : [])
+      .map((id) => safeIdentifier(id, 'card', 120))
+      .filter(Boolean)
+      .slice(0, 32)
+  }));
+}
+
+function rapidSelectedCardRef(card = {}) {
+  return {
+    cardId: safeIdentifier(card.id || card.cardId || '', 'card', 120),
+    family: safeText(card.family || '', 80),
+    emphasis: safeText(card.emphasis || 'normal', 40),
+    tokenEstimate: Math.max(0, Math.round(numberOr(card.tokenEstimate, 0))),
+    detailProfile: safeText(card.detailProfile || 'standard', 40),
+    evidenceRefs: Array.isArray(card.evidenceRefs)
+      ? card.evidenceRefs.map((entry) => safeText(entry, 160)).filter(Boolean).slice(0, 12)
+      : []
+  };
+}
+
+function rapidPromptPacket({ runId, snapshot, settings, rapid = null, normalized, selectedCards = [], usableWarm }) {
+  const rapidPath = usableWarm ? 'warm-delta' : 'fast-start';
+  const sceneLines = usableWarm
+    ? [rapid?.conditionedSceneBrief]
+    : [normalized.sceneBrief];
+  const turnLines = usableWarm
+    ? [normalized.turnDeltaBrief, ...(normalized.packetInstructions || [])]
+    : [normalized.turnBrief];
+  const guardrailLines = normalized.guardrails || [];
+  const sections = {
+    sceneBrief: rapidSection('Scene brief', sceneLines, ''),
+    turnBrief: rapidSection('Turn brief', turnLines, ''),
+    guardrails: rapidSection('Guardrails', guardrailLines, 'Respect the player message and preserve hard scene constraints.')
+  };
+  const selectedCardIds = selectedCards.map((card) => safeIdentifier(card.id || card.cardId || '', 'card', 120)).filter(Boolean);
+  const sectionSources = {
+    sceneBrief: selectedCardIds,
+    turnBrief: selectedCardIds,
+    guardrails: selectedCardIds
+  };
+  const packetId = makeId('rapid-prompt-packet');
+  const footprint = promptFootprintFromSettings(settings);
+  const omissions = (Array.isArray(normalized.omissions) ? normalized.omissions : [])
+    .map((reason, index) => ({
+      cardId: '',
+      family: '',
+      reason: safeText(reason, 160) || `rapid-omission-${index + 1}`,
+      tokenEstimate: 0
+    }))
+    .slice(0, 12);
+  return {
+    packetId,
+    packetVersion: PROMPT_PACKET_VERSION,
+    snapshotHash: hashJson(snapshot),
+    chatId: safeIdentifier(snapshot.chatId, DEFAULT_CHAT_ID, 160),
+    sceneFingerprint: safeIdentifier(snapshot.sceneFingerprint, 'scene', 160),
+    turnFingerprint: safeIdentifier(snapshot.turnFingerprint, 'turn', 160),
+    footprint,
+    sections,
+    selectedCardRefs: selectedCards.map(rapidSelectedCardRef),
+    omissions,
+    injectionPlan: rapidInjectionPlan(settings, sectionSources),
+    diagnostics: {
+      runId,
+      composerLane: 'utility',
+      reasonerStatus: 'skipped',
+      snapshotHash: hashJson(snapshot),
+      sectionBudgets: { ...RAPID_SECTION_BUDGETS },
+      selectedCardCount: selectedCards.length,
+      omissionCount: omissions.length,
+      selectedTokenEstimate: selectedCards.reduce((sum, card) => sum + Math.max(0, Math.round(numberOr(card.tokenEstimate, 0))), 0),
+      sectionHashes: Object.fromEntries(Object.entries(sections).map(([key, value]) => [key, hashJson(value)])),
+      footprint,
+      pipelineMode: 'rapid',
+      rapidPath,
+      rapidDiagnostics: Array.isArray(normalized.diagnostics) ? normalized.diagnostics.slice(0, 16) : []
+    },
+    composedAt: nowIso()
   };
 }
 
@@ -1076,6 +1208,7 @@ function safeSettingsView(settings) {
   return {
     enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
+    pipelineMode: safeText(source.pipelineMode || 'standard', 40),
     cardScope,
     cardScopeSummary: cardScopeSummary(cardScope),
     strength: safeText(source.strength || 'balanced', 40),
@@ -1196,6 +1329,7 @@ function activeSceneCacheVariant(cache, snapshot) {
       sourceRevisionHash,
       cards: exact.cards,
       latestHand: exact.latestHand || null,
+      rapid: exact.rapid || null,
       exact: true
     };
   }
@@ -1204,6 +1338,7 @@ function activeSceneCacheVariant(cache, snapshot) {
       sourceRevisionHash: safeText(source.activeSourceRevisionHash || '', 180),
       cards: source.cards,
       latestHand: source.latestHand || null,
+      rapid: source.rapid || null,
       exact: false
     };
   }
@@ -1211,6 +1346,7 @@ function activeSceneCacheVariant(cache, snapshot) {
     sourceRevisionHash,
     cards: [],
     latestHand: null,
+    rapid: null,
     exact: false
   };
 }
@@ -1646,7 +1782,8 @@ export function createRecursionRuntime({
   storage = createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity = createActivityReporter(),
   generationRouter = null,
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  rapidHedgeDelayMs = 4000
 } = {}) {
   let activeRunId = null;
   let activeRunController = null;
@@ -2986,6 +3123,405 @@ export function createRecursionRuntime({
     }
   }
 
+  async function warmRapidScene({ reason = 'idle' } = {}) {
+    const settings = settingsStore.get();
+    if (settings.enabled === false || settings.pipelineMode !== 'rapid') {
+      return { ok: true, skipped: true, reason: 'rapid-disabled' };
+    }
+    if (!generationRouter || typeof generationRouter.generate !== 'function') {
+      return { ok: true, skipped: true, reason: 'rapid-utility-unavailable' };
+    }
+    await waitForExternalMutations();
+    const runId = makeId('rapid-warm');
+    const signal = startRun(runId);
+    startRuntimeActivity({
+      runId,
+      phase: 'rapidWarming',
+      label: 'Rapid warming scene deck...',
+      chips: ['Rapid']
+    });
+    try {
+      const snapshot = await readSnapshot();
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      lastSnapshot = snapshot;
+      const fallbackPlan = localFallbackPlan(snapshot, settings);
+      const cache = await loadSceneCacheSafe(runId, snapshot, settings);
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      let plan = await askUtilityArbiter({
+        runId,
+        snapshot,
+        settings,
+        fallbackPlan,
+        sceneCache: cache,
+        userMessage: '',
+        signal
+      });
+      plan = enforceReasonerAvailability(plan, settings);
+      plan = applyReasoningPolicyToPlan(plan, settings);
+      plan = applyBehaviorPolicyToPlan(plan, settings);
+      const scopedCardJobs = filterCardJobsForScope(plan.cardJobs, settings);
+      plan = {
+        ...plan,
+        cardJobs: scopedCardJobs.cardJobs,
+        diagnostics: mergeDiagnostics(
+          plan.diagnostics,
+          scopeOmissionReasons(scopedCardJobs.omitted),
+          autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings)
+        )
+      };
+      lastPlan = plan;
+      const providerCards = (await generatePlanCards({ runId, plan, snapshot, settings, signal })).map(sanitizeGeneratedCard);
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      const activeCache = activeSceneCacheVariant(cache, snapshot);
+      const cacheCards = sanitizedCacheCards(runId, snapshot, activeCache.cards);
+      const candidateCards = [...cacheCards, ...providerCards];
+      if (!candidateCards.length) {
+        settleRuntimeActivity({
+          runId,
+          outcome: 'warning',
+          phase: 'rapidWarmStale',
+          label: 'Rapid deck stale.',
+          chips: ['Rapid']
+        });
+        return { ok: true, skipped: true, reason: 'rapid-no-provider-cards', plan };
+      }
+      const deck = applyCardPlan(cacheCards, {
+        acceptedCards: providerCards,
+        lifecycle: lifecycleForDeck(candidateCards, plan, () => 'rapid background warm')
+      });
+      const behaviorPolicy = runPolicyForEffectivePlan(settings, plan);
+      const hand = selectHand(deck.cards, {
+        maxCards: budgetOr(plan.budgets?.maxCards, 6),
+        maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700),
+        behaviorPolicy
+      });
+      const conditionedSceneBrief = hand.cards
+        .map((card) => card.promptText)
+        .filter(Boolean)
+        .join('\n')
+        .slice(0, 1600);
+      const rapid = {
+        pipelineVersion: RAPID_PIPELINE_VERSION,
+        status: 'ready',
+        warmArtifactId: makeId('rapid-warm-artifact'),
+        baseSourceRevisionHash: activeSourceRevisionHash(snapshot),
+        conditionedSceneBrief,
+        candidateCardIds: hand.cards.map((card) => card.id),
+        cardIds: deck.cards.map((card) => card.id),
+        ...cacheContractVersions(settings),
+        builtAt: nowIso(),
+        runId,
+        diagnostics: mergeDiagnostics(plan.diagnostics, [`rapid-warm:${safeText(reason, 80)}`])
+      };
+      rapid.artifactHash = rapidArtifactHash(rapid);
+      await runStorageSaveSection(runId, () => saveSceneCacheSafe(
+        runId,
+        snapshot,
+        sceneCachePayload(snapshot, deck, hand, plan, null, settings, cache, { rapid })
+      ));
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      settleRuntimeActivity({
+        runId,
+        outcome: 'success',
+        phase: 'rapidWarmReady',
+        label: 'Rapid deck ready.',
+        chips: ['Rapid']
+      });
+      return { ok: true, rapid, hand, plan };
+    } catch (error) {
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      const safeError = runtimeError(error);
+      settleRuntimeActivity({
+        runId,
+        outcome: 'warning',
+        phase: 'rapidWarmStale',
+        label: 'Rapid deck stale.',
+        chips: ['Rapid'],
+        detail: { message: safeError.message }
+      });
+      return { ok: true, skipped: true, reason: 'rapid-warm-failed', error: safeError };
+    } finally {
+      clearActiveRun(runId);
+    }
+  }
+
+  async function installRapidPacket({
+    runId,
+    baseSnapshot,
+    turnSnapshot,
+    pendingUserMessage,
+    settings,
+    rapid,
+    candidateCards,
+    normalized,
+    usableWarm
+  }) {
+    const selectedCards = usableWarm
+      ? candidateCards.filter((card) => normalized.selectedCardIds.includes(card.id))
+      : [];
+    const plan = {
+      schema: UTILITY_ARBITER_SCHEMA,
+      snapshotHash: hashJson(turnSnapshot),
+      action: 'compose-brief',
+      sceneStatus: 'same-scene',
+      promptFootprint: promptFootprintFromSettings(settings),
+      cardJobs: [],
+      budgets: {
+        targetBriefTokens: RAPID_SECTION_BUDGETS.turnBrief,
+        maxCards: selectedCards.length
+      },
+      reasonerDecision: { mode: 'skip', reason: 'Rapid foreground uses Utility delta.', signals: ['rapid'] },
+      diagnostics: mergeDiagnostics(
+        ['rapid-foreground', usableWarm ? 'rapid-warm-delta' : 'rapid-fast-start'],
+        normalized.diagnostics
+      )
+    };
+    lastPlan = plan;
+    const hand = {
+      handId: makeId('rapid-hand'),
+      composedAt: nowIso(),
+      cards: selectedCards,
+      omitted: []
+    };
+    const packet = rapidPromptPacket({
+      runId,
+      snapshot: turnSnapshot,
+      settings,
+      rapid,
+      normalized,
+      selectedCards,
+      usableWarm
+    });
+    const freshness = await recheckPromptInstallSnapshot(runId, turnSnapshot, plan, pendingUserMessage);
+    if (!isActiveRun(runId)) return supersededResult(runId);
+    if (freshness.ok === false) {
+      return skipPromptInstallAfterFreshnessFailure(runId, {
+        reason: freshness.reason,
+        sceneSnapshot: turnSnapshot,
+        currentSnapshot: freshness.currentSnapshot,
+        packet,
+        hand,
+        plan,
+        error: freshness.error
+      });
+    }
+    const promptSnapshot = freshness.snapshot;
+    const installedResult = await runPromptMutationSection(runId, async () => {
+      stageRuntimeActivity({
+        runId,
+        phase: 'promptInstalling',
+        label: 'Installing Recursion prompt...',
+        chips: ['Prompt', 'Rapid']
+      });
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      const install = await installPrompt(host, packet);
+      const installOk = install?.ok !== false;
+      lastSnapshot = promptSnapshot;
+      lastHand = hand;
+      lastPacket = packet;
+      await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
+      await appendJournalSafe(runId, promptSnapshot.chatKey, {
+        event: installOk ? 'prompt.installed' : 'prompt.install_failed',
+        severity: installOk ? 'info' : 'warn',
+        summary: installSummary(install),
+        runId,
+        sceneKey: promptSnapshot.sceneKey,
+        details: {
+          ...installJournalDetails(install),
+          pipelineMode: 'rapid',
+          rapidPath: usableWarm ? 'warm-delta' : 'fast-start',
+          baseSourceRevisionHash: activeSourceRevisionHash(baseSnapshot)
+        },
+        hashes: { promptPacketHash: hashJson(packet) }
+      });
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      settleRuntimeActivity({
+        runId,
+        outcome: installOk ? 'success' : 'warning',
+        label: installOk ? 'Recursion prompt ready.' : INSTALL_FAILURE_LABEL,
+        chips: ['Rapid']
+      });
+      return { ok: true, packet, hand, plan, install };
+    });
+    return installedResult;
+  }
+
+  async function prepareRapidForGeneration({
+    runId,
+    baseSnapshot,
+    turnSnapshot,
+    pendingUserMessage,
+    initialCache,
+    settings,
+    signal
+  }) {
+    if (!generationRouter || typeof generationRouter.generate !== 'function') {
+      settleRuntimeActivity({
+        runId,
+        outcome: 'warning',
+        label: 'Rapid provider output was unavailable.',
+        chips: ['Rapid']
+      });
+      return { ok: true, skipped: true, reason: 'rapid-provider-unavailable' };
+    }
+
+    async function generateRapidForeground(roleId, request, options = {}) {
+      const hedgeDelay = Number(rapidHedgeDelayMs);
+      if (!Number.isFinite(hedgeDelay) || hedgeDelay < 0 || typeof setTimeout !== 'function') {
+        return generationRouter.generate(roleId, { ...request, rapidHedgeSource: 'primary' }, options);
+      }
+      const started = Date.now();
+      const call = async (source) => {
+        try {
+          const result = await generationRouter.generate(roleId, { ...request, rapidHedgeSource: source }, options);
+          return { source, result, settledAtMs: Date.now() - started };
+        } catch (error) {
+          return {
+            source,
+            result: { ok: false, error: { message: safeText(error?.message || error, 240) } },
+            settledAtMs: Date.now() - started
+          };
+        }
+      };
+      const primary = call('primary');
+      const backup = new Promise((resolve) => {
+        setTimeout(() => resolve(call('backup')), Math.max(0, Math.round(hedgeDelay)));
+      }).then((entry) => entry);
+      const first = await Promise.race([primary, backup]);
+      if (first?.result?.ok === true) return {
+        ...first.result,
+        diagnostics: {
+          ...(first.result.diagnostics || {}),
+          rapidHedgeWinner: first.source
+        }
+      };
+      const second = await (first?.source === 'primary' ? backup : primary);
+      const winner = chooseRapidHedgeWinner([first, second]);
+      if (winner?.result?.ok === true) return {
+        ...winner.result,
+        diagnostics: {
+          ...(winner.result.diagnostics || {}),
+          rapidHedgeWinner: winner.source
+        }
+      };
+      return first?.result || second?.result || { ok: false, error: { message: 'Rapid provider calls failed.' } };
+    }
+
+    const snapshotHash = hashJson(turnSnapshot);
+    const baseSourceRevisionHash = activeSourceRevisionHash(baseSnapshot);
+    const turnSourceRevisionHash = activeSourceRevisionHash(turnSnapshot);
+    const activeVariant = activeSceneCacheVariant(initialCache, baseSnapshot);
+    const rapid = activeVariant.rapid;
+    const candidateCards = sanitizedCacheCards(runId, baseSnapshot, activeVariant.cards);
+    const usableWarm = rapidWarmArtifactIsUsable(rapid, {
+      baseSourceRevisionHash,
+      ...cacheContractVersions(settings)
+    }) && candidateCards.length > 0;
+    stageRuntimeActivity({
+      runId,
+      phase: usableWarm ? 'rapidDeltaRunning' : 'rapidFastStartRunning',
+      label: usableWarm ? 'Rapid selecting turn delta...' : 'Rapid fast-start pack...',
+      chips: ['Rapid', usableWarm ? 'Warm' : 'Fast start']
+    });
+    const providerResult = usableWarm
+      ? await generateRapidForeground('rapidTurnDelta', {
+        lane: 'utility',
+        runId,
+        signal,
+        snapshotHash,
+        baseSourceRevisionHash,
+        turnSourceRevisionHash,
+        prompt: buildRapidTurnDeltaPrompt({
+          snapshotHash,
+          baseSourceRevisionHash,
+          turnSourceRevisionHash,
+          userMessage: pendingUserMessage.text,
+          warmArtifact: rapid,
+          candidateCards: candidateCards.map((card) => ({
+            id: card.id,
+            family: card.family,
+            summary: card.summary
+          }))
+        })
+      }, { runId, signal, isCurrent: () => isActiveRun(runId) })
+      : await generateRapidForeground('rapidFastStartPack', {
+        lane: 'utility',
+        runId,
+        signal,
+        snapshotHash,
+        turnSourceRevisionHash,
+        prompt: buildRapidFastStartPrompt({
+          snapshotHash,
+          turnSourceRevisionHash,
+          snapshot: providerSafeSnapshot(turnSnapshot)
+        })
+      }, { runId, signal, isCurrent: () => isActiveRun(runId) });
+    if (!isActiveRun(runId)) return supersededResult(runId);
+    if (!providerResult?.ok) {
+      settleRuntimeActivity({
+        runId,
+        outcome: 'warning',
+        label: 'Rapid provider output was unavailable.',
+        chips: ['Rapid']
+      });
+      return { ok: true, skipped: true, reason: 'rapid-provider-unavailable' };
+    }
+    let normalized;
+    try {
+      normalized = usableWarm
+        ? normalizeRapidTurnDelta(providerResult.data, {
+          snapshotHash,
+          baseSourceRevisionHash,
+          turnSourceRevisionHash,
+          allowedCardIds: candidateCards.map((card) => card.id)
+        })
+        : normalizeRapidFastStartPack(providerResult.data, {
+          snapshotHash,
+          turnSourceRevisionHash
+        });
+    } catch {
+      return {
+        ok: false,
+        escalateToStandard: true,
+        diagnostics: ['rapid-escalated-standard:invalid-provider-output']
+      };
+    }
+    if (normalized.escalateToStandard || normalized.mandatoryMissingCards.length) {
+      return {
+        ok: false,
+        escalateToStandard: true,
+        diagnostics: ['rapid-escalated-standard:mandatory-gap']
+      };
+    }
+    const hasPromptText = usableWarm
+      ? (safeText(rapid?.conditionedSceneBrief || '', 1600) && (
+          safeText(normalized.turnDeltaBrief || '', 1200)
+          || (Array.isArray(normalized.packetInstructions) && normalized.packetInstructions.length)
+          || (Array.isArray(normalized.guardrails) && normalized.guardrails.length)
+        ))
+      : (safeText(normalized.sceneBrief || '', 1600) && safeText(normalized.turnBrief || '', 1200));
+    if (!hasPromptText) {
+      settleRuntimeActivity({
+        runId,
+        outcome: 'warning',
+        label: 'Rapid provider output was unavailable.',
+        chips: ['Rapid']
+      });
+      return { ok: true, skipped: true, reason: 'rapid-empty-provider-guidance' };
+    }
+    return installRapidPacket({
+      runId,
+      baseSnapshot,
+      turnSnapshot,
+      pendingUserMessage,
+      settings,
+      rapid,
+      candidateCards,
+      normalized,
+      usableWarm
+    });
+  }
+
   async function prepareForGeneration({ userMessage = '', refreshReason = '' } = {}) {
     const settings = settingsStore.get();
     if (settings.enabled === false) {
@@ -3015,7 +3551,8 @@ export function createRecursionRuntime({
     const modeChip = settings.mode === 'manual' ? 'Manual' : 'Auto';
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: [modeChip] });
     try {
-      const snapshot = snapshotWithPendingUserMessage(await readSnapshot(), pendingUserMessage);
+      const baseSnapshot = await readSnapshot();
+      const snapshot = snapshotWithPendingUserMessage(baseSnapshot, pendingUserMessage);
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastSnapshot = snapshot;
       if (refreshReason && typeof storage.invalidateSceneCache === 'function') {
@@ -3033,14 +3570,35 @@ export function createRecursionRuntime({
         });
         if (!isActiveRun(runId)) return supersededResult(runId);
       }
+      const rapidForeground = settings.pipelineMode === 'rapid' && !refreshReason;
+      const rapidCacheSnapshot = rapidForeground ? baseSnapshot : snapshot;
+      let initialCache = await loadSceneCacheSafe(runId, rapidCacheSnapshot, settings);
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      let rapidEscalationDiagnostics = [];
+      if (rapidForeground) {
+        const rapidResult = await prepareRapidForGeneration({
+          runId,
+          baseSnapshot,
+          turnSnapshot: snapshot,
+          pendingUserMessage,
+          initialCache,
+          settings,
+          signal
+        });
+        if (!isActiveRun(runId)) return supersededResult(runId);
+        if (rapidResult?.escalateToStandard !== true) return rapidResult;
+        rapidEscalationDiagnostics = Array.isArray(rapidResult.diagnostics)
+          ? rapidResult.diagnostics
+          : ['rapid-escalated-standard:mandatory-gap'];
+        initialCache = await loadSceneCacheSafe(runId, snapshot, settings);
+        if (!isActiveRun(runId)) return supersededResult(runId);
+      }
       const fallbackPlan = localFallbackPlan(snapshot, settings);
       fallbackPlan.source = {
         ...fallbackPlan.source,
         userMessageHash: hashJson(pendingUserMessage.text),
         catalogHash: hashJson(CARD_CATALOG)
       };
-      const initialCache = await loadSceneCacheSafe(runId, snapshot, settings);
-      if (!isActiveRun(runId)) return supersededResult(runId);
       let plan = await askUtilityArbiter({
         runId,
         snapshot,
@@ -3059,6 +3617,7 @@ export function createRecursionRuntime({
         cardJobs: scopedCardJobs.cardJobs,
         diagnostics: mergeDiagnostics(
           plan.diagnostics,
+          rapidEscalationDiagnostics,
           scopeOmissionReasons(scopedCardJobs.omitted),
           autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings)
         )
@@ -3343,6 +3902,7 @@ export function createRecursionRuntime({
   return {
     storage,
     prepareForGeneration,
+    warmRapidScene,
     async dispose() {
       supersedeActiveRun();
       await waitForExternalMutations();

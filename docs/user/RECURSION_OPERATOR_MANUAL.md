@@ -38,6 +38,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 
 - runtime health: Ready, Working, Paused, Issue, or Off;
 - power toggle;
+- icon-only Pipeline control: Standard or Rapid;
 - icon-only mode control: Auto or Manual;
 - Hero Pixel Array plus current-step text;
 - Reasoning Level chain;
@@ -45,6 +46,8 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 - ellipsis options/settings entry.
 
 The bar should be stable. Status changes should not repeatedly resize the transcript or cover message input controls.
+
+The Pipeline control is a small icon-only dropdown immediately to the left of the Mode button. `Standard` uses the full foreground Arbiter, card, compose, and install path on send. `Rapid` warms provider-generated scene guidance in the background and uses a short provider delta on send. The selected icon updates on the bar, and the dropdown follows the compact Mode-menu pattern. Pipeline is not duplicated in Settings.
 
 ### Hero Pixel Array Progress Menu
 
@@ -111,9 +114,21 @@ Auto lets Recursion compile and install the next prompt packet. It should finish
 
 Manual uses the Cards selector as a strict whitelist. Disabled families stay out of planning, deck reuse, hand selection, composition, and injection.
 
+## Pipelines
+
+### Standard
+
+Standard is the reference pipeline. On send, Recursion captures the turn, runs Arbiter planning, creates or reuses scene cards, selects the hand, composes the prompt packet, and installs the validated prompt keys before generation continues.
+
+### Rapid
+
+Rapid is the low-latency pipeline. When Rapid is selected and Recursion is enabled, Recursion may warm a provider-generated scene deck after an assistant message lands or the active source settles. That background work writes cache metadata only. It does not install prompt text by itself and does not affect the current assistant response.
+
+On the next send, Rapid uses the exact ready warm deck plus the new user message in a short Utility turn-delta call. If no warm deck is available, Rapid asks the Utility provider for a compact fast-start pack. Both paths are provider-generated. Rapid does not create local fallback cards, local scene briefs, or local turn briefs. If the provider says a mandatory piece is missing, Recursion escalates that turn to Standard.
+
 ## Settings
 
-Operator settings should stay broad. Mode and Reasoning Level live in the compact bar, not in Settings.
+Operator settings should stay broad. Pipeline, Mode, and Reasoning Level live in the compact bar, not in Settings.
 
 - Play / Behavior: Strength `Light | Balanced | Strong`, Prompt Footprint `Compact | Normal | Rich`, and Focus `Balanced | Character | Constraints | Scene | Plot`.
 - Providers: collapsible Utility and Reasoner setup in the settings panel.
@@ -157,12 +172,13 @@ Use this first-run path:
 2. Configure Utility.
 3. Leave Reasoner disabled unless you need Medium/High/Ultra synthesis; if you enable it, run Test Provider.
 4. Confirm the power toggle is on.
-5. Set mode to Auto.
+5. Set Pipeline to Standard, then set mode to Auto.
 6. Send a safe ordinary turn.
 7. Confirm progress reaches prompt ready or a clear fallback.
 8. Inspect Last Brief and Prompt Packet.
 9. Try Manual with a narrowed Cards scope and confirm prompt readiness respects that scope.
-10. Use the power toggle to verify prompt cleanup.
+10. Try Rapid only when Utility provider work is intended, then confirm the progress text reports Rapid warm, delta, fast-start, or Standard escalation honestly.
+11. Use the power toggle to verify prompt cleanup.
 
 See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.
 
@@ -171,11 +187,12 @@ See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.
 During normal play:
 
 1. Keep Recursion in Auto when you want current-scene prompt help.
-2. Watch the Hero Pixel Array and current-step text while work runs.
-3. Use Last Brief when output quality suggests the wrong scene pressure was selected.
-4. Open Prompt Packet when you need to inspect exact model-facing Recursion guidance.
-5. Use the progress menu or Full Viewer when you need diagnostic detail.
-6. Turn the power toggle off when you want an unassisted generation or prompt cleanup.
+2. Use Standard when you want the full foreground pass, and Rapid when you want warmed scene guidance plus a short send-time delta.
+3. Watch the Hero Pixel Array and current-step text while work runs.
+4. Use Last Brief when output quality suggests the wrong scene pressure was selected.
+5. Open Prompt Packet when you need to inspect exact model-facing Recursion guidance.
+6. Use the progress menu or Full Viewer when you need diagnostic detail.
+7. Turn the power toggle off when you want an unassisted generation or prompt cleanup.
 
 Recursion should not require card editing or repeated manual tuning.
 
@@ -187,6 +204,8 @@ Expected behavior:
 
 - Utility unavailable: skip new work, reuse valid cache when safe, or avoid injection.
 - Utility invalid output: reject unsafe structured output and use conservative fallback.
+- Rapid warm unavailable: use provider fast-start guidance or skip; do not install local substitute Rapid briefs.
+- Rapid invalid output or mandatory gap: escalate the current turn to Standard.
 - Card failure: omit failed cards and keep valid siblings.
 - Reasoner disabled, unhealthy, missing credentials, or failed: compose with Utility.
 - Player Stop / host generation stop: abort active Recursion work, clear owned prompt keys, and show skipped/canceled progress rather than a provider warning.
@@ -261,11 +280,13 @@ Use this checklist for a practical browser pass:
 6. Turn power off and confirm prompt lanes are absent or cleared.
 7. Set Auto and confirm Recursion is ready to compile.
 8. Set Manual and confirm it applies as a distinct mode.
-9. Run a safe Auto pass only when provider and live mutation are intended.
-10. Confirm Activity reaches ready or a clear fallback.
-11. Inspect Last Brief and the final Prompt Packet text.
-12. Turn power off and confirm cleanup.
-13. Clear session keys before screenshots or exports that might show provider setup.
+9. Confirm the Pipeline icon dropdown sits immediately left of Mode and offers Standard and Rapid only.
+10. Run a safe Standard Auto pass only when provider and live mutation are intended.
+11. Run a safe Rapid Auto pass only when provider and live mutation are intended.
+12. Confirm Activity reaches ready, Rapid fast-start/delta, Standard escalation, or a clear fallback.
+13. Inspect Last Brief and the final Prompt Packet text.
+14. Turn power off and confirm cleanup.
+15. Clear session keys before screenshots or exports that might show provider setup.
 
 Automated live evidence must use dedicated `recursion-soak-*` users and must reject `default-user` before mutation. See [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md).
 

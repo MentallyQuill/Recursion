@@ -39,11 +39,15 @@ Recursion exposes route visibility as a compact Reasoning Level summary rather t
 | --- | --- | --- |
 | `utilityArbiter` | Utility by default; Reasoner at High/Ultra when healthy | Plan action, scene status, card jobs, Reasoner decision, budgets, and compact diagnostics. |
 | Card roles | Utility by default; Reasoner for high-priority High cards and Ultra card calls when healthy | Generate fixed-family card JSON from the frozen snapshot. |
+| `rapidTurnDelta` | Utility | Foreground Rapid role that selects warm provider-generated cards and emits a tiny user-message delta. |
+| `rapidFastStartPack` | Utility | Foreground Rapid role that returns compact provider-generated scene and turn guidance when no warm deck exists. |
 | `briefUtilityComposer` | Utility | Reserved Utility composition role in the routing contract. |
 | `reasonerComposer` | Reasoner | Medium+ synthesis patch for the Turn Brief. |
 | `providerTest` | Selected lane | Connectivity and structured response test for provider settings UI. |
 
-Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `socialSubtextCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`.
+Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `socialSubtextCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`. Rapid roles are Utility-only foreground roles; they do not run on the Reasoner lane.
+
+Rapid foreground roles are latency-sensitive structured Utility calls. `rapidTurnDelta` is used only when an exact-source warm artifact is ready. `rapidFastStartPack` is used when no warm artifact is available. Both roles must return provider-authored guidance; runtime must not replace missing Rapid output with local scene or turn briefs.
 
 ## Routing Diagram
 
@@ -74,7 +78,7 @@ flowchart TD
 
 All provider work must return a JSON object. OpenAI-compatible responses are normalized before JSON parsing so empty visible output, reasoning-only payloads, and token-limit truncation are reported as provider failures with stable error codes. The router rejects undeclared role ids, parses visible text through the structured JSON parser, validates the expected role schema, and returns either `ok: true` with parsed data or `ok: false` with sanitized diagnostics. Runtime consumers still validate role-specific payload details; for example, provider tests pass only when the router succeeds and the parsed payload contains `schema: "recursion.providerTest.v1"` plus explicit `ok: true`.
 
-The structured parser may recover common provider formatting damage: markdown fences, wrapper prose, `<think>` / `<reasoning>` blocks, comments, trailing commas, smart quotes, BOMs, and literal line breaks inside JSON strings. Repair never supplies missing contract fields. A repaired object that lacks the expected `schema`, frozen `snapshotHash`, card role/family, valid evidence, or composer envelope remains invalid and is retried or rejected by the same semantic validators as strict JSON.
+The structured parser may recover common provider formatting damage: markdown fences, wrapper prose, `<think>` / `<reasoning>` blocks, comments, trailing commas, smart quotes, BOMs, and literal line breaks inside JSON strings. Repair never supplies missing contract fields. A repaired object that lacks the expected `schema`, role/family, valid evidence, or composer envelope remains invalid and is retried or rejected by the same semantic validators as strict JSON. Roles that require a provider-echoed `snapshotHash` still reject missing or mismatched hashes. Rapid foreground roles instead stamp local revision hashes from the frozen request after schema validation, because those hashes are runtime bookkeeping rather than provider-authored guidance.
 
 Every generation-role request carries `responseSchema` and `machineJson: true` into the host adapter. Requests with a frozen snapshot also carry `snapshotHash`. Host adapters may use that metadata to request structured JSON support, but the metadata is advisory until the router validates the visible response body.
 
@@ -100,10 +104,14 @@ Provider calls use a 120 second default timeout unless a caller overrides it. Th
 
 Transient transport and server failures can receive one same-lane retry only while the abort signal has not fired and the current-run or current-snapshot guard still passes. Recoverable structured-output schema failures receive one correction retry that names the expected `schema` field and, when present, the frozen `snapshotHash` field. Provider results normalize to statuses such as success, validation failed, provider failed, timeout, aborted, or stale.
 
+Rapid foreground Utility calls may hedge: runtime starts the primary Utility call immediately and starts a backup Utility call after the configured short delay if no valid structured output has returned. The first valid structured output wins, diagnostics record whether `primary` or `backup` won, and late results cannot install prompt packets after the run is no longer current. Hedging is limited to Rapid foreground roles and is not used for final Story generation.
+
 Fallback behavior:
 
 - Utility provider unavailable, timed out, or transport-failed reuses valid cache when safe; otherwise runtime clears Recursion injection and skips new guidance.
 - Invalid Utility Arbiter schema or missing/mismatched Arbiter `snapshotHash` can use a conservative local fallback plan because a provider result existed but failed structured validation.
+- Rapid warm miss calls `rapidFastStartPack`; it does not permit local Rapid cards, local Rapid scene briefs, or local Rapid turn briefs.
+- Rapid invalid structured output, mandatory missing cards, or provider-declared Standard escalation continue through the Standard pipeline for that same pending user message.
 - Card call failure omits failed cards and keeps valid siblings.
 - Reasoner failure falls back to Utility composition.
 - Provider test failure updates lane status with compact error text.

@@ -22,6 +22,10 @@ async function waitUntil(predicate, message, { attempts = 50, delayMs = 0 } = {}
   throw new Error(message);
 }
 
+function delay(ms = 0) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function assertNoSecretText(value, label) {
   const serialized = JSON.stringify(value);
   assert(!/\bbearer\s+[a-z0-9._-]+/i.test(serialized), `${label} redacts bearer text`);
@@ -78,6 +82,90 @@ function cardProviderResponse(roleId, request = {}) {
         evidenceRefs: ['message:2'],
         tokenEstimate: 12
       }]
+    }
+  };
+}
+
+function sourceFingerprintForMessages(messages = [], firstMesId = null, lastMesId = null) {
+  const first = Number.isFinite(Number(firstMesId)) ? Number(firstMesId) : Number.NEGATIVE_INFINITY;
+  const last = Number.isFinite(Number(lastMesId)) ? Number(lastMesId) : Number.POSITIVE_INFINITY;
+  return hashJson(messages
+    .filter((message) => message?.visible !== false)
+    .map((message) => ({
+      mesid: Number(message.mesid) || 0,
+      role: ['assistant', 'system', 'user'].includes(String(message.role || '').toLowerCase())
+        ? String(message.role).toLowerCase()
+        : 'assistant',
+      textHash: String(message.textHash || hashJson(String(message.text ?? '')))
+    }))
+    .filter((message) => message.mesid >= first && message.mesid <= last));
+}
+
+function rapidWarmSnapshotFixture() {
+  const text = 'The corridor ends at a sealed hatch.';
+  const messages = [
+    { mesid: 2, role: 'user', text, textHash: hashJson(text), visible: true }
+  ];
+  const baseSourceRevisionHash = sourceFingerprintForMessages(messages, 2, 2);
+  return {
+    baseSourceRevisionHash,
+    snapshot: {
+      chatId: 'rapid-chat',
+      chatKey: 'rapid-chat',
+      sceneKey: 'rapid-scene',
+      sceneFingerprint: 'rapid-scene-fp',
+      turnFingerprint: 'rapid-turn-fp',
+      sourceRevisionHash: baseSourceRevisionHash,
+      latestMesId: 2,
+      messages
+    }
+  };
+}
+
+function rapidWarmCacheFixture({ cardId = 'warm-card-1', baseSourceRevisionHash } = {}) {
+  return {
+    cacheState: 'active',
+    versions: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }),
+    activeSourceRevisionHash: baseSourceRevisionHash,
+    variantOrder: [baseSourceRevisionHash],
+    variants: {
+      [baseSourceRevisionHash]: {
+        sourceRevisionHash: baseSourceRevisionHash,
+        cards: [{
+          id: cardId,
+          family: 'Scene Constraints',
+          role: 'sceneConstraintsCard',
+          summary: 'The hatch stays sealed until opened.',
+          promptText: 'The hatch stays sealed until opened.',
+          evidenceRefs: ['message:2'],
+          source: {
+            chatId: 'rapid-chat',
+            firstMesId: 2,
+            lastMesId: 2,
+            fingerprint: baseSourceRevisionHash,
+            snapshotHash: baseSourceRevisionHash,
+            sourceRevisionHash: baseSourceRevisionHash
+          },
+          freshness: {
+            sourceFingerprint: baseSourceRevisionHash,
+            sourceRevisionHash: baseSourceRevisionHash
+          }
+        }],
+        rapid: {
+          pipelineVersion: 1,
+          status: 'ready',
+          warmArtifactId: 'rapid-warm-fixture',
+          baseSourceRevisionHash,
+          conditionedSceneBrief: 'The hatch stays sealed until opened.',
+          candidateCardIds: [cardId],
+          cardIds: [cardId],
+          settingsHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).settingsHash,
+          providerContractHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).providerContractHash,
+          cardCatalogHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).cardCatalogHash,
+          promptContractHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).promptContractHash,
+          diagnostics: ['rapid-warm-ready']
+        }
+      }
     }
   };
 }
@@ -181,7 +269,8 @@ function createRuntimeHarness({
   hostPrompt = {},
   generationRouter = undefined,
   activity = createActivityReporter(),
-  storage: providedStorage = null
+  storage: providedStorage = null,
+  rapidHedgeDelayMs = undefined
 } = {}) {
   const calls = {
     snapshot: 0,
@@ -228,7 +317,7 @@ function createRuntimeHarness({
       ...hostPrompt.methods
     }
   };
-  const runtime = createRecursionRuntime({ host, settingsStore, storage, activity, generationRouter: resolvedGenerationRouter });
+  const runtime = createRecursionRuntime({ host, settingsStore, storage, activity, generationRouter: resolvedGenerationRouter, rapidHedgeDelayMs });
   return { runtime, calls, installed, cleared, storage, settingsStore, activity, adapter };
 }
 
@@ -250,6 +339,315 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
       };
     }
   };
+}
+
+{
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Warm scene frame.' }],
+              reasonerDecision: { mode: 'skip', reason: 'background warm', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['rapid-background-warm']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') return cardProviderResponse(roleId, request);
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  assertEqual(typeof harness.runtime.warmRapidScene, 'function', 'runtime exposes Rapid warm entrypoint');
+  const warm = await harness.runtime.warmRapidScene({ reason: 'test-idle' });
+  assertEqual(warm.ok, true, 'Rapid background warm succeeds');
+  assert(roleCalls.includes('utilityArbiter'), 'Rapid warm uses provider Arbiter');
+  assert(roleCalls.includes('sceneFrameCard'), 'Rapid warm generates provider card');
+  const cache = await harness.storage.loadSceneCache('chat-1', 'scene-1');
+  const variant = cache.variants[cache.activeSourceRevisionHash];
+  assertEqual(variant.rapid.status, 'ready', 'Rapid warm artifact is ready');
+  assertEqual(harness.installed.length, 0, 'Rapid warm does not install prompt');
+}
+
+{
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash }));
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot,
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v1',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: ['warm-card-1'],
+              turnDeltaBrief: 'The user tests the hatch now.',
+              packetInstructions: ['Keep hatch access constrained.'],
+              guardrails: ['Do not open the hatch for free.'],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['rapid-warm-deck']
+            }
+          };
+        }
+        throw new Error(`unexpected foreground role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Try the hatch.' });
+  assertEqual(result.ok, true, 'Rapid foreground installs from warm deck');
+  assert(roleCalls.includes('rapidTurnDelta'), 'Rapid foreground calls turn delta');
+  assert(!roleCalls.includes('utilityArbiter'), 'Rapid warm foreground does not call full Arbiter');
+  assertEqual(harness.installed.length, 1, 'Rapid foreground installs one prompt packet');
+  assertNoSecretText(result.packet, 'Rapid packet');
+}
+
+{
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidFastStartPack') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidFastStartPack.v1',
+              snapshotHash: request.snapshotHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              sceneBrief: 'The corridor ends at a sealed hatch.',
+              turnBrief: 'The user tries the hatch.',
+              guardrails: ['Keep the hatch sealed unless the action opens it.'],
+              omissions: ['No warm scene deck was ready.'],
+              backgroundRefreshRequests: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Warm full deck.' }],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['rapid-fast-start']
+            }
+          };
+        }
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Try the hatch.' });
+  assertEqual(result.ok, true, 'Rapid fast-start installs');
+  assert(roleCalls.includes('rapidFastStartPack'), 'Rapid calls fast-start when no warm deck exists');
+  assert(!JSON.stringify(result).includes('local-fallback'), 'Rapid fast-start does not use local fallback diagnostics');
+}
+
+{
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidFastStartPack') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidFastStartPack.v1',
+              snapshotHash: request.snapshotHash,
+              turnSourceRevisionHash: 'wrong-source-revision',
+              sceneBrief: 'Mismatched echoed source still uses provider-generated guidance.',
+              turnBrief: 'This should install through Rapid with trusted local metadata.',
+              guardrails: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false
+            }
+          };
+        }
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'compact',
+              cardJobs: [],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'unit standard escalation' },
+              diagnostics: []
+            }
+          };
+        }
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Try the hatch.' });
+  assertEqual(result.ok, true, 'Rapid fast-start with mismatched echoed hash installs');
+  assert(roleCalls.includes('rapidFastStartPack'), 'Rapid tries fast-start first');
+  assert(!roleCalls.includes('utilityArbiter'), 'Rapid echoed hash mismatch does not continue through Standard Arbiter');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'rapid', 'Rapid packet records Rapid pipeline');
+  assertEqual(result.packet.diagnostics.rapidPath, 'fast-start', 'Rapid packet records fast-start path');
+}
+
+{
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidFastStartPack') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.wrongSchema.v1',
+              snapshotHash: request.snapshotHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              sceneBrief: 'Wrong schema should not be trusted.',
+              turnBrief: 'This should escalate to Standard.',
+              guardrails: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false
+            }
+          };
+        }
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'compact',
+              cardJobs: [],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'unit standard escalation' },
+              diagnostics: []
+            }
+          };
+        }
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Try the hatch.' });
+  assertEqual(result.ok, true, 'invalid Rapid schema escalates and Standard installs');
+  assert(roleCalls.includes('rapidFastStartPack'), 'Rapid tries fast-start before schema escalation');
+  assert(roleCalls.includes('utilityArbiter'), 'invalid Rapid schema continues through Standard Arbiter');
+  assert(result.plan.diagnostics.includes('rapid-escalated-standard:invalid-provider-output'), 'plan records invalid Rapid output escalation');
+}
+
+{
+  const calls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    rapidHedgeDelayMs: 1,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        calls.push({ roleId, hedge: request.rapidHedgeSource });
+        if (roleId !== 'rapidFastStartPack') throw new Error(`unexpected role ${roleId}`);
+        if (request.rapidHedgeSource === 'primary') {
+          await delay(20);
+          return { ok: false, error: { code: 'slow-invalid', message: 'primary invalid' } };
+        }
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.rapidFastStartPack.v1',
+            snapshotHash: request.snapshotHash,
+            turnSourceRevisionHash: request.turnSourceRevisionHash,
+            sceneBrief: 'Backup scene brief.',
+            turnBrief: 'Backup turn brief.',
+            guardrails: [],
+            omissions: [],
+            backgroundRefreshRequests: [],
+            mandatoryMissingCards: [],
+            escalateToStandard: false,
+            diagnostics: ['rapid-hedge-backup']
+          }
+        };
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Use backup hedge.' });
+  assertEqual(result.ok, true, 'Rapid hedge installs from backup');
+  assert(calls.some((call) => call.hedge === 'primary'), 'primary hedge call started');
+  assert(calls.some((call) => call.hedge === 'backup'), 'backup hedge call started');
+  assert(JSON.stringify(result.packet).includes('rapid-hedge-backup'), 'packet diagnostics include backup winner');
+}
+
+{
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidFastStartPack') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidFastStartPack.v1',
+              snapshotHash: request.snapshotHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              sceneBrief: '',
+              turnBrief: '',
+              guardrails: [],
+              omissions: [],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [{ family: 'Knowledge', reason: 'Reveal boundary is mandatory.' }],
+              escalateToStandard: true,
+              diagnostics: ['rapid-mandatory-gap']
+            }
+          };
+        }
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Resolve mandatory gap.' }],
+              reasonerDecision: { mode: 'skip', reason: 'standard escalation', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['standard-after-rapid']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') return cardProviderResponse(roleId, request);
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Reveal the hidden thing.' });
+  assertEqual(result.ok, true, 'Rapid mandatory gap escalates and installs through Standard');
+  assert(roleCalls.includes('rapidFastStartPack'), 'Rapid tried fast-start first');
+  assert(roleCalls.includes('utilityArbiter'), 'Rapid escalated to Standard Arbiter');
+  assert(result.plan.diagnostics.includes('rapid-escalated-standard:mandatory-gap'), 'plan records Rapid escalation');
 }
 
 const modelFetchSettingsStore = createSettingsStore({ root: {} });

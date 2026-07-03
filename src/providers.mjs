@@ -42,6 +42,8 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'environmentAffordancesCard',
   'possessionsItemsCard',
   'openThreadsCard',
+  'rapidTurnDelta',
+  'rapidFastStartPack',
   'briefUtilityComposer',
   'providerTest'
 ]);
@@ -60,6 +62,8 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   environmentAffordancesCard: 'recursion.card.v1',
   possessionsItemsCard: 'recursion.card.v1',
   openThreadsCard: 'recursion.card.v1',
+  rapidTurnDelta: 'recursion.rapidTurnDelta.v1',
+  rapidFastStartPack: 'recursion.rapidFastStartPack.v1',
   briefUtilityComposer: 'recursion.briefUtilityComposer.v1',
   reasonerComposer: 'recursion.reasonerComposer.v1',
   providerTest: 'recursion.providerTest.v1'

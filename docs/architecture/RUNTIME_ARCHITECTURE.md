@@ -58,6 +58,7 @@ Primary components:
 - Utility Arbiter: returns an Auto Control Plan for action, scene status, prompt footprint, card jobs, Reasoner decision, and budgets.
 - Card Job Runner: executes the plan by creating, refreshing, stowing, discarding, and selecting scene cards according to Arbiter decisions.
 - Scene Cache: stores bounded, per-chat and per-scene card state plus fingerprints and prompt-plan metadata.
+- Rapid Warm Artifact: optional active-variant metadata that records provider-generated scene conditioning for an exact source revision so a later send can use a small Utility delta.
 - Hand Selector: selects the small card set that should influence the next generation.
 - Composer: deterministic prompt assembly and optional model-mediated synthesis.
 - Reasoner: optional deeper synthesis lane that is never required for generation to continue.
@@ -65,9 +66,9 @@ Primary components:
 - Diagnostics Recorder: records structured, sanitized runtime events for the status and inspector surfaces.
 - Activity Reporter: aggregates runtime, provider, storage, and prompt events into concise user-visible phases for the Recursion Bar, Hero Pixel Array progress menu, and Full Viewer.
 
-## Turn Pipeline
+## Turn Pipelines
 
-The core pipeline is:
+The Standard pipeline is the reference foreground path:
 
 1. Observe chat and turn snapshot.
 2. Run Utility Arbiter.
@@ -79,11 +80,30 @@ The core pipeline is:
 8. Emit user-visible activity updates for status, fallbacks, and prompt readiness.
 9. Record diagnostics.
 
+The Rapid pipeline moves most scene work out of the send path:
+
+1. Background warm observes the current source revision after assistant output, source changes, or idle time.
+2. Background warm runs provider Arbiter/card work, saves a source-keyed warm artifact into the scene cache, and does not install prompt keys.
+3. On send, Rapid loads the exact warm artifact for the pre-send source revision.
+4. If the artifact is fresh, Rapid calls `rapidTurnDelta` on the Utility lane to select ready cards and adapt them to the new player message.
+5. If the artifact is missing, Rapid calls `rapidFastStartPack` on the Utility lane for compact provider-generated scene and turn guidance.
+6. If the provider declares a mandatory missing card, Standard escalation, or invalid Rapid structured output, Rapid abandons its install path and runs Standard for the same turn.
+7. Accepted Rapid output is formatted into the normal prompt packet install contract and rechecked against the active source before installation.
+
+Rapid does not gain latency by using local cards, local fallback plans, local scene briefs, local turn briefs, or timeout-based quality cuts. Its speed comes from precomputation, exact-source cache reuse, delta work, and optional hedged Utility foreground calls.
+
 Power and mode controls change how much of the pipeline runs:
 
 - Power off: remove or avoid installing Recursion prompt entries. Runtime may keep minimal UI/provider status, but it should not inspect or influence active generations.
 - Auto: run the full automatic pipeline and install prompt packets when the Auto Control Plan says a pass is useful. Card scope acts as focus and preference; critical unselected families may still be requested when needed for coherence or safety.
 - Manual: use selected card scope as a strict whitelist for planning, deck reuse, hand selection, composition, and injection.
+
+Pipeline controls change when work happens:
+
+- Standard: run the foreground Arbiter, card, hand, compose, and install sequence on send.
+- Rapid: warm provider-generated scene artifacts in the background, then run a foreground Utility delta or fast-start pack on send.
+
+Pipeline is selected from the compact bar dropdown immediately left of Mode. It is not duplicated in Settings.
 
 The Runtime Coordinator should serialize work per chat/generation attempt. A newer turn snapshot supersedes older pending work. If a late provider result arrives after the active snapshot changed, the result is discarded or recorded as stale and must not overwrite the current prompt packet.
 
@@ -129,6 +149,8 @@ Plan action controls runtime cost and cache churn.
 
 Action choice should be automatic by default. User controls should stay high level, such as the power toggle, Auto/Manual, refresh, Strength, Focus, Reasoning Level, provider setup, Prompt Footprint, and advanced final-packet injection placement.
 
+Rapid foreground calls do not ask the Arbiter which cards should exist. They ask the Utility provider what should condition the immediate reply given the ready provider-generated cards, the new user message, and current source hashes. Missing non-mandatory cards become optional background refresh requests. Mandatory missing cards escalate to Standard.
+
 ## Scene Shift Handling
 
 Scene status is the Arbiter's view of how much the active scene changed:
@@ -151,6 +173,9 @@ Expected failure behavior:
 - Utility provider unavailable: skip new Arbiter work, reuse a valid packet if safe, or clear Recursion injection and continue.
 - Arbiter schema invalid or `snapshotHash` missing/mismatched: reject the plan, record diagnostics, and fall back to a conservative local action.
 - Card job failure: keep the last valid cache segment, omit failed cards from the hand, and record omission reasons.
+- Rapid warm miss: call the provider fast-start role instead of inventing local Rapid cards or briefs.
+- Rapid mandatory gap: run Standard for the current turn and record the escalation diagnostic.
+- Invalid Rapid structured output: reject the output and run Standard for the current turn.
 - Reasoner failure: continue with deterministic or Utility-composed prompt packets.
 - Prompt composition over budget: trim by lane priority and record budget omissions.
 - Injection failure: clear or leave untouched according to host adapter safety rules, then record the failed install attempt.
@@ -219,6 +244,7 @@ In memory:
 - current turn snapshot id and message fingerprint;
 - scene fingerprint and scene status;
 - active Auto Control Plan;
+- active Rapid warm artifact metadata when the selected source variant has one;
 - pending run lock and cancellation marker;
 - provider health and resolved lane status;
 - last prompt packet metadata;

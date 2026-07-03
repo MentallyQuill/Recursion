@@ -2,6 +2,7 @@ import { cloneJson } from './core.mjs';
 import { defaultCardScope, normalizeCardScope } from './card-scope.mjs';
 
 const MODES = new Set(['auto', 'manual']);
+const PIPELINE_MODES = new Set(['standard', 'rapid']);
 const STRENGTHS = new Set(['light', 'balanced', 'strong']);
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
 const FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
@@ -26,6 +27,7 @@ function deepFreeze(value) {
 export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   enabled: true,
   mode: 'auto',
+  pipelineMode: 'standard',
   cardScope: defaultCardScope(),
   strength: 'balanced',
   minCards: 3,
@@ -221,6 +223,7 @@ export function normalizeSettings(value = {}, secretStore = null) {
   return {
     enabled: source.enabled !== false,
     mode: enumValue(source.mode, MODES, DEFAULT_RECURSION_SETTINGS.mode),
+    pipelineMode: enumValue(source.pipelineMode, PIPELINE_MODES, DEFAULT_RECURSION_SETTINGS.pipelineMode),
     cardScope: normalizeCardScope(source.cardScope),
     strength: enumValue(source.strength, STRENGTHS, DEFAULT_RECURSION_SETTINGS.strength),
     minCards: cardBudget.minCards,

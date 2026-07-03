@@ -1289,6 +1289,25 @@ try {
   assert(!fakeDocument.textTree(root.querySelector('[data-recursion-bar]')).includes('RECURSION'), 'compact bar does not render the Recursion wordmark');
   assert(root.querySelector('[data-recursion-mode-button]'), 'compact bar renders an icon-only mode button');
   assert(root.querySelector('[data-recursion-mode-menu]'), 'compact bar renders the mode selector menu');
+  assert(root.querySelector('[data-recursion-pipeline-button]'), 'compact bar renders an icon-only pipeline button');
+  assert(root.querySelector('[data-recursion-pipeline-menu]'), 'compact bar renders the pipeline selector menu');
+  assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('svg'), 'pipeline button renders an inline SVG icon');
+  assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-standard]'), 'Standard pipeline button uses the standard pipeline icon');
+  assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-icon]').length, 2, 'pipeline selector renders icons only for Standard and Rapid');
+  assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-tip]').length, 2, 'pipeline selector renders tips only for Standard and Rapid');
+  assert(root.querySelector('[data-recursion-pipeline-choice-standard]').querySelector('[data-recursion-pipeline-standard]'), 'Standard pipeline row uses the standard pipeline icon');
+  assert(root.querySelector('[data-recursion-pipeline-choice-rapid]').querySelector('[data-recursion-pipeline-rapid]'), 'Rapid pipeline row uses the rapid pipeline icon');
+  assertDeepEqual(
+    root.querySelectorAll('[data-recursion-pipeline-choice]').map((choice) => choice.dataset.recursionPipelineChoice),
+    ['standard', 'rapid'],
+    'pipeline selector uses the Standard/Rapid order'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-pipeline-button]').getAttribute('aria-label'),
+    'Pipeline: Standard Pipeline',
+    'pipeline button exposes the current pipeline label'
+  );
+  assertEqual(root.querySelector('[data-recursion-pipeline-button]').getAttribute('title'), 'Pipeline: Standard Pipeline', 'pipeline button exposes compact hover tip');
   assert(root.querySelector('[data-recursion-mode-icon]').querySelector('svg'), 'mode button renders the reference inline SVG icon');
   assert(root.querySelector('[data-recursion-mode-icon]').querySelector('[data-recursion-mode-arrow-fan]'), 'Auto mode button uses the divergent three-arrow mode icon');
   assertEqual(root.querySelector('[data-recursion-mode-icon]').querySelectorAll('[data-recursion-mode-arrow]').length, 3, 'Auto mode icon keeps three equal-weight arrows');
@@ -1331,10 +1350,19 @@ try {
     root.querySelector('[data-recursion-mode-choice-auto]').className.includes('is-selected'),
     'mode selector marks the current mode'
   );
+  assert(
+    root.querySelector('[data-recursion-pipeline-choice-standard]').className.includes('is-selected'),
+    'pipeline selector marks the current pipeline'
+  );
   assertEqual(
     root.querySelector('[data-recursion-mode-choice-auto]').getAttribute('aria-current'),
     'true',
     'mode selector exposes the current mode to assistive tech'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-pipeline-choice-standard]').getAttribute('aria-current'),
+    'true',
+    'pipeline selector exposes the current pipeline to assistive tech'
   );
   assert(root.querySelector('[data-recursion-status-trigger]'), 'compact bar renders the progress activity trigger');
   assert(root.querySelector('[data-recursion-hero-array]'), 'compact bar renders the Hero Pixel Array');
@@ -1357,11 +1385,13 @@ try {
   assertEqual(root.querySelector('[data-recursion-cards-button]').querySelectorAll('rect').length, 3, 'Cards scope button owns the stacked-cards SVG');
   const barChildren = root.querySelector('[data-recursion-bar]').children;
   const powerButton = root.querySelector('[data-recursion-power-toggle]');
+  const pipelineCluster = root.querySelector('[data-recursion-pipeline-button]').parentNode;
   const modeCluster = root.querySelector('[data-recursion-mode-button]').parentNode;
   const cardsButton = root.querySelector('[data-recursion-cards-button]');
   const statusTrigger = root.querySelector('[data-recursion-status-trigger]');
   const rightTools = root.querySelector('[data-recursion-reasoning-chain]').parentNode;
-  assertEqual(barChildren.indexOf(modeCluster), barChildren.indexOf(powerButton) + 1, 'Power and Mode sit adjacent with no separator between them');
+  assertEqual(barChildren.indexOf(pipelineCluster), barChildren.indexOf(powerButton) + 1, 'Pipeline sits immediately to the right of Power');
+  assertEqual(barChildren.indexOf(modeCluster), barChildren.indexOf(pipelineCluster) + 1, 'Mode sits immediately to the right of Pipeline');
   assertEqual(cardsButton.parentNode, root.querySelector('[data-recursion-bar]'), 'Cards button lives in the left bar flow');
   assert(barChildren.indexOf(modeCluster) < barChildren.indexOf(cardsButton), 'Cards button sits to the right of Mode');
   assert(barChildren.indexOf(cardsButton) < barChildren.indexOf(statusTrigger), 'Cards button sits to the left of the Hero Pixel Array progress trigger');
@@ -1379,6 +1409,7 @@ try {
   );
   assertEqual(root.querySelector('[data-recursion-power-toggle]').getAttribute('aria-pressed'), 'true', 'power toggle starts pressed when Recursion is enabled');
   assertEqual(root.querySelector('[data-recursion-power-toggle]').getAttribute('title'), 'Turn Recursion off', 'power toggle exposes hover tip copy');
+  assertEqual(root.querySelector('[data-recursion-pipeline-button]').getAttribute('aria-expanded'), 'false', 'pipeline menu trigger starts collapsed');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('aria-expanded'), 'false', 'progress activity trigger starts collapsed');
   assertEqual(root.querySelector('[data-recursion-status-trigger]').getAttribute('title'), 'Open generation progress', 'progress activity trigger exposes hover tip copy');
   assertEqual(root.querySelector('[data-recursion-hand-toggle]').getAttribute('aria-expanded'), 'false', 'brief dropdown trigger starts collapsed');
@@ -1410,7 +1441,24 @@ try {
   assertEqual(root.querySelector('[data-recursion-hand-count]').textContent, 'Hand 1', 'rendered hand count');
   assertEqual(root.querySelector('[data-recursion-composer]').textContent, 'Utility', 'rendered composer');
 
-  root.querySelector('[data-recursion-mode-button]').setBoundingClientRect({ left: 39, top: 3, width: 24, height: 24, right: 63, bottom: 27 });
+  root.querySelector('[data-recursion-pipeline-button]').setBoundingClientRect({ left: 32, top: 3, width: 24, height: 24, right: 56, bottom: 27 });
+  root.querySelector('[data-recursion-pipeline-button]').click();
+  assertEqual(root.querySelector('[data-recursion-pipeline-menu]').hidden, false, 'pipeline button opens pipeline selector');
+  assertEqual(root.querySelector('[data-recursion-pipeline-button]').getAttribute('aria-expanded'), 'true', 'pipeline button reflects open menu');
+  assertEqual(root.querySelector('[data-recursion-pipeline-menu]').style.left, '38px', 'pipeline menu follows reference 6px inset from pipeline cluster');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-pipeline-choice-standard]')).includes('Standard'), 'Standard row has visible short name');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-pipeline-choice-rapid]')).includes('Rapid'), 'Rapid row has visible short name');
+  root.querySelector('[data-recursion-pipeline-choice-rapid]').querySelector('[data-recursion-pipeline-choice-name]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { pipelineMode: 'rapid' }, 'pipeline menu switches Standard to Rapid from nested row content clicks');
+  assertEqual(root.querySelector('[data-recursion-pipeline-button]').getAttribute('aria-expanded'), 'false', 'pipeline button reflects closed menu after selection');
+  ui.update();
+  assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-rapid]'), 'Rapid pipeline button uses the rapid pipeline icon after selection');
+  assert(
+    root.querySelector('[data-recursion-pipeline-button]').getAttribute('title').includes('Rapid Pipeline'),
+    'Rapid pipeline tooltip explains current pipeline'
+  );
+
+  root.querySelector('[data-recursion-mode-button]').setBoundingClientRect({ left: 63, top: 3, width: 24, height: 24, right: 87, bottom: 27 });
   let bubbledModeClicks = 0;
   root.addEventListener('click', (event) => {
     if (event.target === root.querySelector('[data-recursion-mode-button]')) bubbledModeClicks += 1;
@@ -1419,7 +1467,7 @@ try {
   assertEqual(bubbledModeClicks, 0, 'mode button consumes its own click instead of letting the bar/document outside-click handlers capture the first open');
   assertEqual(root.querySelector('[data-recursion-mode-menu]').hidden, false, 'mode button opens mode selector');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'true', 'mode button reflects open menu');
-  assertEqual(root.querySelector('[data-recursion-mode-menu]').style.left, '45px', 'mode menu follows reference 6px inset from mode cluster');
+  assertEqual(root.querySelector('[data-recursion-mode-menu]').style.left, '69px', 'mode menu follows reference 6px inset from mode cluster');
   root.querySelector('[data-recursion-mode-choice-manual]').querySelector('[data-recursion-mode-choice-name]').click();
   assertDeepEqual(settingsUpdates.at(-1), { mode: 'manual' }, 'mode menu updates Manual from nested row content clicks');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode button reflects closed menu after selection');

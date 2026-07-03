@@ -6,20 +6,26 @@ Recursion testing should prove the extension is useful and safe without turning 
 | --- | --- | --- |
 | Fast contract suite | Runtime contracts, schemas, card lifecycle, provider routing, storage, redaction, and prompt packet rules work without a live host. | Maintained deterministic gate: `node tools\scripts\run-alpha-gate.mjs`; focused scripts: `tools/scripts/test-*.mjs`. |
 | Playwright readiness | Offline probe proves the local machine can launch/control Chromium through Playwright, use a role locator, switch desktop/phone viewports, and write trace/screenshot artifacts. If Playwright is unavailable, it returns `environment-fail` without contacting SillyTavern. | Current evidence: `check-playwright-readiness` report, trace, and viewport screenshots when Playwright is installed; otherwise a sanitized environment-fail report. |
-| Focused live SillyTavern smoke | Current preflight proves dedicated-user rejection, dry-run behavior, report shape, fail-closed semantics, Recursion-owned storage probes, served-extension freshness, no-generation UI mount/open behavior, and opt-in generation bridge prompt-install evidence. | Current evidence: `check-sillytavern-soak-users` storage-probe reports and `smoke-sillytavern-live` reports, no-generation screenshots/trace, live log, served-extension comparison, storage probe artifact, browser snapshot, prompt-key hashes, hand readiness, and prompt-packet metadata. |
+| Focused live SillyTavern smoke | Current preflight proves dedicated-user rejection, dry-run behavior, report shape, fail-closed semantics, Recursion-owned storage probes, served-extension freshness, no-generation UI mount/open behavior, pipeline dropdown behavior, and opt-in generation bridge prompt-install evidence. | Current evidence: `check-sillytavern-soak-users`, `smoke-sillytavern-live`, and `prove-live-pipelines` reports, no-generation screenshots/trace, live log, served-extension comparison, storage probe artifact, browser snapshot, prompt-key hashes, Standard hand readiness, Rapid packet readiness, and prompt-packet metadata. |
 | Documentation render tracking | Open screenshot, diagram, and static visual needs remain visible until promoted. | [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md), visible `<Render Needed>` markers, and promoted assets under `assets/documentation/renders/`. |
 
 ![Recursion verification gates](../../assets/documentation/renders/recursion-testing-gates.png)
 
-The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, offline Playwright readiness, SillyTavern storage probes when dedicated users are available, no-generation SillyTavern UI evidence, and opt-in generation bridge evidence when Recursion is installed for a dedicated user.
+The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, offline Playwright readiness, SillyTavern storage probes when dedicated users are available, no-generation SillyTavern UI evidence, pipeline-specific visible-send proof, and opt-in generation bridge evidence when Recursion is installed for a dedicated user.
 
 ## Core Invariants
 
 Highest-priority invariants:
 
 - Power-off performs no chat inspection, provider calls, card updates, or prompt injection.
+- Pipeline selection lives as a compact bar dropdown left of Mode and must not be duplicated as a Settings toggle.
 - Manual mode uses card scope as a strict whitelist and must remain a distinct selectable mode.
 - Auto mode may install prompt packets only through Recursion-owned SillyTavern prompt keys.
+- Standard and Rapid remain distinct pipelines; Standard keeps the full foreground path, while Rapid uses background provider warm plus foreground Utility delta or fast-start.
+- Rapid background warm never installs prompt keys.
+- Rapid foreground never creates local fallback cards, local scene briefs, or local turn briefs.
+- Rapid warm artifacts are exact-source keyed and must not survive source revision, settings/provider/catalog/prompt contract, or pipeline-version mismatch.
+- Rapid invalid provider output and mandatory gaps escalate to Standard for the same pending user message.
 - Prompt packet installation is replace-or-clear by Recursion metadata, not blind append.
 - Stale provider results cannot update the active scene cache or active prompt packet.
 - SillyTavern swipe changes clear stale Recursion prompts and cannot reuse cards from a different active source revision.
@@ -46,16 +52,20 @@ The gate calls the focused local suite rather than duplicating test logic. Cover
 - manifest and extension shell identity;
 - host adapter fake contracts;
 - settings normalization and session-only secret handling;
+- pipeline setting normalization and compact pipeline-menu rendering;
 - logical storage key safety;
 - scene cache schema validation;
+- Rapid warm artifact sanitization and exact-source cache validation;
 - source-revision and swipe A/B/A cache-variant behavior;
 - run journal redaction and ring-buffer pruning;
 - provider lane routing, provider-payload normalization, and structured response parsing/repair;
 - Utility Arbiter Auto Control Plan validation;
+- Rapid turn-delta and fast-start structured schema validation;
 - card catalog, lifecycle, emphasis, detail, and hand-selection contracts;
 - Utility and Reasoner prompt packet composition;
 - prompt budget trimming and omission reasons;
 - prompt injection metadata, replacement, and clearing through a fake host;
+- Rapid background warm provider calls, no prompt install, foreground warm-delta install, fast-start install, hedged Utility winner selection, invalid-output Standard escalation, and mandatory-gap Standard escalation;
 - activity event normalization and user-safe status text.
 
 Focused contract tests should use deterministic fixtures and fake provider responses before live providers. `tools/scripts/test-provider-response-parser.mjs` owns provider-envelope extraction and syntax-repair cases. `tools/scripts/test-providers.mjs` owns router integration, sanitized repair diagnostics, stable failure codes, and retry behavior. Runtime/card tests own the semantic boundary: repaired JSON still fails when it lacks the expected schema, snapshot hash, role, family, or valid evidence. If a live smoke finds a defect, add a focused contract regression where the behavior can be isolated without browser control.
@@ -92,10 +102,15 @@ Live smoke must start with these gates:
 Primary live scenarios:
 
 - extension mount and Recursion Bar render;
+- Pipeline dropdown location and behavior: icon-only button left of Mode, Standard/Rapid rows, no duplicate Settings toggle;
 - mode transitions: disabled power, Auto, Manual;
+- pipeline transitions: Standard and Rapid;
 - provider setup display and Test Provider action for Utility and Reasoner;
 - Manual prompt-install proof through the strict card-scope path;
 - Auto mode Utility Arbiter pass, card refresh, hand selection, prompt packet composition, and prompt installation;
+- Rapid warm evidence after assistant/source settle, proving cache-only provider work with no prompt-key installation;
+- Rapid foreground evidence for warm-delta or fast-start prompt install, with no local fallback card or local brief diagnostics;
+- Rapid mandatory-gap evidence, when fixtureable, proving Standard escalation rather than unsafe install;
 - Last Brief dropdown reflects the cards used for the last prompt packet;
 - Hero Pixel Array progress menu shows model-call, cache, storage, composition, injection, fallback, and settled states;
 - full viewer opens Now, Deck, Activity, Prompt Packet, Settings, and Providers views;
@@ -105,6 +120,15 @@ Primary live scenarios:
 - storage repair and journal pruning report logical progress without leaking physical paths.
 
 Generation-enabled smoke may use real model calls only when explicitly enabled by `RECURSION_LIVE_GENERATION=1` or `RECURSION_LIVE_REASONER=1`. The runner first completes the same dedicated-user, served-extension, storage, and UI checks as no-generation smoke, then switches Recursion to Auto, wraps `setExtensionPrompt` to record only Recursion prompt keys, hashes, lengths, and placement metadata, drives the visible SillyTavern send controls when both input and send button are available and enabled, and asserts visible hand readiness plus prompt-packet metadata. If no visible send controls exist, non-strict runs may use the public `recursionGenerationInterceptor` as a diagnostic direct-bridge fallback and must record that trigger source as `direct-bridge`. Strict generation runs fail direct-bridge fallback with `generation-direct-bridge-diagnostic`; V1 release proof requires visible send controls and host generation continuation. If only one visible send control exists, or controls are visible but disabled, the run fails instead of falling back. UI-send runs must also prove host generation continued after the user message. Generation-enabled runs suppress screenshots and Playwright traces because those binary artifacts can capture chat/model text. The smoke does not score writing quality or store raw provider prompts/responses.
+
+Pipeline-specific live proof is handled by:
+
+```powershell
+node tools\scripts\prove-live-pipelines.mjs --live --pipeline standard
+node tools\scripts\prove-live-pipelines.mjs --live --pipeline rapid
+```
+
+The script uses the same `SILLYTAVERN_BASE_URL`, `RECURSION_SILLYTAVERN_USER`, and dedicated-user guardrails as the smoke harness. It drives the real compact Pipeline dropdown, verifies the Pipeline button is left of Mode, verifies no Pipeline control appears in Settings, sends through visible SillyTavern controls, proves an assistant message follows the exact proof user message, and fails on browser console warnings/errors or page errors. Standard proof requires a ready hand. Rapid proof accepts either a warm-delta or fast-start Rapid packet; fast-start may have zero selected cards because it installs provider-authored scene and turn guidance directly instead of local fallback cards.
 
 ## Dedicated Live Users
 

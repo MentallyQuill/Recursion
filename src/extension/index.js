@@ -142,6 +142,16 @@ function resolveGenerationStoppedEvents(context) {
   ].filter(Boolean))];
 }
 
+function resolveAssistantLandedEvents(context) {
+  const eventTypes = hostEventTypes(context);
+  return [...new Set([
+    eventTypes.GENERATION_ENDED,
+    eventTypes.GENERATION_AFTER_COMMANDS,
+    eventTypes.MESSAGE_RECEIVED,
+    'generation_ended'
+  ].filter(Boolean))];
+}
+
 function sourceEventDetails(eventName, payload) {
   const source = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
   const rawId = Number(source.messageId ?? source.mesid ?? source.id ?? source.message_id ?? payload);
@@ -182,6 +192,12 @@ function registerHostEvents(nextRuntime) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
       runtime ||= nextRuntime;
       return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', sourceEventDetails(eventName, payload));
+    });
+  }
+  for (const eventName of resolveAssistantLandedEvents(context)) {
+    registerRuntimeHostEvent(eventSource, eventName, () => {
+      runtime ||= nextRuntime;
+      return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
     });
   }
 }

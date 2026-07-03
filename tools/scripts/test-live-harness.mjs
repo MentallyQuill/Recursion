@@ -458,6 +458,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/providers.mjs',
     'src/providers/provider-response-normalizer.mjs',
     'src/providers/structured-output-parser.mjs',
+    'src/rapid-pipeline.mjs',
     'src/reasoning-policy.mjs',
     'src/runtime.mjs',
     'src/settings.mjs',

@@ -176,6 +176,17 @@ assert(cacheReuseStep, 'cache reuse renders the scene deck reuse row');
 assertEqual(cacheReuseStep.state, 'cached', 'scene deck reuse is purple cached state');
 assertEqual(cacheReuseStep.meta, 'cached', 'scene deck reuse uses cached meta');
 
+const rapidWarmProgress = createProgressRunModel({
+  activityHistory: [
+    { runId: 'rapid-warm', phase: 'rapidWarming', label: 'Rapid warming scene deck...', chips: ['Rapid'], recordedAt: '1' }
+  ],
+  activity: { runId: 'rapid-warm', phase: 'rapidWarming', label: 'Rapid warming scene deck...', chips: ['Rapid'], recordedAt: '1' }
+});
+assert(
+  JSON.stringify(rapidWarmProgress).includes('Rapid warming scene deck'),
+  'progress includes Rapid warming row'
+);
+
 const controlOnlyPromptProgress = createProgressRunModel({
   settings: { enabled: false, mode: 'auto' },
   activity: {

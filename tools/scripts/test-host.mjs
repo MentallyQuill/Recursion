@@ -300,6 +300,17 @@ const storageHost = createSillyTavernHost({
       storageFiles.set(body.name, JSON.parse(Buffer.from(body.data, 'base64').toString('utf8')));
       return { ok: true, status: 200, json: async () => ({ ok: true }) };
     }
+    if (url === '/api/files/verify') {
+      const body = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => Object.fromEntries((body.urls || []).map((entry) => {
+          const name = decodeURIComponent(String(entry).replace('/user/files/', ''));
+          return [entry, storageFiles.has(name)];
+        }))
+      };
+    }
     if (url.startsWith('/user/files/')) {
       const name = decodeURIComponent(url.slice('/user/files/'.length));
       if (!storageFiles.has(name)) return { ok: false, status: 404, json: async () => ({}) };
@@ -330,7 +341,14 @@ await storageHost.storageAdapter.deleteJson('recursion-system-index.v1.json');
 const deleteCall = storageFetchCalls.find((call) => call.url === '/api/files/delete');
 assert(deleteCall, 'default storage deletes through SillyTavern delete API');
 assertEqual(JSON.parse(deleteCall.options.body).path, '/user/files/recursion-system-index.v1.json', 'default storage deletes user file path');
+const missingReadCountBefore = storageFetchCalls.filter((call) => call.url === '/user/files/recursion-system-index.v1.json').length;
 assertEqual(await storageHost.storageAdapter.readJson('recursion-system-index.v1.json'), null, 'default storage returns null for missing user files');
+assert(storageFetchCalls.some((call) => call.url === '/api/files/verify'), 'default storage verifies missing user files before GET');
+assertEqual(
+  storageFetchCalls.filter((call) => call.url === '/user/files/recursion-system-index.v1.json').length,
+  missingReadCountBefore,
+  'default storage does not issue missing user-file GET after verify says absent'
+);
 await storageHost.storageAdapter.writeJson('recursion-after-404.v1.json', { ok: 'host' });
 assert(storageFetchCalls.some((call) => call.url === '/api/files/upload' && JSON.parse(call.options.body).name === 'recursion-after-404.v1.json'), 'missing user file reads do not force memory fallback');
 assertDeepEqual(

@@ -37,6 +37,7 @@
 }
 
 .recursion-power-toggle,
+.recursion-pipeline-button,
 .recursion-mode-button,
 .recursion-activity-trigger,
 .recursion-icon-button,
@@ -85,11 +86,13 @@
   height: 18px;
 }
 
+.recursion-pipeline-cluster,
 .recursion-mode-cluster {
   flex: 0 0 auto;
   position: relative;
 }
 
+.recursion-pipeline-button,
 .recursion-mode-button,
 .recursion-icon-button,
 .recursion-cards-button {
@@ -103,6 +106,8 @@
   padding: 0;
 }
 
+.recursion-pipeline-button:hover,
+.recursion-pipeline-button:focus-visible,
 .recursion-mode-button:hover,
 .recursion-mode-button:focus-visible,
 .recursion-cards-button:hover,
@@ -168,6 +173,7 @@
   filter: drop-shadow(0 0 7px color-mix(in srgb, var(--recursion-accent) 22%, transparent));
 }
 
+.recursion-pipeline-icon,
 .recursion-mode-icon {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 70%, transparent);
   display: inline-grid;
@@ -177,6 +183,7 @@
   width: 16px;
 }
 
+.recursion-pipeline-icon *,
 .recursion-mode-icon * {
   pointer-events: none;
 }
@@ -202,6 +209,7 @@
   border: 0;
 }
 
+.recursion-pipeline-menu,
 .recursion-mode-menu,
 .recursion-status-popover,
 .recursion-hand-dropdown,
@@ -214,6 +222,7 @@
   font: 12.5px/1 var(--mainFontFamily, "Noto Sans", sans-serif);
 }
 
+.recursion-pipeline-menu,
 .recursion-mode-menu {
   left: 0;
   position: absolute;
@@ -222,6 +231,7 @@
   z-index: 86;
 }
 
+.recursion-pipeline-choice,
 .recursion-mode-choice {
   align-items: center;
   background: transparent;
@@ -239,10 +249,14 @@
   width: 100%;
 }
 
+.recursion-pipeline-choice:first-child,
 .recursion-mode-choice:first-child {
   border-top: 0;
 }
 
+.recursion-pipeline-choice:hover,
+.recursion-pipeline-choice:focus-visible,
+.recursion-pipeline-choice.is-selected,
 .recursion-mode-choice:hover,
 .recursion-mode-choice:focus-visible,
 .recursion-mode-choice.is-selected {
@@ -250,6 +264,7 @@
   outline: none;
 }
 
+.recursion-pipeline-choice-icon,
 .recursion-mode-choice-icon {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 70%, transparent);
   display: inline-grid;
@@ -258,6 +273,7 @@
   width: 16px;
 }
 
+.recursion-pipeline-choice-name,
 .recursion-mode-choice-name {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 80%, transparent);
   display: block;
@@ -265,6 +281,7 @@
   line-height: 1.15;
 }
 
+.recursion-pipeline-choice-tip,
 .recursion-mode-choice-tip {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 46%, transparent);
   display: block;

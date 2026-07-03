@@ -2,6 +2,7 @@ import { hashJson, safeId } from '../../core.mjs';
 import { packetToPromptBlocks } from '../../prompt.mjs';
 import { createProviderClient, machineJsonSchemaForRequest } from '../../providers.mjs';
 import { normalizeReasoningCategory, normalizeReasoningIntent } from '../../reasoning-policy.mjs';
+import { normalizeRetentionSettings, selectBoundedSourceWindow } from '../../retention-policy.mjs';
 import { createSettingsStore } from '../../settings.mjs';
 import { createMemoryStorageAdapter } from '../../storage.mjs';
 import { createSillyTavernUserFileStorageAdapter } from './storage.mjs';
@@ -165,9 +166,13 @@ function normalizeMessage(message, index) {
   };
 }
 
-function latestMessageId(messages) {
-  if (messages.length === 0) return -1;
-  return messages.reduce((latest, message) => Math.max(latest, message.mesId), -1);
+function latestMessageIdFromRawChat(messages) {
+  const source = Array.isArray(messages) ? messages : [];
+  for (let index = source.length - 1; index >= 0; index -= 1) {
+    const numeric = numericMessageId(source[index], index);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return -1;
 }
 
 function sourceRevisionMessages(messages) {
@@ -521,8 +526,11 @@ export function createSillyTavernHost({
     const context = currentContext(contextFactory);
     const chatId = await readChatId(context);
     const chatKey = safeId(chatId, 'chat');
-    const messages = (Array.isArray(context.chat) ? context.chat : []).map((message, index) => normalizeMessage(message, index));
-    const latestMesId = latestMessageId(messages);
+    const retention = normalizeRetentionSettings(settingsStore.get().retention);
+    const rawChat = Array.isArray(context.chat) ? context.chat : [];
+    const bounded = selectBoundedSourceWindow(rawChat, retention);
+    const messages = bounded.messages.map((message, index) => normalizeMessage(message, index));
+    const latestMesId = latestMessageIdFromRawChat(rawChat);
     const sourceRevisionHash = hashJson(sourceRevisionMessages(messages));
     const sceneFingerprint = hashJson({
       chatKey,
@@ -545,7 +553,8 @@ export function createSillyTavernHost({
       sourceRevisionHash,
       turnFingerprint,
       latestMesId,
-      messages
+      messages,
+      ...bounded.metadata
     };
   }
 

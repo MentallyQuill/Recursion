@@ -379,7 +379,8 @@ export function bootstrapRecursion() {
     const activity = createActivityReporter();
     const storage = createStorageRepository({
       storage: nextHost.storageAdapter,
-      activity
+      activity,
+      getRetentionSettings: () => nextHost.settingsStore.get().retention
     });
     const generationRouter = createGenerationRouter({
       client: nextHost.providerClient,

@@ -25,6 +25,40 @@ const snap = await host.snapshot();
 assertEqual(snap.chatId, 'chat-file', 'chat id read');
 assertEqual(snap.messages[0].text, 'Hello', 'message text read');
 
+{
+  const boundedContext = {
+    chatId: 'long-chat',
+    chat: Array.from({ length: 30 }, (_, index) => ({
+      mesid: index,
+      is_user: index % 2 === 1,
+      mes: `visible message ${index}`
+    })),
+    extensionSettings: {
+      recursion: {
+        retention: {
+          sourceWindowMessages: 12,
+          sourceWindowCharacters: 6000,
+          providerVisibleMessages: 4
+        }
+      }
+    }
+  };
+  const boundedHost = createSillyTavernHost({
+    contextFactory: () => boundedContext,
+    fetchImpl: null
+  });
+  const boundedSnapshot = await boundedHost.snapshot();
+  assertEqual(boundedSnapshot.messages.length, 12, 'host snapshot keeps bounded source messages');
+  assertDeepEqual(
+    boundedSnapshot.messages.map((message) => message.mesId),
+    [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    'host snapshot keeps newest bounded source window'
+  );
+  assertEqual(boundedSnapshot.sourceWindowMessageCount, 12, 'snapshot exposes source window count');
+  assertEqual(boundedSnapshot.sourceWindowTruncated, true, 'snapshot marks bounded source window');
+  assertEqual(boundedSnapshot.sourceWindowLimitReason, 'message-cap', 'snapshot records message cap reason');
+}
+
 const swipeContext = {
   chatId: 'swipe-chat',
   chat: [
@@ -911,10 +945,9 @@ const chatKeyHost = createSillyTavernHost({
 const chatKeySnap = await chatKeyHost.snapshot();
 assertEqual(chatKeySnap.chatId, 'Folder/Chat File.jsonl', 'chat_id fallback read');
 assertEqual(chatKeySnap.chatKey, 'Folder-Chat-File.jsonl', 'chat key normalized');
-assertEqual(chatKeySnap.messages[0].role, 'system', 'system role normalized');
-assertEqual(chatKeySnap.messages[0].visible, false, 'system rows are hidden from provider-visible snapshot');
-assertEqual(chatKeySnap.messages[1].sender, 'Mara', 'sender name preserved');
-assertEqual(chatKeySnap.messages[2].visible, false, 'hidden rows stay hidden in snapshot');
+assertEqual(chatKeySnap.messages.length, 1, 'snapshot excludes system and hidden rows from source window');
+assertEqual(chatKeySnap.messages[0].sender, 'Mara', 'sender name preserved');
+assertEqual(chatKeySnap.messages[0].visible, true, 'visible source row stays visible in snapshot');
 assertEqual(chatKeySnap.latestMesId, 3, 'latest message id derived');
 assert(chatKeySnap.sceneFingerprint, 'scene fingerprint built');
 assert(chatKeySnap.sceneKey, 'scene key built');

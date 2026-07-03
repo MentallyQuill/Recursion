@@ -1,11 +1,11 @@
 import { cloneJson, makeId, nowIso, redact, safeId } from './core.mjs';
 import { UNKNOWN_STORY_FORM, normalizeStoryForm } from './story-form.mjs';
+import { normalizeRetentionSettings } from './retention-policy.mjs';
 
 const RECURSION_VERSION = '0.1.0-pre-alpha.1';
 const MAX_JOURNAL_ENTRIES = 500;
 const DEFAULT_MAX_SCENE_CACHES_PER_CHAT = 3;
 const DEFAULT_MAX_SCENE_CACHES_TOTAL = 24;
-const MAX_SCENE_CACHE_VARIANTS = 4;
 const SCENE_CACHE_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
 const RUN_JOURNAL_KEY_PATTERN = /^recursion-run-journal-[A-Za-z0-9_.-]+\.v1\.json$/;
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
@@ -413,7 +413,8 @@ function normalizeSceneCacheVariant(key, value = {}) {
   return variant;
 }
 
-function normalizeSceneCacheVariants(source) {
+function normalizeSceneCacheVariants(source, retention = {}) {
+  const variantLimit = normalizeRetentionSettings(retention).sourceVariantsPerScene;
   const variantsSource = source && typeof source.variants === 'object' && !Array.isArray(source.variants)
     ? source.variants
     : {};
@@ -428,15 +429,15 @@ function normalizeSceneCacheVariants(source) {
   const discoveredOrder = Object.keys(normalized).filter((key) => !requestedOrder.includes(key));
   const boundedOrder = [...requestedOrder, ...discoveredOrder]
     .filter((key, index, list) => key && normalized[key] && list.indexOf(key) === index)
-    .slice(-MAX_SCENE_CACHE_VARIANTS);
+    .slice(-variantLimit);
   const bounded = {};
   for (const key of boundedOrder) bounded[key] = normalized[key];
   return { variants: bounded, variantOrder: boundedOrder };
 }
 
-function normalizeSceneCache(chatKey, sceneKey, value = {}) {
+function normalizeSceneCache(chatKey, sceneKey, value = {}, retention = {}) {
   const source = value && typeof value === 'object' ? value : {};
-  const normalizedVariants = normalizeSceneCacheVariants(source);
+  const normalizedVariants = normalizeSceneCacheVariants(source, retention);
   const activeSourceRevisionHash = normalizeVariantKey(source.activeSourceRevisionHash || normalizedVariants.variantOrder.at(-1) || '');
   return baseRecord('recursion.sceneCache', {
     createdAt: source.createdAt,
@@ -881,8 +882,27 @@ function reportStorageWriteStatus(activity, operationId, status, detail = {}) {
   });
 }
 
-export function createStorageRepository({ storage = createMemoryStorageAdapter(), maxJournalEntries = 100, activity = null } = {}) {
-  const journalEntryLimit = normalizeMaxEntries(maxJournalEntries);
+export function createStorageRepository({
+  storage = createMemoryStorageAdapter(),
+  maxJournalEntries = 100,
+  activity = null,
+  getRetentionSettings = null
+} = {}) {
+  const fallbackJournalEntryLimit = normalizeMaxEntries(maxJournalEntries);
+
+  function currentRetention() {
+    if (typeof getRetentionSettings === 'function') {
+      try {
+        return normalizeRetentionSettings(getRetentionSettings());
+      } catch {
+        return normalizeRetentionSettings({});
+      }
+    }
+    return {
+      ...normalizeRetentionSettings({}),
+      runJournalEntries: fallbackJournalEntryLimit
+    };
+  }
 
   async function writeIndexEntry(key, kind, chatKey = null) {
     const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
@@ -1068,12 +1088,12 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
   async function loadSceneCache(chatKey, sceneKey) {
     const key = sceneCacheKey(chatKey, sceneKey);
     const existing = await storage.readJson(key);
-    return existing ? normalizeSceneCache(chatKey, sceneKey, existing) : null;
+    return existing ? normalizeSceneCache(chatKey, sceneKey, existing, currentRetention()) : null;
   }
 
   async function loadRunJournal(chatKey) {
     const key = runJournalKey(chatKey);
-    return normalizeJournal(chatKey, await storage.readJson(key), journalEntryLimit);
+    return normalizeJournal(chatKey, await storage.readJson(key), currentRetention().runJournalEntries);
   }
 
   async function appendJournal(chatKey, entry) {
@@ -1107,7 +1127,7 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
           sceneKey: safeId(sceneKey, 'scene')
         }
       });
-      const record = normalizeSceneCache(chatKey, sceneKey, value);
+      const record = normalizeSceneCache(chatKey, sceneKey, value, currentRetention());
       const writeResult = await storage.writeJson(key, record);
       const sceneWriteStatus = storageWriteStatus(writeResult);
       let indexWriteStatus = { persisted: true };
@@ -1139,7 +1159,7 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
         ...existing,
         cacheState,
         invalidation
-      });
+      }, currentRetention());
       await storage.writeJson(key, record);
       await writeIndexEntry(key, 'sceneCache', safeId(chatKey, 'chat'));
       const journalEntry = await appendJournal(chatKey, {
@@ -1166,6 +1186,14 @@ export function createStorageRepository({ storage = createMemoryStorageAdapter()
     appendJournal,
     repairIndex,
     pruneSceneCaches,
+    async maintainRetention(options = {}) {
+      const retention = currentRetention();
+      return pruneSceneCaches({
+        ...options,
+        maxPerChat: retention.sceneCachesPerChat,
+        maxTotal: retention.sceneCachesTotal
+      });
+    },
     async clearSceneCache(chatKey, sceneKey) {
       const key = sceneCacheKey(chatKey, sceneKey);
       await storage.deleteJson(key);

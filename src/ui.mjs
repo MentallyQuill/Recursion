@@ -18,6 +18,7 @@ import {
   providerRouteSummary
 } from './providers.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
+import { DEFAULT_RETENTION_SETTINGS, RETENTION_LIMITS } from './retention-policy.mjs';
 
 const PHASE_LABELS = Object.freeze({
   idle: '',
@@ -146,7 +147,13 @@ const SETTINGS_AUTOSAVE_DATASETS = Object.freeze([
   'recursionSettingTooltipsEnabled',
   'recursionSettingProgressChildLimit',
   'recursionSettingProgressListLimit',
-  'recursionSettingJournalLimit',
+  'recursionSettingSourceWindowMessages',
+  'recursionSettingSourceWindowCharacters',
+  'recursionSettingProviderVisibleMessages',
+  'recursionSettingSceneCachesPerChat',
+  'recursionSettingSceneCachesTotal',
+  'recursionSettingSourceVariantsPerScene',
+  'recursionSettingRunJournalEntries',
   'recursionSettingIncludeExcerpts'
 ]);
 const PROVIDER_AUTOSAVE_DATASETS = Object.freeze([
@@ -176,8 +183,15 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   tooltips: 'Show hover help across Recursion. Turn off once the controls are familiar; hidden text never affects model calls.',
   progressChildLimit: 'Maximum visible sub-rows under one progress step before that child list scrolls. Useful when many card calls run in one turn.',
   progressListLimit: 'Maximum combined progress rows before the whole progress menu scrolls. Keeps long model-call runs readable without growing over the chat.',
+  retention: 'Operational caps for Recursion-owned source windows and cache files. These never delete SillyTavern chat messages.',
+  sourceWindowMessages: 'Recent visible messages Recursion reads for source freshness. This does not delete SillyTavern chat.',
+  sourceWindowCharacters: 'Character budget for the source freshness window. Lower values make long chats cheaper; higher values keep more local scene evidence.',
+  providerVisibleMessages: 'Recent visible messages sent to Recursion provider calls. This affects Recursion analysis prompts, not the final story model context.',
+  sceneCachesPerChat: 'Recursion scene-cache files retained per chat. Old unprotected caches are disposable and can be rebuilt.',
+  sceneCachesTotal: 'Total Recursion scene-cache files retained across chats. Cleanup never deletes SillyTavern messages or other extension data.',
+  sourceVariantsPerScene: 'Active-source variants retained for swipe A/B/A reuse. Higher values preserve more swipe branches but make scene-cache files larger.',
+  runJournalEntries: 'Sanitized Recursion activity entries retained per chat. Higher values help debugging but cost more local storage.',
   diagnostics: 'Local troubleshooting controls. Diagnostics are sanitized by default and are for understanding Recursion behavior, not feeding the model.',
-  journalEntries: 'Maximum sanitized run-journal entries retained for inspection. Higher values help debugging but cost more local storage.',
   includeExcerpts: 'Include short sanitized excerpts in exported diagnostics. Leave off for privacy unless a bug report needs bounded text evidence.',
   resetSceneCache: 'Clear cached scene cards for the current chat so Recursion rebuilds its hand from fresh context.',
   clearRunJournal: 'Clear local Recursion activity history for this chat. This does not change cards, settings, or SillyTavern messages.',
@@ -191,6 +205,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   providerTest: 'Send a small structured test call through this lane to verify routing, credentials, and JSON output before using it in chat.',
   providerClearKey: 'Remove the in-memory session key for this lane. Saved endpoint, model, and profile settings stay unchanged.'
 });
+const FORCE_REGENERATE_TOOLTIP = 'Run the next Recursion packet fresh, ignoring cached cards, Rapid warm, and swipe reuse.';
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -758,6 +773,10 @@ export function createRecursionViewModel(view = {}) {
     || source.hostGenerationActive === true
     || Number(progressRun.activeCount || 0) > 0
   );
+  const forceRegenerate = asObject(source.forceRegenerate);
+  const forceRegeneratePending = forceRegenerate.pending === true;
+  const forceRegenerateVisible = enabled && !generationStopVisible;
+  const forceRegenerateLabel = forceRegeneratePending ? 'Regenerating' : 'Regenerate';
   const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
   const progressChildVisibleLimit = integerInRange(settings.ui?.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20);
   const progressListVisibleLimit = integerInRange(settings.ui?.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80);
@@ -786,6 +805,10 @@ export function createRecursionViewModel(view = {}) {
     activityChips,
     progressRun,
     generationStopVisible,
+    forceRegenerateVisible,
+    forceRegeneratePending,
+    forceRegenerateDisabled: !forceRegenerateVisible || forceRegeneratePending,
+    forceRegenerateLabel,
     currentStepText: progressRun.currentStepText,
     standbyStatusText: standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards, source.rapidWarm),
     heroPixelBlocks,
@@ -1409,6 +1432,7 @@ function syncStaticTooltips(root, model) {
   setTooltip(root.querySelector('[data-recursion-mode-button]'), true, `Mode: ${model.modeLabel}`);
   setTooltip(root.querySelector('[data-recursion-cards-button]'), true, 'Open card scope selector. Auto treats scope as preference; Manual uses scope as a strict whitelist.');
   setTooltip(root.querySelector('[data-recursion-status-trigger]'), true, 'Open generation progress');
+  setTooltip(root.querySelector('[data-recursion-force-regenerate]'), true, FORCE_REGENERATE_TOOLTIP);
   setTooltip(root.querySelector('[data-recursion-hand-toggle]'), true, 'Open last brief preview');
   setTooltip(root.querySelector('[data-recursion-options-button]'), true, 'Open Recursion settings');
   for (const option of MODE_MENU_OPTIONS) {
@@ -1473,7 +1497,10 @@ function clearHandDropdownFadeTimer(panel) {
 
 function lastBriefEmptyText(model) {
   const status = model.lastBriefStatus;
-  if (status === 'clearing' || status === 'preparing') return 'Preparing next prompt packet.';
+  if (status === 'clearing' || status === 'preparing') {
+    if (model.lastBriefReason === 'user-force-regenerate') return 'Preparing fresh prompt packet.';
+    return 'Preparing next prompt packet.';
+  }
   return 'No hand has been composed for this chat.';
 }
 
@@ -1808,8 +1835,10 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
   const ui = asObject(settings.ui);
   const diagnostics = asObject(settings.diagnostics);
   const injection = asObject(settings.injection);
+  const retention = asObject(settings.retention);
   const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
   const defaultInjection = DEFAULT_RECURSION_SETTINGS.injection;
+  const defaultRetention = DEFAULT_RETENTION_SETTINGS;
   const tooltipsEnabled = ui.tooltipsEnabled !== false;
   group.appendChild(el('h3', { text: 'Advanced' }));
   const resetSceneCache = button('Reset Scene Cache', 'recursionResetSceneCache', 'Reset Recursion scene cache');
@@ -1877,16 +1906,41 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     controlRow('Sub-tier Rows', progressChildControl),
     controlRow('Progress Rows', progressListControl)
   ], { tooltip: SETTINGS_TOOLTIPS.ui, tooltipsEnabled }));
-  const journalLimitControl = inputControl({
-    value: integerInRange(diagnostics.maxJournalEntries, 100, 10, 500),
-    type: 'number',
-    min: 10,
-    max: 500,
-    step: 10,
-    dataset: { recursionSettingJournalLimit: '' },
-    ariaLabel: 'Maximum diagnostic journal entries'
-  });
-  setTooltip(journalLimitControl, tooltipsEnabled, SETTINGS_TOOLTIPS.journalEntries);
+  const retentionNumberControl = (key, datasetKey, ariaLabel) => {
+    const limits = RETENTION_LIMITS[key];
+    return inputControl({
+      value: integerInRange(retention[key], defaultRetention[key], limits.min, limits.max),
+      type: 'number',
+      min: limits.min,
+      max: limits.max,
+      step: limits.step,
+      dataset: { [datasetKey]: '' },
+      ariaLabel
+    });
+  };
+  const sourceMessagesControl = retentionNumberControl('sourceWindowMessages', 'recursionSettingSourceWindowMessages', 'Source freshness message cap');
+  setTooltip(sourceMessagesControl, tooltipsEnabled, SETTINGS_TOOLTIPS.sourceWindowMessages);
+  const sourceCharactersControl = retentionNumberControl('sourceWindowCharacters', 'recursionSettingSourceWindowCharacters', 'Source freshness character budget');
+  setTooltip(sourceCharactersControl, tooltipsEnabled, SETTINGS_TOOLTIPS.sourceWindowCharacters);
+  const providerMessagesControl = retentionNumberControl('providerVisibleMessages', 'recursionSettingProviderVisibleMessages', 'Provider visible message cap');
+  setTooltip(providerMessagesControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerVisibleMessages);
+  const perChatCacheControl = retentionNumberControl('sceneCachesPerChat', 'recursionSettingSceneCachesPerChat', 'Scene caches retained per chat');
+  setTooltip(perChatCacheControl, tooltipsEnabled, SETTINGS_TOOLTIPS.sceneCachesPerChat);
+  const totalCacheControl = retentionNumberControl('sceneCachesTotal', 'recursionSettingSceneCachesTotal', 'Total scene caches retained');
+  setTooltip(totalCacheControl, tooltipsEnabled, SETTINGS_TOOLTIPS.sceneCachesTotal);
+  const variantControl = retentionNumberControl('sourceVariantsPerScene', 'recursionSettingSourceVariantsPerScene', 'Swipe variants retained per scene');
+  setTooltip(variantControl, tooltipsEnabled, SETTINGS_TOOLTIPS.sourceVariantsPerScene);
+  const journalEntriesControl = retentionNumberControl('runJournalEntries', 'recursionSettingRunJournalEntries', 'Maximum diagnostic journal entries');
+  setTooltip(journalEntriesControl, tooltipsEnabled, SETTINGS_TOOLTIPS.runJournalEntries);
+  group.appendChild(settingsDisclosureSection('retention', 'Retention', [
+    controlRow('Source Messages', sourceMessagesControl),
+    controlRow('Source Text Budget', sourceCharactersControl),
+    controlRow('Provider Messages', providerMessagesControl),
+    controlRow('Scene Caches / Chat', perChatCacheControl),
+    controlRow('Scene Caches Total', totalCacheControl),
+    controlRow('Swipe Variants / Scene', variantControl),
+    controlRow('Journal Entries', journalEntriesControl)
+  ], { tooltip: SETTINGS_TOOLTIPS.retention, tooltipsEnabled }));
   const excerptsControl = checkboxControl({
     checked: diagnostics.includeExcerpts === true,
     dataset: { recursionSettingIncludeExcerpts: '' },
@@ -1894,7 +1948,6 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
   });
   setTooltip(excerptsControl, tooltipsEnabled, SETTINGS_TOOLTIPS.includeExcerpts);
   group.appendChild(settingsDisclosureSection('diagnostics', 'Diagnostics', [
-    controlRow('Journal Entries', journalLimitControl),
     controlRow('Include Excerpts', excerptsControl),
     el('div', { className: 'recursion-provider-actions' }, [
       resetSceneCache,
@@ -2828,6 +2881,13 @@ function buildRoot() {
         modeIconSvg('stop')
       ])
     ]),
+    el('button', {
+      className: 'recursion-force-regenerate',
+      attrs: { type: 'button', 'aria-label': 'Regenerate Recursion prompt packet', title: FORCE_REGENERATE_TOOLTIP },
+      dataset: { recursionForceRegenerate: '' }
+    }, [
+      el('span', { className: 'recursion-force-regenerate-label', dataset: { recursionForceRegenerateLabel: '' }, text: 'Regenerate' })
+    ]),
     el('span', { className: 'recursion-chip recursion-legacy-hand-count', dataset: { recursionHandCount: '' } }),
     el('span', { className: 'recursion-chip recursion-legacy-composer', dataset: { recursionComposer: '' } }),
     el('span', { className: 'recursion-chip recursion-reasoner-chip', dataset: { recursionReasoner: '' } }),
@@ -3003,6 +3063,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const modeButton = root.querySelector('[data-recursion-mode-button]');
   const statusButton = root.querySelector('[data-recursion-status-trigger]');
   const stopGenerationButton = root.querySelector('[data-recursion-stop-generation]');
+  const forceRegenerateButton = root.querySelector('[data-recursion-force-regenerate]');
   const reasoningChain = root.querySelector('[data-recursion-reasoning-chain]');
   const pipelineMenu = root.querySelector('[data-recursion-pipeline-menu]');
   const modeMenu = root.querySelector('[data-recursion-mode-menu]');
@@ -3575,6 +3636,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     update();
     runAction(action, () => update());
   });
+  forceRegenerateButton?.addEventListener('click', (event) => {
+    consumeClickEvent(event);
+    setProgressPopoverOpen(false);
+    const action = runtime?.forceRegenerateNext?.({ source: 'bar' });
+    update();
+    runAction(action, () => update());
+  });
   reasoningChain?.addEventListener('keydown', handleReasoningKeydown);
   const handleSettingsAutoSave = (event) => {
     const target = event?.target;
@@ -3837,6 +3905,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function readSettingsPatch(sourceRoot) {
     const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
     const defaultInjection = DEFAULT_RECURSION_SETTINGS.injection;
+    const defaultRetention = DEFAULT_RETENTION_SETTINGS;
     const injectionDepth = controlValue(sourceRoot, '[data-recursion-setting-injection-depth]');
     return {
       strength: controlValue(sourceRoot, '[data-recursion-setting-strength]'),
@@ -3870,13 +3939,51 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         )
       },
       diagnostics: {
-        maxJournalEntries: integerInRange(
-          controlNumber(sourceRoot, '[data-recursion-setting-journal-limit]', 100),
-          100,
-          10,
-          500
-        ),
         includeExcerpts: controlChecked(sourceRoot, '[data-recursion-setting-include-excerpts]')
+      },
+      retention: {
+        sourceWindowMessages: integerInRange(
+          controlNumber(sourceRoot, '[data-recursion-setting-source-window-messages]', defaultRetention.sourceWindowMessages),
+          defaultRetention.sourceWindowMessages,
+          RETENTION_LIMITS.sourceWindowMessages.min,
+          RETENTION_LIMITS.sourceWindowMessages.max
+        ),
+        sourceWindowCharacters: integerInRange(
+          controlNumber(sourceRoot, '[data-recursion-setting-source-window-characters]', defaultRetention.sourceWindowCharacters),
+          defaultRetention.sourceWindowCharacters,
+          RETENTION_LIMITS.sourceWindowCharacters.min,
+          RETENTION_LIMITS.sourceWindowCharacters.max
+        ),
+        providerVisibleMessages: integerInRange(
+          controlNumber(sourceRoot, '[data-recursion-setting-provider-visible-messages]', defaultRetention.providerVisibleMessages),
+          defaultRetention.providerVisibleMessages,
+          RETENTION_LIMITS.providerVisibleMessages.min,
+          RETENTION_LIMITS.providerVisibleMessages.max
+        ),
+        sceneCachesPerChat: integerInRange(
+          controlNumber(sourceRoot, '[data-recursion-setting-scene-caches-per-chat]', defaultRetention.sceneCachesPerChat),
+          defaultRetention.sceneCachesPerChat,
+          RETENTION_LIMITS.sceneCachesPerChat.min,
+          RETENTION_LIMITS.sceneCachesPerChat.max
+        ),
+        sceneCachesTotal: integerInRange(
+          controlNumber(sourceRoot, '[data-recursion-setting-scene-caches-total]', defaultRetention.sceneCachesTotal),
+          defaultRetention.sceneCachesTotal,
+          RETENTION_LIMITS.sceneCachesTotal.min,
+          RETENTION_LIMITS.sceneCachesTotal.max
+        ),
+        sourceVariantsPerScene: integerInRange(
+          controlNumber(sourceRoot, '[data-recursion-setting-source-variants-per-scene]', defaultRetention.sourceVariantsPerScene),
+          defaultRetention.sourceVariantsPerScene,
+          RETENTION_LIMITS.sourceVariantsPerScene.min,
+          RETENTION_LIMITS.sourceVariantsPerScene.max
+        ),
+        runJournalEntries: integerInRange(
+          controlNumber(sourceRoot, '[data-recursion-setting-run-journal-entries]', defaultRetention.runJournalEntries),
+          defaultRetention.runJournalEntries,
+          RETENTION_LIMITS.runJournalEntries.min,
+          RETENTION_LIMITS.runJournalEntries.max
+        )
       },
       injection: {
         placement: controlValue(sourceRoot, '[data-recursion-setting-injection-placement]') || defaultInjection.placement,
@@ -3960,6 +4067,17 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       stopGenerationButton.setAttribute('aria-hidden', model.generationStopVisible ? 'false' : 'true');
       stopGenerationButton.setAttribute('tabindex', model.generationStopVisible ? '0' : '-1');
       setTooltip(stopGenerationButton, model.tooltipsEnabled, 'Stop generation');
+    }
+    if (forceRegenerateButton) {
+      const supported = typeof runtime?.forceRegenerateNext === 'function';
+      const visible = supported && model.forceRegenerateVisible;
+      forceRegenerateButton.hidden = !visible;
+      forceRegenerateButton.disabled = !visible || model.forceRegenerateDisabled;
+      forceRegenerateButton.setAttribute('aria-hidden', visible ? 'false' : 'true');
+      forceRegenerateButton.setAttribute('tabindex', visible ? '0' : '-1');
+      forceRegenerateButton.setAttribute('aria-label', model.forceRegeneratePending ? 'Fresh prompt packet queued' : 'Regenerate Recursion prompt packet');
+      setText(root, '[data-recursion-force-regenerate-label]', model.forceRegenerateLabel);
+      setTooltip(forceRegenerateButton, model.tooltipsEnabled, model.forceRegeneratePending ? 'Fresh prompt packet queued.' : FORCE_REGENERATE_TOOLTIP);
     }
     renderPipelineMenuSelection(model.pipelineMode);
     renderModeMenuSelection(model.mode);

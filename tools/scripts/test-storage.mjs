@@ -1564,4 +1564,72 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertEqual(journal.nextIndex, 4, 'destructured appendJournal increments from normalized nextIndex');
 }
 
+{
+  const adapter = createMemoryStorageAdapter();
+  let retention = { runJournalEntries: 10 };
+  const repo = createStorageRepository({
+    storage: adapter,
+    getRetentionSettings: () => retention
+  });
+  for (let index = 0; index < 12; index += 1) {
+    await repo.appendJournal('Dynamic Journal Chat', { event: 'activity.settled', summary: `entry-${index}` });
+  }
+  let journal = await repo.loadRunJournal('Dynamic Journal Chat');
+  assertEqual(journal.maxEntries, 10, 'dynamic retention starts at ten entries');
+  assertDeepEqual(
+    journal.entries.map((entry) => entry.summary),
+    ['entry-2', 'entry-3', 'entry-4', 'entry-5', 'entry-6', 'entry-7', 'entry-8', 'entry-9', 'entry-10', 'entry-11'],
+    'dynamic journal retention prunes to current cap'
+  );
+
+  retention = { runJournalEntries: 12 };
+  await repo.appendJournal('Dynamic Journal Chat', { event: 'activity.settled', summary: 'entry-12' });
+  journal = await repo.loadRunJournal('Dynamic Journal Chat');
+  assertEqual(journal.maxEntries, 12, 'dynamic retention expands on next append');
+  assertDeepEqual(
+    journal.entries.map((entry) => entry.summary),
+    ['entry-2', 'entry-3', 'entry-4', 'entry-5', 'entry-6', 'entry-7', 'entry-8', 'entry-9', 'entry-10', 'entry-11', 'entry-12'],
+    'dynamic journal keeps retained entries plus new append after expansion'
+  );
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({
+    storage: adapter,
+    getRetentionSettings: () => ({ sourceVariantsPerScene: 2 })
+  });
+  await repo.saveSceneCache('Variant Cap Chat', 'Scene One', {
+    activeSourceRevisionHash: 'rev-c',
+    variantOrder: ['rev-a', 'rev-b', 'rev-c'],
+    variants: {
+      'rev-a': { sourceRevisionHash: 'rev-a', cards: [] },
+      'rev-b': { sourceRevisionHash: 'rev-b', cards: [] },
+      'rev-c': { sourceRevisionHash: 'rev-c', cards: [] }
+    }
+  });
+  const cache = await repo.loadSceneCache('Variant Cap Chat', 'Scene One');
+  assertDeepEqual(cache.variantOrder, ['rev-b', 'rev-c'], 'storage applies dynamic variant cap');
+  assert(!cache.variants['rev-a'], 'storage drops oldest variant beyond cap');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({
+    storage: adapter,
+    getRetentionSettings: () => ({ sceneCachesPerChat: 1, sceneCachesTotal: 4 })
+  });
+  await repo.saveSceneCache('Maintain Chat A', 'Old Scene', {});
+  await repo.saveSceneCache('Maintain Chat A', 'Active Scene', {});
+  await repo.saveSceneCache('Maintain Chat B', 'Other Scene', {});
+  const result = await repo.maintainRetention({
+    activeScene: { chatKey: 'Maintain Chat A', sceneKey: 'Active Scene' }
+  });
+  const dump = adapter.dump();
+  assertEqual(result.ok, true, 'maintainRetention succeeds');
+  assert(!dump[sceneCacheKey('Maintain Chat A', 'Old Scene')], 'maintenance prunes old same-chat scene');
+  assert(dump[sceneCacheKey('Maintain Chat A', 'Active Scene')], 'maintenance protects active scene');
+  assert(dump[sceneCacheKey('Maintain Chat B', 'Other Scene')], 'maintenance keeps other chat cache');
+}
+
 console.log('[pass] storage');

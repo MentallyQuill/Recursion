@@ -8,6 +8,7 @@ This manual describes the turn lifecycle implemented by `src/runtime.mjs` and th
 | --- | --- |
 | Power off | Supersedes active Recursion work, clears Recursion prompt entries, and returns without chat inspection or prompt compilation. |
 | Stop generation | Requests SillyTavern host generation stop, aborts active Recursion work, clears Recursion prompt entries, and settles the canceled attempt as skipped/neutral. |
+| Force Regenerate | Queues one fresh next-generation pass from the Recursion Bar command slot. The next `prepareForGeneration()` consumes the token, skips packet/Rapid/cache reuse, soft-invalidates scene cache with `user-force-regenerate`, and restores normal pipeline behavior afterward. |
 | Auto | Captures a snapshot, sends the full fixed catalog plus card-scope focus preferences to the selected pipeline, installs validated prompt blocks when useful, writes bounded diagnostics, and settles the progress surface. |
 | Manual | Captures a snapshot, treats enabled card-scope families/sub-items as a strict whitelist, filters disabled card jobs/cards before generation and hand selection, then runs the selected prompt-compile pipeline when useful. |
 
@@ -95,6 +96,21 @@ Foreground send:
 
 Rapid foreground roles are small Utility jobs. They may hedge by starting a primary call immediately and a backup after the configured short delay; the first valid structured output wins and diagnostics record the winning hedge source. Hedging is not used for Story generation.
 
+## Force Regenerate Sequence
+
+Force Regenerate is one-shot and bar-owned:
+
+1. The bar calls `runtime.forceRegenerateNext({ source: 'bar' })`.
+2. Runtime records a force token, clears any pending latest-assistant swipe retry, and clears Last Brief with reason `user-force-regenerate`.
+3. The next `prepareForGeneration()` consumes the token before reuse checks.
+4. Runtime skips latest-assistant swipe packet reinstall and same-turn packet reuse.
+5. Runtime soft-invalidates the current scene cache with reason `user-force-regenerate`.
+6. If Rapid is selected, runtime bypasses Rapid foreground warm for this run and continues through Standard foreground work.
+7. Cached card metadata may appear in the Arbiter scene-cache evidence as stale, but cached card prompt text is not prompt-eligible for the forced hand.
+8. Runtime installs a fresh packet, sets Last Brief ready with reason `force-regenerate-installed`, and clears the pending force view.
+
+Repeated Regenerate clicks replace the pending token rather than stacking runs. Source/chat cleanup, disable, hard reset, and host stop cleanup clear stale pending tokens.
+
 ## Snapshot Capture
 
 The host adapter returns a host-neutral snapshot with chat id, chat key, scene fingerprint, scene key, turn fingerprint, latest message id, and normalized messages. System or hidden SillyTavern messages are not treated as visible story messages. Runtime sanitizes and bounds provider-facing snapshots before sending them to model lanes.
@@ -176,7 +192,7 @@ Runtime keeps one active run id and an abort controller. Settings changes, provi
 
 When the SillyTavern entrypoint receives `event_types.CHAT_CHANGED`, runtime aborts active provider work, clears volatile packet/hand/plan/snapshot state, best-effort marks the previously active scene cache stale with reason `chat-changed`, clears Recursion prompt keys, and journals the prompt-clear result against the previous chat when known. It does not call Utility or Reasoner for the newly selected chat until the next generation or explicit refresh.
 
-When the entrypoint receives source mutation events such as `MESSAGE_DELETED`, `MESSAGE_UPDATED`, or older-message `MESSAGE_SWIPED`, runtime follows the same prompt-safe cleanup path with reason `source-changed`. It clears the stale prompt immediately and stores only compact event metadata such as event name and message id; it does not persist changed message text. A `MESSAGE_SWIPED` event for the latest visible assistant message is different: it is treated as a same-turn swipe retry, so Recursion keeps the existing prompt and Rapid does not prewarm again. If SillyTavern invokes the generation interceptor again for that same pending user turn, runtime reinstalls the previous packet without running Standard, Rapid, Utility, or Reasoner work. The next distinct user message reads the current active source revision and starts fresh progress. If the user swiped back to an earlier revision and that exact variant still exists and validates, runtime can reuse it with cached/purple progress; otherwise it regenerates or skips according to the Arbiter plan.
+When the entrypoint receives source mutation events such as `MESSAGE_DELETED`, `MESSAGE_UPDATED`, or older-message `MESSAGE_SWIPED`, runtime follows the same prompt-safe cleanup path with reason `source-changed`. It clears the stale prompt immediately and stores only compact event metadata such as event name and message id; it does not persist changed message text. A `MESSAGE_SWIPED` event for the latest visible assistant message is different: it is treated as a same-turn swipe retry, so Recursion keeps the existing prompt and Rapid does not prewarm again. If SillyTavern invokes the generation interceptor again for that same pending user turn, runtime reinstalls the previous packet without running Standard, Rapid, Utility, or Reasoner work unless Force Regenerate is pending. With Force Regenerate pending, runtime clears the retry marker, uses the current post-swipe snapshot, and runs fresh provider work. The next distinct user message reads the current active source revision and starts fresh progress. If the user swiped back to an earlier revision and that exact variant still exists and validates, runtime can reuse it with cached/purple progress; otherwise it regenerates or skips according to the Arbiter plan.
 
 When the player cancels SillyTavern generation, the entrypoint receives `event_types.GENERATION_STOPPED` (`generation_stopped`). Runtime treats that as `host-generation-stopped`: it aborts the active run controller so in-flight Utility/Reasoner calls receive an abort signal, clears volatile packet/hand/plan/snapshot state, clears Recursion prompt keys, and refuses to install any late packet from the canceled run. If a scene cache had already been written for that canceled attempt, runtime marks it stale with reason `host-generation-stopped`. The progress outcome is `skipped`/neutral so user cancellation is not displayed as a provider warning or failure.
 

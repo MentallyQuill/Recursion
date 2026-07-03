@@ -57,7 +57,9 @@ Canonical desktop layout:
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
 
-The Stop generation button is a separate active-only control, not a second power state. It appears while Recursion is preparing a prompt for a SillyTavern generation or while that host generation is still active. The button uses a square stop icon with accessible label and hover tooltip copy `Stop generation`. Clicking it must call the unified stop path: request SillyTavern generation stop through the host adapter, abort active Recursion provider work, prevent stale prompt installation, clear Recursion-owned prompt keys, mark the canceled attempt neutral/skipped, and close any active progress popover. When no active run or host generation exists, the button is hidden and removed from keyboard focus.
+The Stop generation button is a separate active-only control, not a second power state. It appears while Recursion is preparing a prompt for a SillyTavern generation or while that host generation is still active. The button uses a square stop icon with accessible label and hover tooltip copy `Stop generation`. Clicking it must call the unified stop path: request SillyTavern generation stop through the host adapter, abort active Recursion provider work, prevent stale prompt installation, clear Recursion-owned prompt keys, mark the canceled attempt neutral/skipped, and close any active progress popover.
+
+When no active run or host generation exists, the same command slot shows `Regenerate`. This queues a one-shot fresh Recursion packet for the next generation: cached cards, Rapid warm, latest-assistant swipe packet reuse, and same-turn packet reinstall are bypassed. If a force token is pending, the button shows `Regenerating`, is disabled, and keeps the tooltip `Fresh prompt packet queued.` Stop always has priority over Regenerate during active work. Regenerate is not Reset Scene Cache; it soft-invalidates current cache for the forced run but does not delete scene cache records or SillyTavern messages.
 
 The pipeline control is a single icon-only button immediately to the left of the Mode button. It is not duplicated in Settings. It opens a compact dropdown with two choices:
 
@@ -202,7 +204,7 @@ The bar should visually align with nearby SillyTavern chrome. Its height, border
 Color grammar:
 
 - The power, pipeline, and mode controls use muted SillyTavern foreground text, not bright brand color.
-- The active Stop generation control may use a muted error tint, but only as a compact 24px icon button.
+- The active Stop generation control may use a muted error tint, but only as a compact 24px icon button. The idle Regenerate control uses neutral compact chrome in the same slot and should not look like a warning or destructive reset.
 - Reasoning level controls use muted SillyTavern foreground grey-white, so they read as chrome rather than runtime state.
 - The Hero Pixel Array owns compact state color.
 - The bar itself should remain mostly neutral; amber/red should appear only in the array or disclosed menus for attention or blocking conditions.
@@ -1109,7 +1111,7 @@ The menu uses three tabs:
 - Providers.
 - Advanced.
 
-Play, Provider, and Advanced setting controls auto-save on committed changes. The compact settings menu must not render a broad `Save Settings` button, and provider lanes must not render a separate `Save Provider` button. Closing the menu should never discard changed Strength, card limits, Focus, Prompt Footprint, provider source/profile/endpoint/model/max tokens, Injection, UI, or Diagnostics values. Provider session keys remain session-only even when entered through autosave.
+Play, Provider, and Advanced setting controls auto-save on committed changes. The compact settings menu must not render a broad `Save Settings` button, and provider lanes must not render a separate `Save Provider` button. Closing the menu should never discard changed Strength, card limits, Focus, Prompt Footprint, provider source/profile/endpoint/model/max tokens, Injection, UI, Retention, or Diagnostics values. Provider session keys remain session-only even when entered through autosave.
 
 Switching between settings tabs is internal panel navigation. A tab click must keep the settings menu open, even though the tab switch re-renders the floating panel content; outside-click closers must ignore that handled tab-switch event.
 
@@ -1157,7 +1159,8 @@ Advanced contains low-frequency controls grouped into collapsible sections:
 
 - Injection: placement, role, and depth controls for the composed prompt packet.
 - UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
-- Diagnostics: journal size, safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
+- Retention: Source Messages, Source Text Budget, Provider Messages, Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries. These controls tune Recursion-owned windows and cache files; they do not delete SillyTavern chat.
+- Diagnostics: safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
 
 Injection controls apply to the final prompt packet after Utility guidance or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the Recursion packet to land in a different host lane or depth.
 
@@ -1256,7 +1259,7 @@ Provider fallback states should appear in the Hero Pixel Array Progress Menu and
 
 On narrow viewports:
 
-- Keep the power toggle, pipeline icon, mode icon, card scope icon, Hero Pixel Array, active Stop generation button when visible, last-brief arrow, and ellipsis visible when possible.
+- Keep the power toggle, pipeline icon, mode icon, card scope icon, Hero Pixel Array, active Stop generation button when visible, idle Regenerate button when space permits, last-brief arrow, and ellipsis visible when possible.
 - Keep the bar on one row. The inline current-step text must not force the right tool cluster onto a second row.
 - Use a mobile status drawer below the bar for the same current-step or transient standby text that desktop renders beside the Hero Pixel Array.
 - Hide the mobile status drawer when Progress, Last Brief, Cards, Settings, Pipeline, or Mode is open; those panels own the temporary vertical space.

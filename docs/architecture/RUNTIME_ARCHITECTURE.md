@@ -105,6 +105,8 @@ Pipeline controls change when work happens:
 
 Pipeline is selected from the compact bar dropdown immediately left of Mode. It is not duplicated in Settings.
 
+Force Regenerate is a one-shot runtime override from the Recursion Bar command slot. Runtime stores a pending force token, clears Last Brief visually with reason `user-force-regenerate`, and consumes the token at the start of the next `prepareForGeneration()` run. A forced run skips same-turn packet reinstall, latest-assistant swipe packet reuse, and Rapid foreground warm use. It soft-invalidates the current scene cache with reason `user-force-regenerate`, exposes stale cache metadata to the Utility Arbiter as evidence, prevents cached cards from entering the prompt-eligible hand, and records compact diagnostics such as `force-regenerate:cache-bypassed` and `force-regenerate:rapid-bypassed`.
+
 The Runtime Coordinator should serialize work per chat/generation attempt. A newer turn snapshot supersedes older pending work. If a late provider result arrives after the active snapshot changed, the result is discarded or recorded as stale and must not overwrite the current prompt packet.
 
 The injection point should be as close as practical to host generation start, after the snapshot and prompt packet are valid. If Recursion cannot complete optional work before generation, it should reuse a valid cache-backed packet or continue without injection rather than block the host indefinitely.
@@ -307,6 +309,8 @@ Provider setting and session-key mutations follow the same prompt-safety rule. `
 Clear failure, missing host clear API, missing scene cache, or invalidation storage failure does not roll back the provider change. Prompt-clear failures return `ok: false`, include the sanitized prompt-clear result, and leave the existing prompt-clear warning visible. Invalidation failures are fail-soft and do not change the mutation result contract.
 
 `runtime.refreshScene()` is a first-class refresh operation. It waits for prior mutations, captures the current host snapshot without adding synthetic chat text, best-effort soft-invalidates that snapshot's scene cache with reason `user-refresh`, then runs the normal preparation loop so the Utility Arbiter can review the stale cache before the new active cache is saved.
+
+`runtime.forceRegenerateNext()` is different from refresh and reset. It only queues the next generation to run fresh. The queued run uses reason `user-force-regenerate`, bypasses prompt/cache/Rapid reuse paths once, consumes the token, and then returns future generations to the selected Standard or Rapid pipeline.
 
 ## Diagnostics Events
 

@@ -1,5 +1,6 @@
 import { cloneJson } from './core.mjs';
 import { defaultCardScope, normalizeCardScope } from './card-scope.mjs';
+import { DEFAULT_RETENTION_SETTINGS, normalizeRetentionSettings } from './retention-policy.mjs';
 
 const MODES = new Set(['auto', 'manual']);
 const PIPELINE_MODES = new Set(['standard', 'rapid']);
@@ -42,9 +43,9 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
     depth: 1
   },
   diagnostics: {
-    maxJournalEntries: 100,
     includeExcerpts: false
   },
+  retention: DEFAULT_RETENTION_SETTINGS,
   providers: {
     utility: {
       lane: 'utility',
@@ -234,9 +235,9 @@ export function normalizeSettings(value = {}, secretStore = null) {
     reasonerUse: reasonerUseForReasoningLevel(reasoningLevel),
     injection: normalizeInjectionSettings(source.injection),
     diagnostics: {
-      maxJournalEntries: Math.round(numberInRange(source.diagnostics?.maxJournalEntries, 100, 10, 500)),
       includeExcerpts: source.diagnostics?.includeExcerpts === true
     },
+    retention: normalizeRetentionSettings(source.retention),
     providers: {
       utility: normalizeProviderSettings('utility', source.providers?.utility, secretStore),
       reasoner: normalizeProviderSettings('reasoner', source.providers?.reasoner, secretStore)

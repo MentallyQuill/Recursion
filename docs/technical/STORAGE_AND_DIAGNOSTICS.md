@@ -16,7 +16,8 @@ Recursion storage is cache-oriented. It makes current-scene prompt compilation f
 - Reasoner use
 - final prompt injection placement, role, and depth controls
 - provider preferences without secrets
-- diagnostics limits
+- retention caps for source windows, provider snapshots, scene caches, source variants, and run journals
+- diagnostics excerpt preferences
 - small UI preferences
 
 Logical JSON records store larger bounded data:
@@ -28,6 +29,18 @@ Logical JSON records store larger bounded data:
 | `recursion-run-journal-{chatKey}.v1.json` | Bounded sanitized runtime, provider, prompt, storage, and activity events. |
 
 The storage repository constructs keys. Runtime and UI modules do not build physical paths directly.
+
+`extension_settings.recursion.retention` owns the user-facing caps:
+
+- Source Messages: recent visible messages used for source freshness.
+- Source Text Budget: character budget for the source freshness window.
+- Provider Messages: recent visible messages sent to Recursion provider calls.
+- Scene Caches / Chat: unprotected scene-cache files retained per chat.
+- Scene Caches Total: unprotected scene-cache files retained across chats.
+- Swipe Variants / Scene: source variants retained inside one scene cache.
+- Journal Entries: sanitized run-journal entries retained per chat.
+
+These caps never delete, hide, summarize, or rewrite SillyTavern chat messages. They only bound Recursion-owned windows, caches, and diagnostics. Long-chat scaling is handled by the bounded source window: Recursion walks backward from the latest visible chat message until Source Messages or Source Text Budget is reached, then uses that bounded window for source hashes and cache freshness. Older chat messages remain in SillyTavern and can still be used by SillyTavern presets or other extensions.
 
 ## Scene Cache
 
@@ -45,7 +58,7 @@ Scene cache records contain:
 
 Cards are truncated, normalized, redacted, and bounded before write. Scene caches can be deleted and rebuilt from the active chat snapshot plus Utility outputs.
 
-Source variants let Recursion survive SillyTavern swipe A/B/A flows without reusing the wrong cards. A cache has one `activeSourceRevisionHash`, a bounded `variantOrder`, and up to four `variants`. Each variant owns the cards, latest hand metadata, source range, and source revision for one exact visible source state. The top-level `cards` and `latestHand` mirror the active variant for simple inspection, but runtime reuse reads only the exact active source variant when variants exist.
+Source variants let Recursion survive SillyTavern swipe A/B/A flows without reusing the wrong cards. A cache has one `activeSourceRevisionHash`, a bounded `variantOrder`, and up to `retention.sourceVariantsPerScene` `variants`. Each variant owns the cards, latest hand metadata, source range, and source revision for one exact visible source state. The top-level `cards` and `latestHand` mirror the active variant for simple inspection, but runtime reuse reads only the exact active source variant when variants exist.
 
 The source revision is not raw transcript text. It is a hash over visible message identity, role, text hash, and swipe metadata such as active swipe id, swipe count, and active swipe text hash. Inactive swipe text does not affect the revision until it becomes the active SillyTavern swipe.
 
@@ -177,11 +190,11 @@ Runtime must not persist generated card text, provider prompt text, transcript t
 
 ## Cleanup And Index Maintenance
 
-Current storage behavior normalizes records whenever they are loaded or written. Scene cache saves and run journal appends update `recursion-system-index.v1.json` with the logical key, record kind, chat key, and update time. Scene cache clears remove the corresponding index entry. Run journals are bounded to the configured entry limit during normalization.
+Current storage behavior normalizes records whenever they are loaded or written. Scene cache saves and run journal appends update `recursion-system-index.v1.json` with the logical key, record kind, chat key, and update time. Scene cache clears remove the corresponding index entry. Run journals are bounded to `retention.runJournalEntries` during normalization.
 
 The repository also exposes `repairIndex()` for bounded cleanup. It rebuilds the system index from valid discoverable Recursion scene caches and run journals when the adapter supports key discovery, prunes missing or invalid index entries, preserves unreadable entries instead of guessing, and returns sanitized `storage.repaired` / `storage.pruned` diagnostics. It does not delete scene cache files, run journal files, SillyTavern data, or non-Recursion extension records.
 
-`pruneSceneCaches(options)` is the explicit retention pass for cache files. It first repairs the index, then deletes old unprotected Recursion scene caches beyond `maxPerChat` and `maxTotal`, updates the system index, and returns sanitized `storage.pruned` diagnostics. `protectedScenes`, `protectedKeys`, or `activeScene` keep the active scene even when it is older than other caches. The prune pass revalidates each deletion candidate, preserves unreadable entries instead of guessing, deletes only confirmed `recursion-scene-*.v1.json` records, and never touches run journals, SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or non-Recursion extension records.
+`maintainRetention(options)` is the runtime retention pass. It repairs the index, then deletes old unprotected Recursion scene caches beyond `retention.sceneCachesPerChat` and `retention.sceneCachesTotal`, updates the system index, and returns sanitized `storage.pruned` diagnostics. `protectedScenes`, `protectedKeys`, or `activeScene` keep the active scene even when it is older than other caches. The prune pass revalidates each deletion candidate, preserves unreadable entries instead of guessing, deletes only confirmed `recursion-scene-*.v1.json` records, and never touches run journals, SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or non-Recursion extension records.
 
 If the host storage adapter downgrades a scene-cache or system-index write to memory fallback, the repository returns `storageStatus: { persisted: false, fallback: "memory" }` on the saved record and emits a `storageWarning` activity event instead of `Storage ready`. Generation remains fail-soft, but the UI and diagnostics must not imply durable persistence.
 

@@ -1712,6 +1712,349 @@ for (const pipelineMode of ['standard', 'rapid']) {
 }
 
 {
+  let providerCalls = 0;
+  const baseSnapshot = {
+    chatId: 'force-same-turn-chat',
+    chatKey: 'force-same-turn-chat',
+    sceneKey: 'force-same-turn-scene',
+    sceneFingerprint: 'force-same-turn-scene-fp',
+    turnFingerprint: 'force-same-turn-fp',
+    latestMesId: 2,
+    messages: [
+      { mesid: 2, role: 'assistant', text: 'Same turn force regenerate base response.', visible: true }
+    ]
+  };
+  const { runtime, installed, storage } = createRuntimeHarness({
+    settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => baseSnapshot,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        providerCalls += 1;
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'force same-turn setup', signals: [] },
+              diagnostics: ['force-same-turn-arbiter']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneFrameCard',
+              family: 'Scene Frame',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: `Force same-turn generated card ${providerCalls}.`,
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 8
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: `Force same-turn guidance ${providerCalls}.`,
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['force-same-turn-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected force same-turn role ${roleId}`);
+      }
+    }
+  });
+  const userMessage = 'Force regenerate this same turn.';
+  const first = await runtime.prepareForGeneration({ userMessage });
+  assertEqual(first.ok, true, 'force same-turn setup installs');
+  assertEqual(installed.length, 1, 'force same-turn setup installs one packet');
+  const callsAfterFirst = providerCalls;
+  const queued = await runtime.forceRegenerateNext({ source: 'bar' });
+  assertEqual(queued.ok, true, 'force regenerate queues successfully');
+  assertEqual(runtime.view().forceRegenerate?.pending, true, 'force regenerate is visible as pending');
+  assertEqual(runtime.view().lastBrief?.status, 'clearing', 'force regenerate clears Last Brief immediately');
+  assertEqual(runtime.view().lastBrief?.reason, 'user-force-regenerate', 'force regenerate records Last Brief clear reason');
+  const second = await runtime.prepareForGeneration({ userMessage });
+  assertEqual(second.ok, true, 'force same-turn run succeeds');
+  assertEqual(second.reused, undefined, 'force same-turn run does not report packet reuse');
+  assert(providerCalls > callsAfterFirst, 'force same-turn run calls providers again');
+  assertEqual(installed.length, 2, 'force same-turn run installs a fresh packet');
+  assertNotEqual(installed[0].packetId, installed[1].packetId, 'force same-turn run changes packet identity');
+  assertEqual(runtime.view().forceRegenerate?.pending, false, 'force token is consumed after prepare');
+  assertEqual(runtime.view().lastBrief?.status, 'ready', 'force same-turn restores Last Brief ready state');
+  assertEqual(runtime.view().lastBrief?.reason, 'force-regenerate-installed', 'force same-turn marks forced install reason');
+  const journal = await storage.loadRunJournal(baseSnapshot.chatKey);
+  assert(journal.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'user-force-regenerate'), 'force same-turn records cache invalidation journal');
+}
+
+{
+  let providerCalls = 0;
+  const userMessage = 'Force regenerate the latest assistant swipe.';
+  const chatId = 'force-latest-assistant-chat';
+  const initialMessages = [
+    { mesid: 20, role: 'user', text: userMessage, textHash: hashJson(userMessage), visible: true }
+  ];
+  const snapshotFromMessages = (messages) => ({
+    chatId,
+    chatKey: chatId,
+    sceneKey: 'force-latest-assistant-scene',
+    sceneFingerprint: 'force-latest-assistant-scene-fp',
+    latestMesId: messages.at(-1)?.mesid || 0,
+    messages
+  });
+  let activeSnapshot = snapshotFromMessages(initialMessages);
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => activeSnapshot,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        providerCalls += 1;
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'force latest assistant setup', signals: [] },
+              diagnostics: ['force-latest-assistant-arbiter']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneFrameCard',
+              family: 'Scene Frame',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: 'Force latest assistant generated card.',
+                evidenceRefs: ['message:20'],
+                tokenEstimate: 8
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Force latest assistant guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['force-latest-assistant-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected force latest assistant role ${roleId}`);
+      }
+    }
+  });
+  const first = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
+  assertEqual(first.ok, true, 'force latest assistant setup installs');
+  const callsAfterFirst = providerCalls;
+  activeSnapshot = snapshotFromMessages([
+    ...initialMessages,
+    {
+      mesid: 21,
+      role: 'assistant',
+      text: 'Latest assistant response about to be swiped.',
+      textHash: hashJson('Latest assistant response about to be swiped.'),
+      visible: true,
+      swipeId: 1,
+      swipeCount: 2,
+      activeSwipeTextHash: hashJson('Forced alternate assistant response.')
+    }
+  ]);
+  await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped', messageId: 21 });
+  const queued = await runtime.forceRegenerateNext({ source: 'bar' });
+  assertEqual(queued.ok, true, 'force latest assistant queues after swipe marker');
+  assertEqual(runtime.view().lastBrief?.reason, 'user-force-regenerate', 'force latest assistant replaces swipe clear reason');
+  const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
+  assertEqual(second.ok, true, 'force latest assistant run succeeds');
+  assertEqual(second.reused, undefined, 'force latest assistant does not reuse previous packet');
+  assert(providerCalls > callsAfterFirst, 'force latest assistant run calls providers again');
+  assertEqual(installed.length, 2, 'force latest assistant installs a second packet');
+  assertNotEqual(installed[0].packetId, installed[1].packetId, 'force latest assistant changes packet identity');
+  assertEqual(runtime.view().lastSnapshot.latestMesId, 21, 'force latest assistant uses current post-swipe snapshot');
+}
+
+{
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash }));
+  const roleCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: () => snapshot,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Rapid delta should be bypassed during force regenerate.',
+              mandatoryGapIds: [],
+              sourceCardIds: ['warm-card-1'],
+              diagnostics: ['force-rapid-delta']
+            }
+          };
+        }
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'force rapid standard path', signals: [] },
+              diagnostics: ['force-rapid-standard-arbiter']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneFrameCard',
+              family: 'Scene Frame',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: 'Force rapid generated card.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 8
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Force rapid standard guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['force-rapid-standard-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected force rapid role ${roleId}`);
+      }
+    }
+  });
+  await runtime.forceRegenerateNext({ source: 'bar' });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Try the hatch fresh.' });
+  assertEqual(result.ok, true, 'force rapid run succeeds');
+  assert(!roleCalls.includes('rapidTurnDelta'), 'force rapid run bypasses Rapid foreground delta');
+  assert(roleCalls.includes('utilityArbiter'), 'force rapid run uses Standard utility Arbiter');
+  assert(JSON.stringify(result.packet).includes('force-regenerate:rapid-bypassed'), 'force rapid packet records Rapid bypass diagnostic');
+}
+
+{
+  const snapshot = {
+    chatId: 'force-cache-exclusion-chat',
+    chatKey: 'force-cache-exclusion-chat',
+    sceneKey: 'force-cache-exclusion-scene',
+    sceneFingerprint: 'force-cache-exclusion-scene-fp',
+    turnFingerprint: 'force-cache-exclusion-turn-fp',
+    latestMesId: 2,
+    messages: [{ mesid: 2, role: 'user', text: 'Force cached hand fresh.', visible: true }]
+  };
+  const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, {
+    cacheState: 'active',
+    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
+    cards: [{
+      id: 'force-cache-card',
+      family: 'Scene Frame',
+      promptText: 'FORCE CACHE TEXT MUST NOT INSTALL.',
+      evidenceRefs: ['message:2'],
+      source: {
+        chatId: snapshot.chatId,
+        firstMesId: 2,
+        lastMesId: 2,
+        sourceRevisionHash: snapshot.sourceRevisionHash || sourceWindowHash(snapshot.messages, 2, 2)
+      },
+      freshness: { sourceRevisionHash: snapshot.sourceRevisionHash || sourceWindowHash(snapshot.messages, 2, 2) }
+    }],
+    latestHand: {
+      handId: 'force-cache-hand',
+      cardIds: ['force-cache-card'],
+      cards: [{ id: 'force-cache-card', family: 'Scene Frame' }]
+    }
+  });
+  let arbiterPrompt = '';
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' },
+    storage,
+    snapshot: () => snapshot,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          arbiterPrompt = request.prompt;
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'reuse-cache',
+              cardJobs: [],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'force should override reuse-cache', signals: [] },
+              diagnostics: ['force-cache-reuse-requested']
+            }
+          };
+        }
+        throw new Error(`unexpected force cache exclusion role ${roleId}`);
+      }
+    }
+  });
+  await runtime.forceRegenerateNext({ source: 'bar' });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Force cached hand fresh.' });
+  assertEqual(result.ok, true, 'force cache exclusion run succeeds');
+  assertEqual(result.skipped, undefined, 'force cache exclusion does not skip as cache-unavailable');
+  assertEqual(installed.length, 1, 'force cache exclusion installs a prompt');
+  assert(!JSON.stringify(installed[0]).includes('FORCE CACHE TEXT MUST NOT INSTALL'), 'force cache exclusion does not install cached prompt text');
+  const sceneCacheView = parsePromptJsonSection(arbiterPrompt, 'Scene cache');
+  assertEqual(sceneCacheView.cacheState, 'stale', 'force cache exclusion marks cache stale for Arbiter evidence');
+  assertEqual(sceneCacheView.invalidation?.reason, 'user-force-regenerate', 'force cache exclusion tells Arbiter why cache is stale');
+}
+
+{
   let utilityCallCount = 0;
   let releaseSecondArbiter;
   const { runtime } = createRuntimeHarness({
@@ -6608,6 +6951,64 @@ for (const scenario of [
 }
 
 {
+  const providerPrompts = [];
+  const messages = Array.from({ length: 16 }, (_, index) => ({
+    mesid: index,
+    role: index % 2 === 0 ? 'assistant' : 'user',
+    text: `provider cap message ${index}`,
+    visible: true
+  }));
+  const { runtime } = createRuntimeHarness({
+    settings: {
+      mode: 'auto',
+      reasoningLevel: 'low',
+      retention: { providerVisibleMessages: 5 }
+    },
+    snapshot: {
+      chatId: 'provider-cap-chat',
+      chatKey: 'provider-cap-chat',
+      sceneKey: 'provider-cap-scene',
+      sceneFingerprint: 'provider-cap-scene-fp',
+      turnFingerprint: 'provider-cap-turn-fp',
+      latestMesId: 15,
+      messages
+    },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'provider cap test only needs Arbiter');
+        providerPrompts.push(request.prompt);
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'compose-brief',
+            cardJobs: [],
+            budgets: { targetBriefTokens: 500, maxCards: 4 },
+            reasonerDecision: { mode: 'skip', reason: 'provider cap test' },
+            diagnostics: ['provider-cap-test']
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration();
+  assertEqual(result.ok, true, 'provider cap runtime run installs');
+  const providerSnapshot = parsePromptJsonSection(providerPrompts[0], 'Snapshot');
+  assertDeepEqual(
+    providerSnapshot.messages.map((message) => message.mesid),
+    [11, 12, 13, 14, 15],
+    'provider snapshot honors retention provider cap'
+  );
+  assertEqual(runtime.view().settings.retention.providerVisibleMessages, 5, 'runtime view exposes retention settings');
+  assertEqual(
+    Object.prototype.hasOwnProperty.call(runtime.view().settings.diagnostics, 'maxJournalEntries'),
+    false,
+    'runtime view no longer exposes diagnostics journal cap'
+  );
+}
+
+{
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
@@ -7953,6 +8354,43 @@ for (const scenario of [
   assertEqual(utility.resolvedModelLabel, '', 'missing-ok provider test clears stale model label');
   assertNoSecretText(utility.lastTest, 'missing-ok provider test status');
   assertNoSecretText(invalid, 'missing-ok provider test result');
+}
+
+{
+  const repository = createStorageRepository({ storage: createMemoryStorageAdapter() });
+  const maintenanceCalls = [];
+  const storage = {
+    async loadSceneCache(...args) {
+      return repository.loadSceneCache(...args);
+    },
+    async saveSceneCache(...args) {
+      return repository.saveSceneCache(...args);
+    },
+    async appendJournal(...args) {
+      return repository.appendJournal(...args);
+    },
+    async loadRunJournal(...args) {
+      return repository.loadRunJournal(...args);
+    },
+    async maintainRetention(options = {}) {
+      maintenanceCalls.push(options);
+      return { ok: true };
+    }
+  };
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasoningLevel: 'low' },
+    storage,
+    generationRouter: localFallbackCardRouter(['runtime-maintenance-test'])
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Trigger retention maintenance.' });
+  const snapshot = runtime.view().lastSnapshot;
+  assertEqual(result.ok, true, 'runtime maintenance test installs');
+  assert(maintenanceCalls.length > 0, 'runtime calls retention maintenance after scene-cache save');
+  assertDeepEqual(
+    maintenanceCalls.at(-1).activeScene,
+    { chatKey: snapshot.chatKey, sceneKey: snapshot.sceneKey },
+    'runtime maintenance protects active scene'
+  );
 }
 
 console.log('[pass] runtime');

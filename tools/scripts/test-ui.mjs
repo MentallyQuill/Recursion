@@ -51,6 +51,37 @@ assertEqual(
   createRecursionViewModel({
     settings: { mode: 'auto', enabled: true },
     activity: { phase: 'idle' },
+    forceRegenerate: { pending: false },
+    lastHand: { cards: [] }
+  }).forceRegenerateVisible,
+  true,
+  'idle enabled view exposes force regenerate in the stop command slot'
+);
+assertEqual(
+  createRecursionViewModel({
+    activeRunId: 'run-active-force-slot',
+    settings: { mode: 'auto', enabled: true },
+    activity: { phase: 'cardBatchRunning' },
+    forceRegenerate: { pending: false },
+    lastHand: { cards: [] }
+  }).forceRegenerateVisible,
+  false,
+  'active run hides force regenerate so stop owns the command slot'
+);
+assertEqual(
+  createRecursionViewModel({
+    settings: { mode: 'auto', enabled: true },
+    activity: { phase: 'idle' },
+    forceRegenerate: { pending: true },
+    lastHand: { cards: [] }
+  }).forceRegenerateLabel,
+  'Regenerating',
+  'pending force regenerate exposes pending command label'
+);
+assertEqual(
+  createRecursionViewModel({
+    settings: { mode: 'auto', enabled: true },
+    activity: { phase: 'idle' },
     lastHand: { cards: [] }
   }).standbyStatusText,
   'Ready for Recursion.',
@@ -1218,6 +1249,8 @@ try {
   let clearRunJournalCalls = 0;
   let exportDiagnosticsCalls = 0;
   let stopGenerationCalls = 0;
+  let forceRegenerateCalls = 0;
+  const forceRegenerateDetails = [];
   let view = {
     settings: {
       mode: 'auto',
@@ -1257,6 +1290,7 @@ try {
         }
       }
     },
+    forceRegenerate: { pending: false },
     lastHand: {
       handId: 'hand-ui',
       cards: [{
@@ -1450,6 +1484,21 @@ try {
       stopGeneration: (details = {}) => {
         stopGenerationCalls += 1;
         return { ok: true, details };
+      },
+      forceRegenerateNext: (details = {}) => {
+        forceRegenerateCalls += 1;
+        forceRegenerateDetails.push(details);
+        view = {
+          ...view,
+          forceRegenerate: {
+            pending: true,
+            id: 'force-ui',
+            reason: 'user-force-regenerate',
+            source: details.source || 'bar'
+          },
+          lastBrief: { status: 'clearing', reason: 'user-force-regenerate', previousPacketId: 'packet-ui' }
+        };
+        return { ok: true, forceRegenerate: view.forceRegenerate };
       }
     },
     mountPoint: fakeDocument.body
@@ -1544,6 +1593,8 @@ try {
   assert(root.querySelector('[data-recursion-stop-generation]'), 'compact bar renders the active stop generation button');
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, false, 'active run shows stop generation button');
   assert(root.querySelector('[data-recursion-stop-generation]').querySelector('[data-recursion-stop-icon]'), 'stop generation button uses a square stop icon');
+  assert(root.querySelector('[data-recursion-force-regenerate]'), 'compact bar renders the force regenerate command slot button');
+  assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, true, 'active run hides force regenerate while stop is visible');
   assert(root.querySelector('[data-recursion-status-popover]'), 'compact bar renders the progress popover');
   assert(root.querySelector('[data-recursion-current-step]'), 'compact bar renders one current-step status text');
   assert(root.querySelector('[data-recursion-mobile-status-drawer]'), 'compact root renders the mobile status drawer');
@@ -2079,9 +2130,11 @@ try {
   assertEqual(root.querySelector('[data-recursion-settings-advanced]').hidden, false, 'clicking Advanced shows advanced controls');
   assert(root.querySelector('[data-recursion-settings-section-injection]'), 'Advanced settings groups injection controls');
   assert(root.querySelector('[data-recursion-settings-section-ui]'), 'Advanced settings groups UI controls');
+  assert(root.querySelector('[data-recursion-settings-section-retention]'), 'Advanced settings groups retention controls');
   assert(root.querySelector('[data-recursion-settings-section-diagnostics]'), 'Advanced settings groups diagnostics controls');
   assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, false, 'Injection section defaults open');
   assertEqual(root.querySelector('[data-recursion-settings-section-body-ui]').hidden, false, 'UI section defaults open');
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-retention]').hidden, false, 'Retention section defaults open');
   assertEqual(root.querySelector('[data-recursion-settings-section-body-diagnostics]').hidden, false, 'Diagnostics section defaults open');
   root.querySelector('[data-recursion-settings-section-toggle-injection]').click();
   assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, true, 'Injection section collapses');
@@ -2093,6 +2146,23 @@ try {
   assert(root.querySelector('[data-recursion-setting-injection-placement]'), 'Advanced settings render injection placement control');
   assert(root.querySelector('[data-recursion-setting-injection-role]'), 'Advanced settings render injection role control');
   assert(root.querySelector('[data-recursion-setting-injection-depth]'), 'Advanced settings render injection depth control');
+  assert(root.querySelector('[data-recursion-setting-source-window-messages]'), 'Retention renders source message cap');
+  assert(root.querySelector('[data-recursion-setting-source-window-characters]'), 'Retention renders source character budget');
+  assert(root.querySelector('[data-recursion-setting-provider-visible-messages]'), 'Retention renders provider message cap');
+  assert(root.querySelector('[data-recursion-setting-scene-caches-per-chat]'), 'Retention renders per-chat scene cache cap');
+  assert(root.querySelector('[data-recursion-setting-scene-caches-total]'), 'Retention renders total scene cache cap');
+  assert(root.querySelector('[data-recursion-setting-source-variants-per-scene]'), 'Retention renders source variant cap');
+  assert(root.querySelector('[data-recursion-setting-run-journal-entries]'), 'Retention renders journal entry cap');
+  assertEqual(
+    root.querySelector('[data-recursion-setting-source-window-messages]').getAttribute('min'),
+    '12',
+    'source message cap min exposed'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-setting-run-journal-entries]').getAttribute('max'),
+    '500',
+    'journal entry cap max exposed'
+  );
   assertEqual(root.querySelector('[data-recursion-setting-injection-placement]').getAttribute('title'), 'Choose the SillyTavern prompt lane for the composed Recursion packet. In Prompt is the recommended default; In Chat can help presets that weight recent chat harder.', 'Injection placement tooltip explains what it changes and why');
   assertEqual(root.querySelector('[data-recursion-setting-tooltips-enabled]').getAttribute('title'), 'Show hover help across Recursion. Turn off once the controls are familiar; hidden text never affects model calls.', 'Tooltip setting explains its effect and safety boundary');
   assertDeepEqual(
@@ -2258,7 +2328,13 @@ try {
   root.querySelector('[data-recursion-setting-progress-child-limit]').value = '7';
   root.querySelector('[data-recursion-setting-progress-list-limit]').value = '22';
   root.querySelector('[data-recursion-setting-tooltips-enabled]').checked = false;
-  root.querySelector('[data-recursion-setting-journal-limit]').value = '120';
+  root.querySelector('[data-recursion-setting-source-window-messages]').value = '64';
+  root.querySelector('[data-recursion-setting-source-window-characters]').value = '36000';
+  root.querySelector('[data-recursion-setting-provider-visible-messages]').value = '6';
+  root.querySelector('[data-recursion-setting-scene-caches-per-chat]').value = '5';
+  root.querySelector('[data-recursion-setting-scene-caches-total]').value = '20';
+  root.querySelector('[data-recursion-setting-source-variants-per-scene]').value = '6';
+  root.querySelector('[data-recursion-setting-run-journal-entries]').value = '120';
   root.querySelector('[data-recursion-setting-include-excerpts]').checked = true;
   root.querySelector('[data-recursion-setting-injection-placement]').value = 'in_chat';
   root.querySelector('[data-recursion-setting-injection-role]').value = 'assistant';
@@ -2279,8 +2355,16 @@ try {
       tooltipsEnabled: false
     },
     diagnostics: {
-      maxJournalEntries: 120,
       includeExcerpts: true
+    },
+    retention: {
+      sourceWindowMessages: 64,
+      sourceWindowCharacters: 36000,
+      providerVisibleMessages: 6,
+      sceneCachesPerChat: 5,
+      sceneCachesTotal: 20,
+      sourceVariantsPerScene: 6,
+      runJournalEntries: 120
     },
     injection: {
       placement: 'in_chat',
@@ -2397,6 +2481,25 @@ try {
   assertEqual(closeCount, 1, 'viewer close listener is not duplicated across updates');
 
   view = { settings: { mode: 'auto' }, activity: { phase: 'idle' }, lastHand: { cards: [] } };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'idle view hides stop generation button');
+  assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, false, 'idle view shows force regenerate button in stop slot');
+  assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('aria-label'), 'Regenerate Recursion prompt packet', 'force regenerate button exposes accessible copy');
+  assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('title'), 'Run the next Recursion packet fresh, ignoring cached cards, Rapid warm, and swipe reuse.', 'force regenerate button exposes hover tip copy');
+  root.querySelector('[data-recursion-force-regenerate]').click();
+  assertEqual(forceRegenerateCalls, 1, 'force regenerate button calls runtime');
+  assertDeepEqual(forceRegenerateDetails.at(-1), { source: 'bar' }, 'force regenerate button identifies bar as source');
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-force-regenerate]').disabled, true, 'pending force regenerate disables the bar command');
+  assertEqual(fakeDocument.textTree(root.querySelector('[data-recursion-force-regenerate]')).includes('Regenerating'), true, 'pending force regenerate shows pending label');
+  root.querySelector('[data-recursion-hand-toggle]').click();
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Preparing fresh prompt packet.'), 'force regenerate clearing state uses fresh prompt copy');
+  root.querySelector('[data-recursion-hand-toggle]').click();
+  view = { settings: { mode: 'auto' }, activeRunId: 'run-active-force-slot', activity: { phase: 'cardBatchRunning' }, lastHand: { cards: [] }, forceRegenerate: { pending: false } };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, false, 'active view restores stop generation button');
+  assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, true, 'active view hides force regenerate so stop takes priority');
+  view = { settings: { mode: 'auto' }, activity: { phase: 'idle' }, lastHand: { cards: [] }, forceRegenerate: { pending: false } };
   ui.update();
   assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Ready for Recursion.', 'fresh idle view renders first-load standby text with punctuation');
   assertEqual(root.querySelector('[data-recursion-mobile-status-text]').textContent, 'Ready for Recursion.', 'mobile status drawer mirrors first-load standby text');

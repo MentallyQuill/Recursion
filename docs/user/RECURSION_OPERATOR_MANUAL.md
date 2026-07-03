@@ -43,7 +43,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 - icon-only Pipeline control: Standard or Rapid;
 - icon-only mode control: Auto or Manual;
 - Hero Pixel Array plus current-step text;
-- active-only Stop generation button;
+- command slot: Stop generation while active, Regenerate while idle;
 - Reasoning Level chain;
 - Last Brief dropdown arrow;
 - ellipsis options/settings entry.
@@ -52,7 +52,9 @@ The bar should be stable. Status changes should not repeatedly resize the transc
 
 The Pipeline control is a small icon-only dropdown immediately to the left of the Mode button. `Standard` uses the full foreground Arbiter, card, hand, compose, validate, and install path on send. `Rapid` warms a provider-generated card packet in the background and uses a short provider delta on send. The selected icon updates on the bar, and the dropdown follows the compact Mode-menu pattern. Pipeline is not duplicated in Settings.
 
-The Stop generation button appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
+The command slot changes by state. Stop generation appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
+
+When Recursion is idle, the same slot shows Regenerate. Use it when Last Brief or Prompt Packet looks stale and you want the next generation to run fresh without deleting chat data. Regenerate queues a one-shot forced pass: it bypasses same-turn packet reinstall, latest-assistant swipe reuse, cached card hand reuse, and Rapid warm for the next generation only. The button shows `Regenerating` while queued, and Last Brief clears to `Preparing fresh prompt packet.` until the fresh packet installs.
 
 ### Hero Pixel Array Progress Menu
 
@@ -82,7 +84,7 @@ Main controls:
 
 - Play: a Behavior section containing Strength, Min Cards, Max Cards, Prompt Footprint, and Focus.
 - Providers: collapsible Utility and Reasoner provider setup, test controls, and session key controls.
-- Advanced: collapsible Injection, UI, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, diagnostics settings, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point.
+- Advanced: collapsible Injection, UI, Retention, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, Recursion-owned cap settings, safe excerpts, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 
@@ -93,6 +95,8 @@ Last Brief is the compact inspection surface for what Recursion used last. It op
 Cards expand in place to show the full card text. The Prompt Packet button opens the final injected packet text plus route metadata, omitted items, source card refs, and copy control.
 
 Rows are read-only. Recursion V1 is not a card editor.
+
+If Last Brief shows stale or wrong context, use the bar Regenerate command. Last Brief stays an inspection surface; it does not grow per-card regenerate controls.
 
 ### Full Viewer
 
@@ -178,7 +182,10 @@ Operator settings should stay broad. Pipeline, Mode, and Reasoning Level live in
 - Providers: collapsible Utility and Reasoner setup in the settings panel.
 - Advanced / Injection: final-prompt injection compatibility controls: Placement `In Prompt | In Chat`, Role `System | User | Assistant`, and Depth `0..10`.
 - Advanced / UI: progress row limits.
-- Advanced / Diagnostics: journal limits, safe excerpts, Reset Scene Cache, Clear Run Journal, and Export Diagnostics.
+- Advanced / Retention: Source Messages, Source Text Budget, Provider Messages, Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries.
+- Advanced / Diagnostics: safe excerpts, Reset Scene Cache, Clear Run Journal, and Export Diagnostics.
+
+Use Regenerate before Reset Scene Cache. Regenerate is the normal play control for "make the next packet fresh." Reset Scene Cache is a diagnostic cleanup action that deletes the current scene cache and clears the installed prompt.
 
 Behavior controls have distinct jobs. Prompt Footprint controls the size and detail of the final composed prompt packet. Min Cards controls Low's selected-card pressure, Max Cards controls Ultra's selected-card pressure, and Medium/High use their average. Strength controls intervention pressure inside that budget. Focus changes soft card-family priority without becoming a hard whitelist. The backend contract is defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
 
@@ -193,6 +200,8 @@ flowchart LR
 ```
 
 Default injection settings use Recursion's recommended concrete plan: `In Prompt`, `System`, depth `1`. Injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
+
+Retention caps are local Recursion tuning controls. Lower Source Messages or Source Text Budget if a very long chat makes Recursion feel slow. Raise Scene Caches or Journal Entries when debugging. These caps only affect Recursion-owned files and analysis windows; they do not prune SillyTavern chat history.
 
 ## Provider Controls
 
@@ -258,6 +267,7 @@ Expected behavior:
 - Utility invalid output: reject unsafe structured output and use conservative fallback.
 - Rapid warm unavailable: escalate to Standard for the same pending user message; do not install local substitute Rapid briefs.
 - Rapid invalid output or mandatory gap: escalate the current turn to Standard.
+- Bar Regenerate: bypass cached cards, Rapid warm, and same-turn/swipe packet reuse for one next generation, then return to the selected pipeline.
 - Card failure: omit failed cards and keep valid siblings.
 - Reasoner disabled, unhealthy, missing credentials, or failed: compose with Utility.
 - Player Stop / host generation stop, including the Recursion Bar Stop generation button: abort active Recursion work, stop the host generation when the SillyTavern stop seam is available, clear owned prompt keys, and show skipped/canceled progress rather than a provider warning.
@@ -303,7 +313,8 @@ Recursion storage is cache-oriented. The runtime owns scene cache, run journal, 
 
 - power-toggle cleanup;
 - Clear Session Key for OpenAI-compatible provider lanes;
-- diagnostics row-limit and excerpt settings;
+- Retention caps for Recursion-owned source windows, scene caches, source variants, and run journals;
+- diagnostics excerpt settings;
 - Reset Scene Cache, Clear Run Journal, and Export Diagnostics;
 - extension disable when Recursion should be fully inactive.
 
@@ -329,17 +340,18 @@ Use this checklist for a practical browser pass:
 3. Open the Hero Pixel Array progress menu, Last Brief dropdown, Settings, and Full Viewer.
 4. Visit Play, Providers, Advanced, Prompt Packet, and Viewer sections.
 5. Configure and test Utility when provider work is intended.
-6. Start a generation, confirm Stop generation appears while the turn is active, click it, and confirm the host generation stops with canceled/skipped Recursion progress.
-7. Turn power off and confirm prompt lanes are absent or cleared.
-8. Set Auto and confirm Recursion is ready to compile.
-8. Set Manual and confirm it applies as a distinct mode.
-9. Confirm the Pipeline icon dropdown sits immediately left of Mode and offers Standard and Rapid only.
-10. Run a safe Standard Auto pass only when provider and live mutation are intended.
-11. Run a safe Rapid Auto pass only when provider and live mutation are intended.
-12. Confirm Activity reaches ready, Rapid delta, warm-miss Standard escalation, or a clear fallback.
-13. Inspect Last Brief and the final Prompt Packet text.
-14. Turn power off and confirm cleanup.
-15. Clear session keys before screenshots or exports that might show provider setup.
+6. Confirm Regenerate appears in the bar while idle; click it and confirm Last Brief clears to `Preparing fresh prompt packet.`
+7. Start a generation, confirm Stop generation replaces Regenerate while the turn is active, click it, and confirm the host generation stops with canceled/skipped Recursion progress.
+8. Turn power off and confirm prompt lanes are absent or cleared.
+9. Set Auto and confirm Recursion is ready to compile.
+10. Set Manual and confirm it applies as a distinct mode.
+11. Confirm the Pipeline icon dropdown sits immediately left of Mode and offers Standard and Rapid only.
+12. Run a safe Standard Auto pass only when provider and live mutation are intended.
+13. Run a safe Rapid Auto pass only when provider and live mutation are intended.
+14. Confirm Activity reaches ready, Rapid delta, warm-miss Standard escalation, or a clear fallback.
+15. Inspect Last Brief and the final Prompt Packet text.
+16. Turn power off and confirm cleanup.
+17. Clear session keys before screenshots or exports that might show provider setup.
 
 Automated live evidence must use dedicated `recursion-soak-*` users and must reject `default-user` before mutation. See [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md).
 

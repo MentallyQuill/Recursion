@@ -38,6 +38,7 @@
 
 .recursion-power-toggle,
 .recursion-stop-generation,
+.recursion-force-regenerate,
 .recursion-pipeline-button,
 .recursion-mode-button,
 .recursion-activity-trigger,
@@ -80,14 +81,38 @@
   width: 24px;
 }
 
+.recursion-force-regenerate {
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 12%, transparent);
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 74%, transparent);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  height: 24px;
+  justify-content: center;
+  line-height: 1;
+  min-width: 74px;
+  padding: 0 7px;
+  position: relative;
+  white-space: nowrap;
+}
+
 .recursion-stop-generation[hidden] {
+  display: none !important;
+}
+
+.recursion-force-regenerate[hidden] {
   display: none !important;
 }
 
 .recursion-power-toggle:hover,
 .recursion-power-toggle:focus-visible,
 .recursion-stop-generation:hover,
-.recursion-stop-generation:focus-visible {
+.recursion-stop-generation:focus-visible,
+.recursion-force-regenerate:hover,
+.recursion-force-regenerate:focus-visible {
   background: color-mix(in srgb, var(--recursion-panel) 72%, var(--recursion-hover));
   outline: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 28%, transparent);
   outline-offset: 1px;
@@ -99,7 +124,8 @@
   outline-color: color-mix(in srgb, var(--recursion-error) 36%, transparent);
 }
 
-.recursion-stop-generation:disabled {
+.recursion-stop-generation:disabled,
+.recursion-force-regenerate:disabled {
   cursor: default;
   opacity: .42;
 }

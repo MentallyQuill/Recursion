@@ -35,10 +35,23 @@ Every persisted record is cache-oriented. If it is stale, corrupt, too large, or
 - final prompt injection placement, role, and depth controls;
 - provider lane preferences without secrets;
 - advanced routing choices that are part of the current settings contract;
-- diagnostic toggles such as journal size and artifact detail;
+- retention caps for Recursion-owned source windows, provider snapshots, scene caches, source variants, and run journals;
+- diagnostic toggles such as safe excerpt export;
 - UI preferences that are truly user settings.
 
 It must not store scene decks, full cards, run journals, raw prompt packets, provider responses, transcript archives, or API keys. Direct endpoint API keys are session-only and must never be written to settings, cache records, journals, prompt packets, diagnostics, artifacts, or logs.
+
+`extension_settings.recursion.retention` stores user-facing caps for Recursion-owned source-window and storage behavior:
+
+- Source Messages: recent visible messages used for source freshness.
+- Source Text Budget: character budget for the source freshness window.
+- Provider Messages: recent visible messages sent to Recursion provider calls.
+- Scene Caches / Chat: unprotected scene-cache files retained per chat.
+- Scene Caches Total: unprotected scene-cache files retained across chats.
+- Swipe Variants / Scene: source variants retained inside one scene cache.
+- Journal Entries: sanitized run-journal entries retained per chat.
+
+These caps never delete, hide, summarize, or rewrite SillyTavern chat messages. They only bound Recursion-owned windows, caches, and diagnostics.
 
 Logical JSON files are for bounded structured records that are larger than settings:
 
@@ -253,7 +266,7 @@ Journal entries must not record:
 - unbounded excerpts;
 - private diagnostic notes in any injected prompt log.
 
-Default `maxEntries` should be small enough that the journal stays cheap to load. V1 should start around 100 events per chat unless tests show that a smaller cap is enough for the UI and debugging workflow.
+Default `maxEntries` should be small enough that the journal stays cheap to load. V1 starts around 100 events per chat through `retention.runJournalEntries`, and users can tune that cap without affecting SillyTavern chat history.
 
 ## Activity Event Contract
 
@@ -358,8 +371,8 @@ Cleanup responsibilities:
 - remove index entries for missing records;
 - add index entries for valid orphaned Recursion records;
 - mark corrupt records invalid and exclude them from runtime use;
-- prune scene caches beyond the configured per-chat and total caps through an explicit retention pass that protects the active scene;
-- prune run journals beyond count and age caps;
+- prune scene caches beyond `retention.sceneCachesPerChat` and `retention.sceneCachesTotal` through an explicit retention pass that protects the active scene;
+- prune run journals beyond `retention.runJournalEntries`;
 - remove records with unsupported schema versions during pre-alpha resets;
 - report cleanup actions through sanitized journal events and UI status.
 
@@ -369,6 +382,8 @@ V1 retention should start small:
 - keep a small number of recently retired scene caches per chat for inspection;
 - keep one bounded run journal per chat;
 - prune discarded-card history unless diagnostics explicitly need it.
+
+Long-chat scaling is handled before cache freshness and provider prompts. Recursion walks backward from the latest visible chat message until Source Messages or Source Text Budget is reached, then uses that bounded window for source hashes and cache freshness. Older chat messages remain in SillyTavern and can still be used by SillyTavern presets or other extensions.
 
 Cleanup must never delete SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or any non-Recursion extension records.
 

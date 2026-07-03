@@ -65,7 +65,8 @@ Rapid must not gain speed by using local fallback cards, local scene briefs, loc
 | Component | Owner module | Responsibility |
 | --- | --- | --- |
 | Core helpers | `src/core.mjs` | Stable hashing, safe ids, truncation, JSON parsing, cloning, timestamps, and redaction. |
-| Settings | `src/settings.mjs` | Mode, Standard/Rapid pipeline mode, Reasoning Level, strength, footprint, focus, provider preferences, injection settings, UI limits, and session-only API key handling. |
+| Settings | `src/settings.mjs` | Mode, Standard/Rapid pipeline mode, Reasoning Level, strength, footprint, focus, provider preferences, injection settings, retention caps, UI limits, and session-only API key handling. |
+| Retention policy | `src/retention-policy.mjs` | User-facing cap defaults, ranges, settings normalization, and bounded source-window selection. |
 | Behavior policy | `src/settings-policy.mjs` | Source-backed Strength, Min/Max Cards, Focus, Prompt Footprint, policy prompt lines, effective footprint, and diagnostics summaries. |
 | Activity | `src/activity.mjs` | Sanitized user-facing activity events for the bar, progress menu, viewer, and diagnostics. |
 | Progress model | `src/progress.mjs` | Hero Pixel Array blocks, progress-menu rows, nested card/model-call status, and compact current-step text. |
@@ -135,6 +136,8 @@ Settings stay in `extension_settings.recursion`. Larger records use logical JSON
 - `recursion-run-journal-{chatKey}.v1.json`
 
 Diagnostics are bounded and sanitized. Normal records may include hashes, ids, card families, statuses, token estimates, provider lane labels, durations, and compact errors. They must not include API keys, raw provider prompts, raw provider responses, full transcripts, hidden reasoning, private story plans, or unbounded local paths.
+
+Retention caps are local Recursion tuning controls. Source Messages and Source Text Budget bound the visible source window by walking backward from the latest visible chat message; Provider Messages bounds provider-safe snapshots; Scene Caches / Chat and Scene Caches Total prune only unprotected Recursion scene-cache files; Swipe Variants / Scene bounds active-source variants; Journal Entries bounds sanitized run journals. These caps do not delete, hide, summarize, or rewrite SillyTavern chat history.
 
 ```mermaid
 flowchart LR

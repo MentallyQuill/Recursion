@@ -101,8 +101,35 @@ assertEqual(blankNumbers.temperature, DEFAULT_RECURSION_SETTINGS.providers.utili
 assertEqual(blankNumbers.topP, DEFAULT_RECURSION_SETTINGS.providers.utility.topP, 'blank topP falls back');
 assertEqual(blankNumbers.maxTokens, DEFAULT_RECURSION_SETTINGS.providers.utility.maxTokens, 'blank maxTokens falls back');
 
-const blankDiagnostics = normalizeSettings({ diagnostics: { maxJournalEntries: '' } });
-assertEqual(blankDiagnostics.diagnostics.maxJournalEntries, DEFAULT_RECURSION_SETTINGS.diagnostics.maxJournalEntries, 'blank diagnostics max falls back');
+const diagnosticsOnly = normalizeSettings({ diagnostics: { maxJournalEntries: 250, includeExcerpts: true } });
+assertDeepEqual(diagnosticsOnly.diagnostics, { includeExcerpts: true }, 'diagnostics only retains excerpt toggle');
+
+const retentionDefaults = normalizeSettings({ retention: {} }).retention;
+assertEqual(retentionDefaults.sourceWindowMessages, 48, 'retention source messages default');
+assertEqual(retentionDefaults.sourceWindowCharacters, 24000, 'retention character budget default');
+assertEqual(retentionDefaults.providerVisibleMessages, 12, 'retention provider messages default');
+assertEqual(retentionDefaults.sceneCachesPerChat, 3, 'retention per-chat scene cache default');
+assertEqual(retentionDefaults.sceneCachesTotal, 24, 'retention total scene cache default');
+assertEqual(retentionDefaults.sourceVariantsPerScene, 4, 'retention source variant default');
+assertEqual(retentionDefaults.runJournalEntries, 100, 'retention journal default');
+
+const retentionClamped = normalizeSettings({
+  retention: {
+    sourceWindowMessages: 999,
+    sourceWindowCharacters: 5,
+    providerVisibleMessages: 1,
+    sceneCachesPerChat: 9,
+    sceneCachesTotal: 4,
+    sourceVariantsPerScene: 99,
+    runJournalEntries: 9999
+  }
+}).retention;
+assertEqual(retentionClamped.sourceWindowMessages, 200, 'settings clamps source message cap');
+assertEqual(retentionClamped.sourceWindowCharacters, 6000, 'settings clamps source character cap');
+assertEqual(retentionClamped.providerVisibleMessages, 4, 'settings clamps provider message cap');
+assertEqual(retentionClamped.sceneCachesTotal, 9, 'settings keeps total at least per-chat cap');
+assertEqual(retentionClamped.sourceVariantsPerScene, 8, 'settings clamps source variants');
+assertEqual(retentionClamped.runJournalEntries, 500, 'settings clamps journal entries');
 
 const defaultUi = normalizeSettings({});
 assertEqual(defaultUi.enabled, true, 'power toggle defaults on');
@@ -209,10 +236,12 @@ markUtilityProviderTestPass();
 store.updateProvider('utility', { maxTokens: 8192 });
 assertUtilityProviderTestReset('changing provider token limit');
 
-store.update({ diagnostics: { maxJournalEntries: 321 } });
 store.update({ diagnostics: { includeExcerpts: true } });
-assertEqual(root.recursion.diagnostics.maxJournalEntries, 321, 'partial diagnostics update preserves max entries');
 assertEqual(root.recursion.diagnostics.includeExcerpts, true, 'partial diagnostics update changes includeExcerpts');
+
+store.update({ retention: { sourceWindowMessages: 64, runJournalEntries: 120 } });
+assertEqual(root.recursion.retention.sourceWindowMessages, 64, 'partial retention update preserves source cap');
+assertEqual(root.recursion.retention.runJournalEntries, 120, 'partial retention update preserves journal cap');
 
 store.update({ reasoningLevel: 'medium' });
 store.update({ strength: 'light' });

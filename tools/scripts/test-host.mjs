@@ -855,7 +855,7 @@ context.generateRaw = async (request) => {
 const routed = await createGenerationRouter({ client: host.providerClient }).generate('utilityArbiter', { prompt: 'Route through provider client' });
 assertEqual(routed.ok, true, 'provider client routes through host generation');
 assertEqual(rawCalls[0].prompt, 'Route through provider client', 'provider client sends prompt to host');
-assertEqual(rawCalls[0].responseLength, 4096, 'provider client maxTokens pass through to responseLength');
+assertEqual(rawCalls[0].responseLength, 8192, 'provider client default maxTokens pass through to responseLength');
 assertEqual(rawCalls[0].temperature, 0.1, 'provider client temperature pass through');
 assertEqual(rawCalls[0].topP, 0.95, 'provider client topP pass through');
 const reasonedRouted = await createGenerationRouter({ client: host.providerClient }).generate('utilityArbiter', {

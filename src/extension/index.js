@@ -32,6 +32,12 @@ function warn(label, error) {
   console.warn(`[Recursion] ${label}`, error);
 }
 
+function publishLiveHarnessRuntime(nextRuntime) {
+  if (globalThis.__recursionLiveHarness === true) {
+    globalThis.__recursionLiveHarnessRuntime = nextRuntime || null;
+  }
+}
+
 function destroyUi() {
   try {
     ui?.destroy?.();
@@ -390,6 +396,7 @@ export function bootstrapRecursion() {
     host = nextHost;
     runtime = nextRuntime;
     ui = nextUi;
+    publishLiveHarnessRuntime(nextRuntime);
     registerHostEvents(nextRuntime);
     return runtime;
   } catch (error) {
@@ -425,6 +432,7 @@ async function teardownRecursion(label) {
   destroyUi();
   host = null;
   runtime = null;
+  publishLiveHarnessRuntime(null);
 }
 
 export async function recursionGenerationInterceptor(chat) {

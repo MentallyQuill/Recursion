@@ -8,6 +8,7 @@ import {
 } from '../../src/card-scope.mjs';
 import { activityLabel, createRecursionViewModel, mountRecursionUi } from '../../src/ui.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
+import { DEFAULT_RECURSION_SETTINGS } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 assertEqual(activityLabel({ phase: 'cardBatchRunning' }), 'Generating scene cards...', 'phase label mapped');
@@ -592,6 +593,7 @@ assert(!/\.recursion-provider-context-fields\s*\{[\s\S]*?display:\s*contents;/.t
 assert(/\.recursion-provider-context-fields\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1;/.test(recursionCss), 'provider source-specific field groups span the provider grid');
 assert(/\.recursion-provider-openai-fields\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\);/.test(recursionCss), 'OpenAI provider fields align as a stable two-column block');
 assert(/\.recursion-provider-context-fields\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'hidden provider source-specific field groups stay hidden despite grouped provider layout');
+assert(/\.recursion-provider-profile-list\s*\{[\s\S]*?max-height:\s*168px;[\s\S]*?overflow-y:\s*auto;/.test(recursionCss), 'connection profile combobox uses a bounded scrollable option list');
 assert(/\.recursion-provider-status\.pass\s*\{[\s\S]*?var\(--recursion-success\)/.test(recursionCss), 'production provider success status uses the defined success token');
 assert(/const progressTop = Math\.max\(viewportTop,\s*rect\.bottom \+ 3\);/.test(recursionUi), 'production progress popover uses the reference vertical gap with visual viewport top clamping');
 assert(/const settingsTop = Math\.max\(viewportTop,\s*rect\.bottom \+ 5\);/.test(recursionUi), 'production settings and brief popovers use the reference desktop vertical gap with visual viewport top clamping');
@@ -833,6 +835,34 @@ function createFakeDocument() {
       this.eventListeners[type].push(listener);
     }
 
+    dispatchEvent(eventInit = {}) {
+      const event = {
+        ...eventInit,
+        type: eventInit.type || '',
+        target: eventInit.target || this,
+        preventDefault() {
+          this.defaultPrevented = true;
+        },
+        stopPropagation() {
+          this.propagationStopped = true;
+        },
+        stopImmediatePropagation() {
+          this.propagationStopped = true;
+          this.immediatePropagationStopped = true;
+        }
+      };
+      let node = this;
+      while (node) {
+        for (const listener of node.eventListeners[event.type] || []) listener(event);
+        if (event.propagationStopped) break;
+        node = node.parentNode;
+      }
+      if (!event.propagationStopped) {
+        for (const listener of documentListeners[event.type] || []) listener(event);
+      }
+      return !event.defaultPrevented;
+    }
+
     focus() {
       fakeDocument.activeElement = this;
     }
@@ -1043,7 +1073,12 @@ try {
             providerProfileServiceCalls += 1;
             return [
               { id: 'quiet-profile-a', label: 'Quiet Utility', model: 'glm-fast' },
-              { profileId: 'deep-profile-b', label: 'Deep Reasoner', model_name: 'o-reasoner' }
+              { profileId: 'deep-profile-b', label: 'Deep Reasoner', model_name: 'o-reasoner' },
+              ...Array.from({ length: 28 }, (_, index) => ({
+                id: `archive-profile-${String(index + 1).padStart(2, '0')}`,
+                label: `Archive Utility ${String(index + 1).padStart(2, '0')}`,
+                model: `archive-model-${index + 1}`
+              }))
             ];
           }
         }
@@ -1150,7 +1185,7 @@ try {
           openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
           temperature: 0.1,
           topP: 0.95,
-          maxTokens: 4096,
+          maxTokens: DEFAULT_RECURSION_SETTINGS.providers.utility.maxTokens,
           lastTest: { status: 'not-run' }
         },
         reasoner: {
@@ -1161,7 +1196,7 @@ try {
           openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
           temperature: 0.4,
           topP: 0.95,
-          maxTokens: 4096,
+          maxTokens: DEFAULT_RECURSION_SETTINGS.providers.reasoner.maxTokens,
           lastTest: { status: 'pass' }
         }
       }
@@ -1855,7 +1890,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-settings-section-body-play-behavior]').hidden, false, 'Play behavior section expands');
   providerProfileServiceCalls = 0;
   root.querySelector('[data-recursion-settings-tab-providers]').click();
-  assertEqual(providerProfileServiceCalls, 1, 'Providers pane renders both lane profile selectors from one host profile lookup');
+  assertEqual(providerProfileServiceCalls, 1, 'Providers pane renders both lane profile comboboxes from one host profile lookup');
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open');
   assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, true, 'clicking Providers hides Play pane');
   assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, false, 'clicking Providers shows provider controls');
@@ -1889,28 +1924,58 @@ try {
   assertEqual(utilityProfileContext.hidden, true, 'Current Host Model hides Utility profile fields');
   assertEqual(utilityOpenAiContext.hidden, true, 'Current Host Model hides Utility OpenAI endpoint fields');
   assertEqual(utilityClearKey.hidden, true, 'Current Host Model hides Utility clear session key action');
-  const utilityProfileSelect = root.querySelector('[data-recursion-provider-profile-utility]');
-  assertEqual(utilityProfileSelect.tagName, 'SELECT', 'Host Connection Profile uses a real profile selector, not a free-text id field');
-  assertDeepEqual(
-    utilityProfileSelect.children.map((option) => [option.value, option.textContent]),
-    [
-      ['', 'Select Profile'],
-      ['quiet-profile-a', 'Quiet Utility / glm-fast'],
-      ['deep-profile-b', 'Deep Reasoner / o-reasoner']
-    ],
-    'profile selector is populated from SillyTavern connection profiles'
-  );
-  assertEqual(utilityProfileSelect.getAttribute('title'), 'Saved SillyTavern Connection Profile for this lane. Profiles keep routing, preset, and keys in SillyTavern.', 'profile selector tooltip explains why profiles matter');
+  const utilityProfileValue = root.querySelector('[data-recursion-provider-profile-utility]');
+  const utilityProfileFilter = root.querySelector('[data-recursion-provider-profile-filter-utility]');
+  const utilityProfileList = root.querySelector('[data-recursion-provider-profile-list-utility]');
+  assertEqual(utilityProfileValue.tagName, 'INPUT', 'Host Connection Profile stores a committed hidden profile id, not the typed filter text');
+  assertEqual(utilityProfileValue.getAttribute('type'), 'hidden', 'committed profile id stays hidden from the search field');
+  assertEqual(utilityProfileFilter.tagName, 'INPUT', 'Host Connection Profile renders a searchable profile input');
+  assertEqual(utilityProfileFilter.getAttribute('role'), 'combobox', 'searchable profile input exposes combobox semantics');
+  assertEqual(utilityProfileFilter.getAttribute('aria-expanded'), 'false', 'profile combobox starts collapsed');
+  assertEqual(utilityProfileFilter.getAttribute('title'), 'Saved SillyTavern Connection Profile for this lane. Type to filter detected profiles; selection saves only when a listed profile is chosen. Profiles keep routing, preset, and keys in SillyTavern.', 'profile combobox tooltip explains filter and selection behavior');
+  assert(utilityProfileList, 'profile combobox renders a scrollable option list');
+  assert(utilityProfileList.className.includes('recursion-provider-profile-list'), 'profile combobox list owns the scrollable list class');
   utilitySource.value = 'host-connection-profile';
   for (const listener of utilitySource.eventListeners.change || []) listener({ target: utilitySource });
   assertEqual(utilityProfileContext.hidden, false, 'Host Connection Profile shows Utility profile fields');
   assertEqual(utilityOpenAiContext.hidden, true, 'Host Connection Profile hides Utility OpenAI endpoint fields');
   assertEqual(utilityClearKey.hidden, true, 'Host Connection Profile hides Utility clear session key action');
-  utilitySource.value = 'openai-compatible';
-  for (const listener of utilitySource.eventListeners.change || []) listener({ target: utilitySource });
-  assertEqual(utilityProfileContext.hidden, true, 'OpenAI-Compatible hides Utility profile fields');
-  assertEqual(utilityOpenAiContext.hidden, false, 'OpenAI-Compatible shows Utility endpoint/model/key fields');
-  assertEqual(utilityClearKey.hidden, false, 'OpenAI-Compatible shows Utility clear session key action');
+  const providerUpdatesBeforeProfileSearch = providerUpdates.length;
+  utilityProfileFilter.focus();
+  utilityProfileFilter.value = 'deep';
+  utilityProfileFilter.dispatchEvent({ type: 'input', target: utilityProfileFilter });
+  assertEqual(utilityProfileValue.value, '', 'typing in profile combobox does not autosave a partial profile id');
+  assertEqual(providerUpdates.length, providerUpdatesBeforeProfileSearch, 'typing in profile combobox does not send a provider autosave');
+  assertEqual(utilityProfileFilter.getAttribute('aria-expanded'), 'true', 'typing opens the filtered profile list');
+  assertEqual(utilityProfileList.hidden, false, 'typing shows filtered profile matches');
+  assertDeepEqual(
+    utilityProfileList.children.map((option) => option.textContent),
+    ['Deep Reasoner / o-reasoner'],
+    'profile combobox filters visible options by typed profile text'
+  );
+  utilityProfileList.children[0].click();
+  assertEqual(utilityProfileValue.value, 'deep-profile-b', 'choosing a filtered profile commits the detected profile id');
+  assertEqual(utilityProfileFilter.value, 'Deep Reasoner / o-reasoner', 'choosing a filtered profile restores the selected profile label');
+  assertEqual(utilityProfileFilter.getAttribute('aria-expanded'), 'false', 'choosing a profile closes the filtered list');
+  const filteredProfileReadiness = fakeDocument.textTree(root.querySelector('[data-recursion-provider-readiness-utility]'));
+  assertEqual(filteredProfileReadiness.includes('Profile: Deep Reasoner'), true, 'choosing a filtered profile updates readiness profile copy');
+  assertEqual(filteredProfileReadiness.includes('Model: o-reasoner'), true, 'choosing a filtered profile updates readiness model copy');
+  assertEqual(providerUpdates.length, providerUpdatesBeforeProfileSearch + 1, 'choosing a filtered profile autosaves once');
+  assertEqual(providerUpdates.at(-1).patch.hostConnectionProfileId, 'deep-profile-b', 'profile autosave records the selected detected profile id');
+  const selectedProfileFilter = root.querySelector('[data-recursion-provider-profile-filter-utility]');
+  const selectedProfileList = root.querySelector('[data-recursion-provider-profile-list-utility]');
+  selectedProfileFilter.click();
+  assertEqual(selectedProfileFilter.getAttribute('aria-expanded'), 'true', 'clicking selected profile opens the dropdown');
+  assert(selectedProfileList.children.length > 20, 'clicking selected profile shows the full scrollable profile dropdown instead of only the selected profile');
+  const currentUtilitySource = root.querySelector('[data-recursion-provider-source-utility]');
+  const currentUtilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
+  const currentUtilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
+  const currentUtilityClearKey = root.querySelector('[data-recursion-utility-provider-clear-key]');
+  currentUtilitySource.value = 'openai-compatible';
+  for (const listener of currentUtilitySource.eventListeners.change || []) listener({ target: currentUtilitySource });
+  assertEqual(currentUtilityProfileContext.hidden, true, 'OpenAI-Compatible hides Utility profile fields');
+  assertEqual(currentUtilityOpenAiContext.hidden, false, 'OpenAI-Compatible shows Utility endpoint/model/key fields');
+  assertEqual(currentUtilityClearKey.hidden, false, 'OpenAI-Compatible shows Utility clear session key action');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-provider-readiness-utility]')).includes('OpenAI-Compatible Endpoint'), 'readiness status follows unsaved provider source changes');
   assert(root.querySelector('[data-recursion-provider-fetch-models-utility]'), 'OpenAI-Compatible settings expose Fetch Models control');
   assert(root.querySelector('[data-recursion-provider-model-list-utility]'), 'OpenAI-Compatible settings expose fetched model selector');
@@ -2129,6 +2194,7 @@ try {
 
   root.querySelector('[data-recursion-provider-source-utility]').value = 'openai-compatible';
   root.querySelector('[data-recursion-provider-profile-utility]').value = 'utility-profile';
+  root.querySelector('[data-recursion-provider-profile-filter-utility]').value = 'Utility Profile / utility-model';
   root.querySelector('[data-recursion-provider-base-url-utility]').value = 'https://utility.example/v1';
   root.querySelector('[data-recursion-provider-model-utility]').value = 'utility-model';
   root.querySelector('[data-recursion-provider-api-key-utility]').value = 'sk-ui-secret';

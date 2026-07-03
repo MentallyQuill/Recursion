@@ -264,6 +264,14 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
             diagnostics: ['guidance-ok'],
             rawProviderResponse: 'must not persist'
           },
+          storyForm: {
+            schema: 'recursion.storyForm.v1',
+            tense: 'past',
+            pov: 'third-person-limited',
+            confidence: 'high',
+            evidenceRefs: ['message:2'],
+            reason: 'Warm assistant narration establishes form.'
+          },
           settingsHash: 'settings-hash',
           providerContractHash: 'provider-hash',
           cardCatalogHash: 'catalog-hash',
@@ -299,6 +307,16 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
     rapidCache.variants['base-source'].rapid.selectedCardIds,
     ['card-a'],
     'rapid warm V2 selected card ids persist'
+  );
+  assertEqual(
+    rapidCache.variants['base-source'].rapid.storyForm.tense,
+    'past',
+    'rapid warm V2 story tense persists'
+  );
+  assertEqual(
+    rapidCache.variants['base-source'].rapid.storyForm.pov,
+    'third-person-limited',
+    'rapid warm V2 story pov persists'
   );
   assertEqual(
     rapidCache.variants['base-source'].rapid.conditionedSceneBrief,

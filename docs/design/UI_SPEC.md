@@ -1147,7 +1147,7 @@ Providers contains the complete provider setup surface in collapsible lane secti
 Provider Source changes the field context inside each lane immediately, matching the lean Directive/Saga pattern instead of showing every possible provider field at once:
 
 - Current Host Model shows no connection-specific option boxes; it uses the active SillyTavern model context.
-- Host Connection Profile shows Profile and hides OpenAI-compatible endpoint, model, and session key fields.
+- Host Connection Profile shows a searchable Profile combobox and hides OpenAI-compatible endpoint, model, and session key fields. Typing filters detected profiles in place; only selecting a listed profile commits and auto-saves the underlying profile id.
 - OpenAI-Compatible Endpoint shows Base URL, Model, and Session Key and hides Profile.
 - Clear Session Key appears only for OpenAI-compatible endpoints.
 - Max Tokens and provider actions remain visible for every Source.
@@ -1177,7 +1177,7 @@ Provider controls should follow the smaller Directive-style lane model:
 Each provider card should support:
 
 - Source: Current Host Model, Host Connection Profile, OpenAI-Compatible Endpoint.
-- Connection profile selector when using host profiles.
+- Searchable connection profile combobox when using host profiles.
 - Base URL, model, Fetch Models, and fetched-model selector for OpenAI-compatible endpoints.
 - Session API key field.
 - Max tokens.
@@ -1187,7 +1187,7 @@ Each provider card should support:
 
 The compact Providers tab shows Utility details by default and keeps Reasoner as a collapsed optional lane until the user opens or configures it. Temperature and top-p remain normalized provider settings with safe defaults, but they are not visible controls in the compact top-bar menu.
 
-The Providers tab should build Utility and Reasoner profile selectors from one connection-profile lookup per render. Profile discovery must not walk character-card, persona, group, avatar, or Recursion card collections; those collections can be large enough to make native dropdown expansion feel blocked.
+The Providers tab should build Utility and Reasoner profile comboboxes from one connection-profile lookup per render. Profile discovery must not walk character-card, persona, group, avatar, or Recursion card collections; those collections can be large enough to make native dropdown expansion feel blocked. The combobox list must be scrollable for long SillyTavern profile collections, and filter typing must not write partial text into provider settings.
 
 Provider cards must not sprawl by rendering profile and OpenAI endpoint fields together. The selected Source owns the visible option context, while hidden alternate-source values remain available if the user switches back.
 

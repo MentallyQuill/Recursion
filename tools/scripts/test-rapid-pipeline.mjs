@@ -8,6 +8,7 @@ import {
   rapidCacheKey,
   rapidWarmArtifactIsUsable
 } from '../../src/rapid-pipeline.mjs';
+import { UNKNOWN_STORY_FORM } from '../../src/story-form.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const snapshot = {
@@ -17,6 +18,15 @@ const snapshot = {
   turnFingerprint: 'turn-fingerprint',
   latestMesId: 42,
   messages: [{ mesid: 42, role: 'user', text: 'Open the sealed hatch.', visible: true }]
+};
+
+const rapidStoryForm = {
+  schema: 'recursion.storyForm.v1',
+  tense: 'past',
+  pov: 'third-person-limited',
+  confidence: 'high',
+  evidenceRefs: ['message:2'],
+  reason: 'Warm assistant narration establishes form.'
 };
 
 const rapidV2 = {
@@ -35,6 +45,7 @@ const rapidV2 = {
     guardrailCardIds: ['constraint-card'],
     diagnostics: []
   },
+  storyForm: rapidStoryForm,
   settingsHash: 'settings',
   providerContractHash: 'provider',
   cardCatalogHash: 'catalog',
@@ -49,7 +60,8 @@ const expectedRapidV2 = {
   settingsHash: 'settings',
   providerContractHash: 'provider',
   cardCatalogHash: 'catalog',
-  promptContractHash: 'prompt'
+  promptContractHash: 'prompt',
+  storyForm: rapidStoryForm
 };
 
 assertEqual(RAPID_PIPELINE_VERSION, 2, 'rapid pipeline v2 is current');
@@ -63,6 +75,7 @@ assert(rapidWarmArtifactIsUsable(rapidV2, expectedRapidV2), 'Rapid V2 warm artif
 assert(!rapidWarmArtifactIsUsable({ ...rapidV2, conditionedSceneBrief: 'old brief', pipelineVersion: 1 }, expectedRapidV2), 'Rapid V1 conditionedSceneBrief artifact is invalid');
 assert(!rapidWarmArtifactIsUsable({ ...rapidV2, guidance: { ...rapidV2.guidance, text: '' } }, expectedRapidV2), 'Rapid V2 requires provider guidance text');
 assert(!rapidWarmArtifactIsUsable({ ...rapidV2, selectedCardIds: [] }, expectedRapidV2), 'Rapid V2 requires selected card ids');
+assert(!rapidWarmArtifactIsUsable({ ...rapidV2, storyForm: { ...UNKNOWN_STORY_FORM, reason: 'missing warm form' } }, expectedRapidV2), 'Rapid V2 requires matching story form');
 
 const deltaPrompt = buildRapidTurnDeltaPrompt({
   snapshotHash: 'snapshot-hash',
@@ -71,6 +84,7 @@ const deltaPrompt = buildRapidTurnDeltaPrompt({
   userMessage: 'Open the sealed hatch.',
   warmArtifact: rapidV2,
   warmGuidance: rapidV2.guidance,
+  storyForm: rapidStoryForm,
   selectedCards: [
     { id: 'scene-card', family: 'Scene Frame', promptText: 'SCENE_CARD_MARKER full raw scene card.' },
     { id: 'subtext-card', family: 'Social Subtext', promptText: 'SOCIAL_SUBTEXT_MARKER full raw subtext card.' }
@@ -78,6 +92,7 @@ const deltaPrompt = buildRapidTurnDeltaPrompt({
 });
 assert(deltaPrompt.includes(RAPID_TURN_DELTA_SCHEMA), 'turn delta prompt names v2 schema');
 assert(deltaPrompt.includes('Warm provider guidance.'), 'turn delta prompt includes warm guidance');
+assert(deltaPrompt.includes('past tense, third-person-limited POV'), 'turn delta prompt includes story form instruction');
 assert(deltaPrompt.includes('SOCIAL_SUBTEXT_MARKER'), 'turn delta prompt includes full raw selected cards');
 assert(deltaPrompt.includes('turnGuidanceText'), 'turn delta prompt names required turn guidance field');
 assert(!deltaPrompt.includes('turnDeltaBrief'), 'turn delta prompt omits old turnDeltaBrief field');

@@ -180,7 +180,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   clearRunJournal: 'Clear local Recursion activity history for this chat. This does not change cards, settings, or SillyTavern messages.',
   exportDiagnostics: 'Copy sanitized Recursion diagnostics for debugging. API keys, raw provider prompts, and hidden reasoning are excluded.',
   providerSource: 'Choose where this lane sends Recursion model calls. Current Host Model follows the active chat model; Host Connection Profile uses a saved SillyTavern profile; OpenAI-Compatible uses the endpoint fields below. Changes auto-save; hidden alternate-source fields keep their values.',
-  providerProfile: 'Saved SillyTavern Connection Profile for this lane. Profiles keep routing, preset, and keys in SillyTavern.',
+  providerProfile: 'Saved SillyTavern Connection Profile for this lane. Type to filter detected profiles; selection saves only when a listed profile is chosen. Profiles keep routing, preset, and keys in SillyTavern.',
   providerBaseUrl: 'Base /v1 URL for a direct OpenAI-compatible endpoint. Only used when Source is OpenAI-Compatible.',
   providerModel: 'Model id sent to the direct OpenAI-compatible endpoint. Only used with the OpenAI-Compatible source.',
   providerApiKey: 'Session-only key for the OpenAI-compatible endpoint. Recursion keeps it in memory and never writes it to settings or diagnostics.',
@@ -1010,6 +1010,15 @@ function inputControl({ value = '', type = 'text', dataset, ariaLabel, min = nul
   });
   input.value = String(value ?? '');
   return input;
+}
+
+function dispatchControlChange(control) {
+  if (!control || typeof control.dispatchEvent !== 'function') return;
+  if (typeof Event === 'function') {
+    control.dispatchEvent(new Event('change', { bubbles: true }));
+  } else {
+    control.dispatchEvent({ type: 'change', target: control });
+  }
 }
 
 function checkboxControl({ checked = false, dataset, ariaLabel, disabled = false }) {
@@ -1886,17 +1895,154 @@ function listConnectionProfiles(profiles = null) {
   }));
 }
 
-function connectionProfileOptions(selectedId = '', profiles = null) {
+function connectionProfileEntries(selectedId = '', profiles = null) {
   const selected = cleanText(selectedId);
   const availableProfiles = listConnectionProfiles(profiles);
-  const options = [
-    ['', availableProfiles.length ? 'Select Profile' : 'No connection profiles found'],
-    ...availableProfiles.map((profile) => [profile.id, profile.label])
-  ];
+  const entries = availableProfiles.map((profile) => ({
+    id: cleanText(profile.id),
+    label: cleanText(profile.label || profile.id)
+  })).filter((profile) => profile.id);
   if (selected && !availableProfiles.some((profile) => profile.id === selected)) {
-    options.push([selected, `${selected} (saved)`]);
+    entries.push({ id: selected, label: `${selected} (saved)` });
   }
-  return options;
+  return entries;
+}
+
+function connectionProfileLabel(profileId = '', profiles = []) {
+  const selected = cleanText(profileId);
+  if (!selected) return '';
+  return profiles.find((profile) => profile.id === selected)?.label || selected;
+}
+
+function profileMatchesQuery(profile, query = '') {
+  const needle = cleanText(query).toLowerCase();
+  if (!needle) return true;
+  return [profile.label, profile.id].some((value) => cleanText(value).toLowerCase().includes(needle));
+}
+
+function renderConnectionProfileCombobox({ selectedId = '', profiles = [], lane, title, tooltipsEnabled = true, disabled = false, onCommit = null } = {}) {
+  const entries = Array.isArray(profiles) ? profiles : [];
+  const selected = cleanText(selectedId);
+  const selectedLabel = connectionProfileLabel(selected, entries);
+  const listId = `recursion-provider-profile-list-${lane}`;
+  const hidden = inputControl({
+    value: selected,
+    type: 'hidden',
+    dataset: providerDataset('Profile', lane),
+    ariaLabel: `${title} committed host connection profile`
+  });
+  const input = inputControl({
+    value: selectedLabel,
+    dataset: providerDataset('ProfileFilter', lane),
+    ariaLabel: `${title} host connection profile`,
+    placeholder: entries.length ? 'Select Profile' : 'No connection profiles found'
+  });
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('autocomplete', 'off');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'false');
+  input.setAttribute('aria-controls', listId);
+  input.className = `${input.className} recursion-provider-profile-search`;
+  if (disabled) {
+    input.disabled = true;
+    input.setAttribute('disabled', 'disabled');
+  }
+  setTooltip(input, tooltipsEnabled, SETTINGS_TOOLTIPS.providerProfile);
+
+  const list = el('div', {
+    className: 'recursion-provider-profile-list',
+    attrs: { id: listId, role: 'listbox' },
+    dataset: providerDataset('ProfileList', lane)
+  });
+  list.hidden = true;
+
+  const setExpanded = (open) => {
+    const shouldOpen = Boolean(open) && !disabled;
+    list.hidden = !shouldOpen;
+    input.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+  };
+
+  const commitProfile = (profile) => {
+    if (!profile?.id) return;
+    hidden.value = profile.id;
+    input.value = profile.label;
+    setExpanded(false);
+    onCommit?.();
+    dispatchControlChange(hidden);
+  };
+
+  const activeSearchQuery = () => {
+    const committedLabel = connectionProfileLabel(hidden.value, entries);
+    return cleanText(input.value) === cleanText(committedLabel) ? '' : input.value;
+  };
+
+  const renderMatches = () => {
+    const matches = entries.filter((profile) => profileMatchesQuery(profile, activeSearchQuery()));
+    if (!matches.length) {
+      list.replaceChildren(el('div', {
+        className: 'recursion-provider-profile-empty',
+        text: entries.length ? 'No matching profiles' : 'No connection profiles found',
+        attrs: { role: 'option', 'aria-disabled': 'true' }
+      }));
+      return matches;
+    }
+    list.replaceChildren(...matches.map((profile) => {
+      const option = el('div', {
+        className: `recursion-provider-profile-option${profile.id === hidden.value ? ' is-selected' : ''}`,
+        text: profile.label,
+        attrs: {
+          role: 'option',
+          tabindex: '-1',
+          'aria-selected': profile.id === hidden.value ? 'true' : 'false'
+        },
+        dataset: { recursionProviderProfileOption: profile.id }
+      });
+      option.addEventListener?.('click', (event) => {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        commitProfile(profile);
+      });
+      return option;
+    }));
+    return matches;
+  };
+
+  input.addEventListener?.('focus', () => {
+    renderMatches();
+    setExpanded(true);
+  });
+  input.addEventListener?.('click', () => {
+    renderMatches();
+    setExpanded(true);
+  });
+  input.addEventListener?.('input', () => {
+    renderMatches();
+    setExpanded(true);
+  });
+  input.addEventListener?.('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault?.();
+      input.value = connectionProfileLabel(hidden.value, entries);
+      setExpanded(false);
+      return;
+    }
+    if (event.key === 'Enter') {
+      const matches = renderMatches();
+      const exact = matches.find((profile) => cleanText(profile.label).toLowerCase() === cleanText(input.value).toLowerCase());
+      const selectedMatch = exact || matches[0];
+      if (selectedMatch) {
+        event.preventDefault?.();
+        commitProfile(selectedMatch);
+      }
+    }
+  });
+  renderMatches();
+
+  return el('div', { className: 'recursion-provider-profile-combobox' }, [
+    hidden,
+    input,
+    list
+  ]);
 }
 
 function syncProviderSourceVisibility(container, lane) {
@@ -2040,19 +2186,16 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   };
   sourceControl.addEventListener?.('change', syncSourceControls);
   grid.appendChild(providerField('Source', sourceControl));
-  const profileOptions = connectionProfileOptions(source.hostConnectionProfileId, connectionProfiles);
-  const profileControl = selectControl({
-      value: cleanText(source.hostConnectionProfileId),
-      options: profileOptions,
-      dataset: providerDataset('Profile', lane),
-      ariaLabel: `${title} host connection profile`
+  const profileEntries = connectionProfileEntries(source.hostConnectionProfileId, connectionProfiles);
+  const profileControl = renderConnectionProfileCombobox({
+    selectedId: source.hostConnectionProfileId,
+    profiles: profileEntries,
+    lane,
+    title,
+    tooltipsEnabled,
+    disabled: profileEntries.length <= 0 && !source.hostConnectionProfileId,
+    onCommit: () => syncProviderReadiness(body, lane, source, readinessOptions)
   });
-  if (profileOptions.length <= 1 && !source.hostConnectionProfileId) {
-    profileControl.disabled = true;
-    profileControl.setAttribute('disabled', 'disabled');
-  }
-  setTooltip(profileControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerProfile);
-  profileControl.addEventListener?.('change', () => syncProviderReadiness(body, lane, source, readinessOptions));
   grid.appendChild(providerField('Profile', profileControl, {
       lane,
       context: 'profile',
@@ -3638,6 +3781,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function readProviderPatch(sourceRoot, lane) {
     const apiKey = controlValue(sourceRoot, providerSelector('api-key', lane));
+    const providerDefaults = DEFAULT_RECURSION_SETTINGS.providers[lane] || DEFAULT_RECURSION_SETTINGS.providers.utility;
     const patch = {
       enabled: lane === 'utility' ? true : controlChecked(sourceRoot, providerSelector('enabled', lane)),
       source: controlValue(sourceRoot, providerSelector('source', lane)),
@@ -3648,7 +3792,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       },
       temperature: controlNumber(sourceRoot, providerSelector('temperature', lane), lane === 'reasoner' ? 0.4 : 0.1),
       topP: controlNumber(sourceRoot, providerSelector('top-p', lane), 0.95),
-      maxTokens: controlNumber(sourceRoot, providerSelector('max-tokens', lane), 4096)
+      maxTokens: controlNumber(sourceRoot, providerSelector('max-tokens', lane), providerDefaults.maxTokens)
     };
     if (apiKey) patch.apiKey = apiKey;
     return patch;

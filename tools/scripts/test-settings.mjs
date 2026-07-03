@@ -108,6 +108,8 @@ const defaultUi = normalizeSettings({});
 assertEqual(defaultUi.enabled, true, 'power toggle defaults on');
 assertEqual(defaultUi.mode, 'auto', 'mode defaults to auto');
 assertEqual(defaultUi.reasoningLevel, 'high', 'reasoning level defaults to high');
+assertEqual(defaultUi.providers.utility.maxTokens, 8192, 'utility provider max tokens default to 8192');
+assertEqual(defaultUi.providers.reasoner.maxTokens, 8192, 'reasoner provider max tokens default to 8192');
 assertEqual(defaultUi.minCards, 3, 'minimum cards defaults to low reasoning card budget');
 assertEqual(defaultUi.maxCards, 10, 'maximum cards defaults to ultra reasoning card budget');
 assertEqual(defaultUi.ui.progressChildVisibleLimit, 5, 'sub-tier visible item default is five');

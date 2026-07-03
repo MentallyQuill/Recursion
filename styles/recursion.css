@@ -1511,6 +1511,58 @@
   grid-column: 1 / -1;
 }
 
+.recursion-provider-profile-combobox {
+  min-width: 0;
+  position: relative;
+}
+
+.recursion-provider-profile-search {
+  padding-right: 24px !important;
+}
+
+.recursion-provider-profile-list {
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #242424) 88%, #101010) !important;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 12%, transparent);
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, .32);
+  left: 0;
+  max-height: 168px;
+  min-width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  position: absolute;
+  right: 0;
+  scrollbar-width: thin;
+  top: calc(100% + 2px);
+  z-index: 95;
+}
+
+.recursion-provider-profile-list[hidden] {
+  display: none !important;
+}
+
+.recursion-provider-profile-option,
+.recursion-provider-profile-empty {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 78%, transparent);
+  cursor: pointer;
+  font: 12px/1.25 var(--mainFontFamily, "Noto Sans", sans-serif);
+  min-height: 24px;
+  padding: 5px 7px;
+}
+
+.recursion-provider-profile-option:hover,
+.recursion-provider-profile-option:focus-visible,
+.recursion-provider-profile-option.is-selected {
+  background: rgba(101, 216, 232, .08);
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 92%, transparent);
+  outline: none;
+}
+
+.recursion-provider-profile-empty {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 52%, transparent);
+  cursor: default;
+}
+
 .recursion-provider-readiness,
 .recursion-provider-route-summary {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #e0e0e0) 58%, transparent);
@@ -2079,6 +2131,18 @@
 .recursion-root select.recursion-input.recursion-select {
   appearance: none !important;
   background-color: color-mix(in srgb, var(--SmartThemeBlurTintColor, #242424) 70%, #101010) !important;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%) !important;
+  background-position:
+    calc(100% - 13px) 50%,
+    calc(100% - 8px) 50% !important;
+  background-repeat: no-repeat !important;
+  background-size: 5px 5px, 5px 5px !important;
+  padding-right: 24px !important;
+}
+
+.recursion-root input.recursion-input.recursion-provider-profile-search {
   background-image:
     linear-gradient(45deg, transparent 50%, currentColor 50%),
     linear-gradient(135deg, currentColor 50%, transparent 50%) !important;

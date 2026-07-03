@@ -96,13 +96,15 @@ Source options:
 
 V1 should implement all three source options for Utility and Reasoner when the host exposes the required APIs. If a host cannot support connection profiles, the setting should be unavailable with a clear UI status rather than silently mapped to the current model.
 
+Utility and Reasoner provider settings default to `8192` max tokens. The same max-token field applies to all provider sources unless a caller supplies a narrower per-request response length.
+
 Provider setup uses the same control-plane helpers as generation:
 
 - `listProviderConnectionProfiles()` detects saved SillyTavern profiles from `context.ConnectionManagerRequestService`, global `ConnectionManagerRequestService`, and host state objects that expose profile arrays or profile maps.
 - `providerModelStatus()` resolves the selected source into a compact readiness label before a test call runs, including selected connection profile model labels when the host exposes them.
 - `fetchOpenAICompatibleModels()` discovers direct endpoint models by normalizing the configured base URL to `/models` and parsing OpenAI-style `data[]` or `models[]` responses.
 
-Connection profile discovery must stay scoped to provider/connection-profile seams. It must not traverse SillyTavern character, character-card, persona, avatar, group, or Recursion card containers while searching for profiles. The Providers pane should reuse one detected profile list while rendering Utility and Reasoner controls instead of asking the host repeatedly during a single render.
+Connection profile discovery must stay scoped to provider/connection-profile seams. It must not traverse SillyTavern character, character-card, persona, avatar, group, or Recursion card containers while searching for profiles. The Providers pane should reuse one detected profile list while rendering Utility and Reasoner controls instead of asking the host repeatedly during a single render. The Profile control is a filterable combobox: typed text filters the local detected list, and persisted provider settings change only after the user chooses a detected profile entry.
 
 Model discovery is read-only. It may use the currently typed session key, but it must not save settings, persist secrets, write diagnostics, clear prompts, or invalidate scene cache. Fetch failures are compact UI status, not runtime generation failures.
 
@@ -150,7 +152,7 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 | Role | Default lane | Purpose | Failure behavior |
 | --- | --- | --- | --- |
-| `utilityArbiter` | Utility, Reasoner at High/Ultra when healthy | Decide whether Recursion should skip, reuse cache, refresh cards, compose a packet, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
+| `utilityArbiter` | Utility, Reasoner at High/Ultra when healthy | Decide whether Recursion should skip, reuse cache, refresh cards, compose a packet, infer story tense/POV, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
 | `sceneFrameCard` | Utility, Reasoner at High/Ultra when healthy | Produce compact current-scene frame data | Omit card with diagnostic |
 | `activeCastCard` | Utility, Reasoner at High/Ultra when healthy | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
 | `characterMotivationCard` | Utility, Reasoner at High/Ultra when healthy | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
@@ -171,6 +173,8 @@ Card names should align with [Card System Spec](../design/CARD_SYSTEM_SPEC.md). 
 
 The literal `compose-brief` Arbiter action is retained as a V1 enum name, but it now means compose the V3 Guidance/Card Evidence/Guardrails packet. The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Rapid foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses `recursion.guidanceComposer.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`.
 
+Card roles, `guidanceComposer`, `reasonerComposer`, and `rapidTurnDelta` receive the Arbiter-normalized `recursion.storyForm.v1` object as request context. They must align generated card prose and prompt guidance to that tense and point of view rather than deriving their own independent form from the prompt.
+
 ## Utility Arbiter Call
 
 The Utility Arbiter is the first model call when Recursion needs model help for a turn. Its job is to make the run plan, not to write prose.
@@ -187,6 +191,8 @@ Inputs:
 - Reasoner on/off state and health summary.
 
 The Arbiter should return every auto decision it can in the initial call. Recursion should not spend a separate model call just to decide whether to use Reasoner unless a later version has a concrete, measured reason to do so.
+
+The Arbiter also owns story-form detection. It should infer the current tense and point of view from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. This keeps card generation and prompt composition aligned with the host model's established output form.
 
 Required output shape:
 
@@ -213,11 +219,21 @@ Required output shape:
     "targetBriefTokens": 450,
     "maxCards": 6
   },
+  "storyForm": {
+    "schema": "recursion.storyForm.v1",
+    "tense": "past | present | mixed | unknown",
+    "pov": "first-person | second-person | third-person-limited | third-person-omniscient | mixed | unknown",
+    "confidence": "high | medium | low",
+    "evidenceRefs": ["message:8"],
+    "reason": "Latest assistant narration uses past tense third-person-limited prose."
+  },
   "diagnostics": ["string"]
 }
 ```
 
 The Utility Arbiter must echo the frozen request `snapshotHash`. Missing or mismatched Arbiter hashes are stale output; runtime rejects the plan and uses the conservative local fallback instead of trusting its action, card jobs, lifecycle, diagnostics, or Reasoner decision.
+
+Invalid or unsupported `storyForm` values normalize to `unknown` rather than failing the whole plan. Unknown story form produces conservative downstream prompt text that tells card and story models to match the active chat's established form.
 
 The Arbiter is allowed to choose `reasonerDecision.mode: "use"` only when Reasoner is enabled and healthy. If Reasoner is disabled, unhealthy, or missing a provider secret, the Arbiter must select `skip` and explain the reason compactly.
 

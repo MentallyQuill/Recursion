@@ -7,6 +7,10 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 180000;
 const PIPELINES = new Set(['standard', 'rapid']);
+const EXPECTED_STORY_FORM = Object.freeze({
+  tense: 'past',
+  pov: 'third-person-limited'
+});
 
 function parseArgs(argv = []) {
   const args = { live: false, pipeline: 'standard' };
@@ -68,10 +72,32 @@ async function setPower(page, enabled, timeoutMs) {
   }, enabled, { timeout: timeoutMs });
 }
 
+async function forcePipelineSetting(page, pipeline, timeoutMs) {
+  await page.evaluate(async (expected) => {
+    globalThis.__recursionLiveHarness = true;
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const roots = [context.extensionSettings, globalThis.extension_settings].filter(Boolean);
+    for (const root of roots) {
+      if (!root.recursion || typeof root.recursion !== 'object') root.recursion = {};
+      root.recursion.pipelineMode = expected;
+    }
+    if (typeof globalThis.recursionOnDisable === 'function') await globalThis.recursionOnDisable();
+    if (typeof globalThis.recursionOnEnable === 'function') await globalThis.recursionOnEnable();
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    if (typeof runtime?.updateSettings === 'function') await runtime.updateSettings({ pipelineMode: expected });
+  }, pipeline);
+  await waitForRoot(page, timeoutMs);
+  await page.waitForFunction((expected) => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    return String(runtime?.view?.()?.settings?.pipelineMode || '') === expected;
+  }, pipeline, { timeout: timeoutMs });
+}
+
 async function selectPipeline(page, pipeline, timeoutMs) {
   const button = page.locator('[data-recursion-pipeline-button]').first();
   await button.click({ timeout: timeoutMs });
   await page.locator(`[data-recursion-pipeline-choice="${pipeline}"], [data-recursion-pipeline-choice-${pipeline}]`).first().click({ timeout: timeoutMs });
+  await forcePipelineSetting(page, pipeline, timeoutMs);
   await page.waitForFunction((expected) => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
     const settings = context?.extensionSettings?.recursion || globalThis.extension_settings?.recursion || {};
@@ -137,10 +163,131 @@ function installRawPromptRecorderScript() {
   };
 }
 
+function installProviderRequestRecorderScript() {
+  return () => {
+    const events = [];
+    globalThis.__recursionProviderRequestProofEvents = events;
+
+    const classifyPrompt = (text) => {
+      const source = String(text || '');
+      if (/recursion\.utilityArbiter\.v1/.test(source)) return 'utilityArbiter';
+      if (/recursion\.card\.v1/.test(source)) return 'card';
+      if (/recursion\.guidanceComposer\.v1/.test(source)) return 'guidanceComposer';
+      if (/recursion\.reasonerComposer\.v1/.test(source)) return 'reasonerComposer';
+      if (/recursion\.rapidTurnDelta\.v2/.test(source)) return 'rapidTurnDelta';
+      return 'unknown';
+    };
+
+    const textFromMessages = (messages) => {
+      if (!Array.isArray(messages)) return String(messages || '');
+      return messages.map((message) => {
+        if (typeof message === 'string') return message;
+        if (!message || typeof message !== 'object') return '';
+        return [message.role, message.name, message.content, message.text]
+          .filter(Boolean)
+          .map((entry) => String(entry))
+          .join('\n');
+      }).join('\n\n');
+    };
+
+    const record = (source, payload = {}) => {
+      const prompt = String(payload.prompt || payload.systemPrompt || textFromMessages(payload.messages) || '');
+      events.push({
+        source,
+        role: classifyPrompt(prompt),
+        promptLength: prompt.length,
+        hasStoryFormSchema: /recursion\.storyForm\.v1/.test(prompt),
+        hasStoryFormJson: /"storyForm"|"Story form:"|Story form:/.test(prompt),
+        hasStoryFormInstruction: /past tense, third-person-limited POV|active chat's established story form/.test(prompt),
+        hasArbiterStoryPriority: /latest visible assistant narration first/.test(prompt),
+        hasCardStoryBlock: /Story form contract for card promptText:/.test(prompt),
+        hasTargetTense: /Target tense: past\./.test(prompt),
+        hasTargetPov: /Target POV: third-person-limited\./.test(prompt)
+      });
+    };
+
+    const install = (context) => {
+      if (!context || typeof context !== 'object') return false;
+      if (typeof context.generateRaw === 'function' && !context.__recursionProviderRequestProofGenerateRaw) {
+        const original = context.generateRaw.bind(context);
+        context.__recursionProviderRequestProofGenerateRaw = original;
+        context.generateRaw = (request = {}) => {
+          record('generateRaw', request);
+          return original(request);
+        };
+      }
+      const service = context.ConnectionManagerRequestService || globalThis.ConnectionManagerRequestService;
+      if (service && typeof service.sendRequest === 'function' && !service.__recursionProviderRequestProofSendRequest) {
+        const original = service.sendRequest.bind(service);
+        service.__recursionProviderRequestProofSendRequest = original;
+        service.sendRequest = (profileId, messages, maxTokens, options, parameters) => {
+          record('connectionProfile', { messages, profileId, maxTokens, options, parameters });
+          return original(profileId, messages, maxTokens, options, parameters);
+        };
+      }
+      return true;
+    };
+
+    const current = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+    install(current);
+    const wrap = (owner, key) => {
+      if (!owner || typeof owner[key] !== 'function' || owner[`__recursionProviderRequestProofOriginal${key}`]) return;
+      const original = owner[key].bind(owner);
+      owner[`__recursionProviderRequestProofOriginal${key}`] = original;
+      owner[key] = (...args) => {
+        const context = original(...args);
+        install(context);
+        return context;
+      };
+    };
+    wrap(globalThis.SillyTavern, 'getContext');
+    wrap(globalThis, 'getContext');
+    return install(current);
+  };
+}
+
+async function seedStoryFormScene(page, timeoutMs) {
+  const marker = `recursion-story-form-proof-${Date.now().toString(36)}`;
+  await page.evaluate((seed) => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    if (!Array.isArray(context.chat)) context.chat = [];
+    const base = context.chat.length;
+    context.chat.push({
+      mesid: base,
+      is_user: true,
+      name: 'Recursion Story Form Proof',
+      mes: `I touch the archive door in first person for ${seed}, but this should not define the assistant output form.`
+    });
+    context.chat.push({
+      mesid: base + 1,
+      is_user: false,
+      name: 'Recursion Story Form Proof',
+      mes: [
+        `Mara kept her gloved hand against the sealed archive door for ${seed}.`,
+        'She felt the brass ward-lines tighten under her palm, but she did not know what waited beyond the threshold.',
+        'Only her perspective was available in the narration, and the corridor remained still behind her.'
+      ].join(' ')
+    });
+    globalThis.__recursionStoryFormProofMarker = seed;
+  }, marker);
+  await page.waitForFunction((seed) => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    return Array.isArray(context.chat) && context.chat.some((message) => String(message?.mes || '').includes(seed) && message?.is_user === false);
+  }, marker, { timeout: timeoutMs });
+  return marker;
+}
+
 function directPrepareScript() {
   return (message) => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
     if (!context) throw new Error('SillyTavern context unavailable');
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    if (typeof runtime?.prepareForGeneration === 'function') {
+      return runtime.prepareForGeneration({
+        userMessage: String(message || ''),
+        hostGeneration: true
+      });
+    }
     const chat = Array.isArray(context.chat) ? context.chat.slice() : [];
     chat.push({
       mesid: chat.length,
@@ -170,6 +317,8 @@ function readProofStateScript() {
     } catch {
       packet = null;
     }
+    const runtimeView = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    const runtimePacket = runtimeView.lastPacket || null;
     return {
       events,
       installedKeys: [...new Set(installed.map((event) => event.key))],
@@ -180,13 +329,20 @@ function readProofStateScript() {
       packet: packet ? {
         packetId: String(packet.packetId || ''),
         handId: String(packet.handId || ''),
+        storyForm: packet.storyForm || runtimePacket?.storyForm || null,
         selectedCardRefs: Array.isArray(packet.selectedCardRefs) ? packet.selectedCardRefs : [],
-        diagnostics: packet.diagnostics || {},
+        diagnostics: packet.diagnostics || runtimePacket?.diagnostics || {},
         pipelineMode: String(packet.pipelineMode || '')
       } : null,
+      runtimePacketStoryForm: runtimePacket?.storyForm || null,
+      lastPlanStoryForm: runtimeView.lastPlan?.storyForm || null,
+      providerRequests: Array.isArray(globalThis.__recursionProviderRequestProofEvents)
+        ? globalThis.__recursionProviderRequestProofEvents.slice()
+        : [],
       handText: String(document.querySelector('[data-recursion-hand-count]')?.textContent || ''),
       statusText: String(document.querySelector('[data-recursion-status]')?.textContent || ''),
-      ribbonText: String(document.querySelector('[data-recursion-ribbon-label]')?.textContent || '')
+      ribbonText: String(document.querySelector('[data-recursion-ribbon-label]')?.textContent || ''),
+      runtimeView: globalThis.__recursionLiveHarnessRuntime?.view?.() || null
     };
   };
 }
@@ -194,13 +350,9 @@ function readProofStateScript() {
 async function warmRapidDeck(page, timeoutMs) {
   await page.evaluate(() => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
-    if (Array.isArray(context.chat)) {
-      context.chat.push({
-        mesid: context.chat.length,
-        is_user: false,
-        name: 'Recursion Prompt Packet Proof',
-        mes: `Recursion rapid warm proof assistant marker ${Date.now().toString(36)}.`
-      });
+    const seed = String(globalThis.__recursionStoryFormProofMarker || '');
+    if (!Array.isArray(context.chat) || !context.chat.some((message) => message?.is_user === false && String(message?.mes || '').includes(seed))) {
+      throw new Error('story form proof seed unavailable for Rapid warm');
     }
     const eventSource = context.eventSource || globalThis.eventSource;
     const payload = { source: 'recursion-prompt-packet-proof-rapid-warm' };
@@ -258,8 +410,22 @@ function assertPacketState(state, { afterStop = false, pipeline = 'standard' } =
   if (!/Private Recursion guidance for the next assistant message\./.test(state.guidance)) {
     fail('guidance-framing-missing', 'Guidance block did not include private response framing.', { guidance: state.guidance });
   }
-  if (!/Write the next reply as normal story prose\/dialogue\./.test(state.guidance)) {
-    fail('guidance-output-shape-missing', 'Guidance block did not instruct normal story output.', { guidance: state.guidance });
+  const storyForm = state.packet?.storyForm || {};
+  const planStoryForm = state.lastPlanStoryForm || {};
+  if (storyForm.tense !== EXPECTED_STORY_FORM.tense || storyForm.pov !== EXPECTED_STORY_FORM.pov) {
+    fail('packet-story-form-mismatch', 'Prompt packet did not carry expected story form.', { storyForm, expected: EXPECTED_STORY_FORM });
+  }
+  if (planStoryForm.tense !== EXPECTED_STORY_FORM.tense || planStoryForm.pov !== EXPECTED_STORY_FORM.pov) {
+    fail('arbiter-story-form-mismatch', 'Arbiter plan did not capture expected story form.', { planStoryForm, expected: EXPECTED_STORY_FORM });
+  }
+  if (diagnostics.storyFormTense !== EXPECTED_STORY_FORM.tense || diagnostics.storyFormPov !== EXPECTED_STORY_FORM.pov) {
+    fail('diagnostic-story-form-missing', 'Prompt diagnostics did not expose expected story form.', { diagnostics });
+  }
+  if (!/Write the next reply in past tense, third-person-limited POV\./.test(state.guidance)) {
+    fail('guidance-output-shape-missing', 'Guidance block did not instruct expected story form.', { guidance: state.guidance });
+  }
+  if (/Write the next reply as normal story prose\/dialogue\./.test(state.guidance)) {
+    fail('generic-guidance-output-shape-leaked', 'Guidance block still used the old generic story output instruction.', { guidance: state.guidance });
   }
   if (!/Private Recursion card evidence for the next assistant message\./.test(state.cardEvidence)) {
     fail('card-evidence-framing-missing', 'Card evidence block did not include private response framing.', { cardEvidence: state.cardEvidence });
@@ -276,6 +442,29 @@ function assertPacketState(state, { afterStop = false, pipeline = 'standard' } =
   const serialized = `${state.guidance}\n${state.cardEvidence}\n${state.guardrails}`;
   if (/Scene brief:|Turn brief:|conditionedSceneBrief|rapidFastStartPack/.test(serialized)) {
     fail('legacy-brief-text-leaked', 'Legacy brief or fast-start text leaked into prompt blocks.', { serialized });
+  }
+  if (/recursion\.utilityArbiter\.v1|recursion\.card\.v1|Story form contract for card promptText:|Output contract:/.test(serialized)) {
+    fail('internal-provider-prompt-leaked', 'Internal provider prompt text leaked into installed prompt blocks.', { serialized });
+  }
+  const requests = Array.isArray(state.providerRequests) ? state.providerRequests : [];
+  if (pipeline === 'rapid') {
+    const rapid = requests.find((request) => request.role === 'rapidTurnDelta');
+    if (rapid && (!rapid.hasStoryFormJson || !rapid.hasStoryFormInstruction)) {
+      fail('rapid-story-form-request-missing', 'Rapid foreground request did not include expected story-form instruction.', { requests });
+    }
+  } else {
+    const arbiter = requests.find((request) => request.role === 'utilityArbiter');
+    if (!arbiter?.hasStoryFormSchema || !arbiter?.hasStoryFormJson || !arbiter?.hasArbiterStoryPriority) {
+      fail('arbiter-story-form-request-missing', 'Arbiter provider request did not include story-form detection contract.', { requests });
+    }
+    const card = requests.find((request) => request.role === 'card');
+    if (!card?.hasCardStoryBlock || !card?.hasTargetTense || !card?.hasTargetPov) {
+      fail('card-story-form-request-missing', 'Card provider request did not include expected story-form block.', { requests });
+    }
+    const guidance = requests.find((request) => request.role === 'guidanceComposer');
+    if (!guidance?.hasStoryFormJson || !guidance?.hasStoryFormInstruction) {
+      fail('guidance-story-form-request-missing', 'Guidance composer request did not include expected story-form instruction.', { requests });
+    }
   }
   if (afterStop) {
     for (const key of requiredKeys) {
@@ -307,13 +496,28 @@ export async function runLivePromptPacketProof({ argv = process.argv.slice(2), e
     await page.goto(env.SILLYTAVERN_BASE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await waitForRoot(page, timeoutMs);
     await page.evaluate(installRawPromptRecorderScript());
+    await page.evaluate(installProviderRequestRecorderScript());
     await setPower(page, true, timeoutMs);
     await selectPipeline(page, args.pipeline, timeoutMs);
     await selectMode(page, 'auto', timeoutMs);
+    await forcePipelineSetting(page, args.pipeline, timeoutMs);
+    await seedStoryFormScene(page, timeoutMs);
     if (args.pipeline === 'rapid') await warmRapidDeck(page, timeoutMs);
     const message = `Recursion ${args.pipeline} prompt packet proof ${Date.now().toString(36)}: keep the archive door scene coherent.`;
+    const previousPacketId = await page.evaluate(() => {
+      const packetText = String(document.querySelector('[data-recursion-prompt-packet]')?.textContent || '').trim();
+      if (Array.isArray(globalThis.__recursionPromptPacketProofEvents)) globalThis.__recursionPromptPacketProofEvents.length = 0;
+      else globalThis.__recursionPromptPacketProofEvents = [];
+      if (Array.isArray(globalThis.__recursionProviderRequestProofEvents)) globalThis.__recursionProviderRequestProofEvents.length = 0;
+      else globalThis.__recursionProviderRequestProofEvents = [];
+      try {
+        return packetText ? String(JSON.parse(packetText)?.packetId || '') : '';
+      } catch {
+        return '';
+      }
+    });
     await page.evaluate(directPrepareScript(), message);
-    await page.waitForFunction(() => {
+    await page.waitForFunction((stalePacketId) => {
       const state = (() => {
         const events = Array.isArray(globalThis.__recursionPromptPacketProofEvents)
           ? globalThis.__recursionPromptPacketProofEvents
@@ -329,8 +533,8 @@ export async function runLivePromptPacketProof({ argv = process.argv.slice(2), e
         return { keys, packet };
       })();
       return ['recursion.guidance', 'recursion.cardEvidence', 'recursion.guardrails'].every((key) => state.keys.has(key))
-        && Boolean(state.packet?.packetId && state.packet?.handId && Array.isArray(state.packet?.selectedCardRefs) && state.packet.selectedCardRefs.length);
-    }, null, { timeout: timeoutMs });
+        && Boolean(state.packet?.packetId && state.packet.packetId !== stalePacketId && state.packet?.handId && Array.isArray(state.packet?.selectedCardRefs) && state.packet.selectedCardRefs.length);
+    }, previousPacketId, { timeout: timeoutMs });
     const beforeStop = await page.evaluate(readProofStateScript());
     assertPacketState(beforeStop, { pipeline: args.pipeline });
     await emitGenerationStopped(page, timeoutMs);
@@ -345,6 +549,8 @@ export async function runLivePromptPacketProof({ argv = process.argv.slice(2), e
       selectedCardCount: beforeStop.packet.selectedCardRefs.length,
       installedKeys: beforeStop.installedKeys,
       clearedKeys: afterStop.clearedKeys,
+      storyForm: beforeStop.packet.storyForm,
+      providerRequestRoles: [...new Set(beforeStop.providerRequests.map((request) => request.role))],
       textLengths: {
         guidance: beforeStop.guidance.length,
         cardEvidence: beforeStop.cardEvidence.length,

@@ -40,6 +40,7 @@ The composer receives:
 - turn fingerprint
 - settings for footprint and Reasoner use
 - section budgets
+- normalized story form from the Arbiter
 - generation router for `guidanceComposer` and optional Reasoner augmentation
 - activity reporter for fallback events
 
@@ -48,6 +49,8 @@ Cards are normalized before composition. Unsafe evidence refs, unsupported famil
 ## Utility Composition
 
 Utility guidance composition is the default path. It calls `guidanceComposer` with the selected raw cards, omitted candidates, behavior policy, and current source metadata. The provider writes guidance about how the next generation should use the evidence; runtime validates schema, source ids, hidden-reasoning language, and length before trusting it.
+
+The composer includes the normalized story form in the provider request and in fallback guidance. When tense and POV are known, the guidance section names the target form directly. When either field is unknown, it tells the host model to match the active chat's established story form instead of introducing a new form from card evidence.
 
 The selected raw card evidence remains model-facing even when guidance composition is unavailable. If `guidanceComposer` fails, Recursion installs a raw-card-only packet with minimal fallback guidance that tells the model to use the card evidence directly.
 

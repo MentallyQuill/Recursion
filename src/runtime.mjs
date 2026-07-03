@@ -8,7 +8,7 @@ import {
   scopePayloadForArbiter
 } from './card-scope.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
-import { composeGuidanceForCards, composePromptPacket, PROMPT_PACKET_VERSION } from './prompt.mjs';
+import { composeGuidanceForCards, composePromptPacket, GUIDANCE_SCHEMA as PROMPT_GUIDANCE_SCHEMA, PROMPT_PACKET_VERSION } from './prompt.mjs';
 import { PROVIDER_CONTRACT_HASH, fetchOpenAICompatibleModels } from './providers.mjs';
 import {
   RAPID_PIPELINE_VERSION,
@@ -21,6 +21,7 @@ import {
 import { reasoningRequestMetadata } from './reasoning-policy.mjs';
 import { createSettingsStore, normalizeCardBudgetSettings, normalizeInjectionSettings, normalizeSettings } from './settings.mjs';
 import { behaviorPolicyPromptLines, influencePolicyForSettings, runPolicyForEffectivePlan } from './settings-policy.mjs';
+import { STORY_FORM_SCHEMA, UNKNOWN_STORY_FORM, arbiterStoryFormContractLine, normalizeStoryForm } from './story-form.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
@@ -88,6 +89,7 @@ const HARD_CACHE_VERSION_FIELDS = Object.freeze([
   'runtimeCacheContractVersion',
   'cardCatalogHash',
   'promptPacketVersion',
+  'promptContractHash',
   'providerContractHash'
 ]);
 
@@ -174,6 +176,11 @@ export function cacheContractVersions(settings = {}) {
     runtimeCacheContractVersion: RUNTIME_CACHE_CONTRACT_VERSION,
     cardCatalogHash: hashJson(CARD_CATALOG),
     promptPacketVersion: PROMPT_PACKET_VERSION,
+    promptContractHash: hashJson({
+      promptPacketVersion: PROMPT_PACKET_VERSION,
+      guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
+      storyFormSchema: STORY_FORM_SCHEMA
+    }),
     providerContractHash: PROVIDER_CONTRACT_HASH,
     settingsHash: hashJson(cacheSettingsSignature(settings))
   };
@@ -408,6 +415,7 @@ function localFallbackPlan(snapshot, settings) {
     sceneStatus: 'same-scene',
     promptFootprint,
     cardJobs: [],
+    storyForm: UNKNOWN_STORY_FORM,
     reasonerDecision: {
       mode: settings.reasonerUse === 'always' ? 'use' : 'skip',
       reason: 'local fallback',
@@ -725,6 +733,7 @@ function mergePlan(fallbackPlan, arbiterData) {
     sceneStatus: normalizeSceneStatus(data.sceneStatus, fallbackPlan.sceneStatus),
     promptFootprint: normalizePromptFootprint(data.promptFootprint, fallbackPlan.promptFootprint || 'normal'),
     cardJobs: normalizePlanCardJobs(data.cardJobs) ?? fallbackPlan.cardJobs,
+    storyForm: normalizeStoryForm(data.storyForm, fallbackPlan.storyForm),
     lifecycle: normalizePlanLifecycle(data.lifecycle ?? data.cardLifecycle ?? data.cardDecisions),
     reasonerDecision: normalizeReasonerDecision(fallbackPlan.reasonerDecision, data.reasonerDecision),
     budgets,
@@ -1370,6 +1379,7 @@ function arbiterOutputContractLine(snapshotHash) {
     '- "action": "skip" | "reuse-cache" | "refresh-cards" | "compose-brief"',
     '- "sceneStatus": "same-scene" | "soft-shift" | "hard-shift" | "unknown"',
     '- "promptFootprint": "compact" | "normal" | "rich"',
+    '- "storyForm": {"schema":"recursion.storyForm.v1","tense":"past|present|mixed|unknown","pov":"first-person|second-person|third-person-limited|third-person-omniscient|mixed|unknown","confidence":"high|medium|low","evidenceRefs":["message:N"],"reason":"string"}',
     '- "cardJobs": []',
     '- "reasonerDecision": {"mode":"use"|"skip","reason":"string","signals":[]}',
     '- "budgets": {"targetBriefTokens":500,"maxCards":6}',
@@ -2797,7 +2807,7 @@ export function createRecursionRuntime({
     return true;
   }
 
-  function staleCacheCardReason(card, normalized, snapshot) {
+  function staleCacheCardReason(card, normalized, snapshot, options = {}) {
     const source = asObject(card?.source);
     const freshness = asObject(card?.freshness);
     const sourceChatId = String(source.chatId || card?.chatId || '').trim();
@@ -2810,7 +2820,7 @@ export function createRecursionRuntime({
     if (!Number.isFinite(firstMesId) || !Number.isFinite(lastMesId)) return 'source-range-missing';
     if (!Number.isInteger(firstMesId) || !Number.isInteger(lastMesId) || firstMesId > lastMesId) return 'source-range-invalid';
     if (lastMesId > numberOr(snapshot.latestMesId, 0)) return 'source-range-future';
-    if (!sourceRangeIsVisible(snapshot, firstMesId, lastMesId)) return 'source-range-not-visible';
+    if (!options.allowSparseSourceRange && !sourceRangeIsVisible(snapshot, firstMesId, lastMesId)) return 'source-range-not-visible';
 
     const expiresAfterMesId = Number(freshness.expiresAfterMesId ?? normalized?.freshness?.expiresAfterMesId);
     if (Number.isFinite(expiresAfterMesId) && numberOr(snapshot.latestMesId, 0) > expiresAfterMesId) {
@@ -2836,7 +2846,7 @@ export function createRecursionRuntime({
     return '';
   }
 
-  function sanitizedCacheCards(runId, snapshot, cards) {
+  function sanitizedCacheCards(runId, snapshot, cards, options = {}) {
     const accepted = [];
     let invalid = 0;
     let stale = 0;
@@ -2850,7 +2860,7 @@ export function createRecursionRuntime({
           sourceRevisionHash: activeSourceRevisionHash(snapshot),
           lastMesId: snapshot.latestMesId
         });
-        const staleReason = staleCacheCardReason(sanitized, normalized, snapshot);
+        const staleReason = staleCacheCardReason(sanitized, normalized, snapshot, options);
         if (staleReason) {
           stale += 1;
           continue;
@@ -2996,6 +3006,7 @@ export function createRecursionRuntime({
           `Card scope: ${JSON.stringify(cardScope)}`,
           cardScopePolicyLine(cardScope),
           arbiterCardJobContractLine(),
+          arbiterStoryFormContractLine(),
           reasoningPolicyPromptLine(settings),
           `Catalog: ${JSON.stringify(catalog)}`,
           `Catalog hash: ${hashJson(catalog)}`,
@@ -3025,7 +3036,8 @@ export function createRecursionRuntime({
       runId,
       snapshotHash: plan.snapshotHash || hashJson(snapshot),
       snapshot: providerSafeSnapshot(snapshot),
-      cardScope
+      cardScope,
+      storyForm: plan.storyForm || UNKNOWN_STORY_FORM
     }).map((request) => applyReasoningLaneToCardRequest(request, settings));
     if (!requests.length) return [];
     if (typeof generationRouter.batch !== 'function' && typeof generationRouter.generate !== 'function') return [];
@@ -3163,7 +3175,8 @@ export function createRecursionRuntime({
         behaviorPolicy,
         generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRun),
         activity,
-        runId
+        runId,
+        storyForm: plan.storyForm || UNKNOWN_STORY_FORM
       });
       if (!isActiveRun(runId)) return supersededResult(runId);
       const rapid = {
@@ -3183,6 +3196,7 @@ export function createRecursionRuntime({
           omittedCardIds: guidance.omittedCardIds,
           diagnostics: guidance.diagnostics
         },
+        storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
         ...cacheContractVersions(settings),
         builtAt: nowIso(),
         runId,
@@ -3247,6 +3261,7 @@ export function createRecursionRuntime({
       sceneStatus: 'same-scene',
       promptFootprint: promptFootprintFromSettings(settings),
       cardJobs: [],
+      storyForm: rapid?.storyForm || UNKNOWN_STORY_FORM,
       budgets: {
         targetBriefTokens: 1800,
         maxCards: selectedCards.length
@@ -3293,8 +3308,10 @@ export function createRecursionRuntime({
         guardrailCardIds: normalized.guardrailCardIds,
         diagnostics: mergeDiagnostics(rapid?.guidance?.diagnostics, normalized.diagnostics)
       },
+      storyForm: rapid?.storyForm || plan.storyForm || UNKNOWN_STORY_FORM,
       pipelineMode: 'rapid',
-      rapidPath: 'warm-v2'
+      rapidPath: 'warm-v2',
+      planDiagnostics: plan.diagnostics
     });
     if (!isActiveRun(runId)) return supersededResult(runId);
     const installedResult = await runPromptMutationSection(runId, async () => {
@@ -3403,22 +3420,48 @@ export function createRecursionRuntime({
     const turnSourceRevisionHash = activeSourceRevisionHash(turnSnapshot);
     const activeVariant = activeSceneCacheVariant(initialCache, baseSnapshot);
     const rapid = activeVariant.rapid;
-    const candidateCards = sanitizedCacheCards(runId, baseSnapshot, activeVariant.cards);
+    const candidateCards = sanitizedCacheCards(runId, baseSnapshot, activeVariant.cards, {
+      allowSparseSourceRange: true
+    });
+    const expectedContracts = cacheContractVersions(settings);
+    const warmMissDiagnostics = () => [
+      'rapid-warm-miss-standard',
+      `rapid-variant:${activeVariant.exact ? 'exact' : 'miss'}`,
+      `rapid-candidate-cards:${candidateCards.length}`,
+      `rapid-base:${safeText(baseSourceRevisionHash, 40)}`,
+      `rapid-artifact-base:${safeText(rapid?.baseSourceRevisionHash || '', 40)}`,
+      `rapid-settings:${safeText(rapid?.settingsHash || '', 12)}:${safeText(expectedContracts.settingsHash || '', 12)}`,
+      `rapid-provider-contract:${safeText(rapid?.providerContractHash || '', 12)}:${safeText(expectedContracts.providerContractHash || '', 12)}`,
+      `rapid-card-catalog:${safeText(rapid?.cardCatalogHash || '', 12)}:${safeText(expectedContracts.cardCatalogHash || '', 12)}`,
+      `rapid-prompt-contract:${safeText(rapid?.promptContractHash || '', 12)}:${safeText(expectedContracts.promptContractHash || '', 12)}`
+    ];
     const usableWarm = rapidWarmArtifactIsUsable(rapid, {
       baseSourceRevisionHash,
-      ...cacheContractVersions(settings)
+      ...expectedContracts,
+      storyForm: rapid?.storyForm || UNKNOWN_STORY_FORM
     }) && candidateCards.length > 0;
     if (!usableWarm) {
       stageRuntimeActivity({
         runId,
         phase: 'rapidWarmMissStandard',
         label: 'Rapid warm packet unavailable; using Standard.',
-        chips: ['Rapid', 'Standard']
+        chips: ['Rapid', 'Standard'],
+        detail: {
+          exactVariant: activeVariant.exact,
+          candidateCardCount: candidateCards.length,
+          baseSourceRevisionHash: safeText(baseSourceRevisionHash, 80),
+          artifactBaseSourceRevisionHash: safeText(rapid?.baseSourceRevisionHash || '', 80),
+          artifactStatus: safeText(rapid?.status || '', 80),
+          settingsHash: safeText(expectedContracts.settingsHash || '', 80),
+          artifactSettingsHash: safeText(rapid?.settingsHash || '', 80),
+          promptContractHash: safeText(expectedContracts.promptContractHash || '', 80),
+          artifactPromptContractHash: safeText(rapid?.promptContractHash || '', 80)
+        }
       });
       return {
         ok: false,
         escalateToStandard: true,
-        diagnostics: ['rapid-warm-miss-standard']
+        diagnostics: warmMissDiagnostics()
       };
     }
     const selectedWarmCards = candidateCards.filter((card) => (rapid.selectedCardIds || []).includes(card.id));
@@ -3426,7 +3469,7 @@ export function createRecursionRuntime({
       return {
         ok: false,
         escalateToStandard: true,
-        diagnostics: ['rapid-warm-miss-standard', 'rapid-selected-card-miss']
+        diagnostics: [...warmMissDiagnostics(), 'rapid-selected-card-miss']
       };
     }
     stageRuntimeActivity({
@@ -3449,6 +3492,7 @@ export function createRecursionRuntime({
         userMessage: pendingUserMessage.text,
         warmArtifact: rapid,
         warmGuidance: rapid.guidance,
+        storyForm: rapid?.storyForm || UNKNOWN_STORY_FORM,
         selectedCards: selectedWarmCards.map((card) => ({
           id: card.id,
           family: card.family,
@@ -3842,7 +3886,9 @@ export function createRecursionRuntime({
         generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRun),
         activity,
         runId,
-        signal
+        signal,
+        storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
+        planDiagnostics: plan.diagnostics
       });
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastHand = hand;
@@ -3908,7 +3954,9 @@ export function createRecursionRuntime({
             generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRun),
             activity,
             runId,
-            signal
+            signal,
+            storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
+            planDiagnostics: plan.diagnostics
           });
           if (!isActiveRun(runId)) return supersededResult(runId);
           lastSnapshot = promptSnapshot;

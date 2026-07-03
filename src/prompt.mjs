@@ -7,6 +7,7 @@ import {
   summarizeBehaviorPolicyForDiagnostics
 } from './settings-policy.mjs';
 import { reasoningRequestMetadata } from './reasoning-policy.mjs';
+import { UNKNOWN_STORY_FORM, normalizeStoryForm, storyFormInstruction } from './story-form.mjs';
 
 export const PROMPT_PACKET_VERSION = 3;
 export const GUIDANCE_SCHEMA = 'recursion.guidanceComposer.v1';
@@ -416,7 +417,8 @@ function validateGuidanceResult(result, allowedIds, expectedSnapshotHash) {
   };
 }
 
-function buildGuidancePrompt({ runId, snapshotHash: sourceSnapshotHash, cards, behaviorPolicy = null }) {
+function buildGuidancePrompt({ runId, snapshotHash: sourceSnapshotHash, cards, behaviorPolicy = null, storyForm = UNKNOWN_STORY_FORM }) {
+  const normalizedStoryForm = normalizeStoryForm(storyForm);
   return [
     'Write Recursion response guidance for the next story generation.',
     `Return one JSON object only using schema "${GUIDANCE_SCHEMA}".`,
@@ -426,12 +428,15 @@ function buildGuidancePrompt({ runId, snapshotHash: sourceSnapshotHash, cards, b
     'Expected JSON shape: {"schema":"recursion.guidanceComposer.v1","snapshotHash":"same snapshot hash","guidanceText":"provider-authored direction","sourceCardIds":["card-id"],"guardrailCardIds":["card-id"],"omittedCardIds":[{"id":"card-id","reason":"duplicate | lower-priority | unsupported | unsafe"}],"diagnostics":["safe-note"]}.',
     `Run id: ${runId}`,
     `Snapshot hash: ${sourceSnapshotHash}`,
+    `Story form: ${JSON.stringify(normalizedStoryForm)}`,
+    storyFormInstruction(normalizedStoryForm),
     `Behavior policy:\n${behaviorComposerLines(behaviorPolicy).join('\n')}`,
     `Selected raw cards:\n${JSON.stringify(cards.map((card) => promptCard(card)), null, 2)}`
   ].join('\n\n');
 }
 
-function buildReasonerPrompt({ runId, snapshotHash: sourceSnapshotHash, footprint, cards, guidance, behaviorPolicy = null }) {
+function buildReasonerPrompt({ runId, snapshotHash: sourceSnapshotHash, footprint, cards, guidance, behaviorPolicy = null, storyForm = UNKNOWN_STORY_FORM }) {
+  const normalizedStoryForm = normalizeStoryForm(storyForm);
   return [
     'Compose optional Recursion guidance synthesis.',
     `Return one JSON object only using schema "${REASONER_SCHEMA}".`,
@@ -441,6 +446,8 @@ function buildReasonerPrompt({ runId, snapshotHash: sourceSnapshotHash, footprin
     `Run id: ${runId}`,
     `Snapshot hash: ${sourceSnapshotHash}`,
     `Footprint: ${footprint}`,
+    `Story form: ${JSON.stringify(normalizedStoryForm)}`,
+    storyFormInstruction(normalizedStoryForm),
     `Behavior policy:\n${behaviorComposerLines(behaviorPolicy).join('\n')}`,
     `Current guidance:\n${safeText(guidance?.text || '', MAX_GUIDANCE_TEXT)}`,
     `Selected raw cards:\n${JSON.stringify(cards.map((card) => promptCard(card)), null, 2)}`
@@ -530,7 +537,8 @@ export async function composeGuidanceForCards({
   activity = null,
   onActivity = null,
   runId = makeId('prompt-run'),
-  precomposedGuidance = null
+  precomposedGuidance = null,
+  storyForm = UNKNOWN_STORY_FORM
 } = {}) {
   const cards = Array.isArray(inputCards) ? inputCards.map((card, index) => normalizeCard(card, index)).filter((card) => card.promptText) : normalizeCards(hand);
   const sourceSnapshotHash = snapshotHash(snapshot);
@@ -545,7 +553,8 @@ export async function composeGuidanceForCards({
       runId: promptRunId,
       snapshotHash: sourceSnapshotHash,
       cards,
-      behaviorPolicy: policy
+      behaviorPolicy: policy,
+      storyForm
     });
     const result = await generationRouter.generate('guidanceComposer', {
       lane: 'utility',
@@ -581,7 +590,8 @@ async function applyReasonerGuidance({
   behaviorPolicy,
   settings,
   generationRouter,
-  activity
+  activity,
+  storyForm = UNKNOWN_STORY_FORM
 }) {
   const runId = packet.diagnostics.runId;
   const allowedIds = new Set(cards.map((card) => card.id));
@@ -592,7 +602,8 @@ async function applyReasonerGuidance({
       footprint: packet.footprint,
       cards,
       guidance: packet.guidance,
-      behaviorPolicy
+      behaviorPolicy,
+      storyForm
     });
     const result = await generationRouter.generate('reasonerComposer', {
       lane: 'reasoner',
@@ -627,7 +638,7 @@ async function applyReasonerGuidance({
     const guidanceText = safeText(`${packet.guidance.text}\n${reasonerLine}`, MAX_GUIDANCE_TEXT);
     const sections = {
       ...packet.sections,
-      guidance: buildGuidanceSection({ ...packet.guidance, text: guidanceText })
+      guidance: buildGuidanceSection({ ...packet.guidance, text: guidanceText }, storyForm)
     };
     const injectionPlan = packet.injectionPlan.map((block) => block.id === 'guidance'
       ? { ...block, sourceIds: uniqueStrings([...(block.sourceIds || []), ...validated.keptCardIds]) }
@@ -666,11 +677,11 @@ async function applyReasonerGuidance({
   }
 }
 
-function buildGuidanceSection(guidance) {
+function buildGuidanceSection(guidance, storyForm = UNKNOWN_STORY_FORM) {
   const text = safeText(guidance?.text, MAX_GUIDANCE_TEXT);
   return [
     'Private Recursion guidance for the next assistant message.',
-    'Write the next reply as normal story prose/dialogue.',
+    storyFormInstruction(storyForm),
     'Guidance:',
     text || 'Guidance unavailable; use the raw Recursion card evidence directly.'
   ].join('\n');
@@ -698,9 +709,12 @@ function baseDiagnostics({
   omissions,
   behaviorPolicy = null,
   guidance,
+  storyForm = UNKNOWN_STORY_FORM,
   pipelineMode = 'standard',
-  rapidPath = ''
+  rapidPath = '',
+  planDiagnostics = []
 }) {
+  const normalizedStoryForm = normalizeStoryForm(storyForm);
   return {
     runId,
     composerLane: guidance?.status === 'used' ? 'guidance' : 'utility',
@@ -721,6 +735,10 @@ function baseDiagnostics({
     footprint,
     pipelineMode,
     rapidPath,
+    planDiagnostics: uniqueStrings(planDiagnostics).slice(0, 24),
+    storyFormTense: normalizedStoryForm.tense,
+    storyFormPov: normalizedStoryForm.pov,
+    storyFormConfidence: normalizedStoryForm.confidence,
     behaviorPolicy: summarizeBehaviorPolicyForDiagnostics(behaviorPolicy, {
       effectiveFootprint: footprint,
       selectedFamilies: cards.map((card) => card.family)
@@ -752,11 +770,14 @@ function buildPacket({
   injectionSettings,
   behaviorPolicy,
   diagnostics,
+  planDiagnostics,
   composedAt,
+  storyForm = UNKNOWN_STORY_FORM,
   pipelineMode = 'standard',
   rapidPath = ''
 }) {
   const sourceSnapshotHash = snapshotHash(snapshot);
+  const normalizedStoryForm = normalizeStoryForm(storyForm);
   return withSectionHashes({
     packetId,
     packetVersion: PACKET_VERSION,
@@ -767,6 +788,7 @@ function buildPacket({
     turnFingerprint: snapshotField(snapshot, 'turnFingerprint'),
     footprint,
     pipelineMode,
+    storyForm: normalizedStoryForm,
     guidance: {
       schema: GUIDANCE_SCHEMA,
       status: guidance.status,
@@ -794,8 +816,10 @@ function buildPacket({
       omissions,
       behaviorPolicy,
       guidance,
+      storyForm: normalizedStoryForm,
       pipelineMode,
-      rapidPath
+      rapidPath,
+      planDiagnostics
     }),
     composedAt
   });
@@ -811,10 +835,13 @@ export async function composePromptPacket({
   onActivity = null,
   runId = makeId('prompt-run'),
   precomposedGuidance = null,
+  storyForm = UNKNOWN_STORY_FORM,
   pipelineMode = 'standard',
-  rapidPath = ''
+  rapidPath = '',
+  planDiagnostics = []
 } = {}) {
   const policy = behaviorPolicyFrom(settings, behaviorPolicy);
+  const normalizedStoryForm = normalizeStoryForm(storyForm);
   const footprint = footprintForPolicy(settings, policy);
   const budgets = budgetsForPolicy(policy, footprint);
   const injectionSettings = normalizeInjectionSettings(settings?.injection);
@@ -836,11 +863,12 @@ export async function composePromptPacket({
     activity,
     onActivity,
     runId: promptRunId,
-    precomposedGuidance
+    precomposedGuidance,
+    storyForm: normalizedStoryForm
   });
 
   const sections = {
-    guidance: buildGuidanceSection(guidance),
+    guidance: buildGuidanceSection(guidance, normalizedStoryForm),
     cardEvidence: evidence.text,
     guardrails: guardrails.text
   };
@@ -862,7 +890,9 @@ export async function composePromptPacket({
     sectionSources,
     injectionSettings,
     behaviorPolicy: policy,
+    planDiagnostics,
     composedAt,
+    storyForm: normalizedStoryForm,
     pipelineMode,
     rapidPath
   });
@@ -875,7 +905,8 @@ export async function composePromptPacket({
       behaviorPolicy: policy,
       settings,
       generationRouter,
-      activity: activity || onActivity
+      activity: activity || onActivity,
+      storyForm: normalizedStoryForm
     });
   }
   validatePromptPacket(packet);

@@ -204,6 +204,27 @@ assert(requests[0].prompt.includes('Return one JSON object'), 'request prompt as
 assert(requests[0].prompt.includes('Envelope role must be "sceneFrameCard"'), 'request prompt requires envelope role echo');
 assert(requests[0].prompt.includes('Envelope family must be "Scene Frame"'), 'request prompt requires envelope family echo');
 assert(requests[0].prompt.includes('Envelope snapshotHash must be "hash"'), 'request prompt requires envelope snapshot hash echo');
+const storyFormRequest = buildCardRequests({
+  cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve narrative form.' }]
+}, {
+  runId: 'story-form-card-run',
+  snapshotHash: 'story-form-card-hash',
+  snapshot: {},
+  storyForm: {
+    schema: 'recursion.storyForm.v1',
+    tense: 'past',
+    pov: 'third-person-limited',
+    confidence: 'high',
+    evidenceRefs: ['message:7'],
+    reason: 'Assistant narration establishes form.'
+  }
+})[0];
+assertEqual(storyFormRequest.storyForm.tense, 'past', 'card request metadata carries story tense');
+assertEqual(storyFormRequest.storyForm.pov, 'third-person-limited', 'card request metadata carries story pov');
+assert(storyFormRequest.prompt.includes('Story form contract for card promptText:'), 'card prompt includes story form block');
+assert(storyFormRequest.prompt.includes('Target tense: past.'), 'card prompt includes target tense');
+assert(storyFormRequest.prompt.includes('Target POV: third-person-limited.'), 'card prompt includes target pov');
+assert(storyFormRequest.prompt.includes('Do not switch to first person'), 'card prompt warns against POV drift');
 const motivationRequest = buildCardRequests({ cardJobs: [{ family: 'Character Motivation' }] }, {
   runId: 'run',
   snapshotHash: 'hash'
@@ -846,6 +867,7 @@ const sourceWindowCards = cardsFromProviderResult({
   expectedFamily: 'Scene Frame'
 });
 assertEqual(sourceWindowCards.length, 1, 'provider card with evidence inside frozen source window accepted');
+assertDeepEqual(sourceWindowCards[0].evidenceRefs, ['message:1', 'message:2'], 'provider card keeps in-window evidence refs');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
@@ -866,7 +888,7 @@ assertEqual(cardsFromProviderResult({
   expectedRole: 'sceneFrameCard',
   expectedFamily: 'Scene Frame'
 }).length, 1, 'provider card with nullish source bounds keeps old no-window behavior');
-assertEqual(cardsFromProviderResult({
+const repairedOutOfWindowCards = cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
   data: {
@@ -874,7 +896,7 @@ assertEqual(cardsFromProviderResult({
     role: 'sceneFrameCard',
     family: 'Scene Frame',
     snapshotHash: 'request-frozen-hash',
-    items: [{ promptText: 'Out-of-window evidence must be ignored.', evidenceRefs: ['message:99'] }]
+    items: [{ promptText: 'Out-of-window message evidence repairs to the active source window.', evidenceRefs: ['message:99'] }]
   }
 }, {
   sceneId: 'scene-provider',
@@ -885,7 +907,9 @@ assertEqual(cardsFromProviderResult({
   expectedSnapshotHash: 'request-frozen-hash',
   expectedRole: 'sceneFrameCard',
   expectedFamily: 'Scene Frame'
-}).length, 0, 'provider card with evidence outside frozen source window ignored');
+});
+assertEqual(repairedOutOfWindowCards.length, 1, 'provider card with only out-of-window message refs repairs to active source window');
+assertDeepEqual(repairedOutOfWindowCards[0].evidenceRefs, ['message:2'], 'out-of-window provider message refs repair to latest source-window message');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
@@ -963,6 +987,25 @@ assertEqual(cardsFromProviderResult({
     items: [{ promptText: 'Missing message evidence should be ignored.', evidenceRefs: ['source:8'] }]
   }
 }, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider card without message evidence ignored');
+const repairedEvidenceCards = cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'hash-provider',
+    items: [{ promptText: 'Missing evidence refs are repaired from the active source window.' }]
+  }
+}, {
+  snapshotHash: 'hash-provider',
+  expectedRole: 'sceneFrameCard',
+  expectedFamily: 'Scene Frame',
+  firstMesId: 7,
+  lastMesId: 8
+});
+assertEqual(repairedEvidenceCards.length, 1, 'provider card without evidence refs accepted when active source window is known');
+assertDeepEqual(repairedEvidenceCards[0].evidenceRefs, ['message:8'], 'missing provider evidence refs repair to latest source-window message');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',

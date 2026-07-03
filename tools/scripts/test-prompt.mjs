@@ -98,6 +98,14 @@ const packet = await composePromptPacket({
   snapshot,
   settings: { promptFootprint: 'normal', reasonerUse: 'off' },
   behaviorPolicy: influencePolicyForSettings({ strength: 'balanced', focus: 'balanced', promptFootprint: 'normal' }),
+  storyForm: {
+    schema: 'recursion.storyForm.v1',
+    tense: 'past',
+    pov: 'third-person-limited',
+    confidence: 'high',
+    evidenceRefs: ['message:913'],
+    reason: 'Assistant narration establishes form.'
+  },
   generationRouter: {
     async generate(roleId, request) {
       guidanceCalls.push({ roleId, request });
@@ -123,7 +131,12 @@ assertEqual(packet.diagnostics.guidanceStatus, 'used', 'valid provider guidance 
 assertEqual(packet.diagnostics.composerLane, 'guidance', 'guidance composer lane is recorded');
 assert(packet.sections.guidance.includes('GUIDANCE_MARKER'), 'provider guidance is injected');
 assert(packet.sections.guidance.includes('Private Recursion guidance for the next assistant message.'), 'guidance section frames guidance as private response context');
-assert(packet.sections.guidance.includes('Write the next reply as normal story prose/dialogue.'), 'guidance section tells the final model to keep normal output shape');
+assert(packet.sections.guidance.includes('Write the next reply in past tense, third-person-limited POV.'), 'guidance section names target story form');
+assert(!packet.sections.guidance.includes('normal story prose/dialogue'), 'generic story-prose line is removed');
+assertEqual(packet.storyForm.tense, 'past', 'packet stores story tense');
+assertEqual(packet.storyForm.pov, 'third-person-limited', 'packet stores story pov');
+assertEqual(packet.diagnostics.storyFormTense, 'past', 'packet diagnostics store story tense');
+assertEqual(packet.diagnostics.storyFormPov, 'third-person-limited', 'packet diagnostics store story pov');
 assert(packet.sections.cardEvidence.includes('Private Recursion card evidence for the next assistant message.'), 'card evidence section frames raw cards as private response context');
 assert(packet.sections.cardEvidence.includes('Use these cards silently as evidence.'), 'card evidence section tells the final model to use raw cards silently');
 assert(packet.sections.guardrails.includes('Write only the next assistant message; keep Recursion cards, labels, and guidance invisible.'), 'guardrails keep Recursion internals out of final output');
@@ -137,6 +150,7 @@ assert(!JSON.stringify(packet.sections).includes('Scene brief:'), 'old scene bri
 assert(!JSON.stringify(packet.sections).includes('Turn brief:'), 'old turn brief header is removed');
 assertEqual(guidanceCalls[0].roleId, 'guidanceComposer', 'guidance composer provider role is called');
 assert(guidanceCalls[0].request.prompt.includes('SOCIAL_SUBTEXT_MARKER'), 'guidance composer sees full raw cards');
+assert(guidanceCalls[0].request.prompt.includes('past tense, third-person-limited POV'), 'guidance composer prompt includes story form');
 assert(guidanceCalls[0].request.prompt.includes('recursion.guidanceComposer.v1'), 'guidance composer prompt names schema');
 assertNoPrivateFields(packet, 'packet excludes private hand and card fields');
 assertNoPrivateFields(guidanceCalls[0].request.prompt, 'guidance prompt excludes private card fields');
@@ -168,6 +182,23 @@ for (const block of blocks) {
   assert(block.text, `${block.id} has text`);
   assertEqual(block.hash, hashJson(block.text), `${block.id} hash matches text`);
 }
+
+const unknownFormPacket = await composePromptPacket({
+  runId: 'unknown-story-form-run',
+  hand: markerHand({ omitted: [] }),
+  snapshot: baseSnapshot(),
+  settings: { promptFootprint: 'normal', reasonerUse: 'off' },
+  storyForm: {
+    schema: 'recursion.storyForm.v1',
+    tense: 'unknown',
+    pov: 'unknown',
+    confidence: 'low',
+    evidenceRefs: [],
+    reason: 'story form unavailable'
+  },
+  generationRouter: null
+});
+assert(unknownFormPacket.sections.guidance.includes("active chat's established story form"), 'unknown story form uses conservative guidance text');
 
 const rawOnlyPacket = await composePromptPacket({
   hand: markerHand(),

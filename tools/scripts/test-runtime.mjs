@@ -168,6 +168,14 @@ function rapidWarmCacheFixture({ cardId = 'warm-card-1', baseSourceRevisionHash 
             omittedCardIds: [],
             diagnostics: ['warm-guidance']
           },
+          storyForm: {
+            schema: 'recursion.storyForm.v1',
+            tense: 'past',
+            pov: 'third-person-limited',
+            confidence: 'high',
+            evidenceRefs: ['message:2'],
+            reason: 'Warm assistant narration establishes form.'
+          },
           settingsHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).settingsHash,
           providerContractHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).providerContractHash,
           cardCatalogHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).cardCatalogHash,
@@ -368,6 +376,14 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
               action: 'refresh-cards',
               sceneStatus: 'same-scene',
               promptFootprint: 'normal',
+              storyForm: {
+                schema: 'recursion.storyForm.v1',
+                tense: 'past',
+                pov: 'third-person-limited',
+                confidence: 'high',
+                evidenceRefs: ['message:2'],
+                reason: 'Warm assistant narration establishes form.'
+              },
               cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Warm scene frame.' }],
               reasonerDecision: { mode: 'skip', reason: 'background warm', signals: [] },
               budgets: { targetBriefTokens: 500, maxCards: 4 },
@@ -404,6 +420,8 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assertEqual(variant.rapid.status, 'ready', 'Rapid warm artifact is ready');
   assertEqual(variant.rapid.pipelineVersion, 2, 'Rapid warm artifact uses v2');
   assert(variant.rapid.guidance.text.includes('GUIDANCE_MARKER'), 'Rapid warm stores provider guidance');
+  assertEqual(variant.rapid.storyForm.tense, 'past', 'Rapid warm stores story tense');
+  assertEqual(variant.rapid.storyForm.pov, 'third-person-limited', 'Rapid warm stores story pov');
   assertDeepEqual(variant.rapid.selectedCardIds, variant.latestHand.cardIds, 'Rapid warm stores selected card ids');
   assert(!Object.prototype.hasOwnProperty.call(variant.rapid, 'conditionedSceneBrief'), 'Rapid warm no longer stores conditionedSceneBrief');
   assertEqual(harness.installed.length, 0, 'Rapid warm does not install prompt');
@@ -454,11 +472,14 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assertEqual(harness.installed.length, 1, 'Rapid foreground installs one prompt packet');
   assert(rapidTurnDeltaRequest.prompt.includes('The hatch stays sealed until opened.'), 'Rapid foreground receives full raw selected cards');
   assert(rapidTurnDeltaRequest.prompt.includes('Warm provider guidance.'), 'Rapid foreground receives warm guidance');
+  assert(rapidTurnDeltaRequest.prompt.includes('past tense, third-person-limited POV'), 'Rapid foreground receives story form');
   assert(result.packet.sections.guidance.includes('Warm provider guidance.'), 'Rapid packet includes warm guidance');
   assert(result.packet.sections.guidance.includes('TURN_GUIDANCE_MARKER'), 'Rapid packet includes turn guidance');
   assert(result.packet.sections.cardEvidence.includes('The hatch stays sealed until opened.'), 'Rapid packet includes full raw card evidence');
   assertEqual(result.packet.diagnostics.pipelineMode, 'rapid', 'Rapid packet records Rapid pipeline');
   assertEqual(result.packet.diagnostics.rapidPath, 'warm-v2', 'Rapid packet records warm-v2 path');
+  assertEqual(result.packet.storyForm.tense, 'past', 'Rapid packet stores warm story tense');
+  assertEqual(result.packet.storyForm.pov, 'third-person-limited', 'Rapid packet stores warm story pov');
   assertNoSecretText(result.packet, 'Rapid packet');
 }
 
@@ -517,7 +538,10 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
   const adapter = createMemoryStorageAdapter();
   const storage = createStorageRepository({ storage: adapter });
-  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash }));
+  const warmCache = rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash });
+  warmCache.variants[baseSourceRevisionHash].cards[0].source.firstMesId = 0;
+  warmCache.variants[baseSourceRevisionHash].cards[0].source.lastMesId = 2;
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, warmCache);
   const harness = createRuntimeHarness({
     settings: { pipelineMode: 'rapid', mode: 'auto' },
     snapshot,
@@ -721,6 +745,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assert(cache.cards.length >= 2, 'scene cache persists fallback cards');
   assertEqual(cache.versions.cardCatalogHash, hashJson(CARD_CATALOG), 'scene cache records card catalog hash');
   assertEqual(cache.versions.promptPacketVersion, 3, 'scene cache records prompt packet contract version');
+  assert(cache.versions.promptContractHash, 'scene cache records prompt contract hash');
+  assertEqual(cache.versions.promptContractHash, cacheContractVersions(view.settings).promptContractHash, 'scene cache prompt contract hash matches current prompt contract');
   assertEqual(cache.versions.runtimeCacheContractVersion, 1, 'scene cache records runtime cache contract version');
   assertEqual(cache.versions.settingsHash, cacheContractVersions(view.settings).settingsHash, 'scene cache records current settings hash');
   assertEqual(cache.versions.providerContractHash, cacheContractVersions(view.settings).providerContractHash, 'scene cache records provider contract hash');
@@ -3325,6 +3351,97 @@ for (const scenario of [
 }
 
 {
+  const arbiterPrompts = [];
+  const guidancePrompts = [];
+  const cardPrompts = [];
+  const storySnapshot = {
+    chatId: 'story-form-chat',
+    chatKey: 'story-form-chat',
+    sceneKey: 'story-form-scene',
+    sceneFingerprint: 'story-form-scene',
+    turnFingerprint: 'story-form-turn',
+    latestMesId: 3,
+    messages: [
+      { mesid: 1, role: 'user', text: 'I open the hatch.', visible: true },
+      { mesid: 2, role: 'assistant', text: 'Mara stepped through the hatch and kept her hand on the rail.', visible: true },
+      { mesid: 3, role: 'user', text: 'I ask what she sees.', visible: true }
+    ]
+  };
+  const { runtime } = createRuntimeHarness({
+    snapshot: storySnapshot,
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          arbiterPrompts.push(request.prompt);
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              storyForm: {
+                schema: 'recursion.storyForm.v1',
+                tense: 'past',
+                pov: 'third-person-limited',
+                confidence: 'high',
+                evidenceRefs: ['message:2'],
+                reason: 'Latest assistant narration is past-tense third person.'
+              },
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Check story form.' }],
+              reasonerDecision: { mode: 'skip', reason: 'unit story form', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['story-form-arbiter']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') {
+          cardPrompts.push(request.prompt);
+          return cardProviderResponse(roleId, request);
+        }
+        if (roleId === 'guidanceComposer') {
+          guidancePrompts.push(request.prompt);
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Keep the response in past tense third-person limited form.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['story-form-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'I ask what she sees.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'story form run installs');
+  assert(arbiterPrompts[0].includes('latest visible assistant narration first'), 'Arbiter prompt includes assistant-first story form rule');
+  assert(arbiterPrompts[0].includes('"storyForm"'), 'Arbiter output contract requires storyForm');
+  assertDeepEqual(result.plan.storyForm, {
+    schema: 'recursion.storyForm.v1',
+    tense: 'past',
+    pov: 'third-person-limited',
+    confidence: 'high',
+    evidenceRefs: ['message:2'],
+    reason: 'Latest assistant narration is past-tense third person.'
+  }, 'valid Arbiter story form enters plan');
+  assert(cardPrompts[0].includes('Target tense: past.'), 'card prompt receives story tense');
+  assert(cardPrompts[0].includes('Target POV: third-person-limited.'), 'card prompt receives story pov');
+  assert(guidancePrompts[0].includes('past tense, third-person-limited POV'), 'guidance composer receives story form');
+  assertEqual(view.lastPacket.storyForm.tense, 'past', 'packet stores story tense');
+  assertEqual(view.lastPacket.storyForm.pov, 'third-person-limited', 'packet stores story pov');
+  assert(view.lastPacket.sections.guidance.includes('past tense, third-person-limited POV'), 'installed guidance names story form');
+}
+
+{
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
@@ -3365,7 +3482,7 @@ for (const scenario of [
   assertEqual(result.plan.nested, undefined, 'result plan drops arbitrary top-level nested object');
   assertEqual(result.plan.cardJobs[0].extraJobField, undefined, 'result plan drops arbitrary card job fields');
   assertEqual(result.plan.reasonerDecision.extraDecisionField, undefined, 'result plan drops arbitrary reasoner decision fields');
-  assertDeepEqual(Object.keys(result.plan).sort(), ['action', 'budgets', 'cardJobs', 'diagnostics', 'lifecycle', 'promptFootprint', 'reasonerDecision', 'sceneStatus', 'schema', 'snapshotHash', 'source'].sort(), 'result plan only exposes whitelisted fields');
+  assertDeepEqual(Object.keys(result.plan).sort(), ['action', 'budgets', 'cardJobs', 'diagnostics', 'lifecycle', 'promptFootprint', 'reasonerDecision', 'sceneStatus', 'schema', 'snapshotHash', 'source', 'storyForm'].sort(), 'result plan only exposes whitelisted fields');
   assert(result.plan.diagnostics.includes('safe-diagnostic'), 'safe diagnostics survive plan scrub');
   assert(result.plan.reasonerDecision.signals.includes('safe-signal'), 'safe reasoner signals survive plan scrub');
   assert(result.plan.reasonerDecision.signals.every((signal) => typeof signal === 'string'), 'reasoner signals normalize to strings');

@@ -1,4 +1,5 @@
 import { hashJson } from './core.mjs';
+import { normalizeStoryForm, storyFormInstruction } from './story-form.mjs';
 
 export const RAPID_PIPELINE_VERSION = 2;
 export const RAPID_TURN_DELTA_SCHEMA = 'recursion.rapidTurnDelta.v2';
@@ -79,9 +80,16 @@ function guidanceIsUsable(guidance = {}) {
     && ['used', 'missing', 'fallback-raw-only'].includes(cleanText(source.status || 'used', 80));
 }
 
+function storyFormKey(value = {}) {
+  const form = normalizeStoryForm(value);
+  return [form.tense, form.pov, form.confidence].join('|');
+}
+
 export function rapidWarmArtifactIsUsable(artifact = {}, expected = {}) {
   const source = asObject(artifact);
   const required = asObject(expected);
+  const sourceStoryForm = normalizeStoryForm(source.storyForm);
+  const expectedStoryForm = required.storyForm ? normalizeStoryForm(required.storyForm) : null;
   return source.pipelineVersion === RAPID_PIPELINE_VERSION
     && source.status === 'ready'
     && cleanText(source.baseSourceRevisionHash, 180) === cleanText(required.baseSourceRevisionHash, 180)
@@ -93,11 +101,15 @@ export function rapidWarmArtifactIsUsable(artifact = {}, expected = {}) {
     && source.selectedCardIds.length > 0
     && Array.isArray(source.cardIds)
     && source.cardIds.length > 0
+    && sourceStoryForm.tense !== 'unknown'
+    && sourceStoryForm.pov !== 'unknown'
+    && (!expectedStoryForm || storyFormKey(sourceStoryForm) === storyFormKey(expectedStoryForm))
     && guidanceIsUsable(source.guidance);
 }
 
 export function buildRapidTurnDeltaPrompt(input = {}) {
   const source = asObject(input);
+  const storyForm = normalizeStoryForm(source.storyForm || asObject(source.warmArtifact).storyForm);
   const selectedCards = Array.isArray(source.selectedCards)
     ? source.selectedCards
     : (Array.isArray(source.candidateCards) ? source.candidateCards : []);
@@ -108,6 +120,8 @@ export function buildRapidTurnDeltaPrompt(input = {}) {
     `Base source revision hash: ${cleanText(source.baseSourceRevisionHash, 180)}`,
     `Turn source revision hash: ${cleanText(source.turnSourceRevisionHash, 180)}`,
     'Given the warm provider-authored guidance, full selected raw cards, and the latest user message, select the cards and write turn guidance for this reply.',
+    storyFormInstruction(storyForm),
+    `Story form: ${JSON.stringify(storyForm)}`,
     'Do not invent cards. Missing non-mandatory cards should become backgroundRefreshRequests.',
     'Set escalateToStandard true only when a missing card is mandatory for safe or coherent response guidance.',
     'Required fields: schema, snapshotHash, baseSourceRevisionHash, turnSourceRevisionHash, selectedCardIds, turnGuidanceText, guardrailCardIds, packetInstructions, backgroundRefreshRequests, mandatoryMissingCards, escalateToStandard, diagnostics.',
@@ -148,6 +162,7 @@ export function rapidArtifactHash(artifact = {}) {
     baseSourceRevisionHash: artifact.baseSourceRevisionHash,
     selectedCardIds: artifact.selectedCardIds,
     cardIds: artifact.cardIds,
+    storyForm: normalizeStoryForm(artifact.storyForm),
     guidance: artifact.guidance
   });
 }

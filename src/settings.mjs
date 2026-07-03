@@ -54,7 +54,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
       openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
       temperature: 0.1,
       topP: 0.95,
-      maxTokens: 4096,
+      maxTokens: 8192,
       lastTest: { status: 'not-run' }
     },
     reasoner: {
@@ -65,7 +65,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
       openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
       temperature: 0.4,
       topP: 0.95,
-      maxTokens: 4096,
+      maxTokens: 8192,
       lastTest: { status: 'not-run' }
     }
   },

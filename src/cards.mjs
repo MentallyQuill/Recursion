@@ -2,6 +2,7 @@ import { compact, hashJson, makeId, nowIso, redact, safeId, truncate } from './c
 import { CARD_SCOPE_CATALOG } from './card-scope.mjs';
 import { UTILITY_ROLE_IDS } from './providers.mjs';
 import { summarizeBehaviorPolicyForDiagnostics } from './settings-policy.mjs';
+import { UNKNOWN_STORY_FORM, normalizeStoryForm, storyFormPromptBlock } from './story-form.mjs';
 
 const TEXT_LIMIT = 1000;
 const CARD_TEXT_LIMIT = Infinity;
@@ -490,6 +491,29 @@ function hasValidMessageEvidenceRefs(value, context = {}) {
   return refs.every((entry) => entry >= minMesId && entry <= maxMesId);
 }
 
+function sourceWindowFallbackEvidenceRefs(context = {}) {
+  const lastMesId = optionalNumber(context.lastMesId);
+  const firstMesId = optionalNumber(context.firstMesId);
+  const fallback = lastMesId ?? firstMesId;
+  if (!Number.isSafeInteger(fallback)) return null;
+  return [`message:${fallback}`];
+}
+
+function repairProviderEvidenceRefs(value, context = {}) {
+  const entries = evidenceRefEntries(value);
+  const fallback = sourceWindowFallbackEvidenceRefs(context);
+  if (entries.length === 0) return fallback || value;
+  const refs = messageEvidenceRefs(entries);
+  if (refs.length !== entries.length) return value;
+  if (hasValidMessageEvidenceRefs(entries, context)) return value;
+  const firstMesId = optionalNumber(context.firstMesId);
+  const lastMesId = optionalNumber(context.lastMesId);
+  const minMesId = firstMesId ?? 0;
+  const maxMesId = lastMesId ?? Number.MAX_SAFE_INTEGER;
+  if (refs.some((entry) => entry >= minMesId && entry <= maxMesId)) return value;
+  return fallback || value;
+}
+
 function assertCardPromptTextSafe(catalog, promptText) {
   for (const pattern of CARD_FORBIDDEN_PATTERNS) {
     if (pattern.test(promptText)) {
@@ -777,6 +801,7 @@ export function buildCardRequests(plan = {}, context = {}) {
       const selectedSubItems = Array.isArray(context.cardScope?.selectedSubItemsByFamily?.[catalog.family])
         ? context.cardScope.selectedSubItemsByFamily[catalog.family].map((item) => String(item))
         : [];
+      const storyForm = normalizeStoryForm(context.storyForm || UNKNOWN_STORY_FORM);
       return {
         roleId: catalog.role,
         runId: cleanProviderPromptText(context.runId ?? source.runId ?? '', TEXT_LIMIT),
@@ -785,9 +810,11 @@ export function buildCardRequests(plan = {}, context = {}) {
           family: catalog.family,
           selectedSubItems
         },
+        storyForm,
         prompt: [
           `Create one compact ${catalog.family} card for the current scene.`,
           cardScopePromptBlock(catalog, selectedSubItems),
+          storyFormPromptBlock(storyForm),
           refreshOfCardId ? `Refreshes cached card: ${refreshOfCardId}` : '',
           'Return one JSON object only. Do not wrap it in markdown.',
           'The JSON object must use schema "recursion.card.v1" and an "items" array with one card object.',
@@ -808,7 +835,12 @@ export function buildCardRequests(plan = {}, context = {}) {
           catalogKey: safeId(catalog.family),
           priority: catalog.priority,
           reason,
-          ...(refreshOfCardId ? { refreshOfCardId } : {})
+          ...(refreshOfCardId ? { refreshOfCardId } : {}),
+          storyForm: {
+            tense: storyForm.tense,
+            pov: storyForm.pov,
+            confidence: storyForm.confidence
+          }
         }
       };
     })
@@ -829,14 +861,15 @@ export function cardsFromProviderResult(result, context = {}) {
   return items.flatMap((item) => {
     const source = asObject(item);
     if (!itemMatchesProviderCatalog(source, catalog)) return [];
-    if (!hasValidMessageEvidenceRefs(source.evidenceRefs ?? source.evidence, context)) return [];
+    const evidenceRefs = repairProviderEvidenceRefs(source.evidenceRefs ?? source.evidence, context);
+    if (!hasValidMessageEvidenceRefs(evidenceRefs, context)) return [];
     try {
       return [normalizeCard({
         ...source,
         role: catalog.role,
         family: catalog.family,
         promptText: source.promptText ?? source.text ?? source.claim,
-        evidenceRefs: source.evidenceRefs ?? source.evidence,
+        evidenceRefs,
         tokenEstimate: source.tokenEstimate ?? source.tokenCost,
         inspectorNotes: source.inspectorNotes
       }, context)];

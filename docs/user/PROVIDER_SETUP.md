@@ -16,7 +16,7 @@ Each lane can use one provider source when the host supports it.
 | Source | Use When | Notes |
 | --- | --- | --- |
 | Current Host Model | You want Recursion to use the model currently active in SillyTavern. | Smallest setup surface. Availability depends on host APIs. |
-| Host Connection Profile | You want Recursion to use a saved SillyTavern connection profile. | Recursion lists detected host profiles from SillyTavern profile/connection seams without scanning character cards or Recursion cards. If the host cannot expose profiles, the selector should be unavailable with a clear status. |
+| Host Connection Profile | You want Recursion to use a saved SillyTavern connection profile. | Recursion lists detected host profiles from SillyTavern profile/connection seams without scanning character cards or Recursion cards. Type in the Profile box to filter long profile lists, then choose a listed profile to save it. If the host cannot expose profiles, the Profile box should be unavailable with a clear status. |
 | OpenAI-Compatible Endpoint | You want a direct endpoint with base URL, model, and session API key. | Use `Fetch Models` to query `/models`. Session key is memory-only and must be re-entered after session loss. |
 
 ## Utility Setup
@@ -26,10 +26,10 @@ Each lane can use one provider source when the host supports it.
 3. Select the `Utility` provider card.
 4. Choose a provider source.
 5. Fill the required fields for that source.
-6. For Host Connection Profile, select one of the saved SillyTavern profiles from the profile selector.
+6. For Host Connection Profile, type in the Profile box to filter saved SillyTavern profiles, then select one of the listed profiles.
 7. For OpenAI-compatible endpoints, enter base URL and session API key, then use `Fetch Models` if the endpoint exposes a model list.
 8. Select a fetched model or type the model id manually.
-9. Adjust temperature, top-p, and max tokens only when needed.
+9. Adjust temperature, top-p, and max tokens only when needed. Utility and Reasoner default to `8192` max tokens.
 10. Run `Test Provider`.
 
 Utility is healthy when the test passes and the bar or provider card shows a ready state. If Utility is missing or unhealthy, Recursion may reuse valid cache, skip injection, or continue without Recursion guidance.

@@ -399,7 +399,7 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
               <label>Model<input placeholder="model"></label>
               <label>Session Key<input type="password" placeholder="Session API key"></label>
             </div>
-            <label>Max Tokens<input type="number" value="4096"></label>
+            <label>Max Tokens<input type="number" value="8192"></label>
           </div>
           <div class="provider-actions"><button>Test Provider</button></div>
         </div>

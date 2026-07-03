@@ -16,6 +16,8 @@ Example: if Hermione is walking on the first floor of Hogwarts near the library,
 
 The Utility Arbiter is the primary decision engine for card utility. It makes model-mediated decisions about what to create, keep, stow, discard, regenerate, select, and emphasize. Runtime code may enforce schemas, token budgets, freshness caps, source ranges, and state transitions, but it should not replace the Arbiter with brittle deterministic semantic relevance scoring.
 
+The Utility Arbiter also determines the active story form for the scene. Story form is the current tense and point of view inferred from the latest visible assistant narration first, with the pending user message used only when no assistant narration exists. Runtime validates that `storyForm` and passes it to card generation, guidance composition, and Rapid artifacts so raw card evidence does not introduce conflicting tense or POV.
+
 Related design docs:
 
 - [Product Scope](RECURSION_PRODUCT_SCOPE.md)

@@ -48,6 +48,7 @@ Required fields:
 - `turnFingerprint`: current turn identity used to avoid stale installation.
 - `footprint`: `compact`, `normal`, or `rich`.
 - `sections`: model-facing guidance, card evidence, and guardrail sections.
+- `storyForm`: normalized tense and point of view from the Arbiter.
 - `selectedCardRefs`: compact internal references for selected hand items.
 - `omissions`: budget and policy omissions.
 - `injectionPlan`: lane, depth, order, and lifecycle metadata.
@@ -106,6 +107,7 @@ Core inputs:
 - card detail profile: terse, balanced, or descriptive;
 - Utility Arbiter footprint state;
 - Utility Arbiter next-turn need assessment;
+- Utility Arbiter story form for tense and point of view;
 - provider availability and Reasoner eligibility;
 - prompt environment summary, including known active external context sources when available;
 - user settings for enablement, Strength, Focus, Prompt Footprint, Reasoning Level, and diagnostics visibility;
@@ -128,6 +130,8 @@ Cards should provide structured fields plus safe `promptText`:
 - `expiresAtSceneShift`.
 
 The composer must treat cards as evidence. A high-emphasis card should usually survive into the selected hand, and selected card `promptText` survives into Card Evidence. The guidance composer controls the directional layer, not the raw evidence wording.
+
+The composer must also keep story form explicit. It receives the normalized `storyForm` from the Arbiter, passes it to `guidanceComposer` and optional `reasonerComposer`, and includes a direct Guidance instruction to write the next reply in that tense and point of view. If the story form is unknown, Guidance must tell the host model to match the active chat's established form.
 
 ## Utility Composer vs Reasoner Composer
 

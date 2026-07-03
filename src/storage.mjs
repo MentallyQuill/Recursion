@@ -1,4 +1,5 @@
 import { cloneJson, makeId, nowIso, redact, safeId } from './core.mjs';
+import { UNKNOWN_STORY_FORM, normalizeStoryForm } from './story-form.mjs';
 
 const RECURSION_VERSION = '0.1.0-pre-alpha.1';
 const MAX_JOURNAL_ENTRIES = 500;
@@ -373,6 +374,7 @@ function normalizeRapidWarmArtifact(source = {}) {
         : [],
       diagnostics: safeMetadataList(guidanceSource.diagnostics, 120, 24)
     },
+    storyForm: normalizeStoryForm(value.storyForm || UNKNOWN_STORY_FORM),
     settingsHash: safeMetadataText(value.settingsHash || '', 180, ''),
     providerContractHash: safeMetadataText(value.providerContractHash || '', 180, ''),
     cardCatalogHash: safeMetadataText(value.cardCatalogHash || '', 180, ''),

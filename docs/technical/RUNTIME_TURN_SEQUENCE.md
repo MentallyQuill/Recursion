@@ -113,9 +113,12 @@ The Utility Arbiter receives safe settings, provider health, the bounded snapsho
 - `cardJobs`: requested card roles or families
 - `reasonerDecision`: `use` or `skip` plus compact signals
 - `budgets`: target guidance tokens and max cards
+- `storyForm`: normalized tense, point of view, confidence, and message evidence for the active scene
 - `diagnostics`: compact labels
 
 Runtime includes an explicit output contract in the Arbiter prompt. The contract restates the required top-level JSON fields, the exact `schema`, and the frozen `snapshotHash`, and rejects common alternate outputs such as markdown, prose, hidden reasoning, or `lifecycleActions`. This makes the provider request, retry prompt, router validation, and fallback branch all enforce the same machine-readable shape.
+
+The Arbiter must infer `storyForm` from visible story text before card jobs run. It prioritizes the latest assistant narration because that is the host model's established output form; the pending user message is fallback evidence only when no assistant narration exists. Runtime normalizes unsupported or low-evidence output to `unknown` and uses a conservative instruction to match the active chat's established form.
 
 Runtime validates and normalizes the plan. If the Utility provider is unavailable, runtime reuses a valid cache when safe or clears Recursion injection and continues the turn without new guidance. If the Arbiter returns invalid structured output, including a missing or mismatched `snapshotHash`, runtime uses the conservative local fallback plan because the provider responded but the plan was unsafe. Rejected Arbiter card jobs, lifecycle actions, diagnostics, and Reasoner decisions are not trusted.
 
@@ -124,6 +127,8 @@ Reasoner decisions are advisory after normalization. When the Arbiter requests R
 ## Card Jobs And Deck Update
 
 Card requests are built from the Arbiter plan, the frozen snapshot, and the selected sub-item focus for each requested family. The selected focus facets are copied into the model-visible card-generation prompt with their labels and descriptions, while also remaining in safe request metadata for diagnostics. Sub-items guide what the provider should emphasize inside a family; they do not create separate card instances.
+
+Card-generation prompts receive the normalized `storyForm` block from the Arbiter. Card providers must write card prose and instructions in that same tense and point of view, or use the conservative active-chat form when the Arbiter could not identify both fields. Runtime also stores compact story-form metadata with each request for diagnostics.
 
 In Manual mode, runtime enforces the whitelist after the Arbiter returns. Disabled-family jobs are omitted before provider generation, disabled cached/provider/fallback cards are filtered before deck and hand selection, and diagnostics use compact `manual-scope-omitted:<family>` reasons without prompt text. In Auto mode, disabled focus is advisory: runtime keeps the full catalog available, but records compact exception diagnostics when an unselected critical family is used.
 

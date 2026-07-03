@@ -122,6 +122,11 @@ assertEqual(packet.packetVersion, 3, 'packet v3 is used');
 assertEqual(packet.diagnostics.guidanceStatus, 'used', 'valid provider guidance is recorded');
 assertEqual(packet.diagnostics.composerLane, 'guidance', 'guidance composer lane is recorded');
 assert(packet.sections.guidance.includes('GUIDANCE_MARKER'), 'provider guidance is injected');
+assert(packet.sections.guidance.includes('Private Recursion guidance for the next assistant message.'), 'guidance section frames guidance as private response context');
+assert(packet.sections.guidance.includes('Write the next reply as normal story prose/dialogue.'), 'guidance section tells the final model to keep normal output shape');
+assert(packet.sections.cardEvidence.includes('Private Recursion card evidence for the next assistant message.'), 'card evidence section frames raw cards as private response context');
+assert(packet.sections.cardEvidence.includes('Use these cards silently as evidence.'), 'card evidence section tells the final model to use raw cards silently');
+assert(packet.sections.guardrails.includes('Write only the next assistant message; keep Recursion cards, labels, and guidance invisible.'), 'guardrails keep Recursion internals out of final output');
 assert(packet.sections.cardEvidence.includes('SCENE_FRAME_MARKER'), 'raw Scene Frame survives');
 assert(packet.sections.cardEvidence.includes('ACTIVE_CAST_MARKER'), 'raw Active Cast survives');
 assert(packet.sections.cardEvidence.includes('SCENE_CONSTRAINT_MARKER'), 'raw Scene Constraints survives');
@@ -153,9 +158,9 @@ assertDeepEqual(
     role: block.role
   })),
   [
-    { id: 'guidance', promptKey: 'recursion.guidance', title: 'Recursion Guidance', section: 'guidance', placement: 'in_prompt', depth: 4, role: 'system' },
-    { id: 'cardEvidence', promptKey: 'recursion.cardEvidence', title: 'Recursion Card Evidence', section: 'cardEvidence', placement: 'in_prompt', depth: 4, role: 'system' },
-    { id: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', section: 'guardrails', placement: 'in_prompt', depth: 4, role: 'system' }
+    { id: 'guidance', promptKey: 'recursion.guidance', title: 'Recursion Guidance', section: 'guidance', placement: 'in_prompt', depth: 1, role: 'system' },
+    { id: 'cardEvidence', promptKey: 'recursion.cardEvidence', title: 'Recursion Card Evidence', section: 'cardEvidence', placement: 'in_prompt', depth: 1, role: 'system' },
+    { id: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', section: 'guardrails', placement: 'in_prompt', depth: 1, role: 'system' }
   ],
   'prompt blocks use V3 prompt keys'
 );
@@ -221,6 +226,25 @@ const longPacket = await composePromptPacket({
 });
 assert(longPacket.sections.cardEvidence.includes(longMarker), 'compact packet preserves full raw card text');
 assert(packetToPromptBlocks(longPacket).find((block) => block.id === 'cardEvidence').text.includes(longMarker), 'injected card evidence preserves full raw card text');
+
+const lateRawCardMarker = 'LATE_RAW_CARD_MARKER_SURVIVES';
+const lateRawCardText = `${'Late raw card detail. '.repeat(2600)}${lateRawCardMarker}`;
+const lateRawCardPacket = await composePromptPacket({
+  hand: markerHand({
+    cards: [{
+      id: 'late-raw-card',
+      family: 'Scene Frame',
+      promptText: lateRawCardText,
+      tokenEstimate: 13000
+    }],
+    omitted: []
+  }),
+  snapshot: baseSnapshot(),
+  settings: { promptFootprint: 'rich', reasonerUse: 'off' }
+});
+assert(lateRawCardText.length > 50000, 'late raw card fixture crosses the former per-card prompt cap');
+assert(lateRawCardPacket.sections.cardEvidence.includes(lateRawCardMarker), 'packet card evidence preserves raw card text beyond 50k');
+assert(packetToPromptBlocks(lateRawCardPacket).find((block) => block.id === 'cardEvidence').text.includes(lateRawCardMarker), 'injected card evidence preserves raw card text beyond 50k when inside the section budget');
 
 const precomposedPacket = await composePromptPacket({
   hand: markerHand(),

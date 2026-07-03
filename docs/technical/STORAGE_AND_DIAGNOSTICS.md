@@ -131,7 +131,7 @@ versions: {
   storageSchemaVersion: 1;
   runtimeCacheContractVersion: 1;
   cardCatalogHash: string;
-  promptPacketVersion: 1;
+  promptPacketVersion: 3;
   providerContractHash: string;
   settingsHash: string;
 }

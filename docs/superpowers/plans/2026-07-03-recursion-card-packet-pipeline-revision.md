@@ -199,8 +199,8 @@ Replace injection template with:
 
 ```js
 const INJECTION_TEMPLATE = Object.freeze([
-  Object.freeze({ id: 'guidance', promptKey: 'recursion.guidance', title: 'Recursion Guidance', placement: 'in_prompt', depth: 4, role: 'system' }),
-  Object.freeze({ id: 'cardEvidence', promptKey: 'recursion.cardEvidence', title: 'Recursion Card Evidence', placement: 'in_prompt', depth: 4, role: 'system' }),
+  Object.freeze({ id: 'guidance', promptKey: 'recursion.guidance', title: 'Recursion Guidance', placement: 'in_prompt', depth: 1, role: 'system' }),
+  Object.freeze({ id: 'cardEvidence', promptKey: 'recursion.cardEvidence', title: 'Recursion Card Evidence', placement: 'in_prompt', depth: 1, role: 'system' }),
   Object.freeze({ id: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', placement: 'in_prompt', depth: 1, role: 'system' })
 ]);
 ```

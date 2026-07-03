@@ -8,8 +8,8 @@ Recursion injects provider-authored guidance plus the full raw selected-card evi
 
 | Section | Prompt key | Placement | Purpose |
 | --- | --- | --- | --- |
-| Guidance | `recursion.guidance` | `in_prompt`, depth 4 | Provider-authored direction for how the selected evidence should shape the next generation. |
-| Card Evidence | `recursion.cardEvidence` | `in_prompt`, depth 4 | Full raw `promptText` from selected cards, grouped as evidence and preserved without semantic summarization. |
+| Guidance | `recursion.guidance` | `in_prompt`, depth 1 | Provider-authored direction for how the selected evidence should shape the next generation. |
+| Card Evidence | `recursion.cardEvidence` | `in_prompt`, depth 1 | Full raw `promptText` from selected cards, grouped as evidence and preserved without semantic summarization. |
 | Guardrails | `recursion.guardrails` | `in_prompt`, depth 1 | Compact global constraints for player intent, privacy, scope, and raw-evidence handling. |
 
 ```mermaid
@@ -47,7 +47,7 @@ Cards are normalized before composition. Unsafe evidence refs, unsupported famil
 
 ## Utility Composition
 
-Utility composition is the default path. It calls `guidanceComposer` with the selected raw cards, omitted candidates, behavior policy, and current source metadata. The provider writes guidance about how the next generation should use the evidence; runtime validates schema, source ids, hidden-reasoning language, and length before trusting it.
+Utility guidance composition is the default path. It calls `guidanceComposer` with the selected raw cards, omitted candidates, behavior policy, and current source metadata. The provider writes guidance about how the next generation should use the evidence; runtime validates schema, source ids, hidden-reasoning language, and length before trusting it.
 
 The selected raw card evidence remains model-facing even when guidance composition is unavailable. If `guidanceComposer` fails, Recursion installs a raw-card-only packet with minimal fallback guidance that tells the model to use the card evidence directly.
 
@@ -55,7 +55,7 @@ The selected raw card evidence remains model-facing even when guidance compositi
 
 Reasoner composition is optional. It runs only when settings allow it and the current footprint or Arbiter decision makes it eligible. The Reasoner receives selected cards, Utility guidance, and the frozen snapshot hash, then returns `recursion.reasonerComposer.v1` with the same `snapshotHash`, an instruction patch, and source card ids.
 
-Runtime validates the schema, echoed snapshot hash, patch text, kept ids, and dropped ids. If validation fails, if the provider fails, or if the patch cannot fit the guidance budget, the packet remains Utility-composed and diagnostics record a Reasoner fallback.
+Runtime validates the schema, echoed snapshot hash, patch text, kept ids, and dropped ids. If validation fails, if the provider fails, or if the patch cannot fit the guidance budget, the packet keeps Utility guidance plus raw selected Card Evidence and diagnostics record a Reasoner fallback.
 
 Reasoner output cannot invent lore, forward plot, hidden motives, or private analysis.
 
@@ -104,7 +104,7 @@ flowchart LR
 
 The SillyTavern adapter accepts only prompt keys starting with `recursion.` and currently installs the three V3 keys: `recursion.guidance`, `recursion.cardEvidence`, and `recursion.guardrails`. It clears known Recursion keys before install, tracks installed keys, and rolls back known keys if a partial install fails.
 
-Advanced user settings control the composed packet's effective insertion lane without changing packet content. The V1 recommended defaults are `in_prompt`, `system`, and depth `4`.
+Advanced user settings control the composed packet's effective insertion lane without changing packet content. The V1 recommended defaults are `in_prompt`, `system`, and depth `1`.
 
 - `injection.placement`: `in_prompt` or `in_chat`
 - `injection.role`: `system`, `user`, or `assistant`

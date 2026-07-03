@@ -115,25 +115,25 @@ The Utility Arbiter returns an Auto Control Plan. Runtime code treats this as ad
 
 Primary control fields:
 
-- `action`: one of `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`.
+- `action`: one of `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`. The literal `compose-brief` enum is the V1 Arbiter action name; in the current packet contract it means compose a V3 packet with Guidance, Card Evidence, and Guardrails.
 - `sceneStatus`: one of `same-scene`, `soft-shift`, `hard-shift`, or `unknown`.
 - `promptFootprint`: `compact`, `normal`, or `rich` size class for the next prompt packet.
 - `cardJobs`: bounded Utility card requests using the fixed V1 catalog.
 - `reasonerDecision`: `skip` or `use`, with compact trigger reasons and signals.
-- `budgets`: runtime-limited target brief tokens and maximum selected cards.
+- `budgets`: runtime-limited target guidance tokens and maximum selected cards.
 
 The plan may also include card lifecycle suggestions and diagnostics labels. It must not include hidden plot plans, chain-of-thought, durable canon updates, arbitrary provider endpoints, or host-specific prompt instructions that bypass the Prompt Composer.
 
 Runtime enforcement:
 
-- Invalid plans fall back to local `compose-brief`, cache reuse, or `skip`, depending on mode and cache state.
+- Invalid plans fall back to local `compose-brief` packet composition, cache reuse, or `skip`, depending on mode and cache state.
 - Token and card count caps are enforced after the Arbiter returns.
 - Runtime derives the behavior policy from Strength, Min/Max Cards, Focus, and Prompt Footprint, sends policy lines to the Arbiter, and applies mechanical shaping before cards are selected.
 - Min Cards caps Low's card count, Max Cards raises/caps Ultra's card count, and Medium/High use the floor average.
 - `promptFootprint` is sanitized to `compact`, `normal`, or `rich`, then resolved through the user's stored Prompt Footprint policy. Compact may expand only for safety or hard scene-constraint evidence, Normal may use Rich only for high-risk evidence, and Rich may still choose smaller effective packets for simple turns. The effective footprint applies only to this run and never mutates stored settings.
 - Strength changes cache/hand pressure and composer assertiveness inside the selected card budget. Focus changes soft family ordering for the hand and diagnostics, but it is not a hard whitelist.
 - Provider lane choices are resolved through the provider spec, not trusted as raw endpoints.
-- Reasoner triggers are advisory. If Reasoner is off, unavailable, too slow, or over budget, generation continues through the deterministic or Utility composer path.
+- Reasoner triggers are advisory. If Reasoner is off, unavailable, too slow, or over budget, generation continues through the deterministic or Utility guidance path.
 
 ## Plan Actions
 
@@ -145,7 +145,7 @@ Plan action controls runtime cost and cache churn.
 
 `refresh-cards` means execute the Arbiter's card jobs against the current snapshot, merge accepted cards into the scene cache, apply lifecycle decisions, then select a fresh hand.
 
-`compose-brief` means compose a packet from the current hand after any requested cache/card work. Local fallback also uses this action when the Arbiter is unavailable and safe fallback cards can be built from the snapshot.
+`compose-brief` means compose a V3 packet from the current hand after any requested cache/card work. Local fallback also uses this action when the Arbiter is unavailable and safe fallback cards can be built from the snapshot.
 
 Action choice should be automatic by default. User controls should stay high level, such as the power toggle, Auto/Manual, refresh, Strength, Focus, Reasoning Level, provider setup, Prompt Footprint, and advanced final-packet injection placement.
 
@@ -176,7 +176,7 @@ Expected failure behavior:
 - Rapid warm miss: run Standard for the current turn instead of inventing local Rapid cards, briefs, or summary fast-start packs.
 - Rapid mandatory gap: run Standard for the current turn and record the escalation diagnostic.
 - Invalid Rapid structured output: reject the output and run Standard for the current turn.
-- Reasoner failure: continue with deterministic or Utility-composed prompt packets.
+- Reasoner failure: continue with Utility guidance plus raw selected Card Evidence.
 - Prompt composition over budget: trim by lane priority and record budget omissions.
 - Injection failure: clear or leave untouched according to host adapter safety rules, then record the failed install attempt.
 - Storage failure or host-storage memory fallback: keep in-memory runtime state for the current turn if possible, show a storage warning, disable persistence-dependent reuse, and continue generation.
@@ -200,7 +200,7 @@ type RecursionActivityEvent = {
   detail?: string;
   chips?: string[];
   providerLane?: "utility" | "reasoner";
-  composerLane?: "utility" | "reasoner" | "local";
+  composerLane?: "utility" | "guidance" | "reasoner" | "local";
   cardCounts?: {
     requested?: number;
     accepted?: number;

@@ -18,7 +18,7 @@ flowchart TD
     Plan --> Jobs["Card jobs"]
     Jobs --> Deck["Scene deck cache"]
     Deck --> Hand["Turn hand"]
-    Hand --> Composer["Utility composer"]
+    Hand --> Composer["Guidance composer"]
     Hand --> Reasoner["Optional Reasoner composer"]
     Composer --> Packet["Prompt packet"]
     Reasoner --> Packet
@@ -95,12 +95,12 @@ Recursion has two provider lanes:
 
 | Lane | Role |
 | --- | --- |
-| Utility | Required default lane for Arbiter planning, card work, provider tests, and Utility fallback composition support. |
+| Utility | Required default lane for Arbiter planning, card work, provider tests, guidance composition, and fail-soft guidance support. |
 | Reasoner | Optional composer lane for rich, crowded, conflicted, or subtle hands. Utility remains the fallback. |
 
 Each lane can use the current host model, a host connection profile when the host supports it, or an OpenAI-compatible endpoint. Direct endpoint API keys live only in the session secret store and are never persisted. OpenAI-compatible model discovery is read-only against `/models`; it may use the session key but does not save secrets, write journals, clear prompts, or invalidate scene cache.
 
-Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses Reasoner for final composition when healthy, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when healthy. Disabled, untested, unhealthy, missing-profile, or missing-key Reasoner routes fall back to Utility without blocking normal chat generation.
+Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses Reasoner for guidance composition when healthy, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when healthy. Disabled, untested, unhealthy, missing-profile, or missing-key Reasoner routes fall back to Utility without blocking normal chat generation.
 
 ## Card And Hand System
 
@@ -163,7 +163,7 @@ The UI is an observatory, not a card editor. It shows what Recursion did without
 - Provider failure degrades Recursion, not the chat.
 - Invalid Utility Arbiter output falls back to conservative local behavior.
 - Invalid card output omits only that card.
-- Reasoner failure falls back to Utility composition.
+- Reasoner failure falls back to Utility guidance plus raw selected Card Evidence.
 - Prompt composition over budget trims by priority and records omissions.
 - Prompt install failure records a warning and generation continues without Recursion.
 - Storage failure keeps in-memory work for the current turn when possible and reports a warning.

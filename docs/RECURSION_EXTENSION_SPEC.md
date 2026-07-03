@@ -43,7 +43,7 @@ Current V1 decisions:
 - Rapid must not create local fallback cards, local scene briefs, local turn briefs, or summary fast-start packs. Warm misses, missing mandatory guidance, invalid Rapid output, or provider-declared escalation continue through Standard for the same pending user message.
 - Support all three provider sources for both lanes where the host permits it: current host model, host connection profile, and OpenAI-compatible endpoint.
 - Machine-readable Recursion provider jobs carry the expected response schema, request structured output where the host supports it, and still validate visible JSON before runtime trusts the result.
-- Advanced users can control where the conditioned final prompt packet is injected by setting placement, role, and depth; defaults use the recommended concrete `in_prompt`, `system`, depth `4` plan.
+- Advanced users can control where the conditioned final prompt packet is injected by setting placement, role, and depth; defaults use the recommended concrete `in_prompt`, `system`, depth `1` plan.
 - Use Directive-style runtime discipline for retries, timeouts, aborts, fallbacks, structured validation, and sanitized model-call diagnostics without importing Directive's campaign architecture.
 - Do not store raw provider prompts or raw provider responses by default.
 - Recursion lives in its own chat-attached top bar. It should sit as the lowest bar in the top-bar stack when the host layout makes that possible.

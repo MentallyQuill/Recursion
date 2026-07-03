@@ -247,7 +247,7 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
           </div>
           <div class="card-body">
             <p class="card-text">Doorway remains blocked, the lamp is broken, and movement through the corridor should stay constrained until the scene resolves it. If the model tries to move characters through the blocked door without clearing debris, the prompt should steer back toward the known physical constraint instead of silently accepting the contradiction.</p>
-            <div class="meta-row"><span class="chip critical">critical</span><span class="chip state">fresh</span><span class="chip state">injected</span><span class="chip" title="More metadata: scene, turn brief">+2</span></div>
+            <div class="meta-row"><span class="chip critical">critical</span><span class="chip state">fresh</span><span class="chip state">evidence</span><span class="chip" title="More packet metadata: guidance and evidence">+2</span></div>
           </div>
         </button>
 
@@ -263,7 +263,7 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
           </div>
           <div class="card-body">
             <p class="card-text">Mara is trying to keep control without revealing panic; she should redirect pressure through precise questions, not confession. The pressure is social as much as tactical: she wants the others to believe she is still reading the room clearly, even while she privately knows the plan has started to fail.</p>
-            <div class="meta-row"><span class="chip strong">strong</span><span class="chip">Mara</span><span class="chip state">turn brief</span></div>
+            <div class="meta-row"><span class="chip strong">strong</span><span class="chip">Mara</span><span class="chip state">evidence</span></div>
           </div>
         </button>
 

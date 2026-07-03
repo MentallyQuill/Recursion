@@ -1,5 +1,7 @@
 # Recursion V1 Implementation Plan
 
+> Historical note (2026-07-03): This original V1 plan predates Prompt Packet V3. Current prompt packets are `recursion.guidance`, `recursion.cardEvidence`, and `recursion.guardrails`; `guidanceComposer` replaces the old brief utility composer terminology. Older examples below may still mention scene briefs, turn briefs, and final briefs as implementation history.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build Recursion V1 as a mostly automatic SillyTavern extension that observes the current chat, creates scene-local cards with Utility calls, optionally uses a Reasoner composer, installs a compact prompt packet, and shows all invisible work through a native-looking Recursion top bar and Activity Ribbon.
@@ -33,11 +35,11 @@ Settings shape:
 injection: {
   placement: 'in_prompt', // 'in_prompt' | 'in_chat'
   role: 'system',       // 'system' | 'user' | 'assistant'
-  depth: 4              // integer 0..10
+  depth: 1              // integer 0..10
 }
 ```
 
-Default behavior uses the concrete recommended plan: composed packet blocks install in prompt at depth 4 as system. Injection settings apply after Utility/Reasoner composition and before prompt install. They must not affect Arbiter planning, card generation, hand selection, storage records, or raw card injection policy.
+Default behavior uses the concrete recommended plan: composed packet blocks install in prompt at depth 1 as system. Injection settings apply after Utility/Reasoner composition and before prompt install. They must not affect Arbiter planning, card generation, hand selection, storage records, or raw card injection policy.
 
 ## File Structure
 

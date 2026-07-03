@@ -1,5 +1,7 @@
 # Recursion Card Facet Audit Implementation Plan
 
+> Historical note (2026-07-03): This plan predates Prompt Packet V3 terminology. Any references below to old brief utility composer names or brief-shaped prompt output are implementation history; current composition uses `guidanceComposer` and the V3 Guidance/Card Evidence/Guardrails packet.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the Card System Spec facet audit by changing Recursion from a continuity/prose-flavored catalog to a scene-reasoning catalog.

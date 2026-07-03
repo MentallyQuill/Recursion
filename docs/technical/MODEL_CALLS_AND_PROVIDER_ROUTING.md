@@ -110,7 +110,7 @@ Fallback behavior:
 - Rapid warm miss escalates to Standard for the same pending user message; it does not permit local Rapid cards, local Rapid scene briefs, local Rapid turn briefs, or summary fast-start packs.
 - Rapid invalid structured output, mandatory missing cards, or provider-declared Standard escalation continue through the Standard pipeline for that same pending user message.
 - Card call failure omits failed cards and keeps valid siblings.
-- Reasoner failure falls back to Utility composition.
+- Reasoner failure falls back to Utility guidance plus raw selected Card Evidence.
 - Provider test failure updates lane status with compact error text.
 - Host generation unavailability makes the lane unhealthy without blocking normal chat generation.
 - Token-limit, reasoning-only, and empty visible provider responses are classified before raw response text can enter diagnostics, journals, or progress details.

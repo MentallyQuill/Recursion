@@ -60,7 +60,7 @@ assertEqual(normalizedPartial.mode, 'manual', 'manual mode survives card-scope n
 assertEqual(normalizedPartial.cardScope.families['Open Threads'].enabled, false, 'disabled current family persists');
 assertDeepEqual(
   normalizeSettings({}).injection,
-  { placement: 'in_prompt', role: 'system', depth: 4 },
+  { placement: 'in_prompt', role: 'system', depth: 1 },
   'injection defaults use the recommended concrete prompt placement'
 );
 assertDeepEqual(
@@ -70,21 +70,21 @@ assertDeepEqual(
 );
 assertDeepEqual(
   normalizeSettings({ injection: { placement: 'bad', role: 'developer', depth: 'deep' } }).injection,
-  { placement: 'in_prompt', role: 'system', depth: 4 },
+  { placement: 'in_prompt', role: 'system', depth: 1 },
   'invalid injection values fall back safely'
 );
 assertDeepEqual(
   normalizeSettings({ injection: { placement: 'default', role: 'system', depth: 'default' } }).injection,
-  { placement: 'in_prompt', role: 'system', depth: 4 },
+  { placement: 'in_prompt', role: 'system', depth: 1 },
   'old default injection sentinels normalize to concrete settings'
 );
 assertEqual(normalizeSettings({ injection: { depth: -9 } }).injection.depth, 0, 'injection depth clamps low');
 assertEqual(normalizeSettings({ injection: { depth: 99 } }).injection.depth, 10, 'injection depth clamps high');
-assertEqual(normalizeSettings({ injection: { depth: '' } }).injection.depth, 4, 'blank injection depth falls back');
-assertEqual(normalizeSettings({ injection: { depth: null } }).injection.depth, 4, 'null injection depth falls back');
-assertEqual(normalizeSettings({ injection: { depth: true } }).injection.depth, 4, 'boolean injection depth falls back');
-assertEqual(normalizeSettings({ injection: { depth: [] } }).injection.depth, 4, 'array injection depth falls back');
-assertEqual(normalizeSettings({ injection: { depth: {} } }).injection.depth, 4, 'object injection depth falls back');
+assertEqual(normalizeSettings({ injection: { depth: '' } }).injection.depth, 1, 'blank injection depth falls back');
+assertEqual(normalizeSettings({ injection: { depth: null } }).injection.depth, 1, 'null injection depth falls back');
+assertEqual(normalizeSettings({ injection: { depth: true } }).injection.depth, 1, 'boolean injection depth falls back');
+assertEqual(normalizeSettings({ injection: { depth: [] } }).injection.depth, 1, 'array injection depth falls back');
+assertEqual(normalizeSettings({ injection: { depth: {} } }).injection.depth, 1, 'object injection depth falls back');
 assertEqual(normalized.mode, 'auto', 'mode preserved');
 assertEqual(normalized.reasoningLevel, 'ultra', 'reasoning level preserved');
 assertEqual(normalized.reasonerUse, 'always', 'ultra reasoning derives always-on reasoner routing');

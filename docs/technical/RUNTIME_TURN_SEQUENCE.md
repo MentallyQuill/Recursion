@@ -108,11 +108,11 @@ Runtime derives the behavior influence policy from normalized settings before th
 The Utility Arbiter receives safe settings, provider health, the bounded snapshot, and card-scope payload. In Auto, the payload includes the full available catalog plus selected focus preferences; selected families and sub-items are preferred, but unselected families can still be requested when they have high relevance to scene constraints, scene coherence, or the current user message. In Manual, the payload is a strict whitelist and disabled families are not offered to the Arbiter. It returns the V1 `recursion.utilityArbiter.v1` plan shape:
 
 - `snapshotHash`: exact echo of the frozen request snapshot hash
-- `action`: `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`
+- `action`: `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`; the literal `compose-brief` enum now means compose the V3 Guidance/Card Evidence/Guardrails packet.
 - `sceneStatus`: `same-scene`, `soft-shift`, `hard-shift`, or `unknown`
 - `cardJobs`: requested card roles or families
 - `reasonerDecision`: `use` or `skip` plus compact signals
-- `budgets`: target brief tokens and max cards
+- `budgets`: target guidance tokens and max cards
 - `diagnostics`: compact labels
 
 Runtime includes an explicit output contract in the Arbiter prompt. The contract restates the required top-level JSON fields, the exact `schema`, and the frozen `snapshotHash`, and rejects common alternate outputs such as markdown, prose, hidden reasoning, or `lifecycleActions`. This makes the provider request, retry prompt, router validation, and fallback branch all enforce the same machine-readable shape.
@@ -131,7 +131,7 @@ Utility card calls are batched when the provider router supports batching. Each 
 
 Runtime can create local fallback Scene Frame and Scene Constraints role cards from the latest visible messages after a valid or locally recoverable plan exists. These local cards keep the first loop useful by deriving basic scene frame and hard-constraint guidance when card generation is unavailable, but they are not used to mask a missing or transport-failing Utility provider.
 
-Rapid does not use those local fallback cards. A Rapid warm pass stores only provider-generated cards plus provider-authored guidance. A Rapid foreground pass either uses a valid warm provider artifact, skips when provider guidance is unavailable, or escalates to Standard when the warm artifact is missing or the provider declares a mandatory gap.
+Rapid does not use those local fallback cards. A Rapid warm pass stores only provider-generated cards plus provider-authored guidance. A Rapid foreground pass either uses a valid warm provider artifact or escalates to Standard when the warm artifact is missing, selected warm cards cannot be found, provider output is unavailable or empty, provider output is invalid, or the provider declares a mandatory gap.
 
 After cache, provider, and fallback cards are known, runtime emits sanitized `cardProgress` activity events for the Hero Pixel Array progress menu. These events are child rows under `utility-card-batch`: generated provider cards use `state: done` and `source: generated` when they complete cleanly, generated provider cards that complete after a retry use `state: warning`, `source: generated`, `retryCount`, and a safe `reason`, cache-reused cards use `state: cached` and `source: cache`, and local fallback cards use `state: warning` and `source: fallback`. The event detail is limited to parent step id, role/family, source, state, safe card id, retry count, and one sanitized progress reason; it must not include card prompt text, raw provider output, transcript text, or secrets.
 
@@ -205,7 +205,7 @@ flowchart LR
 | No Rapid warm artifact | Continue through Standard for the same pending user message; do not create local Rapid briefs or summary fast-start packs. |
 | Rapid mandatory gap | Abort Rapid install and continue through Standard with `rapid-escalated-standard:mandatory-gap`. |
 | Invalid Rapid structured output | Abort Rapid install and continue through Standard with `rapid-escalated-standard:invalid-provider-output`. |
-| Rapid provider output unavailable or empty | Skip Rapid guidance for the turn; do not install local substitute guidance. |
+| Rapid provider output unavailable or empty | Abort Rapid install and continue through Standard with `rapid-escalated-standard:provider-unavailable` or `rapid-escalated-standard:empty-provider-guidance`; do not install local substitute guidance. |
 | Card batch failure | Continue with accepted siblings and local fallback cards after a valid or locally recoverable plan. |
 | Invalid cached card | Ignore the card and show neutral cache-inspection progress; warn only if the run must skip because no reusable cache remains. |
 | No reusable cache for `reuse-cache` | Clear Recursion prompt and return a warning skip. |

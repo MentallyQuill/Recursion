@@ -1128,7 +1128,7 @@ Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must 
 - Low: Utility-only bias with card pressure capped at Min Cards.
 - Medium: Utility Arbiter and Utility cards, then Reasoner guidance composition; card pressure capped at Normal Cards.
 - High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner guidance composition; card pressure capped at Normal Cards.
-- Ultra: Reasoner-heavy Arbiter, card generation, and final composition with card pressure raised/capped at Max Cards.
+- Ultra: Reasoner-heavy Arbiter, card generation, and guidance composition with card pressure raised/capped at Max Cards.
 
 `reasoningLevel` is persisted as `low | medium | high | ultra`, default `high`. It is the authoritative user-facing provider-bias setting. Runtime may still carry an internal `reasonerUse` route value, but that value is always derived from `reasoningLevel`: Low maps to `off`, Medium/High/Ultra map to `always`. If the Reasoner provider is unavailable while Medium, High, or Ultra is selected, the UI should keep the selected level and show fallback status rather than blocking the user.
 
@@ -1159,7 +1159,7 @@ Advanced contains low-frequency controls grouped into collapsible sections:
 - UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
 - Diagnostics: journal size, safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
 
-Injection controls apply to the final conditioned prompt packet after Utility or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the Recursion packet to land in a different host lane or depth.
+Injection controls apply to the final prompt packet after Utility guidance or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the Recursion packet to land in a different host lane or depth.
 
 Advanced commands without V1 runtime handlers must render disabled with tooltip copy. They should not appear active until they perform the named action. V1 wires `Reset Scene Cache`, `Export Diagnostics`, and `Clear Run Journal`.
 

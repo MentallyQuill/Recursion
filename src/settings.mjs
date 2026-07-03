@@ -39,7 +39,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   injection: {
     placement: 'in_prompt',
     role: 'system',
-    depth: 4
+    depth: 1
   },
   diagnostics: {
     maxJournalEntries: 100,

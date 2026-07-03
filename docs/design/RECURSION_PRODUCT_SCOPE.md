@@ -4,7 +4,7 @@
 
 Recursion is a mostly turnkey SillyTavern extension for improving writing output quality during live roleplay and story generation. Its job is to improve the next model response by expanding reasoning over the current scene: what the active location, cast, relationships, objects, pressures, and reveal boundaries imply for the next beat.
 
-Recursion is not a continuity extension, long-term memory, or lore authority. It complements Memory Books, Summaryception, VectFox, World Info, and similar extensions by compiling a compact, current-scene reasoning brief instead of owning durable canon.
+Recursion is not a continuity extension, long-term memory, or lore authority. It complements Memory Books, Summaryception, VectFox, World Info, and similar extensions by compiling a current-scene prompt packet instead of owning durable canon.
 
 Related specs:
 

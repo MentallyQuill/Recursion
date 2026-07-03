@@ -192,13 +192,13 @@ flowchart LR
     Policy --> Diagnostics["Safe diagnostics"]
 ```
 
-Default injection settings use Recursion's recommended concrete plan: `In Prompt`, `System`, depth `4`. Injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
+Default injection settings use Recursion's recommended concrete plan: `In Prompt`, `System`, depth `1`. Injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
 
 ## Provider Controls
 
 Recursion has two provider lanes:
 
-- Utility: required, default, and used for Arbiter planning, structured card work, provider tests, and Utility fallback composition.
+- Utility: required, default, and used for Arbiter planning, structured card work, provider tests, guidance composition, and fail-soft fallback guidance.
 - Reasoner: optional, selected by Reasoning Level and lane health for synthesis, priority routing, crowded hands, conflicted cards, or subtle composition work.
 
 Each lane may support:

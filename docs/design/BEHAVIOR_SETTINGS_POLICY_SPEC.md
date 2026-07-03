@@ -143,7 +143,7 @@ It must not increase `promptFootprint`, section budgets, Reasoning Level, provid
 | Strength | Runtime posture | Arbiter pressure | Composer pressure |
 | --- | --- | --- | --- |
 | Light | Prefer valid cache, avoid churn, select fewer support cards inside the active footprint. | Ask for refresh/regeneration only when relevance or drift risk is clear. | Phrase guidance as gentle, sparse writing support. |
-| Balanced | Default V1 behavior. | Normal refresh, card-job, and lifecycle pressure. | Normal concise brief. |
+| Balanced | Default V1 behavior. | Normal refresh, card-job, and lifecycle pressure. | Concise guidance over selected evidence. |
 | Strong | Be more willing to refresh stale or weak cards, preserve high-risk cards, and use the active footprint fully. | Ask for regeneration when scene drift, scene-constraint risk, or weak coverage is plausible. | Phrase selected constraints firmly and prefer explicit guardrails when evidence supports them. |
 
 Mechanical effects:
@@ -310,7 +310,7 @@ The composer should receive:
 - Reasoning Level composer eligibility;
 - final injection settings.
 
-Utility composition uses the policy to order and phrase guidance. Reasoner composition receives the same policy and must still return bounded, evidence-based output.
+Utility guidance composition uses the policy to order and phrase guidance. Reasoner composition receives the same policy and must still return bounded, evidence-based output.
 
 The composer should never receive raw provider reasoning, inspector-only notes, API keys, or full transcripts.
 
@@ -369,7 +369,7 @@ Required focused tests:
 - Compact, Normal, and Rich produce different section budgets and packet detail while Min Cards, Max Cards, and Reasoning Level own card-count pressure.
 - Arbiter footprint override is accepted only when allowed by the stored footprint policy.
 - Invalid Arbiter footprint falls back to stored setting.
-- Reasoner unavailable still produces a Utility-composed packet with policy diagnostics.
+- Reasoner unavailable still produces Utility guidance plus raw selected Card Evidence with policy diagnostics.
 - Diagnostics contain policy labels and hashes, not raw prompts, raw responses, secrets, or transcript text.
 
 Maintained commands:

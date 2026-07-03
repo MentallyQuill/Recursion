@@ -19,7 +19,7 @@ The bar should expose the power toggle, icon-only Pipeline control, icon-only mo
 
 ## 2. Configure Utility
 
-Utility is required. It is the default lane for Arbiter planning, card work, provider tests, and Utility fallback composition.
+Utility is required. It is the default lane for Arbiter planning, card work, provider tests, guidance composition, and fail-soft fallback guidance.
 
 1. Open the Recursion options menu from the ellipsis.
 2. Choose the `Providers` tab.

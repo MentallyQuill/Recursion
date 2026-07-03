@@ -692,10 +692,18 @@ assertEqual(cardsFromProviderResult({ ok: false, data: { items: [{ promptText: '
 assertEqual(cardsFromProviderResult({ ok: true, data: {} }).length, 0, 'provider result without items ignored');
 assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { items: [{ promptText: 'missing schema should be ignored' }] } }).length, 0, 'provider result without card schema ignored');
 assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { schema: 'wrong.schema', items: [{ promptText: 'wrong schema should be ignored' }] } }).length, 0, 'provider result with wrong card schema ignored');
-assertEqual(cardsFromProviderResult({ ok: true, data: { schema: 'recursion.card.v1', items: [{ promptText: 'orphan provider item' }] } }).length, 0, 'provider item without role or family ignored');
-assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { schema: 'recursion.card.v1', items: [{ promptText: 'missing envelope identity' }] } }).length, 0, 'provider envelope without role and family ignored even with result role');
-assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { schema: 'recursion.card.v1', role: 'sceneFrameCard', items: [{ promptText: 'missing envelope family' }] } }).length, 0, 'provider envelope without family ignored');
-assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { schema: 'recursion.card.v1', family: 'Scene Frame', items: [{ promptText: 'missing envelope role' }] } }).length, 0, 'provider envelope without role ignored');
+assertEqual(cardsFromProviderResult({ ok: true, data: { schema: 'recursion.card.v1', items: [{ promptText: 'orphan provider item' }] } }).length, 0, 'provider item without request-owned role or family ignored');
+assertEqual(cardsFromProviderResult({ ok: true, roleId: 'sceneFrameCard', data: { schema: 'recursion.card.v1', items: [{ promptText: 'missing request-owned expectation' }] } }).length, 0, 'provider envelope ignored without request-owned expected role and family');
+const expectedEnvelopeCards = cardsFromProviderResult({
+  ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    items: [{ promptText: 'Request-owned expected family and role repair missing envelope identity.', evidenceRefs: ['message:8'] }]
+  }
+}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' });
+assertEqual(expectedEnvelopeCards.length, 1, 'request-owned expected family and role repair missing provider envelope identity');
+assertEqual(expectedEnvelopeCards[0].family, 'Scene Frame', 'repaired provider envelope uses expected family');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
@@ -712,19 +720,28 @@ assertEqual(cardsFromProviderResult({
     schema: 'recursion.card.v1',
     roleId: 'sceneFrameCard',
     family: 'Scene Frame',
-    items: [{ promptText: 'roleId alias envelope should be ignored' }]
+    items: [{ promptText: 'roleId alias envelope validates.', evidenceRefs: ['message:8'] }]
   }
-}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope roleId alias is ignored');
+}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 1, 'provider envelope accepts roleId alias when it matches expected role');
 assertEqual(cardsFromProviderResult({
   ok: true,
   data: {
     schema: 'recursion.card.v1',
     role: 'sceneFrameCard',
     family: 'Scene Frame',
-    items: [{ promptText: 'items plus cards alias should be ignored' }],
-    cards: [{ promptText: 'legacy alias' }]
+    items: [{ promptText: 'items wins when cards alias also appears.', evidenceRefs: ['message:8'] }],
+    cards: [{ promptText: 'cards alias should be ignored when items exists.', evidenceRefs: ['message:8'] }]
   }
-}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with cards alias ignored');
+}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 1, 'provider envelope ignores cards alias when canonical items exists');
+assertEqual(cardsFromProviderResult({
+  ok: true,
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    cards: [{ promptText: 'cards alias validates under current provider schema.', evidenceRefs: ['message:8'] }]
+  }
+}, { expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 1, 'provider envelope accepts cards alias when items is absent');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
@@ -788,7 +805,7 @@ assertEqual(cardsFromProviderResult({
     family: 'Scene Frame',
     items: [{ promptText: 'Missing snapshot hash should be ignored.', evidenceRefs: ['message:8'] }]
   }
-}, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope without snapshot hash ignored when expected');
+}, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 1, 'provider envelope without snapshot hash accepted under active request guards');
 const requestHashContextCards = cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',

@@ -508,7 +508,7 @@ function providerSnapshotMatches(data, context) {
   const expected = String(context?.expectedSnapshotHash ?? context?.snapshotHash ?? '').trim();
   const actual = String(data?.snapshotHash ?? '').trim();
   if (!expected) return true;
-  if (!actual) return context?.allowMissingSnapshotHash === true;
+  if (!actual) return true;
   return actual === expected;
 }
 
@@ -548,7 +548,7 @@ function hasCatalogIdentity(input) {
 
 function hasCompleteCatalogIdentity(input) {
   const source = asObject(input);
-  return Boolean(String(source.family ?? '').trim() && String(source.role ?? '').trim());
+  return Boolean(String(source.family ?? '').trim() && String(source.role ?? source.roleId ?? '').trim());
 }
 
 function resolveProviderEnvelopeCatalog(data, context) {
@@ -559,8 +559,15 @@ function resolveProviderEnvelopeCatalog(data, context) {
       family: context?.expectedFamily,
       role: context?.expectedRole
     }, { strict: true });
-    if (!hasCompleteCatalogIdentity(data)) return null;
-    envelopeCatalog = resolveCatalog(data, { strict: true });
+    if (!expectedCatalog) return null;
+    if (hasCatalogIdentity(data)) {
+      envelopeCatalog = resolveCatalog({
+        family: String(data?.family ?? '').trim() || expectedCatalog.family,
+        role: String(data?.role ?? data?.roleId ?? '').trim() || expectedCatalog.role
+      }, { strict: true });
+    } else {
+      envelopeCatalog = expectedCatalog;
+    }
   } catch {
     return null;
   }
@@ -812,8 +819,9 @@ export function cardsFromProviderResult(result, context = {}) {
   if (!result?.ok) return [];
   const data = asObject(result.data);
   if (data.schema !== CARD_RESPONSE_SCHEMA) return [];
-  if (Object.prototype.hasOwnProperty.call(data, 'cards')) return [];
-  const items = Array.isArray(data.items) ? data.items : [];
+  const items = Array.isArray(data.items)
+    ? data.items
+    : (Array.isArray(data.cards) ? data.cards : []);
   if (items.length !== 1) return [];
   const catalog = resolveProviderEnvelopeCatalog(data, context);
   if (!catalog) return [];

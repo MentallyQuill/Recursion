@@ -260,7 +260,7 @@ Expected flow:
 1. Scene deck holds the disposable scene-local cache.
 2. Utility Arbiter selects a hand from the deck.
 3. Runtime applies token and schema checks.
-4. Prompt composition installs the resulting brief.
+4. Prompt composition installs the resulting V3 packet.
 5. Diagnostics record what was selected, omitted, and why.
 
 A card can exist in the deck without appearing in the hand. A hand can omit a valid card because the current turn does not need it or the prompt budget is better spent elsewhere.

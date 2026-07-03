@@ -123,7 +123,7 @@ The first working loop must include:
 - Utility Arbiter structured call;
 - Utility guidance path through `guidanceComposer`;
 - Reasoner composition path through `reasonerComposer`;
-- Utility-composed packet as the default and fallback composition path.
+- Utility guidance plus raw selected Card Evidence as the default and fallback packet path.
 
 ## Session Secret Boundary
 
@@ -164,12 +164,12 @@ Generation roles describe why a model call exists. They are not the same thing a
 | `openThreadsCard` | Utility, Reasoner at Ultra when healthy | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
 | `rapidTurnDelta` | Utility | Select warm raw cards and write provider-authored turn guidance for the Rapid foreground path | Escalate to Standard only when a missing card is mandatory |
 | `guidanceComposer` | Utility | Write provider-authored direction for using selected raw cards in the next generation | Fall back to raw-card-only packet when invalid or unavailable |
-| `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility-only composition |
+| `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility guidance plus raw selected Card Evidence |
 | `providerTest` | Selected lane | Validate lane connectivity and structured response capability | Mark lane test failed with compact error |
 
 Card names should align with [Card System Spec](../design/CARD_SYSTEM_SPEC.md). Prompt installation and depth decisions belong to [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md), not provider routing.
 
-The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Rapid foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses `recursion.guidanceComposer.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`.
+The literal `compose-brief` Arbiter action is retained as a V1 enum name, but it now means compose the V3 Guidance/Card Evidence/Guardrails packet. The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Rapid foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses `recursion.guidanceComposer.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`.
 
 ## Utility Arbiter Call
 
@@ -237,7 +237,7 @@ The preferred execution shape is:
 6. Each card returns structured JSON with its own schema id, frozen snapshot hash, and compact evidence references.
 7. Runtime validates and accepts, repairs locally where safe, or omits each card independently.
 
-Card calls must not depend on sibling card outputs from the same batch. Fusion happens later in the Utility composer or Reasoner composer.
+Card calls must not depend on sibling card outputs from the same batch. Fusion happens later in the Guidance composer or Reasoner composer.
 
 Common card output envelope:
 
@@ -344,7 +344,7 @@ The first end-to-end loop should prove both composer paths even if the default s
 3. Generate or reuse a small accepted hand.
 4. Compose a prompt packet through `guidanceComposer`, injecting guidance plus full raw selected card evidence.
 5. Compose through `reasonerComposer` when the setting and Arbiter decision permit it.
-6. Fall back to the Utility-composed packet if Reasoner fails, times out, returns invalid schema, or is disabled during the run.
+6. Keep Utility guidance plus raw selected Card Evidence if Reasoner fails, times out, returns invalid schema, or is disabled during the run.
 7. Install, skip, or clear the Recursion prompt packet through the host adapter.
 8. Emit visible progress stages and sanitized model-call journal entries for the route taken.
 
@@ -377,7 +377,7 @@ Invalid Utility Arbiter output should fall back to conservative local behavior: 
 
 Invalid card output should omit only that card. One bad card must not poison the whole batch.
 
-Invalid Reasoner output should fall back to Utility-only composition.
+Invalid Reasoner output should fall back to Utility guidance plus raw selected Card Evidence.
 
 Prompt composition should consume only accepted structured data. It should not parse useful facts from rejected raw provider text.
 
@@ -445,8 +445,8 @@ Card failure:
 Reasoner failure:
 
 - retry the same Reasoner call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot and the Reasoner route remains enabled;
-- fall back to Utility-only composition;
-- do not run an additional hidden Utility model call solely to recover the Reasoner result; use the Utility composer output that is already part of the normal route, or compose locally from accepted cards if available;
+- fall back to Utility guidance plus raw selected Card Evidence;
+- do not run an additional hidden Utility model call solely to recover the Reasoner result; use the Guidance composer output that is already part of the normal route, or compose locally from accepted cards if available;
 - record a compact reason such as auth failure, timeout, validation failure, or provider error.
 
 OpenAI-compatible authentication failure:

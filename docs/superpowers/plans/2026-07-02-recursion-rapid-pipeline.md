@@ -1,5 +1,7 @@
 # Recursion Rapid Pipeline Implementation Plan
 
+> Historical note (2026-07-03): This plan predates Prompt Packet V3 and Rapid Pipeline V2. Current contract uses `guidanceComposer`, `recursion.guidance`, `recursion.cardEvidence`, `recursion.guardrails`, `rapidTurnDelta.v2`, Rapid warm V2 artifacts, and Standard escalation on warm misses. It no longer uses `rapidFastStartPack`, `rapidFastStartPack.v1`, or `conditionedSceneBrief`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a Rapid pipeline that warms provider-generated scene guidance in the background, then uses one foreground Utility delta or fast-start provider call on send.

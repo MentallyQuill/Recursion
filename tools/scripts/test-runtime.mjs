@@ -1622,6 +1622,33 @@ for (const pipelineMode of ['standard', 'rapid']) {
 }
 
 {
+  let releaseClear;
+  let updateResolved = false;
+  const { runtime } = createRuntimeHarness({
+    settings: { injection: { placement: 'in_prompt', role: 'system', depth: 1 } },
+    hostPrompt: {
+      async clear() {
+        await new Promise((resolve) => {
+          releaseClear = resolve;
+        });
+        return { ok: true, cleared: true };
+      }
+    }
+  });
+  const update = runtime.updateSettings({ injection: { depth: 7 } });
+  update.then(() => {
+    updateResolved = true;
+  });
+  await waitUntil(() => typeof releaseClear === 'function', 'injection depth change did not start prompt clear');
+  assertEqual(updateResolved, false, 'injection depth change waits for prompt clear before resolving');
+  assertEqual(runtime.view().settings.injection.depth, 7, 'injection depth change updates runtime view immediately');
+  releaseClear();
+  const result = await update;
+  assertEqual(result.settings.injection.depth, 7, 'injection depth change returns updated injection depth');
+  assertEqual(runtime.view().settings.injection.depth, 7, 'injection depth change stays visible after prompt clear resolves');
+}
+
+{
   const disabledSceneScope = setFamilyEnabled(defaultCardScope(), 'Scene Frame', false).scope;
   const { runtime } = createRuntimeHarness({
     settings: { cardScope: disabledSceneScope }
@@ -4164,7 +4191,7 @@ for (const scenario of [
             `{"schema":"${UTILITY_ARBITER_SCHEMA}","snapshotHash":"${snapshotHash}","action":"compose-brief","cardJobs":[{"role":"openThreadsCard","reason":"Keep valid repaired sibling."},{"role":"sceneConstraintsCard","reason":"Reject repaired stale sibling."}],"budgets":{"targetBriefTokens":500,"maxCards":6},"reasonerDecision":{"mode":"skip","reason":"semantic repair test","signals":[]},"diagnostics":["semantic-repair-arbiter"],}`
           ].join('\n');
         } else if (prompt.includes('sceneConstraintsCard')) {
-          content = `<think>draft that must not persist</think>{"schema":"recursion.card.v1","role":"sceneConstraintsCard","family":"Scene Constraints","items":[{"promptText":"Missing repaired snapshot card must not enter prompt.","evidenceRefs":["message:2"],"tokenEstimate":12,}],}`;
+          content = `<think>draft that must not persist</think>{"schema":"recursion.card.v1","role":"sceneConstraintsCard","family":"Scene Constraints","snapshotHash":"wrong-repaired-hash","items":[{"promptText":"Wrong repaired snapshot card must not enter prompt.","evidenceRefs":["message:2"],"tokenEstimate":12,}],}`;
         } else {
           content = '```json\n'
             + `{"schema":"recursion.card.v1","role":"openThreadsCard","family":"Open Threads","snapshotHash":"${snapshotHash}","items":[{"promptText":"Valid repaired card survives semantic sibling rejection.","evidenceRefs":["message:2"],"tokenEstimate":12,}],}`
@@ -4190,7 +4217,7 @@ for (const scenario of [
   assertEqual(result.ok, true, 'runtime with repaired provider JSON remains fail-soft');
   assert(fetchCalls.length >= 3, 'real provider router handled arbiter and card provider calls');
   assert(serializedRuntime.includes('Valid repaired card survives semantic sibling rejection'), 'valid repaired sibling reaches runtime prompt');
-  assert(!serializedRuntime.includes('Missing repaired snapshot card'), 'repaired card missing snapshot hash is still semantically rejected');
+  assert(!serializedRuntime.includes('Wrong repaired snapshot card'), 'repaired card with wrong snapshot hash is still semantically rejected');
   assert(providerHistory.includes('"structuredOutputRepaired":true'), 'provider diagnostics record syntax repair before runtime semantics');
   assert(!providerHistory.includes('draft that must not persist'), 'provider diagnostics omit stripped hidden reasoning text');
 }
@@ -4338,7 +4365,7 @@ for (const scenario of [
           data: {
             schema: 'recursion.card.v1',
             items: [{
-              promptText: 'Identityless provider card must not enter cache or prompt.',
+              promptText: 'Identityless provider card is repaired from request-owned role and family.',
               evidenceRefs: ['message:2'],
               tokenEstimate: 12
             }]
@@ -4347,12 +4374,13 @@ for (const scenario of [
       }
     }
   });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Reject identityless card envelope.' });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Repair identityless card envelope.' });
   const view = runtime.view();
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
   assertEqual(result.ok, true, 'identityless provider envelope run remains fail-soft');
-  assert(!serialized.includes('Identityless provider card'), 'identityless provider envelope is not accepted into cache, hand, or packet');
+  assert(serialized.includes('Identityless provider card is repaired from request-owned role and family.'), 'identityless provider envelope is accepted from request-owned role and family');
+  assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'identityless provider envelope repairs expected family');
 }
 
 {
@@ -6123,6 +6151,31 @@ for (const scenario of [
 }
 
 {
+  const { runtime, calls } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' }
+  });
+  const prepared = await runtime.prepareForGeneration({
+    userMessage: 'Stop after install.',
+    hostGeneration: true
+  });
+  assertEqual(prepared.ok, true, 'host-stop preservation setup installs prompt');
+  const before = runtime.view();
+  const beforePacketId = before.lastPacket?.packetId;
+  const beforeHandId = before.lastHand?.handId;
+  assert(beforePacketId, 'host-stop preservation setup has prompt packet');
+  assert(beforeHandId, 'host-stop preservation setup has hand');
+  const stopped = await runtime.handleHostGenerationStopped({ eventName: 'generation_stopped' });
+  assertEqual(stopped.ok, true, 'post-install host generation stop cleanup succeeds');
+  assertEqual(calls.clear, 1, 'post-install host generation stop clears host prompt');
+  const after = runtime.view();
+  assertEqual(after.lastPacket?.packetId, beforePacketId, 'host generation stop preserves in-memory prompt packet for Last Brief');
+  assertEqual(after.lastHand?.handId, beforeHandId, 'host generation stop preserves in-memory hand for Last Brief');
+  assert(after.lastHand.cards.length > 0, 'host generation stop keeps selected cards visible');
+  assertEqual(after.lastPlan?.schema, UTILITY_ARBITER_SCHEMA, 'host generation stop preserves plan diagnostics for inspection');
+  assert(after.lastSnapshot, 'host generation stop preserves last snapshot for diagnostics');
+}
+
+{
   let releaseArbiter;
   const hostStopCalls = [];
   const { runtime, calls, installed } = createRuntimeHarness({
@@ -6172,7 +6225,7 @@ for (const scenario of [
   assertEqual(view.lastPacket, null, 'host generation stop clears in-memory prompt packet');
   assertEqual(view.lastHand.cards.length, 0, 'host generation stop clears in-memory hand');
   assertEqual(view.lastPlan, null, 'host generation stop clears in-memory plan');
-  assertEqual(view.lastSnapshot, null, 'host generation stop clears in-memory snapshot');
+  assert(view.lastSnapshot, 'host generation stop preserves last snapshot for cancellation diagnostics');
   assertEqual(view.activity.label, 'Generation canceled. Recursion prompt cleared.', 'host generation stop surfaces canceled cleanup');
   assertEqual(view.activity.outcome, 'skipped', 'host generation stop activity is neutral skipped outcome');
 }
@@ -6213,7 +6266,9 @@ for (const scenario of [
   assertEqual(cache.invalidation.details.eventName, 'generation_stopped', 'host generation stop stores safe event name');
   const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
   assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'host-generation-stopped'), 'host generation stop records prompt clear journal');
-  assertEqual(runtime.view().lastSnapshot, null, 'host generation stop clears previous snapshot after journaling');
+  assertEqual(runtime.view().lastSnapshot?.chatKey, setupSnapshot.chatKey, 'host generation stop preserves previous snapshot after journaling');
+  assert(runtime.view().lastPacket, 'host generation stop preserves prompt packet after journaling');
+  assert(runtime.view().lastHand.cards.length > 0, 'host generation stop preserves selected hand after journaling');
 }
 
 {

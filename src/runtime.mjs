@@ -19,7 +19,7 @@ import {
   rapidWarmArtifactIsUsable
 } from './rapid-pipeline.mjs';
 import { reasoningRequestMetadata } from './reasoning-policy.mjs';
-import { createSettingsStore, normalizeCardBudgetSettings, normalizeSettings } from './settings.mjs';
+import { createSettingsStore, normalizeCardBudgetSettings, normalizeInjectionSettings, normalizeSettings } from './settings.mjs';
 import { behaviorPolicyPromptLines, influencePolicyForSettings, runPolicyForEffectivePlan } from './settings-policy.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
 
@@ -1088,6 +1088,7 @@ function safeSettingsView(settings) {
   const source = asObject(settings);
   const cardScope = normalizeCardScope(source.cardScope);
   const cardBudget = normalizeCardBudgetSettings(source);
+  const injection = normalizeInjectionSettings(source.injection);
   return {
     enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
@@ -1101,6 +1102,11 @@ function safeSettingsView(settings) {
     promptFootprint: safeText(source.promptFootprint || 'normal', 40),
     focus: safeText(source.focus || 'balanced', 80),
     reasonerUse: safeText(source.reasonerUse || 'auto', 40),
+    injection: {
+      placement: safeText(injection.placement, 40),
+      role: safeText(injection.role, 40),
+      depth: numberOr(injection.depth, 1)
+    },
     diagnostics: {
       maxJournalEntries: numberOr(source.diagnostics?.maxJournalEntries, 100),
       includeExcerpts: source.diagnostics?.includeExcerpts === true
@@ -2216,7 +2222,8 @@ export function createRecursionRuntime({
     successLabel,
     chips,
     outcome = 'success',
-    settleSeverity = 'success'
+    settleSeverity = 'success',
+    clearVolatileState = true
   }) {
     const runId = makeId(idPrefix);
     supersedeActiveRun();
@@ -2231,7 +2238,7 @@ export function createRecursionRuntime({
         chips
       });
       await invalidateActiveSceneCacheBestEffort(reason, invalidationDetails);
-      clearVolatileSceneState();
+      if (clearVolatileState) clearVolatileSceneState();
       const clear = await runPromptMutationSection(null, async () => {
         const clearResult = await clearPromptBestEffort(host);
         await appendPromptClearedJournal(runId, clearContext, clearResult, reason);
@@ -2299,7 +2306,8 @@ export function createRecursionRuntime({
       successLabel: 'Generation canceled. Recursion prompt cleared.',
       chips: ['Stop', 'Prompt'],
       outcome: 'skipped',
-      settleSeverity: 'info'
+      settleSeverity: 'info',
+      clearVolatileState: false
     }).finally(() => {
       hostStopCleanupPromise = null;
     });

@@ -153,7 +153,7 @@ Exit criteria:
 
 ## Stage 6: Prompt Composition And Injection
 
-Goal: turn selected cards into one compact, inspectable prompt packet.
+Goal: turn selected cards into one inspectable V3 prompt packet that preserves selected raw card evidence and adds provider-authored guidance.
 
 Build:
 
@@ -171,8 +171,8 @@ Tests:
 - Packet composition from selected hand.
 - Reasoner composition cannot add unsupported lore fields.
 - Selected raw card evidence remains preserved in the prompt packet and is not locally summarized into scene/turn briefs.
-- Reasoner timeout, provider failure, or invalid schema falls back to Utility composition.
-- Explicit conditioned final-prompt injection settings override packet block placement, role, and depth after Utility/Reasoner composition.
+- Reasoner timeout, provider failure, or invalid schema keeps Utility guidance plus raw selected Card Evidence.
+- Explicit final-prompt injection settings override packet block placement, role, and depth after Utility/Reasoner guidance composition.
 - Injection installs, replaces, and clears by Recursion-owned key.
 - Manual mode remains selectable and enforces selected card scope as a strict whitelist before prompt installation.
 
@@ -192,7 +192,7 @@ Build:
 - Last Brief dropdown.
 - Full viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers.
 - High-level settings controls.
-- Advanced conditioned final-prompt injection controls for placement, role, and depth, defaulted to `in_prompt`, `system`, depth `4`.
+- Advanced conditioned final-prompt injection controls for placement, role, and depth, defaulted to `in_prompt`, `system`, depth `1`.
 - Provider controls.
 - Cards scope selector with fixed family and sub-item focus controls.
 - SillyTavern-native graphite styling.

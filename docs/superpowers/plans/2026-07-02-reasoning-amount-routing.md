@@ -1,5 +1,7 @@
 # Reasoning Amount Routing Implementation Plan
 
+> Historical note (2026-07-03): This plan predates Prompt Packet V3 wording. References to final brief or pre-conditioning now map to guidance composition and the V3 prompt packet contract.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Recursion Reasoning Level control provider-level reasoning amount across direct OpenAI-compatible endpoints and SillyTavern host routes, then prove it with automated and live Playwright verification.

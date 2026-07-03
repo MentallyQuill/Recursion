@@ -1,5 +1,7 @@
 # Recursion Rapid Pipeline Design
 
+> Historical note (2026-07-03): This design predates Prompt Packet V3 and Rapid Pipeline V2. Current contract uses `guidanceComposer`, `recursion.guidance`, `recursion.cardEvidence`, `recursion.guardrails`, `rapidTurnDelta.v2`, Rapid warm V2 artifacts, and Standard escalation on warm misses. It no longer uses `rapidFastStartPack`, `rapidFastStartPack.v1`, or `conditionedSceneBrief`.
+
 ## Purpose
 
 Rapid is a second Recursion pipeline for low-latency play. It keeps provider-generated scene conditioning ready in the background, then uses one small foreground Utility call on user send to adapt that ready context to the latest player message.

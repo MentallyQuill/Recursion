@@ -189,13 +189,13 @@ Recommended depth behavior:
 
 ### User-Controlled Final Prompt Injection
 
-V1 must include an advanced user setting group for the conditioned final prompt packet. The recommended concrete defaults are placement `in_prompt`, role `system`, and depth `4`, but advanced users can choose where the composed packet lands when a model or preset responds better to a different lane.
+V1 must include an advanced user setting group for the conditioned final prompt packet. The recommended concrete defaults are placement `in_prompt`, role `system`, and depth `1`, but advanced users can choose where the composed packet lands when a model or preset responds better to a different lane.
 
 Settings contract:
 
 - `injection.placement`: `in_prompt` or `in_chat`. The selected value applies to composed Recursion packet blocks.
 - `injection.role`: `system`, `user`, or `assistant`. Default is `system`; unsupported host roles fall back to `system` and record a compact warning.
-- `injection.depth`: an integer from `0` to `10`. Default is `4`; the selected numeric depth applies to composed Recursion packet blocks.
+- `injection.depth`: an integer from `0` to `10`. Default is `1`; the selected numeric depth applies to composed Recursion packet blocks.
 
 These settings apply only after Utility/Reasoner composition has produced the packet. They do not change card generation, Arbiter scoring, selected-hand contents, raw card storage, or external memory/lore behavior. They also do not create a per-card injection matrix; Recursion remains a composed-packet system, not a card micromanagement UI.
 
@@ -267,7 +267,7 @@ Every excluded candidate that reached the composition stage should receive an om
 
 - `budget_exceeded`;
 - `duplicate`;
-- `already_in_scene_brief`;
+- `already_in_guidance`;
 - `already_in_external_context`;
 - `external_owner`;
 - `low_next_turn_need`;

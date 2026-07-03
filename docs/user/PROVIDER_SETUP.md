@@ -2,10 +2,10 @@
 
 Recursion uses two provider lanes:
 
-- Utility: required, default, and used for Arbiter planning, scene/card extraction, card generation, lifecycle support, structured diagnostics, and Utility fallback composition.
+- Utility: required, default, and used for Arbiter planning, scene/card extraction, card generation, lifecycle support, structured diagnostics, guidance composition, and fail-soft fallback guidance.
 - Reasoner: optional, used by Medium/High/Ultra Reasoning Level routing when enabled and healthy, with Utility fallback when unavailable.
 
-Reasoner is not a better default Utility. Utility remains the required path and the fallback path. The compact-bar Reasoning Level chain controls how much Recursion tries to use Reasoner: Low is Utility-only, Medium uses Reasoner for final composition when healthy, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when the lane is healthy.
+Reasoner is not a better default Utility. Utility remains the required path and the fallback path. The compact-bar Reasoning Level chain controls how much Recursion tries to use Reasoner: Low is Utility-only, Medium uses Reasoner for guidance composition when healthy, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when the lane is healthy.
 
 ![Utility and Reasoner provider controls with session-only key state](../../assets/documentation/renders/recursion-provider-controls-utility-reasoner.png)
 
@@ -47,7 +47,7 @@ Reasoner is eligible only when enabled, healthy, and selected by Reasoning Level
 
 Reasoning Level also sets the amount of provider-side reasoning Recursion requests for Reasoner work:
 
-| Level | Final brief | Other Reasoner work |
+| Level | Guidance augmentation | Other Reasoner work |
 | --- | --- | --- |
 | Low | minimal | minimal |
 | Medium | medium | minimal |
@@ -143,7 +143,7 @@ Provider failures should degrade Recursion, not block normal SillyTavern generat
 | Utility not ready | Missing source, model, profile, or session key. | Open Utility provider card, complete setup, run Test Provider. |
 | Provider test failed | Bad key, base URL, model name, network, or incompatible response. | Re-enter session key, verify endpoint/model, test again. |
 | Reasoner never runs | Off, unhealthy, or not needed by Auto. | Enable Reasoner, test it, and use Auto only for suitable complex turns. |
-| Reasoner failed but generation continued | Expected fallback path. | Inspect Activity and Prompt Packet to confirm Utility composition. |
+| Reasoner failed but generation continued | Expected fallback path. | Inspect Activity and Prompt Packet to confirm Utility guidance plus raw selected Card Evidence. |
 | Prompt not installed | Power is off, Utility unavailable, stale run, or injection failure. | Check power state, mode, Activity, Provider status, and Prompt Packet metadata. |
 | Session key disappeared | Browser session reset or Clear Session Key used. | Re-enter key and run Test Provider. |
 | Provider returned messy JSON | Recursion can strip wrappers and repair common JSON syntax, but cannot invent missing contract fields. | Inspect sanitized Activity details; fix provider prompt/model settings if schema or snapshot errors repeat. |

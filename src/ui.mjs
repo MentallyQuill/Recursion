@@ -1397,7 +1397,43 @@ function briefCardDomId(card, index) {
   return cleanText(source.id || source.cardId || source.refId || `${cardFamily(source)}-${index}`, `card-${index}`);
 }
 
+function handDropdownRenderKey(view, model, cards, packetText, packetMeta) {
+  return stableStringify({
+    tooltipsEnabled: model.tooltipsEnabled,
+    hasPacket: Boolean(view.lastPacket),
+    packetId: cleanText(view.lastPacket?.packetId || ''),
+    packetText,
+    packetMeta,
+    composedAt: cleanText(view.lastPacket?.composedAt || ''),
+    cards: cards.map((card, index) => {
+      const source = asObject(card);
+      const family = cardFamily(source);
+      const priority = cardPriority(source);
+      const metaChips = cardMetaChips(source);
+      return {
+        id: briefCardDomId(source, index),
+        family,
+        priority,
+        text: cardText(source) || cardSummary(source),
+        chips: [
+          ['critical', 'strong'].includes(priority) ? priority : '',
+          ...metaChips
+        ].map((chip) => cleanText(chip, '')).filter(Boolean),
+        selectedReason: cleanText(source.selectedReason || source.selectionReason || source.whySelected),
+        omittedReason: cleanText(source.omittedReason || source.omissionReason || source.whyOmitted)
+      };
+    })
+  });
+}
+
 function renderHandDropdown(panel, view, model) {
+  const cards = model.cards;
+  const packetPreview = promptPacketPreview(view.lastPacket, view.lastHand);
+  const packetText = promptPacketText(view.lastPacket, view.lastHand);
+  const packetMeta = promptPacketMeta(packetPreview);
+  const renderKey = handDropdownRenderKey(view, model, cards, packetText, packetMeta);
+  if (panel.hidden === false && panel.dataset?.recursionHandRenderKey === renderKey) return;
+
   const packetPanelWasOpen = panel.querySelector?.('[data-recursion-prompt-packet-panel]')?.hidden === false;
   const previousPacketPreviewNode = panel.querySelector?.('[data-recursion-prompt-packet-preview]');
   const previousBriefScrollTop = Number(panel.querySelector?.('[data-recursion-brief-scroll]')?.scrollTop || 0);
@@ -1407,11 +1443,7 @@ function renderHandDropdown(panel, view, model) {
     .map((row) => row.dataset?.recursionBriefCardId)
     .filter(Boolean));
   panel.replaceChildren();
-  const cards = model.cards;
-  const packetPreview = promptPacketPreview(view.lastPacket, view.lastHand);
-  const packetText = promptPacketText(view.lastPacket, view.lastHand);
   const packetTextUnchanged = previousPacketPreviewNode?.textContent === packetText;
-  const packetMeta = promptPacketMeta(packetPreview);
   const packetButton = el('button', {
     className: 'recursion-prompt-packet-button',
     text: 'Prompt Packet',
@@ -1473,6 +1505,7 @@ function renderHandDropdown(panel, view, model) {
       el('span', { text: 'Waiting for first composed brief' }),
       el('span', { className: 'recursion-mini-chip', text: 'Esc' })
     ]));
+    panel.dataset.recursionHandRenderKey = renderKey;
     return;
   }
   const scroll = el('div', { className: 'recursion-brief-scroll', dataset: { recursionBriefScroll: '' } });
@@ -1544,6 +1577,7 @@ function renderHandDropdown(panel, view, model) {
     }),
     el('span', { className: 'recursion-mini-chip', text: 'Esc' })
   ]));
+  panel.dataset.recursionHandRenderKey = renderKey;
 }
 
 function cardScopeSelectedCount(scope, family) {

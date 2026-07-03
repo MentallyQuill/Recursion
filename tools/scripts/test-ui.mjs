@@ -1977,7 +1977,7 @@ try {
   );
   assertEqual(root.querySelector('[data-recursion-setting-injection-placement]').value, 'in_prompt', 'injection placement defaults to the concrete prompt lane');
   assertEqual(root.querySelector('[data-recursion-setting-injection-role]').value, 'system', 'injection role defaults to system');
-  assertEqual(root.querySelector('[data-recursion-setting-injection-depth]').value, '4', 'injection depth defaults to the concrete recommended depth');
+  assertEqual(root.querySelector('[data-recursion-setting-injection-depth]').value, '1', 'injection depth defaults to the concrete recommended depth');
   root.querySelector('[data-recursion-reset-scene-cache]').click();
   assertEqual(resetSceneCacheCalls, 1, 'Reset Scene Cache action calls runtime');
   root.querySelector('[data-recursion-clear-run-journal]').click();
@@ -2040,6 +2040,7 @@ try {
   const progressChildren = root.querySelector('[data-recursion-progress-children]');
   const briefScroll = root.querySelector('[data-recursion-brief-scroll]');
   const packetPreview = root.querySelector('[data-recursion-prompt-packet-preview]');
+  const packetPreviewParent = packetPreview.parentNode;
   progressList.scrollTop = 48;
   progressChildren.scrollTop = 36;
   briefScroll.scrollTop = 44;
@@ -2048,6 +2049,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-progress-list]'), progressList, 'progress list node is preserved across rerender');
   assertEqual(root.querySelector('[data-recursion-progress-row]'), progressRow, 'progress row node is preserved across rerender');
   assertEqual(root.querySelector('[data-recursion-prompt-packet-preview]'), packetPreview, 'prompt packet preview node is preserved across rerender');
+  assertEqual(root.querySelector('[data-recursion-prompt-packet-preview]').parentNode, packetPreviewParent, 'prompt packet preview parent is preserved across rerender');
   assertEqual(root.querySelector('[data-recursion-progress-list]').scrollTop, 48, 'progress list preserves scroll position across rerender');
   assertEqual(root.querySelector('[data-recursion-progress-children]').scrollTop, 36, 'progress child list preserves scroll position across rerender');
   assertEqual(root.querySelector('[data-recursion-brief-scroll]').scrollTop, 44, 'brief card list preserves scroll position across rerender');

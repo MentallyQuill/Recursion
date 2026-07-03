@@ -1,5 +1,7 @@
 # Reasoning Amount Routing Design
 
+> Historical note (2026-07-03): This design predates Prompt Packet V3 wording. References to final brief or pre-conditioning now map to guidance composition and the V3 prompt packet contract.
+
 ## Goal
 
 Recursion Reasoning Level must control both which lane is used and how much reasoning the selected provider is asked to spend. The implementation should support direct OpenAI-compatible endpoints and SillyTavern host routes without adding a new user-facing setting.

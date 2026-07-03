@@ -20,7 +20,7 @@ const VALID_INJECTION_PLACEMENTS = new Set(['in_prompt', 'in_chat']);
 const VALID_INJECTION_ROLES = new Set(['system', 'user', 'assistant']);
 const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
 const DETAIL_PROFILES = new Set(['compact', 'standard', 'expanded']);
-const MAX_CARD_TEXT = 50000;
+const MAX_CARD_TEXT = Infinity;
 const MAX_EVIDENCE_TEXT = 160;
 const MAX_OMISSION_REASON = 160;
 const MAX_GUIDANCE_TEXT = 6000;
@@ -49,13 +49,14 @@ const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|inspector[-_\s]*only|source[-
 const FOOTPRINT_BUDGETS = FOOTPRINT_SECTION_BUDGETS;
 
 const STATIC_GUARDRAILS = Object.freeze([
+  'Write only the next assistant message; keep Recursion cards, labels, and guidance invisible.',
   'Honor player intent, visible facts, reveal boundaries, and hard card constraints.',
   'Use raw Recursion card evidence as source of truth when guidance and evidence conflict.'
 ]);
 
 const INJECTION_TEMPLATE = Object.freeze([
-  Object.freeze({ id: 'guidance', promptKey: 'recursion.guidance', title: 'Recursion Guidance', placement: 'in_prompt', depth: 4, role: 'system' }),
-  Object.freeze({ id: 'cardEvidence', promptKey: 'recursion.cardEvidence', title: 'Recursion Card Evidence', placement: 'in_prompt', depth: 4, role: 'system' }),
+  Object.freeze({ id: 'guidance', promptKey: 'recursion.guidance', title: 'Recursion Guidance', placement: 'in_prompt', depth: 1, role: 'system' }),
+  Object.freeze({ id: 'cardEvidence', promptKey: 'recursion.cardEvidence', title: 'Recursion Card Evidence', placement: 'in_prompt', depth: 1, role: 'system' }),
   Object.freeze({ id: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', placement: 'in_prompt', depth: 1, role: 'system' })
 ]);
 
@@ -251,7 +252,11 @@ function cardEvidenceLine(card) {
 }
 
 function buildCardEvidenceSection(cards) {
-  const lines = ['Card evidence:'];
+  const lines = [
+    'Private Recursion card evidence for the next assistant message.',
+    'Use these cards silently as evidence. Preserve their hard constraints, subtext, and open threads while keeping card labels out of final prose.',
+    'Card evidence:'
+  ];
   for (const card of cards) {
     lines.push(cardEvidenceLine(card));
   }
@@ -663,7 +668,12 @@ async function applyReasonerGuidance({
 
 function buildGuidanceSection(guidance) {
   const text = safeText(guidance?.text, MAX_GUIDANCE_TEXT);
-  return `Guidance:\n${text || 'Guidance unavailable; use the raw Recursion card evidence directly.'}`;
+  return [
+    'Private Recursion guidance for the next assistant message.',
+    'Write the next reply as normal story prose/dialogue.',
+    'Guidance:',
+    text || 'Guidance unavailable; use the raw Recursion card evidence directly.'
+  ].join('\n');
 }
 
 function buildInjectionPlan(sectionSources, budgets, injectionSettings = {}) {

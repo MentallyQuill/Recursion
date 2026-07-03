@@ -46,6 +46,11 @@ function assertNoSecretText(value, label) {
   return serialized;
 }
 
+function assertNoObjectString(value, label) {
+  const serialized = JSON.stringify(value);
+  assert(!serialized.includes('[object Object]') && !serialized.includes('object-Object'), label);
+}
+
 function assertNotEqual(actual, expected, message) {
   if (actual === expected) {
     throw new Error(`${message}: did not expect ${expected}`);
@@ -1241,7 +1246,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
             backgroundRefreshRequests: [],
             mandatoryMissingCards: [],
             escalateToStandard: false,
-            diagnostics: ['rapid-hedge-backup']
+            diagnostics: ['rapid-hedge-backup', { code: 'rapid-object-diagnostic' }]
           }
         };
       }
@@ -1252,6 +1257,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assert(calls.some((call) => call.hedge === 'primary'), 'primary hedge call started');
   assert(calls.some((call) => call.hedge === 'backup'), 'backup hedge call started');
   assert(JSON.stringify(result.packet).includes('rapid-hedge-backup'), 'packet diagnostics include backup winner');
+  assertNoObjectString(result.packet, 'Rapid object diagnostics do not stringify to object marker');
 }
 
 const modelFetchSettingsStore = createSettingsStore({ root: {} });
@@ -4311,7 +4317,13 @@ for (const scenario of [
               signals: ['safe-signal', 'Bearer signal-token', 'sk-live-signal', { nested: 'private-secret' }],
               extraDecisionField: 'sk-extra-decision'
             },
-            diagnostics: ['safe-diagnostic', 'Bearer diagnostic-token', 'sk-live-diagnostic', 'private-secret'],
+            diagnostics: [
+              'safe-diagnostic',
+              'Bearer diagnostic-token',
+              'sk-live-diagnostic',
+              'private-secret',
+              { code: 'object-diagnostic', message: 'structured provider diagnostic' }
+            ],
             apiKey: 'sk-extra-top-level',
             authorization: 'Bearer extra-top-level',
             nested: { secret: 'private-secret' }
@@ -4330,6 +4342,7 @@ for (const scenario of [
   assertEqual(result.plan.reasonerDecision.extraDecisionField, undefined, 'result plan drops arbitrary reasoner decision fields');
   assertDeepEqual(Object.keys(result.plan).sort(), ['action', 'budgets', 'cardJobs', 'diagnostics', 'lifecycle', 'promptFootprint', 'reasonerDecision', 'sceneStatus', 'schema', 'snapshotHash', 'source', 'storyForm'].sort(), 'result plan only exposes whitelisted fields');
   assert(result.plan.diagnostics.includes('safe-diagnostic'), 'safe diagnostics survive plan scrub');
+  assertNoObjectString(result.plan.diagnostics, 'object-valued arbiter diagnostics do not stringify to object marker');
   assert(result.plan.reasonerDecision.signals.includes('safe-signal'), 'safe reasoner signals survive plan scrub');
   assert(result.plan.reasonerDecision.signals.every((signal) => typeof signal === 'string'), 'reasoner signals normalize to strings');
   assertNoSecretText({ resultPlan: result.plan, viewPlan }, 'successful arbiter plan');

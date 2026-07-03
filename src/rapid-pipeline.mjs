@@ -13,7 +13,19 @@ function asObject(value) {
 }
 
 function cleanText(value, limit = TEXT_LIMIT) {
-  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
+  let source = '';
+  if (value === undefined || value === null) {
+    source = '';
+  } else if (['string', 'number', 'boolean', 'bigint'].includes(typeof value)) {
+    source = String(value);
+  } else {
+    try {
+      source = JSON.stringify(value);
+    } catch {
+      source = '';
+    }
+  }
+  return source.replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
 function textCandidate(value, limit = TEXT_LIMIT) {

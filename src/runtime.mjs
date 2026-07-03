@@ -110,8 +110,19 @@ function cleanString(value, fallback = '') {
   return text || fallback;
 }
 
+function safeTextSource(value, limit = 700) {
+  const redacted = redact(value, { maxString: limit });
+  if (redacted === undefined || redacted === null) return '';
+  if (['string', 'number', 'boolean', 'bigint'].includes(typeof redacted)) return String(redacted);
+  try {
+    return JSON.stringify(redacted);
+  } catch {
+    return '';
+  }
+}
+
 function safeText(value, limit = 700) {
-  return truncate(compact(String(redact(value, { maxString: limit }) ?? '').replace(SECRET_TEXT_PATTERN, '[redacted]'), limit), limit);
+  return truncate(compact(safeTextSource(value, limit).replace(SECRET_TEXT_PATTERN, '[redacted]'), limit), limit);
 }
 
 function hasSecretText(value) {

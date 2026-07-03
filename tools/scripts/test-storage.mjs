@@ -46,7 +46,7 @@ function assertParseableTimestamp(value, message) {
 }
 
 function assertNoObjectString(value, message) {
-  const text = String(value ?? '');
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
   assert(!text.includes('[object Object]') && !text.includes('object-Object'), message);
 }
 
@@ -261,7 +261,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
             sourceCardIds: ['card-a'],
             guardrailCardIds: ['card-b'],
             omittedCardIds: [{ id: 'card-b', reason: 'lower-priority' }],
-            diagnostics: ['guidance-ok'],
+            diagnostics: ['guidance-ok', '[object Object]'],
             rawProviderResponse: 'must not persist'
           },
           storyForm: {
@@ -276,7 +276,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
           providerContractHash: 'provider-hash',
           cardCatalogHash: 'catalog-hash',
           promptContractHash: 'prompt-hash',
-          diagnostics: ['rapid-warm-ready'],
+          diagnostics: ['rapid-warm-ready', '[object Object]'],
           rawProviderResponse: 'must not persist'
         }
       }
@@ -323,6 +323,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
     undefined,
     'rapid V1 conditionedSceneBrief is dropped'
   );
+  assertNoObjectString(rapidCache.variants['base-source'].rapid, 'rapid warm artifact drops object-string diagnostics');
 }
 
 {

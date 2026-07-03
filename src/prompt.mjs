@@ -81,8 +81,19 @@ function cleanText(value, limit) {
   return truncate(compact(value ?? '', limit), limit);
 }
 
+function safeTextSource(value, limit) {
+  const redacted = redact(value, { maxString: limit });
+  if (redacted === undefined || redacted === null) return '';
+  if (['string', 'number', 'boolean', 'bigint'].includes(typeof redacted)) return String(redacted);
+  try {
+    return JSON.stringify(redacted);
+  } catch {
+    return '';
+  }
+}
+
 function safeText(value, limit) {
-  return cleanText(String(redact(value, { maxString: limit }) ?? '').replace(new RegExp(SECRET_TEXT_PATTERN.source, 'ig'), '[redacted]'), limit);
+  return cleanText(safeTextSource(value, limit).replace(new RegExp(SECRET_TEXT_PATTERN.source, 'ig'), '[redacted]'), limit);
 }
 
 function safeOptionalText(value, limit) {

@@ -26,10 +26,12 @@ const PHASE_LABELS = Object.freeze({
   sceneChecking: 'Checking scene shift...',
   arbiterPlanning: 'Planning card pass...',
   rapidWarming: 'Rapid warming scene deck...',
+  rapidWarmWaiting: 'Waiting for Rapid deck...',
   rapidDeltaRunning: 'Rapid selecting turn delta...',
   rapidWarmMissStandard: 'Rapid warm miss; Standard...',
   rapidWarmReady: 'Rapid deck ready.',
   rapidWarmStale: 'Rapid deck stale.',
+  rapidWarmFailed: 'Rapid warm failed.',
   cacheReusing: 'Reusing scene deck...',
   cardBatchRunning: 'Generating scene cards...',
   cardValidating: 'Validating cards...',
@@ -694,7 +696,19 @@ function runtimeHealthLabel(activity, progressRun) {
   return 'Ready';
 }
 
-function standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards) {
+function rapidWarmStandbyText(rapidWarm, pipelineMode) {
+  if (pipelineMode !== 'rapid') return '';
+  const source = asObject(rapidWarm);
+  const status = cleanText(source.status).toLowerCase();
+  const label = cleanText(source.reasonLabel || source.failureReasonLabel);
+  if (status === 'ready') return terminalStatusText(label || 'Rapid deck ready');
+  if (status === 'stale') return terminalStatusText(label || 'Rapid deck stale');
+  if (status === 'missed') return terminalStatusText(label || 'Rapid warm missed; Standard started');
+  if (status === 'failed') return terminalStatusText(label || 'Rapid warm failed');
+  return '';
+}
+
+function standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards, rapidWarm) {
   if (!enabled) return terminalStatusText('Recursion off');
   if (progressRun?.currentStepText) return '';
   const severity = normalizeSeverity(activity.severity);
@@ -711,6 +725,8 @@ function standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, c
   }
   if (!READY_PHASES.has(activity.phase)) return '';
   if (mode === 'manual') return terminalStatusText('Manual scope armed');
+  const rapidStatus = rapidWarmStandbyText(rapidWarm, pipelineMode);
+  if (rapidStatus) return rapidStatus;
   if (pipelineMode === 'rapid' && Array.isArray(cards) && cards.length > 0) return terminalStatusText('Rapid deck standing by');
   if (Array.isArray(cards) && cards.length > 0) return terminalStatusText('Scene deck standing by');
   return terminalStatusText('Ready for Recursion');
@@ -760,7 +776,7 @@ export function createRecursionViewModel(view = {}) {
     progressRun,
     generationStopVisible,
     currentStepText: progressRun.currentStepText,
-    standbyStatusText: standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards),
+    standbyStatusText: standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards, source.rapidWarm),
     heroPixelBlocks,
     heroPixelColumnCount: heroPixelBlocks.at(-1)?.columnCount || 0,
     progressChildVisibleLimit,

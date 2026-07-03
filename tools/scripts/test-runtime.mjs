@@ -5,7 +5,9 @@ import { createMemoryStorageAdapter, createStorageRepository } from '../../src/s
 import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
 import { CARD_CATALOG, cardsFromProviderResult } from '../../src/cards.mjs';
 import { defaultCardScope, setFamilyEnabled } from '../../src/card-scope.mjs';
+import { packetToPromptBlocks } from '../../src/prompt.mjs';
 import { hashJson } from '../../src/core.mjs';
+import { UNKNOWN_STORY_FORM } from '../../src/story-form.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
@@ -24,6 +26,16 @@ async function waitUntil(predicate, message, { attempts = 50, delayMs = 0 } = {}
 
 function delay(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 function assertNoSecretText(value, label) {
@@ -288,7 +300,8 @@ function createRuntimeHarness({
   generationRouter = undefined,
   activity = createActivityReporter(),
   storage: providedStorage = null,
-  rapidHedgeDelayMs = undefined
+  rapidHedgeDelayMs = undefined,
+  rapidWarmJoinWaitMs = undefined
 } = {}) {
   const calls = {
     snapshot: 0,
@@ -336,7 +349,7 @@ function createRuntimeHarness({
     },
     generation: hostGeneration
   };
-  const runtime = createRecursionRuntime({ host, settingsStore, storage, activity, generationRouter: resolvedGenerationRouter, rapidHedgeDelayMs });
+  const runtime = createRecursionRuntime({ host, settingsStore, storage, activity, generationRouter: resolvedGenerationRouter, rapidHedgeDelayMs, rapidWarmJoinWaitMs });
   return { runtime, calls, installed, cleared, storage, settingsStore, activity, adapter };
 }
 
@@ -428,6 +441,273 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const arbiterGate = deferred();
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    rapidHedgeDelayMs: -1,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          await arbiterGate.promise;
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              storyForm: {
+                schema: 'recursion.storyForm.v1',
+                tense: 'past',
+                pov: 'third-person-limited',
+                confidence: 'high',
+                evidenceRefs: ['message:2'],
+                reason: 'Warm narration establishes form.'
+              },
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Warm visible status.' }],
+              reasonerDecision: { mode: 'skip', reason: 'background warm', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['warm-non-abort']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneFrameCard',
+              family: 'Scene Frame',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: 'Warm card survives foreground send.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 12
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Warm guidance survives foreground send.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['warm-guidance']
+            }
+          };
+        }
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: [],
+              turnGuidanceText: 'Turn guidance after join.',
+              guardrailCardIds: [],
+              packetInstructions: [],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['joined-warm']
+            }
+          };
+        }
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const warmPromise = harness.runtime.warmRapidScene({ reason: 'unit-non-abort' });
+  await Promise.resolve();
+  const foregroundPromise = harness.runtime.prepareForGeneration({ userMessage: 'Use current warm if ready.' });
+  await Promise.resolve();
+  arbiterGate.resolve();
+  const [warmResult, foregroundResult] = await Promise.all([warmPromise, foregroundPromise]);
+  assertEqual(warmResult.ok, true, 'background warm completes');
+  assertEqual(foregroundResult.ok, true, 'foreground generation completes');
+  assert(roleCalls.includes('rapidTurnDelta'), 'foreground uses Rapid delta after joining warm');
+  assertEqual(foregroundResult.packet.diagnostics.rapidPath, 'warm-v2', 'joined foreground records Rapid warm path');
+}
+
+{
+  const gate = deferred();
+  let arbiterStarted = false;
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          arbiterStarted = true;
+          await gate.promise;
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'skip',
+              diagnostics: ['blocked-warm']
+            }
+          };
+        }
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const warmPromise = harness.runtime.warmRapidScene({ reason: 'unit-warming-persist' });
+  await waitUntil(() => arbiterStarted, 'Rapid warm Arbiter did not start');
+  const view = harness.runtime.view();
+  assertEqual(view.rapidWarm.status, 'warming', 'runtime view exposes warming state');
+  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
+  const active = cache?.variants?.[cache.activeSourceRevisionHash];
+  assertEqual(active?.rapid?.status, 'warming', 'scene cache persists warming status before provider work completes');
+  gate.resolve();
+  await warmPromise;
+}
+
+{
+  const gate = deferred();
+  let arbiterStarted = false;
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    rapidWarmJoinWaitMs: 1,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          if (!arbiterStarted) {
+            arbiterStarted = true;
+            await gate.promise;
+            return {
+              ok: true,
+              data: {
+                schema: UTILITY_ARBITER_SCHEMA,
+                snapshotHash: request.snapshotHash,
+                action: 'skip',
+                diagnostics: ['late-warm']
+              }
+            };
+          }
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              cardJobs: [],
+              reasonerDecision: { mode: 'skip', reason: 'warm timeout standard', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['standard-after-warm-timeout']
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Standard guidance after Rapid warm timeout.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['timeout-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const warmPromise = harness.runtime.warmRapidScene({ reason: 'unit-timeout' });
+  await waitUntil(() => arbiterStarted, 'Rapid warm Arbiter did not start before timeout test');
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Continue before warm finishes.' });
+  assertEqual(result.ok, true, 'foreground generation completes after Rapid warm timeout');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'standard', 'Rapid warm timeout falls back to Standard');
+  assert(result.plan.diagnostics.includes('rapid-warm-miss:warm-timeout'), 'timeout reason is visible in Standard diagnostics');
+  assertEqual(harness.runtime.view().rapidWarm.status, 'missed', 'runtime view exposes Rapid warm miss after timeout');
+  assertEqual(harness.runtime.view().rapidWarm.reasonCode, 'warm-timeout', 'runtime view exposes Rapid warm timeout reason');
+  gate.resolve();
+  await warmPromise;
+  assert(roleCalls.filter((roleId) => roleId === 'utilityArbiter').length >= 2, 'timeout test runs warm Arbiter and Standard Arbiter');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    storage,
+    generationRouter: {
+      async generate(roleId) {
+        if (roleId === 'utilityArbiter') throw new Error('Bearer rapid-warm-secret');
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.warmRapidScene({ reason: 'unit-failure-persist' });
+  assertEqual(result.reason, 'rapid-warm-failed', 'Rapid warm provider failure is reported');
+  const view = harness.runtime.view();
+  assertEqual(view.rapidWarm.status, 'failed', 'runtime view exposes failed Rapid warm state');
+  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
+  const active = cache?.variants?.[cache.activeSourceRevisionHash];
+  assertEqual(active?.rapid?.status, 'failed', 'scene cache persists failed Rapid warm status');
+  assertEqual(active?.rapid?.failureReasonCode, 'warm-failed', 'failed Rapid warm persists reason code');
+  assertNoSecretText(active?.rapid, 'failed Rapid warm artifact');
+}
+
+{
+  const gate = deferred();
+  let arbiterStarted = false;
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          arbiterStarted = true;
+          await gate.promise;
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'skip',
+              diagnostics: ['settings-aborted-warm']
+            }
+          };
+        }
+        throw new Error(`unexpected role ${roleId}`);
+      }
+    }
+  });
+  const warmPromise = harness.runtime.warmRapidScene({ reason: 'unit-settings-abort' });
+  await waitUntil(() => arbiterStarted, 'Rapid warm Arbiter did not start before settings abort');
+  await harness.runtime.updateSettings({ strength: 'strong' });
+  const view = harness.runtime.view();
+  assertEqual(view.rapidWarm.status, 'stale', 'settings changes mark active Rapid warm stale');
+  assertEqual(view.rapidWarm.reasonCode, 'settings-mismatch', 'settings changes expose Rapid warm stale reason');
+  gate.resolve();
+  const warmResult = await warmPromise;
+  assertEqual(warmResult.superseded, true, 'settings changes supersede active Rapid warm run');
+}
+
+{
   const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
   const adapter = createMemoryStorageAdapter();
   const storage = createStorageRepository({ storage: adapter });
@@ -481,6 +761,344 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assertEqual(result.packet.storyForm.tense, 'past', 'Rapid packet stores warm story tense');
   assertEqual(result.packet.storyForm.pov, 'third-person-limited', 'Rapid packet stores warm story pov');
   assertNoSecretText(result.packet, 'Rapid packet');
+}
+
+{
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const pendingText = 'The pending user message is already visible in the host snapshot.';
+  const hostSnapshot = {
+    ...snapshot,
+    latestMesId: 3,
+    messages: [
+      ...snapshot.messages,
+      { mesid: 3, role: 'user', text: pendingText, textHash: hashJson(pendingText), visible: true }
+    ],
+    sourceRevisionHash: sourceFingerprintForMessages([
+      ...snapshot.messages,
+      { mesid: 3, role: 'user', text: pendingText, textHash: hashJson(pendingText), visible: true }
+    ], 2, 3),
+    turnFingerprint: 'rapid-host-visible-pending-turn'
+  };
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash }));
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot: hostSnapshot,
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: ['warm-card-1'],
+              turnGuidanceText: 'HOST_VISIBLE_PENDING_MARKER use warm deck despite visible pending user.',
+              packetInstructions: [],
+              guardrailCardIds: ['warm-card-1'],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['host-visible-pending']
+            }
+          };
+        }
+        throw new Error(`unexpected host-visible pending role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: { text: pendingText, mesid: 3 } });
+  assertEqual(result.ok, true, 'Rapid foreground handles host-visible pending user messages');
+  assertEqual(result.packet.diagnostics.rapidPath, 'warm-v2', 'host-visible pending user still uses warm-v2');
+  assertDeepEqual(roleCalls, ['rapidTurnDelta'], 'host-visible pending user does not rerun Standard pipeline');
+  assert(result.packet.sections.guidance.includes('HOST_VISIBLE_PENDING_MARKER'), 'host-visible pending Rapid delta reaches packet');
+}
+
+{
+  const message0 = {
+    mesid: 0,
+    role: 'user',
+    text: 'I push open the archive door and ask Mara about the captain.',
+    textHash: hashJson('I push open the archive door and ask Mara about the captain.'),
+    visible: true
+  };
+  const assistant1 = {
+    mesid: 1,
+    role: 'assistant',
+    text: 'Mara stiffens in the candlelight as the guards pass nearby.',
+    textHash: hashJson('Mara stiffens in the candlelight as the guards pass nearby.'),
+    visible: true
+  };
+  const pendingText = 'What does Mara say next?';
+  const pending2 = {
+    mesid: 2,
+    role: 'user',
+    text: pendingText,
+    textHash: hashJson(pendingText),
+    visible: true
+  };
+  const olderHash = sourceFingerprintForMessages([message0], 0, 0);
+  const warmHash = sourceFingerprintForMessages([message0, assistant1], 0, 1);
+  const hostSnapshot = {
+    chatId: 'Rapid Alternate Sparse Chat',
+    chatKey: 'rapid-alternate-sparse-chat',
+    sceneKey: 'rapid-alternate-sparse-scene',
+    sceneFingerprint: 'rapid-alternate-sparse-scene-fp',
+    turnFingerprint: 'rapid-alternate-sparse-turn',
+    sourceRevisionHash: sourceFingerprintForMessages([message0, pending2], 0, 2),
+    latestMesId: 2,
+    messages: [message0, pending2]
+  };
+  const contracts = cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
+  const cache = {
+    cacheState: 'active',
+    versions: contracts,
+    activeSourceRevisionHash: warmHash,
+    variantOrder: [olderHash, warmHash],
+    variants: {
+      [olderHash]: {
+        sourceRevisionHash: olderHash,
+        cards: []
+      },
+      [warmHash]: {
+        sourceRevisionHash: warmHash,
+        cards: [{
+          id: 'warm-card-sparse-assistant',
+          family: 'Active Cast',
+          role: 'activeCastCard',
+          promptText: 'Mara is present, tense, and constrained by nearby guards.',
+          evidenceRefs: ['message:0', 'message:1'],
+          source: {
+            chatId: 'rapid-alternate-sparse-chat',
+            firstMesId: 0,
+            lastMesId: 1,
+            fingerprint: warmHash,
+            snapshotHash: warmHash,
+            sourceRevisionHash: warmHash
+          },
+          freshness: {
+            sourceFingerprint: warmHash,
+            sourceRevisionHash: warmHash
+          }
+        }],
+        rapid: {
+          pipelineVersion: 2,
+          status: 'ready',
+          warmArtifactId: 'rapid-warm-sparse-assistant',
+          baseSourceRevisionHash: warmHash,
+          baseSnapshotHash: hashJson({ sourceRevisionHash: warmHash }),
+          selectedCardIds: ['warm-card-sparse-assistant'],
+          cardIds: ['warm-card-sparse-assistant'],
+          guidance: {
+            schema: 'recursion.guidanceComposer.v1',
+            status: 'used',
+            text: 'Use the warmed Mara/guards pressure.',
+            sourceCardIds: ['warm-card-sparse-assistant'],
+            guardrailCardIds: ['warm-card-sparse-assistant'],
+            diagnostics: ['sparse-assistant-warm']
+          },
+          storyForm: UNKNOWN_STORY_FORM,
+          settingsHash: contracts.settingsHash,
+          providerContractHash: contracts.providerContractHash,
+          cardCatalogHash: contracts.cardCatalogHash,
+          promptContractHash: contracts.promptContractHash,
+          diagnostics: ['rapid-warm-ready']
+        }
+      }
+    }
+  };
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache(hostSnapshot.chatKey, hostSnapshot.sceneKey, cache);
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot: hostSnapshot,
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: ['warm-card-sparse-assistant'],
+              turnGuidanceText: 'SPARSE_ASSISTANT_WARM_MARKER reuse warm deck.',
+              packetInstructions: [],
+              guardrailCardIds: ['warm-card-sparse-assistant'],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['sparse-assistant-rapid']
+            }
+          };
+        }
+        throw new Error(`unexpected sparse assistant warm role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: { text: pendingText, mesid: 2 } });
+  assertEqual(result.ok, true, 'Rapid foreground can use alternate ready warm variant when host snapshot omits cached assistant');
+  assertEqual(result.packet.diagnostics.rapidPath, 'warm-v2', 'sparse assistant alternate warm uses Rapid path');
+  assertDeepEqual(roleCalls, ['rapidTurnDelta'], 'sparse assistant alternate warm does not rerun Standard pipeline');
+  assert(result.packet.sections.guidance.includes('SPARSE_ASSISTANT_WARM_MARKER'), 'sparse assistant Rapid delta reaches packet');
+}
+
+{
+  let snapshotReads = 0;
+  const message0 = {
+    mesid: 0,
+    role: 'user',
+    text: 'I enter the archive and ask Mara about the captain.',
+    textHash: hashJson('I enter the archive and ask Mara about the captain.'),
+    visible: true
+  };
+  const staleAssistant1 = {
+    mesid: 1,
+    role: 'assistant',
+    text: 'Stale hook payload assistant text.',
+    textHash: hashJson('Stale hook payload assistant text.'),
+    visible: true
+  };
+  const finalAssistant1 = {
+    mesid: 1,
+    role: 'assistant',
+    text: 'Final saved assistant text used by the Rapid warm deck.',
+    textHash: hashJson('Final saved assistant text used by the Rapid warm deck.'),
+    visible: true
+  };
+  const pendingText = 'What does Mara say now?';
+  const pending2 = {
+    mesid: 2,
+    role: 'user',
+    text: pendingText,
+    textHash: hashJson(pendingText),
+    visible: true
+  };
+  const staleHash = sourceFingerprintForMessages([message0, staleAssistant1], 0, 1);
+  const warmHash = sourceFingerprintForMessages([message0, finalAssistant1], 0, 1);
+  const initialSnapshot = {
+    chatId: 'rapid-warm-recheck-chat',
+    chatKey: 'rapid-warm-recheck-chat',
+    sceneKey: 'rapid-warm-recheck-scene',
+    sceneFingerprint: 'rapid-warm-recheck-scene-fp',
+    turnFingerprint: 'rapid-warm-recheck-turn-stale',
+    sourceRevisionHash: sourceFingerprintForMessages([message0, staleAssistant1, pending2], 0, 2),
+    latestMesId: 2,
+    messages: [message0, staleAssistant1, pending2]
+  };
+  const currentSnapshot = {
+    ...initialSnapshot,
+    turnFingerprint: 'rapid-warm-recheck-turn-current',
+    sourceRevisionHash: sourceFingerprintForMessages([message0, finalAssistant1, pending2], 0, 2),
+    messages: [message0, finalAssistant1, pending2]
+  };
+  const contracts = cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
+  const cache = {
+    cacheState: 'active',
+    versions: contracts,
+    activeSourceRevisionHash: warmHash,
+    variantOrder: [warmHash],
+    variants: {
+      [warmHash]: {
+        sourceRevisionHash: warmHash,
+        cards: [{
+          id: 'warm-card-recheck-current-base',
+          family: 'Scene Frame',
+          role: 'sceneFrameCard',
+          promptText: 'Mara answers in the current saved archive scene.',
+          evidenceRefs: ['message:0', 'message:1'],
+          source: {
+            chatId: 'rapid-warm-recheck-chat',
+            firstMesId: 0,
+            lastMesId: 1,
+            fingerprint: warmHash,
+            snapshotHash: warmHash,
+            sourceRevisionHash: warmHash
+          },
+          freshness: {
+            sourceFingerprint: warmHash,
+            sourceRevisionHash: warmHash
+          }
+        }],
+        rapid: {
+          pipelineVersion: 2,
+          status: 'ready',
+          warmArtifactId: 'rapid-warm-recheck-current-base',
+          baseSourceRevisionHash: warmHash,
+          selectedCardIds: ['warm-card-recheck-current-base'],
+          cardIds: ['warm-card-recheck-current-base'],
+          guidance: {
+            schema: 'recursion.guidanceComposer.v1',
+            status: 'used',
+            text: 'Use the current saved warm base.',
+            sourceCardIds: ['warm-card-recheck-current-base'],
+            guardrailCardIds: ['warm-card-recheck-current-base'],
+            diagnostics: ['current-base-warm']
+          },
+          storyForm: UNKNOWN_STORY_FORM,
+          settingsHash: contracts.settingsHash,
+          providerContractHash: contracts.providerContractHash,
+          cardCatalogHash: contracts.cardCatalogHash,
+          promptContractHash: contracts.promptContractHash,
+          diagnostics: ['rapid-warm-ready']
+        }
+      }
+    }
+  };
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache(initialSnapshot.chatKey, initialSnapshot.sceneKey, cache);
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot: () => {
+      snapshotReads += 1;
+      return snapshotReads === 1 ? initialSnapshot : currentSnapshot;
+    },
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: ['warm-card-recheck-current-base'],
+              turnGuidanceText: 'CURRENT_BASE_WARM_MARKER install after recheck.',
+              packetInstructions: [],
+              guardrailCardIds: ['warm-card-recheck-current-base'],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['current-base-rapid']
+            }
+          };
+        }
+        throw new Error(`unexpected current-base warm role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: { text: pendingText, mesid: 2 } });
+  assertEqual(staleHash !== warmHash, true, 'test fixture uses a stale hook prefix distinct from warm base');
+  assertEqual(result.ok, true, 'Rapid install tolerates stale hook prefix when current prefix matches warm base');
+  assertEqual(result.packet.diagnostics.rapidPath, 'warm-v2', 'current-base recheck keeps Rapid path');
+  assertDeepEqual(roleCalls, ['rapidTurnDelta'], 'current-base recheck does not rerun Standard pipeline');
+  assert(result.packet.sections.guidance.includes('CURRENT_BASE_WARM_MARKER'), 'current-base Rapid delta reaches packet');
 }
 
 {
@@ -2154,6 +2772,47 @@ for (const pipelineMode of ['standard', 'rapid']) {
   assert(view.activity.label.includes('Recursion skipped'), 'stale install skip has visible status label');
   const journal = await storage.loadRunJournal(firstTurn.chatKey);
   assertEqual(journal.entries[0].event, 'prompt.install_skipped', 'stale install skip is journaled');
+}
+
+{
+  let snapshotReads = 0;
+  const pendingText = 'Live host keeps this pending user text.';
+  const firstTurn = {
+    chatId: 'pending-hash-chat',
+    chatKey: 'pending-hash-chat',
+    sceneKey: 'pending-hash-scene',
+    sceneFingerprint: 'pending-hash-scene',
+    turnFingerprint: 'pending-hash-turn-1',
+    latestMesId: 30,
+    messages: [
+      { mesid: 29, role: 'assistant', text: 'Stable prefix message.', swipeCount: 1, visible: true },
+      { mesid: 30, role: 'user', text: pendingText, textHash: hashJson(pendingText), visible: true }
+    ]
+  };
+  const recheckedTurn = {
+    ...firstTurn,
+    turnFingerprint: 'pending-hash-turn-2',
+    sourceRevisionHash: '',
+    messages: [
+      { ...firstTurn.messages[0], swipeCount: 2, activeSwipeTextHash: hashJson('Stable prefix message.') },
+      { ...firstTurn.messages[1], textHash: hashJson(`${pendingText}:host-mutated`) }
+    ]
+  };
+  const { runtime, calls, installed, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      snapshotReads += 1;
+      return snapshotReads === 1 ? firstTurn : recheckedTurn;
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: { text: pendingText, mesid: 30 } });
+  assertEqual(result.ok, true, 'pending user hash churn remains installable when text and turn are unchanged');
+  assertEqual(result.skipped, undefined, 'pending user hash churn does not report stale skip');
+  assert(calls.snapshot >= 2, 'pending user hash churn still rechecks host snapshot');
+  assertEqual(calls.install, 1, 'pending user hash churn installs prompt');
+  assertEqual(installed.length, 1, 'pending user hash churn writes one prompt packet');
+  const journal = await storage.loadRunJournal(firstTurn.chatKey);
+  assert(!journal.entries.some((entry) => entry.event === 'prompt.install_skipped'), 'pending user hash churn is not journaled as skipped');
 }
 
 {
@@ -4045,6 +4704,96 @@ for (const scenario of [
   const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
   assert(!serialized.includes('Bearer live-token'), 'provider card bearer token redacted before persistence and prompt');
   assert(!serialized.includes('sk-live-runtime'), 'provider card sk token redacted before persistence and prompt');
+}
+
+{
+  const generatedCardTextByRole = {
+    sceneFrameCard: 'SG1_SCENE_FRAME_CARD: ONeill holds the parking-lot line and must choose proof or withdrawal.',
+    activeCastCard: 'SG1_ACTIVE_CAST_CARD: Carter verifies the construct while Daniel and Tealc hold position.',
+    characterMotivationCard: 'SG1_MOTIVATION_CARD: ONeill needs leverage before accepting Will offer.',
+    dialogueRelationshipCard: 'SG1_RELATIONSHIP_CARD: Will presses recruitment while SG-1 distrust stays visible.',
+    knowledgeSecretsCard: 'SG1_KNOWLEDGE_CARD: Simulation boundary, idle gate, no DHD, and Tuesday loop stay true.',
+    openThreadsCard: 'SG1_OPEN_THREADS_CARD: Immediate unresolved thread is proof demand versus gate withdrawal.'
+  };
+  const guidancePrompts = [];
+  const { runtime, installed } = createRuntimeHarness({
+    settings: {
+      mode: 'auto',
+      pipelineMode: 'standard',
+      reasoningLevel: 'medium',
+      reasonerUse: 'off',
+      promptFootprint: 'normal',
+      minCards: 5,
+      maxCards: 12
+    },
+    generationRouter: {
+      async generate(roleId, request) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              cardJobs: Object.keys(generatedCardTextByRole).map((role) => ({ role, reason: `Generate ${role}.` })),
+              reasonerDecision: { mode: 'skip', reason: 'unit all generated cards', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 8 },
+              diagnostics: ['all-generated-cards']
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          guidancePrompts.push(request.prompt);
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Use every generated card.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['all-generated-guidance']
+            }
+          };
+        }
+        const text = generatedCardTextByRole[roleId];
+        if (!text) throw new Error(`unexpected role ${roleId}`);
+        return {
+          ok: true,
+          roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: roleId,
+            family: request.metadata.family,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: text,
+              evidenceRefs: ['message:2'],
+              tokenEstimate: roleId === 'activeCastCard' ? 260 : (roleId === 'sceneFrameCard' ? 130 : 135)
+            }]
+          }
+        };
+      },
+      async batch(requests) {
+        return Promise.all(requests.map((request) => this.generate(request.roleId, request)));
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Use every generated SG-1 card.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'all generated card run installs prompt');
+  assertEqual(view.lastHand.cards.length, 6, 'legacy target brief budget does not drop generated active cards');
+  assertEqual(view.lastPacket.selectedCardRefs.length, 6, 'prompt packet refs include every generated active card');
+  const guidancePrompt = guidancePrompts[0] || '';
+  const installedCardEvidence = packetToPromptBlocks(installed[0] || {}).find((block) => block.id === 'cardEvidence')?.text || '';
+  for (const marker of Object.values(generatedCardTextByRole)) {
+    assert(guidancePrompt.includes(marker), `guidance composer receives ${marker}`);
+    assert(view.lastPacket.sections.cardEvidence.includes(marker), `card evidence injects ${marker}`);
+    assert(installedCardEvidence.includes(marker), `installed prompt includes ${marker}`);
+  }
 }
 
 {

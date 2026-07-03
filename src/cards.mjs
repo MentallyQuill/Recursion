@@ -957,15 +957,6 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
       });
       continue;
     }
-    if (tokenEstimate + cardTokens > tokenLimit) {
-      omitted.push({
-        cardId: card.id,
-        family: card.family || '',
-        reason: 'token-budget',
-        tokenEstimate: cardTokens
-      });
-      continue;
-    }
     tokenEstimate += cardTokens;
     selected.push(sanitizeHandCard({
       ...card,
@@ -999,6 +990,7 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
       maxTokens: tokenLimit,
       selectedCount: selected.length,
       omittedCount: omitted.length,
+      tokenBudgetExceeded: tokenLimit > 0 && tokenEstimate > tokenLimit,
       sourceCardCount: Array.isArray(cards) ? cards.length : 0,
       ...(behaviorPolicyMetadata ? { behaviorPolicy: behaviorPolicyMetadata } : {})
     }

@@ -198,6 +198,7 @@ function isLatestAssistantSwipe(context, details = {}) {
   const latestVisible = latestVisibleChatMessage(context);
   if (!latestVisible || !isRawAssistantChatMessage(latestVisible.message)) return false;
   const latestAssistantId = Number(messageMesId(latestVisible.message) ?? latestVisible.index);
+  if (!Number.isFinite(messageId)) return true;
   return Number.isFinite(messageId)
     && Number.isFinite(latestAssistantId)
     && messageId === latestAssistantId;

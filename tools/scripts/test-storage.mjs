@@ -328,6 +328,37 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
 {
   const adapter = createMemoryStorageAdapter();
   const repo = createStorageRepository({ storage: adapter });
+  await repo.saveSceneCache('Rapid Failed Chat', 'Rapid Failed Scene', {
+    activeSourceRevisionHash: 'source-a',
+    variantOrder: ['source-a'],
+    variants: {
+      'source-a': {
+        sourceRevisionHash: 'source-a',
+        rapid: {
+          pipelineVersion: 2,
+          status: 'failed',
+          warmArtifactId: 'rapid-warm-failed',
+          baseSourceRevisionHash: 'source-a',
+          startedAt: '2026-07-03T08:00:00.000Z',
+          failedAt: '2026-07-03T08:00:03.000Z',
+          failureReasonCode: 'warm-failed',
+          failureReasonLabel: 'authorization: Bearer rapid-storage-token'
+        }
+      }
+    }
+  });
+  const cache = await repo.loadSceneCache('Rapid Failed Chat', 'Rapid Failed Scene');
+  const rapid = cache.variants['source-a'].rapid;
+  assertEqual(rapid.status, 'failed', 'rapid failed status persists');
+  assertEqual(rapid.startedAt, '2026-07-03T08:00:00.000Z', 'rapid warm startedAt persists');
+  assertEqual(rapid.failedAt, '2026-07-03T08:00:03.000Z', 'rapid warm failedAt persists');
+  assertEqual(rapid.failureReasonCode, 'warm-failed', 'rapid warm failure reason code persists');
+  assert(!JSON.stringify(rapid).includes('Bearer'), 'rapid warm failure label is sanitized');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
   await repo.saveSceneCache('Swipe Variant Bound Chat', 'Scene One', {
     activeSourceRevisionHash: 'source-rev-e',
     variantOrder: ['source-rev-a', 'source-rev-b', 'source-rev-c', 'source-rev-d', 'source-rev-e'],
@@ -1097,6 +1128,21 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   const clean = await repo.appendJournal('Corrupt Chat', null);
   assertEqual(clean.event, 'activity.stage_changed', 'null journal entry gets canonical default event');
   assertEqual(clean.summary, '', 'null journal entry gets empty summary');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  const rapidMiss = await repo.appendJournal('Event Gate Chat', {
+    event: 'rapid.warm_missed',
+    severity: 'warn',
+    summary: 'Rapid warm missed; Standard started.',
+    details: {
+      reasonCode: 'base-source-mismatch',
+      reasonLabel: 'Warm source differs from current turn'
+    }
+  });
+  assertEqual(rapidMiss.event, 'rapid.warm_missed', 'rapid warm miss journal event is preserved');
 }
 
 {

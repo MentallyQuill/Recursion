@@ -101,8 +101,6 @@ export function rapidWarmArtifactIsUsable(artifact = {}, expected = {}) {
     && source.selectedCardIds.length > 0
     && Array.isArray(source.cardIds)
     && source.cardIds.length > 0
-    && sourceStoryForm.tense !== 'unknown'
-    && sourceStoryForm.pov !== 'unknown'
     && (!expectedStoryForm || storyFormKey(sourceStoryForm) === storyFormKey(expectedStoryForm))
     && guidanceIsUsable(source.guidance);
 }

@@ -18,6 +18,12 @@ import {
   rapidArtifactHash,
   rapidWarmArtifactIsUsable
 } from './rapid-pipeline.mjs';
+import {
+  RAPID_WARM_JOIN_WAIT_MS,
+  rapidWarmMissReason,
+  rapidWarmReasonLabel,
+  rapidWarmStatusView
+} from './rapid-warm-state.mjs';
 import { reasoningRequestMetadata } from './reasoning-policy.mjs';
 import { createSettingsStore, normalizeCardBudgetSettings, normalizeInjectionSettings, normalizeSettings } from './settings.mjs';
 import { behaviorPolicyPromptLines, influencePolicyForSettings, runPolicyForEffectivePlan } from './settings-policy.mjs';
@@ -34,6 +40,7 @@ const INSTALL_FAILURE_LABEL = 'Prompt install failed. Generation will continue w
 const CLEAR_FAILURE_LABEL = 'Prompt clear failed. Recursion skipped without clearing host prompt.';
 const STALE_INSTALL_LABEL = 'Recursion skipped: host turn changed before prompt install.';
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
+const SNAPSHOT_MESSAGE_TEXT_LIMIT = 1200;
 const PROVIDER_VISIBLE_MESSAGE_LIMIT = 12;
 const PROVIDER_MESSAGE_TEXT_LIMIT = 900;
 const PLAN_ACTIONS = new Set(['skip', 'reuse-cache', 'refresh-cards', 'compose-brief']);
@@ -235,7 +242,7 @@ function normalizeMessage(message, index) {
   return {
     mesid,
     role,
-    text: safeText(rawText, 1200),
+    text: safeText(rawText, SNAPSHOT_MESSAGE_TEXT_LIMIT),
     textHash: hashJson(String(rawText ?? '')),
     ...(Number.isFinite(swipeId) ? { swipeId: Math.max(0, Math.round(swipeId)) } : {}),
     ...(Number.isFinite(swipeCount) ? { swipeCount: Math.max(0, Math.round(swipeCount)) } : {}),
@@ -330,6 +337,17 @@ function latestVisibleMessage(snapshot) {
     .find((message) => message?.visible !== false && String(message?.text ?? '').trim());
 }
 
+function latestVisibleMessageEntry(snapshot) {
+  const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.visible === false) continue;
+    if (!String(message?.text ?? '').trim()) continue;
+    return { message, index };
+  }
+  return null;
+}
+
 function latestVisibleUserMessage(snapshot) {
   const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
   return messages
@@ -341,6 +359,7 @@ function latestVisibleUserMessage(snapshot) {
 function normalizePendingUserMessage(userMessage) {
   if (typeof userMessage === 'string') {
     return {
+      rawText: userMessage,
       text: safeText(userMessage, PROVIDER_MESSAGE_TEXT_LIMIT),
       textHash: hashJson(userMessage)
     };
@@ -350,6 +369,7 @@ function normalizePendingUserMessage(userMessage) {
   const text = safeText(rawText, PROVIDER_MESSAGE_TEXT_LIMIT);
   const mesid = Number(source.mesid ?? source.id ?? source.messageId);
   return {
+    rawText: String(rawText ?? ''),
     text,
     textHash: hashJson(String(rawText ?? '')),
     ...(Number.isFinite(mesid) ? { mesid } : {})
@@ -397,6 +417,36 @@ function snapshotWithPendingUserMessage(snapshot, userMessage) {
       messages: nextMessages.slice(-3)
     })
   };
+}
+
+function snapshotWithoutVisiblePendingUserMessage(snapshot, userMessage) {
+  const pending = normalizePendingUserMessage(userMessage);
+  const pendingText = pending.text;
+  if (!pendingText) return snapshot;
+  const entry = latestVisibleMessageEntry(snapshot);
+  const latest = entry?.message;
+  const matchesLatestPending = latest?.role === 'user'
+    && (
+      (latest?.textHash && pending.textHash && latest.textHash === pending.textHash)
+      || safeText(latest?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingText
+    )
+    && (!Number.isFinite(pending.mesid) || numberOr(latest?.mesid, null) === pending.mesid);
+  if (!matchesLatestPending) return snapshot;
+  const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+  const nextMessages = messages.filter((_, index) => index !== entry.index);
+  const latestRemaining = nextMessages
+    .slice()
+    .reverse()
+    .find((message) => message?.visible !== false && String(message?.text ?? '').trim());
+  if (!latestRemaining) return snapshot;
+  const latestMesId = numberOr(latestRemaining?.mesid, 0);
+  return normalizeSnapshot({
+    ...snapshot,
+    latestMesId,
+    messages: nextMessages,
+    sourceRevisionHash: '',
+    turnFingerprint: ''
+  });
 }
 
 function localFallbackPlan(snapshot, settings) {
@@ -816,9 +866,9 @@ function snapshotForPlan(snapshot, plan) {
   };
 }
 
-function promptInstallFreshnessSignature(snapshot) {
+function promptInstallVisibleMessages(snapshot) {
   const source = asObject(snapshot);
-  const visibleMessages = Array.isArray(source.messages)
+  return Array.isArray(source.messages)
     ? source.messages
         .filter((message) => message?.visible !== false)
         .map((message) => ({
@@ -830,6 +880,19 @@ function promptInstallFreshnessSignature(snapshot) {
           ...(message?.activeSwipeTextHash ? { activeSwipeTextHash: safeText(message.activeSwipeTextHash, 180) } : {})
         }))
     : [];
+}
+
+function promptInstallContentMessages(snapshot) {
+  return promptInstallVisibleMessages(snapshot).map((message) => ({
+    mesid: message.mesid,
+    role: message.role,
+    textHash: message.textHash
+  }));
+}
+
+function promptInstallFreshnessSignature(snapshot) {
+  const source = asObject(snapshot);
+  const visibleMessages = promptInstallVisibleMessages(snapshot);
   return {
     chatKey: safeText(source.chatKey || source.chatId || DEFAULT_CHAT_ID, 160) || DEFAULT_CHAT_ID,
     sceneKey: safeText(source.sceneKey || DEFAULT_SCENE_KEY, 160) || DEFAULT_SCENE_KEY,
@@ -884,12 +947,94 @@ function cardSourceContext(snapshot, overrides = {}) {
   };
 }
 
-function snapshotsMatchForPromptInstall(expected, current) {
+function pendingUserInstallStillCurrent(expected, current, pendingUserMessage, options = {}) {
+  const pending = normalizePendingUserMessage(pendingUserMessage);
+  if (!pending.text) return false;
   const expectedSignature = promptInstallFreshnessSignature(expected);
   const currentSignature = promptInstallFreshnessSignature(current);
-  return expectedSignature.chatKey === currentSignature.chatKey
+  if (expectedSignature.chatKey !== currentSignature.chatKey) return false;
+  if (expectedSignature.sceneKey !== currentSignature.sceneKey) return false;
+  if (expectedSignature.sceneFingerprint !== currentSignature.sceneFingerprint) return false;
+  if (expectedSignature.latestMesId !== currentSignature.latestMesId) return false;
+
+  const expectedMessages = promptInstallVisibleMessages(expected);
+  const currentMessages = promptInstallVisibleMessages(current);
+  if (expectedMessages.length !== currentMessages.length || !expectedMessages.length) return false;
+  const expectedContentMessages = promptInstallContentMessages(expected);
+  const currentContentMessages = promptInstallContentMessages(current);
+  const prefixContentMatches = hashJson(expectedContentMessages.slice(0, -1)) === hashJson(currentContentMessages.slice(0, -1));
+
+  const expectedLatest = latestVisibleMessage(expected);
+  const currentLatest = latestVisibleMessage(current);
+  const latestMatches = (message) => message?.role === 'user'
+    && numberOr(message?.mesid, 0) === expectedSignature.latestMesId
+    && (
+      (message?.textHash && pending.textHash && message.textHash === pending.textHash)
+      || (
+        String(pending.rawText || '').length <= SNAPSHOT_MESSAGE_TEXT_LIMIT
+        && String(message?.text ?? '') === String(pending.rawText || '')
+      )
+    );
+  if (!latestMatches(expectedLatest) || !latestMatches(currentLatest)) return false;
+  if (prefixContentMatches) return true;
+
+  const expectedBaseSourceRevisionHash = safeText(options.baseSourceRevisionHash || '', 180);
+  if (!expectedBaseSourceRevisionHash) return false;
+  const currentBaseSnapshot = snapshotWithoutVisiblePendingUserMessage(current, pendingUserMessage);
+  return activeSourceRevisionHash(currentBaseSnapshot) === expectedBaseSourceRevisionHash;
+}
+
+function snapshotsMatchForPromptInstall(expected, current, pendingUserMessage = null, options = {}) {
+  const expectedSignature = promptInstallFreshnessSignature(expected);
+  const currentSignature = promptInstallFreshnessSignature(current);
+  const exact = expectedSignature.chatKey === currentSignature.chatKey
     && expectedSignature.sourceRevisionHash === currentSignature.sourceRevisionHash
     && expectedSignature.visibleMessagesHash === currentSignature.visibleMessagesHash;
+  return exact || pendingUserInstallStillCurrent(expected, current, pendingUserMessage, options);
+}
+
+function promptInstallComparisonDiagnostics(expected, current, pendingUserMessage = null, options = {}) {
+  const pending = normalizePendingUserMessage(pendingUserMessage);
+  const expectedSignature = promptInstallFreshnessSignature(expected);
+  const currentSignature = promptInstallFreshnessSignature(current);
+  const expectedMessages = promptInstallVisibleMessages(expected);
+  const currentMessages = promptInstallVisibleMessages(current);
+  const expectedContentMessages = promptInstallContentMessages(expected);
+  const currentContentMessages = promptInstallContentMessages(current);
+  const expectedBaseSourceRevisionHash = safeText(options.baseSourceRevisionHash || '', 180);
+  const currentBaseSnapshot = expectedBaseSourceRevisionHash
+    ? snapshotWithoutVisiblePendingUserMessage(current, pendingUserMessage)
+    : null;
+  const expectedLatest = latestVisibleMessage(expected);
+  const currentLatest = latestVisibleMessage(current);
+  const rawText = String(pending.rawText || '');
+  const rawTextComparable = rawText.length > 0 && rawText.length <= SNAPSHOT_MESSAGE_TEXT_LIMIT;
+  const latestDiagnostics = (message) => ({
+    role: safeProviderRole(message?.role),
+    mesid: numberOr(message?.mesid, -1),
+    textHashMatches: Boolean(message?.textHash && pending.textHash && message.textHash === pending.textHash),
+    rawTextMatches: Boolean(rawTextComparable && String(message?.text ?? '') === rawText)
+  });
+  return {
+    exact: expectedSignature.chatKey === currentSignature.chatKey
+      && expectedSignature.sourceRevisionHash === currentSignature.sourceRevisionHash
+      && expectedSignature.visibleMessagesHash === currentSignature.visibleMessagesHash,
+    pendingTextPresent: Boolean(pending.text),
+    rawTextComparable,
+    pendingRawLength: rawText.length,
+    chatKeyMatch: expectedSignature.chatKey === currentSignature.chatKey,
+    sceneKeyMatch: expectedSignature.sceneKey === currentSignature.sceneKey,
+    sceneFingerprintMatch: expectedSignature.sceneFingerprint === currentSignature.sceneFingerprint,
+    latestMesIdMatch: expectedSignature.latestMesId === currentSignature.latestMesId,
+    messageCountMatch: expectedMessages.length === currentMessages.length,
+    prefixHashMatch: hashJson(expectedMessages.slice(0, -1)) === hashJson(currentMessages.slice(0, -1)),
+    prefixContentHashMatch: hashJson(expectedContentMessages.slice(0, -1)) === hashJson(currentContentMessages.slice(0, -1)),
+    warmBaseHashMatch: expectedBaseSourceRevisionHash
+      ? activeSourceRevisionHash(currentBaseSnapshot) === expectedBaseSourceRevisionHash
+      : null,
+    expectedLatest: latestDiagnostics(expectedLatest),
+    currentLatest: latestDiagnostics(currentLatest)
+  };
 }
 
 function promptSnapshotMetadataMatches(expected, current) {
@@ -1033,6 +1178,12 @@ function lifecycleForDeck(cards, plan, defaultReason) {
 function budgetOr(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function cardEvidenceTokenBudget(settings, plan, behaviorPolicy = null) {
+  const policy = behaviorPolicy || runPolicyForEffectivePlan(settings, plan);
+  const budget = Number(policy?.footprint?.sectionBudgets?.cardEvidence);
+  return Number.isFinite(budget) && budget > 0 ? Math.round(budget) : 30000;
 }
 
 function arbiterSafeSettings(settings) {
@@ -1690,16 +1841,19 @@ export function createRecursionRuntime({
   activity = createActivityReporter(),
   generationRouter = null,
   fetchImpl = globalThis.fetch,
-  rapidHedgeDelayMs = 4000
+  rapidHedgeDelayMs = 4000,
+  rapidWarmJoinWaitMs = RAPID_WARM_JOIN_WAIT_MS
 } = {}) {
   let activeRunId = null;
   let activeRunController = null;
+  let activeRapidWarmRun = null;
   let hostGenerationActive = false;
   let hostStopCleanupPromise = null;
   let lastPacket = null;
   let lastHand = { cards: [], omitted: [] };
   let lastPlan = null;
   let lastSnapshot = null;
+  let lastRapidWarmView = rapidWarmStatusView({ pipelineMode: settingsStore.get().pipelineMode });
   let lastSavedSceneCacheRef = null;
   let pendingLatestAssistantSwipeRetry = null;
   let promptInstallTail = Promise.resolve();
@@ -1718,12 +1872,38 @@ export function createRecursionRuntime({
     return activeRunId === runId;
   }
 
+  function isActiveRapidWarmRun(runId) {
+    return activeRapidWarmRun?.runId === runId;
+  }
+
+  function isRuntimeRunCurrent(runId) {
+    return isActiveRun(runId) || isActiveRapidWarmRun(runId);
+  }
+
   function abortActiveRun() {
     try {
       activeRunController?.abort?.();
     } catch {
       // Abort notification is best-effort; supersession guards still prevent stale writes.
     }
+  }
+
+  function abortActiveRapidWarmRun(reasonCode = 'stale') {
+    const current = activeRapidWarmRun;
+    if (!current) return;
+    try {
+      current.controller?.abort?.();
+    } catch {
+      // Abort notification is best-effort; supersession guards still prevent stale writes.
+    }
+    lastRapidWarmView = rapidWarmStatusView({
+      ...lastRapidWarmView,
+      status: reasonCode === 'warm-failed' ? 'failed' : 'stale',
+      reasonCode,
+      reasonLabel: rapidWarmReasonLabel(reasonCode),
+      joinable: false
+    });
+    activeRapidWarmRun = null;
   }
 
   function supersedeActiveRun() {
@@ -1739,10 +1919,79 @@ export function createRecursionRuntime({
     return activeRunController?.signal ?? null;
   }
 
+  function startRapidWarmRun(runId, context = {}) {
+    abortActiveRapidWarmRun('stale');
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    let resolvePromise = null;
+    const promise = new Promise((resolve) => {
+      resolvePromise = resolve;
+    });
+    activeRapidWarmRun = {
+      runId,
+      controller,
+      signal: controller?.signal ?? null,
+      baseSourceRevisionHash: safeText(context.baseSourceRevisionHash || '', 180),
+      contract: asObject(context.contract),
+      startedAt: nowIso(),
+      promise,
+      resolve: resolvePromise
+    };
+    lastRapidWarmView = rapidWarmStatusView({
+      status: 'warming',
+      pipelineMode: settingsStore.get().pipelineMode,
+      runId,
+      baseSourceRevisionHash: context.baseSourceRevisionHash,
+      startedAt: activeRapidWarmRun.startedAt,
+      reasonCode: 'warming',
+      joinable: true
+    });
+    return activeRapidWarmRun.signal;
+  }
+
   function clearActiveRun(runId = null) {
     if (runId && activeRunId !== runId) return;
     activeRunId = null;
     activeRunController = null;
+  }
+
+  function clearRapidWarmRun(runId = null) {
+    if (runId && activeRapidWarmRun?.runId !== runId) return;
+    activeRapidWarmRun = null;
+  }
+
+  function exactWarmRunForSource(baseSourceRevisionHash, expectedContracts = {}) {
+    const warm = activeRapidWarmRun;
+    if (!warm?.promise) return null;
+    if (warm.signal?.aborted === true) return null;
+    if (safeText(warm.baseSourceRevisionHash || '', 180) !== safeText(baseSourceRevisionHash || '', 180)) return null;
+    const contract = asObject(warm.contract);
+    for (const key of ['settingsHash', 'providerContractHash', 'cardCatalogHash', 'promptContractHash']) {
+      if (safeText(contract[key] || '', 180) !== safeText(expectedContracts[key] || '', 180)) return null;
+    }
+    return warm;
+  }
+
+  async function waitForRapidWarm(runId, warmRun, timeoutMs = RAPID_WARM_JOIN_WAIT_MS) {
+    lastRapidWarmView = rapidWarmStatusView({
+      ...lastRapidWarmView,
+      status: 'waiting',
+      reasonCode: 'warming',
+      reasonLabel: 'Waiting for Rapid deck...',
+      joinable: true
+    });
+    stageRuntimeActivity({
+      runId,
+      phase: 'rapidWarmWaiting',
+      label: 'Waiting for Rapid deck...',
+      chips: ['Rapid']
+    });
+    const timeout = new Promise((resolve) => {
+      setTimeout(() => resolve({ ok: false, timeout: true }), Math.max(0, Number(timeoutMs) || 0));
+    });
+    const result = await Promise.race([warmRun.promise, timeout]);
+    if (result?.ok === true && result?.rapid?.status === 'ready') return result;
+    if (result?.timeout) return { ok: false, reasonCode: 'warm-timeout' };
+    return { ok: false, reasonCode: 'warm-failed' };
   }
 
   function setHostGenerationActive(value) {
@@ -1837,6 +2086,7 @@ export function createRecursionRuntime({
   }
 
   function clearVolatileSceneState() {
+    abortActiveRapidWarmRun('stale');
     lastPacket = null;
     lastHand = { cards: [], omitted: [] };
     lastPlan = null;
@@ -1949,6 +2199,7 @@ export function createRecursionRuntime({
     }
     if (changedKeys.length > 0) {
       supersedeActiveRun();
+      abortActiveRapidWarmRun('settings-mismatch');
       return trackRuntimeMutation(async () => {
         await invalidateActiveSceneCacheBestEffort('settings-changed', {
           changedKeys
@@ -1969,6 +2220,7 @@ export function createRecursionRuntime({
     const resolvedLane = providerLane(lane);
     const provider = settingsStore.updateProvider(resolvedLane, patch);
     supersedeActiveRun();
+    abortActiveRapidWarmRun('provider-contract-mismatch');
     return trackRuntimeMutation(async () => {
       await invalidateActiveSceneCacheBestEffort('provider-changed', {
         lane: resolvedLane,
@@ -1986,6 +2238,7 @@ export function createRecursionRuntime({
     const resolvedLane = providerLane(lane);
     const provider = settingsStore.clearApiKey(resolvedLane);
     supersedeActiveRun();
+    abortActiveRapidWarmRun('provider-contract-mismatch');
     return trackRuntimeMutation(async () => {
       await invalidateActiveSceneCacheBestEffort('provider-key-cleared', {
         lane: resolvedLane
@@ -2636,7 +2889,7 @@ export function createRecursionRuntime({
   async function runStorageSaveSection(runId, saveWork) {
     const previous = storageSaveTail.catch(() => {});
     const current = previous.then(async () => {
-      if (!isActiveRun(runId)) return supersededResult(runId);
+      if (runId && !isRuntimeRunCurrent(runId)) return supersededResult(runId);
       return saveWork();
     });
     storageSaveTail = current.catch(() => {});
@@ -2644,7 +2897,7 @@ export function createRecursionRuntime({
   }
 
   function reportStorageWarning(runId, operation, error) {
-    if (!isActiveRun(runId)) return;
+    if (!isRuntimeRunCurrent(runId)) return;
     stageRuntimeActivity({
       runId,
       phase: 'storageWarning',
@@ -2753,6 +3006,55 @@ export function createRecursionRuntime({
       reportStorageWarning(runId, 'appendJournal', error);
       return null;
     }
+  }
+
+  async function saveRapidWarmStatus(runId, snapshot, cache, rapidPatch = {}, settings = settingsStore.get()) {
+    const activeVariant = activeSceneCacheVariant(cache, snapshot);
+    const warmArtifactId = safeIdentifier(rapidPatch.warmArtifactId || makeId('rapid-warm-artifact'), 'rapid-warm-artifact', 160);
+    const rapid = {
+      pipelineVersion: RAPID_PIPELINE_VERSION,
+      status: safeText(rapidPatch.status || 'warming', 40),
+      warmArtifactId,
+      baseSourceRevisionHash: activeSourceRevisionHash(snapshot),
+      baseSnapshotHash: hashJson(snapshot),
+      selectedCardIds: Array.isArray(rapidPatch.selectedCardIds) ? rapidPatch.selectedCardIds : [],
+      cardIds: Array.isArray(rapidPatch.cardIds) ? rapidPatch.cardIds : [],
+      guidance: rapidPatch.guidance || {
+        schema: PROMPT_GUIDANCE_SCHEMA,
+        status: 'missing',
+        text: '',
+        sourceCardIds: [],
+        guardrailCardIds: [],
+        omittedCardIds: [],
+        diagnostics: []
+      },
+      storyForm: rapidPatch.storyForm || UNKNOWN_STORY_FORM,
+      ...cacheContractVersions(settings),
+      startedAt: safeText(rapidPatch.startedAt || nowIso(), 80),
+      builtAt: safeText(rapidPatch.builtAt || '', 80),
+      failedAt: safeText(rapidPatch.failedAt || '', 80),
+      failureReasonCode: safeText(rapidPatch.failureReasonCode || '', 80),
+      failureReasonLabel: safeText(rapidPatch.failureReasonLabel || '', 240),
+      runId,
+      diagnostics: mergeDiagnostics(rapidPatch.diagnostics, [`rapid-warm-${safeText(rapidPatch.status || 'warming', 40)}`])
+    };
+    if (rapid.status === 'ready') rapid.artifactHash = rapidArtifactHash(rapid);
+    const payload = sceneCachePayload(
+      snapshot,
+      { cards: Array.isArray(activeVariant.cards) ? activeVariant.cards : [] },
+      { cards: [], omitted: [] },
+      { sceneStatus: 'same-scene' },
+      null,
+      settings,
+      cache,
+      { rapid }
+    );
+    if (activeVariant.latestHand) {
+      payload.latestHand = activeVariant.latestHand;
+      payload.variants[payload.activeSourceRevisionHash].latestHand = activeVariant.latestHand;
+    }
+    await runStorageSaveSection(runId, () => saveSceneCacheSafe(runId, snapshot, payload));
+    return rapid;
   }
 
   function promptClearContext(snapshot = null) {
@@ -2904,7 +3206,17 @@ export function createRecursionRuntime({
     const source = asObject(card?.source);
     const freshness = asObject(card?.freshness);
     const sourceChatId = String(source.chatId || card?.chatId || '').trim();
-    if (sourceChatId && sourceChatId !== snapshot.chatId) return 'source-chat-mismatch';
+    if (sourceChatId) {
+      const expectedChatIds = new Set([
+        String(snapshot.chatId || '').trim(),
+        String(snapshot.chatKey || '').trim(),
+        safeIdentifier(snapshot.chatId || ''),
+        safeIdentifier(snapshot.chatKey || '')
+      ].filter(Boolean));
+      if (!expectedChatIds.has(sourceChatId) && !expectedChatIds.has(safeIdentifier(sourceChatId))) {
+        return 'source-chat-mismatch';
+      }
+    }
 
     const sourceRange = rawSourceRange(card);
     if (!sourceRange) return 'source-range-missing';
@@ -2927,14 +3239,14 @@ export function createRecursionRuntime({
     if (!evidenceIds.length) return 'evidence-message-missing';
     const visibleMessageIds = messageIds(snapshot);
     for (const evidenceId of evidenceIds) {
-      if (!visibleMessageIds.has(evidenceId)) return 'evidence-message-missing';
+      if (!visibleMessageIds.has(evidenceId) && !options.allowCachedEvidenceRefs) return 'evidence-message-missing';
       if (evidenceId < firstMesId || evidenceId > lastMesId) return 'evidence-outside-source-range';
     }
 
     const candidates = cacheFingerprintCandidates(card);
     if (!candidates.length) return 'source-fingerprint-missing';
     const currentWindow = sourceWindowFingerprint(snapshot, firstMesId, lastMesId);
-    if (!candidates.includes(currentWindow)) return 'source-fingerprint-mismatch';
+    if (!candidates.includes(currentWindow) && !options.allowCachedSourceFingerprint) return 'source-fingerprint-mismatch';
 
     return '';
   }
@@ -2956,11 +3268,13 @@ export function createRecursionRuntime({
         const staleReason = staleCacheCardReason(sanitized, normalized, snapshot, options);
         if (staleReason) {
           stale += 1;
+          if (Array.isArray(options.rejectionReasons)) options.rejectionReasons.push(staleReason);
           continue;
         }
         accepted.push(sanitized);
-      } catch {
+      } catch (error) {
         invalid += 1;
+        if (Array.isArray(options.rejectionReasons)) options.rejectionReasons.push(`invalid:${safeText(error?.message || error, 80)}`);
       }
     }
     if (invalid || stale) {
@@ -2989,14 +3303,19 @@ export function createRecursionRuntime({
     });
   }
 
-  async function recheckPromptInstallSnapshot(runId, expectedSnapshot, plan, pendingUserMessage) {
+  async function recheckPromptInstallSnapshot(runId, expectedSnapshot, plan, pendingUserMessage, options = {}) {
     try {
       const currentSnapshot = snapshotForPlan(
         snapshotWithPendingUserMessage(await readSnapshot(), pendingUserMessage),
         plan
       );
-      if (!snapshotsMatchForPromptInstall(expectedSnapshot, currentSnapshot)) {
-        return { ok: false, reason: 'stale-snapshot', currentSnapshot };
+      if (!snapshotsMatchForPromptInstall(expectedSnapshot, currentSnapshot, pendingUserMessage, options)) {
+        return {
+          ok: false,
+          reason: 'stale-snapshot',
+          currentSnapshot,
+          comparison: promptInstallComparisonDiagnostics(expectedSnapshot, currentSnapshot, pendingUserMessage, options)
+        };
       }
       return { ok: true, snapshot: currentSnapshot };
     } catch (error) {
@@ -3019,7 +3338,8 @@ export function createRecursionRuntime({
     packet = null,
     hand = null,
     plan = null,
-    error = null
+    error = null,
+    comparison = null
   }) {
     const install = {
       ok: true,
@@ -3032,7 +3352,8 @@ export function createRecursionRuntime({
       reason,
       ...(error ? { error } : {}),
       expected: promptInstallFreshnessSignature(sceneSnapshot),
-      ...(currentSnapshot ? { current: promptInstallFreshnessSignature(currentSnapshot) } : {})
+      ...(currentSnapshot ? { current: promptInstallFreshnessSignature(currentSnapshot) } : {}),
+      ...(comparison ? { comparison } : {})
     };
     await appendJournalSafe(runId, sceneSnapshot.chatKey, {
       event: 'prompt.install_skipped',
@@ -3108,7 +3429,7 @@ export function createRecursionRuntime({
           `Scene cache: ${JSON.stringify(cacheView)}`,
           `Snapshot: ${JSON.stringify(providerSafeSnapshot(snapshot))}`
         ].join('\n\n')
-      }, { runId, signal, isCurrent: () => isActiveRun(runId) });
+      }, { runId, signal, isCurrent: () => isRuntimeRunCurrent(runId) });
       if (result?.ok) {
         try {
           return mergePlan(fallbackPlan, result.data);
@@ -3152,18 +3473,18 @@ export function createRecursionRuntime({
       const signalRequests = signal
         ? requests.map((request) => ({ ...request, signal }))
         : requests;
-      const options = { runId, signal, isCurrent: () => isActiveRun(runId) };
+      const options = { runId, signal, isCurrent: () => isRuntimeRunCurrent(runId) };
       const usedBatch = typeof generationRouter.batch === 'function';
       const results = typeof generationRouter.batch === 'function'
         ? await generationRouter.batch(signalRequests, options)
         : [];
       if (typeof generationRouter.batch !== 'function') {
         for (const request of signalRequests) {
-          if (signal?.aborted === true || !isActiveRun(runId)) break;
+          if (signal?.aborted === true || !isRuntimeRunCurrent(runId)) break;
           try {
             results.push(await generationRouter.generate(request.roleId, request, options));
           } catch {
-            if (signal?.aborted === true || !isActiveRun(runId)) break;
+            if (signal?.aborted === true || !isRuntimeRunCurrent(runId)) break;
             results.push({ ok: false });
           }
         }
@@ -3199,7 +3520,13 @@ export function createRecursionRuntime({
     }
     await waitForExternalMutations();
     const runId = makeId('rapid-warm');
-    const signal = startRun(runId);
+    let warmOutcome = supersededResult(runId);
+    let snapshot = null;
+    let cache = null;
+    let warmingRapid = null;
+    const signal = startRapidWarmRun(runId, {
+      contract: cacheContractVersions(settings)
+    });
     startRuntimeActivity({
       runId,
       phase: 'rapidWarming',
@@ -3207,12 +3534,45 @@ export function createRecursionRuntime({
       chips: ['Rapid']
     });
     try {
-      const snapshot = await readSnapshot();
-      if (!isActiveRun(runId)) return supersededResult(runId);
+      snapshot = await readSnapshot();
+      const warmBaseSourceRevisionHash = activeSourceRevisionHash(snapshot);
+      if (activeRapidWarmRun?.runId === runId) {
+        activeRapidWarmRun.baseSourceRevisionHash = warmBaseSourceRevisionHash;
+        lastRapidWarmView = rapidWarmStatusView({
+          ...lastRapidWarmView,
+          baseSourceRevisionHash: warmBaseSourceRevisionHash,
+          joinable: true
+        });
+      }
+      if (!isActiveRapidWarmRun(runId)) {
+        warmOutcome = supersededResult(runId);
+        return warmOutcome;
+      }
       lastSnapshot = snapshot;
       const fallbackPlan = localFallbackPlan(snapshot, settings);
-      const cache = await loadSceneCacheSafe(runId, snapshot, settings);
-      if (!isActiveRun(runId)) return supersededResult(runId);
+      cache = await loadSceneCacheSafe(runId, snapshot, settings);
+      if (!isActiveRapidWarmRun(runId)) {
+        warmOutcome = supersededResult(runId);
+        return warmOutcome;
+      }
+      warmingRapid = await saveRapidWarmStatus(runId, snapshot, cache, {
+        status: 'warming',
+        startedAt: activeRapidWarmRun?.startedAt || nowIso(),
+        diagnostics: [`rapid-warm-started:${safeText(reason, 80)}`]
+      }, settings);
+      if (!isActiveRapidWarmRun(runId)) {
+        warmOutcome = supersededResult(runId);
+        return warmOutcome;
+      }
+      lastRapidWarmView = rapidWarmStatusView({
+        ...lastRapidWarmView,
+        status: 'warming',
+        warmArtifactId: warmingRapid.warmArtifactId,
+        baseSourceRevisionHash: warmingRapid.baseSourceRevisionHash,
+        startedAt: warmingRapid.startedAt,
+        reasonCode: 'warming',
+        joinable: true
+      });
       let plan = await askUtilityArbiter({
         runId,
         snapshot,
@@ -3225,6 +3585,9 @@ export function createRecursionRuntime({
       plan = enforceReasonerAvailability(plan, settings);
       plan = applyReasoningPolicyToPlan(plan, settings);
       plan = applyBehaviorPolicyToPlan(plan, settings);
+      if (plan.utilityUnavailable) {
+        throw new Error(plan.utilityUnavailableReason || 'Utility provider unavailable.');
+      }
       const scopedCardJobs = filterCardJobsForScope(plan.cardJobs, settings);
       plan = {
         ...plan,
@@ -3237,19 +3600,43 @@ export function createRecursionRuntime({
       };
       lastPlan = plan;
       const providerCards = cardsWithOrigin((await generatePlanCards({ runId, plan, snapshot, settings, signal })).map(sanitizeGeneratedCard), 'generated');
-      if (!isActiveRun(runId)) return supersededResult(runId);
+      if (!isActiveRapidWarmRun(runId)) {
+        warmOutcome = supersededResult(runId);
+        return warmOutcome;
+      }
       const activeCache = activeSceneCacheVariant(cache, snapshot);
       const cacheCards = cardsWithOrigin(sanitizedCacheCards(runId, snapshot, activeCache.cards), 'cache');
       const candidateCards = [...cacheCards, ...providerCards];
       if (!candidateCards.length) {
+        const failedAt = nowIso();
+        const failureReasonCode = 'warm-failed';
+        const failureReasonLabel = rapidWarmReasonLabel(failureReasonCode);
+        warmingRapid = await saveRapidWarmStatus(runId, snapshot, cache, {
+          status: 'failed',
+          startedAt: warmingRapid?.startedAt || activeRapidWarmRun?.startedAt || failedAt,
+          failedAt,
+          failureReasonCode,
+          failureReasonLabel,
+          diagnostics: mergeDiagnostics(plan.diagnostics, ['rapid-warm-failed:no-candidate-cards'])
+        }, settings);
         settleRuntimeActivity({
           runId,
           outcome: 'warning',
-          phase: 'rapidWarmStale',
-          label: 'Rapid deck stale.',
+          phase: 'rapidWarmFailed',
+          label: 'Rapid warm failed.',
           chips: ['Rapid']
         });
-        return { ok: true, skipped: true, reason: 'rapid-no-provider-cards', plan };
+        lastRapidWarmView = rapidWarmStatusView({
+          ...lastRapidWarmView,
+          status: 'failed',
+          warmArtifactId: warmingRapid?.warmArtifactId,
+          failedAt,
+          reasonCode: failureReasonCode,
+          reasonLabel: failureReasonLabel,
+          joinable: false
+        });
+        warmOutcome = { ok: true, skipped: true, reason: 'rapid-warm-failed', plan };
+        return warmOutcome;
       }
       const deck = applyCardPlan(cacheCards, {
         acceptedCards: providerCards,
@@ -3258,7 +3645,7 @@ export function createRecursionRuntime({
       const behaviorPolicy = runPolicyForEffectivePlan(settings, plan);
       const hand = selectHand(deck.cards, {
         maxCards: budgetOr(plan.budgets?.maxCards, 6),
-        maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700),
+        maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
         behaviorPolicy
       });
       const guidance = await composeGuidanceForCards({
@@ -3266,16 +3653,19 @@ export function createRecursionRuntime({
         snapshot,
         settings,
         behaviorPolicy,
-        generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRun),
+        generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRapidWarmRun),
         activity,
         runId,
         storyForm: plan.storyForm || UNKNOWN_STORY_FORM
       });
-      if (!isActiveRun(runId)) return supersededResult(runId);
+      if (!isActiveRapidWarmRun(runId)) {
+        warmOutcome = supersededResult(runId);
+        return warmOutcome;
+      }
       const rapid = {
         pipelineVersion: RAPID_PIPELINE_VERSION,
         status: 'ready',
-        warmArtifactId: makeId('rapid-warm-artifact'),
+        warmArtifactId: warmingRapid.warmArtifactId,
         baseSourceRevisionHash: activeSourceRevisionHash(snapshot),
         baseSnapshotHash: hashJson(snapshot),
         selectedCardIds: hand.cards.map((card) => card.id),
@@ -3291,6 +3681,7 @@ export function createRecursionRuntime({
         },
         storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
         ...cacheContractVersions(settings),
+        startedAt: warmingRapid.startedAt,
         builtAt: nowIso(),
         runId,
         diagnostics: mergeDiagnostics(plan.diagnostics, [`rapid-warm-v2:${safeText(reason, 80)}`])
@@ -3301,7 +3692,10 @@ export function createRecursionRuntime({
         snapshot,
         sceneCachePayload(snapshot, deck, hand, plan, null, settings, cache, { rapid })
       ));
-      if (!isActiveRun(runId)) return supersededResult(runId);
+      if (!isActiveRapidWarmRun(runId)) {
+        warmOutcome = supersededResult(runId);
+        return warmOutcome;
+      }
       settleRuntimeActivity({
         runId,
         outcome: 'success',
@@ -3309,21 +3703,61 @@ export function createRecursionRuntime({
         label: 'Rapid deck ready.',
         chips: ['Rapid']
       });
-      return { ok: true, rapid, hand, plan };
+      lastRapidWarmView = rapidWarmStatusView({
+        ...lastRapidWarmView,
+        status: 'ready',
+        warmArtifactId: rapid.warmArtifactId,
+        selectedCardCount: hand.cards.length,
+        cardCount: deck.cards.length,
+        completedAt: nowIso(),
+        reasonCode: 'ready',
+        reasonLabel: 'Rapid deck ready.',
+        joinable: false
+      });
+      warmOutcome = { ok: true, rapid, hand, plan };
+      return warmOutcome;
     } catch (error) {
-      if (!isActiveRun(runId)) return supersededResult(runId);
+      if (!isActiveRapidWarmRun(runId)) {
+        warmOutcome = supersededResult(runId);
+        return warmOutcome;
+      }
       const safeError = runtimeError(error);
+      let failedRapid = null;
+      if (snapshot) {
+        failedRapid = await saveRapidWarmStatus(runId, snapshot, cache, {
+          status: 'failed',
+          warmArtifactId: warmingRapid?.warmArtifactId,
+          startedAt: warmingRapid?.startedAt || lastRapidWarmView.startedAt || nowIso(),
+          failedAt: nowIso(),
+          failureReasonCode: 'warm-failed',
+          failureReasonLabel: rapidWarmReasonLabel('warm-failed'),
+          diagnostics: ['rapid-warm-failed']
+        }, settings);
+      }
       settleRuntimeActivity({
         runId,
         outcome: 'warning',
-        phase: 'rapidWarmStale',
-        label: 'Rapid deck stale.',
+        phase: 'rapidWarmFailed',
+        label: 'Rapid warm failed.',
         chips: ['Rapid'],
         detail: { message: safeError.message }
       });
-      return { ok: true, skipped: true, reason: 'rapid-warm-failed', error: safeError };
+      lastRapidWarmView = rapidWarmStatusView({
+        ...lastRapidWarmView,
+        status: 'failed',
+        warmArtifactId: failedRapid?.warmArtifactId || lastRapidWarmView.warmArtifactId,
+        failedAt: nowIso(),
+        reasonCode: 'warm-failed',
+        reasonLabel: rapidWarmReasonLabel('warm-failed'),
+        joinable: false
+      });
+      warmOutcome = { ok: true, skipped: true, reason: 'rapid-warm-failed', error: safeError };
+      return warmOutcome;
     } finally {
-      clearActiveRun(runId);
+      if (activeRapidWarmRun?.runId === runId) {
+        activeRapidWarmRun.resolve?.(warmOutcome);
+      }
+      clearRapidWarmRun(runId);
     }
   }
 
@@ -3334,6 +3768,7 @@ export function createRecursionRuntime({
     pendingUserMessage,
     settings,
     rapid,
+    baseSourceRevisionHash,
     candidateCards,
     normalized,
     usableWarm
@@ -3372,17 +3807,20 @@ export function createRecursionRuntime({
       cards: selectedCards,
       omitted: []
     };
-    const freshness = await recheckPromptInstallSnapshot(runId, turnSnapshot, plan, pendingUserMessage);
+    const freshness = await recheckPromptInstallSnapshot(runId, turnSnapshot, plan, pendingUserMessage, {
+      baseSourceRevisionHash
+    });
     if (!isActiveRun(runId)) return supersededResult(runId);
     if (freshness.ok === false) {
       return skipPromptInstallAfterFreshnessFailure(runId, {
         reason: freshness.reason,
         sceneSnapshot: turnSnapshot,
         currentSnapshot: freshness.currentSnapshot,
-        packet,
+        packet: null,
         hand,
         plan,
-        error: freshness.error
+        error: freshness.error,
+        comparison: freshness.comparison
       });
     }
     const promptSnapshot = freshness.snapshot;
@@ -3431,7 +3869,7 @@ export function createRecursionRuntime({
           ...installJournalDetails(install),
           pipelineMode: 'rapid',
           rapidPath: 'warm-v2',
-          baseSourceRevisionHash: activeSourceRevisionHash(baseSnapshot)
+          baseSourceRevisionHash: safeText(rapid?.baseSourceRevisionHash || activeSourceRevisionHash(baseSnapshot), 180)
         },
         hashes: { promptPacketHash: hashJson(packet) }
       });
@@ -3509,14 +3947,65 @@ export function createRecursionRuntime({
     }
 
     const snapshotHash = hashJson(turnSnapshot);
-    const baseSourceRevisionHash = activeSourceRevisionHash(baseSnapshot);
+    let baseSourceRevisionHash = activeSourceRevisionHash(baseSnapshot);
     const turnSourceRevisionHash = activeSourceRevisionHash(turnSnapshot);
-    const activeVariant = activeSceneCacheVariant(initialCache, baseSnapshot);
-    const rapid = activeVariant.rapid;
-    const candidateCards = sanitizedCacheCards(runId, baseSnapshot, activeVariant.cards, {
+    let activeVariant = activeSceneCacheVariant(initialCache, baseSnapshot);
+    let rapid = activeVariant.rapid;
+    let candidateCards = sanitizedCacheCards(runId, turnSnapshot, activeVariant.cards, {
       allowSparseSourceRange: true
     });
     const expectedContracts = cacheContractVersions(settings);
+    const rapidVariantIsUsable = (artifact, cards, expectedBaseSourceRevisionHash) => rapidWarmArtifactIsUsable(artifact, {
+      baseSourceRevisionHash: expectedBaseSourceRevisionHash,
+      ...expectedContracts,
+      storyForm: artifact?.storyForm || UNKNOWN_STORY_FORM
+    }) && cards.length > 0;
+    const alternateWarmDiagnostics = [];
+    function findValidatedReadyRapidVariant() {
+      const variants = asObject(initialCache?.variants);
+      for (const [variantHash, rawVariant] of Object.entries(variants)) {
+        if (variantHash === activeVariant.sourceRevisionHash) continue;
+        const variant = asObject(rawVariant);
+        const artifact = variant.rapid;
+        const artifactBaseSourceRevisionHash = safeText(artifact?.baseSourceRevisionHash || variantHash, 180);
+        const rejectionReasons = [];
+        const cards = sanitizedCacheCards(runId, turnSnapshot, variant.cards, {
+          allowSparseSourceRange: true,
+          allowCachedSourceFingerprint: true,
+          allowCachedEvidenceRefs: true,
+          rejectionReasons
+        });
+        const artifactUsable = rapidWarmArtifactIsUsable(artifact, {
+          baseSourceRevisionHash: artifactBaseSourceRevisionHash,
+          ...expectedContracts,
+          storyForm: artifact?.storyForm || UNKNOWN_STORY_FORM
+        });
+        alternateWarmDiagnostics.push([
+          'rapid-alternate',
+          safeText(variantHash, 12),
+          `status:${safeText(artifact?.status || '', 24)}`,
+          `base:${safeText(artifactBaseSourceRevisionHash, 12)}`,
+          `raw:${Array.isArray(variant.cards) ? variant.cards.length : 0}`,
+          `cards:${cards.length}`,
+          `artifact:${artifactUsable ? 'usable' : 'miss'}`,
+          ...(rejectionReasons.length ? [`reject:${safeText(rejectionReasons[0], 80)}`] : [])
+        ].join(':'));
+        if (!artifactUsable || cards.length <= 0) continue;
+        return {
+          activeVariant: {
+            sourceRevisionHash: variantHash,
+            cards: Array.isArray(variant.cards) ? variant.cards : [],
+            latestHand: variant.latestHand || null,
+            rapid: artifact,
+            exact: false
+          },
+          rapid: artifact,
+          candidateCards: cards,
+          baseSourceRevisionHash: artifactBaseSourceRevisionHash
+        };
+      }
+      return null;
+    }
     const warmMissDiagnostics = () => [
       'rapid-warm-miss-standard',
       `rapid-variant:${activeVariant.exact ? 'exact' : 'miss'}`,
@@ -3526,20 +4015,102 @@ export function createRecursionRuntime({
       `rapid-settings:${safeText(rapid?.settingsHash || '', 12)}:${safeText(expectedContracts.settingsHash || '', 12)}`,
       `rapid-provider-contract:${safeText(rapid?.providerContractHash || '', 12)}:${safeText(expectedContracts.providerContractHash || '', 12)}`,
       `rapid-card-catalog:${safeText(rapid?.cardCatalogHash || '', 12)}:${safeText(expectedContracts.cardCatalogHash || '', 12)}`,
-      `rapid-prompt-contract:${safeText(rapid?.promptContractHash || '', 12)}:${safeText(expectedContracts.promptContractHash || '', 12)}`
+      `rapid-prompt-contract:${safeText(rapid?.promptContractHash || '', 12)}:${safeText(expectedContracts.promptContractHash || '', 12)}`,
+      ...alternateWarmDiagnostics.slice(0, 8)
     ];
-    const usableWarm = rapidWarmArtifactIsUsable(rapid, {
-      baseSourceRevisionHash,
-      ...expectedContracts,
-      storyForm: rapid?.storyForm || UNKNOWN_STORY_FORM
-    }) && candidateCards.length > 0;
+    async function appendRapidWarmMissJournal(reasonCode, reasonLabel) {
+      await appendJournalSafe(runId, turnSnapshot.chatKey, {
+        event: 'rapid.warm_missed',
+        severity: 'warn',
+        summary: 'Rapid warm missed; Standard started.',
+        runId,
+        sceneKey: turnSnapshot.sceneKey,
+        details: {
+          reasonCode: safeText(reasonCode || '', 80),
+          reasonLabel: safeText(reasonLabel || '', 240),
+          diagnostics: warmMissDiagnostics()
+        },
+        hashes: {
+          baseSourceRevisionHash: safeText(baseSourceRevisionHash, 180),
+          turnSourceRevisionHash: safeText(turnSourceRevisionHash, 180)
+        }
+      });
+    }
+    let usableWarm = rapidVariantIsUsable(rapid, candidateCards, baseSourceRevisionHash);
     if (!usableWarm) {
+      const alternateWarm = findValidatedReadyRapidVariant();
+      if (alternateWarm) {
+        activeVariant = alternateWarm.activeVariant;
+        rapid = alternateWarm.rapid;
+        candidateCards = alternateWarm.candidateCards;
+        baseSourceRevisionHash = alternateWarm.baseSourceRevisionHash;
+        usableWarm = true;
+      }
+    }
+    if (!usableWarm) {
+      const miss = rapidWarmMissReason({
+        activeVariant,
+        rapid,
+        candidateCards,
+        expectedContracts,
+        baseSourceRevisionHash
+      });
+      const joinableWarm = exactWarmRunForSource(baseSourceRevisionHash, expectedContracts);
+      if (joinableWarm) {
+        const joined = await waitForRapidWarm(runId, joinableWarm, rapidWarmJoinWaitMs);
+        if (!isActiveRun(runId)) return supersededResult(runId);
+        if (joined?.ok === true) {
+          const reloadedCache = await loadSceneCacheSafe(runId, baseSnapshot, settings);
+          if (!isActiveRun(runId)) return supersededResult(runId);
+          return prepareRapidForGeneration({
+            runId,
+            baseSnapshot,
+            turnSnapshot,
+            pendingUserMessage,
+            initialCache: reloadedCache,
+            settings,
+            signal
+          });
+        }
+        lastRapidWarmView = rapidWarmStatusView({
+          ...lastRapidWarmView,
+          status: 'missed',
+          reasonCode: joined.reasonCode || 'warm-failed',
+          reasonLabel: rapidWarmReasonLabel(joined.reasonCode || 'warm-failed'),
+          joinable: false
+        });
+        stageRuntimeActivity({
+          runId,
+          phase: 'rapidWarmMissStandard',
+          label: 'Rapid warm missed; Standard started.',
+          chips: ['Rapid', 'Standard'],
+          detail: {
+            reasonCode: joined.reasonCode || 'warm-failed',
+            reasonLabel: rapidWarmReasonLabel(joined.reasonCode || 'warm-failed')
+          }
+        });
+        await appendRapidWarmMissJournal(joined.reasonCode || 'warm-failed', rapidWarmReasonLabel(joined.reasonCode || 'warm-failed'));
+        return {
+          ok: false,
+          escalateToStandard: true,
+          diagnostics: [...warmMissDiagnostics(), `rapid-warm-miss:${joined.reasonCode || 'warm-failed'}`]
+        };
+      }
+      lastRapidWarmView = rapidWarmStatusView({
+        ...lastRapidWarmView,
+        status: 'missed',
+        reasonCode: miss.code,
+        reasonLabel: miss.label,
+        joinable: false
+      });
       stageRuntimeActivity({
         runId,
         phase: 'rapidWarmMissStandard',
-        label: 'Rapid warm packet unavailable; using Standard.',
+        label: 'Rapid warm missed; Standard started.',
         chips: ['Rapid', 'Standard'],
         detail: {
+          reasonCode: miss.code,
+          reasonLabel: miss.label,
           exactVariant: activeVariant.exact,
           candidateCardCount: candidateCards.length,
           baseSourceRevisionHash: safeText(baseSourceRevisionHash, 80),
@@ -3551,10 +4122,11 @@ export function createRecursionRuntime({
           artifactPromptContractHash: safeText(rapid?.promptContractHash || '', 80)
         }
       });
+      await appendRapidWarmMissJournal(miss.code, miss.label);
       return {
         ok: false,
         escalateToStandard: true,
-        diagnostics: warmMissDiagnostics()
+        diagnostics: [...warmMissDiagnostics(), `rapid-warm-miss:${miss.code}`]
       };
     }
     const selectedWarmCards = candidateCards.filter((card) => (rapid.selectedCardIds || []).includes(card.id));
@@ -3649,6 +4221,7 @@ export function createRecursionRuntime({
       pendingUserMessage,
       settings,
       rapid,
+      baseSourceRevisionHash,
       candidateCards: selectedWarmCards,
       normalized,
       usableWarm
@@ -3742,7 +4315,10 @@ export function createRecursionRuntime({
     const modeChip = settings.mode === 'manual' ? 'Manual' : 'Auto';
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: [modeChip] });
     try {
-      const baseSnapshot = await readSnapshot();
+      const hostSnapshot = await readSnapshot();
+      const baseSnapshot = settings.pipelineMode === 'rapid' && !refreshReason
+        ? snapshotWithoutVisiblePendingUserMessage(hostSnapshot, pendingUserMessage)
+        : hostSnapshot;
       const snapshot = snapshotWithPendingUserMessage(baseSnapshot, pendingUserMessage);
       if (!isActiveRun(runId)) return supersededResult(runId);
       const swipeRetrySnapshot = !refreshReason
@@ -3944,7 +4520,7 @@ export function createRecursionRuntime({
       let promptDeck = deck;
       let hand = selectHand(deck.cards, {
         maxCards: budgetOr(plan.budgets?.maxCards, 6),
-        maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700),
+        maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
         behaviorPolicy
       });
 
@@ -3957,7 +4533,8 @@ export function createRecursionRuntime({
           currentSnapshot: freshness.currentSnapshot,
           hand,
           plan,
-          error: freshness.error
+          error: freshness.error,
+          comparison: freshness.comparison
         });
       }
       promptSnapshot = freshness.snapshot;
@@ -3968,7 +4545,7 @@ export function createRecursionRuntime({
         };
         hand = selectHand(promptDeck.cards, {
           maxCards: budgetOr(plan.budgets?.maxCards, 6),
-          maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700),
+          maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
           behaviorPolicy
         });
       }
@@ -4018,7 +4595,8 @@ export function createRecursionRuntime({
               packet,
               hand,
               plan,
-              error: freshness.error
+              error: freshness.error,
+              comparison: freshness.comparison
             });
           }
           if (promptSnapshotMetadataMatches(promptSnapshot, freshness.snapshot)) break;
@@ -4040,7 +4618,7 @@ export function createRecursionRuntime({
           };
           hand = selectHand(promptDeck.cards, {
             maxCards: budgetOr(plan.budgets?.maxCards, 6),
-            maxTokens: budgetOr(plan.budgets?.targetBriefTokens, 700),
+            maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
             behaviorPolicy
           });
           await runStorageSaveSection(runId, () => saveSceneCacheSafe(
@@ -4113,6 +4691,7 @@ export function createRecursionRuntime({
     warmRapidScene,
     async dispose() {
       supersedeActiveRun();
+      abortActiveRapidWarmRun('stale');
       await waitForExternalMutations();
     },
     async refreshScene() {
@@ -4140,6 +4719,10 @@ export function createRecursionRuntime({
         lastHand,
         lastPlan,
         lastSnapshot: viewSnapshot(lastSnapshot),
+        rapidWarm: rapidWarmStatusView({
+          ...lastRapidWarmView,
+          pipelineMode: settingsStore.get().pipelineMode
+        }),
         activity: safeCurrentActivity(activity),
         activityHistory: safeActivityHistory(activity),
         settings: safeSettingsView(settingsStore.get()),

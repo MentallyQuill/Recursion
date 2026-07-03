@@ -1096,7 +1096,10 @@ const tokenOnlyHand = selectHand([
   deckCard('Scene Constraints', 'Oversized risk.', { id: 'too-big', tokenEstimate: 301 }),
   deckCard('Scene Frame', 'Small scene.', { id: 'small', tokenEstimate: 20 })
 ], { maxCards: 5, maxTokens: 300 });
-assert(tokenOnlyHand.omitted.some((entry) => entry.cardId === 'too-big' && entry.reason === 'token-budget'), 'token budget omissions recorded before hand is full');
+assertEqual(tokenOnlyHand.cards.length, 2, 'token budget no longer drops active card evidence');
+assert(tokenOnlyHand.cards.some((entry) => entry.id === 'too-big'), 'oversized card evidence survives token budget');
+assert(tokenOnlyHand.cards.some((entry) => entry.id === 'small'), 'small card evidence survives token budget');
+assertEqual(tokenOnlyHand.metadata.tokenBudgetExceeded, true, 'token overage is diagnostic metadata');
 
 const hand = selectHand(deck.cards, { maxCards: 4, maxTokens: 500 });
 assertEqual(hand.cards.length, 1, 'hand selected card');

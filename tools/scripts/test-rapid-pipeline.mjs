@@ -75,7 +75,14 @@ assert(rapidWarmArtifactIsUsable(rapidV2, expectedRapidV2), 'Rapid V2 warm artif
 assert(!rapidWarmArtifactIsUsable({ ...rapidV2, conditionedSceneBrief: 'old brief', pipelineVersion: 1 }, expectedRapidV2), 'Rapid V1 conditionedSceneBrief artifact is invalid');
 assert(!rapidWarmArtifactIsUsable({ ...rapidV2, guidance: { ...rapidV2.guidance, text: '' } }, expectedRapidV2), 'Rapid V2 requires provider guidance text');
 assert(!rapidWarmArtifactIsUsable({ ...rapidV2, selectedCardIds: [] }, expectedRapidV2), 'Rapid V2 requires selected card ids');
-assert(!rapidWarmArtifactIsUsable({ ...rapidV2, storyForm: { ...UNKNOWN_STORY_FORM, reason: 'missing warm form' } }, expectedRapidV2), 'Rapid V2 requires matching story form');
+assert(rapidWarmArtifactIsUsable(
+  { ...rapidV2, storyForm: { ...UNKNOWN_STORY_FORM, reason: 'missing warm form' } },
+  { ...expectedRapidV2, storyForm: { ...UNKNOWN_STORY_FORM, reason: 'missing warm form' } }
+), 'Rapid V2 accepts unknown story form when warm guidance is otherwise ready');
+assert(!rapidWarmArtifactIsUsable(
+  { ...rapidV2, storyForm: { schema: 'recursion.storyForm.v1', tense: 'present', pov: 'first-person', confidence: 'high' } },
+  expectedRapidV2
+), 'Rapid V2 rejects mismatched story form');
 
 const deltaPrompt = buildRapidTurnDeltaPrompt({
   snapshotHash: 'snapshot-hash',

@@ -42,10 +42,12 @@ const STEP_ORDER = [
   'planning-card-pass',
   'checking-scene-cache',
   'rapid-warming-scene-deck',
+  'rapid-warm-waiting',
   'rapid-selecting-turn-delta',
   'rapid-warm-miss-standard',
   'rapid-deck-ready',
   'rapid-deck-stale',
+  'rapid-warm-failed',
   'reusing-scene-deck',
   'utility-card-batch',
   'validating-cards',
@@ -66,10 +68,12 @@ const STEP_DEFINITIONS = Object.freeze({
   'planning-card-pass': { label: 'Planning card pass', providerLane: 'utility' },
   'checking-scene-cache': { label: 'Checking scene cache', providerLane: 'utility' },
   'rapid-warming-scene-deck': { label: 'Rapid warming scene deck', providerLane: 'utility' },
+  'rapid-warm-waiting': { label: 'Waiting for Rapid deck', providerLane: 'utility' },
   'rapid-selecting-turn-delta': { label: 'Rapid selecting turn delta', providerLane: 'utility' },
   'rapid-warm-miss-standard': { label: 'Rapid warm miss; Standard', providerLane: 'utility' },
   'rapid-deck-ready': { label: 'Rapid deck ready', providerLane: 'utility' },
   'rapid-deck-stale': { label: 'Rapid deck stale', providerLane: 'utility' },
+  'rapid-warm-failed': { label: 'Rapid warm', providerLane: 'utility' },
   'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
   'utility-card-batch': { label: 'Utility card batch', providerLane: 'utility' },
   'validating-cards': { label: 'Validating cards', providerLane: 'utility' },
@@ -90,10 +94,12 @@ const PHASE_STEP_IDS = Object.freeze({
   arbiterPlanning: 'planning-card-pass',
   cacheReusing: 'reusing-scene-deck',
   rapidWarming: 'rapid-warming-scene-deck',
+  rapidWarmWaiting: 'rapid-warm-waiting',
   rapidDeltaRunning: 'rapid-selecting-turn-delta',
   rapidWarmMissStandard: 'rapid-warm-miss-standard',
   rapidWarmReady: 'rapid-deck-ready',
   rapidWarmStale: 'rapid-deck-stale',
+  rapidWarmFailed: 'rapid-warm-failed',
   cardBatchRunning: 'utility-card-batch',
   cardValidating: 'validating-cards',
   deckUpdating: 'updating-scene-deck',
@@ -123,6 +129,10 @@ function asObject(value) {
 function cleanText(value, fallback = '') {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   return text || fallback;
+}
+
+function normalizePipelineMode(value) {
+  return cleanText(value, 'standard').toLowerCase() === 'rapid' ? 'rapid' : 'standard';
 }
 
 function truncateText(value, limit = 120) {
@@ -648,6 +658,98 @@ function appendPendingChildSteps(map, view, orderStart = 0) {
   }
 }
 
+function rapidWarmStatusStep(rapidWarm, order = 0) {
+  const source = asObject(rapidWarm);
+  const status = cleanText(source.status, 'idle').toLowerCase();
+  const reason = safeReasonText(source.reasonLabel || source.failureReasonLabel || source.reason);
+  const phase = cleanText(source.phase);
+  if (status === 'warming') {
+    return normalizeStep({
+      id: 'rapid-warming-scene-deck',
+      label: STEP_DEFINITIONS['rapid-warming-scene-deck'].label,
+      providerLane: 'utility',
+      state: 'running',
+      reason,
+      sourcePhase: phase || 'rapidWarming',
+      order
+    }, order);
+  }
+  if (status === 'waiting') {
+    return normalizeStep({
+      id: 'rapid-warm-waiting',
+      label: STEP_DEFINITIONS['rapid-warm-waiting'].label,
+      providerLane: 'utility',
+      state: 'running',
+      reason,
+      sourcePhase: phase || 'rapidWarmWaiting',
+      order
+    }, order);
+  }
+  if (status === 'ready') {
+    return normalizeStep({
+      id: 'rapid-deck-ready',
+      label: STEP_DEFINITIONS['rapid-deck-ready'].label,
+      providerLane: 'utility',
+      state: 'done',
+      reason,
+      sourcePhase: phase || 'rapidWarmReady',
+      order
+    }, order);
+  }
+  if (status === 'stale') {
+    return normalizeStep({
+      id: 'rapid-deck-stale',
+      label: STEP_DEFINITIONS['rapid-deck-stale'].label,
+      providerLane: 'utility',
+      state: 'warning',
+      reason,
+      sourcePhase: phase || 'rapidWarmStale',
+      order
+    }, order);
+  }
+  if (status === 'missed') {
+    return normalizeStep({
+      id: 'rapid-warm-miss-standard',
+      label: STEP_DEFINITIONS['rapid-warm-miss-standard'].label,
+      providerLane: 'utility',
+      state: 'warning',
+      reason,
+      sourcePhase: phase || 'rapidWarmMissStandard',
+      order
+    }, order);
+  }
+  if (status === 'failed') {
+    return normalizeStep({
+      id: 'rapid-warm-failed',
+      label: STEP_DEFINITIONS['rapid-warm-failed'].label,
+      providerLane: 'utility',
+      state: 'failed',
+      reason,
+      sourcePhase: phase || 'rapidWarmFailed',
+      order
+    }, order);
+  }
+  if (status === 'queued') {
+    return normalizeStep({
+      id: 'rapid-warming-scene-deck',
+      label: STEP_DEFINITIONS['rapid-warming-scene-deck'].label,
+      providerLane: 'utility',
+      state: 'pending',
+      reason,
+      sourcePhase: phase || 'rapidWarming',
+      order
+    }, order);
+  }
+  return null;
+}
+
+function appendRapidWarmStatusStep(map, view, order = 0) {
+  const source = asObject(view);
+  if (normalizePipelineMode(source.settings?.pipelineMode) !== 'rapid') return;
+  const step = rapidWarmStatusStep(source.rapidWarm, order);
+  if (step) upsertStep(map, step);
+}
+
 function normalizeExplicitProgress(progressRun) {
   const source = asObject(progressRun);
   const steps = Array.isArray(source.steps)
@@ -696,8 +798,9 @@ function isControlOnlySettingsProgress(runId, steps = []) {
 }
 
 function deriveProgressRun(view) {
-  const events = sourceEvents(view);
-  const current = asObject(asObject(view).activity);
+  const source = asObject(view);
+  const events = sourceEvents(source);
+  const current = asObject(source.activity);
   const runId = cleanText(current.runId || [...events].reverse().find((event) => cleanText(event.runId))?.runId) || null;
   const currentKey = `${cleanText(current.runId)}|${cleanText(current.phase)}|${cleanText(current.recordedAt)}|${cleanText(current.label)}`;
   const steps = new Map();
@@ -729,6 +832,7 @@ function deriveProgressRun(view) {
       order: eventOrder
     }, eventOrder));
   }
+  appendRapidWarmStatusStep(steps, source, order++);
   const beforePlanSteps = [...steps.values()];
   if (!isControlOnlySettingsProgress(runId, beforePlanSteps)) {
     appendPendingPlanSteps(steps, view, order);

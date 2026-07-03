@@ -387,16 +387,16 @@ if (lifecycleFailures.length) {
       swipes: ['Latest assistant swipe A.', 'Latest assistant swipe B.']
     }
   ];
-  await eventSource.emit('message_swiped', { mesid: 2 });
+  await eventSource.emit('message_swiped', {});
   assertEqual(
     await globalThis.recursionGenerationInterceptor(fake.context.chat),
     fake.context.chat,
-    'latest assistant swipe retry generation keeps original chat'
+    'latest assistant swipe retry with sparse event payload keeps original chat'
   );
-  assertEqual(prompts.length, callsAfterSetup, 'latest assistant swipe retry does not call providers again');
-  assert(fake.promptWrites.length > writesAfterSetup, 'latest assistant swipe retry reinstalls previous prompt');
+  assertEqual(prompts.length, callsAfterSetup, 'latest assistant swipe retry with sparse event payload does not call providers again');
+  assert(fake.promptWrites.length > writesAfterSetup, 'latest assistant swipe retry with sparse event payload reinstalls previous prompt');
   for (const key of RECURSION_PROMPT_KEYS) {
-    assert(fake.promptState.get(key), `latest assistant swipe retry keeps ${key} installed`);
+    assert(fake.promptState.get(key), `latest assistant swipe retry with sparse event payload keeps ${key} installed`);
   }
   await globalThis.recursionOnDelete();
   if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;

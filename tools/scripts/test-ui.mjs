@@ -92,6 +92,34 @@ assertEqual(
   'Rapid deck ready.',
   'rapid warm success exposes rapid standby text with punctuation'
 );
+const rapidWarmingViewModel = createRecursionViewModel({
+  settings: { mode: 'auto', enabled: true, pipelineMode: 'rapid' },
+  activity: { phase: 'idle' },
+  rapidWarm: { runId: 'rapid-ui-warming', status: 'warming', phase: 'rapidWarming' },
+  lastHand: { cards: [] }
+});
+assertEqual(rapidWarmingViewModel.currentStepText, 'Rapid warming scene deck...', 'rapid warm object exposes warming status in the compact bar');
+assertEqual(rapidWarmingViewModel.progressRun.steps.some((step) => step.id === 'rapid-warming-scene-deck'), true, 'rapid warm object appears in the progress menu');
+assertEqual(
+  createRecursionViewModel({
+    settings: { mode: 'auto', enabled: true, pipelineMode: 'rapid' },
+    activity: { phase: 'idle' },
+    rapidWarm: { runId: 'rapid-ui-ready', status: 'ready', phase: 'rapidWarmReady' },
+    lastHand: { cards: [] }
+  }).standbyStatusText,
+  'Rapid deck ready.',
+  'rapid warm ready status persists while idle'
+);
+assertEqual(
+  createRecursionViewModel({
+    settings: { mode: 'auto', enabled: true, pipelineMode: 'standard' },
+    activity: { phase: 'idle' },
+    rapidWarm: { runId: 'rapid-ui-standard', status: 'ready', phase: 'rapidWarmReady' },
+    lastHand: { cards: [] }
+  }).standbyStatusText,
+  'Ready for Recursion.',
+  'rapid warm status does not override Standard pipeline status'
+);
 
 const explicitProgress = createProgressRunModel({
   progressRun: {

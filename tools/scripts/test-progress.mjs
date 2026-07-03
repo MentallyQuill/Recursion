@@ -187,6 +187,62 @@ assert(
   'progress includes Rapid warming row'
 );
 
+const rapidWarmWaitingProgress = createProgressRunModel({
+  settings: { pipelineMode: 'rapid' },
+  activity: { phase: 'idle' },
+  rapidWarm: {
+    runId: 'rapid-warm-waiting',
+    status: 'waiting',
+    phase: 'rapidWarmWaiting',
+    reasonLabel: 'Rapid deck still warming; Standard started.'
+  }
+});
+const rapidWarmWaitingStep = rapidWarmWaitingProgress.steps.find((step) => step.id === 'rapid-warm-waiting');
+assert(rapidWarmWaitingStep, 'rapid warm waiting status renders a progress row');
+assertEqual(rapidWarmWaitingStep.state, 'running', 'rapid warm waiting row is active');
+assertEqual(rapidWarmWaitingProgress.currentStepText, 'Waiting for Rapid deck...', 'rapid warm waiting gets compact status text');
+
+const rapidWarmFailedProgress = createProgressRunModel({
+  settings: { pipelineMode: 'rapid' },
+  activity: { phase: 'idle' },
+  rapidWarm: {
+    runId: 'rapid-warm-failed',
+    status: 'failed',
+    phase: 'rapidWarmFailed',
+    reasonLabel: 'Rapid warm provider failed.'
+  }
+});
+const rapidWarmFailedStep = rapidWarmFailedProgress.steps.find((step) => step.id === 'rapid-warm-failed');
+assert(rapidWarmFailedStep, 'rapid warm failed status renders a progress row');
+assertEqual(rapidWarmFailedStep.state, 'failed', 'rapid warm failed row is failed');
+assertEqual(rapidWarmFailedStep.reason, 'Rapid warm provider failed.', 'rapid warm failed row keeps safe failure reason');
+assertEqual(rapidWarmFailedProgress.currentStepText, 'Rapid warm failed', 'rapid warm failure gets compact status text');
+
+const rapidWarmReadyProgress = createProgressRunModel({
+  settings: { pipelineMode: 'rapid' },
+  activity: { phase: 'idle' },
+  rapidWarm: {
+    runId: 'rapid-warm-ready',
+    status: 'ready',
+    phase: 'rapidWarmReady'
+  }
+});
+const rapidWarmReadyStep = rapidWarmReadyProgress.steps.find((step) => step.id === 'rapid-deck-ready');
+assert(rapidWarmReadyStep, 'rapid warm ready status renders a progress row');
+assertEqual(rapidWarmReadyStep.state, 'done', 'rapid warm ready row is done');
+assertEqual(rapidWarmReadyProgress.heroPixelState, 'done', 'rapid warm ready owns done hero state');
+
+const standardIgnoresRapidWarmProgress = createProgressRunModel({
+  settings: { pipelineMode: 'standard' },
+  activity: { phase: 'idle' },
+  rapidWarm: {
+    runId: 'standard-rapid-warm-ready',
+    status: 'ready',
+    phase: 'rapidWarmReady'
+  }
+});
+assert(!standardIgnoresRapidWarmProgress.steps.some((step) => step.id === 'rapid-deck-ready'), 'Standard pipeline does not render Rapid warm status rows');
+
 const controlOnlyPromptProgress = createProgressRunModel({
   settings: { enabled: false, mode: 'auto' },
   activity: {

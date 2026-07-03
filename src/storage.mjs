@@ -49,6 +49,7 @@ const JOURNAL_EVENTS = new Set([
   'prompt.install_failed',
   'prompt.install_skipped',
   'prompt.cleared',
+  'rapid.warm_missed',
   'provider.call.started',
   'provider.call.completed',
   'provider.call.failed',
@@ -379,7 +380,11 @@ function normalizeRapidWarmArtifact(source = {}) {
     providerContractHash: safeMetadataText(value.providerContractHash || '', 180, ''),
     cardCatalogHash: safeMetadataText(value.cardCatalogHash || '', 180, ''),
     promptContractHash: safeMetadataText(value.promptContractHash || '', 180, ''),
+    startedAt: safeMetadataText(value.startedAt || '', 80, ''),
     builtAt: safeMetadataText(value.builtAt || '', 80, ''),
+    failedAt: safeMetadataText(value.failedAt || '', 80, ''),
+    failureReasonCode: safeMetadataText(value.failureReasonCode || '', 80, ''),
+    failureReasonLabel: safeMetadataText(value.failureReasonLabel || '', 240, ''),
     runId: safeMetadataText(value.runId || '', 120, ''),
     diagnostics: safeMetadataList(value.diagnostics, 120, 24)
   };

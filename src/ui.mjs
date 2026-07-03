@@ -2902,6 +2902,15 @@ function buildRoot() {
   });
   settingsPanel.hidden = true;
 
+  const mobileStatusDrawer = el('div', {
+    className: 'recursion-mobile-status-drawer',
+    attrs: { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' },
+    dataset: { recursionMobileStatusDrawer: '' }
+  }, [
+    el('span', { className: 'recursion-mobile-status-text', dataset: { recursionMobileStatusText: '' } })
+  ]);
+  mobileStatusDrawer.hidden = true;
+
   const statusPopover = el('div', {
     className: 'recursion-status-popover',
     attrs: { 'aria-label': 'Generation status steps' },
@@ -2923,6 +2932,7 @@ function buildRoot() {
   hiddenViewerToggle.setAttribute('aria-hidden', 'true');
 
   root.appendChild(bar);
+  root.appendChild(mobileStatusDrawer);
   root.appendChild(statusPopover);
   root.appendChild(ribbon);
   root.appendChild(hand);
@@ -2984,6 +2994,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const cardsPanel = root.querySelector('[data-recursion-cards-panel]');
   const settingsPanel = root.querySelector('[data-recursion-settings-panel]');
   const statusPopover = root.querySelector('[data-recursion-status-popover]');
+  const mobileStatusDrawer = root.querySelector('[data-recursion-mobile-status-drawer]');
   const actionsButton = root.querySelector('[data-recursion-actions]');
   const powerButton = root.querySelector('[data-recursion-power-toggle]');
   const handButton = root.querySelector('[data-recursion-hand-toggle]');
@@ -3008,6 +3019,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let transientCurrentStepText = '';
   let transientCurrentStepStatusKey = '';
   let transientCurrentStepTimer = null;
+  let mobileStatusText = '';
   let standbyStatusKey = '';
   let expiredStandbyStatusKey = '';
   let standbyStatusTimer = null;
@@ -3138,6 +3150,20 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     update();
   }
 
+  function mobileStatusPanelOpen() {
+    return [statusPopover, handPanel, cardsPanel, settingsPanel, pipelineMenu, modeMenu]
+      .some((panel) => panel?.hidden === false);
+  }
+
+  function syncMobileStatusDrawer(text = mobileStatusText) {
+    mobileStatusText = cleanText(text);
+    if (!mobileStatusDrawer) return;
+    setText(mobileStatusDrawer, '[data-recursion-mobile-status-text]', mobileStatusText);
+    const hidden = !mobileStatusText || mobileStatusPanelOpen();
+    mobileStatusDrawer.hidden = hidden;
+    mobileStatusDrawer.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+  }
+
   function setRibbonVisible(nextVisible) {
     ribbonVisible = Boolean(nextVisible);
     ribbon.hidden = !ribbonVisible;
@@ -3243,9 +3269,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const rootLeft = Math.max(viewportLeft, rect.left);
     const rootRight = Math.min(viewportRight, rect.right);
     const rootWidth = Math.max(0, rootRight - rootLeft);
+    const mobilePanel = viewportWidth <= 720 || rootWidth <= 720;
     const progressTop = Math.max(viewportTop, rect.bottom + 3);
     const settingsTop = Math.max(viewportTop, rect.bottom + 5);
-    const progressWidth = Math.min(352, rootWidth);
+    const progressWidth = mobilePanel ? rootWidth : Math.min(352, rootWidth);
     setFixedPanelGeometry(statusPopover, { left: rootLeft, top: progressTop, width: progressWidth, zIndex: 10020 });
     setFixedPanelGeometry(handPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10010 });
     setFixedPanelGeometry(cardsPanel, { left: rootLeft, top: settingsTop, width: rootWidth, zIndex: 10016 });
@@ -3276,6 +3303,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     modeButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) rememberPanelFocus(modeMenu, modeButton);
     else restorePanelFocus(modeMenu, modeButton);
+    syncMobileStatusDrawer();
   }
 
   function setPipelineMenuOpen(open) {
@@ -3284,6 +3312,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     pipelineButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) rememberPanelFocus(pipelineMenu, pipelineButton);
     else restorePanelFocus(pipelineMenu, pipelineButton);
+    syncMobileStatusDrawer();
   }
 
   function renderPipelineMenuSelection(pipelineMode) {
@@ -3314,6 +3343,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (open) rememberPanelFocus(statusPopover, statusButton);
     else restorePanelFocus(statusPopover, statusButton);
     syncFloatingPanelGeometry();
+    syncMobileStatusDrawer();
   }
 
   function setHandPanelOpen(open) {
@@ -3327,6 +3357,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (open) rememberPanelFocus(handPanel, handButton);
     else restorePanelFocus(handPanel, handButton);
     syncFloatingPanelGeometry();
+    syncMobileStatusDrawer();
   }
 
   function setSettingsPanelOpen(open) {
@@ -3345,6 +3376,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       restorePanelFocus(settingsPanel, actionsButton);
     }
     syncFloatingPanelGeometry();
+    syncMobileStatusDrawer();
   }
 
   function setCardsPanelOpen(open) {
@@ -3365,6 +3397,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       restorePanelFocus(cardsPanel, cardsButton);
     }
     syncFloatingPanelGeometry();
+    syncMobileStatusDrawer();
   }
 
   function viewWithPendingCardScope(view) {
@@ -3890,9 +3923,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function update(viewOverride = null) {
     const view = viewOverride || currentView();
     const model = createRecursionViewModel(view);
+    const currentStepText = currentStepTextForRender(view, model);
     setText(root, '[data-recursion-status]', model.runtimeHealthLabel);
     setText(root, '[data-recursion-mode]', model.modeLabel);
-    setText(root, '[data-recursion-current-step]', currentStepTextForRender(view, model));
+    setText(root, '[data-recursion-current-step]', currentStepText);
+    syncMobileStatusDrawer(currentStepText);
     const pipelineButton = root.querySelector('[data-recursion-pipeline-button]');
     if (pipelineButton) {
       const pipelineKind = pipelineIcon(model.pipelineMode);

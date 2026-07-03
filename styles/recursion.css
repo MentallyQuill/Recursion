@@ -365,6 +365,30 @@
   white-space: nowrap;
 }
 
+.recursion-mobile-status-drawer {
+  align-items: center;
+  background: color-mix(in srgb, var(--recursion-bg) 92%, #050505);
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 68%, transparent);
+  display: none;
+  font-size: 11.5px;
+  line-height: 1;
+  min-height: 24px;
+  overflow: hidden;
+  padding: 0 9px 6px 33px;
+}
+
+.recursion-mobile-status-drawer[hidden] {
+  display: none !important;
+}
+
+.recursion-mobile-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .recursion-hero-pixel-array {
   align-content: start;
   display: grid;
@@ -1518,8 +1542,8 @@
 }
 
 .recursion-provider-profile-combobox {
+  display: grid;
   min-width: 0;
-  position: relative;
 }
 
 .recursion-provider-profile-search {
@@ -1530,17 +1554,15 @@
   background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #242424) 88%, #101010) !important;
   border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 12%, transparent);
   border-radius: 0 0 6px 6px;
+  box-sizing: border-box;
   box-shadow: 0 12px 24px rgba(0, 0, 0, .32);
-  left: 0;
+  margin-top: 2px;
   max-height: 168px;
   min-width: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
-  position: absolute;
-  right: 0;
   scrollbar-width: thin;
-  top: calc(100% + 2px);
-  z-index: 95;
+  width: 100%;
 }
 
 .recursion-provider-profile-list[hidden] {
@@ -2213,10 +2235,57 @@
 }
 
 @media (max-width: 720px) {
-  .recursion-bar,
+  .recursion-root {
+    font-size: 11.5px;
+  }
+
+  .recursion-bar {
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 4px;
+    min-width: 0;
+    padding-right: 6px;
+  }
+
   .recursion-activity-ribbon {
     align-items: stretch;
     flex-wrap: wrap;
+  }
+
+  .recursion-activity-trigger {
+    flex: 1 1 16px;
+    gap: 0;
+    min-width: 12px;
+  }
+
+  .recursion-current-step {
+    display: none;
+  }
+
+  .recursion-mobile-status-drawer:not([hidden]) {
+    display: flex;
+    animation: recursion-slide .16s ease-out;
+  }
+
+  .recursion-right-tools {
+    gap: 4px;
+    margin-left: 0;
+  }
+
+  .recursion-reasoning-chain {
+    --chain-start: 4px;
+    --chain-step: 12px;
+    flex-basis: 44px;
+    width: 44px;
+  }
+
+  .recursion-pipeline-menu,
+  .recursion-mode-menu,
+  .recursion-status-popover,
+  .recursion-hand-dropdown,
+  .recursion-cards-panel,
+  .recursion-settings-panel {
+    font-size: 11.5px;
   }
 
   .recursion-button {
@@ -2227,13 +2296,72 @@
     grid-template-columns: 1fr;
   }
 
+  .recursion-status-head,
+  .recursion-status-foot,
+  .recursion-brief-head,
+  .recursion-brief-foot,
+  .recursion-cards-head,
+  .recursion-cards-foot,
+  .recursion-settings-header {
+    flex-wrap: wrap;
+  }
+
+  .recursion-card-scope-family {
+    grid-template-columns: 1fr;
+  }
+
+  .recursion-card-scope-family-toggle {
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
+    border-right: 0;
+  }
+
+  .recursion-card-scope-family-name,
+  .recursion-kind-label {
+    white-space: normal;
+  }
+
+  .recursion-card-scope-subitems {
+    align-content: start;
+    padding: 6px 8px 8px;
+  }
+
+  .recursion-card-scope-subitem {
+    line-height: 1.15;
+    min-height: 24px;
+  }
+
+  .recursion-brief-card {
+    gap: 6px;
+    grid-template-columns: 1fr;
+    padding: 7px 9px;
+  }
+
+  .recursion-card-kind {
+    align-items: center;
+  }
+
+  .recursion-settings-panel {
+    gap: 8px;
+    padding: 8px;
+  }
+
   .recursion-provider-actions .recursion-button {
     justify-content: center;
     width: 100%;
   }
 
-  .recursion-provider-grid {
+  .recursion-provider-grid,
+  .recursion-provider-openai-fields,
+  .recursion-provider-model-tools {
     grid-template-columns: 1fr;
+  }
+
+  .recursion-provider-openai-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .recursion-provider-model-tools .recursion-button {
+    width: 100%;
   }
 
   .recursion-ribbon-chips {

@@ -274,7 +274,7 @@ Nested child rows are persistent once they appear during a run. They should not 
 
 The user setting `ui.progressListVisibleLimit` controls how many combined progress items are visible before the whole progress list becomes scrollable; default `progressListVisibleLimit: 15`, allowed range 5-80. Count top-level rows and visible child rows together, using each capped child group as part of the same progress surface. This keeps the menu compact when a turn has many top-level rows and many card subcalls.
 
-On mobile and narrow visual viewports, the progress menu must treat that list cap as a maximum, not a fixed required height. The popover shell is clamped to the visible viewport, the header and footer stay visible, and `.recursion-status-list` flex-shrinks into the remaining space as the only primary scroll surface. The footer must never be clipped below the browser controls; users must be able to scroll the list to the final visible progress row inside the popover.
+On mobile and narrow visual viewports, the progress menu must treat that list cap as a maximum, not a fixed required height. Progress should be full-width on mobile instead of capped to the desktop popover width. The popover shell is clamped to the visible viewport, the header and footer stay visible, and `.recursion-status-list` flex-shrinks into the remaining space as the only primary scroll surface. The footer must never be clipped below the browser controls; users must be able to scroll the list to the final visible progress row inside the popover.
 
 Parent row aggregation:
 
@@ -1187,7 +1187,7 @@ Each provider card should support:
 
 The compact Providers tab shows Utility details by default and keeps Reasoner as a collapsed optional lane until the user opens or configures it. Temperature and top-p remain normalized provider settings with safe defaults, but they are not visible controls in the compact top-bar menu.
 
-The Providers tab should build Utility and Reasoner profile comboboxes from one connection-profile lookup per render. Profile discovery must not walk character-card, persona, group, avatar, or Recursion card collections; those collections can be large enough to make native dropdown expansion feel blocked. The combobox list must be scrollable for long SillyTavern profile collections, and filter typing must not write partial text into provider settings.
+The Providers tab should build Utility and Reasoner profile comboboxes from one connection-profile lookup per render. Profile discovery must not walk character-card, persona, group, avatar, or Recursion card collections; those collections can be large enough to make native dropdown expansion feel blocked. The combobox list must be scrollable for long SillyTavern profile collections, open inside the provider lane flow so rounded disclosures do not clip the options, and filter typing must not write partial text into provider settings.
 
 Provider cards must not sprawl by rendering profile and OpenAI endpoint fields together. The selected Source owns the visible option context, while hidden alternate-source values remain available if the user switches back.
 
@@ -1256,10 +1256,16 @@ Provider fallback states should appear in the Hero Pixel Array Progress Menu and
 
 On narrow viewports:
 
-- Keep the power toggle, mode icon, Hero Pixel Array, active Stop generation button when visible, last-brief arrow, and ellipsis visible when possible.
+- Keep the power toggle, pipeline icon, mode icon, card scope icon, Hero Pixel Array, active Stop generation button when visible, last-brief arrow, and ellipsis visible when possible.
+- Keep the bar on one row. The inline current-step text must not force the right tool cluster onto a second row.
+- Use a mobile status drawer below the bar for the same current-step or transient standby text that desktop renders beside the Hero Pixel Array.
+- Hide the mobile status drawer when Progress, Last Brief, Cards, Settings, Pipeline, or Mode is open; those panels own the temporary vertical space.
 - Collapse provider details, viewer entry points, and advanced commands into the ellipsis options menu.
 - Use `[power] | [mode] | [array] v ...` as the default collapsed shape.
 - Put mode selection, provider details, settings, last brief, and viewer links inside menus when there is not enough width.
+- Keep Progress, Last Brief, Cards, and Settings full-width or viewport-clamped below the bar. Their headers and footers stay visible while their body/list scrolls.
+- Collapse dense panel grids to one column: card scope families stack above sub-items, Last Brief kind rows stack above card text, and provider/settings fields stack vertically.
+- Reduce mobile panel chrome slightly, using 11.5px default text and 10px helper/meta text, without changing panel content.
 - Prefer one-column viewer layouts.
 - Keep buttons icon-first where meaning is familiar, with tooltips or accessible labels.
 - Avoid wide tables in the full viewer.

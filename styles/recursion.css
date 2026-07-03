@@ -83,20 +83,26 @@
 
 .recursion-force-regenerate {
   align-items: center;
-  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 12%, transparent);
   border-radius: 5px;
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 74%, transparent);
   cursor: pointer;
   display: inline-flex;
-  flex: 0 0 auto;
-  font-size: 10.5px;
+  flex: 0 0 24px;
   height: 24px;
   justify-content: center;
   line-height: 1;
-  min-width: 74px;
-  padding: 0 7px;
+  min-width: 24px;
+  padding: 0;
   position: relative;
-  white-space: nowrap;
+  width: 24px;
+}
+
+.recursion-force-regenerate-icon {
+  align-items: center;
+  display: inline-flex;
+  height: 16px;
+  justify-content: center;
+  width: 16px;
 }
 
 .recursion-stop-generation[hidden] {
@@ -399,9 +405,9 @@
   display: none;
   font-size: 11.5px;
   line-height: 1;
-  min-height: 24px;
+  min-height: 14px;
   overflow: hidden;
-  padding: 0 9px 6px 33px;
+  padding: 1px 9px 1px 2px;
 }
 
 .recursion-mobile-status-drawer[hidden] {

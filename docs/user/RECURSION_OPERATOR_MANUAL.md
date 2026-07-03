@@ -43,7 +43,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 - icon-only Pipeline control: Standard or Rapid;
 - icon-only mode control: Auto or Manual;
 - Hero Pixel Array plus current-step text;
-- command slot: Stop generation while active, Regenerate while idle;
+- command slot: Stop generation while active, restart Regenerate icon while idle;
 - Reasoning Level chain;
 - Last Brief dropdown arrow;
 - ellipsis options/settings entry.
@@ -54,7 +54,7 @@ The Pipeline control is a small icon-only dropdown immediately to the left of th
 
 The command slot changes by state. Stop generation appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
 
-When Recursion is idle, the same slot shows Regenerate. Use it when Last Brief or Prompt Packet looks stale and you want the next generation to run fresh without deleting chat data. Regenerate queues a one-shot forced pass: it bypasses same-turn packet reinstall, latest-assistant swipe reuse, cached card hand reuse, and Rapid warm for the next generation only. The button shows `Regenerating` while queued, and Last Brief clears to `Preparing fresh prompt packet.` until the fresh packet installs.
+When Recursion is idle, the same slot shows a restart icon for Regenerate. Use it when Last Brief or Prompt Packet looks stale and you want the current turn regenerated fresh without deleting chat data. Regenerate immediately starts a one-shot forced pass: it bypasses same-turn packet reinstall, latest-assistant swipe reuse, cached card hand reuse, and Rapid warm for this regeneration only. The icon swaps to Stop, the normal progress menu/status feedback appears, and Last Brief clears to `Preparing fresh prompt packet.` until the fresh packet installs. You can stop the forced regeneration with the Recursion Bar Stop button or SillyTavern's native Stop button.
 
 ### Hero Pixel Array Progress Menu
 
@@ -267,7 +267,7 @@ Expected behavior:
 - Utility invalid output: reject unsafe structured output and use conservative fallback.
 - Rapid warm unavailable: escalate to Standard for the same pending user message; do not install local substitute Rapid briefs.
 - Rapid invalid output or mandatory gap: escalate the current turn to Standard.
-- Bar Regenerate: bypass cached cards, Rapid warm, and same-turn/swipe packet reuse for one next generation, then return to the selected pipeline.
+- Bar Regenerate: immediately regenerate the current turn fresh, bypass cached cards, Rapid warm, and same-turn/swipe packet reuse for that one run, then return to the selected pipeline.
 - Card failure: omit failed cards and keep valid siblings.
 - Reasoner disabled, unhealthy, missing credentials, or failed: compose with Utility.
 - Player Stop / host generation stop, including the Recursion Bar Stop generation button: abort active Recursion work, stop the host generation when the SillyTavern stop seam is available, clear owned prompt keys, and show skipped/canceled progress rather than a provider warning.
@@ -340,8 +340,8 @@ Use this checklist for a practical browser pass:
 3. Open the Hero Pixel Array progress menu, Last Brief dropdown, Settings, and Full Viewer.
 4. Visit Play, Providers, Advanced, Prompt Packet, and Viewer sections.
 5. Configure and test Utility when provider work is intended.
-6. Confirm Regenerate appears in the bar while idle; click it and confirm Last Brief clears to `Preparing fresh prompt packet.`
-7. Start a generation, confirm Stop generation replaces Regenerate while the turn is active, click it, and confirm the host generation stops with canceled/skipped Recursion progress.
+6. Confirm the restart Regenerate icon appears in the bar while idle; click it and confirm normal generation progress appears, Stop replaces Regenerate, and Last Brief clears to `Preparing fresh prompt packet.`
+7. While the forced regeneration is active, click either Recursion Bar Stop or SillyTavern Stop and confirm the host generation stops with canceled/skipped Recursion progress.
 8. Turn power off and confirm prompt lanes are absent or cleared.
 9. Set Auto and confirm Recursion is ready to compile.
 10. Set Manual and confirm it applies as a distinct mode.

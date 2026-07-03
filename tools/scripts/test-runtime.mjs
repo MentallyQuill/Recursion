@@ -1803,6 +1803,85 @@ for (const pipelineMode of ['standard', 'rapid']) {
 }
 
 {
+  const hostStartCalls = [];
+  const hostStarted = deferred();
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' },
+    hostGeneration: {
+      async start(details = {}) {
+        hostStartCalls.push(details);
+        await hostStarted.promise;
+        return { ok: true, started: true, completed: true, type: details.type, source: 'test-host-start' };
+      }
+    }
+  });
+  assertEqual(typeof runtime.forceRegenerateNow, 'function', 'runtime exposes immediate force regenerate action');
+  const pending = runtime.forceRegenerateNow({ source: 'bar' });
+  await waitUntil(() => hostStartCalls.length === 1, 'immediate force regenerate did not start host regeneration');
+  assertEqual(hostStartCalls[0].type, 'regenerate', 'immediate force regenerate asks host to regenerate');
+  assertEqual(hostStartCalls[0].source, 'recursion-ui', 'immediate force regenerate identifies Recursion as host source');
+  assertEqual(runtime.view().hostGenerationActive, true, 'immediate force regenerate keeps stop affordance active during host regeneration');
+  assertEqual(runtime.view().forceRegenerate?.pending, false, 'immediate force regenerate consumes the force token during preparation');
+  assertEqual(installed.length, 1, 'immediate force regenerate installs a fresh prompt before host regeneration');
+  hostStarted.resolve();
+  const result = await pending;
+  assertEqual(result.ok, true, 'immediate force regenerate succeeds');
+  assertEqual(result.hostGeneration?.ok, true, 'immediate force regenerate reports host regeneration result');
+  assert(JSON.stringify(result.packet).includes('force-regenerate:cache-bypassed'), 'immediate force regenerate bypasses cache paths');
+  assertEqual(runtime.view().hostGenerationActive, false, 'host regenerate completion clears stop affordance');
+}
+
+{
+  let releaseArbiter;
+  const hostStartCalls = [];
+  const hostStopCalls = [];
+  const { runtime, calls, installed } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    hostGeneration: {
+      async start(details = {}) {
+        hostStartCalls.push(details);
+        return { ok: true, started: true, type: details.type };
+      },
+      async stop(details = {}) {
+        hostStopCalls.push(details);
+        return { ok: true, stopped: true, eventEmitted: false, source: 'test-host-stop' };
+      }
+    },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        assertEqual(roleId, 'utilityArbiter', 'stopped immediate force regenerate only needs utility arbiter');
+        await new Promise((resolve) => {
+          releaseArbiter = resolve;
+        });
+        assertEqual(request.signal?.aborted, true, 'stopping immediate force regenerate aborts in-flight provider signal');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'compose-brief',
+            diagnostics: ['force-regenerate-stop-regression']
+          }
+        };
+      }
+    }
+  });
+  const pending = runtime.forceRegenerateNow({ source: 'bar' });
+  await waitUntil(() => typeof releaseArbiter === 'function', 'immediate force regenerate did not enter arbiter before stop');
+  assertEqual(runtime.view().hostGenerationActive, true, 'immediate force regenerate exposes stop state before host generation starts');
+  const stopped = runtime.stopGeneration({ source: 'recursion-ui' });
+  releaseArbiter();
+  const [stopResult, pendingResult] = await Promise.all([stopped, pending]);
+  assertEqual(pendingResult.superseded, true, 'stop supersedes immediate force regenerate preparation');
+  assertEqual(stopResult.ok, true, 'stop cleanup succeeds during immediate force regenerate');
+  assertEqual(hostStopCalls.length, 1, 'stop still calls SillyTavern stop during immediate force regenerate');
+  assertEqual(hostStartCalls.length, 0, 'stopped immediate force regenerate does not start host regeneration');
+  assertEqual(calls.clear, 1, 'stopped immediate force regenerate clears host prompt');
+  assertEqual(installed.length, 0, 'stopped immediate force regenerate prevents prompt install');
+  assertEqual(runtime.view().hostGenerationActive, false, 'stop clears immediate force regenerate host state');
+}
+
+{
   let providerCalls = 0;
   const userMessage = 'Force regenerate the latest assistant swipe.';
   const chatId = 'force-latest-assistant-chat';

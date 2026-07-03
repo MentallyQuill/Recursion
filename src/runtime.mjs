@@ -2103,6 +2103,23 @@ export function createRecursionRuntime({
     };
   }
 
+  async function forceRegenerateNow(details = {}) {
+    const queued = await forceRegenerateNext(details);
+    if (queued?.skipped) return queued;
+    const prepare = await prepareForGeneration({ userMessage: null, hostGeneration: true });
+    if (prepare?.superseded || prepare?.ok === false || prepare?.skipped) return prepare;
+    const hostGeneration = await requestHostGenerationStart({
+      type: 'regenerate',
+      source: 'recursion-ui',
+      reason: 'force-regenerate'
+    });
+    setHostGenerationActive(false);
+    return {
+      ...asObject(prepare),
+      hostGeneration
+    };
+  }
+
   function readyLastBrief(packet = lastPacket, hand = lastHand, { runId = '', reason = 'packet-ready' } = {}) {
     const cards = Array.isArray(hand?.cards) ? hand.cards : [];
     lastBrief = {
@@ -2700,6 +2717,39 @@ export function createRecursionRuntime({
         error: {
           code: safeText(error?.code || error?.name || 'RECURSION_HOST_STOP_FAILED', 120),
           message: safeText(error?.message || error || 'SillyTavern stop generation failed.', 300)
+        }
+      };
+    }
+  }
+
+  async function requestHostGenerationStart(details = {}) {
+    const source = asObject(details);
+    if (typeof host?.generation?.start !== 'function') {
+      return {
+        ok: false,
+        started: false,
+        completed: false,
+        error: {
+          code: 'RECURSION_HOST_GENERATION_UNAVAILABLE',
+          message: 'SillyTavern native generation API is unavailable.'
+        }
+      };
+    }
+    try {
+      const result = await host.generation.start({
+        type: safeText(source.type || 'regenerate', 80) || 'regenerate',
+        source: safeText(source.source || 'recursion-ui', 80) || 'recursion-ui',
+        reason: safeText(source.reason || 'force-regenerate', 80) || 'force-regenerate'
+      });
+      return asObject(result);
+    } catch (error) {
+      return {
+        ok: false,
+        started: false,
+        completed: false,
+        error: {
+          code: safeText(error?.code || error?.name || 'RECURSION_HOST_GENERATION_FAILED', 120),
+          message: safeText(error?.message || error || 'SillyTavern native generation failed.', 300)
         }
       };
     }
@@ -4883,6 +4933,7 @@ export function createRecursionRuntime({
     prepareForGeneration,
     warmRapidScene,
     forceRegenerateNext,
+    forceRegenerateNow,
     async dispose() {
       supersedeActiveRun();
       abortActiveRapidWarmRun('stale');

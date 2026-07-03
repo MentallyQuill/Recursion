@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Give users a direct way to tell Recursion, "do this turn fresh." The control must bypass cached cards, Rapid warm artifacts, and latest-assistant swipe packet reuse for the next generation without deleting SillyTavern chat data or turning into a hidden persistent no-cache mode.
+Give users a direct way to tell Recursion, "do this turn fresh." The control must immediately regenerate the current turn while bypassing cached cards, Rapid warm artifacts, and latest-assistant swipe packet reuse without deleting SillyTavern chat data or turning into a hidden persistent no-cache mode.
 
 Force Regenerate is a normal play control. It is not the same as Reset Scene Cache:
 
-- Force Regenerate: one-shot fresh prompt-packet run for the next generation.
+- Force Regenerate: one-shot fresh prompt-packet run plus native SillyTavern regenerate for the current turn.
 - Reset Scene Cache: destructive diagnostic cleanup that deletes the current scene cache, clears in-memory hand/packet state, and clears the host prompt.
 
 ## Current State
@@ -28,16 +28,16 @@ The current optimized paths are correct most of the time but frustrating when th
 - A latest-assistant swipe can reinstall the same Recursion packet even when the user wants new card/guidance judgment for the alternate assistant response.
 - A same-turn send can reinstall the prior packet instead of rebuilding it.
 - Rapid can use warm guidance that is operationally valid but not what the user wants after inspecting Last Brief.
-- Existing Reset Scene Cache is too broad; it deletes diagnostic state and clears prompt state instead of simply making the next generation fresh.
+- Existing Reset Scene Cache is too broad; it deletes diagnostic state and clears prompt state instead of simply regenerating the current turn fresh.
 
 The user intent is not "delete everything." It is "ignore the reuse/cached path for this generation."
 
 ## Goals
 
 - Add a one-shot Force Regenerate action.
-- Bypass latest-assistant swipe packet reuse for the next generation.
-- Bypass same-turn packet reinstall for the next generation.
-- Bypass Rapid warm artifact use for the next generation.
+- Bypass latest-assistant swipe packet reuse for the current forced regeneration.
+- Bypass same-turn packet reinstall for the current forced regeneration.
+- Bypass Rapid warm artifact use for the current forced regeneration.
 - Soft-invalidate the loaded scene cache with reason `user-force-regenerate`.
 - Prevent cached cards from entering the forced hand.
 - Run fresh provider work for Arbiter/card/guidance using the current snapshot.
@@ -71,7 +71,7 @@ The force token has safe operational metadata:
 }
 ```
 
-Calling `runtime.forceRegenerateNext()` sets the token, clears Last Brief visually with reason `user-force-regenerate`, clears any pending latest-assistant swipe retry, and returns immediately. The next `prepareForGeneration()` consumes the token and runs fresh.
+Calling `runtime.forceRegenerateNow()` sets a force token, clears Last Brief visually with reason `user-force-regenerate`, clears any pending latest-assistant swipe retry, immediately calls `prepareForGeneration({ hostGeneration: true })`, and starts SillyTavern native regenerate after the fresh packet installs. `runtime.forceRegenerateNext()` remains the lower-level one-shot token primitive.
 
 This keeps the control ergonomic:
 
@@ -79,10 +79,10 @@ This keeps the control ergonomic:
 2. User sees stale or wrong cards.
 3. User clicks Regenerate in the Recursion Bar command slot where Stop appears during active work.
 4. Last Brief clears to the same preparing state used by send/swipe.
-5. The next generation path ignores reuse and cache.
-6. New cards and packet install into Last Brief.
+5. Normal Recursion progress/status appears while the forced path ignores reuse and cache.
+6. New cards and packet install into Last Brief, then SillyTavern regenerates the current turn with the fresh packet installed.
 
-If the user clicks Regenerate during a latest-assistant swipe window, the next generation treats the current post-swipe source as the source of truth and does not call `reinstallLastPacketForSameTurn(...)`.
+If the user clicks Regenerate during a latest-assistant swipe window, the forced regeneration treats the current post-swipe source as the source of truth and does not call `reinstallLastPacketForSameTurn(...)`.
 
 ## Alternatives Considered
 
@@ -100,7 +100,7 @@ Rejected for V1. It is expensive, easy to forget, and likely to make Rapid appea
 
 ### Option C: One-Shot Fresh Run
 
-Add a visible one-shot action that makes the next generation fresh.
+Add a visible one-shot action that makes the current turn regenerate fresh.
 
 Selected. It maps directly to user intent, keeps runtime cache machinery intact, preserves diagnostics, and gives the main bar an obvious fresh-run command.
 
@@ -109,7 +109,8 @@ Selected. It maps directly to user intent, keeps runtime cache machinery intact,
 ### New runtime API
 
 ```js
-runtime.forceRegenerateNext({ source = 'bar' } = {})
+runtime.forceRegenerateNow({ source = 'bar' } = {})
+runtime.forceRegenerateNext({ source = 'bar' } = {}) // lower-level token primitive
 ```
 
 Return shape:
@@ -223,44 +224,41 @@ The ready reason after install should be `force-regenerate-installed` or `force-
 
 ### Placement
 
-Add a compact Regenerate control to the Recursion Bar command slot where the Stop generation button appears during active work.
+Add a compact icon-only Regenerate control to the Recursion Bar command slot where the Stop generation button appears during active work.
 
 The slot is mutually exclusive:
 
 - Active prompt preparation or host generation: show Stop generation.
-- Idle and Recursion enabled: show Regenerate.
-- Force token pending before the next generation starts: show Regenerating as a disabled/pending state.
+- Idle and Recursion enabled: show the restart Regenerate icon button.
+- Force token pending before `activeRunId` is visible: show Stop generation.
 - Recursion disabled: hide Regenerate and Stop.
 
 Recommended desktop order:
 
 ```text
-[power] [pipeline] [mode] [cards] | [Hero Pixel Array] Current step... [Regenerate/Stop] [reasoning] v | ...
+[power] [pipeline] [mode] [cards] | [Hero Pixel Array] Current step... [restart/stop] [reasoning] v | ...
 ```
 
 The control is enabled when:
 
 - Recursion is enabled.
-- `runtime.forceRegenerateNext` exists.
+- `runtime.forceRegenerateNow` exists.
 - No active prompt-preparation or host-generation run needs the Stop button.
 
-If a force token is pending, the button becomes disabled and labels as pending:
-
-- Visible text: `Regenerating`
-- Tooltip: `Fresh prompt packet queued.`
+If a force token is pending, Stop owns the command slot even before `activeRunId` is visible. The restart icon is hidden so the user has one clear action: cancel the in-flight forced regeneration.
 
 ### Copy
 
-Button text:
+Accessible label:
 
 ```text
-Regenerate
+Regenerate this turn
 ```
 
 Tooltip:
 
 ```text
-Run the next Recursion packet fresh, ignoring cached cards, Rapid warm, and swipe reuse.
+Regenerate this turn fresh, ignoring cached cards, Rapid warm, and swipe reuse.
 ```
 
 Preparing text:
@@ -318,9 +316,11 @@ This makes force regenerate a direct override for "do not reuse the same cards/p
 - Provider unavailable: follow existing fail-soft provider behavior; do not preserve the old packet as if force succeeded.
 - Storage invalidation failed: continue in memory and show storage warning.
 - Prompt install failed: show existing install failure warning, with Last Brief ready metadata only if a packet exists.
-- User clicks Regenerate repeatedly: replace the pending force token with a newer token; do not stack requests.
-- Chat/source changes before next generation: clear stale force token with source-change cleanup.
-- Recursion disabled before next generation: clear force token and Last Brief as disabled path already does.
+- User clicks Regenerate while idle: start the forced regeneration immediately.
+- User clicks Stop during forced prompt preparation: abort provider work, prevent prompt install, and clear owned prompt lanes.
+- User clicks Stop after forced prompt install while SillyTavern is regenerating: call SillyTavern stop and run host-stop cleanup.
+- Chat/source changes before or during forced generation: clear stale force token with source-change cleanup.
+- Recursion disabled before or during forced generation: clear force token and Last Brief as disabled path already does.
 
 ## Privacy And Diagnostics
 
@@ -350,7 +350,7 @@ Safe diagnostics can include:
 
 Add tests proving:
 
-- `runtime.forceRegenerateNext()` sets a pending force view.
+- `runtime.forceRegenerateNow()` starts prompt preparation immediately and uses the pending force view only as a short-lived command-slot state.
 - The next `prepareForGeneration()` consumes the token.
 - Same-turn reuse is skipped and provider calls increase.
 - Latest-assistant swipe reuse is skipped when force is pending.
@@ -363,9 +363,9 @@ Add tests proving:
 
 Add tests proving:
 
-- Recursion Bar command slot renders Regenerate when idle.
-- Recursion Bar command slot renders Stop instead of Regenerate during active work.
-- Click calls `runtime.forceRegenerateNext()`.
+- Recursion Bar command slot renders an icon-only restart Regenerate control when idle.
+- Recursion Bar command slot renders Stop instead of Regenerate during active work or pending force state.
+- Click calls `runtime.forceRegenerateNow()`.
 - Button disables while pending.
 - Clearing text uses `Preparing fresh prompt packet.`
 - Last Brief remains an inspection surface, not the primary command location.
@@ -407,7 +407,7 @@ Update:
 
 ## Acceptance Criteria
 
-- A user can click Regenerate from the Recursion Bar and the next generation runs fresh.
+- A user can click Regenerate from the Recursion Bar and the current turn regenerates fresh.
 - Latest-assistant swipe reuse is bypassed when force is pending.
 - Same-turn packet reuse is bypassed when force is pending.
 - Rapid warm is bypassed only for the forced run.

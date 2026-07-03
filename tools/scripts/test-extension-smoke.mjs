@@ -460,6 +460,29 @@ if (lifecycleFailures.length) {
 }
 
 {
+  const fake = createFakeSillyTavernContext('generation-after-commands-event');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    CHAT_CHANGED: 'chat_changed',
+    GENERATION_AFTER_COMMANDS: 'generation_after_commands',
+    GENERATION_ENDED: 'generation_ended'
+  };
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionOnActivate(), true, 'generation after-commands setup activates');
+  assertEqual(eventSource.listenerCount('generation_after_commands'), 0, 'bootstrap does not treat generation-after-commands as assistant landed');
+  assertEqual(eventSource.listenerCount('generation_ended'), 1, 'bootstrap still subscribes to true assistant-landed generation ended event');
+  await globalThis.recursionOnDelete();
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const eventSource = createFakeEventSource();
   const prompts = [];
   const context = {

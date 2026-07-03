@@ -74,9 +74,19 @@ assertEqual(
     activity: { phase: 'idle' },
     forceRegenerate: { pending: true },
     lastHand: { cards: [] }
-  }).forceRegenerateLabel,
-  'Regenerating',
-  'pending force regenerate exposes pending command label'
+  }).generationStopVisible,
+  true,
+  'pending force regenerate swaps the command slot to Stop'
+);
+assertEqual(
+  createRecursionViewModel({
+    settings: { mode: 'auto', enabled: true },
+    activity: { phase: 'idle' },
+    forceRegenerate: { pending: true },
+    lastHand: { cards: [] }
+  }).forceRegenerateVisible,
+  false,
+  'pending force regenerate hides the restart icon while Stop owns the slot'
 );
 assertEqual(
   createRecursionViewModel({
@@ -691,6 +701,9 @@ assert(!/settings-close/.test(barImplementationReference), 'implementation refer
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(recursionCss), 'production CSS honors reduced-motion preferences');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.recursion-root \*[\s\S]*?animation:\s*none\s*!important;[\s\S]*?transition:\s*none\s*!important;/.test(recursionCss), 'reduced-motion rule disables Recursion animations and transitions');
 assert(/\.recursion-mobile-status-drawer\s*\{[\s\S]*?display:\s*none;/.test(recursionCss), 'mobile status drawer is hidden by default on desktop');
+assert(/\.recursion-mobile-status-drawer\s*\{[\s\S]*?min-height:\s*14px;/.test(recursionCss), 'mobile status drawer uses a reduced low-profile height');
+assert(/\.recursion-mobile-status-drawer\s*\{[\s\S]*?padding:\s*1px 9px 1px 2px;/.test(recursionCss), 'mobile status drawer aligns text with the compact bar left edge');
+assert(/\.recursion-mobile-status-drawer\s*\{[\s\S]*?align-items:\s*center;/.test(recursionCss), 'mobile status drawer vertically centers its text');
 assert(/\.recursion-mobile-status-drawer\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'mobile status drawer hidden state wins over mobile display rules');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-bar\s*\{[\s\S]*?flex-wrap:\s*nowrap;/.test(recursionCss), 'mobile Recursion bar stays on one row');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-current-step\s*\{[\s\S]*?display:\s*none;/.test(recursionCss), 'mobile bar hides inline current-step text');
@@ -1485,11 +1498,27 @@ try {
         stopGenerationCalls += 1;
         return { ok: true, details };
       },
-      forceRegenerateNext: (details = {}) => {
+      forceRegenerateNow: (details = {}) => {
         forceRegenerateCalls += 1;
         forceRegenerateDetails.push(details);
         view = {
           ...view,
+          activeRunId: 'force-ui-run',
+          hostGenerationActive: true,
+          activity: {
+            phase: 'cardBatchRunning',
+            severity: 'info',
+            label: 'Reading current turn...',
+            chips: ['Auto']
+          },
+          progressRun: {
+            runId: 'force-ui-run',
+            title: 'Generating',
+            currentStepText: 'Reading current turn...',
+            steps: [
+              { id: 'read-current-turn', label: 'Reading current turn', state: 'running' }
+            ]
+          },
           forceRegenerate: {
             pending: true,
             id: 'force-ui',
@@ -2484,14 +2513,17 @@ try {
   ui.update();
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'idle view hides stop generation button');
   assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, false, 'idle view shows force regenerate button in stop slot');
-  assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('aria-label'), 'Regenerate Recursion prompt packet', 'force regenerate button exposes accessible copy');
-  assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('title'), 'Run the next Recursion packet fresh, ignoring cached cards, Rapid warm, and swipe reuse.', 'force regenerate button exposes hover tip copy');
+  assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('aria-label'), 'Regenerate this turn', 'force regenerate button exposes accessible copy');
+  assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('title'), 'Regenerate this turn fresh, ignoring cached cards, Rapid warm, and swipe reuse.', 'force regenerate button exposes hover tip copy');
+  assert(root.querySelector('[data-recursion-force-regenerate-icon]'), 'force regenerate button renders a restart icon');
+  assertEqual(fakeDocument.textTree(root.querySelector('[data-recursion-force-regenerate]')).includes('Regenerate'), false, 'force regenerate button is icon-only when idle');
   root.querySelector('[data-recursion-force-regenerate]').click();
-  assertEqual(forceRegenerateCalls, 1, 'force regenerate button calls runtime');
+  assertEqual(forceRegenerateCalls, 1, 'force regenerate button starts runtime regeneration immediately');
   assertDeepEqual(forceRegenerateDetails.at(-1), { source: 'bar' }, 'force regenerate button identifies bar as source');
   ui.update();
-  assertEqual(root.querySelector('[data-recursion-force-regenerate]').disabled, true, 'pending force regenerate disables the bar command');
-  assertEqual(fakeDocument.textTree(root.querySelector('[data-recursion-force-regenerate]')).includes('Regenerating'), true, 'pending force regenerate shows pending label');
+  assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, true, 'running force regenerate hides restart command');
+  assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, false, 'running force regenerate shows stop command');
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Reading current turn...', 'running force regenerate shows normal generation status');
   root.querySelector('[data-recursion-hand-toggle]').click();
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Preparing fresh prompt packet.'), 'force regenerate clearing state uses fresh prompt copy');
   root.querySelector('[data-recursion-hand-toggle]').click();

@@ -577,6 +577,41 @@ assertEqual(quietResponse.text, 'quiet text', 'quiet generation result normalize
 assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
 
 {
+  const generateCalls = [];
+  const startHost = createSillyTavernHost({
+    contextFactory: () => ({
+      currentChatId: 'start-chat',
+      chat: [],
+      generate: async (type, options) => {
+        generateCalls.push({ type, options });
+        return { native: true };
+      }
+    }),
+    settingsRoot: {}
+  });
+  assertEqual(typeof startHost.generation.start, 'function', 'host exposes native generation start');
+  const startResult = await startHost.generation.start({ type: 'regenerate', source: 'recursion-ui' });
+  assertEqual(startResult.ok, true, 'host native generation start succeeds');
+  assertEqual(startResult.started, true, 'host native generation start reports started');
+  assertEqual(startResult.type, 'regenerate', 'host native generation start reports regenerate type');
+  assertEqual(startResult.source, 'context.generate', 'host native generation start uses SillyTavern context Generate');
+  assertDeepEqual(generateCalls, [{ type: 'regenerate', options: {} }], 'host native generation start calls SillyTavern Generate once');
+}
+
+{
+  const unavailableStartHost = createSillyTavernHost({
+    contextFactory: () => ({
+      currentChatId: 'start-unavailable-chat',
+      chat: []
+    }),
+    settingsRoot: {}
+  });
+  const startResult = await unavailableStartHost.generation.start({ type: 'regenerate', source: 'recursion-ui' });
+  assertEqual(startResult.ok, false, 'host native generation start reports unavailable start support');
+  assertEqual(startResult.error.code, 'RECURSION_HOST_GENERATION_UNAVAILABLE', 'host native generation start returns stable unavailable error code');
+}
+
+{
   const stopCalls = [];
   const stopHost = createSillyTavernHost({
     contextFactory: () => ({

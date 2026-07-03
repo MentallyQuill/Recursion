@@ -67,17 +67,23 @@ async function seedChatTurn(page, marker, timeoutMs) {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
     if (!Array.isArray(context.chat)) context.chat = [];
     const base = context.chat.length;
+    const assistantMes = `For ${runMarker}, the sealed gate glowed blue while Mara held the brass key.`;
+    const userMes = `For ${runMarker}, keep the gate scene coherent and brief.`;
     context.chat.push({
       mesid: base,
       is_user: false,
       name: 'Recursion Force Proof',
-      mes: `For ${runMarker}, the sealed gate glowed blue while Mara held the brass key.`
+      mes: assistantMes,
+      swipe_id: 0,
+      swipes: [assistantMes]
     });
     context.chat.push({
       mesid: base + 1,
       is_user: true,
       name: 'Recursion Force Proof',
-      mes: `For ${runMarker}, keep the gate scene coherent and brief.`
+      mes: userMes,
+      swipe_id: 0,
+      swipes: [userMes]
     });
     globalThis.__recursionForceProof = {
       marker: runMarker,
@@ -120,13 +126,75 @@ function readDomStateScript() {
       forceButtonHidden: forceButton?.hidden === true,
       forceButtonDisabled: forceButton?.disabled === true,
       forceButtonText: String(forceButton?.textContent || '').replace(/\s+/g, ' ').trim(),
+      forceButtonAriaLabel: String(forceButton?.getAttribute('aria-label') || ''),
+      forceButtonHasRestartIcon: Boolean(forceButton?.querySelector('[data-recursion-force-regenerate-icon]')),
       stopButtonHidden: stopButton?.hidden === true,
+      stopButtonDisabled: stopButton?.disabled === true,
+      currentStepText: String(document.querySelector('[data-recursion-current-step]')?.textContent || '').replace(/\s+/g, ' ').trim(),
       runtimeLastBrief: runtimeView.lastBrief || null,
       forceRegenerate: runtimeView.forceRegenerate || null,
+      activeRunId: String(runtimeView.activeRunId || ''),
+      hostGenerationActive: runtimeView.hostGenerationActive === true,
+      progressRun: runtimeView.progressRun || null,
       packetId: String(runtimeView.lastPacket?.packetId || ''),
-      packetDiagnostics: runtimeView.lastPacket?.diagnostics || null
+      packetDiagnostics: runtimeView.lastPacket?.diagnostics || null,
+      hostProbe: globalThis.__recursionForceProof?.hostProbe || null
     };
   };
+}
+
+async function installHostGenerationProbe(page, timeoutMs) {
+  await page.evaluate(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    if (typeof context.generate !== 'function') {
+      throw new Error('SillyTavern context Generate function is unavailable');
+    }
+    if (!globalThis.__recursionForceProof) globalThis.__recursionForceProof = {};
+    const originalGenerate = context.generate.bind(context);
+    const originalStopGeneration = typeof context.stopGeneration === 'function'
+      ? context.stopGeneration.bind(context)
+      : null;
+    const probe = {
+      generateCalls: [],
+      stopCalls: [],
+      released: false
+    };
+    let releaseGenerate = null;
+    context.generate = async (type, options = {}) => {
+      probe.generateCalls.push({ type: String(type || ''), options });
+      return await new Promise((resolve) => {
+        releaseGenerate = (value = { ok: true, stopped: true }) => {
+          probe.released = true;
+          resolve(value);
+        };
+      });
+    };
+    context.stopGeneration = (details = {}) => {
+      probe.stopCalls.push(details);
+      if (releaseGenerate) releaseGenerate({ ok: true, stopped: true });
+      if (originalStopGeneration) {
+        try {
+          return originalStopGeneration(details);
+        } catch {
+          return true;
+        }
+      }
+      return true;
+    };
+    globalThis.__recursionForceProof.hostProbe = probe;
+    globalThis.__recursionForceProof.restoreHostProbe = () => {
+      context.generate = originalGenerate;
+      if (originalStopGeneration) context.stopGeneration = originalStopGeneration;
+      else delete context.stopGeneration;
+    };
+  });
+  await page.waitForFunction(() => Boolean(globalThis.__recursionForceProof?.hostProbe), null, { timeout: timeoutMs });
+}
+
+async function restoreHostGenerationProbe(page) {
+  await page.evaluate(() => {
+    globalThis.__recursionForceProof?.restoreHostProbe?.();
+  }).catch(() => {});
 }
 
 async function main() {
@@ -145,13 +213,14 @@ async function main() {
   await session.init();
   await session.login();
   const browser = await chromium.launch({ headless: env.RECURSION_SILLYTAVERN_HEADLESS !== '0' });
+  let page = null;
   try {
     const context = await browser.newContext({ viewport: { width: 1360, height: 820 } });
     await context.addCookies(session.playwrightCookies());
     await context.addInitScript(() => {
       globalThis.__recursionLiveHarness = true;
     });
-    const page = await context.newPage();
+    page = await context.newPage();
     await page.goto(env.SILLYTAVERN_BASE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await waitForRoot(page, timeoutMs);
     await forceStandardAuto(page, timeoutMs);
@@ -177,46 +246,77 @@ async function main() {
     if (readyBefore.forceButtonHidden || !readyBefore.stopButtonHidden || !readyBefore.packetId) {
       fail('idle-command-slot-mismatch', 'Regenerate was not visible in the idle bar command slot.', { readyBefore });
     }
+    if (!readyBefore.forceButtonHasRestartIcon || readyBefore.forceButtonText) {
+      fail('idle-regenerate-icon-mismatch', 'Idle Regenerate command was not an icon-only restart button.', { readyBefore });
+    }
     const readyScreenshot = await screenshotPanel(page, artifactDir, '01-ready-before-force', timeoutMs);
 
+    await installHostGenerationProbe(page, timeoutMs);
     await page.locator('[data-recursion-force-regenerate]').first().click({ timeout: timeoutMs });
     await page.waitForFunction(() => {
       const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
       const panel = document.querySelector('[data-recursion-hand-dropdown]');
-      return view.forceRegenerate?.pending === true
+      const stopButton = document.querySelector('[data-recursion-stop-generation]');
+      const forceButton = document.querySelector('[data-recursion-force-regenerate]');
+      return (view.forceRegenerate?.pending === true || view.activeRunId || view.hostGenerationActive === true)
         && view.lastBrief?.reason === 'user-force-regenerate'
         && panel?.dataset?.recursionLastBriefState === 'clearing'
-        && /Preparing fresh prompt packet\./.test(String(panel?.textContent || ''));
+        && /Preparing fresh prompt packet\./.test(String(panel?.textContent || ''))
+        && stopButton?.hidden === false
+        && forceButton?.hidden === true;
     }, null, { timeout: timeoutMs });
     const clearing = await page.evaluate(readDomStateScript());
-    if (!clearing.forceRegenerate?.pending || clearing.runtimeLastBrief?.reason !== 'user-force-regenerate') {
-      fail('force-not-pending', 'Regenerate click did not queue a force token and clear Last Brief.', { clearing });
+    if (clearing.runtimeLastBrief?.reason !== 'user-force-regenerate') {
+      fail('force-not-running', 'Regenerate click did not start a forced turn and clear Last Brief.', { clearing });
+    }
+    if (!clearing.forceButtonHidden || clearing.stopButtonHidden || clearing.stopButtonDisabled) {
+      fail('force-stop-slot-mismatch', 'Forced regeneration did not replace Regenerate with Stop.', { clearing });
+    }
+    if (!clearing.currentStepText && !clearing.activeRunId && clearing.forceRegenerate?.pending !== true) {
+      fail('force-progress-missing', 'Forced regeneration did not expose progress/status feedback.', { clearing });
     }
     const clearingScreenshot = await screenshotPanel(page, artifactDir, '02-cleared-after-force', timeoutMs);
 
-    const second = await page.evaluate(() => globalThis.__recursionLiveHarnessRuntime.prepareForGeneration({
-      userMessage: null,
-      hostGeneration: false
-    }));
-    if (!second?.ok || second?.reused === true || second?.reason === 'same-turn-swipe-retry') {
-      fail('force-prepare-reused', 'Forced prepare reused the previous packet.', { second });
-    }
     await page.waitForFunction((oldPacketId) => {
       const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-      return view.forceRegenerate?.pending === false
+      const probe = globalThis.__recursionForceProof?.hostProbe;
+      return Array.isArray(probe?.generateCalls)
+        && probe.generateCalls.some((call) => call.type === 'regenerate')
+        && view.forceRegenerate?.pending === false
         && view.lastBrief?.status === 'ready'
         && view.lastPacket?.packetId
-        && view.lastPacket.packetId !== oldPacketId;
+        && view.lastPacket.packetId !== oldPacketId
+        && view.hostGenerationActive === true;
     }, readyBefore.packetId, { timeout: timeoutMs });
     const readyAfter = await page.evaluate(readDomStateScript());
     if (readyAfter.packetId === readyBefore.packetId || readyAfter.runtimeLastBrief?.reason !== 'force-regenerate-installed') {
       fail('force-ready-mismatch', 'Forced run did not restore Last Brief with a fresh packet.', { readyBefore, readyAfter });
+    }
+    if (!readyAfter.hostProbe?.generateCalls?.some((call) => call.type === 'regenerate')) {
+      fail('host-regenerate-missing', 'Forced run did not call SillyTavern native regenerate.', { readyAfter });
+    }
+    if (readyAfter.stopButtonHidden || !readyAfter.forceButtonHidden || readyAfter.hostGenerationActive !== true) {
+      fail('host-regenerate-stop-mismatch', 'Stop was not visible while forced host regeneration was active.', { readyAfter });
     }
     const packetText = JSON.stringify(readyAfter.packetDiagnostics || {});
     if (!packetText.includes('force-regenerate:user-force-regenerate') || !packetText.includes('force-regenerate:cache-bypassed')) {
       fail('force-diagnostics-missing', 'Forced packet did not record force-regenerate diagnostics.', { packetDiagnostics: readyAfter.packetDiagnostics });
     }
     const readyAfterScreenshot = await screenshotPanel(page, artifactDir, '03-ready-after-force', timeoutMs);
+
+    await page.locator('[data-recursion-stop-generation]').first().click({ timeout: timeoutMs });
+    await page.waitForFunction(() => {
+      const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+      const probe = globalThis.__recursionForceProof?.hostProbe;
+      return Array.isArray(probe?.stopCalls)
+        && probe.stopCalls.length > 0
+        && view.hostGenerationActive === false
+        && !view.activeRunId;
+    }, null, { timeout: timeoutMs });
+    const stoppedAfter = await page.evaluate(readDomStateScript());
+    if (!stoppedAfter.hostProbe?.stopCalls?.length || stoppedAfter.hostGenerationActive) {
+      fail('force-stop-failed', 'Recursion Stop did not call SillyTavern stop during forced regeneration.', { stoppedAfter });
+    }
 
     console.log(JSON.stringify({
       status: 'pass',
@@ -225,20 +325,24 @@ async function main() {
       runId,
       first: { ok: first.ok === true, packetId: readyBefore.packetId },
       second: {
-        ok: second.ok === true,
-        reused: second.reused === true,
-        reason: second.reason || '',
         packetId: readyAfter.packetId
       },
       clearing: {
         state: clearing.panelState,
         reason: clearing.runtimeLastBrief?.reason || '',
-        button: clearing.forceButtonText
+        buttonText: clearing.forceButtonText,
+        stopVisible: clearing.stopButtonHidden === false,
+        currentStepText: clearing.currentStepText
       },
       readyAfter: {
         state: readyAfter.panelState,
         reason: readyAfter.runtimeLastBrief?.reason || '',
-        cards: readyAfter.cardRows
+        cards: readyAfter.cardRows,
+        hostGenerateCalls: readyAfter.hostProbe?.generateCalls?.length || 0
+      },
+      stoppedAfter: {
+        hostStopCalls: stoppedAfter.hostProbe?.stopCalls?.length || 0,
+        hostGenerationActive: stoppedAfter.hostGenerationActive
       },
       screenshots: {
         readyBefore: readyScreenshot,
@@ -247,6 +351,7 @@ async function main() {
       }
     }, null, 2));
   } finally {
+    if (page) await restoreHostGenerationProbe(page).catch(() => {});
     await browser.close().catch(() => {});
   }
 }

@@ -351,6 +351,39 @@ function stopFailedResult(error) {
   };
 }
 
+function nativeGenerationType(value) {
+  const type = stringValue(value || 'regenerate').trim().toLowerCase();
+  return ['normal', 'regenerate', 'continue', 'swipe'].includes(type) ? type : 'regenerate';
+}
+
+function startUnavailableResult() {
+  return {
+    ok: false,
+    started: false,
+    completed: false,
+    error: {
+      code: 'RECURSION_HOST_GENERATION_UNAVAILABLE',
+      message: 'SillyTavern native generation API is unavailable.'
+    }
+  };
+}
+
+function startFailedResult(error) {
+  const code = stringValue(error?.code || error?.name || 'RECURSION_HOST_GENERATION_FAILED').trim()
+    || 'RECURSION_HOST_GENERATION_FAILED';
+  const message = stringValue(error?.message || error || 'SillyTavern native generation failed.').replace(/\s+/g, ' ').trim()
+    || 'SillyTavern native generation failed.';
+  return {
+    ok: false,
+    started: false,
+    completed: false,
+    error: {
+      code: code.slice(0, 120),
+      message: message.slice(0, 300)
+    }
+  };
+}
+
 function findStopButton(context) {
   const documentRef = context?.document || globalThis.document;
   if (typeof documentRef?.querySelector !== 'function') return null;
@@ -672,6 +705,26 @@ export function createSillyTavernHost({
   };
 
   const generation = {
+    async start(details = {}) {
+      const context = currentContext(contextFactory);
+      const type = nativeGenerationType(details?.type);
+      const options = asObject(details?.options);
+      try {
+        if (typeof context.generate === 'function') {
+          await context.generate(type, options);
+          return {
+            ok: true,
+            started: true,
+            completed: true,
+            type,
+            source: 'context.generate'
+          };
+        }
+        return startUnavailableResult();
+      } catch (error) {
+        return startFailedResult(error);
+      }
+    },
     async stop(details = {}) {
       const context = currentContext(contextFactory);
       try {
@@ -760,6 +813,10 @@ export function createSillyTavernHost({
     stop: {
       source: 'sillytavern-host-adapter',
       event: 'generation_stopped'
+    },
+    start: {
+      source: 'sillytavern-host-adapter',
+      type: 'regenerate'
     }
   };
 

@@ -205,7 +205,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   providerTest: 'Send a small structured test call through this lane to verify routing, credentials, and JSON output before using it in chat.',
   providerClearKey: 'Remove the in-memory session key for this lane. Saved endpoint, model, and profile settings stay unchanged.'
 });
-const FORCE_REGENERATE_TOOLTIP = 'Run the next Recursion packet fresh, ignoring cached cards, Rapid warm, and swipe reuse.';
+const FORCE_REGENERATE_TOOLTIP = 'Regenerate this turn fresh, ignoring cached cards, Rapid warm, and swipe reuse.';
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -356,6 +356,12 @@ function modeIconSvg(kind) {
   if (kind === 'stop') {
     return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true', 'data-recursion-stop-icon': '' } }, [
       el('rect', { attrs: { x: '4.25', y: '4.25', width: '7.5', height: '7.5', rx: '1.2', fill: 'currentColor' } })
+    ]);
+  }
+  if (kind === 'restart') {
+    return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true', 'data-recursion-force-regenerate-icon': '' } }, [
+      el('path', { attrs: { d: 'M12.6 5.4V2.8h-2.6', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.35', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } }),
+      el('path', { attrs: { d: 'M12.2 3.2A5.2 5.2 0 1 0 13 9.1', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.35', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
     ]);
   }
   return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
@@ -768,15 +774,15 @@ export function createRecursionViewModel(view = {}) {
   const composerLane = source.lastPacket?.diagnostics?.composerLane || activity.composerLane || activity.providerLane || 'utility';
   const progressRun = createProgressRunModel(source);
   const heroPixelBlocks = createHeroPixelBlocks(progressRun);
+  const forceRegenerate = asObject(source.forceRegenerate);
+  const forceRegeneratePending = forceRegenerate.pending === true;
   const generationStopVisible = enabled && (
     Boolean(cleanText(source.activeRunId))
     || source.hostGenerationActive === true
     || Number(progressRun.activeCount || 0) > 0
+    || forceRegeneratePending
   );
-  const forceRegenerate = asObject(source.forceRegenerate);
-  const forceRegeneratePending = forceRegenerate.pending === true;
   const forceRegenerateVisible = enabled && !generationStopVisible;
-  const forceRegenerateLabel = forceRegeneratePending ? 'Regenerating' : 'Regenerate';
   const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
   const progressChildVisibleLimit = integerInRange(settings.ui?.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20);
   const progressListVisibleLimit = integerInRange(settings.ui?.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80);
@@ -808,7 +814,6 @@ export function createRecursionViewModel(view = {}) {
     forceRegenerateVisible,
     forceRegeneratePending,
     forceRegenerateDisabled: !forceRegenerateVisible || forceRegeneratePending,
-    forceRegenerateLabel,
     currentStepText: progressRun.currentStepText,
     standbyStatusText: standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards, source.rapidWarm),
     heroPixelBlocks,
@@ -2883,10 +2888,12 @@ function buildRoot() {
     ]),
     el('button', {
       className: 'recursion-force-regenerate',
-      attrs: { type: 'button', 'aria-label': 'Regenerate Recursion prompt packet', title: FORCE_REGENERATE_TOOLTIP },
+      attrs: { type: 'button', 'aria-label': 'Regenerate this turn', title: FORCE_REGENERATE_TOOLTIP },
       dataset: { recursionForceRegenerate: '' }
     }, [
-      el('span', { className: 'recursion-force-regenerate-label', dataset: { recursionForceRegenerateLabel: '' }, text: 'Regenerate' })
+      el('span', { className: 'recursion-force-regenerate-icon', attrs: { 'aria-hidden': 'true' } }, [
+        modeIconSvg('restart')
+      ])
     ]),
     el('span', { className: 'recursion-chip recursion-legacy-hand-count', dataset: { recursionHandCount: '' } }),
     el('span', { className: 'recursion-chip recursion-legacy-composer', dataset: { recursionComposer: '' } }),
@@ -3639,7 +3646,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   forceRegenerateButton?.addEventListener('click', (event) => {
     consumeClickEvent(event);
     setProgressPopoverOpen(false);
-    const action = runtime?.forceRegenerateNext?.({ source: 'bar' });
+    const regenerate = typeof runtime?.forceRegenerateNow === 'function'
+      ? runtime.forceRegenerateNow.bind(runtime)
+      : runtime?.forceRegenerateNext?.bind(runtime);
+    const action = regenerate?.({ source: 'bar' });
     update();
     runAction(action, () => update());
   });
@@ -4069,15 +4079,14 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setTooltip(stopGenerationButton, model.tooltipsEnabled, 'Stop generation');
     }
     if (forceRegenerateButton) {
-      const supported = typeof runtime?.forceRegenerateNext === 'function';
+      const supported = typeof runtime?.forceRegenerateNow === 'function' || typeof runtime?.forceRegenerateNext === 'function';
       const visible = supported && model.forceRegenerateVisible;
       forceRegenerateButton.hidden = !visible;
       forceRegenerateButton.disabled = !visible || model.forceRegenerateDisabled;
       forceRegenerateButton.setAttribute('aria-hidden', visible ? 'false' : 'true');
       forceRegenerateButton.setAttribute('tabindex', visible ? '0' : '-1');
-      forceRegenerateButton.setAttribute('aria-label', model.forceRegeneratePending ? 'Fresh prompt packet queued' : 'Regenerate Recursion prompt packet');
-      setText(root, '[data-recursion-force-regenerate-label]', model.forceRegenerateLabel);
-      setTooltip(forceRegenerateButton, model.tooltipsEnabled, model.forceRegeneratePending ? 'Fresh prompt packet queued.' : FORCE_REGENERATE_TOOLTIP);
+      forceRegenerateButton.setAttribute('aria-label', model.forceRegeneratePending ? 'Regenerating this turn' : 'Regenerate this turn');
+      setTooltip(forceRegenerateButton, model.tooltipsEnabled, model.forceRegeneratePending ? 'Regenerating this turn.' : FORCE_REGENERATE_TOOLTIP);
     }
     renderPipelineMenuSelection(model.pipelineMode);
     renderModeMenuSelection(model.mode);

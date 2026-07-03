@@ -152,7 +152,6 @@ function resolveAssistantLandedEvents(context) {
   const eventTypes = hostEventTypes(context);
   return [...new Set([
     eventTypes.GENERATION_ENDED,
-    eventTypes.GENERATION_AFTER_COMMANDS,
     eventTypes.MESSAGE_RECEIVED,
     'generation_ended'
   ].filter(Boolean))];

@@ -59,7 +59,7 @@ The first control is a dedicated icon-only power toggle. It uses the same power 
 
 The Stop generation button is a separate active-only control, not a second power state. It appears while Recursion is preparing a prompt for a SillyTavern generation or while that host generation is still active. The button uses a square stop icon with accessible label and hover tooltip copy `Stop generation`. Clicking it must call the unified stop path: request SillyTavern generation stop through the host adapter, abort active Recursion provider work, prevent stale prompt installation, clear Recursion-owned prompt keys, mark the canceled attempt neutral/skipped, and close any active progress popover.
 
-When no active run or host generation exists, the same command slot shows `Regenerate`. This queues a one-shot fresh Recursion packet for the next generation: cached cards, Rapid warm, latest-assistant swipe packet reuse, and same-turn packet reinstall are bypassed. If a force token is pending, the button shows `Regenerating`, is disabled, and keeps the tooltip `Fresh prompt packet queued.` Stop always has priority over Regenerate during active work. Regenerate is not Reset Scene Cache; it soft-invalidates current cache for the forced run but does not delete scene cache records or SillyTavern messages.
+When no active run or host generation exists, the same command slot shows an icon-only restart button with accessible label `Regenerate this turn`. Clicking it immediately starts a one-shot fresh regeneration for the current turn: cached cards, Rapid warm, latest-assistant swipe packet reuse, and same-turn packet reinstall are bypassed, normal generation progress appears, and the command slot swaps to Stop. A pending force token also counts as active command-slot state so Stop appears during the short async gap before prompt preparation fully starts. Stop always has priority over Regenerate during Recursion preparation and SillyTavern host generation. Regenerate is not Reset Scene Cache; it soft-invalidates current cache for the forced run but does not delete scene cache records or SillyTavern messages.
 
 The pipeline control is a single icon-only button immediately to the left of the Mode button. It is not duplicated in Settings. It opens a compact dropdown with two choices:
 
@@ -204,7 +204,7 @@ The bar should visually align with nearby SillyTavern chrome. Its height, border
 Color grammar:
 
 - The power, pipeline, and mode controls use muted SillyTavern foreground text, not bright brand color.
-- The active Stop generation control may use a muted error tint, but only as a compact 24px icon button. The idle Regenerate control uses neutral compact chrome in the same slot and should not look like a warning or destructive reset.
+- The active Stop generation control may use a muted error tint, but only as a compact 24px icon button. The idle Regenerate control is an icon-only restart button using neutral compact chrome in the same slot and should not look like a warning or destructive reset.
 - Reasoning level controls use muted SillyTavern foreground grey-white, so they read as chrome rather than runtime state.
 - The Hero Pixel Array owns compact state color.
 - The bar itself should remain mostly neutral; amber/red should appear only in the array or disclosed menus for attention or blocking conditions.
@@ -1259,7 +1259,7 @@ Provider fallback states should appear in the Hero Pixel Array Progress Menu and
 
 On narrow viewports:
 
-- Keep the power toggle, pipeline icon, mode icon, card scope icon, Hero Pixel Array, active Stop generation button when visible, idle Regenerate button when space permits, last-brief arrow, and ellipsis visible when possible.
+- Keep the power toggle, pipeline icon, mode icon, card scope icon, Hero Pixel Array, active Stop generation button when visible, idle restart Regenerate icon when space permits, last-brief arrow, and ellipsis visible when possible.
 - Keep the bar on one row. The inline current-step text must not force the right tool cluster onto a second row.
 - Use a mobile status drawer below the bar for the same current-step or transient standby text that desktop renders beside the Hero Pixel Array.
 - Hide the mobile status drawer when Progress, Last Brief, Cards, Settings, Pipeline, or Mode is open; those panels own the temporary vertical space.

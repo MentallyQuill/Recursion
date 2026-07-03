@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a one-shot Force Regenerate control that makes the next Recursion generation bypass cached cards, Rapid warm, and swipe/same-turn packet reuse while preserving Reset Scene Cache as a destructive diagnostic action.
+**Goal:** Add a one-shot Force Regenerate control that immediately regenerates the current turn fresh, bypassing cached cards, Rapid warm, and swipe/same-turn packet reuse while preserving Reset Scene Cache as a destructive diagnostic action.
 
-**Architecture:** Add a runtime-owned force token and consume it inside `prepareForGeneration()` before reuse decisions. A forced run soft-invalidates cache, treats cached cards as non-eligible evidence only, forces fresh provider work, exposes pending state through `runtime.view()`, and adds an idle Recursion Bar command in the same slot where Stop appears during active work.
+**Architecture:** Keep a runtime-owned force token, but make the visible bar action immediate. `runtime.forceRegenerateNow()` records the token, starts `prepareForGeneration({ hostGeneration: true })`, keeps the command slot in Stop state through prompt preparation and SillyTavern regeneration, and calls the host native regenerate seam after the fresh packet installs. A forced run soft-invalidates cache, treats cached cards as non-eligible evidence only, forces fresh provider work, exposes pending/host-generation state through `runtime.view()`, and keeps Reset Scene Cache separate.
 
 **Tech Stack:** JavaScript ES modules, Recursion runtime/settings/storage, SillyTavern extension UI, deterministic Node test scripts, guarded Playwright live proof.
 
@@ -12,9 +12,13 @@
 
 - `src/runtime.mjs`
 - `src/ui.mjs`
+- `src/hosts/sillytavern/host.mjs`
+- `src/extension/index.js`
 - `src/styles.css` if the existing bar command-button styles cannot cover the new control
 - `tools/scripts/test-runtime.mjs`
 - `tools/scripts/test-ui.mjs`
+- `tools/scripts/test-host.mjs`
+- `tools/scripts/test-extension-smoke.mjs`
 - `tools/scripts/test-storage.mjs` if cache invalidation details need expanded assertions
 - `tools/scripts/prove-live-force-regenerate.mjs` or an existing guarded live proof script
 - `docs/design/UI_SPEC.md`
@@ -24,13 +28,27 @@
 
 ## Contract
 
-Runtime API:
+Runtime APIs:
 
 ```js
+runtime.forceRegenerateNow({ source = 'bar' } = {})
 runtime.forceRegenerateNext({ source = 'bar' } = {})
 ```
 
-Success return:
+Immediate success return:
+
+```js
+{
+  ok: true,
+  packet,
+  hand,
+  plan,
+  install,
+  hostGeneration
+}
+```
+
+Token primitive success return:
 
 ```js
 {
@@ -80,11 +98,16 @@ Forced `prepareForGeneration()` behavior:
 - Bypass Rapid foreground warm for this run only.
 - Run fresh provider Arbiter/card/guidance calls against the current snapshot.
 - Install a fresh packet and restore Last Brief with ready cards.
+- Keep `hostGenerationActive` true until SillyTavern native generation ends or the user stops it.
+- Prevent `GENERATION_AFTER_COMMANDS` from clearing Stop state; only true assistant-landed events end host-generation state.
 
 ## Task 1: Runtime Red Tests
 
 - [ ] Add focused runtime tests before implementation.
 - [ ] Assert `forceRegenerateNext()` exposes a pending `runtime.view().forceRegenerate`.
+- [ ] Assert `forceRegenerateNow()` starts prompt preparation immediately.
+- [ ] Assert `forceRegenerateNow()` calls `host.generation.start({ type: 'regenerate' })` after prompt install.
+- [ ] Assert Stop during immediate forced preparation aborts provider work, prevents prompt install, and does not call host generation start.
 - [ ] Assert the next `prepareForGeneration()` consumes the pending force token.
 - [ ] Assert same-turn packet reuse is bypassed when force is pending.
 - [ ] Assert latest-assistant swipe packet reinstall is bypassed when force is pending.
@@ -108,6 +131,8 @@ Implementation notes:
 - [ ] Add helper to consume the token once and stamp `consumeByRunId`.
 - [ ] Add helper to clear force state on disable/source reset/chat reset.
 - [ ] Export `forceRegenerateNext({ source } = {})` from the runtime object.
+- [ ] Export `forceRegenerateNow({ source } = {})` from the runtime object as the visible product action.
+- [ ] Add a host generation-start request helper that calls `host.generation.start({ type: 'regenerate' })`.
 - [ ] Return the disabled/no-op shape when Recursion is disabled.
 - [ ] Clear Last Brief with reason `user-force-regenerate` when a token is queued.
 - [ ] Clear pending latest-assistant swipe retry when a token is queued.
@@ -133,10 +158,10 @@ Implementation notes:
 ## Task 4: UI Red Tests
 
 - [ ] Add UI tests for a Recursion Bar Regenerate control in the Stop command slot.
-- [ ] Assert the bar renders Regenerate when Recursion is enabled, idle, and runtime supports `forceRegenerateNext`.
-- [ ] Assert the bar renders Stop instead of Regenerate during active prompt preparation or host generation.
-- [ ] Assert clicking Regenerate calls `runtime.forceRegenerateNext({ source: 'bar' })`.
-- [ ] Assert the button is disabled or pending when `runtime.view().forceRegenerate.pending` is true.
+- [ ] Assert the bar renders an icon-only restart Regenerate control when Recursion is enabled, idle, and runtime supports `forceRegenerateNow`.
+- [ ] Assert the bar renders Stop instead of Regenerate during active prompt preparation, host generation, or pending force state.
+- [ ] Assert clicking Regenerate calls `runtime.forceRegenerateNow({ source: 'bar' })`.
+- [ ] Assert pending force state swaps the slot to Stop rather than leaving a disabled restart icon visible.
 - [ ] Assert the empty Last Brief text reads `Preparing fresh prompt packet.` for `user-force-regenerate`.
 - [ ] Assert the control does not call Reset Scene Cache.
 - [ ] Run `node tools\scripts\test-ui.mjs` and confirm these assertions fail for expected missing UI wiring.
@@ -146,10 +171,10 @@ Implementation notes:
 - [ ] Add a tooltip entry for Force Regenerate in `SETTINGS_TOOLTIPS` or the relevant UI tooltip map.
 - [ ] Add a compact Regenerate button to the Recursion Bar command slot currently occupied by Stop during active work.
 - [ ] Preserve Stop priority: active prompt preparation or host generation must show Stop and hide Regenerate.
-- [ ] Use label text `Regenerate` or a refresh-style icon+tooltip if the existing bar command slot uses icon-first conventions.
-- [ ] Wire the click handler to `runtime.forceRegenerateNext({ source: 'bar' })`.
+- [ ] Use an icon-only restart control with accessible label `Regenerate this turn`.
+- [ ] Wire the click handler to `runtime.forceRegenerateNow({ source: 'bar' })`.
 - [ ] Refresh the UI after the runtime call resolves.
-- [ ] Render pending state as `Regenerating` or a disabled button with equivalent accessible text.
+- [ ] Render pending force state as Stop-visible active state.
 - [ ] Show `Preparing fresh prompt packet.` while Last Brief is cleared for `user-force-regenerate`.
 - [ ] Keep Reset Scene Cache in Advanced settings unchanged.
 - [ ] Re-run `node tools\scripts\test-ui.mjs` until the new UI tests pass.
@@ -178,7 +203,9 @@ Implementation notes:
 - [ ] Capture current packet id and card count.
 - [ ] Click Regenerate in the Recursion Bar command slot.
 - [ ] Assert the Last Brief visually clears to the fresh preparing state.
-- [ ] Trigger generation through the visible send/swipe path or a guarded runtime hook.
+- [ ] Assert normal progress/status feedback appears and Stop replaces Regenerate.
+- [ ] Assert `host.generation.start({ type: 'regenerate' })` is invoked by the forced path.
+- [ ] Assert Recursion Bar Stop and SillyTavern Stop both reach the unified stop path during forced regeneration.
 - [ ] Assert provider calls occurred.
 - [ ] Assert no `same-turn-swipe-retry` reinstall diagnostic is emitted for the forced run.
 - [ ] Assert the new packet id differs from the old packet id.
@@ -197,6 +224,8 @@ node tools\scripts\prove-live-force-regenerate.mjs --live
 
 - [ ] Run `node tools\scripts\test-runtime.mjs`.
 - [ ] Run `node tools\scripts\test-ui.mjs`.
+- [ ] Run `node tools\scripts\test-host.mjs`.
+- [ ] Run `node tools\scripts\test-extension-smoke.mjs`.
 - [ ] Run `node tools\scripts\test-storage.mjs` if touched.
 - [ ] Run `node tools\scripts\run-alpha-gate.mjs`.
 - [ ] Run the guarded live proof when SillyTavern is available.
@@ -214,13 +243,17 @@ node tools\scripts\prove-live-force-regenerate.mjs --live
 
 ## Acceptance Checklist
 
-- [ ] Force Regenerate queues a one-shot fresh run.
+- [ ] Force Regenerate starts a one-shot fresh regeneration immediately.
 - [ ] Force Regenerate bypasses latest-assistant swipe packet reinstall.
 - [ ] Force Regenerate bypasses same-turn packet reuse.
 - [ ] Force Regenerate bypasses Rapid warm only for the forced run.
 - [ ] Force Regenerate soft-invalidates cache instead of deleting it.
 - [ ] Cached cards cannot enter the forced prompt hand.
 - [ ] Last Brief clears with a visible fresh-preparing state and restores with a new ready packet.
+- [ ] Normal progress/status feedback appears during forced regeneration.
+- [ ] Regenerate swaps to Stop while forced preparation or host generation is active.
+- [ ] Recursion Bar Stop cancels forced regeneration.
+- [ ] SillyTavern Stop remains functional for forced host generation.
 - [ ] UI makes Regenerate distinct from Reset Scene Cache.
 - [ ] Deterministic runtime and UI tests pass.
 - [ ] Alpha gate passes.

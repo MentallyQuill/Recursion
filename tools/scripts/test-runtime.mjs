@@ -981,6 +981,107 @@ for (const pipelineMode of ['standard', 'rapid']) {
   assertEqual(installed[0].packetId, installed[1].packetId, `${pipelineMode} same-turn retry keeps packet identity`);
 }
 
+for (const pipelineMode of ['standard', 'rapid']) {
+  let providerCalls = 0;
+  const userMessage = 'Retry the latest assistant response as a swipe.';
+  const chatId = `latest-assistant-swipe-${pipelineMode}-chat`;
+  const initialMessages = [
+    { mesid: 10, role: 'user', text: userMessage, textHash: hashJson(userMessage), visible: true }
+  ];
+  const snapshotFromMessages = (messages) => ({
+    chatId,
+    chatKey: chatId,
+    sceneKey: `latest-assistant-swipe-${pipelineMode}-scene`,
+    sceneFingerprint: `latest-assistant-swipe-${pipelineMode}-scene-fp`,
+    latestMesId: messages.at(-1)?.mesid || 0,
+    messages
+  });
+  let activeSnapshot = snapshotFromMessages(initialMessages);
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { pipelineMode, mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => activeSnapshot,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        providerCalls += 1;
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'latest assistant swipe setup', signals: [] },
+              diagnostics: ['latest-assistant-swipe-setup']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneFrameCard',
+              family: 'Scene Frame',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: 'Latest assistant swipe retry card guidance.',
+                evidenceRefs: ['message:10'],
+                tokenEstimate: 8
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Latest assistant swipe retry guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['latest-assistant-swipe-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected latest assistant swipe role ${roleId}`);
+      }
+    }
+  });
+  const first = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
+  assertEqual(first.ok, true, `${pipelineMode} latest-assistant swipe setup installs`);
+  assertEqual(installed.length, 1, `${pipelineMode} latest-assistant swipe setup installs one packet`);
+  const callsAfterFirst = providerCalls;
+  activeSnapshot = snapshotFromMessages([
+    ...initialMessages,
+    {
+      mesid: 11,
+      role: 'assistant',
+      text: 'First assistant response now being swiped.',
+      textHash: hashJson('First assistant response now being swiped.'),
+      visible: true,
+      swipeId: 1,
+      swipeCount: 2,
+      activeSwipeTextHash: hashJson('Alternate assistant response.')
+    }
+  ]);
+  assertEqual(typeof runtime.handleLatestAssistantSwipeRetry, 'function', `${pipelineMode} exposes latest-assistant swipe retry marker`);
+  const marked = await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped', messageId: 11 });
+  assertEqual(marked.ok, true, `${pipelineMode} latest-assistant swipe retry marker succeeds`);
+  const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
+  assertEqual(second.ok, true, `${pipelineMode} latest-assistant swipe retry succeeds`);
+  assertEqual(second.reused, true, `${pipelineMode} latest-assistant swipe retry reuses previous packet`);
+  assertEqual(second.reason, 'same-turn-swipe-retry', `${pipelineMode} latest-assistant swipe retry reports reuse reason`);
+  assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} latest-assistant swipe retry does not call providers again`);
+  assertEqual(installed.length, 2, `${pipelineMode} latest-assistant swipe retry reinstalls previous packet`);
+  assertEqual(installed[0].packetId, installed[1].packetId, `${pipelineMode} latest-assistant swipe retry keeps packet identity`);
+  assertEqual(runtime.view().lastSnapshot.latestMesId, 10, `${pipelineMode} latest-assistant swipe retry keeps original user-turn snapshot`);
+}
+
 {
   const { runtime, installed, cleared } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },

@@ -244,7 +244,8 @@ function registerHostEvents(nextRuntime) {
       const currentContext = getSillyTavernContextSafe();
       if (isLatestAssistantSwipe(currentContext, details)) {
         refreshAssistantSignature();
-        return { ok: true, skipped: true, reason: 'latest-assistant-swipe-retry' };
+        runtime ||= nextRuntime;
+        return invokeRuntimeCleanup('handleLatestAssistantSwipeRetry', 'Latest assistant swipe retry marker failed.', details);
       }
       refreshAssistantSignature();
       runtime ||= nextRuntime;

@@ -344,6 +344,68 @@ if (lifecycleFailures.length) {
 }
 
 {
+  const fake = createFakeSillyTavernContext('latest-assistant-swipe-retry');
+  const eventSource = createFakeEventSource();
+  const prompts = [];
+  const userText = 'User asks for the retryable reply.';
+  fake.context.eventSource = eventSource;
+  fake.context.chat = [{ mesid: 1, is_user: true, mes: userText }];
+  fake.context.event_types = { MESSAGE_SWIPED: 'message_swiped' };
+  fake.context.generateRaw = async (request = {}) => {
+    prompts.push(String(request.prompt || ''));
+    return {
+      text: JSON.stringify({
+        schema: 'recursion.utilityArbiter.v1',
+        snapshotHash: request.snapshotHash,
+        action: 'compose-brief',
+        cardJobs: [],
+        reasonerDecision: { mode: 'skip', reason: 'latest assistant swipe retry smoke', signals: [] },
+        budgets: { targetBriefTokens: 500, maxCards: 6 },
+        diagnostics: ['latest-assistant-swipe-retry-smoke']
+      })
+    };
+  };
+  globalThis.extension_settings = { recursion: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+
+  await globalThis.recursionOnDelete();
+  assertEqual(
+    await globalThis.recursionGenerationInterceptor(fake.context.chat),
+    fake.context.chat,
+    'latest assistant swipe retry setup keeps original chat'
+  );
+  assert(prompts.length > 0, 'latest assistant swipe retry setup calls provider once');
+  const callsAfterSetup = prompts.length;
+  const writesAfterSetup = fake.promptWrites.length;
+  fake.context.chat = [
+    { mesid: 1, is_user: true, mes: userText },
+    {
+      mesid: 2,
+      is_user: false,
+      mes: 'Latest assistant swipe B.',
+      swipe_id: 1,
+      swipes: ['Latest assistant swipe A.', 'Latest assistant swipe B.']
+    }
+  ];
+  await eventSource.emit('message_swiped', { mesid: 2 });
+  assertEqual(
+    await globalThis.recursionGenerationInterceptor(fake.context.chat),
+    fake.context.chat,
+    'latest assistant swipe retry generation keeps original chat'
+  );
+  assertEqual(prompts.length, callsAfterSetup, 'latest assistant swipe retry does not call providers again');
+  assert(fake.promptWrites.length > writesAfterSetup, 'latest assistant swipe retry reinstalls previous prompt');
+  for (const key of RECURSION_PROMPT_KEYS) {
+    assert(fake.promptState.get(key), `latest assistant swipe retry keeps ${key} installed`);
+  }
+  await globalThis.recursionOnDelete();
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const fake = createFakeSillyTavernContext('generation-stopped-event');
   const eventSource = createFakeEventSource();
   fake.context.eventSource = eventSource;

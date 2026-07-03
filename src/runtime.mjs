@@ -46,6 +46,7 @@ const DEFAULT_NORMAL_REASONING_MAX_CARDS = 6;
 const DEFAULT_ULTRA_REASONING_MAX_CARDS = 10;
 const HIGH_REASONER_CARD_PRIORITY = 88;
 const MAX_SCENE_CACHE_VARIANTS = 4;
+const LATEST_ASSISTANT_SWIPE_RETRY_MAX_AGE_MS = 120000;
 const REASONING_LEVEL_POLICIES = Object.freeze({
   low: {
     level: 'low',
@@ -1700,6 +1701,7 @@ export function createRecursionRuntime({
   let lastPlan = null;
   let lastSnapshot = null;
   let lastSavedSceneCacheRef = null;
+  let pendingLatestAssistantSwipeRetry = null;
   let promptInstallTail = Promise.resolve();
   let storageSaveTail = Promise.resolve();
   const activeRuntimeMutations = new Set();
@@ -1747,12 +1749,100 @@ export function createRecursionRuntime({
     hostGenerationActive = Boolean(value);
   }
 
+  function clearPendingLatestAssistantSwipeRetry() {
+    pendingLatestAssistantSwipeRetry = null;
+  }
+
+  function markLatestAssistantSwipeRetry(details = {}) {
+    const source = asObject(details);
+    const eventName = safeText(source.eventName || source.event || 'message_swiped', 80);
+    const messageId = finiteNumberOrNull(source.messageId ?? source.mesid ?? source.id);
+    pendingLatestAssistantSwipeRetry = {
+      eventName,
+      ...(messageId !== null ? { messageId } : {}),
+      recordedAtMs: Date.now(),
+      recordedAt: nowIso()
+    };
+    return {
+      ok: true,
+      skipped: true,
+      reason: 'latest-assistant-swipe-retry',
+      details: {
+        ...(eventName ? { eventName } : {}),
+        ...(messageId !== null ? { messageId } : {})
+      }
+    };
+  }
+
+  function latestVisibleAssistantEntry(snapshot) {
+    const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.visible === false) continue;
+      if (!String(message?.text ?? '').trim()) continue;
+      if (safeProviderRole(message?.role) !== 'assistant') return null;
+      return { message, index };
+    }
+    return null;
+  }
+
+  function latestVisibleMesId(messages = []) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.visible === false) continue;
+      if (!String(message?.text ?? '').trim()) continue;
+      return numberOr(message?.mesid, index);
+    }
+    return 0;
+  }
+
+  function snapshotWithoutLatestAssistant(snapshot, entry) {
+    if (!entry) return null;
+    const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+    const nextMessages = messages.filter((_, index) => index !== entry.index);
+    return normalizeSnapshot({
+      ...snapshot,
+      latestMesId: latestVisibleMesId(nextMessages),
+      messages: nextMessages,
+      sourceRevisionHash: '',
+      turnFingerprint: ''
+    });
+  }
+
+  function sameSourceBeforeLatestAssistant(currentSnapshot, previousSnapshot, latestAssistantEntry) {
+    const candidate = snapshotWithoutLatestAssistant(currentSnapshot, latestAssistantEntry);
+    if (!candidate || !previousSnapshot) return false;
+    return safeText(candidate.chatId || DEFAULT_CHAT_ID, 160) === safeText(previousSnapshot.chatId || DEFAULT_CHAT_ID, 160)
+      && safeText(candidate.chatKey || DEFAULT_CHAT_ID, 160) === safeText(previousSnapshot.chatKey || DEFAULT_CHAT_ID, 160)
+      && safeText(candidate.sceneKey || DEFAULT_SCENE_KEY, 160) === safeText(previousSnapshot.sceneKey || DEFAULT_SCENE_KEY, 160)
+      && safeText(candidate.sceneFingerprint || '', 180) === safeText(previousSnapshot.sceneFingerprint || '', 180)
+      && numberOr(candidate.latestMesId, 0) === numberOr(previousSnapshot.latestMesId, 0)
+      && hashJson(sourceWindowMessages(candidate)) === hashJson(sourceWindowMessages(previousSnapshot));
+  }
+
+  function reusableSnapshotForLatestAssistantSwipeRetry(snapshot, pendingUserMessage) {
+    if (!pendingLatestAssistantSwipeRetry) return null;
+    const retry = pendingLatestAssistantSwipeRetry;
+    pendingLatestAssistantSwipeRetry = null;
+    if (Date.now() - numberOr(retry.recordedAtMs, 0) > LATEST_ASSISTANT_SWIPE_RETRY_MAX_AGE_MS) return null;
+    if (safeText(pendingUserMessage?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT)) return null;
+    if (!lastSnapshot || !canReuseLastPacketForSnapshot(lastSnapshot)) return null;
+    const latestAssistant = latestVisibleAssistantEntry(snapshot);
+    if (!latestAssistant) return null;
+    const expectedMessageId = finiteNumberOrNull(retry.messageId);
+    const latestMessageId = numberOr(latestAssistant.message?.mesid, latestAssistant.index);
+    if (expectedMessageId !== null && expectedMessageId !== latestMessageId) return null;
+    if (!sameSourceBeforeLatestAssistant(snapshot, lastSnapshot, latestAssistant)) return null;
+    return lastSnapshot;
+  }
+
   function clearVolatileSceneState() {
     lastPacket = null;
     lastHand = { cards: [], omitted: [] };
     lastPlan = null;
     lastSnapshot = null;
     lastSavedSceneCacheRef = null;
+    pendingLatestAssistantSwipeRetry = null;
   }
 
   function supersededResult(runId) {
@@ -1815,6 +1905,7 @@ export function createRecursionRuntime({
     journalReason = 'settings-changed'
   } = {}) {
     const runId = makeId('settings');
+    clearPendingLatestAssistantSwipeRetry();
     activePromptMutationId = runId;
     startRuntimeActivity({
       runId,
@@ -2163,6 +2254,7 @@ export function createRecursionRuntime({
       lastHand = { cards: [], omitted: [] };
       lastPlan = null;
       lastSavedSceneCacheRef = null;
+      pendingLatestAssistantSwipeRetry = null;
       stageRuntimeActivity({
         runId,
         phase: 'promptClearing',
@@ -2236,6 +2328,7 @@ export function createRecursionRuntime({
     clearVolatileState = true
   }) {
     const runId = makeId(idPrefix);
+    clearPendingLatestAssistantSwipeRetry();
     supersedeActiveRun();
     return trackRuntimeMutation(async () => {
       const clearContext = promptClearContext();
@@ -3622,6 +3715,7 @@ export function createRecursionRuntime({
     const settings = settingsStore.get();
     setHostGenerationActive(hostGeneration);
     if (settings.enabled === false) {
+      clearPendingLatestAssistantSwipeRetry();
       await waitForExternalMutations();
       supersedeActiveRun();
       const clearRunId = makeId('run');
@@ -3651,10 +3745,19 @@ export function createRecursionRuntime({
       const baseSnapshot = await readSnapshot();
       const snapshot = snapshotWithPendingUserMessage(baseSnapshot, pendingUserMessage);
       if (!isActiveRun(runId)) return supersededResult(runId);
+      const swipeRetrySnapshot = !refreshReason
+        ? reusableSnapshotForLatestAssistantSwipeRetry(snapshot, pendingUserMessage)
+        : null;
+      if (refreshReason) clearPendingLatestAssistantSwipeRetry();
+      if (swipeRetrySnapshot) {
+        lastSnapshot = swipeRetrySnapshot;
+        return await reinstallLastPacketForSameTurn(runId, swipeRetrySnapshot);
+      }
       if (!refreshReason && canReuseLastPacketForSnapshot(snapshot)) {
         lastSnapshot = snapshot;
         return await reinstallLastPacketForSameTurn(runId, snapshot);
       }
+      clearPendingLatestAssistantSwipeRetry();
       lastSnapshot = snapshot;
       if (refreshReason && typeof storage.invalidateSceneCache === 'function') {
         await runStorageSaveSection(runId, async () => {
@@ -4017,6 +4120,7 @@ export function createRecursionRuntime({
     },
     handleChatChanged,
     handleSourceChanged,
+    handleLatestAssistantSwipeRetry: markLatestAssistantSwipeRetry,
     handleHostGenerationStopped,
     handleHostGenerationEnded,
     stopGeneration,

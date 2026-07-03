@@ -39,9 +39,8 @@ function assertNoProviderMarker(value, marker, message) {
 function responseSchemaForRole(roleId) {
   if (roleId === 'reasonerComposer') return 'recursion.reasonerComposer.v1';
   if (roleId === 'utilityArbiter') return 'recursion.utilityArbiter.v1';
-  if (roleId === 'rapidTurnDelta') return 'recursion.rapidTurnDelta.v1';
-  if (roleId === 'rapidFastStartPack') return 'recursion.rapidFastStartPack.v1';
-  if (roleId === 'briefUtilityComposer') return 'recursion.briefUtilityComposer.v1';
+  if (roleId === 'rapidTurnDelta') return 'recursion.rapidTurnDelta.v2';
+  if (roleId === 'guidanceComposer') return 'recursion.guidanceComposer.v1';
   if (roleId === 'providerTest') return 'recursion.providerTest.v1';
   return 'recursion.card.v1';
 }
@@ -74,11 +73,11 @@ const expectedUtilityRoles = [
   'possessionsItemsCard',
   'openThreadsCard',
   'rapidTurnDelta',
-  'rapidFastStartPack',
-  'briefUtilityComposer',
+  'guidanceComposer',
   'providerTest'
 ];
 assertDeepEqual(UTILITY_ROLE_IDS, expectedUtilityRoles, 'utility role catalog exactly matches Task 6 plan');
+assert(!UTILITY_ROLE_IDS.includes('briefUtilityComposer'), 'old brief utility composer role is removed');
 assertDeepEqual(REASONER_ROLE_IDS, ['reasonerComposer'], 'reasoner role catalog exactly matches Task 6 plan');
 for (const utilityRole of expectedUtilityRoles) {
   assertEqual(roleLane(utilityRole), 'utility', `${utilityRole} uses utility lane`);
@@ -296,10 +295,10 @@ assertEqual(calls[0].responseSchema, 'recursion.utilityArbiter.v1', 'provider re
 assertEqual(calls[0].machineJson, true, 'provider request marks machine JSON calls');
 await router.generate('rapidTurnDelta', { prompt: 'Rapid delta' });
 assertEqual(calls.at(-1).lane, 'utility', 'rapidTurnDelta uses utility lane');
-assertEqual(calls.at(-1).responseSchema, 'recursion.rapidTurnDelta.v1', 'rapidTurnDelta request carries expected response schema');
-await router.generate('rapidFastStartPack', { prompt: 'Rapid fast start' });
-assertEqual(calls.at(-1).lane, 'utility', 'rapidFastStartPack uses utility lane');
-assertEqual(calls.at(-1).responseSchema, 'recursion.rapidFastStartPack.v1', 'rapidFastStartPack request carries expected response schema');
+assertEqual(calls.at(-1).responseSchema, 'recursion.rapidTurnDelta.v2', 'rapidTurnDelta request carries expected response schema');
+await router.generate('guidanceComposer', { prompt: 'Guidance composer' });
+assertEqual(calls.at(-1).lane, 'utility', 'guidanceComposer uses utility lane');
+assertEqual(calls.at(-1).responseSchema, 'recursion.guidanceComposer.v1', 'guidanceComposer request carries expected response schema');
 
 store.update({ reasonerUse: 'always' });
 store.updateProvider('reasoner', { enabled: true });
@@ -656,10 +655,10 @@ const fallbackBatchClient = createProviderClient({
 });
 const fallbackBatchResults = await fallbackBatchClient.batch([
   { roleId: 'utilityArbiter', prompt: 'A' },
-  { roleId: 'briefUtilityComposer', prompt: 'B' }
+  { roleId: 'guidanceComposer', prompt: 'B' }
 ]);
 assertEqual(fallbackBatchResults.length, 2, 'batch fallback returns all results');
-assertDeepEqual(fallbackBatchCalls.map((request) => request.roleId), ['utilityArbiter', 'briefUtilityComposer'], 'batch fallback enriches role ids');
+assertDeepEqual(fallbackBatchCalls.map((request) => request.roleId), ['utilityArbiter', 'guidanceComposer'], 'batch fallback enriches role ids');
 assertDeepEqual(fallbackBatchCalls.map((request) => request.lane), ['utility', 'utility'], 'batch fallback enriches lanes');
 
 const hostBatchCalls = [];

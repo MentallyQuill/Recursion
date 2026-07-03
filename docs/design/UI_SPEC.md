@@ -62,7 +62,7 @@ The Stop generation button is a separate active-only control, not a second power
 The pipeline control is a single icon-only button immediately to the left of the Mode button. It is not duplicated in Settings. It opens a compact dropdown with two choices:
 
 - Three stacked layer icon, `Standard`: runs the full foreground Arbiter, card, compose, and install path on send.
-- Tapered layer spike icon, `Rapid`: warms provider-generated scene guidance in the background and uses a short provider delta on send.
+- Tapered layer spike icon, `Rapid`: warms a provider-generated card packet in the background and uses a short provider delta on send.
 
 The icons share one layer-based visual language. Standard shows three large stacked layers, signaling broad foreground scene coverage and detailed conditioning. Rapid shows one compressed layer shape tapering into a forward spike, signaling warmed provider-generated context moving through a faster foreground turn-delta path. Rapid must not use a lightning bolt, timer, or empty shortcut glyph because the product promise is smarter-faster rather than lower-quality or skipped work.
 
@@ -256,7 +256,7 @@ Swipes and other source mutations start a fresh visible run. The new run must no
         { id: "open-threads-card", label: "Open Threads", providerLane: "utility", state: "warning", meta: "fallback", source: "fallback", sourceRoleId: "openThreadsCard" }
       ]
     },
-    { id: "reasoner-brief", label: "Reasoner brief", providerLane: "reasoner", state: "running" },
+    { id: "reasoner-guidance", label: "Reasoner guidance", providerLane: "reasoner", state: "running" },
     { id: "composing-prompt-packet", label: "Composing prompt packet", providerLane: "utility", state: "pending" }
   ],
   settings: {
@@ -268,7 +268,7 @@ Swipes and other source mutations start a fresh visible run. The new run must no
 }
 ```
 
-Nested child rows are the intended shape for grouped work. `Utility card batch` should show one child row for each generated card, cache-reused card, or local fallback card involved in the batch. `Reasoner brief` may show child rows for `Reasoner synthesis`, validation, and `Utility fallback` when those sub-steps matter. Keep `Composing prompt packet`, prompt install, and storage rows flat unless they later contain real sub-model calls.
+Nested child rows are the intended shape for grouped work. `Utility card batch` should show one child row for each generated card, cache-reused card, or local fallback card involved in the batch. `Reasoner guidance` may show child rows for `Reasoner synthesis`, validation, and `Utility fallback` when those sub-steps matter. Keep `Composing prompt packet`, prompt install, and storage rows flat unless they later contain real sub-model calls.
 
 Nested child rows are persistent once they appear during a run. They should not auto-collapse while the progress menu is open. The user setting `ui.progressChildVisibleLimit` controls how many child rows are visible inside a single parent group before that child group becomes scrollable; default `progressChildVisibleLimit: 5`, allowed range 1-20. Child group scrollbars stay hidden. When more child rows exist below the visible area, show a subtle bottom fade over the child group; when the user scrolls to the final child row, remove the bottom fade.
 
@@ -344,7 +344,7 @@ Generating                         2 model calls running
        [cache] Scene Constraints   cached
        [done]  Motivation           generated
        [warn]  Open Threads         fallback
-[run]  Reasoner brief               running
+[run]  Reasoner guidance            running
 [wait] Composing prompt packet      waiting
 [wait] Installing Recursion prompt  waiting
 [wait] Saving scene cache           queued
@@ -360,7 +360,7 @@ Recommended V1 step labels:
 - `Reusing scene deck`
 - `Generating scene cards`
 - `Utility card batch`
-- `Reasoner brief`
+- `Reasoner guidance`
 - `Validating cards`
 - `Repairing card JSON`
 - `Updating scene deck`
@@ -458,7 +458,7 @@ Reference DOM shape:
         <span class="recursion-provider-mark" aria-label="Reasoner provider">R</span>
         <span class="recursion-step-separator" aria-hidden="true"></span>
         <span class="recursion-step-icon"></span>
-        <span class="recursion-step-label">Reasoner brief</span>
+        <span class="recursion-step-label">Reasoner guidance</span>
         <span class="recursion-step-meta">running</span>
       </div>
       <div class="recursion-step is-pending" data-provider="utility">
@@ -802,9 +802,9 @@ Example:
 Last brief - 9 cards - click row to expand - priority color only
 
 [warning]  Scene Constraints   doorway blocked, lamp broken...      critical | fresh | injected | scene
-[target]   Motivation           Mara wants to keep control...         strong | Mara | turn brief
+[target]   Motivation           Mara wants to keep control...         strong | Mara | evidence
 [people]   Relationship         accusation unresolved...              normal | tension | dialogue
-[spark]    Social Subtext      joke lands like a warning...           normal | veiled pressure | turn brief
+[spark]    Social Subtext      joke lands like a warning...           normal | veiled pressure | evidence
 [cube]     Environment          rain masks movement...                normal | items | local
 [map]      Scene Frame          answer before time skip...             light | beat | compiler
 ```
@@ -1079,7 +1079,7 @@ The full viewer is an observatory, not a primary play surface. It should open as
 
 Recommended sections:
 
-- Now: current Auto Control Plan, last run, active brief, prompt packet summary.
+- Now: current Auto Control Plan, last run, active hand, prompt packet summary.
 - Deck: scene deck, card states, emphasis, detail profile, provider, updated time.
 - Activity: bounded run journal, Hero Pixel Array timeline, errors, refreshes, reasoner trigger reasons, fallback paths.
 - Prompt Packet: final injected packet, omitted reasons, source card ids.
@@ -1126,8 +1126,8 @@ The backend meaning of these controls is defined by [Behavior Settings Policy Sp
 Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Pipeline is selected from its bar dropdown only; Settings may persist the value but must not render a separate Standard/Rapid toggle. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
 
 - Low: Utility-only bias with card pressure capped at Min Cards.
-- Medium: Utility Arbiter and Utility cards, then Reasoner final brief composition; card pressure capped at Normal Cards.
-- High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner final brief composition; card pressure capped at Normal Cards.
+- Medium: Utility Arbiter and Utility cards, then Reasoner guidance composition; card pressure capped at Normal Cards.
+- High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner guidance composition; card pressure capped at Normal Cards.
 - Ultra: Reasoner-heavy Arbiter, card generation, and final composition with card pressure raised/capped at Max Cards.
 
 `reasoningLevel` is persisted as `low | medium | high | ultra`, default `high`. It is the authoritative user-facing provider-bias setting. Runtime may still carry an internal `reasonerUse` route value, but that value is always derived from `reasoningLevel`: Low maps to `off`, Medium/High/Ultra map to `always`. If the Reasoner provider is unavailable while Medium, High, or Ultra is selected, the UI should keep the selected level and show fallback status rather than blocking the user.
@@ -1159,7 +1159,7 @@ Advanced contains low-frequency controls grouped into collapsible sections:
 - UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
 - Diagnostics: journal size, safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
 
-Injection controls apply to the final conditioned prompt packet after Utility or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the composed Recursion brief to land in a different host lane or depth.
+Injection controls apply to the final conditioned prompt packet after Utility or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the Recursion packet to land in a different host lane or depth.
 
 Advanced commands without V1 runtime handlers must render disabled with tooltip copy. They should not appear active until they perform the named action. V1 wires `Reset Scene Cache`, `Export Diagnostics`, and `Clear Run Journal`.
 
@@ -1238,7 +1238,7 @@ Empty states should be short and action-oriented.
 
 Examples:
 
-- No brief yet: `No brief has been composed for this chat.`
+- No packet yet: `No packet has been composed for this chat.`
 - Power off: `Recursion disabled. Prompt cleared.`
 - Provider missing: `Utility provider is not ready.`
 - Reasoner unavailable: `Reasoner unavailable. Utility will compose compact packets.`

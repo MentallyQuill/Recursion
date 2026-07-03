@@ -39,8 +39,8 @@ Current V1 decisions:
 - Ship the full fixed V1 card catalog described in [Card System Spec](design/CARD_SYSTEM_SPEC.md).
 - Build provider settings, provider contracts, and structured call contracts before the card loop depends on them.
 - The first working loop must support both Utility Composer and Reasoner Composer, with Utility Composer as the default and fail-soft path.
-- Pipeline selection is separate from Auto/Manual. Standard is the default full foreground path; Rapid warms provider-generated scene guidance in the background and uses foreground Utility `rapidTurnDelta` or `rapidFastStartPack` roles.
-- Rapid must not create local fallback cards, local scene briefs, or local turn briefs. Missing mandatory guidance, invalid Rapid output, or provider-declared escalation continues through Standard for the same pending user message.
+- Pipeline selection is separate from Auto/Manual. Standard is the default full foreground path; Rapid warms a provider-generated card packet in the background and uses foreground Utility `rapidTurnDelta` when that warm packet is exact-source valid.
+- Rapid must not create local fallback cards, local scene briefs, local turn briefs, or summary fast-start packs. Warm misses, missing mandatory guidance, invalid Rapid output, or provider-declared escalation continue through Standard for the same pending user message.
 - Support all three provider sources for both lanes where the host permits it: current host model, host connection profile, and OpenAI-compatible endpoint.
 - Machine-readable Recursion provider jobs carry the expected response schema, request structured output where the host supports it, and still validate visible JSON before runtime trusts the result.
 - Advanced users can control where the conditioned final prompt packet is injected by setting placement, role, and depth; defaults use the recommended concrete `in_prompt`, `system`, depth `4` plan.
@@ -83,8 +83,8 @@ Recursion does not own:
 4. Standard sends the snapshot, current scene cache metadata, fixed V1 card catalog, provider status, behavior influence policy, and prompt budget context to the Utility Arbiter.
 5. Standard validates the Arbiter plan, enforces schema and budget caps, applies current behavior policy and card-scope policy, and executes requested card jobs from one frozen snapshot.
 6. Standard updates the scene deck with generated, refreshed, stowed, discarded, or stale cards, then passes the selected turn hand to prompt composition.
-7. Rapid uses exact-source warm provider artifacts when available, or asks Utility for a compact fast-start pack when no warm artifact is ready.
-8. Utility Composer builds the prompt packet, Reasoner Composer assists when enabled and justified, or Rapid formats provider-authored Rapid packet sections into the normal prompt-install contract.
+7. Rapid uses exact-source warm provider artifacts when available; when no warm artifact is ready it continues through Standard.
+8. Utility `guidanceComposer` builds the guidance layer, Reasoner Composer assists when enabled and justified, and both Standard and Rapid preserve full selected raw card evidence in the normal prompt-install contract.
 9. Runtime validates the packet and installs it through Recursion-owned SillyTavern prompt keys.
 10. The UI and storage layers receive sanitized diagnostics and latest-hand metadata.
 
@@ -95,7 +95,7 @@ If any optional step fails, Recursion should degrade gracefully. Normal SillyTav
 The Utility Arbiter is the semantic decision point. It decides meaning-heavy questions such as:
 
 - whether the current scene is the same scene, a soft shift, a hard shift, or unknown;
-- whether to skip, reuse cache, refresh cards, or compose a brief;
+- whether to skip, reuse cache, refresh cards, or compose a packet;
 - which card families are already represented, missing, stale, or no longer relevant;
 - which cards belong in the next turn hand;
 - which cards deserve more emphasis or detail;
@@ -126,12 +126,12 @@ Character Motivation cards replace raw internal-thought dumps. They may express 
 
 ## Prompt Packet
 
-The model-facing artifact is a composed prompt packet, not a pile of raw cards.
+The model-facing artifact is a prompt packet made from provider-authored guidance plus selected raw card evidence, not the full scene deck.
 
 The packet has three primary sections:
 
-- Scene Brief: reusable scene context while the scene remains valid.
-- Turn Brief: immediate next-response guidance.
+- Guidance: provider-authored direction for using the selected evidence in the next generation.
+- Card Evidence: full raw selected-card `promptText`, grouped as evidence.
 - Guardrails: compact constraints that prevent contradictions, hidden-thought leakage, spoilers, or user-message rewriting.
 
 Prompt footprint can be compact, normal, or rich. Even rich packets must stay bounded, current-scene oriented, and inspectable.

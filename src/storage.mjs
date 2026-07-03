@@ -348,14 +348,31 @@ function normalizeRapidWarmArtifact(source = {}) {
   const status = RAPID_WARM_STATUSES.has(value.status) ? value.status : '';
   const warmArtifactId = safeMetadataText(value.warmArtifactId || '', 160, '');
   if (!status && !warmArtifactId) return null;
+  const guidanceSource = value.guidance && typeof value.guidance === 'object' && !Array.isArray(value.guidance) ? value.guidance : {};
   return {
     pipelineVersion: Math.max(1, Math.floor(Number(value.pipelineVersion) || 1)),
     status: status || 'stale',
     warmArtifactId,
     baseSourceRevisionHash: safeMetadataText(value.baseSourceRevisionHash || '', 180, ''),
-    conditionedSceneBrief: safeMetadataText(value.conditionedSceneBrief || '', 1600, ''),
-    candidateCardIds: safeMetadataList(value.candidateCardIds, 180, 32),
+    baseSnapshotHash: safeMetadataText(value.baseSnapshotHash || '', 180, ''),
+    selectedCardIds: safeMetadataList(value.selectedCardIds, 180, 32),
     cardIds: safeMetadataList(value.cardIds, 180, 32),
+    guidance: {
+      schema: safeMetadataText(guidanceSource.schema || '', 120, ''),
+      status: safeMetadataText(guidanceSource.status || '', 80, ''),
+      text: safeMetadataText(guidanceSource.text || '', 6000, ''),
+      sourceCardIds: safeMetadataList(guidanceSource.sourceCardIds, 180, 32),
+      guardrailCardIds: safeMetadataList(guidanceSource.guardrailCardIds, 180, 32),
+      omittedCardIds: Array.isArray(guidanceSource.omittedCardIds)
+        ? guidanceSource.omittedCardIds.map((entry) => {
+          const omission = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {};
+          const id = safeMetadataText(omission.id || omission.cardId || '', 180, '');
+          const reason = safeMetadataText(omission.reason || '', 120, '');
+          return id ? { id, reason } : null;
+        }).filter(Boolean).slice(0, 32)
+        : [],
+      diagnostics: safeMetadataList(guidanceSource.diagnostics, 120, 24)
+    },
     settingsHash: safeMetadataText(value.settingsHash || '', 180, ''),
     providerContractHash: safeMetadataText(value.providerContractHash || '', 180, ''),
     cardCatalogHash: safeMetadataText(value.cardCatalogHash || '', 180, ''),

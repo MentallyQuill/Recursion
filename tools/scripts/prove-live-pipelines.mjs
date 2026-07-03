@@ -261,6 +261,34 @@ async function sendAndWait(page, message, { requirePrompt, timeoutMs }) {
   return { before, after, messageProof };
 }
 
+async function triggerRapidWarm(page, timeoutMs) {
+  const emitted = await page.evaluate(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const eventSource = context.eventSource || globalThis.eventSource;
+    if (!eventSource) return false;
+    const payload = { source: 'recursion-live-pipeline-proof' };
+    if (typeof eventSource.emit === 'function') {
+      eventSource.emit('generation_ended', payload);
+      return true;
+    }
+    if (typeof eventSource.trigger === 'function') {
+      eventSource.trigger('generation_ended', payload);
+      return true;
+    }
+    if (typeof eventSource.dispatchEvent === 'function') {
+      eventSource.dispatchEvent(new CustomEvent('generation_ended', { detail: payload }));
+      return true;
+    }
+    return false;
+  });
+  if (!emitted) fail('rapid-warm-event-unavailable', 'Unable to emit host generation-ended event for Rapid warm proof.');
+  await page.waitForFunction(() => {
+    const text = String(document.querySelector('[data-recursion-current-step]')?.textContent || '')
+      || String(document.querySelector('#recursion-root')?.textContent || '');
+    return /Rapid deck ready\./i.test(text);
+  }, null, { timeout: timeoutMs });
+}
+
 async function openViewer(page, timeoutMs) {
   const actions = page.locator('[data-recursion-actions]').first();
   if (await actions.count().catch(() => 0)) {
@@ -354,7 +382,7 @@ function assertPipelineProof(pipeline, proof, issues) {
     if (diagnostics.pipelineMode !== 'rapid') {
       fail(`${pipeline}-diagnostics-missing`, 'Rapid proof did not expose Rapid packet diagnostics.', { snapshot, diagnosticsExport: proof.diagnosticsExport });
     }
-    if (!['fast-start', 'warm-delta'].includes(diagnostics.rapidPath)) {
+    if (diagnostics.rapidPath !== 'warm-v2') {
       fail(`${pipeline}-path-missing`, 'Rapid proof did not expose a valid Rapid foreground path.', { snapshot, diagnosticsExport: proof.diagnosticsExport });
     }
   }
@@ -382,6 +410,16 @@ async function provePipeline(page, pipeline, timeoutMs, runId) {
     await selectPipeline(page, pipeline, timeoutMs);
     phase = 'mode-select';
     await selectMode(page, 'auto', timeoutMs);
+    let primer = null;
+    if (pipeline === 'rapid') {
+      phase = 'rapid-primer-send';
+      primer = await sendAndWait(page, proofMessageFor('rapid warm primer', runId), {
+        requirePrompt: true,
+        timeoutMs
+      });
+      phase = 'rapid-warm';
+      await triggerRapidWarm(page, timeoutMs);
+    }
     phase = 'pipeline-send';
     const send = await sendAndWait(page, proofMessageFor(pipeline, runId), {
       requirePrompt: true,
@@ -393,7 +431,7 @@ async function provePipeline(page, pipeline, timeoutMs, runId) {
     const diagnosticsExport = await exportDiagnosticsSnapshot(page, timeoutMs);
     phase = 'snapshot';
     const snapshot = await page.evaluate(liveSnapshotScript());
-    return { pipeline, send, snapshot, diagnosticsExport };
+    return { pipeline, primer, send, snapshot, diagnosticsExport };
   } catch (error) {
     const snapshot = await page.evaluate(liveSnapshotScript()).catch(() => null);
     const chat = await page.evaluate(contextChatSummaryScript()).catch(() => null);

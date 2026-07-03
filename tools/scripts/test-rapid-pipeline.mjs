@@ -1,12 +1,10 @@
 import {
-  RAPID_FAST_START_SCHEMA,
   RAPID_PIPELINE_VERSION,
   RAPID_TURN_DELTA_SCHEMA,
-  buildRapidFastStartPrompt,
   buildRapidTurnDeltaPrompt,
   chooseRapidHedgeWinner,
-  normalizeRapidFastStartPack,
   normalizeRapidTurnDelta,
+  rapidArtifactHash,
   rapidCacheKey,
   rapidWarmArtifactIsUsable
 } from '../../src/rapid-pipeline.mjs';
@@ -21,195 +19,115 @@ const snapshot = {
   messages: [{ mesid: 42, role: 'user', text: 'Open the sealed hatch.', visible: true }]
 };
 
-const warmArtifact = {
-  pipelineVersion: RAPID_PIPELINE_VERSION,
+const rapidV2 = {
+  pipelineVersion: 2,
   status: 'ready',
-  warmArtifactId: 'rapid-warm-1',
-  baseSourceRevisionHash: 'base-source',
-  conditionedSceneBrief: 'The sealed hatch blocks the corridor.',
-  candidateCardIds: ['card-scene', 'card-constraints'],
-  cardIds: ['card-scene', 'card-constraints'],
-  settingsHash: 'settings-hash',
-  providerContractHash: 'provider-hash',
-  cardCatalogHash: 'catalog-hash',
-  promptContractHash: 'prompt-hash'
+  warmArtifactId: 'rapid-warm-v2',
+  baseSourceRevisionHash: 'base-rev',
+  baseSnapshotHash: 'base-snapshot',
+  selectedCardIds: ['scene-card', 'subtext-card'],
+  cardIds: ['scene-card', 'subtext-card', 'constraint-card'],
+  guidance: {
+    schema: 'recursion.guidanceComposer.v1',
+    status: 'used',
+    text: 'Warm provider guidance.',
+    sourceCardIds: ['scene-card', 'subtext-card'],
+    guardrailCardIds: ['constraint-card'],
+    diagnostics: []
+  },
+  settingsHash: 'settings',
+  providerContractHash: 'provider',
+  cardCatalogHash: 'catalog',
+  promptContractHash: 'prompt',
+  builtAt: '2026-07-03T00:00:00.000Z',
+  runId: 'rapid-run',
+  diagnostics: ['rapid-warm-v2']
 };
 
-assertEqual(RAPID_TURN_DELTA_SCHEMA, 'recursion.rapidTurnDelta.v1', 'rapid turn delta schema id is stable');
-assertEqual(RAPID_FAST_START_SCHEMA, 'recursion.rapidFastStartPack.v1', 'rapid fast-start schema id is stable');
+const expectedRapidV2 = {
+  baseSourceRevisionHash: 'base-rev',
+  settingsHash: 'settings',
+  providerContractHash: 'provider',
+  cardCatalogHash: 'catalog',
+  promptContractHash: 'prompt'
+};
+
+assertEqual(RAPID_PIPELINE_VERSION, 2, 'rapid pipeline v2 is current');
+assertEqual(RAPID_TURN_DELTA_SCHEMA, 'recursion.rapidTurnDelta.v2', 'rapid turn delta v2 schema is current');
 assertEqual(
   rapidCacheKey({ chatKey: 'rapid-chat', sceneKey: 'rapid-scene', sourceRevisionHash: 'base-source' }),
   'rapid-chat::rapid-scene::base-source',
   'rapid cache key uses exact source revision'
 );
-
-assertEqual(
-  rapidWarmArtifactIsUsable(warmArtifact, {
-    baseSourceRevisionHash: 'base-source',
-    settingsHash: 'settings-hash',
-    providerContractHash: 'provider-hash',
-    cardCatalogHash: 'catalog-hash',
-    promptContractHash: 'prompt-hash'
-  }),
-  true,
-  'matching warm artifact is usable'
-);
-
-assertEqual(
-  rapidWarmArtifactIsUsable(warmArtifact, {
-    baseSourceRevisionHash: 'other-source',
-    settingsHash: 'settings-hash',
-    providerContractHash: 'provider-hash',
-    cardCatalogHash: 'catalog-hash',
-    promptContractHash: 'prompt-hash'
-  }),
-  false,
-  'wrong source warm artifact is rejected'
-);
+assert(rapidWarmArtifactIsUsable(rapidV2, expectedRapidV2), 'Rapid V2 warm artifact is usable');
+assert(!rapidWarmArtifactIsUsable({ ...rapidV2, conditionedSceneBrief: 'old brief', pipelineVersion: 1 }, expectedRapidV2), 'Rapid V1 conditionedSceneBrief artifact is invalid');
+assert(!rapidWarmArtifactIsUsable({ ...rapidV2, guidance: { ...rapidV2.guidance, text: '' } }, expectedRapidV2), 'Rapid V2 requires provider guidance text');
+assert(!rapidWarmArtifactIsUsable({ ...rapidV2, selectedCardIds: [] }, expectedRapidV2), 'Rapid V2 requires selected card ids');
 
 const deltaPrompt = buildRapidTurnDeltaPrompt({
   snapshotHash: 'snapshot-hash',
-  baseSourceRevisionHash: 'base-source',
-  turnSourceRevisionHash: 'turn-source',
+  baseSourceRevisionHash: 'base-rev',
+  turnSourceRevisionHash: 'turn-rev',
   userMessage: 'Open the sealed hatch.',
-  warmArtifact,
-  candidateCards: [
-    { id: 'card-scene', family: 'Scene Frame', summary: 'The sealed hatch blocks the corridor.' },
-    { id: 'card-constraints', family: 'Scene Constraints', summary: 'The hatch is sealed until opened.' }
+  warmArtifact: rapidV2,
+  warmGuidance: rapidV2.guidance,
+  selectedCards: [
+    { id: 'scene-card', family: 'Scene Frame', promptText: 'SCENE_CARD_MARKER full raw scene card.' },
+    { id: 'subtext-card', family: 'Social Subtext', promptText: 'SOCIAL_SUBTEXT_MARKER full raw subtext card.' }
   ]
 });
-assert(deltaPrompt.includes(RAPID_TURN_DELTA_SCHEMA), 'turn delta prompt names schema');
-assert(deltaPrompt.includes('Open the sealed hatch.'), 'turn delta prompt includes user delta');
-assert(deltaPrompt.includes('card-constraints'), 'turn delta prompt includes candidate card ids');
-assert(deltaPrompt.includes('turnDeltaBrief'), 'turn delta prompt names required brief field');
-assert(deltaPrompt.includes('packetInstructions'), 'turn delta prompt names required packet instructions field');
+assert(deltaPrompt.includes(RAPID_TURN_DELTA_SCHEMA), 'turn delta prompt names v2 schema');
+assert(deltaPrompt.includes('Warm provider guidance.'), 'turn delta prompt includes warm guidance');
+assert(deltaPrompt.includes('SOCIAL_SUBTEXT_MARKER'), 'turn delta prompt includes full raw selected cards');
+assert(deltaPrompt.includes('turnGuidanceText'), 'turn delta prompt names required turn guidance field');
+assert(!deltaPrompt.includes('turnDeltaBrief'), 'turn delta prompt omits old turnDeltaBrief field');
+assert(!deltaPrompt.includes('conditionedSceneBrief'), 'turn delta prompt omits conditionedSceneBrief');
 
-const fastStartPrompt = buildRapidFastStartPrompt({
-  snapshotHash: 'snapshot-hash',
-  turnSourceRevisionHash: 'turn-source',
-  snapshot
-});
-assert(fastStartPrompt.includes(RAPID_FAST_START_SCHEMA), 'fast-start prompt names schema');
-assert(fastStartPrompt.includes('No warm deck is available'), 'fast-start prompt states missing warm deck');
-assert(fastStartPrompt.includes('sceneBrief'), 'fast-start prompt names required scene brief field');
-assert(fastStartPrompt.includes('turnBrief'), 'fast-start prompt names required turn brief field');
-
-const normalizedDelta = normalizeRapidTurnDelta({
-  schema: RAPID_TURN_DELTA_SCHEMA,
-  snapshotHash: 'snapshot-hash',
-  baseSourceRevisionHash: 'base-source',
-  turnSourceRevisionHash: 'turn-source',
-  selectedCardIds: ['card-constraints', 'unknown-card'],
-  turnDeltaBrief: 'The user tests the hatch directly.',
-  packetInstructions: ['Keep the hatch constraint visible.'],
-  guardrails: ['Do not imply it opens without an action.'],
-  backgroundRefreshRequests: [{ family: 'Scene Constraints', role: 'sceneConstraintsCard', reason: 'Hatch access changed.' }],
-  mandatoryMissingCards: [],
-  escalateToStandard: false,
-  diagnostics: ['rapid-warm-deck']
-}, {
-  snapshotHash: 'snapshot-hash',
-  baseSourceRevisionHash: 'base-source',
-  turnSourceRevisionHash: 'turn-source',
-  allowedCardIds: ['card-scene', 'card-constraints']
-});
-assertDeepEqual(normalizedDelta.selectedCardIds, ['card-constraints'], 'delta keeps only known warm card ids');
-assertEqual(normalizedDelta.escalateToStandard, false, 'delta does not escalate by default');
-
-const stampedDelta = normalizeRapidTurnDelta({
-  schema: RAPID_TURN_DELTA_SCHEMA,
-  snapshotHash: 'model-echoed-wrong-snapshot',
-  baseSourceRevisionHash: 'model-echoed-wrong-base',
-  turnSourceRevisionHash: 'model-echoed-wrong-turn',
-  selectedCardIds: ['card-scene'],
-  turnDeltaBrief: 'The user keeps moving.',
-  packetInstructions: [],
-  guardrails: [],
+const normalized = normalizeRapidTurnDelta({
+  schema: 'recursion.rapidTurnDelta.v2',
+  snapshotHash: 'turn',
+  baseSourceRevisionHash: 'base',
+  turnSourceRevisionHash: 'turn-rev',
+  selectedCardIds: ['scene-card', 'unknown-card'],
+  turnGuidanceText: 'Use Rhya rest boundary as current beat close.',
+  guardrailCardIds: ['constraint-card', 'unknown-guardrail'],
+  packetInstructions: ['Keep Hermione as escort.'],
   backgroundRefreshRequests: [],
   mandatoryMissingCards: [],
   escalateToStandard: false,
-  diagnostics: []
+  diagnostics: ['delta-v2']
 }, {
-  snapshotHash: 'trusted-snapshot',
-  baseSourceRevisionHash: 'trusted-base',
-  turnSourceRevisionHash: 'trusted-turn',
-  allowedCardIds: ['card-scene']
+  snapshotHash: 'turn',
+  baseSourceRevisionHash: 'base',
+  turnSourceRevisionHash: 'turn-rev',
+  allowedCardIds: ['scene-card', 'constraint-card']
 });
-assertEqual(stampedDelta.snapshotHash, 'trusted-snapshot', 'delta stamps trusted snapshot hash instead of model echo');
-assertEqual(stampedDelta.baseSourceRevisionHash, 'trusted-base', 'delta stamps trusted base source hash');
-assertEqual(stampedDelta.turnSourceRevisionHash, 'trusted-turn', 'delta stamps trusted turn source hash');
+assertDeepEqual(normalized.selectedCardIds, ['scene-card'], 'unknown card id is rejected');
+assertEqual(normalized.turnGuidanceText, 'Use Rhya rest boundary as current beat close.', 'turn guidance preserved');
+assertDeepEqual(normalized.guardrailCardIds, ['constraint-card'], 'guardrail card ids preserved');
+assertDeepEqual(normalized.packetInstructions, ['Keep Hermione as escort.'], 'packet instructions preserved');
 
 const aliasedDelta = normalizeRapidTurnDelta({
   schema: RAPID_TURN_DELTA_SCHEMA,
   brief: {
-    turnBrief: 'Nested turn guidance from provider.',
-    packetInstructions: ['Nested packet instruction.'],
-    guardrails: ['Nested guardrail.']
+    turnGuidanceText: 'Nested turn guidance from provider.',
+    packetInstructions: ['Nested packet instruction.']
   },
-  selectedCardIds: ['card-scene']
+  selectedCardIds: ['scene-card']
 }, {
   snapshotHash: 'trusted-snapshot',
   baseSourceRevisionHash: 'trusted-base',
   turnSourceRevisionHash: 'trusted-turn',
-  allowedCardIds: ['card-scene']
+  allowedCardIds: ['scene-card']
 });
-assertEqual(aliasedDelta.turnDeltaBrief, 'Nested turn guidance from provider.', 'delta accepts nested provider turn brief alias');
-assertDeepEqual(aliasedDelta.packetInstructions, ['Nested packet instruction.'], 'delta accepts nested packet instructions alias');
-assertDeepEqual(aliasedDelta.guardrails, ['Nested guardrail.'], 'delta accepts nested guardrails alias');
+assertEqual(aliasedDelta.turnGuidanceText, '', 'delta ignores old nested guidance alias');
+assertEqual(aliasedDelta.snapshotHash, 'trusted-snapshot', 'delta stamps trusted snapshot hash');
 
-const normalizedFastStart = normalizeRapidFastStartPack({
-  schema: RAPID_FAST_START_SCHEMA,
-  snapshotHash: 'snapshot-hash',
-  turnSourceRevisionHash: 'turn-source',
-  sceneBrief: 'The sealed hatch blocks the corridor.',
-  turnBrief: 'The user tries the hatch.',
-  guardrails: ['Keep access constraints intact.'],
-  omissions: ['No warm scene deck was ready.'],
-  backgroundRefreshRequests: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Warm next turn.' }],
-  mandatoryMissingCards: [],
-  escalateToStandard: false,
-  diagnostics: ['rapid-fast-start']
-}, {
-  snapshotHash: 'snapshot-hash',
-  turnSourceRevisionHash: 'turn-source'
-});
-assertEqual(normalizedFastStart.sceneBrief.includes('sealed hatch'), true, 'fast-start preserves provider scene brief');
-
-const stampedFastStart = normalizeRapidFastStartPack({
-  schema: RAPID_FAST_START_SCHEMA,
-  snapshotHash: 'model-echoed-wrong-snapshot',
-  turnSourceRevisionHash: 'model-echoed-wrong-turn',
-  sceneBrief: 'The provider still generated scene guidance.',
-  turnBrief: 'The provider still generated turn guidance.',
-  guardrails: [],
-  omissions: [],
-  backgroundRefreshRequests: [],
-  mandatoryMissingCards: [],
-  escalateToStandard: false,
-  diagnostics: []
-}, {
-  snapshotHash: 'trusted-fast-snapshot',
-  turnSourceRevisionHash: 'trusted-fast-turn'
-});
-assertEqual(stampedFastStart.snapshotHash, 'trusted-fast-snapshot', 'fast-start stamps trusted snapshot hash instead of model echo');
-assertEqual(stampedFastStart.turnSourceRevisionHash, 'trusted-fast-turn', 'fast-start stamps trusted turn source hash');
-
-const aliasedFastStart = normalizeRapidFastStartPack({
-  schema: RAPID_FAST_START_SCHEMA,
-  brief: {
-    scene: 'Nested provider scene guidance.',
-    turn: 'Nested provider turn guidance.',
-    guardrails: ['Nested fast-start guardrail.'],
-    omissions: ['Nested omission.']
-  }
-}, {
-  snapshotHash: 'trusted-fast-snapshot',
-  turnSourceRevisionHash: 'trusted-fast-turn'
-});
-assertEqual(aliasedFastStart.sceneBrief, 'Nested provider scene guidance.', 'fast-start accepts nested scene alias');
-assertEqual(aliasedFastStart.turnBrief, 'Nested provider turn guidance.', 'fast-start accepts nested turn alias');
-assertDeepEqual(aliasedFastStart.guardrails, ['Nested fast-start guardrail.'], 'fast-start accepts nested guardrails alias');
-assertDeepEqual(aliasedFastStart.omissions, ['Nested omission.'], 'fast-start accepts nested omissions alias');
+assertEqual(
+  rapidArtifactHash(rapidV2),
+  rapidArtifactHash({ ...rapidV2, conditionedSceneBrief: 'ignored old field' }),
+  'rapid artifact hash ignores conditionedSceneBrief'
+);
 
 const hedgeWinner = chooseRapidHedgeWinner([
   { source: 'primary', result: { ok: false, error: { code: 'invalid' } }, settledAtMs: 9000 },

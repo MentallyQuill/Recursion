@@ -152,13 +152,22 @@ function rapidWarmCacheFixture({ cardId = 'warm-card-1', baseSourceRevisionHash 
           }
         }],
         rapid: {
-          pipelineVersion: 1,
+          pipelineVersion: 2,
           status: 'ready',
           warmArtifactId: 'rapid-warm-fixture',
           baseSourceRevisionHash,
-          conditionedSceneBrief: 'The hatch stays sealed until opened.',
-          candidateCardIds: [cardId],
+          baseSnapshotHash: hashJson({ sourceRevisionHash: baseSourceRevisionHash }),
+          selectedCardIds: [cardId],
           cardIds: [cardId],
+          guidance: {
+            schema: 'recursion.guidanceComposer.v1',
+            status: 'used',
+            text: 'Warm provider guidance.',
+            sourceCardIds: [cardId],
+            guardrailCardIds: [cardId],
+            omittedCardIds: [],
+            diagnostics: ['warm-guidance']
+          },
           settingsHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).settingsHash,
           providerContractHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).providerContractHash,
           cardCatalogHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).cardCatalogHash,
@@ -367,6 +376,20 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
           };
         }
         if (roleId === 'sceneFrameCard') return cardProviderResponse(roleId, request);
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'GUIDANCE_MARKER warm provider guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['rapid-warm-guidance']
+            }
+          };
+        }
         throw new Error(`unexpected role ${roleId}`);
       }
     }
@@ -379,6 +402,10 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   const cache = await harness.storage.loadSceneCache('chat-1', 'scene-1');
   const variant = cache.variants[cache.activeSourceRevisionHash];
   assertEqual(variant.rapid.status, 'ready', 'Rapid warm artifact is ready');
+  assertEqual(variant.rapid.pipelineVersion, 2, 'Rapid warm artifact uses v2');
+  assert(variant.rapid.guidance.text.includes('GUIDANCE_MARKER'), 'Rapid warm stores provider guidance');
+  assertDeepEqual(variant.rapid.selectedCardIds, variant.latestHand.cardIds, 'Rapid warm stores selected card ids');
+  assert(!Object.prototype.hasOwnProperty.call(variant.rapid, 'conditionedSceneBrief'), 'Rapid warm no longer stores conditionedSceneBrief');
   assertEqual(harness.installed.length, 0, 'Rapid warm does not install prompt');
 }
 
@@ -388,6 +415,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   const storage = createStorageRepository({ storage: adapter });
   await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash }));
   const roleCalls = [];
+  let rapidTurnDeltaRequest = null;
   const harness = createRuntimeHarness({
     settings: { pipelineMode: 'rapid', mode: 'auto' },
     snapshot,
@@ -396,21 +424,22 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
         if (roleId === 'rapidTurnDelta') {
+          rapidTurnDeltaRequest = request;
           return {
             ok: true,
             data: {
-              schema: 'recursion.rapidTurnDelta.v1',
+              schema: 'recursion.rapidTurnDelta.v2',
               snapshotHash: request.snapshotHash,
               baseSourceRevisionHash: request.baseSourceRevisionHash,
               turnSourceRevisionHash: request.turnSourceRevisionHash,
               selectedCardIds: ['warm-card-1'],
-              turnDeltaBrief: 'The user tests the hatch now.',
+              turnGuidanceText: 'TURN_GUIDANCE_MARKER the user tests the hatch now.',
               packetInstructions: ['Keep hatch access constrained.'],
-              guardrails: ['Do not open the hatch for free.'],
+              guardrailCardIds: ['warm-card-1'],
               backgroundRefreshRequests: [],
               mandatoryMissingCards: [],
               escalateToStandard: false,
-              diagnostics: ['rapid-warm-deck']
+              diagnostics: ['rapid-warm-v2']
             }
           };
         }
@@ -423,6 +452,13 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assert(roleCalls.includes('rapidTurnDelta'), 'Rapid foreground calls turn delta');
   assert(!roleCalls.includes('utilityArbiter'), 'Rapid warm foreground does not call full Arbiter');
   assertEqual(harness.installed.length, 1, 'Rapid foreground installs one prompt packet');
+  assert(rapidTurnDeltaRequest.prompt.includes('The hatch stays sealed until opened.'), 'Rapid foreground receives full raw selected cards');
+  assert(rapidTurnDeltaRequest.prompt.includes('Warm provider guidance.'), 'Rapid foreground receives warm guidance');
+  assert(result.packet.sections.guidance.includes('Warm provider guidance.'), 'Rapid packet includes warm guidance');
+  assert(result.packet.sections.guidance.includes('TURN_GUIDANCE_MARKER'), 'Rapid packet includes turn guidance');
+  assert(result.packet.sections.cardEvidence.includes('The hatch stays sealed until opened.'), 'Rapid packet includes full raw card evidence');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'rapid', 'Rapid packet records Rapid pipeline');
+  assertEqual(result.packet.diagnostics.rapidPath, 'warm-v2', 'Rapid packet records warm-v2 path');
   assertNoSecretText(result.packet, 'Rapid packet');
 }
 
@@ -433,69 +469,34 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
-        if (roleId === 'rapidFastStartPack') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.rapidFastStartPack.v1',
-              snapshotHash: request.snapshotHash,
-              turnSourceRevisionHash: request.turnSourceRevisionHash,
-              sceneBrief: 'The corridor ends at a sealed hatch.',
-              turnBrief: 'The user tries the hatch.',
-              guardrails: ['Keep the hatch sealed unless the action opens it.'],
-              omissions: ['No warm scene deck was ready.'],
-              backgroundRefreshRequests: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Warm full deck.' }],
-              mandatoryMissingCards: [],
-              escalateToStandard: false,
-              diagnostics: ['rapid-fast-start']
-            }
-          };
-        }
-        throw new Error(`unexpected role ${roleId}`);
-      }
-    }
-  });
-  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Try the hatch.' });
-  assertEqual(result.ok, true, 'Rapid fast-start installs');
-  assert(roleCalls.includes('rapidFastStartPack'), 'Rapid calls fast-start when no warm deck exists');
-  assert(!JSON.stringify(result).includes('local-fallback'), 'Rapid fast-start does not use local fallback diagnostics');
-}
-
-{
-  const roleCalls = [];
-  const harness = createRuntimeHarness({
-    settings: { pipelineMode: 'rapid', mode: 'auto' },
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        roleCalls.push(roleId);
-        if (roleId === 'rapidFastStartPack') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.rapidFastStartPack.v1',
-              snapshotHash: request.snapshotHash,
-              turnSourceRevisionHash: 'wrong-source-revision',
-              sceneBrief: 'Mismatched echoed source still uses provider-generated guidance.',
-              turnBrief: 'This should install through Rapid with trusted local metadata.',
-              guardrails: [],
-              mandatoryMissingCards: [],
-              escalateToStandard: false
-            }
-          };
-        }
         if (roleId === 'utilityArbiter') {
           return {
             ok: true,
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
               snapshotHash: request.snapshotHash,
-              action: 'compose-brief',
+              action: 'refresh-cards',
               sceneStatus: 'same-scene',
-              promptFootprint: 'compact',
-              cardJobs: [],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'unit standard escalation' },
-              diagnostics: []
+              promptFootprint: 'normal',
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Warm miss standard.' }],
+              reasonerDecision: { mode: 'skip', reason: 'warm miss standard', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['standard-after-warm-miss']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') return cardProviderResponse(roleId, request, 'raw card marker after warm miss.');
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'STANDARD_GUIDANCE_MARKER use raw cards as evidence.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['standard-guidance']
             }
           };
         }
@@ -504,31 +505,36 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
     }
   });
   const result = await harness.runtime.prepareForGeneration({ userMessage: 'Try the hatch.' });
-  assertEqual(result.ok, true, 'Rapid fast-start with mismatched echoed hash installs');
-  assert(roleCalls.includes('rapidFastStartPack'), 'Rapid tries fast-start first');
-  assert(!roleCalls.includes('utilityArbiter'), 'Rapid echoed hash mismatch does not continue through Standard Arbiter');
-  assertEqual(result.packet.diagnostics.pipelineMode, 'rapid', 'Rapid packet records Rapid pipeline');
-  assertEqual(result.packet.diagnostics.rapidPath, 'fast-start', 'Rapid packet records fast-start path');
+  assertEqual(result.ok, true, 'Rapid warm miss escalates and Standard installs');
+  assert(!roleCalls.includes('rapidFastStartPack'), 'warm miss does not use summary fast-start');
+  assert(roleCalls.includes('utilityArbiter'), 'warm miss runs Standard arbiter');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'standard', 'warm miss installs Standard packet');
+  assert(result.plan.diagnostics.includes('rapid-warm-miss-standard'), 'warm miss diagnostic recorded');
 }
 
 {
   const roleCalls = [];
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash }));
   const harness = createRuntimeHarness({
     settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot,
+    storage,
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
-        if (roleId === 'rapidFastStartPack') {
+        if (roleId === 'rapidTurnDelta') {
           return {
             ok: true,
             data: {
               schema: 'recursion.wrongSchema.v1',
               snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
               turnSourceRevisionHash: request.turnSourceRevisionHash,
-              sceneBrief: 'Wrong schema should not be trusted.',
-              turnBrief: 'This should escalate to Standard.',
-              guardrails: [],
-              mandatoryMissingCards: [],
+              selectedCardIds: ['warm-card-1'],
+              turnGuidanceText: 'Wrong schema should not be trusted.',
               escalateToStandard: false
             }
           };
@@ -555,20 +561,26 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   });
   const result = await harness.runtime.prepareForGeneration({ userMessage: 'Try the hatch.' });
   assertEqual(result.ok, true, 'invalid Rapid schema escalates and Standard installs');
-  assert(roleCalls.includes('rapidFastStartPack'), 'Rapid tries fast-start before schema escalation');
+  assert(roleCalls.includes('rapidTurnDelta'), 'Rapid tries turn delta before schema escalation');
   assert(roleCalls.includes('utilityArbiter'), 'invalid Rapid schema continues through Standard Arbiter');
   assert(result.plan.diagnostics.includes('rapid-escalated-standard:invalid-provider-output'), 'plan records invalid Rapid output escalation');
 }
 
 {
   const calls = [];
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash }));
   const harness = createRuntimeHarness({
     settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot,
+    storage,
     rapidHedgeDelayMs: 1,
     generationRouter: {
       async generate(roleId, request = {}) {
         calls.push({ roleId, hedge: request.rapidHedgeSource });
-        if (roleId !== 'rapidFastStartPack') throw new Error(`unexpected role ${roleId}`);
+        if (roleId !== 'rapidTurnDelta') throw new Error(`unexpected role ${roleId}`);
         if (request.rapidHedgeSource === 'primary') {
           await delay(20);
           return { ok: false, error: { code: 'slow-invalid', message: 'primary invalid' } };
@@ -576,13 +588,14 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
         return {
           ok: true,
           data: {
-            schema: 'recursion.rapidFastStartPack.v1',
+            schema: 'recursion.rapidTurnDelta.v2',
             snapshotHash: request.snapshotHash,
+            baseSourceRevisionHash: request.baseSourceRevisionHash,
             turnSourceRevisionHash: request.turnSourceRevisionHash,
-            sceneBrief: 'Backup scene brief.',
-            turnBrief: 'Backup turn brief.',
-            guardrails: [],
-            omissions: [],
+            selectedCardIds: ['warm-card-1'],
+            turnGuidanceText: 'Backup turn guidance.',
+            guardrailCardIds: ['warm-card-1'],
+            packetInstructions: [],
             backgroundRefreshRequests: [],
             mandatoryMissingCards: [],
             escalateToStandard: false,
@@ -597,59 +610,6 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assert(calls.some((call) => call.hedge === 'primary'), 'primary hedge call started');
   assert(calls.some((call) => call.hedge === 'backup'), 'backup hedge call started');
   assert(JSON.stringify(result.packet).includes('rapid-hedge-backup'), 'packet diagnostics include backup winner');
-}
-
-{
-  const roleCalls = [];
-  const harness = createRuntimeHarness({
-    settings: { pipelineMode: 'rapid', mode: 'auto' },
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        roleCalls.push(roleId);
-        if (roleId === 'rapidFastStartPack') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.rapidFastStartPack.v1',
-              snapshotHash: request.snapshotHash,
-              turnSourceRevisionHash: request.turnSourceRevisionHash,
-              sceneBrief: '',
-              turnBrief: '',
-              guardrails: [],
-              omissions: [],
-              backgroundRefreshRequests: [],
-              mandatoryMissingCards: [{ family: 'Knowledge', reason: 'Reveal boundary is mandatory.' }],
-              escalateToStandard: true,
-              diagnostics: ['rapid-mandatory-gap']
-            }
-          };
-        }
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              action: 'compose-brief',
-              sceneStatus: 'same-scene',
-              promptFootprint: 'normal',
-              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Resolve mandatory gap.' }],
-              reasonerDecision: { mode: 'skip', reason: 'standard escalation', signals: [] },
-              budgets: { targetBriefTokens: 500, maxCards: 4 },
-              diagnostics: ['standard-after-rapid']
-            }
-          };
-        }
-        if (roleId === 'sceneFrameCard') return cardProviderResponse(roleId, request);
-        throw new Error(`unexpected role ${roleId}`);
-      }
-    }
-  });
-  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Reveal the hidden thing.' });
-  assertEqual(result.ok, true, 'Rapid mandatory gap escalates and installs through Standard');
-  assert(roleCalls.includes('rapidFastStartPack'), 'Rapid tried fast-start first');
-  assert(roleCalls.includes('utilityArbiter'), 'Rapid escalated to Standard Arbiter');
-  assert(result.plan.diagnostics.includes('rapid-escalated-standard:mandatory-gap'), 'plan records Rapid escalation');
 }
 
 const modelFetchSettingsStore = createSettingsStore({ root: {} });
@@ -742,8 +702,8 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(calls.snapshot, 3, 'auto mode reads snapshot and rechecks before compose and install');
   assertEqual(installed.length, 1, 'auto mode installs one prompt');
   assert(view.lastHand.cards.length > 0, 'hand available in view');
-  assert(view.lastPacket.sections.sceneBrief.includes('The lamp breaks.'), 'scene frame uses latest visible message');
-  assert(!view.lastPacket.sections.sceneBrief.includes('hidden draft'), 'scene frame ignores invisible message');
+  assert(view.lastPacket.sections.cardEvidence.includes('The lamp breaks.'), 'scene frame uses latest visible message');
+  assert(!view.lastPacket.sections.cardEvidence.includes('hidden draft'), 'scene frame ignores invisible message');
   assertEqual(view.activity.label, 'Recursion prompt ready.', 'activity settled');
   assert(Array.isArray(view.activityHistory), 'runtime view exposes bounded activity history');
   assert(view.activityHistory.some((event) => event.phase === 'started'), 'activity history includes turn start');
@@ -760,7 +720,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assert(cache.cards.length >= 2, 'scene cache persists fallback cards');
   assertEqual(cache.versions.cardCatalogHash, hashJson(CARD_CATALOG), 'scene cache records card catalog hash');
-  assertEqual(cache.versions.promptPacketVersion, 2, 'scene cache records prompt packet contract version');
+  assertEqual(cache.versions.promptPacketVersion, 3, 'scene cache records prompt packet contract version');
   assertEqual(cache.versions.runtimeCacheContractVersion, 1, 'scene cache records runtime cache contract version');
   assertEqual(cache.versions.settingsHash, cacheContractVersions(view.settings).settingsHash, 'scene cache records current settings hash');
   assertEqual(cache.versions.providerContractHash, cacheContractVersions(view.settings).providerContractHash, 'scene cache records provider contract hash');
@@ -963,21 +923,17 @@ for (const pipelineMode of ['standard', 'rapid']) {
             }
           };
         }
-        if (roleId === 'rapidFastStartPack') {
+        if (roleId === 'guidanceComposer') {
           return {
             ok: true,
             data: {
-              schema: 'recursion.rapidFastStartPack.v1',
+              schema: 'recursion.guidanceComposer.v1',
               snapshotHash: request.snapshotHash,
-              turnSourceRevisionHash: request.turnSourceRevisionHash,
-              sceneBrief: 'Same-turn retry rapid scene.',
-              turnBrief: 'Same-turn retry rapid turn.',
-              guardrails: [],
-              omissions: [],
-              backgroundRefreshRequests: [],
-              mandatoryMissingCards: [],
-              escalateToStandard: false,
-              diagnostics: ['same-turn-retry-rapid']
+              guidanceText: 'Same-turn retry guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['same-turn-retry-guidance']
             }
           };
         }
@@ -2232,6 +2188,20 @@ for (const pipelineMode of ['standard', 'rapid']) {
             }
           };
         }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Fallback guidance from local cards.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['fallback-guidance']
+            }
+          };
+        }
         return {
           ok: true,
           data: {
@@ -2394,8 +2364,8 @@ for (const scenario of [
   assertEqual(view.lastPacket.diagnostics.behaviorPolicy.strength, 'light', 'packet diagnostics record light strength');
   assertEqual(view.lastPacket.diagnostics.behaviorPolicy.focus, 'character', 'packet diagnostics record character focus');
   assertEqual(view.lastPacket.diagnostics.behaviorPolicy.effectiveFootprint, 'compact', 'packet diagnostics record compact footprint');
-  assert(view.lastPacket.sections.turnBrief.includes('Strength: Light.'), 'packet turn brief includes light composer line');
-  assert(view.lastPacket.sections.turnBrief.includes('Focus: Character.'), 'packet turn brief includes focus composer line');
+  assert(view.lastPacket.diagnostics.behaviorPolicy.strength === 'light', 'packet diagnostics include light strength');
+  assert(view.lastPacket.diagnostics.behaviorPolicy.focus === 'character', 'packet diagnostics include character focus');
 }
 
 {
@@ -3414,7 +3384,7 @@ for (const scenario of [
   });
   const result = await runtime.prepareForGeneration({ userMessage: `Reject ${scenario.label} Arbiter hash.` });
   assertEqual(result.ok, true, `${scenario.label} arbiter snapshot hash falls back fail-soft`);
-  assertDeepEqual(routerCalls, ['utilityArbiter'], `${scenario.label} arbiter snapshot hash does not launch provider card jobs`);
+  assertDeepEqual(routerCalls, ['utilityArbiter', 'guidanceComposer'], `${scenario.label} arbiter snapshot hash only launches guidance after fallback`);
   assertEqual(result.plan.action, 'compose-brief', `${scenario.label} arbiter snapshot hash uses local fallback plan`);
   assertEqual(result.plan.cardJobs.length, 0, `${scenario.label} arbiter snapshot hash drops provider card jobs`);
   assert(result.plan.diagnostics.includes('utility-arbiter-fallback'), `${scenario.label} arbiter snapshot hash records fallback diagnostic`);
@@ -3824,7 +3794,7 @@ for (const scenario of [
       && event.detail?.state === 'done'),
     'provider-generated card emits generated child progress'
   );
-  assert(view.lastPacket.sections.turnBrief.includes('unanswered signal'), 'provider card reaches prompt packet');
+  assert(view.lastPacket.sections.cardEvidence.includes('unanswered signal'), 'provider card reaches prompt packet');
   assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'successful provider card pass does not add local Scene Frame fallback card');
   assert(!cache.cards.some((card) => card.family === 'Scene Constraints'), 'successful provider card pass does not add local Scene Constraints fallback card');
   const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
@@ -4085,6 +4055,20 @@ for (const scenario of [
             }
           };
         }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Sequential guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['sequential-guidance']
+            }
+          };
+        }
         cardStarts.push({ roleId, firstCardCompletedAtStart: firstCardCompleted });
         cardSnapshots.push({ roleId, runId: request.runId, snapshotHash: request.snapshotHash, signal: request.signal, hasSignal: isAbortSignal(request.signal) });
         if (roleId === 'sceneConstraintsCard') {
@@ -4129,7 +4113,7 @@ for (const scenario of [
   const view = runtime.view();
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assertEqual(result.ok, true, 'sequential provider card job run installs prompt');
-  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard'], 'router without batch runs card jobs sequentially');
+  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard', 'guidanceComposer'], 'router without batch runs card jobs sequentially then composes guidance');
   assertEqual(cardStarts[1].firstCardCompletedAtStart, true, 'second sequential card starts after first resolves');
   assertEqual(cardSnapshots.length, 2, 'sequential card jobs capture frozen requests');
   assert(cardSnapshots.every((entry) => entry.snapshotHash === result.plan.snapshotHash), 'sequential card jobs use frozen plan snapshot hash');
@@ -4138,7 +4122,7 @@ for (const scenario of [
   assert(cache.cards.some((card) => card.family === 'Open Threads'), 'sequential provider card persisted in scene cache');
   assert(!cache.cards.some((card) => card.family === 'Scene Constraints'), 'invalid sequential provider card is omitted independently');
   assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'sequential provider card selected into hand');
-  assert(view.lastPacket.sections.turnBrief.includes('sequential provider call'), 'sequential provider card reaches prompt packet');
+  assert(view.lastPacket.sections.cardEvidence.includes('sequential provider call'), 'sequential provider card reaches prompt packet');
   assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'sequential provider card pass does not add local Scene Frame fallback card');
 }
 
@@ -4233,6 +4217,20 @@ for (const scenario of [
             }
           };
         }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Sequential failure guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['sequential-failure-guidance']
+            }
+          };
+        }
         if (roleId === 'sceneConstraintsCard') {
           throw new Error('sequential card provider failed');
         }
@@ -4258,10 +4256,10 @@ for (const scenario of [
   const view = runtime.view();
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assertEqual(result.ok, true, 'sequential thrown card job run still installs prompt');
-  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard'], 'throwing sequential card job is attempted after first card');
+  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard', 'guidanceComposer'], 'throwing sequential card job is attempted after first card then composes guidance');
   assert(cache.cards.some((card) => card.family === 'Open Threads'), 'successful sequential card persists despite later throw');
   assert(!cache.cards.some((card) => card.family === 'Scene Constraints'), 'throwing sequential card is omitted independently');
-  assert(view.lastPacket.sections.turnBrief.includes('survives a later card failure'), 'successful sequential card reaches prompt after later throw');
+  assert(view.lastPacket.sections.cardEvidence.includes('survives a later card failure'), 'successful sequential card reaches prompt after later throw');
   assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'sequential per-card failure does not force local fallback');
 }
 

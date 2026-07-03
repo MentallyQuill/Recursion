@@ -43,8 +43,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'possessionsItemsCard',
   'openThreadsCard',
   'rapidTurnDelta',
-  'rapidFastStartPack',
-  'briefUtilityComposer',
+  'guidanceComposer',
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
@@ -62,9 +61,8 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   environmentAffordancesCard: 'recursion.card.v1',
   possessionsItemsCard: 'recursion.card.v1',
   openThreadsCard: 'recursion.card.v1',
-  rapidTurnDelta: 'recursion.rapidTurnDelta.v1',
-  rapidFastStartPack: 'recursion.rapidFastStartPack.v1',
-  briefUtilityComposer: 'recursion.briefUtilityComposer.v1',
+  rapidTurnDelta: 'recursion.rapidTurnDelta.v2',
+  guidanceComposer: 'recursion.guidanceComposer.v1',
   reasonerComposer: 'recursion.reasonerComposer.v1',
   providerTest: 'recursion.providerTest.v1'
 });

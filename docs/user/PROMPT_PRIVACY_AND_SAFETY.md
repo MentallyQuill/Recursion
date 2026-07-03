@@ -8,8 +8,8 @@ The prompt packet is the complete model-facing Recursion artifact for one genera
 
 It can contain:
 
-- Scene Brief: compact current-scene context that remains useful while the scene is valid.
-- Turn Brief: immediate next-response guidance for the active generation.
+- Guidance: provider-authored direction for using selected evidence in the active generation.
+- Card Evidence: full raw selected-card text, grouped as evidence.
 - Guardrails: compact constraints that prevent contradictions, hidden-thought leakage, spoilers, or user-message rewriting.
 - Rare raw critical guardrail text when exact wording is required.
 
@@ -34,8 +34,8 @@ Recursion owns only its prompt lanes. It should install, replace, or clear Recur
 
 Recursion prompt lanes may include:
 
-- `recursion.sceneBrief`;
-- `recursion.turnBrief`;
+- `recursion.guidance`;
+- `recursion.cardEvidence`;
 - `recursion.guardrails`;
 - `recursion.rawCriticalGuardrail`.
 

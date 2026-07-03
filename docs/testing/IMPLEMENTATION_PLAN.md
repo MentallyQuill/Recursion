@@ -81,7 +81,7 @@ Build:
 - Current host model route.
 - Host connection profile route if available.
 - OpenAI-compatible endpoint route.
-- `briefUtilityComposer` and `reasonerComposer` role contracts.
+- `guidanceComposer` and `reasonerComposer` role contracts.
 - Test Provider action.
 - Sanitized model-call journal.
 - JSON response parser and validator.
@@ -157,7 +157,7 @@ Goal: turn selected cards into one compact, inspectable prompt packet.
 
 Build:
 
-- Utility composition path, with `briefUtilityComposer` reserved for model-routed Utility composition.
+- Utility guidance path through `guidanceComposer`.
 - Optional Reasoner Composer through `reasonerComposer`.
 - Prompt packet schema.
 - Footprint profiles: compact, normal, rich.
@@ -170,6 +170,7 @@ Tests:
 
 - Packet composition from selected hand.
 - Reasoner composition cannot add unsupported lore fields.
+- Selected raw card evidence remains preserved in the prompt packet and is not locally summarized into scene/turn briefs.
 - Reasoner timeout, provider failure, or invalid schema falls back to Utility composition.
 - Explicit conditioned final-prompt injection settings override packet block placement, role, and depth after Utility/Reasoner composition.
 - Injection installs, replaces, and clears by Recursion-owned key.

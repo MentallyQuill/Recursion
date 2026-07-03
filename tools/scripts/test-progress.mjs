@@ -247,7 +247,7 @@ const reasoningSettingDuringRunProgress = createProgressRunModel({
     cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame' }]
   }
 });
-assert(!reasoningSettingDuringRunProgress.steps.some((step) => step.id === 'reasoner-brief'), 'reasoning setting alone does not add a Reasoner row to an active run');
+assert(!reasoningSettingDuringRunProgress.steps.some((step) => step.id === 'reasoner-guidance'), 'reasoning setting alone does not add a Reasoner row to an active run');
 
 const controlOnlyWarningProgress = createProgressRunModel({
   settings: { enabled: false, mode: 'auto' },

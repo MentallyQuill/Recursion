@@ -91,7 +91,7 @@ const metrics = computeCardSelectionMetrics([
         { id: 'card-active-cast', family: 'Active Cast' }
       ],
       injectionPlan: [
-        { section: 'sceneBrief', sourceIds: ['card-items', 'card-active-cast'] }
+        { section: 'cardEvidence', sourceIds: ['card-items', 'card-active-cast'] }
       ],
       omissions: []
     }

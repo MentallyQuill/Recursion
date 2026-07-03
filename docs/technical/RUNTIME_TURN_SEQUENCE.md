@@ -11,7 +11,7 @@ This manual describes the turn lifecycle implemented by `src/runtime.mjs` and th
 | Auto | Captures a snapshot, sends the full fixed catalog plus card-scope focus preferences to the selected pipeline, installs validated prompt blocks when useful, writes bounded diagnostics, and settles the progress surface. |
 | Manual | Captures a snapshot, treats enabled card-scope families/sub-items as a strict whitelist, filters disabled card jobs/cards before generation and hand selection, then runs the selected prompt-compile pipeline when useful. |
 
-Pipeline selection is separate from Auto/Manual. The compact bar owns the Pipeline selector as an icon-only dropdown immediately to the left of the Mode button. `Standard` runs the full foreground pipeline on send. `Rapid` keeps provider-generated scene work warm in the background and uses a short foreground Utility delta on send. Settings may persist `pipelineMode`, but Settings must not render a second Standard/Rapid toggle.
+Pipeline selection is separate from Auto/Manual. The compact bar owns the Pipeline selector as an icon-only dropdown immediately to the left of the Mode button. `Standard` runs the full foreground pipeline on send. `Rapid` warms a provider-generated card packet in the background and uses a short foreground Utility delta on send. Settings may persist `pipelineMode`, but Settings must not render a second Standard/Rapid toggle.
 
 ## Auto Sequence
 
@@ -48,7 +48,7 @@ sequenceDiagram
 
 ## Rapid Sequence
 
-Rapid changes when provider work happens, not who authors the guidance. It never creates local fallback cards, local scene briefs, or local turn briefs for the Rapid path.
+Rapid changes when provider work happens, not who authors the guidance. It never creates local fallback cards, local scene briefs, local turn briefs, or summary fast-start packs for the Rapid path.
 
 ```mermaid
 sequenceDiagram
@@ -59,17 +59,17 @@ sequenceDiagram
     participant Adapter as Prompt Adapter
 
     Host->>Runtime: assistant landed or chat idle
-    Runtime->>Utility: warm provider scene artifact
-    Utility-->>Runtime: warm cards and conditioned scene guidance
+    Runtime->>Utility: warm provider card packet
+    Utility-->>Runtime: selected raw cards and guidance
     Runtime->>Storage: save exact-source rapid metadata
     Host->>Runtime: next generation interceptor
     Runtime->>Storage: load matching warm artifact
     alt warm artifact usable
         Runtime->>Utility: rapidTurnDelta
     else warm artifact missing
-        Runtime->>Utility: rapidFastStartPack
+        Runtime->>Runtime: continue through Standard
     end
-    Utility-->>Runtime: provider-authored Rapid packet guidance
+    Utility-->>Runtime: provider-authored turn guidance
     alt valid Rapid output
         Runtime->>Adapter: install Recursion prompt keys
     else mandatory gap or invalid output
@@ -81,16 +81,16 @@ Background warm:
 
 1. After an assistant message lands, the source settles, or the chat is idle, `warmRapidScene()` captures the current source revision.
 2. Runtime uses the provider Arbiter and provider card roles to build or refresh a scene deck for that exact revision.
-3. Runtime saves the active scene cache variant with `variant.rapid` metadata, including the warm artifact id, source revision hash, selected candidate ids, card ids, contract hashes, and Rapid pipeline version.
+3. Runtime saves the active scene cache variant with `variant.rapid` metadata, including the warm artifact id, source revision hash, selected card ids, guidance metadata, contract hashes, and Rapid pipeline version.
 4. Background warm does not compose a final prompt packet, does not call the SillyTavern prompt adapter, and never installs Recursion prompt keys.
 
 Foreground send:
 
 1. Runtime captures the source snapshot before appending the pending user message and loads the active cache variant for that exact base source revision.
 2. If a ready Rapid warm artifact matches the source revision, settings/provider/catalog/prompt contracts, and candidate cards, runtime calls `rapidTurnDelta` on the Utility lane.
-3. If no warm artifact exists, runtime calls `rapidFastStartPack` on the Utility lane. This is still provider-generated guidance; it degrades breadth, not authorship.
-4. The accepted Rapid output supplies selected card ids when warm, a tiny user-message delta, provider-authored prompt packet instructions, and optional background refresh requests for a later turn.
-5. Runtime formats those provider-authored sections into the same prompt-key install contract used by Standard, then rechecks source freshness before installing.
+3. If no warm artifact exists, runtime escalates to Standard for that same pending user message. Rapid warm miss is not a quality-degraded summary path.
+4. The accepted Rapid output supplies selected warm card ids, a tiny user-message guidance delta, and optional background refresh requests for a later turn.
+5. Runtime composes the same V3 prompt packet used by Standard: warm guidance plus Rapid turn guidance, full selected raw card evidence, and guardrails. It rechecks source freshness before installing.
 6. If the provider marks a mandatory missing card, requests Standard escalation, or returns Rapid structured output that fails schema or content validation, Rapid aborts the Rapid install path and continues through Standard for that same pending user message with a compact escalation diagnostic. Runtime stamps local revision hashes from the frozen request instead of trusting model-echoed hash strings.
 
 Rapid foreground roles are small Utility jobs. They may hedge by starting a primary call immediately and a backup after the configured short delay; the first valid structured output wins and diagnostics record the winning hedge source. Hedging is not used for Story generation.
@@ -131,7 +131,7 @@ Utility card calls are batched when the provider router supports batching. Each 
 
 Runtime can create local fallback Scene Frame and Scene Constraints role cards from the latest visible messages after a valid or locally recoverable plan exists. These local cards keep the first loop useful by deriving basic scene frame and hard-constraint guidance when card generation is unavailable, but they are not used to mask a missing or transport-failing Utility provider.
 
-Rapid does not use those local fallback cards. A Rapid warm pass stores only provider-generated cards. A Rapid foreground pass either uses a valid warm provider artifact, asks the Utility provider for a fast-start pack, skips when provider guidance is unavailable, or escalates to Standard when the provider declares a mandatory gap.
+Rapid does not use those local fallback cards. A Rapid warm pass stores only provider-generated cards plus provider-authored guidance. A Rapid foreground pass either uses a valid warm provider artifact, skips when provider guidance is unavailable, or escalates to Standard when the warm artifact is missing or the provider declares a mandatory gap.
 
 After cache, provider, and fallback cards are known, runtime emits sanitized `cardProgress` activity events for the Hero Pixel Array progress menu. These events are child rows under `utility-card-batch`: generated provider cards use `state: done` and `source: generated` when they complete cleanly, generated provider cards that complete after a retry use `state: warning`, `source: generated`, `retryCount`, and a safe `reason`, cache-reused cards use `state: cached` and `source: cache`, and local fallback cards use `state: warning` and `source: fallback`. The event detail is limited to parent step id, role/family, source, state, safe card id, retry count, and one sanitized progress reason; it must not include card prompt text, raw provider output, transcript text, or secrets.
 
@@ -147,14 +147,14 @@ The resulting hand contains sanitized card ids, families, roles, prompt text, to
 
 ## Composition And Injection
 
-The prompt composer turns the hand into Scene Brief, Turn Brief, and Guardrails. Utility composition is the default path. Reasoner composition can add a validated synthesis patch when settings and the Arbiter permit it.
+The prompt composer turns the hand into Guidance, Card Evidence, and Guardrails. `guidanceComposer` writes the provider-authored direction layer; selected raw card text is preserved in Card Evidence. Reasoner composition can add a validated synthesis patch when settings and the Arbiter permit it.
 
 Auto and Manual install prompt blocks through the SillyTavern adapter when the current run produces a valid hand and packet. Committed prompt install attempts write a sanitized `hand.selected` journal breadcrumb for the final hand before the prompt install event. Power-off clears without compilation.
 
 Current SillyTavern prompt keys:
 
-- `recursion.sceneBrief`
-- `recursion.turnBrief`
+- `recursion.guidance`
+- `recursion.cardEvidence`
 - `recursion.guardrails`
 
 Install uses a clear-then-install sequence and rolls back all known Recursion prompt keys if a partial install fails.
@@ -202,7 +202,7 @@ flowchart LR
 | --- | --- |
 | Utility provider unavailable | Reuse valid cache when safe; otherwise clear Recursion prompt and skip Recursion injection. |
 | Invalid Arbiter schema | Use conservative local fallback plan and record Utility fallback diagnostics. |
-| No Rapid warm artifact | Run `rapidFastStartPack`; do not create local Rapid briefs. |
+| No Rapid warm artifact | Continue through Standard for the same pending user message; do not create local Rapid briefs or summary fast-start packs. |
 | Rapid mandatory gap | Abort Rapid install and continue through Standard with `rapid-escalated-standard:mandatory-gap`. |
 | Invalid Rapid structured output | Abort Rapid install and continue through Standard with `rapid-escalated-standard:invalid-provider-output`. |
 | Rapid provider output unavailable or empty | Skip Rapid guidance for the turn; do not install local substitute guidance. |

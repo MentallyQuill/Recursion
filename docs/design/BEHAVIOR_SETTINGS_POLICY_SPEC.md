@@ -122,8 +122,8 @@ type RecursionInfluencePolicy = {
     preferredProfile: "compact" | "normal" | "rich";
     detailPressure: "compact" | "normal" | "rich";
     sectionBudgets: {
-      sceneBrief: number;
-      turnBrief: number;
+      guidance: number;
+      cardEvidence: number;
       guardrails: number;
     };
     arbiterLine: string;
@@ -219,11 +219,13 @@ Prompt Footprint owns packet size and detail. It controls section budgets and ho
 
 The current code-level section budgets are:
 
-| Footprint | Scene Brief | Turn Brief | Guardrails |
+| Footprint | Guidance | Card Evidence | Guardrails |
 | --- | ---: | ---: | ---: |
-| Compact | 240 | 240 | 520 |
-| Normal | 900 | 900 | 900 |
-| Rich | 1600 | 1600 | 1200 |
+| Compact | 900 | 12000 | 700 |
+| Normal | 1800 | 30000 | 900 |
+| Rich | 3200 | 60000 | 1200 |
+
+`cardEvidence` is intentionally large enough to preserve the full selected hand under normal card-count settings. It is a guard against accidental truncation, not permission to inject the whole scene deck.
 
 The stored Prompt Footprint setting is the user's baseline preference. Arbiter may still request a current-turn footprint, but runtime must treat that request through the user's selected policy:
 
@@ -349,8 +351,8 @@ Current source-backed behavior:
 - `behaviorPolicyPromptLines(policy)` adds compact Strength, Focus, and Prompt Footprint policy lines to the Utility Arbiter request.
 - `runPolicyForEffectivePlan(settings, plan)` resolves the stored Prompt Footprint plus the Arbiter's current-run footprint request into an effective footprint for hand selection, composition, and diagnostics.
 - Runtime clamps Arbiter card budgets through Reasoning Level plus Min/Max Cards, applies Strength and Focus as mechanical pressure, and records compact plan-shaping diagnostics.
-- Reasoning Level derives provider reasoning intent per work category: final brief composition scales from minimal to medium/high, High and Ultra Reasoner Arbiter work uses medium, Reasoner card work stays minimal except Ultra, and provider tests always use minimal.
-- Prompt composition consumes the effective behavior policy, section budgets, and composer policy lines without exposing raw provider output or hidden reasoning.
+- Reasoning Level derives provider reasoning intent per work category: guidance composition scales from minimal to medium/high, High and Ultra Reasoner Arbiter work uses medium, Reasoner card work stays minimal except Ultra, and provider tests always use minimal.
+- Prompt composition consumes the effective behavior policy, guidance/card-evidence/guardrail budgets, and composer policy lines without exposing raw provider output or hidden reasoning.
 
 Live SillyTavern proof remains a separate release gate. The policy contract is considered source-backed when the deterministic suite passes; live renders and live smoke should prove the user-facing surface only after the real UI is stable enough to capture.
 

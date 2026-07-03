@@ -1,9 +1,9 @@
 import { normalizeCardBudgetSettings, normalizeSettings } from './settings.mjs';
 
 export const FOOTPRINT_SECTION_BUDGETS = Object.freeze({
-  compact: Object.freeze({ sceneBrief: 240, turnBrief: 240, guardrails: 520 }),
-  normal: Object.freeze({ sceneBrief: 900, turnBrief: 900, guardrails: 900 }),
-  rich: Object.freeze({ sceneBrief: 1600, turnBrief: 1600, guardrails: 1200 })
+  compact: Object.freeze({ guidance: 900, cardEvidence: 12000, guardrails: 700 }),
+  normal: Object.freeze({ guidance: 1800, cardEvidence: 30000, guardrails: 900 }),
+  rich: Object.freeze({ guidance: 3200, cardEvidence: 60000, guardrails: 1200 })
 });
 
 export const FOCUS_BOOSTED_FAMILIES = Object.freeze({
@@ -22,7 +22,7 @@ const STRENGTH_POLICIES = Object.freeze({
     selectionPressure: 'lean',
     composerAssertiveness: 'soft',
     arbiterLine: 'Strength: Light. Prefer valid cache, avoid churn, and refresh only when relevance or drift risk is clear. Do not drop critical scene constraints.',
-    composerLine: 'Strength: Light. Use sparse, gentle current-turn guidance and keep non-critical support brief.'
+    composerLine: 'Strength: Light. Write sparse, gentle guidance; raw selected cards remain evidence.'
   }),
   balanced: Object.freeze({
     level: 'balanced',
@@ -31,7 +31,7 @@ const STRENGTH_POLICIES = Object.freeze({
     selectionPressure: 'normal',
     composerAssertiveness: 'normal',
     arbiterLine: 'Strength: Balanced. Use normal refresh, lifecycle, and hand pressure for this scene.',
-    composerLine: 'Strength: Balanced. Compose a concise normal Recursion brief.'
+    composerLine: 'Strength: Balanced. Write concise Recursion guidance for using the selected raw cards.'
   }),
   strong: Object.freeze({
     level: 'strong',
@@ -40,7 +40,7 @@ const STRENGTH_POLICIES = Object.freeze({
     selectionPressure: 'full',
     composerAssertiveness: 'firm',
     arbiterLine: 'Strength: Strong. Prefer firm current-turn guidance and refresh weak/stale coverage when relevance is plausible. Do not increase footprint size.',
-    composerLine: 'Strength: Strong. Phrase selected constraints firmly and preserve evidence-backed guardrails, while staying inside the chosen footprint.'
+    composerLine: 'Strength: Strong. Phrase selected constraints firmly and preserve evidence-backed guardrails while leaving raw cards intact.'
   })
 });
 
@@ -51,7 +51,7 @@ export const FOOTPRINT_POLICIES = Object.freeze({
     preferredProfile: 'compact',
     detailPressure: 'compact',
     arbiterLine: 'Prompt Footprint: Compact. Keep compact unless a safety or hard scene-constraint reason requires temporary expansion.',
-    composerLine: 'Prompt Footprint: Compact. Keep packet sections terse and avoid repetitive detail.'
+    composerLine: 'Prompt Footprint: Compact. Use fewer cards and shorter guidance; do not truncate raw selected card text.'
   }),
   normal: Object.freeze({
     level: 'normal',
@@ -59,7 +59,7 @@ export const FOOTPRINT_POLICIES = Object.freeze({
     preferredProfile: 'normal',
     detailPressure: 'normal',
     arbiterLine: 'Prompt Footprint: Normal. Compact or Normal are allowed freely; Rich requires a high-risk reason.',
-    composerLine: 'Prompt Footprint: Normal. Use balanced packet detail and omit lower-priority repetition.'
+    composerLine: 'Prompt Footprint: Normal. Use balanced guidance detail over the full selected raw card evidence.'
   }),
   rich: Object.freeze({
     level: 'rich',
@@ -67,7 +67,7 @@ export const FOOTPRINT_POLICIES = Object.freeze({
     preferredProfile: 'rich',
     detailPressure: 'rich',
     arbiterLine: 'Prompt Footprint: Rich. Use Rich when useful, but still permit Normal or Compact for simple turns.',
-    composerLine: 'Prompt Footprint: Rich. Use more scene and turn detail when relevant, without becoming broad lore recap or distant-story planning.'
+    composerLine: 'Prompt Footprint: Rich. Use richer guidance when relevant without broad lore recap or distant-story planning.'
   })
 });
 

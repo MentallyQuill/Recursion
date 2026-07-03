@@ -1,8 +1,8 @@
 # Recursion Operator Manual
 
-Recursion is a pre-alpha SillyTavern extension that compiles compact, current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Manual mode is active. Standard and Rapid pipelines control how that work is scheduled: Standard does the full foreground pass on send, while Rapid warms provider-generated scene guidance in the background and uses a shorter foreground delta.
+Recursion is a pre-alpha SillyTavern extension that compiles current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Manual mode is active. Standard and Rapid pipelines control how that work is scheduled: Standard does the full foreground pass on send, while Rapid warms a provider-generated card packet in the background and uses a shorter foreground delta.
 
-Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, character database, or card-editing product. It does not own durable canon. It improves the next response by preparing a bounded writing brief from the scene in front of the user.
+Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, character database, or card-editing product. It does not own durable canon. It improves the next response by preserving selected scene evidence and adding provider-authored direction for the scene in front of the user.
 
 ## Surface Matrix
 
@@ -50,7 +50,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 
 The bar should be stable. Status changes should not repeatedly resize the transcript or cover message input controls.
 
-The Pipeline control is a small icon-only dropdown immediately to the left of the Mode button. `Standard` uses the full foreground Arbiter, card, hand, compose, validate, and install path on send. `Rapid` warms provider-generated scene guidance in the background and uses a short provider delta on send. The selected icon updates on the bar, and the dropdown follows the compact Mode-menu pattern. Pipeline is not duplicated in Settings.
+The Pipeline control is a small icon-only dropdown immediately to the left of the Mode button. `Standard` uses the full foreground Arbiter, card, hand, compose, validate, and install path on send. `Rapid` warms a provider-generated card packet in the background and uses a short provider delta on send. The selected icon updates on the bar, and the dropdown follows the compact Mode-menu pattern. Pipeline is not duplicated in Settings.
 
 The Stop generation button appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
 
@@ -66,7 +66,7 @@ Expected stages include:
 - `Generating scene cards...`
 - `Selecting turn hand...`
 - `Composing prompt packet with Utility...`
-- `Reasoner composing final brief...`
+- `Reasoner refining guidance...`
 - `Installing Recursion prompt...`
 - `Recursion prompt ready.`
 
@@ -101,7 +101,7 @@ The Full Viewer is the complete observatory. It should include:
 - `Now`: current mode, active run, latest hand, and prompt packet summary.
 - `Deck`: scene-local card state, emphasis, detail profile, provider source, and freshness.
 - `Activity`: bounded sanitized runtime, provider, storage, and prompt-install timeline.
-- `Prompt Packet`: Scene Brief, Turn Brief, Guardrails, selected refs, omissions, and injection metadata.
+- `Prompt Packet`: Guidance, Card Evidence, Guardrails, selected refs, omissions, and injection metadata.
 - `Settings`: broad behavior controls.
 - `Providers`: Utility and Reasoner setup and test controls.
 
@@ -149,7 +149,7 @@ flowchart LR
 
 Rapid is the low-latency pipeline. When Rapid is selected and Recursion is enabled, Recursion may warm a provider-generated scene deck after an assistant message lands or the active source settles. That background work writes cache metadata only. It does not install prompt text by itself and does not affect the current assistant response.
 
-On the next send, Rapid uses the exact ready warm deck plus the new user message in a short Utility `rapidTurnDelta` call. If no warm deck is available, Rapid asks the Utility provider for a compact `rapidFastStartPack`. Both paths are provider-generated. Rapid does not create local fallback cards, local scene briefs, or local turn briefs. If the provider says a mandatory piece is missing, asks for Standard, or returns invalid Rapid structured output, Recursion escalates that turn to Standard.
+On the next send, Rapid uses the exact ready warm packet plus the new user message in a short Utility `rapidTurnDelta` call. If no warm packet is available, Rapid escalates that turn to Standard instead of creating a lower-quality summary path. Rapid does not create local fallback cards, local scene briefs, local turn briefs, or summary fast-start packs. If the provider says a mandatory piece is missing, asks for Standard, or returns invalid Rapid structured output, Recursion escalates that turn to Standard.
 
 Use Rapid when:
 
@@ -165,11 +165,9 @@ flowchart LR
     Artifact --> Send["Next user send"]
     Send --> Check{"Artifact matches source and contracts?"}
     Check -- "yes" --> Delta["Utility rapidTurnDelta"]
-    Check -- "no" --> FastStart["Utility rapidFastStartPack"]
+    Check -- "no" --> Standard["Run Standard for same turn"]
     Delta --> Install["Install valid Rapid packet"]
-    FastStart --> Install
     Delta -. "mandatory gap or invalid output" .-> Standard["Run Standard for same turn"]
-    FastStart -. "mandatory gap or invalid output" .-> Standard
 ```
 
 ## Settings
@@ -231,7 +229,7 @@ Use this first-run path:
 7. Confirm progress reaches prompt ready or a clear fallback.
 8. Inspect Last Brief and Prompt Packet.
 9. Try Manual with a narrowed Cards scope and confirm prompt readiness respects that scope.
-10. Try Rapid only when Utility provider work is intended, then confirm the progress text reports Rapid warm, delta, fast-start, or Standard escalation honestly.
+10. Try Rapid only when Utility provider work is intended, then confirm the progress text reports Rapid warm, delta, warm-miss Standard escalation, or clear fallback honestly.
 11. Use the power toggle to verify prompt cleanup.
 
 See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.
@@ -241,7 +239,7 @@ See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.
 During normal play:
 
 1. Keep Recursion in Auto when you want current-scene prompt help.
-2. Use Standard when you want the full foreground pass, and Rapid when you want warmed scene guidance plus a short send-time delta.
+2. Use Standard when you want the full foreground pass, and Rapid when you want warmed card evidence and guidance plus a short send-time delta.
 3. Watch the Hero Pixel Array and current-step text while work runs.
 4. Use Last Brief when output quality suggests the wrong scene pressure was selected.
 5. Open Prompt Packet when you need to inspect exact model-facing Recursion guidance.
@@ -258,7 +256,7 @@ Expected behavior:
 
 - Utility unavailable: skip new work, reuse valid cache when safe, or avoid injection.
 - Utility invalid output: reject unsafe structured output and use conservative fallback.
-- Rapid warm unavailable: use provider fast-start guidance or skip; do not install local substitute Rapid briefs.
+- Rapid warm unavailable: escalate to Standard for the same pending user message; do not install local substitute Rapid briefs.
 - Rapid invalid output or mandatory gap: escalate the current turn to Standard.
 - Card failure: omit failed cards and keep valid siblings.
 - Reasoner disabled, unhealthy, missing credentials, or failed: compose with Utility.
@@ -275,8 +273,8 @@ The Prompt Packet is the complete model-facing Recursion artifact for one genera
 
 Main sections:
 
-- Scene Brief: stable current-scene context while the scene remains valid.
-- Turn Brief: immediate next-response guidance.
+- Guidance: provider-authored direction for using the selected evidence in the next generation.
+- Card Evidence: full raw selected-card text preserved as evidence.
 - Guardrails: compact constraints that prevent contradictions, hidden-thought leakage, spoilers, or user-message rewriting.
 
 Inspection should also show selected card refs, omissions, footprint, token estimate, injection metadata, composer route, and fallback path.
@@ -338,7 +336,7 @@ Use this checklist for a practical browser pass:
 9. Confirm the Pipeline icon dropdown sits immediately left of Mode and offers Standard and Rapid only.
 10. Run a safe Standard Auto pass only when provider and live mutation are intended.
 11. Run a safe Rapid Auto pass only when provider and live mutation are intended.
-12. Confirm Activity reaches ready, Rapid fast-start/delta, Standard escalation, or a clear fallback.
+12. Confirm Activity reaches ready, Rapid delta, warm-miss Standard escalation, or a clear fallback.
 13. Inspect Last Brief and the final Prompt Packet text.
 14. Turn power off and confirm cleanup.
 15. Clear session keys before screenshots or exports that might show provider setup.

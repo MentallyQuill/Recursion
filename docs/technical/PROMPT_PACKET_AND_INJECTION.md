@@ -2,28 +2,28 @@
 
 The prompt packet is the model-facing Recursion artifact for one generation attempt. It is composed by `src/prompt.mjs`, installed by `src/hosts/sillytavern/host.mjs`, and orchestrated by `src/runtime.mjs`.
 
-Recursion injects a composed packet, not the full raw scene deck.
+Recursion injects provider-authored guidance plus the full raw selected-card evidence for the turn hand. It does not inject the full raw scene deck.
 
 ## Packet Sections
 
 | Section | Prompt key | Placement | Purpose |
 | --- | --- | --- | --- |
-| Scene Brief | `recursion.sceneBrief` | `in_prompt`, depth 4 | Stable current-scene frame, cast, environmental affordances, and possessions. |
-| Turn Brief | `recursion.turnBrief` | `in_chat`, depth 2 | Immediate next-response guidance from the current turn hand. |
-| Guardrails | `recursion.guardrails` | `in_prompt`, depth 1 | Compact constraints for scene plausibility, player intent, privacy, and scope. |
+| Guidance | `recursion.guidance` | `in_prompt`, depth 4 | Provider-authored direction for how the selected evidence should shape the next generation. |
+| Card Evidence | `recursion.cardEvidence` | `in_prompt`, depth 4 | Full raw `promptText` from selected cards, grouped as evidence and preserved without semantic summarization. |
+| Guardrails | `recursion.guardrails` | `in_prompt`, depth 1 | Compact global constraints for player intent, privacy, scope, and raw-evidence handling. |
 
 ```mermaid
 flowchart TD
-    Hand["Turn hand"] --> Utility["Utility composition"]
-    Utility --> Scene["Scene Brief"]
-    Utility --> Turn["Turn Brief"]
+    Hand["Turn hand"] --> Utility["Utility guidanceComposer"]
+    Hand --> Evidence["Raw selected card evidence"]
+    Utility --> Guidance["Guidance"]
     Utility --> Guardrails["Guardrails"]
     Hand --> Reasoner{"Reasoner eligible?"}
     Reasoner -- "yes" --> Patch["Validated synthesis patch"]
-    Patch --> Turn
+    Patch --> Guidance
     Reasoner -- "no" --> Utility
-    Scene --> Packet["Prompt packet"]
-    Turn --> Packet
+    Guidance --> Packet["Prompt packet"]
+    Evidence --> Packet
     Guardrails --> Packet
     Packet --> Blocks["SillyTavern prompt blocks"]
 ```
@@ -40,26 +40,22 @@ The composer receives:
 - turn fingerprint
 - settings for footprint and Reasoner use
 - section budgets
-- generation router when Reasoner can run
+- generation router for `guidanceComposer` and optional Reasoner augmentation
 - activity reporter for fallback events
 
-Cards are normalized before composition. Unsafe evidence refs, unsupported families, secret-looking ids, hidden-thought wording, and invalid omission reasons are cleaned or rejected. Safe full card text may remain available for Last Brief inspection, but composition applies its own section budgets before injection.
+Cards are normalized before composition. Unsafe evidence refs, unsupported families, secret-looking ids, hidden-thought wording, and invalid omission reasons are cleaned or rejected. Full selected-card prompt text is preserved in the Card Evidence section; packet budgeting is applied to guidance and guardrails, not by locally summarizing selected cards into a smaller semantic brief.
 
 ## Utility Composition
 
-Utility composition is the default path. It maps card families to sections:
+Utility composition is the default path. It calls `guidanceComposer` with the selected raw cards, omitted candidates, behavior policy, and current source metadata. The provider writes guidance about how the next generation should use the evidence; runtime validates schema, source ids, hidden-reasoning language, and length before trusting it.
 
-- Scene Brief: Scene Frame, Active Cast, Environment, Items
-- Guardrails: Scene Constraints, Knowledge, plus static guardrails
-- Turn Brief: Character Motivation, Relationship, Social Subtext, Consequences, Open Threads, and other turn-facing guidance
-
-Utility composition removes unsafe text, enforces section budgets, records source ids, and creates omission records when budget prevents inclusion.
+The selected raw card evidence remains model-facing even when guidance composition is unavailable. If `guidanceComposer` fails, Recursion installs a raw-card-only packet with minimal fallback guidance that tells the model to use the card evidence directly.
 
 ## Reasoner Composition
 
-Reasoner composition is optional. It runs only when settings allow it and the current footprint or Arbiter decision makes it eligible. The Reasoner receives selected cards, Utility sections, and the frozen snapshot hash, then returns `recursion.reasonerComposer.v1` with the same `snapshotHash`, an instruction patch, and source card ids.
+Reasoner composition is optional. It runs only when settings allow it and the current footprint or Arbiter decision makes it eligible. The Reasoner receives selected cards, Utility guidance, and the frozen snapshot hash, then returns `recursion.reasonerComposer.v1` with the same `snapshotHash`, an instruction patch, and source card ids.
 
-Runtime validates the schema, echoed snapshot hash, patch text, kept ids, and dropped ids. If validation fails, if the provider fails, or if the patch cannot fit the Turn Brief budget, the packet remains Utility-composed and diagnostics record a Reasoner fallback.
+Runtime validates the schema, echoed snapshot hash, patch text, kept ids, and dropped ids. If validation fails, if the provider fails, or if the patch cannot fit the guidance budget, the packet remains Utility-composed and diagnostics record a Reasoner fallback.
 
 Reasoner output cannot invent lore, forward plot, hidden motives, or private analysis.
 
@@ -71,11 +67,11 @@ Prompt Footprint is the size/detail owner for the final composed packet. Strengt
 
 | Footprint | Section budgets in source | Use |
 | --- | --- | --- |
-| Compact | small Scene Brief and Turn Brief, larger guardrail allowance | Stable scenes, crowded prompt environment, or low need. |
-| Normal | balanced section caps | Default roleplay turn. |
-| Rich | expanded Scene Brief and Turn Brief with bounded guardrails | High complexity or high drift risk. |
+| Compact | small Guidance, full selected Card Evidence, larger guardrail allowance | Stable scenes, crowded prompt environment, or low need. |
+| Normal | balanced Guidance and Guardrail caps with full selected Card Evidence | Default roleplay turn. |
+| Rich | expanded Guidance with bounded guardrails and full selected Card Evidence | High complexity or high drift risk. |
 
-Budget order favors critical guardrails, immediate scene constraints, current user focus, scene essentials, cast and relationship posture, environment affordances, and lower-priority open threads. Omission is part of the contract.
+Budget order favors critical guardrails, guidance that points at immediate scene constraints and current user focus, and then lower-priority directional nuance. Omission is part of the contract, but selected card evidence is not locally rewritten into shorter scene and turn briefs.
 
 ## Omissions
 
@@ -92,7 +88,7 @@ The broader architecture spec defines additional policy-level omission reasons. 
 
 ## Raw Critical Guardrail Exceptions
 
-The architecture contract allows exact raw critical guardrail exceptions only when exact wording is required to preserve a hard scene constraint or safety boundary. The current implementation installs three composed sections and validates against hidden-thought and forward-plan wording. Raw exceptions should remain rare, visible in diagnostics, and bounded by Recursion-owned prompt keys.
+The architecture contract allows exact raw critical guardrail exceptions only when exact wording is required to preserve a hard scene constraint or safety boundary. The current implementation already injects selected raw card evidence as a bounded evidence section, so raw exceptions should be used only for exact guardrail wording that must sit outside normal evidence. They remain rare, visible in diagnostics, and bounded by Recursion-owned prompt keys.
 
 ## Injection Lanes And Cleanup
 
@@ -106,7 +102,7 @@ flowchart LR
     Failure --> Warn["Activity warning"]
 ```
 
-The SillyTavern adapter accepts only prompt keys starting with `recursion.` and currently installs the three V1 keys. It clears known Recursion keys before install, tracks installed keys, and rolls back known keys if a partial install fails.
+The SillyTavern adapter accepts only prompt keys starting with `recursion.` and currently installs the three V3 keys: `recursion.guidance`, `recursion.cardEvidence`, and `recursion.guardrails`. It clears known Recursion keys before install, tracks installed keys, and rolls back known keys if a partial install fails.
 
 Advanced user settings control the composed packet's effective insertion lane without changing packet content. The V1 recommended defaults are `in_prompt`, `system`, and depth `4`.
 

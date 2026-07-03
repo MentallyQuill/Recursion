@@ -44,7 +44,7 @@ flowchart LR
     Install --> Continue["Host generation"]
 ```
 
-Rapid changes when provider work happens, not who authors the guidance. `warmRapidScene()` runs only when Recursion is enabled and `pipelineMode` is `rapid`; it captures an exact source revision, builds provider-generated warm artifacts, and stores `variant.rapid` metadata without installing prompt text. On the foreground send path, Rapid uses `rapidTurnDelta` when the warm artifact matches the active source and contract hashes, or `rapidFastStartPack` when no usable warm artifact exists. Rapid foreground Utility calls may hedge, and invalid Rapid output, mandatory missing cards, or provider-declared Standard escalation continue through the Standard pipeline for that same pending user message.
+Rapid changes when provider work happens, not who authors the guidance. `warmRapidScene()` runs only when Recursion is enabled and `pipelineMode` is `rapid`; it captures an exact source revision, builds a provider-generated warm card packet, and stores `variant.rapid` metadata without installing prompt text. On the foreground send path, Rapid uses `rapidTurnDelta` when the warm artifact matches the active source and contract hashes. If no usable warm artifact exists, Rapid continues through Standard for that same pending user message. Rapid foreground Utility calls may hedge, and invalid Rapid output, mandatory missing cards, or provider-declared Standard escalation also continue through Standard.
 
 ```mermaid
 flowchart LR
@@ -53,14 +53,12 @@ flowchart LR
     Artifact --> Send["Next send"]
     Send --> Check{"Warm usable?"}
     Check -- "yes" --> Delta["rapidTurnDelta"]
-    Check -- "no" --> FastStart["rapidFastStartPack"]
+    Check -- "no" --> Standard["Standard escalation"]
     Delta --> Install["Prompt install"]
-    FastStart --> Install
     Delta -. "invalid or mandatory gap" .-> Standard["Standard escalation"]
-    FastStart -. "invalid or mandatory gap" .-> Standard
 ```
 
-Rapid must not gain speed by using local fallback cards, local scene briefs, local turn briefs, or timeout-based quality cuts. Its latency win comes from background provider warm work, exact-source cache reuse, a small foreground Utility delta, and optional hedged Rapid Utility calls.
+Rapid must not gain speed by using local fallback cards, local scene briefs, local turn briefs, summary fast-start packs, or timeout-based quality cuts. Its latency win comes from background provider warm work, exact-source cache reuse, a small foreground Utility delta, and optional hedged Rapid Utility calls.
 
 ## Component Ownership
 
@@ -74,7 +72,7 @@ Rapid must not gain speed by using local fallback cards, local scene briefs, loc
 | Providers | `src/providers.mjs` | Utility and Reasoner lane routing, host-current-model, host-connection-profile, OpenAI-compatible calls, model discovery, JSON parsing, retries, timeouts, aborts, and model-call diagnostics. |
 | Cards | `src/cards.mjs` | Fixed V1 catalog, card normalization, provider-result conversion, lifecycle application, and hand selection. |
 | Card scope | `src/card-scope.mjs` | Fixed family/sub-item scope catalog, Auto focus payloads, Manual whitelist enforcement helpers, and safe scope summaries. |
-| Prompt | `src/prompt.mjs` | Packet sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
+| Prompt | `src/prompt.mjs` | Guidance, card evidence, guardrail sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
 | Storage | `src/storage.mjs` | Logical scene-cache and run-journal records, key safety, redaction, index maintenance, and bounded retention. |
 | Runtime | `src/runtime.mjs` | Power toggle, Auto/Manual orchestration, Standard/Rapid pipeline orchestration, snapshot use, Utility Arbiter plan handling, card-scope enforcement, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
 | UI | `src/ui.mjs` | Recursion Bar, Hero Pixel Array progress menu, options/settings, Last Brief, Full Viewer, settings, and provider controls. |
@@ -118,12 +116,12 @@ Character Motivation cards are behavior-facing. They can describe visible pressu
 
 ## Prompt Packet
 
-The model-facing artifact is the prompt packet, not the raw scene deck. V1 packets contain:
+The model-facing artifact is the prompt packet, not the raw scene deck. V3 packets contain:
 
 | Section | Use |
 | --- | --- |
-| Scene Brief | Stable current-scene frame, cast, relationship posture, and grounding details while the scene remains valid. |
-| Turn Brief | Immediate next-generation guidance, latest visible user pressure, scene constraints, and response cues. |
+| Guidance | Provider-authored direction for using selected evidence in the next generation. |
+| Card Evidence | Full raw selected card `promptText`, grouped as evidence and preserved without local semantic summarization. |
 | Guardrails | Compact constraints that protect scene plausibility, player intent, privacy, and scope. |
 
 Prompt packets include selected-card references, omissions, injection metadata, diagnostics, section hashes, and composition lane status. The Last Brief Prompt Packet panel and Full Viewer show the final injected packet text with bounded redaction so users can inspect what Recursion actually installed.

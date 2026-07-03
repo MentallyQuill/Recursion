@@ -29,9 +29,9 @@ Highest-priority invariants:
 - Pipeline selection lives as a compact bar dropdown left of Mode and must not be duplicated as a Settings toggle.
 - Manual mode uses card scope as a strict whitelist and must remain a distinct selectable mode.
 - Auto mode may install prompt packets only through Recursion-owned SillyTavern prompt keys.
-- Standard and Rapid remain distinct pipelines; Standard keeps the full foreground path, while Rapid uses background provider warm plus foreground Utility delta or fast-start.
+- Standard and Rapid remain distinct pipelines; Standard keeps the full foreground path, while Rapid uses background provider warm plus foreground Utility delta. Warm miss escalates to Standard.
 - Rapid background warm never installs prompt keys.
-- Rapid foreground never creates local fallback cards, local scene briefs, or local turn briefs.
+- Rapid foreground never creates local fallback cards, local scene briefs, local turn briefs, or summary fast-start packs.
 - Rapid warm artifacts are exact-source keyed and must not survive source revision, settings/provider/catalog/prompt contract, or pipeline-version mismatch.
 - Rapid invalid provider output and mandatory gaps escalate to Standard for the same pending user message.
 - Prompt packet installation is replace-or-clear by Recursion metadata, not blind append.
@@ -68,12 +68,12 @@ The gate calls the focused local suite rather than duplicating test logic. Cover
 - run journal redaction and ring-buffer pruning;
 - provider lane routing, provider-payload normalization, and structured response parsing/repair;
 - Utility Arbiter Auto Control Plan validation;
-- Rapid turn-delta and fast-start structured schema validation;
+- Rapid turn-delta structured schema validation and warm-miss Standard escalation;
 - card catalog, lifecycle, emphasis, detail, and hand-selection contracts;
 - Utility and Reasoner prompt packet composition;
 - prompt budget trimming and omission reasons;
 - prompt injection metadata, replacement, and clearing through a fake host;
-- Rapid background warm provider calls, no prompt install, foreground warm-delta install, fast-start install, hedged Utility winner selection, invalid-output Standard escalation, and mandatory-gap Standard escalation;
+- Rapid background warm provider calls, no prompt install, foreground warm-v2 install, warm-miss Standard escalation, hedged Utility winner selection, invalid-output Standard escalation, and mandatory-gap Standard escalation;
 - activity event normalization and user-safe status text.
 
 Focused contract tests should use deterministic fixtures and fake provider responses before live providers. `tools/scripts/test-provider-response-parser.mjs` owns provider-envelope extraction and syntax-repair cases. `tools/scripts/test-providers.mjs` owns router integration, sanitized repair diagnostics, stable failure codes, and retry behavior. Runtime/card tests own the semantic boundary: repaired JSON still fails when it lacks the expected schema, snapshot hash, role, family, or valid evidence. If a live smoke finds a defect, add a focused contract regression where the behavior can be isolated without browser control.
@@ -117,7 +117,7 @@ Primary live scenarios:
 - Manual prompt-install proof through the strict card-scope path;
 - Auto mode Utility Arbiter pass, card refresh, hand selection, prompt packet composition, and prompt installation;
 - Rapid warm evidence after assistant/source settle, proving cache-only provider work with no prompt-key installation;
-- Rapid foreground evidence for warm-delta or fast-start prompt install, with no local fallback card or local brief diagnostics;
+- Rapid foreground evidence for warm-v2 prompt install or warm-miss Standard escalation, with no local fallback card or local brief diagnostics;
 - Rapid mandatory-gap evidence, when fixtureable, proving Standard escalation rather than unsafe install;
 - Last Brief dropdown reflects the cards used for the last prompt packet;
 - Hero Pixel Array progress menu shows model-call, cache, storage, composition, injection, fallback, and settled states;
@@ -136,7 +136,7 @@ node tools\scripts\prove-live-pipelines.mjs --live --pipeline standard
 node tools\scripts\prove-live-pipelines.mjs --live --pipeline rapid
 ```
 
-The script uses the same `SILLYTAVERN_BASE_URL`, `RECURSION_SILLYTAVERN_USER`, and dedicated-user guardrails as the smoke harness. It drives the real compact Pipeline dropdown, verifies the Pipeline button is left of Mode, verifies no Pipeline control appears in Settings, sends through visible SillyTavern controls, proves an assistant message follows the exact proof user message, and fails on browser console warnings/errors or page errors. Standard proof requires a ready hand. Rapid proof accepts either a warm-delta or fast-start Rapid packet; fast-start may have zero selected cards because it installs provider-authored scene and turn guidance directly instead of local fallback cards.
+The script uses the same `SILLYTAVERN_BASE_URL`, `RECURSION_SILLYTAVERN_USER`, and dedicated-user guardrails as the smoke harness. It drives the real compact Pipeline dropdown, verifies the Pipeline button is left of Mode, verifies no Pipeline control appears in Settings, sends through visible SillyTavern controls, proves an assistant message follows the exact proof user message, and fails on browser console warnings/errors or page errors. Standard proof requires a ready hand. Rapid proof requires a `warm-v2` Rapid packet; a warm miss must be reported as Standard escalation, not as a Rapid summary install.
 
 ## Dedicated Live Users
 

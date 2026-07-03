@@ -1,6 +1,6 @@
 # Runtime Architecture
 
-Recursion is a mostly automatic runtime layer for compiling current-scene reasoning context into a compact prompt packet for the next SillyTavern generation. It observes the active chat, uses the Utility Arbiter to decide what scene implications are worth expanding, updates a bounded scene card cache, selects a turn hand, optionally runs a Composer or Reasoner pass, installs prompt guidance, and records diagnostics.
+Recursion is a mostly automatic runtime layer for compiling current-scene reasoning context into an inspectable prompt packet for the next SillyTavern generation. It observes the active chat, uses the Utility Arbiter to decide what scene implications are worth expanding, updates a bounded scene card cache, selects a turn hand, preserves selected raw card evidence, optionally runs Guidance or Reasoner composition, installs prompt guidance, and records diagnostics.
 
 Recursion should stay host-adapter based. SillyTavern is the first host, but runtime internals should remain host-neutral where that keeps the model, cache, and prompt-planning logic clean.
 
@@ -58,7 +58,7 @@ Primary components:
 - Utility Arbiter: returns an Auto Control Plan for action, scene status, prompt footprint, card jobs, Reasoner decision, and budgets.
 - Card Job Runner: executes the plan by creating, refreshing, stowing, discarding, and selecting scene cards according to Arbiter decisions.
 - Scene Cache: stores bounded, per-chat and per-scene card state plus fingerprints and prompt-plan metadata.
-- Rapid Warm Artifact: optional active-variant metadata that records provider-generated scene conditioning for an exact source revision so a later send can use a small Utility delta.
+- Rapid Warm Artifact: optional active-variant metadata that records selected raw card ids and provider-authored guidance for an exact source revision so a later send can use a small Utility delta.
 - Hand Selector: selects the small card set that should influence the next generation.
 - Composer: deterministic prompt assembly and optional model-mediated synthesis.
 - Reasoner: optional deeper synthesis lane that is never required for generation to continue.
@@ -86,11 +86,11 @@ The Rapid pipeline moves most scene work out of the send path:
 2. Background warm runs provider Arbiter/card work, saves a source-keyed warm artifact into the scene cache, and does not install prompt keys.
 3. On send, Rapid loads the exact warm artifact for the pre-send source revision.
 4. If the artifact is fresh, Rapid calls `rapidTurnDelta` on the Utility lane to select ready cards and adapt them to the new player message.
-5. If the artifact is missing, Rapid calls `rapidFastStartPack` on the Utility lane for compact provider-generated scene and turn guidance.
+5. If the artifact is missing, Rapid abandons its install path and runs Standard for the same turn.
 6. If the provider declares a mandatory missing card, Standard escalation, or invalid Rapid structured output, Rapid abandons its install path and runs Standard for the same turn.
-7. Accepted Rapid output is formatted into the normal prompt packet install contract and rechecked against the active source before installation.
+7. Accepted Rapid output is composed into the normal V3 prompt packet contract with guidance, full selected raw card evidence, and guardrails, then rechecked against the active source before installation.
 
-Rapid does not gain latency by using local cards, local fallback plans, local scene briefs, local turn briefs, or timeout-based quality cuts. Its speed comes from precomputation, exact-source cache reuse, delta work, and optional hedged Utility foreground calls.
+Rapid does not gain latency by using local cards, local fallback plans, local scene briefs, local turn briefs, summary fast-start packs, or timeout-based quality cuts. Its speed comes from precomputation, exact-source cache reuse, delta work, and optional hedged Utility foreground calls.
 
 Power and mode controls change how much of the pipeline runs:
 
@@ -101,7 +101,7 @@ Power and mode controls change how much of the pipeline runs:
 Pipeline controls change when work happens:
 
 - Standard: run the foreground Arbiter, card, hand, compose, and install sequence on send.
-- Rapid: warm provider-generated scene artifacts in the background, then run a foreground Utility delta or fast-start pack on send.
+- Rapid: warm a provider-generated card packet in the background, then run a foreground Utility delta on send. Warm misses escalate to Standard.
 
 Pipeline is selected from the compact bar dropdown immediately left of Mode. It is not duplicated in Settings.
 
@@ -173,7 +173,7 @@ Expected failure behavior:
 - Utility provider unavailable: skip new Arbiter work, reuse a valid packet if safe, or clear Recursion injection and continue.
 - Arbiter schema invalid or `snapshotHash` missing/mismatched: reject the plan, record diagnostics, and fall back to a conservative local action.
 - Card job failure: keep the last valid cache segment, omit failed cards from the hand, and record omission reasons.
-- Rapid warm miss: call the provider fast-start role instead of inventing local Rapid cards or briefs.
+- Rapid warm miss: run Standard for the current turn instead of inventing local Rapid cards, briefs, or summary fast-start packs.
 - Rapid mandatory gap: run Standard for the current turn and record the escalation diagnostic.
 - Invalid Rapid structured output: reject the output and run Standard for the current turn.
 - Reasoner failure: continue with deterministic or Utility-composed prompt packets.

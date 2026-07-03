@@ -89,7 +89,7 @@ Runtime toggles:
           <span class="provider-mark">R</span>
           <span class="step-sep"></span>
           <span class="step-icon"></span>
-          <span class="step-label">Reasoner brief</span>
+          <span class="step-label">Reasoner guidance</span>
           <span class="step-meta">running</span>
         </div>
         <div class="step-row queued" data-step="4" data-provider="utility">
@@ -190,8 +190,8 @@ Runtime toggles:
       <div class="reasoning-chain" role="radiogroup" aria-label="Reasoning level" data-selected="high">
         <span class="reasoning-line-fill" aria-hidden="true"></span>
         <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="low" title="Low: Utility-only, reduced cards."></button>
-        <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="medium" title="Medium: Utility checks, Reasoner final brief."></button>
-        <button class="reasoning-node is-lit is-selected" type="button" role="radio" aria-checked="true" data-level="high" title="High: Reasoner Arbiter, priority cards, and final brief."></button>
+        <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="medium" title="Medium: Utility checks, Reasoner guidance."></button>
+        <button class="reasoning-node is-lit is-selected" type="button" role="radio" aria-checked="true" data-level="high" title="High: Reasoner Arbiter, priority cards, and guidance."></button>
         <button class="reasoning-node" type="button" role="radio" aria-checked="false" data-level="ultra" title="Ultra: Reasoner-heavy calls with a larger card bias."></button>
       </div>
       <button class="icon-button brief-arrow" id="brief-arrow" aria-label="Open last brief preview" aria-expanded="false">
@@ -493,8 +493,8 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
       ]
     },
     {
-      id: 'reasoner-brief',
-      label: 'Reasoner brief',
+      id: 'reasoner-guidance',
+      label: 'Reasoner guidance',
       provider: 'reasoner',
       state: 'pending',
       children: [
@@ -515,17 +515,17 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
     [1220, 'set', 'scene-shift', 'done', 'Planning card pass...'],
     [1420, 'add', 'utility-card-batch', 'running', '2 model calls running...'],
     [1480, 'child-add', 'utility-card-batch:scene-frame-card', 'running', '2 model calls running...'],
-    [1520, 'add', 'reasoner-brief', 'running', '2 model calls running...'],
-    [1560, 'child-add', 'reasoner-brief:reasoner-synthesis', 'running', '2 model calls running...'],
+    [1520, 'add', 'reasoner-guidance', 'running', '2 model calls running...'],
+    [1560, 'child-add', 'reasoner-guidance:reasoner-synthesis', 'running', '2 model calls running...'],
     [1740, 'child-add', 'utility-card-batch:scene-constraints-card', 'cached', 'Scene Frame card running...'],
     [1980, 'child-add', 'utility-card-batch:character-motivation-card', 'done', 'Scene Frame card running...'],
-    [2140, 'child-set', 'utility-card-batch:scene-frame-card', 'done', 'Reasoner brief...'],
-    [2220, 'child-add', 'utility-card-batch:open-threads-card', 'warning', 'Reasoner brief...'],
-    [2260, 'child-add', 'utility-card-batch:active-cast-card', 'cached', 'Reasoner brief...'],
-    [2300, 'child-add', 'utility-card-batch:dialogue-relationship-card', 'done', 'Reasoner brief...'],
-    [2340, 'child-add', 'utility-card-batch:environment-items-card', 'running', 'Reasoner brief...'],
-    [2360, 'child-set', 'reasoner-brief:reasoner-synthesis', 'failed', 'Reasoner failed; Utility fallback running...'],
-    [2440, 'child-add', 'reasoner-brief:utility-fallback', 'warning', 'Repairing card JSON...'],
+    [2140, 'child-set', 'utility-card-batch:scene-frame-card', 'done', 'Reasoner guidance...'],
+    [2220, 'child-add', 'utility-card-batch:open-threads-card', 'warning', 'Reasoner guidance...'],
+    [2260, 'child-add', 'utility-card-batch:active-cast-card', 'cached', 'Reasoner guidance...'],
+    [2300, 'child-add', 'utility-card-batch:dialogue-relationship-card', 'done', 'Reasoner guidance...'],
+    [2340, 'child-add', 'utility-card-batch:environment-items-card', 'running', 'Reasoner guidance...'],
+    [2360, 'child-set', 'reasoner-guidance:reasoner-synthesis', 'failed', 'Reasoner failed; Utility fallback running...'],
+    [2440, 'child-add', 'reasoner-guidance:utility-fallback', 'warning', 'Repairing card JSON...'],
     [2500, 'child-set', 'utility-card-batch:environment-items-card', 'done', 'Repairing card JSON...'],
     [2540, 'child-add', 'utility-card-batch:scene-frame-beat-card', 'running', 'Repairing card JSON...'],
     [2580, 'child-set', 'utility-card-batch:scene-frame-beat-card', 'done', 'Repairing card JSON...'],

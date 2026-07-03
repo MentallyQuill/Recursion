@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Recursion improves the next SillyTavern generation by composing a compact, inspectable prompt packet from the selected turn hand. It does not inject every selected card directly, and it does not try to own all story context. The packet is a small reasoning brief that helps the model notice the active scene's immediate implications: recent turn pressure, visible character posture, spatial and social affordances, reveal boundaries, and hard plausibility constraints.
+Recursion improves the next SillyTavern generation by composing an inspectable prompt packet from the selected turn hand. The packet preserves the full raw selected-card text as evidence and adds provider-authored guidance about how that evidence should shape the next response. Recursion does not try to own all story context; it helps the model notice the active scene's immediate implications: recent turn pressure, visible character posture, spatial and social affordances, reveal boundaries, and hard plausibility constraints.
 
 Related specs:
 
@@ -16,15 +16,15 @@ Related specs:
 
 ## Composition Strategy
 
-The selected hand is the input to prompt composition, not the final prompt. Cards are intermediate runtime artifacts used to decide what matters now. The composer fuses those cards into a bounded prompt packet with three user-inspectable sections:
+The selected hand is the evidence input to prompt composition. Cards are intermediate runtime artifacts used to decide what matters now, and selected cards remain visible to the model as raw evidence. The composer adds a provider-authored direction layer around that evidence with three user-inspectable sections:
 
-- Scene Brief
-- Turn Brief
+- Guidance
+- Card Evidence
 - Guardrails
 
-The composed packet is preferred because it can remove duplicates, resolve emphasis, fit the active footprint budget, and present one coherent instruction instead of a stack of fragmented card text. Compact card references may be retained internally for diagnostics, omission tracing, cache invalidation, and inspector display, but the model-facing prompt should read as a deliberate brief.
+The guidance section is preferred over deterministic local summarization because it can resolve emphasis, preserve subtext, and tell the model how to use the cards without replacing the cards. Compact card references remain internally for diagnostics, omission tracing, cache invalidation, and inspector display.
 
-Raw or direct card injection is a narrow exception. It is reserved for critical guardrails that would lose force if paraphrased, such as a hard scene constraint, an active safety boundary, or a precise response-shape constraint that must remain exact. Raw card injection must be recorded in diagnostics with the reason it bypassed composition.
+Raw selected-card evidence is the normal V3 prompt contract, not an exception. Raw/direct guardrail exceptions remain reserved for exact wording that must sit outside normal card evidence, such as a hard safety boundary or response-shape constraint.
 
 Composition must not:
 
@@ -47,7 +47,7 @@ Required fields:
 - `sceneFingerprint`: current scene identity used for cache checks.
 - `turnFingerprint`: current turn identity used to avoid stale installation.
 - `footprint`: `compact`, `normal`, or `rich`.
-- `sections`: composed model-facing sections.
+- `sections`: model-facing guidance, card evidence, and guardrail sections.
 - `selectedCardRefs`: compact internal references for selected hand items.
 - `omissions`: budget and policy omissions.
 - `injectionPlan`: lane, depth, order, and lifecycle metadata.
@@ -55,29 +55,28 @@ Required fields:
 
 Model-facing sections:
 
-### Scene Brief
+### Guidance
 
-The Scene Brief is reusable while the scene fingerprint remains valid. It describes the current scene frame in compact prose:
+Guidance is regenerated for the current generation attempt. It is provider-authored direction for how the model should use the selected raw cards:
 
-- immediate location or situation;
-- active cast and visible relationship posture;
-- important recent scene implications that shape this response;
-- unresolved near-term pressures;
-- sensory or spatial constraints that improve prose grounding.
+- current response priorities and emphasis;
+- how visible posture, social pressure, constraints, and open threads should shape the next beat;
+- what not to overplay, restate, or resolve prematurely;
+- how to respect the latest user message without rewriting it;
+- where exact card evidence should control scene plausibility.
 
-The Scene Brief should be stable enough to survive several turns but not so broad that it becomes a replacement for lore or memory. It should avoid backstory unless that backstory is immediately active in the scene.
+Guidance must stay evidence-bound. It can synthesize selected cards, but it cannot invent lore, hidden motives, future plot, or private analysis.
 
-### Turn Brief
+### Card Evidence
 
-The Turn Brief is regenerated for the current generation attempt. It captures what the next response must respect now:
+Card Evidence contains the full raw `promptText` from selected cards. It is grouped and labeled as evidence rather than rewritten into a local summary. It preserves:
 
-- the user's latest move or request, without rewriting it;
-- immediate scene constraints and plausibility traps;
-- active dialogue, emotional, pacing, or action cues;
-- response-shaping priorities selected by the Utility Arbiter;
-- any short-lived instruction needed only for this turn.
+- the card family and role;
+- the card id for source tracing;
+- the selected card's prompt-facing text;
+- card-level emphasis/detail metadata when safe and useful.
 
-The Turn Brief should sit closest to the active generation context. It is allowed to be more specific and volatile than the Scene Brief.
+Card Evidence should include selected cards only. The full scene deck, omitted cards, inspector-only notes, provider prompts, provider responses, and hidden reasoning stay out of the model-facing packet.
 
 ### Guardrails
 
@@ -90,7 +89,7 @@ Guardrails are concise constraints the response must not violate. They are limit
 - do not overwrite the user's latest message or decide the player's intent;
 - do not restate large external memory or lore blocks already owned elsewhere.
 
-Guardrails may include a very small number of exact card-derived statements when exact wording is required. Those cases must be marked as raw/direct exceptions in diagnostics.
+Guardrails may include a very small number of exact card-derived statements when exact wording is required outside normal card evidence. Those cases must be marked as raw/direct exceptions in diagnostics.
 
 ## Composer Inputs
 
@@ -112,7 +111,7 @@ Core inputs:
 - user settings for enablement, Strength, Focus, Prompt Footprint, Reasoning Level, and diagnostics visibility;
 - token budget and section caps.
 
-Cards should provide structured fields rather than opaque prompt text wherever possible:
+Cards should provide structured fields plus safe `promptText`:
 
 - `cardId`;
 - `cardType`;
@@ -120,6 +119,7 @@ Cards should provide structured fields rather than opaque prompt text wherever p
 - `sourceMessageRefs`;
 - `claim`;
 - `instructionHint`;
+- `promptText`;
 - `continuityRisk`;
 - `emphasis`;
 - `detailProfile`;
@@ -127,29 +127,29 @@ Cards should provide structured fields rather than opaque prompt text wherever p
 - `externalOwnerHint`;
 - `expiresAtSceneShift`.
 
-The composer must treat cards as evidence and guidance, not as mandatory final prose. A high-emphasis card should usually survive into the packet, but the composer still controls phrasing, section placement, and duplication.
+The composer must treat cards as evidence. A high-emphasis card should usually survive into the selected hand, and selected card `promptText` survives into Card Evidence. The guidance composer controls the directional layer, not the raw evidence wording.
 
 ## Utility Composer vs Reasoner Composer
 
 Recursion has two composition modes.
 
-The names in this section describe composition paths. Provider generation role IDs are `briefUtilityComposer` for Utility-routed model composition and `reasonerComposer` for Reasoner synthesis.
+The names in this section describe composition paths. Provider generation role IDs are `guidanceComposer` for Utility-routed model guidance and `reasonerComposer` for optional Reasoner synthesis.
 
 ### Utility Composer
 
-The Utility Composer is the default. It is fast, bounded, schema-driven, and suitable for every generation attempt where Recursion is enabled. It may be implemented as deterministic runtime code, a Utility-model structured call, or a hybrid, but its output must pass the prompt packet contract.
+The Utility Composer is the default. It is fast, bounded, schema-driven, and suitable for every generation attempt where Recursion is enabled. In the V3 contract, the semantic guidance layer is model-composed through `guidanceComposer`; deterministic runtime code validates and packages, but does not summarize selected cards into a substitute brief.
 
 Responsibilities:
 
-- merge selected cards into packet sections;
-- enforce section caps and total footprint budget;
+- write guidance for selected card evidence;
+- enforce guidance and guardrail caps plus total footprint budget;
 - apply emphasis and detail profiles;
-- remove duplicates and external-context repeats;
+- avoid duplicating raw evidence that is already visible in Card Evidence;
 - record omission reasons;
 - produce a stable injection plan;
 - degrade cleanly when a provider is unavailable.
 
-The Utility Composer should produce good-enough prompt guidance without requiring a Reasoner.
+The Utility Composer should produce good-enough direction without requiring a Reasoner. If it is unavailable, runtime still injects selected raw card evidence with minimal fallback guidance instead of inventing a deterministic semantic brief.
 
 ### Reasoner Composer
 
@@ -165,9 +165,9 @@ Reasoner Composer triggers may include:
 - user-enabled strong guidance mode;
 - repeated diagnostics showing weak previous composition.
 
-Reasoner output is not authoritative by itself. Runtime must validate, cap, and merge it into the packet. The Reasoner must echo the packet's frozen `snapshotHash`; missing or mismatched hashes are stale output and must be rejected. The Reasoner must not invent lore, future plot, hidden motivations, or private analysis. It should transform selected evidence into concise scene-reasoning guidance, then return structured output that the Utility Composer or runtime validator can accept, trim, or reject.
+Reasoner output is not authoritative by itself. Runtime must validate, cap, and merge it into the guidance section. The Reasoner must echo the packet's frozen `snapshotHash`; missing or mismatched hashes are stale output and must be rejected. The Reasoner must not invent lore, future plot, hidden motivations, or private analysis. It should transform selected evidence into concise scene-reasoning guidance, then return structured output that the runtime validator can accept, trim, or reject.
 
-If the Reasoner fails, times out, returns invalid schema, returns the wrong snapshot hash, or exceeds safety limits, Recursion falls back to Utility Composer output and records the fallback in diagnostics.
+If the Reasoner fails, times out, returns invalid schema, returns the wrong snapshot hash, or exceeds safety limits, Recursion keeps the Utility guidance plus raw card evidence and records the fallback in diagnostics.
 
 ## Injection Lanes/Depths
 
@@ -175,16 +175,16 @@ Recursion installs prompt packets through controlled SillyTavern prompt integrat
 
 Default lanes:
 
-- `recursion.sceneBrief`: scene-scoped packet content, reused while the scene remains valid.
-- `recursion.turnBrief`: turn-scoped packet content, installed for the current generation.
+- `recursion.guidance`: provider-authored direction for the current generation attempt.
+- `recursion.cardEvidence`: selected raw card evidence for the current generation attempt.
 - `recursion.guardrails`: compact high-priority constraints.
 - `recursion.rawCriticalGuardrail`: optional exact statements for rare raw/direct exceptions.
 
 Recommended depth behavior:
 
 - Guardrails use the strongest Recursion lane priority and should be placed where they remain visible to the final generation without displacing SillyTavern's core character or system prompts.
-- Turn Brief should be close to the current user message or active generation prompt because it is volatile and next-turn specific.
-- Scene Brief should sit behind the Turn Brief as stable scene context, lower than strict guardrails but high enough to influence prose and continuity.
+- Guidance should sit near the selected evidence and active generation context because it is volatile and next-turn specific.
+- Card Evidence should remain close enough to the guidance for the model to inspect the actual selected cards rather than relying on a paraphrase.
 - Raw critical guardrails should be minimal, rare, and placed only as high as needed to protect the next response.
 
 ### User-Controlled Final Prompt Injection
@@ -211,21 +211,21 @@ Compact is used when the scene is stable, the latest user message is straightfor
 
 Typical shape:
 
-- very short Turn Brief;
+- very short Guidance;
+- full selected Card Evidence from a smaller hand;
 - critical Guardrails only;
-- Scene Brief omitted or reduced to one sentence if already installed and fresh;
 - no Reasoner unless explicitly justified.
 
 Compact protects the active chat and external context from prompt bloat.
 
 ### Normal
 
-Normal is the default. It includes all three packet sections within conservative caps.
+Normal is the default. It includes guidance, selected card evidence, and guardrails within conservative caps.
 
 Typical shape:
 
-- concise Scene Brief;
-- focused Turn Brief;
+- concise Guidance;
+- selected Card Evidence preserved as raw prompts;
 - short Guardrails list;
 - selected-card references retained internally;
 - Reasoner used only when Utility Arbiter sees material benefit.
@@ -238,8 +238,8 @@ Rich is used when the next response has high scene complexity or high risk of dr
 
 Typical shape:
 
-- expanded Scene Brief with active cast, spatial state, and near-term pressure;
-- more detailed Turn Brief with continuity and dialogue priorities;
+- expanded Guidance for active cast, spatial state, near-term pressure, continuity, and dialogue priorities;
+- selected Card Evidence preserved as raw prompts;
 - explicit Guardrails for high-risk contradictions;
 - optional Reasoner synthesis when enabled and available.
 
@@ -252,18 +252,16 @@ Budgeting is part of the product contract. Recursion should prefer a smaller, sh
 Budget order:
 
 1. Critical Guardrails.
-2. Turn Brief scene constraints and plausibility traps.
+2. Guidance for scene constraints and plausibility traps.
 3. Current user focus and response cues.
-4. Scene Brief essentials.
-5. Active cast and relationship posture.
-6. Environment texture, item affordances, and social subtext.
-7. Lower-priority open threads.
+4. Guidance for active cast, relationship posture, environment texture, item affordances, and social subtext.
+5. Lower-priority open threads.
 
-Cards with higher emphasis are considered earlier, but emphasis does not override safety, freshness, ownership, or hard token caps. Detail profiles decide how much survives:
+Cards with higher emphasis are considered earlier for hand selection, but emphasis does not override safety, freshness, ownership, or hard token caps. Detail profiles decide how much guidance may point at a selected card; selected card evidence itself is not locally paraphrased:
 
-- terse cards usually become one clause or one bullet;
-- balanced cards may become a sentence;
-- descriptive cards may contribute texture only in normal or rich footprints.
+- terse cards usually get minimal guidance emphasis;
+- balanced cards may receive a direct guidance sentence;
+- descriptive cards may contribute extra texture guidance only in normal or rich footprints.
 
 Every excluded candidate that reached the composition stage should receive an omission reason. Standard omission reasons:
 
@@ -294,7 +292,7 @@ Guardrails protect the prompt packet from becoming an invisible author, memory s
 
 Composition guardrails:
 
-- Compose from selected hand evidence; do not invent facts.
+- Compose guidance from selected hand evidence; do not invent facts.
 - Keep the packet current-scene oriented.
 - Keep final prompt text inspectable.
 - Do not store or inject hidden chain-of-thought.
@@ -348,7 +346,7 @@ Each composition run should record:
 - footprint profile;
 - Utility Arbiter next-turn need summary;
 - selected card refs with emphasis and detail profile;
-- final section token estimates;
+- final section token estimates for guidance, card evidence, and guardrails;
 - total token estimate;
 - injection lane and depth plan;
 - Reasoner trigger, provider route, and result status;
@@ -366,7 +364,7 @@ V1 should stay focused on proving the compact prompt packet loop.
 
 Cut from V1:
 
-- direct injection of the full selected hand;
+- direct injection of the full scene deck or omitted candidates;
 - user-authored card catalogs or per-card prompt editing;
 - manual injection-depth matrix UI;
 - long-term memory ownership;
@@ -380,4 +378,4 @@ Cut from V1:
 - multi-packet experiments competing for the same generation;
 - legacy compatibility layers for early pre-alpha packet shapes.
 
-Pre-alpha status allows Recursion to update prompt packet schemas, card fields, and storage records in place when the V1 contract improves. The invariant to preserve is product behavior: a compact, current-scene, inspectable packet composed from the selected hand and installed only when it helps the next generation.
+Pre-alpha status allows Recursion to update prompt packet schemas, card fields, and storage records in place when the V1 contract improves. The invariant to preserve is product behavior: a current-scene, inspectable packet that preserves selected evidence, adds provider-authored guidance, and installs only when it helps the next generation.

@@ -27,7 +27,7 @@ const PHASE_LABELS = Object.freeze({
   arbiterPlanning: 'Planning card pass...',
   rapidWarming: 'Rapid warming scene deck...',
   rapidDeltaRunning: 'Rapid selecting turn delta...',
-  rapidFastStartRunning: 'Rapid fast-start pack...',
+  rapidWarmMissStandard: 'Rapid warm miss; Standard...',
   rapidWarmReady: 'Rapid deck ready.',
   rapidWarmStale: 'Rapid deck stale.',
   cacheReusing: 'Reusing scene deck...',
@@ -36,7 +36,7 @@ const PHASE_LABELS = Object.freeze({
   deckUpdating: 'Updating scene deck...',
   handSelected: 'Selecting turn hand...',
   utilityComposing: 'Composing prompt packet with Utility...',
-  reasonerComposing: 'Reasoner composing final brief...',
+  reasonerComposing: 'Reasoner refining guidance...',
   promptInstalling: 'Installing Recursion prompt...',
   promptPacketBuilt: 'Recursion prompt ready.',
   storageSaving: 'Saving scene cache...',
@@ -80,7 +80,7 @@ const PIPELINE_MENU_OPTIONS = Object.freeze([
     value: 'rapid',
     label: 'Rapid',
     title: 'Rapid Pipeline',
-    tip: 'Uses provider-warmed scene guidance plus a foreground turn delta.'
+    tip: 'Uses provider-warmed card evidence and guidance plus a foreground turn delta.'
   }
 ]);
 const STRENGTH_OPTIONS = Object.freeze([
@@ -108,8 +108,8 @@ const REASONING_LEVEL_OPTIONS = Object.freeze([
 ]);
 const REASONING_LEVEL_TIPS = Object.freeze({
   low: 'Low: Utility-only, reduced cards.',
-  medium: 'Medium: Utility checks, Reasoner final brief.',
-  high: 'High: Reasoner Arbiter, priority cards, and final brief.',
+  medium: 'Medium: Utility checks, Reasoner guidance.',
+  high: 'High: Reasoner Arbiter, priority cards, and guidance.',
   ultra: 'Ultra: Reasoner-heavy calls with a larger card bias.'
 });
 const REASONING_LEVELS = Object.freeze(REASONING_LEVEL_OPTIONS.map(([value]) => value));
@@ -252,6 +252,7 @@ function normalizeChips(value) {
 function laneLabel(value, fallback = 'Utility') {
   const lane = cleanText(value).toLowerCase();
   if (lane === 'reasoner') return 'Reasoner';
+  if (lane === 'guidance') return 'Guidance';
   if (lane === 'local') return 'Local';
   if (lane === 'utility') return 'Utility';
   return fallback;

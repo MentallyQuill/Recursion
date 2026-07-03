@@ -188,7 +188,7 @@ The 2026-07-03 documentation pass retires source-backed diagram PNGs in favor of
 | Full Viewer | Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics sections. |
 | Settings | Play Behavior, Strength, Prompt Footprint, Focus, collapsible Utility and Reasoner provider setup, Advanced Injection/UI/Diagnostics sections, and final prompt injection placement/role/depth. |
 | Provider Controls | Utility setup, Reasoner setup, source selector, fetched model list, session-only key state, test connection, Reasoner disabled/unhealthy state, and Utility fallback warning. |
-| Prompt packet inspection | Scene Brief, Turn Brief, Guardrails, selected card refs, omissions, injection metadata, and redaction-safe diagnostics. |
+| Prompt packet inspection | Guidance, Card Evidence, Guardrails, selected card refs, omissions, injection metadata, and redaction-safe diagnostics. |
 | Fail-soft states | Utility unavailable, Reasoner timeout, invalid structured output, storage write failure, injection failure, and stale async result. |
 | Mobile behavior | Bar wrap behavior, menu access, viewer layout, and touch-safe controls. |
 
@@ -200,7 +200,7 @@ The 2026-07-03 documentation pass retires source-backed diagram PNGs in favor of
 | Turn sequence diagram | Power, Auto/Manual generation lifecycle, prompt install timing, cancellation, and stale result discard. |
 | Card lifecycle diagram | Create, refresh, stow, discard, select, omit, and invalidate cards. |
 | Card family matrix | Scene Frame, Active Cast, Character Motivation, Relationship, Social Subtext, Scene Constraints, Knowledge, Consequences, Environment, Items, Open Threads. |
-| Prompt packet stack | Scene Brief, Turn Brief, Guardrails, raw critical guardrail exception. |
+| Prompt packet stack | Guidance, Card Evidence, Guardrails, raw critical guardrail exception. |
 | Prompt injection diagram | Recursion-owned prompt lanes, insertion metadata, stale packet clear, and host boundary. |
 | Provider routing diagram | Utility lane, optional Reasoner lane, current host model, connection profile, OpenAI-compatible endpoint, retries, and fallback. |
 | Storage key map | Settings, system index, scene cache, run journal, prompt metadata, and sanitized artifact boundary. |

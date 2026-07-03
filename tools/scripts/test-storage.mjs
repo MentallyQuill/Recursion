@@ -247,13 +247,23 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
         sourceRevisionHash: 'base-source',
         cards: [],
         rapid: {
-          pipelineVersion: 1,
+          pipelineVersion: 2,
           status: 'ready',
-          warmArtifactId: 'rapid-warm-1',
+          warmArtifactId: 'rapid-warm-v2',
           baseSourceRevisionHash: 'base-source',
-          conditionedSceneBrief: 'Provider scene brief.',
-          candidateCardIds: ['card-a'],
-          cardIds: ['card-a'],
+          baseSnapshotHash: 'base-snapshot',
+          selectedCardIds: ['card-a'],
+          cardIds: ['card-a', 'card-b'],
+          guidance: {
+            schema: 'recursion.guidanceComposer.v1',
+            status: 'used',
+            text: 'Warm provider guidance.',
+            sourceCardIds: ['card-a'],
+            guardrailCardIds: ['card-b'],
+            omittedCardIds: [{ id: 'card-b', reason: 'lower-priority' }],
+            diagnostics: ['guidance-ok'],
+            rawProviderResponse: 'must not persist'
+          },
           settingsHash: 'settings-hash',
           providerContractHash: 'provider-hash',
           cardCatalogHash: 'catalog-hash',
@@ -267,7 +277,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   const rapidCache = await repo.loadSceneCache('Rapid Cache Chat', 'Rapid Scene');
   assertEqual(
     rapidCache.variants['base-source'].rapid.warmArtifactId,
-    'rapid-warm-1',
+    'rapid-warm-v2',
     'rapid warm artifact id persists'
   );
   assertEqual(
@@ -279,6 +289,21 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
     rapidCache.variants['base-source'].rapid.status,
     'ready',
     'rapid warm status persists'
+  );
+  assertEqual(
+    rapidCache.variants['base-source'].rapid.guidance.text,
+    'Warm provider guidance.',
+    'rapid warm V2 guidance persists'
+  );
+  assertDeepEqual(
+    rapidCache.variants['base-source'].rapid.selectedCardIds,
+    ['card-a'],
+    'rapid warm V2 selected card ids persist'
+  );
+  assertEqual(
+    rapidCache.variants['base-source'].rapid.conditionedSceneBrief,
+    undefined,
+    'rapid V1 conditionedSceneBrief is dropped'
   );
 }
 

@@ -7,19 +7,19 @@ import { createMemoryStorageAdapter } from '../../storage.mjs';
 import { createSillyTavernUserFileStorageAdapter } from './storage.mjs';
 
 const KNOWN_RECURSION_PROMPT_KEYS = Object.freeze([
-  'recursion.sceneBrief',
-  'recursion.turnBrief',
+  'recursion.guidance',
+  'recursion.cardEvidence',
   'recursion.guardrails'
 ]);
 
 const PROMPT_TITLES = Object.freeze({
-  sceneBrief: 'Recursion Scene Brief',
-  turnBrief: 'Recursion Turn Brief',
+  guidance: 'Recursion Guidance',
+  cardEvidence: 'Recursion Card Evidence',
   guardrails: 'Recursion Guardrails'
 });
 const PROMPT_KEYS = Object.freeze({
-  sceneBrief: 'recursion.sceneBrief',
-  turnBrief: 'recursion.turnBrief',
+  guidance: 'recursion.guidance',
+  cardEvidence: 'recursion.cardEvidence',
   guardrails: 'recursion.guardrails'
 });
 

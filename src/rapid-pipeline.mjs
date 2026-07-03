@@ -1,10 +1,10 @@
 import { hashJson } from './core.mjs';
 
-export const RAPID_PIPELINE_VERSION = 1;
-export const RAPID_TURN_DELTA_SCHEMA = 'recursion.rapidTurnDelta.v1';
-export const RAPID_FAST_START_SCHEMA = 'recursion.rapidFastStartPack.v1';
+export const RAPID_PIPELINE_VERSION = 2;
+export const RAPID_TURN_DELTA_SCHEMA = 'recursion.rapidTurnDelta.v2';
+export const GUIDANCE_SCHEMA = 'recursion.guidanceComposer.v1';
 
-const TEXT_LIMIT = 1200;
+const TEXT_LIMIT = 6000;
 const SHORT_TEXT_LIMIT = 240;
 
 function asObject(value) {
@@ -72,6 +72,13 @@ export function rapidCacheKey(snapshot = {}) {
   ].join('::');
 }
 
+function guidanceIsUsable(guidance = {}) {
+  const source = asObject(guidance);
+  return source.schema === GUIDANCE_SCHEMA
+    && cleanText(source.text, TEXT_LIMIT)
+    && ['used', 'missing', 'fallback-raw-only'].includes(cleanText(source.status || 'used', 80));
+}
+
 export function rapidWarmArtifactIsUsable(artifact = {}, expected = {}) {
   const source = asObject(artifact);
   const required = asObject(expected);
@@ -82,40 +89,32 @@ export function rapidWarmArtifactIsUsable(artifact = {}, expected = {}) {
     && cleanText(source.providerContractHash, 180) === cleanText(required.providerContractHash, 180)
     && cleanText(source.cardCatalogHash, 180) === cleanText(required.cardCatalogHash, 180)
     && cleanText(source.promptContractHash, 180) === cleanText(required.promptContractHash, 180)
-    && Boolean(cleanText(source.conditionedSceneBrief, TEXT_LIMIT))
+    && Array.isArray(source.selectedCardIds)
+    && source.selectedCardIds.length > 0
     && Array.isArray(source.cardIds)
-    && source.cardIds.length > 0;
+    && source.cardIds.length > 0
+    && guidanceIsUsable(source.guidance);
 }
 
 export function buildRapidTurnDeltaPrompt(input = {}) {
   const source = asObject(input);
+  const selectedCards = Array.isArray(source.selectedCards)
+    ? source.selectedCards
+    : (Array.isArray(source.candidateCards) ? source.candidateCards : []);
   return [
     'Return one strict JSON object for Recursion Rapid foreground turn delta.',
     `Schema: ${RAPID_TURN_DELTA_SCHEMA}`,
     `Snapshot hash: ${cleanText(source.snapshotHash, 180)}`,
     `Base source revision hash: ${cleanText(source.baseSourceRevisionHash, 180)}`,
     `Turn source revision hash: ${cleanText(source.turnSourceRevisionHash, 180)}`,
-    'Given the warm provider-generated scene guidance and the latest user message, select only what should condition this reply.',
+    'Given the warm provider-authored guidance, full selected raw cards, and the latest user message, select the cards and write turn guidance for this reply.',
     'Do not invent cards. Missing non-mandatory cards should become backgroundRefreshRequests.',
     'Set escalateToStandard true only when a missing card is mandatory for safe or coherent response guidance.',
-    'Required fields: schema, snapshotHash, baseSourceRevisionHash, turnSourceRevisionHash, selectedCardIds, turnDeltaBrief, packetInstructions, guardrails, backgroundRefreshRequests, mandatoryMissingCards, escalateToStandard, diagnostics.',
+    'Required fields: schema, snapshotHash, baseSourceRevisionHash, turnSourceRevisionHash, selectedCardIds, turnGuidanceText, guardrailCardIds, packetInstructions, backgroundRefreshRequests, mandatoryMissingCards, escalateToStandard, diagnostics.',
     `Warm artifact: ${JSON.stringify(asObject(source.warmArtifact))}`,
-    `Candidate cards: ${JSON.stringify(Array.isArray(source.candidateCards) ? source.candidateCards : [])}`,
+    `Warm guidance: ${JSON.stringify(asObject(source.warmGuidance))}`,
+    `Selected raw cards: ${JSON.stringify(selectedCards)}`,
     `User message: ${cleanText(source.userMessage, TEXT_LIMIT)}`
-  ].join('\n\n');
-}
-
-export function buildRapidFastStartPrompt(input = {}) {
-  const source = asObject(input);
-  return [
-    'Return one strict JSON object for Recursion Rapid fast-start pack.',
-    `Schema: ${RAPID_FAST_START_SCHEMA}`,
-    `Snapshot hash: ${cleanText(source.snapshotHash, 180)}`,
-    `Turn source revision hash: ${cleanText(source.turnSourceRevisionHash, 180)}`,
-    'No warm deck is available. Create compact provider-generated scene and turn guidance directly.',
-    'Degrade breadth only. Do not return local fallback language, hidden reasoning, markdown, or prose outside JSON.',
-    'Required fields: schema, snapshotHash, turnSourceRevisionHash, sceneBrief, turnBrief, guardrails, omissions, backgroundRefreshRequests, mandatoryMissingCards, escalateToStandard, diagnostics.',
-    `Snapshot: ${JSON.stringify(asObject(source.snapshot))}`
   ].join('\n\n');
 }
 
@@ -126,37 +125,15 @@ export function normalizeRapidTurnDelta(value = {}, expected = {}) {
   const snapshotHash = cleanText(expected.snapshotHash, 180) || cleanText(source.snapshotHash, 180);
   const baseSourceRevisionHash = cleanText(expected.baseSourceRevisionHash, 180) || cleanText(source.baseSourceRevisionHash, 180);
   const turnSourceRevisionHash = cleanText(expected.turnSourceRevisionHash, 180) || cleanText(source.turnSourceRevisionHash, 180);
-  const brief = asObject(source.brief);
   return {
     schema: RAPID_TURN_DELTA_SCHEMA,
     snapshotHash,
     baseSourceRevisionHash,
     turnSourceRevisionHash,
     selectedCardIds: cleanList(source.selectedCardIds, 180, 20).filter((cardId) => allowed.has(cardId)),
-    turnDeltaBrief: firstText([source.turnDeltaBrief, source.turnBrief, source.userMessageDelta, source.deltaBrief, source.delta, brief.turnDeltaBrief, brief.turnBrief], TEXT_LIMIT),
-    packetInstructions: firstList([source.packetInstructions, source.instructions, source.promptPacketInstructions, brief.packetInstructions], SHORT_TEXT_LIMIT, 12),
-    guardrails: firstList([source.guardrails, source.guardrailInstructions, brief.guardrails], SHORT_TEXT_LIMIT, 12),
-    backgroundRefreshRequests: cleanRefreshRequests(source.backgroundRefreshRequests),
-    mandatoryMissingCards: cleanRefreshRequests(source.mandatoryMissingCards),
-    escalateToStandard: source.escalateToStandard === true,
-    diagnostics: cleanList(source.diagnostics, 120, 16)
-  };
-}
-
-export function normalizeRapidFastStartPack(value = {}, expected = {}) {
-  const source = asObject(value);
-  if (source.schema !== RAPID_FAST_START_SCHEMA) throw new Error('Invalid Rapid fast-start schema.');
-  const snapshotHash = cleanText(expected.snapshotHash, 180) || cleanText(source.snapshotHash, 180);
-  const turnSourceRevisionHash = cleanText(expected.turnSourceRevisionHash, 180) || cleanText(source.turnSourceRevisionHash, 180);
-  const brief = asObject(source.brief);
-  return {
-    schema: RAPID_FAST_START_SCHEMA,
-    snapshotHash,
-    turnSourceRevisionHash,
-    sceneBrief: firstText([source.sceneBrief, source.conditionedSceneBrief, source.scene, source.sceneSummary, source.compactSceneBrief, brief.sceneBrief, brief.scene], TEXT_LIMIT),
-    turnBrief: firstText([source.turnBrief, source.turnDeltaBrief, source.userMessageDelta, source.turn, source.turnSummary, brief.turnBrief, brief.turn], TEXT_LIMIT),
-    guardrails: firstList([source.guardrails, source.guardrailInstructions, source.constraints, brief.guardrails], SHORT_TEXT_LIMIT, 12),
-    omissions: firstList([source.omissions, source.omitted, source.omissionReasons, brief.omissions], SHORT_TEXT_LIMIT, 12),
+    turnGuidanceText: firstText([source.turnGuidanceText, source.userMessageDelta, source.deltaBrief, source.delta], TEXT_LIMIT),
+    guardrailCardIds: cleanList(source.guardrailCardIds, 180, 20).filter((cardId) => allowed.has(cardId)),
+    packetInstructions: firstList([source.packetInstructions, source.instructions, source.promptPacketInstructions], SHORT_TEXT_LIMIT, 12),
     backgroundRefreshRequests: cleanRefreshRequests(source.backgroundRefreshRequests),
     mandatoryMissingCards: cleanRefreshRequests(source.mandatoryMissingCards),
     escalateToStandard: source.escalateToStandard === true,
@@ -169,8 +146,9 @@ export function rapidArtifactHash(artifact = {}) {
     version: RAPID_PIPELINE_VERSION,
     warmArtifactId: artifact.warmArtifactId,
     baseSourceRevisionHash: artifact.baseSourceRevisionHash,
+    selectedCardIds: artifact.selectedCardIds,
     cardIds: artifact.cardIds,
-    conditionedSceneBrief: artifact.conditionedSceneBrief
+    guidance: artifact.guidance
   });
 }
 

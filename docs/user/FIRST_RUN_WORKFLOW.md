@@ -2,7 +2,7 @@
 
 This guide walks through the first useful Recursion session in SillyTavern. It assumes Recursion is installed or served as an extension and that you are using the current V1 pre-alpha contract.
 
-Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Manual mode is active. Pipeline selection is separate from Auto and Manual: Standard runs the full foreground pass on send, while Rapid warms provider-generated scene guidance in the background and uses a shorter foreground delta. Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing workflow.
+Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Manual mode is active. Pipeline selection is separate from Auto and Manual: Standard runs the full foreground pass on send, while Rapid warms a provider-generated card packet in the background and uses a shorter foreground delta. Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing workflow.
 
 ## 1. Install And Enable
 
@@ -37,7 +37,7 @@ Session API keys are memory-only for the browser session. Recursion may remember
 
 Reasoner is optional. Leave it disabled for the first pass unless you intentionally want Medium/High/Ultra routing to use the extra synthesis lane.
 
-Reasoning Level controls how strongly Recursion tries to use Reasoner. Low is Utility-only. Medium uses Reasoner for final brief composition when healthy. High adds Reasoner for Arbiter and priority card families. Ultra is Reasoner-heavy when the lane is healthy. If Reasoner fails, times out, is disabled, lacks credentials, or returns invalid output, Recursion keeps the selected level visible and falls back to Utility.
+Reasoning Level controls how strongly Recursion tries to use Reasoner. Low is Utility-only. Medium uses Reasoner for guidance composition when healthy. High adds Reasoner for Arbiter and priority card families. Ultra is Reasoner-heavy when the lane is healthy. If Reasoner fails, times out, is disabled, lacks credentials, or returns invalid output, Recursion keeps the selected level visible and falls back to Utility.
 
 ## 4. Run The First Auto Pass
 
@@ -70,13 +70,13 @@ A normal Auto pass may show stages such as reading the current turn, planning th
 
 ## 6. Try Rapid
 
-Rapid is useful after Standard is already working. It does not skip provider-authored guidance; instead, it moves scene work into a background warm step and uses a short Utility foreground delta on the next send.
+Rapid is useful after Standard is already working. It does not skip provider-authored guidance; instead, it moves card-packet work into a background warm step and uses a short Utility foreground delta on the next send.
 
 1. Confirm Utility is configured and passing provider tests.
 2. Set Pipeline to `Rapid`.
 3. Let an assistant message land or wait for the scene to settle so Recursion can warm a Rapid scene artifact.
 4. Send a safe, ordinary chat message.
-5. Confirm the progress text reports Rapid warm, Rapid turn delta, Rapid fast-start, Standard escalation, or a clear fallback honestly.
+5. Confirm the progress text reports Rapid warm, Rapid turn delta, warm-miss Standard escalation, or a clear fallback honestly.
 
 ```mermaid
 flowchart LR
@@ -84,7 +84,7 @@ flowchart LR
     Confirm --> Rapid["Switch to Rapid"]
     Rapid --> Warm["Let scene warm"]
     Warm --> Send["Send next message"]
-    Send --> Outcome["Rapid delta, fast-start, Standard escalation, or clear fallback"]
+    Send --> Outcome["Rapid delta, Standard escalation, or clear fallback"]
 ```
 
 ## 7. Inspect Last Brief And Viewer
@@ -121,7 +121,7 @@ The first run is healthy when:
 - Utility provider can be configured and tested.
 - Standard Auto mode reaches prompt ready or a clear fail-soft fallback.
 - Manual mode respects the selected card scope and reaches prompt ready or a clear fallback.
-- Rapid mode reports warm, turn-delta, fast-start, Standard escalation, or clear fallback states without installing local substitute Rapid guidance.
+- Rapid mode reports warm, turn-delta, warm-miss Standard escalation, or clear fallback states without installing local substitute Rapid guidance.
 - Active Stop generation cancels both the host generation and Recursion prompt work without showing a provider failure.
 - Last Brief and Full Viewer inspection are available.
 - Prompt Packet inspection shows bounded current-scene guidance.

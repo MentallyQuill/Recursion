@@ -1005,7 +1005,7 @@ function modeSmokeSeedPromptScript() {
       if (!context || typeof context.setExtensionPrompt !== 'function') {
         throw new Error('setExtensionPrompt unavailable for mode smoke');
       }
-      context.setExtensionPrompt('recursion.sceneBrief', 'Recursion mode smoke baseline.', 'IN_PROMPT', 4, false, 'SYSTEM');
+      context.setExtensionPrompt('recursion.guidance', 'Recursion mode smoke baseline.', 'IN_PROMPT', 4, false, 'SYSTEM');
       seeded = true;
     } catch (seedError) {
       error = String(seedError?.message || seedError || 'mode smoke seed failed');
@@ -1272,10 +1272,10 @@ function swipeProofScript() {
     const waitForPromptClear = async () => {
       const deadline = Date.now() + Math.max(0, Math.min(Number(waitMs) || 30000, 180000));
       while (Date.now() < deadline) {
-        if (promptEvents.some((event) => event.cleared === true && event.key === 'recursion.turnBrief')) return true;
+        if (promptEvents.some((event) => event.cleared === true && event.key === 'recursion.cardEvidence')) return true;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      return promptEvents.some((event) => event.cleared === true && event.key === 'recursion.turnBrief') || installedPromptKeys.size === 0;
+      return promptEvents.some((event) => event.cleared === true && event.key === 'recursion.cardEvidence') || installedPromptKeys.size === 0;
     };
     try {
       if (typeof globalThis.recursionOnEnable === 'function') await globalThis.recursionOnEnable();
@@ -1319,8 +1319,8 @@ function swipeProofScript() {
       proof.swipeIdA = snapA.messages?.[1]?.swipeId ?? null;
       proof.swipeCount = snapA.messages?.[1]?.swipeCount ?? null;
       if (typeof context.setExtensionPrompt !== 'function') throw new Error('setExtensionPrompt unavailable');
-      context.setExtensionPrompt('recursion.turnBrief', 'Recursion swipe smoke stale prompt.', 'IN_PROMPT', 4, false, 'SYSTEM');
-      proof.promptSeeded = promptEvents.some((event) => event.cleared === false && event.key === 'recursion.turnBrief');
+      context.setExtensionPrompt('recursion.cardEvidence', 'Recursion swipe smoke stale prompt.', 'IN_PROMPT', 4, false, 'SYSTEM');
+      proof.promptSeeded = promptEvents.some((event) => event.cleared === false && event.key === 'recursion.cardEvidence');
       chat[1].swipe_id = 1;
       chat[1].mes = chat[1].swipes[1];
       await emitSwipe();

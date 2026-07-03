@@ -100,7 +100,7 @@ const explicitProgress = createProgressRunModel({
     steps: [
       { id: 'read-turn', label: 'Reading current turn', providerLane: 'utility', state: 'done' },
       { id: 'card-batch', label: 'Utility card batch', providerLane: 'utility', state: 'running' },
-      { id: 'reasoner-brief', label: 'Reasoner brief', providerLane: 'reasoner', state: 'running' },
+      { id: 'reasoner-guidance', label: 'Reasoner guidance', providerLane: 'reasoner', state: 'running' },
       { id: 'compose-packet', label: 'Composing prompt packet', providerLane: 'utility', state: 'pending' },
       { id: 'repair-json', label: 'Repairing card JSON', providerLane: 'utility', state: 'warning' },
       { id: 'provider-failure', label: 'Provider retry exhausted', providerLane: 'reasoner', state: 'failed' }
@@ -117,7 +117,7 @@ assertDeepEqual(
   [
     ['read-turn', 'utility', 'done', 'done'],
     ['card-batch', 'utility', 'running', 'running'],
-    ['reasoner-brief', 'reasoner', 'running', 'running'],
+    ['reasoner-guidance', 'reasoner', 'running', 'running'],
     ['compose-packet', 'utility', 'pending', 'waiting'],
     ['repair-json', 'utility', 'warning', 'caution'],
     ['provider-failure', 'reasoner', 'failed', 'failed']
@@ -170,8 +170,8 @@ const nestedChildProgress = createProgressRunModel({
         ]
       },
       {
-        id: 'reasoner-brief',
-        label: 'Reasoner brief',
+        id: 'reasoner-guidance',
+        label: 'Reasoner guidance',
         providerLane: 'reasoner',
         state: 'running',
         children: [
@@ -193,7 +193,7 @@ const nestedChildProgress = createProgressRunModel({
   }
 });
 const nestedUtilityBatch = nestedChildProgress.steps.find((step) => step.id === 'utility-card-batch');
-const nestedReasonerBrief = nestedChildProgress.steps.find((step) => step.id === 'reasoner-brief');
+const nestedReasonerBrief = nestedChildProgress.steps.find((step) => step.id === 'reasoner-guidance');
 const nestedCacheDeck = nestedChildProgress.steps.find((step) => step.id === 'reusing-scene-deck');
 assertEqual(nestedUtilityBatch.state, 'done', 'mixed generated and cached child success makes the card batch successful');
 assertEqual(nestedReasonerBrief.state, 'failed', 'failed child dominates reasoner brief parent state');
@@ -211,7 +211,7 @@ assertDeepEqual(
   createHeroPixelBlocks(nestedChildProgress).map((block) => [block.id, block.state]),
   [
     ['utility-card-batch', 'done'],
-    ['reasoner-brief', 'failed'],
+    ['reasoner-guidance', 'failed'],
     ['reusing-scene-deck', 'cached']
   ],
   'hero pixel blocks use aggregated parent states for nested progress'
@@ -271,7 +271,7 @@ assertDeepEqual(
     ['selecting-turn-hand', 'pending'],
     ['saving-scene-cache', 'pending'],
     ['composing-prompt-packet', 'pending'],
-    ['reasoner-brief', 'pending'],
+    ['reasoner-guidance', 'pending'],
     ['installing-recursion-prompt', 'pending']
   ],
   'progress model derives top-level pending steps from activity history and plan'
@@ -287,11 +287,11 @@ const concurrentDerivedProgress = createProgressRunModel({
 });
 assertDeepEqual(
   concurrentDerivedProgress.steps
-    .filter((step) => ['utility-card-batch', 'reasoner-brief'].includes(step.id))
+    .filter((step) => ['utility-card-batch', 'reasoner-guidance'].includes(step.id))
     .map((step) => [step.id, step.state]),
   [
     ['utility-card-batch', 'running'],
-    ['reasoner-brief', 'running']
+    ['reasoner-guidance', 'running']
   ],
   'derived progress keeps concurrent provider rows running'
 );
@@ -679,7 +679,7 @@ const mixedLaneProgressModel = createRecursionViewModel({
     title: 'Generating',
     steps: [
       { id: 'card-batch', label: 'Utility card batch', providerLane: 'utility', state: 'running' },
-      { id: 'reasoner-brief', label: 'Reasoner brief', providerLane: 'reasoner', state: 'running' }
+      { id: 'reasoner-guidance', label: 'Reasoner guidance', providerLane: 'reasoner', state: 'running' }
     ]
   }
 });
@@ -721,7 +721,7 @@ const sensitiveView = {
     detail: { message: 'Bearer activity-token' }
   },
   lastPacket: {
-    sections: { turnBrief: 'Raw prompt text with sk-ui-packet and private-secret' },
+    sections: { guidance: 'Raw prompt text with sk-ui-packet and private-secret' },
     diagnostics: { composerLane: 'utility', promptPacketHash: 'packet-hash' }
   },
   circular: null,
@@ -1226,25 +1226,25 @@ try {
     },
     lastPacket: {
       packetId: 'packet-ui',
-      packetVersion: 1,
+      packetVersion: 3,
       chatId: 'chat-ui',
       sceneKey: 'scene-ui',
       sceneFingerprint: 'scene-ui',
       turnFingerprint: 'turn-ui',
       footprint: 'normal',
       sections: {
-        sceneBrief: 'Scene brief:\n- [Scene Frame] Door stays blocked and the brass lock remains warped.',
-        turnBrief: 'Turn brief: No turn-specific card guidance selected.',
+        guidance: 'Guidance:\nGUIDANCE_UI_MARKER keep Dumbledore protective but controlled.',
+        cardEvidence: 'Card evidence:\n- [Scene Frame] Door stays blocked and the brass lock remains warped.\n- [Social Subtext] SOCIAL_SUBTEXT_UI_MARKER courtesy carries veiled pressure.',
         guardrails: 'Guardrails:\n- Respect the player message.'
       },
-      selectedCardRefs: [{ cardId: 'card-a', family: 'Scene Frame', emphasis: 'emphasized', tokenEstimate: 12, detailProfile: 'standard', evidenceRefs: [] }],
+      selectedCardRefs: [{ cardId: 'card-a', family: 'Social Subtext', emphasis: 'emphasized', tokenEstimate: 12, detailProfile: 'standard', evidenceRefs: [] }],
       omissions: [],
       injectionPlan: [
-        { id: 'sceneBrief', section: 'sceneBrief', promptKey: 'recursion.sceneBrief', title: 'Recursion Scene Brief', placement: 'in_prompt', depth: 4, role: 'system', maxChars: 900, sourceIds: ['card-a'] },
-        { id: 'turnBrief', section: 'turnBrief', promptKey: 'recursion.turnBrief', title: 'Recursion Turn Brief', placement: 'in_chat', depth: 2, role: 'system', maxChars: 900, sourceIds: [] },
+        { id: 'guidance', section: 'guidance', promptKey: 'recursion.guidance', title: 'Recursion Guidance', placement: 'in_prompt', depth: 4, role: 'system', maxChars: 1800, sourceIds: ['card-a'] },
+        { id: 'cardEvidence', section: 'cardEvidence', promptKey: 'recursion.cardEvidence', title: 'Recursion Card Evidence', placement: 'in_prompt', depth: 4, role: 'system', maxChars: 30000, sourceIds: ['card-a'] },
         { id: 'guardrails', section: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', placement: 'in_prompt', depth: 1, role: 'system', maxChars: 900, sourceIds: [] }
       ],
-      diagnostics: { runId: 'run-ui', composerLane: 'utility', reasonerStatus: 'skipped', sectionBudgets: { sceneBrief: 900, turnBrief: 900, guardrails: 900 } },
+      diagnostics: { runId: 'run-ui', composerLane: 'guidance', reasonerStatus: 'skipped', guidanceStatus: 'used', pipelineMode: 'rapid', rapidPath: 'warm-v2', sectionBudgets: { guidance: 1800, cardEvidence: 30000, guardrails: 900 } },
       composedAt: '2026-07-01T00:00:00.000Z'
     }
   };
@@ -1458,14 +1458,14 @@ try {
   assert(root.querySelector('[data-recursion-reasoning-chain]'), 'compact bar renders the reasoning level chain');
   assert(root.querySelector('[data-recursion-reasoning-level-high]'), 'reasoning chain defaults to the High node');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('aria-label'), 'Low reasoning level. Low: Utility-only, reduced cards.', 'Low reasoning node has explicit accessible label');
-  assertEqual(root.querySelector('[data-recursion-reasoning-level-medium]').getAttribute('aria-label'), 'Medium reasoning level. Medium: Utility checks, Reasoner final brief.', 'Medium reasoning node has explicit accessible label');
-  assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('aria-label'), 'High reasoning level. High: Reasoner Arbiter, priority cards, and final brief.', 'High reasoning node has explicit accessible label');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-medium]').getAttribute('aria-label'), 'Medium reasoning level. Medium: Utility checks, Reasoner guidance.', 'Medium reasoning node has explicit accessible label');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('aria-label'), 'High reasoning level. High: Reasoner Arbiter, priority cards, and guidance.', 'High reasoning node has explicit accessible label');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('aria-label'), 'Ultra reasoning level. Ultra: Reasoner-heavy calls with a larger card bias.', 'Ultra reasoning node has explicit accessible label');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('tabindex'), '0', 'selected reasoning node is the roving tab stop');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('tabindex'), '-1', 'unselected reasoning node leaves the tab sequence');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('title'), 'Low: Utility-only, reduced cards.', 'Low reasoning tooltip matches the reference copy');
-  assertEqual(root.querySelector('[data-recursion-reasoning-level-medium]').getAttribute('title'), 'Medium: Utility checks, Reasoner final brief.', 'Medium reasoning tooltip matches the reference copy');
-  assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('title'), 'High: Reasoner Arbiter, priority cards, and final brief.', 'High reasoning tooltip matches the reference copy');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-medium]').getAttribute('title'), 'Medium: Utility checks, Reasoner guidance.', 'Medium reasoning tooltip matches the reference copy');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('title'), 'High: Reasoner Arbiter, priority cards, and guidance.', 'High reasoning tooltip matches the reference copy');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('title'), 'Ultra: Reasoner-heavy calls with a larger card bias.', 'Ultra reasoning tooltip matches the reference copy');
   assert(root.querySelector('[data-recursion-brief-arrow]'), 'compact bar renders a dedicated last-brief dropdown arrow');
   assert(root.querySelector('[data-recursion-cards-button]'), 'compact bar renders the Cards scope button');
@@ -1528,7 +1528,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-hero-array]').style.props['--columns'], '1', 'hero array exposes column count for width animation');
   assertEqual(root.querySelector('[data-recursion-hero-array]').style.props['--block-count'], '1', 'hero array exposes top-level block count for animation timing');
   assertEqual(root.querySelector('[data-recursion-hand-count]').textContent, 'Hand 2', 'rendered hand count');
-  assertEqual(root.querySelector('[data-recursion-composer]').textContent, 'Utility', 'rendered composer');
+  assertEqual(root.querySelector('[data-recursion-composer]').textContent, 'Guidance', 'rendered composer');
 
   root.querySelector('[data-recursion-pipeline-button]').setBoundingClientRect({ left: 32, top: 3, width: 24, height: 24, right: 56, bottom: 27 });
   root.querySelector('[data-recursion-pipeline-button]').click();
@@ -2026,12 +2026,15 @@ try {
   assert(packetButton, 'last brief renders Prompt Packet button');
   packetButton.click();
   assertEqual(root.querySelector('[data-recursion-prompt-packet-panel]').hidden, false, 'Prompt Packet button opens composed packet panel');
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Utility composed'), 'prompt packet panel renders composer lane meta chip');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Guidance composed'), 'prompt packet panel renders composer lane meta chip');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('1 card'), 'prompt packet panel renders card count meta chip');
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Recursion Scene Brief'), 'prompt packet panel renders injected block titles');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Recursion Guidance'), 'prompt packet panel renders guidance block title');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Recursion Card Evidence'), 'prompt packet panel renders card evidence block title');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('GUIDANCE_UI_MARKER'), 'prompt packet panel renders provider guidance');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('SOCIAL_SUBTEXT_UI_MARKER'), 'prompt packet panel renders raw Social Subtext evidence');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Door stays blocked and the brass lock remains warped.'), 'prompt packet panel renders actual injected prompt text');
   assert(!root.querySelector('[data-recursion-prompt-packet-preview]').textContent.includes('"packetId"'), 'prompt packet panel does not show the packet JSON wrapper');
-  assert(root.querySelector('[data-recursion-prompt-packet-preview]').textContent.includes('Scene brief:\n- [Scene Frame]'), 'prompt packet panel preserves injected prompt line breaks');
+  assert(root.querySelector('[data-recursion-prompt-packet-preview]').textContent.includes('Card evidence:\n- [Scene Frame]'), 'prompt packet panel preserves injected prompt line breaks');
   const progressList = root.querySelector('[data-recursion-progress-list]');
   const progressRow = root.querySelector('[data-recursion-progress-row]');
   const progressChildren = root.querySelector('[data-recursion-progress-children]');
@@ -2165,7 +2168,7 @@ try {
   await Promise.resolve();
   const copiedPromptPacket = copied.at(-1);
   assertEqual(copied.length, copiedBeforePromptPacket + 1, 'copy prompt packet writes a fresh clipboard item');
-  assert(copiedPromptPacket.includes('Recursion Scene Brief'), 'copy prompt packet writes the injected prompt text');
+  assert(copiedPromptPacket.includes('Recursion Card Evidence'), 'copy prompt packet writes the injected prompt text');
   assert(!copiedPromptPacket.includes('"packetId"'), 'copy prompt packet omits packet JSON wrapper');
   assert(copiedPromptPacket.includes('Door stays blocked and the brass lock remains warped.'), 'copy prompt packet includes actual injected prompt text');
 

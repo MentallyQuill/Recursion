@@ -180,8 +180,8 @@ function recursionSmokeFixtureHtml({
   const disableHookScript = missingDisableHook
     ? ''
       : disableHookNeverResolves
-        ? "globalThis.recursionOnDisable = async function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.sceneBrief', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.turnBrief', '', 'IN_CHAT', 2, false, 'SYSTEM'); } if (globalThis.__recursionSmokePromptClearActive === true) await new Promise(() => {}); return true; };"
-        : "globalThis.recursionOnDisable = function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.sceneBrief', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.turnBrief', '', 'IN_CHAT', 2, false, 'SYSTEM'); } return true; };";
+        ? "globalThis.recursionOnDisable = async function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.guidance', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.cardEvidence', '', 'IN_PROMPT', 4, false, 'SYSTEM'); } if (globalThis.__recursionSmokePromptClearActive === true) await new Promise(() => {}); return true; };"
+        : "globalThis.recursionOnDisable = function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.guidance', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.cardEvidence', '', 'IN_PROMPT', 4, false, 'SYSTEM'); } return true; };";
   const reasonerFallbackFlag = reasonerFallback ? 'true' : 'false';
   const promptPacketMetadataExpression = omitPromptPacketMetadata
     ? "JSON.stringify({ packetId: '', handId: '', selectedCardRefs: [] })"
@@ -289,7 +289,7 @@ function recursionSmokeFixtureHtml({
       };
       globalThis.SillyTavern = { getContext: () => smokeContext };
       if (smokeContext.unclearedPromptOnDisable) {
-        smokeContext.setExtensionPrompt('recursion.sceneBrief', 'Recursion stale disabled baseline prompt.', 'IN_PROMPT', 4, false, 'SYSTEM');
+        smokeContext.setExtensionPrompt('recursion.guidance', 'Recursion stale disabled baseline prompt.', 'IN_PROMPT', 4, false, 'SYSTEM');
       }
       globalThis.recursionGenerationInterceptor = async function recursionGenerationInterceptor(chat) {
         const sourceChat = Array.isArray(chat) ? chat : smokeContext.chat;
@@ -314,8 +314,8 @@ function recursionSmokeFixtureHtml({
           renderGenerationUi();
           return sourceChat;
         }
-        smokeContext.setExtensionPrompt('recursion.sceneBrief', 'Recursion smoke scene brief.', 'IN_PROMPT', 4, false, 'SYSTEM');
-        smokeContext.setExtensionPrompt('recursion.turnBrief', 'Recursion smoke turn brief.', 'IN_CHAT', 2, false, 'SYSTEM');
+        smokeContext.setExtensionPrompt('recursion.guidance', 'Recursion smoke guidance.', 'IN_PROMPT', 4, false, 'SYSTEM');
+        smokeContext.setExtensionPrompt('recursion.cardEvidence', 'Recursion smoke card evidence.', 'IN_PROMPT', 4, false, 'SYSTEM');
         if (${asyncUiGeneration ? 'true' : 'false'}) setTimeout(renderGenerationUi, 650);
         else renderGenerationUi();
         if (activeMode === 'manual' && ${manualInterceptorNeverResolves ? 'true' : 'false'}) {
@@ -331,7 +331,7 @@ function recursionSmokeFixtureHtml({
         button?.setAttribute('aria-pressed', smokeContext.enabled ? 'true' : 'false');
         button?.setAttribute('aria-label', smokeContext.enabled ? 'Turn Recursion off' : 'Turn Recursion on');
         if (!smokeContext.enabled) {
-          for (const key of ['recursion.sceneBrief', 'recursion.turnBrief', 'recursion.guardrails']) {
+          for (const key of ['recursion.guidance', 'recursion.cardEvidence', 'recursion.guardrails']) {
             smokeContext.setExtensionPrompt(key, '', 'IN_PROMPT', 0, false, 'SYSTEM');
           }
           document.querySelector('[data-recursion-status]').textContent = 'Off';

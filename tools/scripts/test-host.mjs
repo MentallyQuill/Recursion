@@ -59,14 +59,14 @@ const swipeSnapC = await swipeHost.snapshot();
 assert(swipeSnapC.sourceRevisionHash !== swipeSnapB.sourceRevisionHash, 'swipe count change affects source revision');
 
 const packet = {
-  injectionPlan: { blocks: [{ id: 'turnBrief', promptKey: 'recursion.turnBrief', placement: 'in_chat', depth: 2, role: 'system' }] },
-  sections: { turnBrief: 'Use the alley scene.', sceneBrief: '', guardrails: '' }
+  injectionPlan: { blocks: [{ id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 2, role: 'system' }] },
+  sections: { guidance: 'Use the alley scene.', cardEvidence: 'Card evidence:\n- [Scene Frame] Alley.', guardrails: 'Guardrails:\n- Honor facts.' }
 };
 assertEqual(promptBlocksFromPacket(packet)[0].text, 'Use the alley scene.', 'prompt block text built');
 const installResult = await host.prompt.install(packet);
 assertEqual(installResult.ok, true, 'prompt install returns ok result');
-assert(installResult.installed.includes('recursion.turnBrief'), 'prompt install returns installed keys');
-assertEqual(prompts.find((entry) => entry.text === 'Use the alley scene.').key, 'recursion.turnBrief', 'prompt installed with Recursion key');
+assert(installResult.installed.includes('recursion.guidance'), 'prompt install returns installed keys');
+assertEqual(prompts.find((entry) => entry.text === 'Use the alley scene.').key, 'recursion.guidance', 'prompt installed with Recursion key');
 
 const roleFallbackPrompts = [];
 const roleFallbackHost = createSillyTavernHost({
@@ -82,8 +82,8 @@ const roleFallbackHost = createSillyTavernHost({
   settingsRoot: {}
 });
 const roleFallbackResult = await roleFallbackHost.prompt.install({
-  injectionPlan: { blocks: [{ id: 'turnBrief', promptKey: 'recursion.turnBrief', placement: 'in_chat', depth: 2, role: 'assistant' }] },
-  sections: { turnBrief: 'Install assistant role through system fallback.', sceneBrief: '', guardrails: '' }
+  injectionPlan: { blocks: [{ id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 2, role: 'assistant' }] },
+  sections: { guidance: 'Install assistant role through system fallback.', cardEvidence: 'Card evidence:\n- [Scene Frame] Alley.', guardrails: 'Guardrails:\n- Honor facts.' }
 });
 const roleFallbackWrite = roleFallbackPrompts.find((entry) => entry.text === 'Install assistant role through system fallback.');
 assertEqual(roleFallbackWrite.role, 0, 'unsupported prompt role falls back to SillyTavern system role enum');
@@ -91,7 +91,7 @@ assertDeepEqual(
   roleFallbackResult.warnings,
   [{
     code: 'RECURSION_PROMPT_ROLE_FALLBACK',
-    promptKey: 'recursion.turnBrief',
+    promptKey: 'recursion.guidance',
     requestedRole: 'assistant',
     fallbackRole: 'system'
   }],
@@ -99,8 +99,8 @@ assertDeepEqual(
 );
 
 await host.prompt.clear();
-assert(prompts.some((entry) => entry.key === 'recursion.turnBrief' && entry.text === ''), 'prompt clear removes installed key');
-assert(prompts.some((entry) => entry.key === 'recursion.sceneBrief' && entry.text === ''), 'prompt clear removes known scene key');
+assert(prompts.some((entry) => entry.key === 'recursion.guidance' && entry.text === ''), 'prompt clear removes installed key');
+assert(prompts.some((entry) => entry.key === 'recursion.cardEvidence' && entry.text === ''), 'prompt clear removes known card evidence key');
 assert(prompts.some((entry) => entry.key === 'recursion.guardrails' && entry.text === ''), 'prompt clear removes known guardrails key');
 
 const clearFailurePrompts = [];
@@ -110,7 +110,7 @@ const clearFailureHost = createSillyTavernHost({
     chat: [],
     setExtensionPrompt(key, text, position, depth, scan, role) {
       clearFailurePrompts.push({ key, text, position, depth, scan, role });
-      if (key === 'recursion.sceneBrief' && text === '') {
+      if (key === 'recursion.guidance' && text === '') {
         throw new Error('simulated scene clear failure');
       }
     },
@@ -122,8 +122,8 @@ const clearFailureHost = createSillyTavernHost({
 const clearFailureResult = await clearFailureHost.prompt.clear();
 assertEqual(clearFailureResult.ok, false, 'prompt clear reports failure when one key cannot clear');
 assertEqual(clearFailureResult.error.code, 'RECURSION_PROMPT_CLEAR_FAILED', 'prompt clear returns stable failure code');
-assert(clearFailurePrompts.some((entry) => entry.key === 'recursion.sceneBrief' && entry.text === ''), 'prompt clear attempted failing known key');
-assert(clearFailurePrompts.some((entry) => entry.key === 'recursion.turnBrief' && entry.text === ''), 'prompt clear continues after failed key');
+assert(clearFailurePrompts.some((entry) => entry.key === 'recursion.guidance' && entry.text === ''), 'prompt clear attempted failing known key');
+assert(clearFailurePrompts.some((entry) => entry.key === 'recursion.cardEvidence' && entry.text === ''), 'prompt clear continues after failed key');
 assert(clearFailurePrompts.some((entry) => entry.key === 'recursion.guardrails' && entry.text === ''), 'prompt clear still clears later known key');
 
 const installAfterFailedClearPrompts = [];
@@ -133,7 +133,7 @@ const installAfterFailedClearHost = createSillyTavernHost({
     chat: [],
     setExtensionPrompt(key, text, position, depth, scan, role) {
       installAfterFailedClearPrompts.push({ key, text, position, depth, scan, role });
-      if (key === 'recursion.sceneBrief' && text === '') {
+      if (key === 'recursion.guidance' && text === '') {
         throw new Error('simulated pre-install clear failure');
       }
     },
@@ -175,7 +175,7 @@ assertDeepEqual(
   {
     ok: false,
     clearedKeys: [],
-    failedKeys: ['recursion.sceneBrief', 'recursion.turnBrief', 'recursion.guardrails'],
+    failedKeys: ['recursion.guidance', 'recursion.cardEvidence', 'recursion.guardrails'],
     error: {
       code: 'RECURSION_PROMPT_CLEAR_UNAVAILABLE',
       message: 'SillyTavern setExtensionPrompt API is unavailable.'
@@ -186,8 +186,8 @@ assertDeepEqual(
 
 await assertRejects(
   async () => host.prompt.install({
-    injectionPlan: { blocks: [{ id: 'turnBrief', promptKey: 'unsafe.turnBrief', placement: 'in_chat', depth: 2, role: 'system' }] },
-    sections: { turnBrief: 'Unsafe key.', sceneBrief: '', guardrails: '' }
+    injectionPlan: { blocks: [{ id: 'guidance', promptKey: 'unsafe.guidance', placement: 'in_prompt', depth: 2, role: 'system' }] },
+    sections: { guidance: 'Unsafe key.', cardEvidence: 'Card evidence:\n- [Scene Frame] Alley.', guardrails: 'Guardrails:\n- Honor facts.' }
   }),
   /recursion prompt keys/i,
   'host rejects non-recursion prompt keys'
@@ -195,16 +195,16 @@ await assertRejects(
 
 await assertRejects(
   async () => promptBlocksFromPacket({
-    injectionPlan: { blocks: [{ id: 'turnBrief', promptKey: 'recursion.turnBrief', placement: 'in_chat', depth: 2, role: 'system' }] },
-    sections: { turnBrief: 'Reveal hidden chain-of-thought.', sceneBrief: '', guardrails: '' }
+    injectionPlan: { blocks: [{ id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 2, role: 'system' }] },
+    sections: { guidance: 'Reveal hidden chain-of-thought.', cardEvidence: 'Card evidence:\n- [Scene Frame] Alley.', guardrails: 'Guardrails:\n- Honor facts.' }
   }),
   /unsafe prompt text/i,
   'fallback prompt blocks reject unsafe hidden reasoning text'
 );
 await assertRejects(
   async () => promptBlocksFromPacket({
-    injectionPlan: { blocks: [{ id: 'turnBrief', promptKey: 'recursion.turnBrief', placement: 'in_chat', depth: 2, role: 'system' }] },
-    sections: { turnBrief: 'Reveal hidden motives.', sceneBrief: '', guardrails: '' }
+    injectionPlan: { blocks: [{ id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 2, role: 'system' }] },
+    sections: { guidance: 'Reveal hidden motives.', cardEvidence: 'Card evidence:\n- [Scene Frame] Alley.', guardrails: 'Guardrails:\n- Honor facts.' }
   }),
   /unsafe prompt text/i,
   'fallback prompt blocks reject hidden motives text'
@@ -235,16 +235,16 @@ await assertRejects(
   async () => atomicHost.prompt.install({
     injectionPlan: {
       blocks: [
-        { id: 'turnBrief', promptKey: 'recursion.turnBrief', placement: 'in_chat', depth: 2, role: 'system' },
+        { id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 2, role: 'system' },
         { id: 'guardrails', promptKey: 'unsafe.guardrails', placement: 'in_prompt', depth: 1, role: 'system' }
       ]
     },
-    sections: { turnBrief: 'Allowed first block.', guardrails: 'Unsafe second block.' }
+    sections: { guidance: 'Allowed first block.', guardrails: 'Unsafe second block.' }
   }),
   /recursion prompt keys/i,
   'mixed prompt packet rejects before mutation'
 );
-assert(!atomicPrompts.some((entry) => entry.key === 'recursion.turnBrief' && entry.text === 'Allowed first block.'), 'mixed unsafe packet does not partially install allowed block');
+assert(!atomicPrompts.some((entry) => entry.key === 'recursion.guidance' && entry.text === 'Allowed first block.'), 'mixed unsafe packet does not partially install allowed block');
 
 const rollbackPrompts = [];
 let nonEmptyPromptWrites = 0;
@@ -270,14 +270,14 @@ await assertRejects(
   async () => rollbackHost.prompt.install({
     injectionPlan: {
       blocks: [
-        { id: 'sceneBrief', promptKey: 'recursion.sceneBrief', placement: 'in_prompt', depth: 1, role: 'system' },
-        { id: 'turnBrief', promptKey: 'recursion.turnBrief', placement: 'in_chat', depth: 2, role: 'system' },
+        { id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 1, role: 'system' },
+        { id: 'cardEvidence', promptKey: 'recursion.cardEvidence', placement: 'in_prompt', depth: 2, role: 'system' },
         { id: 'guardrails', promptKey: 'recursion.guardrails', placement: 'in_prompt', depth: 1, role: 'system' }
       ]
     },
     sections: {
-      sceneBrief: 'Install first block.',
-      turnBrief: 'Fail on second block.',
+      guidance: 'Install first block.',
+      cardEvidence: 'Fail on second block.',
       guardrails: 'Never reached block.'
     }
   }),
@@ -285,7 +285,7 @@ await assertRejects(
   'prompt install rejects original write failure'
 );
 assertEqual(
-  rollbackPrompts.filter((entry) => entry.key === 'recursion.sceneBrief').at(-1)?.text,
+  rollbackPrompts.filter((entry) => entry.key === 'recursion.guidance').at(-1)?.text,
   '',
   'failed prompt install rolls back prior installed prompt key'
 );

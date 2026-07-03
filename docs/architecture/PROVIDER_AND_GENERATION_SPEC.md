@@ -27,7 +27,7 @@ Recursion has two provider lanes.
 
 Utility is the operational backbone. It should handle the initial Arbiter call and normal card generation without needing a Reasoner handoff.
 
-Reasoner is not a better default Utility. It is a narrow composer lane used when Recursion already has structured Utility outputs and needs a sharper compact brief from a crowded or conflicted hand. Reasoner must not create new lore, hidden motives, durable canon, or private chain-of-thought artifacts.
+Reasoner is not a better default Utility. It is a narrow composer lane used when Recursion already has structured Utility outputs and needs sharper guidance from a crowded or conflicted hand. Reasoner must not create new lore, hidden motives, durable canon, or private chain-of-thought artifacts.
 
 ## Provider Settings Contract
 
@@ -81,7 +81,7 @@ Reasoning Level also maps to provider-level reasoning intent for model calls tha
 
 | Work category | Low | Medium | High | Ultra |
 | --- | --- | --- | --- | --- |
-| Final brief / `reasonerComposer` | minimal | medium | medium | high |
+| Guidance augmentation / `reasonerComposer` | minimal | medium | medium | high |
 | Arbiter on Reasoner | minimal | minimal | medium | medium |
 | Card generation on Reasoner | minimal | minimal | minimal | medium |
 | Provider tests | minimal | minimal | minimal | minimal |
@@ -114,14 +114,14 @@ Host current-model calls pass normalized `reasoningIntent`, `reasoningCategory`,
 
 Utility must always have an enabled settings object. If Utility is misconfigured or unhealthy, Recursion degrades to cached/local behavior and does not block the user's normal SillyTavern generation.
 
-Reasoner may be disabled. Disabled or unhealthy Reasoner means Medium, High, and Ultra keep their selected UI level but fall back to Utility composition and Utility Arbiter/card routing where needed.
+Reasoner may be disabled. Disabled or unhealthy Reasoner means Medium, High, and Ultra keep their selected UI level but fall back to Utility guidance and Utility Arbiter/card routing where needed.
 
 The first working loop must include:
 
 - Utility provider settings and test action;
 - Reasoner provider settings and test action;
 - Utility Arbiter structured call;
-- Utility composition path, using `briefUtilityComposer` if the composition work is model-routed;
+- Utility guidance path through `guidanceComposer`;
 - Reasoner composition path through `reasonerComposer`;
 - Utility-composed packet as the default and fallback composition path.
 
@@ -150,7 +150,7 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 | Role | Default lane | Purpose | Failure behavior |
 | --- | --- | --- | --- |
-| `utilityArbiter` | Utility, Reasoner at High/Ultra when healthy | Decide whether Recursion should skip, reuse cache, refresh cards, compose a brief, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
+| `utilityArbiter` | Utility, Reasoner at High/Ultra when healthy | Decide whether Recursion should skip, reuse cache, refresh cards, compose a packet, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
 | `sceneFrameCard` | Utility, Reasoner at High/Ultra when healthy | Produce compact current-scene frame data | Omit card with diagnostic |
 | `activeCastCard` | Utility, Reasoner at High/Ultra when healthy | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
 | `characterMotivationCard` | Utility, Reasoner at High/Ultra when healthy | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
@@ -162,15 +162,14 @@ Generation roles describe why a model call exists. They are not the same thing a
 | `environmentAffordancesCard` | Utility, Reasoner at Ultra when healthy | Capture spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances | Omit card with diagnostic |
 | `possessionsItemsCard` | Utility, Reasoner at Ultra when healthy | Capture important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them | Omit card with diagnostic |
 | `openThreadsCard` | Utility, Reasoner at Ultra when healthy | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
-| `rapidTurnDelta` | Utility | Select warm scene cards and provider-generated turn-delta guidance for the Rapid foreground path | Escalate to Standard only when a missing card is mandatory |
-| `rapidFastStartPack` | Utility | Produce compact provider-generated scene and turn guidance when no warm deck is ready | Escalate to Standard only when compact guidance is insufficient |
-| `briefUtilityComposer` | Utility | Compose the normal compact prompt brief from accepted cards and budgets | Compose from available cards; omit invalid cards |
+| `rapidTurnDelta` | Utility | Select warm raw cards and write provider-authored turn guidance for the Rapid foreground path | Escalate to Standard only when a missing card is mandatory |
+| `guidanceComposer` | Utility | Write provider-authored direction for using selected raw cards in the next generation | Fall back to raw-card-only packet when invalid or unavailable |
 | `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility-only composition |
 | `providerTest` | Selected lane | Validate lane connectivity and structured response capability | Mark lane test failed with compact error |
 
 Card names should align with [Card System Spec](../design/CARD_SYSTEM_SPEC.md). Prompt installation and depth decisions belong to [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md), not provider routing.
 
-The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Rapid foreground roles use `recursion.rapidTurnDelta.v1` and `recursion.rapidFastStartPack.v1`, Utility Composer uses `recursion.briefUtilityComposer.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`.
+The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Rapid foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses `recursion.guidanceComposer.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`.
 
 ## Utility Arbiter Call
 
@@ -279,7 +278,7 @@ Cards that fail this check are stale cache artifacts. They may be counted in vis
 
 ## Reasoner Composer Call
 
-The Reasoner Composer receives accepted Utility cards, budget metadata, conflict markers, and the same snapshot hash. It returns a compact instruction patch for prompt composition. Runtime rejects missing or mismatched `snapshotHash` values as stale composer output and falls back to Utility composition.
+The Reasoner Composer receives accepted Utility cards, budget metadata, conflict markers, and the same snapshot hash. It returns a compact instruction patch for prompt composition. Runtime rejects missing or mismatched `snapshotHash` values as stale composer output and falls back to Utility guidance plus raw selected card evidence.
 
 Reasoner is appropriate when:
 
@@ -330,7 +329,7 @@ Auto lane selection follows this order:
 3. Utility card calls generate the structured hand.
 4. Runtime validation accepts or omits cards, while the Utility Arbiter owns semantic hand selection.
 5. Reasoner runs only if the Arbiter selected it, the lane is enabled, the lane is healthy, and accepted card data is sufficient.
-6. Prompt composition installs the Utility-only or Reasoner-assisted brief.
+6. Prompt composition installs the Utility-only or Reasoner-assisted packet.
 
 Auto must be Utility-first. Enabling Reasoner only makes Reasoner eligible; it must not cause every run to use Reasoner.
 
@@ -343,7 +342,7 @@ The first end-to-end loop should prove both composer paths even if the default s
 1. Capture a stable snapshot.
 2. Run Utility Arbiter or use a fake Arbiter fixture in tests.
 3. Generate or reuse a small accepted hand.
-4. Compose a prompt packet through the Utility composition path by default, using `briefUtilityComposer` if a Utility model call is needed.
+4. Compose a prompt packet through `guidanceComposer`, injecting guidance plus full raw selected card evidence.
 5. Compose through `reasonerComposer` when the setting and Arbiter decision permit it.
 6. Fall back to the Utility-composed packet if Reasoner fails, times out, returns invalid schema, or is disabled during the run.
 7. Install, skip, or clear the Recursion prompt packet through the host adapter.
@@ -475,7 +474,7 @@ Recursion should borrow Directive's robustness discipline in smaller form:
 - schema failures do not get blind retries unless the failure is clearly recoverable, such as schema mismatch or likely truncation; correction prompts must restate the required response `schema` and frozen `snapshotHash` when present;
 - card failures, including malformed batch entries, omit only the failed card and keep valid siblings;
 - Utility Arbiter failure reuses valid cache or skips injection;
-- Reasoner failure falls back to Utility composition;
+- Reasoner failure falls back to Utility guidance plus raw selected card evidence;
 - all fallbacks emit progress status and sanitized journal events.
 
 The retry policy should be conservative. Reattempts are for resilience, not for chasing better creative output.

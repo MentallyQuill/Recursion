@@ -2,8 +2,8 @@ import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 import { hashJson } from '../../src/core.mjs';
 
 const RECURSION_PROMPT_KEYS = [
-  'recursion.sceneBrief',
-  'recursion.turnBrief',
+  'recursion.guidance',
+  'recursion.cardEvidence',
   'recursion.guardrails'
 ];
 

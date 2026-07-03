@@ -43,7 +43,7 @@ const STEP_ORDER = [
   'checking-scene-cache',
   'rapid-warming-scene-deck',
   'rapid-selecting-turn-delta',
-  'rapid-fast-start-pack',
+  'rapid-warm-miss-standard',
   'rapid-deck-ready',
   'rapid-deck-stale',
   'reusing-scene-deck',
@@ -54,7 +54,7 @@ const STEP_ORDER = [
   'selecting-turn-hand',
   'saving-scene-cache',
   'composing-prompt-packet',
-  'reasoner-brief',
+  'reasoner-guidance',
   'installing-recursion-prompt',
   'clearing-recursion-prompt',
   'recursion-prompt-ready'
@@ -67,7 +67,7 @@ const STEP_DEFINITIONS = Object.freeze({
   'checking-scene-cache': { label: 'Checking scene cache', providerLane: 'utility' },
   'rapid-warming-scene-deck': { label: 'Rapid warming scene deck', providerLane: 'utility' },
   'rapid-selecting-turn-delta': { label: 'Rapid selecting turn delta', providerLane: 'utility' },
-  'rapid-fast-start-pack': { label: 'Rapid fast-start pack', providerLane: 'utility' },
+  'rapid-warm-miss-standard': { label: 'Rapid warm miss; Standard', providerLane: 'utility' },
   'rapid-deck-ready': { label: 'Rapid deck ready', providerLane: 'utility' },
   'rapid-deck-stale': { label: 'Rapid deck stale', providerLane: 'utility' },
   'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
@@ -78,7 +78,7 @@ const STEP_DEFINITIONS = Object.freeze({
   'selecting-turn-hand': { label: 'Selecting turn hand', providerLane: 'utility' },
   'saving-scene-cache': { label: 'Saving scene cache', providerLane: 'utility' },
   'composing-prompt-packet': { label: 'Composing prompt packet', providerLane: 'utility' },
-  'reasoner-brief': { label: 'Reasoner brief', providerLane: 'reasoner' },
+  'reasoner-guidance': { label: 'Reasoner guidance', providerLane: 'reasoner' },
   'installing-recursion-prompt': { label: 'Installing Recursion prompt', providerLane: 'utility' },
   'clearing-recursion-prompt': { label: 'Clearing Recursion prompt', providerLane: 'utility' },
   'recursion-prompt-ready': { label: 'Recursion prompt ready', providerLane: 'utility' }
@@ -91,7 +91,7 @@ const PHASE_STEP_IDS = Object.freeze({
   cacheReusing: 'reusing-scene-deck',
   rapidWarming: 'rapid-warming-scene-deck',
   rapidDeltaRunning: 'rapid-selecting-turn-delta',
-  rapidFastStartRunning: 'rapid-fast-start-pack',
+  rapidWarmMissStandard: 'rapid-warm-miss-standard',
   rapidWarmReady: 'rapid-deck-ready',
   rapidWarmStale: 'rapid-deck-stale',
   cardBatchRunning: 'utility-card-batch',
@@ -104,8 +104,8 @@ const PHASE_STEP_IDS = Object.freeze({
   storageWarning: 'saving-scene-cache',
   utilityComposing: 'composing-prompt-packet',
   promptPacketBuilt: 'composing-prompt-packet',
-  reasonerComposing: 'reasoner-brief',
-  promptReasonerFallback: 'reasoner-brief',
+  reasonerComposing: 'reasoner-guidance',
+  promptReasonerFallback: 'reasoner-guidance',
   promptInstalling: 'installing-recursion-prompt',
   promptClearing: 'clearing-recursion-prompt',
   promptClearFailed: 'clearing-recursion-prompt',
@@ -285,8 +285,8 @@ function roleStepId(event) {
   const detail = asObject(event.detail);
   const roleId = cleanText(detail.roleId || event.roleId);
   if (roleId === 'utilityArbiter') return 'planning-card-pass';
-  if (roleId === 'reasonerComposer') return 'reasoner-brief';
-  if (roleId === 'briefUtilityComposer') return 'composing-prompt-packet';
+  if (roleId === 'reasonerComposer') return 'reasoner-guidance';
+  if (roleId === 'guidanceComposer') return 'composing-prompt-packet';
   if (MODEL_CALL_ROLE_IDS.has(roleId)) return 'utility-card-batch';
   return null;
 }
@@ -296,7 +296,7 @@ function roleLabel(roleId, fallback = '') {
   if (CARD_ROLE_LABELS[id]) return CARD_ROLE_LABELS[id];
   if (id === 'reasonerComposer') return 'Reasoner synthesis';
   if (id === 'utilityArbiter') return 'Utility Arbiter';
-  if (id === 'briefUtilityComposer') return 'Utility composer';
+  if (id === 'guidanceComposer') return 'Guidance composer';
   return fallback;
 }
 
@@ -503,7 +503,7 @@ function childIdFromRole(roleId, fallback) {
   if (role === 'possessionsItemsCard') return 'possessions-items-card';
   if (role === 'openThreadsCard') return 'open-threads-card';
   if (role === 'reasonerComposer') return 'reasoner-synthesis';
-  if (role === 'briefUtilityComposer') return 'utility-composer';
+  if (role === 'guidanceComposer') return 'guidance-composer';
   return idFromText(role, fallback);
 }
 
@@ -612,8 +612,8 @@ function appendPendingPlanSteps(map, view, orderStart = 0) {
       if (!map.has(id)) upsertStep(map, pendingStep(id, order++));
     }
   }
-  if (planWantsReasoner(source) && !map.has('reasoner-brief')) {
-    upsertStep(map, pendingStep('reasoner-brief', order++));
+  if (planWantsReasoner(source) && !map.has('reasoner-guidance')) {
+    upsertStep(map, pendingStep('reasoner-guidance', order++));
   }
   const promptStepId = enabled ? 'installing-recursion-prompt' : 'clearing-recursion-prompt';
   if (!map.has(promptStepId)) upsertStep(map, pendingStep(promptStepId, order++));

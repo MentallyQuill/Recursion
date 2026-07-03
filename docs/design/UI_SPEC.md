@@ -846,10 +846,11 @@ Category icons replace generic card-stack icons in the list:
 Metachip rules:
 
 - Category is never a chip; category is the icon plus row label.
-- Priority is the only strong color. Use red for `critical`, amber for `strong`, and muted neutral for `normal`, `light`, and support levels.
-- State/source chips such as `fresh`, `injected`, `memory`, `compiler`, `scene`, and `turn brief` stay subtle.
-- Compact rows show at most three or four chips. If more metadata exists, collapse extras behind `+N`.
-- Expanded rows may show more detail text, but metadata should still stay restrained; prefer a `+N` chip with hover/focus explanation over spilling every tag into the row.
+- Priority is the only strong color. Show priority chips only when they add signal: `critical` and `strong`. Do not spend chip space on routine `normal`, `light`, or support labels.
+- Compact Last Brief chips are exception-first trust signals, not a raw metadata dump. Show `cached` only when the card was reused from a valid scene cache; show `fallback`, `retried`, `reasoner`, `focus`, `manual`, or `guardrail` only when that condition materially explains why the card was used.
+- Do not show redundant or misleading compact chips such as `active`, routine clean `generated`, `standard`, `compact`, `scene`, generic `turn`, `provider`, or `injected`. Active is implied by Last Brief membership, detail profile is not visible row length, and clean generated cards need no source chip.
+- Compact rows should usually show zero to two chips. If more meaningful metadata exists, collapse extras behind `+N`.
+- Expanded rows may show full card text, but compact metadata should still stay restrained; deeper card metadata belongs in the Full Viewer or Prompt Packet inspector.
 - Avoid assigning every tag its own color. Random chip color sprawl is explicitly out of scope.
 
 Hover/focus help should be useful but never required. Icon-only controls, progress rows, provider marks, status indicators, card family icons, compact card rows, metachips, provider source controls, Injection controls, and Diagnostics actions should expose short tooltip/accessibility copy that explains what the thing is, what clicking it does, or why it is in its current state. Card row hover copy may include family, safe summary, selected/omitted reason, source/cache state, and bounded evidence metadata. It must not show raw provider output, hidden reasoning, API keys, stack traces, or raw transcript text. Full card text remains click-to-expand, not hover-only.
@@ -1089,7 +1090,7 @@ Card detail view should include:
 
 - Card type and target.
 - State: active, stowed, discarded, regeneration requested, refreshed.
-- Emphasis and detail profile.
+- Emphasis, detail profile, and card origin.
 - Why selected or why omitted.
 - Source evidence refs or hashes.
 - Injection-safe text.
@@ -1155,7 +1156,7 @@ Provider Source changes the field context inside each lane immediately, matching
 Advanced contains low-frequency controls grouped into collapsible sections:
 
 - Injection: placement, role, and depth controls for the composed prompt packet.
-- UI: Tooltips, Sub-tier Rows, and Progress Rows. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
+- UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
 - Diagnostics: journal size, safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
 
 Injection controls apply to the final conditioned prompt packet after Utility or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the composed Recursion brief to land in a different host lane or depth.

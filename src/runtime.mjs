@@ -1548,6 +1548,13 @@ function sanitizeGeneratedCard(card) {
   return sanitized;
 }
 
+function cardsWithOrigin(cards, origin) {
+  return (Array.isArray(cards) ? cards : []).map((card) => ({
+    ...card,
+    origin
+  }));
+}
+
 function safeActivity(activity, method, input, fallback = null) {
   try {
     const fn = activity?.[method];
@@ -3233,10 +3240,10 @@ export function createRecursionRuntime({
         )
       };
       lastPlan = plan;
-      const providerCards = (await generatePlanCards({ runId, plan, snapshot, settings, signal })).map(sanitizeGeneratedCard);
+      const providerCards = cardsWithOrigin((await generatePlanCards({ runId, plan, snapshot, settings, signal })).map(sanitizeGeneratedCard), 'generated');
       if (!isActiveRun(runId)) return supersededResult(runId);
       const activeCache = activeSceneCacheVariant(cache, snapshot);
-      const cacheCards = sanitizedCacheCards(runId, snapshot, activeCache.cards);
+      const cacheCards = cardsWithOrigin(sanitizedCacheCards(runId, snapshot, activeCache.cards), 'cache');
       const candidateCards = [...cacheCards, ...providerCards];
       if (!candidateCards.length) {
         settleRuntimeActivity({
@@ -3796,14 +3803,14 @@ export function createRecursionRuntime({
         return scoped.cards;
       };
       const activeCache = activeSceneCacheVariant(cache, sceneSnapshot);
-      const cacheCards = filterScopedCards(sanitizedCacheCards(runId, sceneSnapshot, activeCache.cards));
+      const cacheCards = filterScopedCards(cardsWithOrigin(sanitizedCacheCards(runId, sceneSnapshot, activeCache.cards), 'cache'));
       const reuseCacheOnly = action === 'reuse-cache' && cacheCards.length > 0;
       const providerCards = reuseCacheOnly ? [] : filterScopedCards(
-        (await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, settings, signal })).map(sanitizeGeneratedCard)
+        cardsWithOrigin((await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, settings, signal })).map(sanitizeGeneratedCard), 'generated')
       );
       if (!isActiveRun(runId)) return supersededResult(runId);
       const useLocalFallbackCards = !reuseCacheOnly && !cacheCards.length && !providerCards.length;
-      const generatedCards = useLocalFallbackCards ? filterScopedCards(localCards(sceneSnapshot).map(sanitizeGeneratedCard)) : [];
+      const generatedCards = useLocalFallbackCards ? filterScopedCards(cardsWithOrigin(localCards(sceneSnapshot).map(sanitizeGeneratedCard), 'fallback')) : [];
       if (scopedCardOmissionDiagnostics.length) {
         plan = {
           ...plan,

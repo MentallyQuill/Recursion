@@ -126,6 +126,7 @@ const CARD_SCOPE_BY_FAMILY = new Map(CARD_SCOPE_CATALOG.map((entry) => [entry.fa
 const STATUS = new Set(['candidate', 'active', 'stowed', 'stale', 'discarded']);
 const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
 const DETAIL = new Set(['compact', 'standard', 'expanded']);
+const ORIGIN = new Set(['cache', 'generated', 'fallback']);
 const EMPHASIS_PRIORITY = Object.freeze({ emphasized: 0, normal: 1, muted: 2 });
 const CARD_FORBIDDEN_PATTERNS = Object.freeze([
   /\bhidden\s+chain[-\s]of[-\s]thought\b/i,
@@ -622,6 +623,11 @@ function validEnum(value, allowed, fallback) {
   return allowed.has(text) ? text : fallback;
 }
 
+function optionalEnum(value, allowed) {
+  const text = String(value ?? '').trim();
+  return allowed.has(text) ? text : '';
+}
+
 function stringifyForPrompt(value) {
   try {
     const scrubbed = scrubProviderPromptStructured(value ?? {});
@@ -632,7 +638,7 @@ function stringifyForPrompt(value) {
 }
 
 function sanitizeHandCard(card) {
-  return {
+  const handCard = {
     id: String(card.id || ''),
     family: String(card.family || ''),
     role: String(card.role || ''),
@@ -643,6 +649,9 @@ function sanitizeHandCard(card) {
     emphasis: validEnum(card.emphasis, EMPHASIS, 'normal'),
     evidenceRefs: normalizeEvidenceRefs(card.evidenceRefs)
   };
+  const origin = optionalEnum(card.origin, ORIGIN);
+  if (origin) handCard.origin = origin;
+  return handCard;
 }
 
 function catalogPriority(card) {
@@ -729,6 +738,7 @@ export function normalizeCard(input = {}, context = {}) {
     tokenEstimate: numberInRange(source.tokenEstimate ?? source.tokenCost, estimateTokens(promptText), 1, MAX_TOKEN_ESTIMATE),
     detailProfile: validEnum(source.detailProfile, DETAIL, 'standard'),
     emphasis: validEnum(source.emphasis, EMPHASIS, 'normal'),
+    origin: optionalEnum(source.origin, ORIGIN),
     freshness: {
       generatedAt: String(freshness.generatedAt ?? source.generatedAt ?? nowIso()),
       sourceFingerprint: String(normalizedSource.snapshotHash || freshness.sourceFingerprint || ''),
@@ -740,6 +750,7 @@ export function normalizeCard(input = {}, context = {}) {
       reason: cleanText(arbiter.reason ?? source.reason ?? '', ARBITER_REASON_LIMIT)
     }
   };
+  if (!card.origin) delete card.origin;
   if (inspectorNotes) card.inspectorNotes = inspectorNotes;
   if (card.freshness.expiresAfterMesId === undefined) delete card.freshness.expiresAfterMesId;
   return card;

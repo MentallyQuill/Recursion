@@ -138,6 +138,8 @@ assertEqual(clampedUi.ui.progressListVisibleLimit, 5, 'whole progress list visib
 const root = {};
 const secrets = createSessionSecretStore();
 const store = createSettingsStore({ root, secretStore: secrets });
+assertEqual(store.get().ui.tooltipsEnabled, true, 'fresh settings store enables tooltip hover help');
+assertEqual(root.recursion.ui.tooltipsEnabled, true, 'fresh settings root persists tooltip hover help enabled');
 store.update({ mode: 'auto' });
 store.updateProvider('utility', { source: 'openai-compatible', apiKey: 'secret-key' });
 assertEqual(root.recursion.mode, 'auto', 'settings update persisted into root');

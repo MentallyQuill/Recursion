@@ -21,7 +21,7 @@ const SCENE_BRIEF_FAMILIES = new Set(['Scene Frame', 'Active Cast', 'Environment
 const GUARDRAIL_FAMILIES = new Set(['Scene Constraints', 'Knowledge']);
 const EMPHASIS = new Set(['normal', 'emphasized', 'muted']);
 const DETAIL_PROFILES = new Set(['compact', 'standard', 'expanded']);
-const MAX_CARD_TEXT = 1200;
+const MAX_CARD_TEXT = Infinity;
 const MAX_EVIDENCE_TEXT = 160;
 const MAX_OMISSION_REASON = 160;
 const MAX_REASONER_PATCH = 900;
@@ -327,7 +327,7 @@ function normalizeSectionLine(value) {
   return String(value ?? '')
     .replace(/\r\n/g, '\n')
     .split('\n')
-    .map((line) => safeText(line, 500))
+    .map((line) => safeText(line, Infinity))
     .filter(Boolean)
     .join(' ');
 }

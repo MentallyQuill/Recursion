@@ -342,6 +342,26 @@ assertEqual(compactPacket.sections.sceneBrief.length, compactPacket.diagnostics.
 assert(compactPacket.sections.sceneBrief.endsWith('...'), 'compact budget truncates overlong section');
 assertEqual(packetToPromptBlocks(compactPacket)[0].text.length, compactPacket.diagnostics.sectionBudgets.sceneBrief, 'prompt block uses truncated compact section text');
 
+const richLongMarker = 'RICH_SECTION_MARKER_SURVIVES';
+const richLongPacket = await composePromptPacket({
+  hand: baseHand({
+    cards: [
+      {
+        id: 'rich-long-scene',
+        family: 'Scene Frame',
+        promptText: `${'Rich scene detail. '.repeat(80)} ${richLongMarker}`,
+        emphasis: 'normal',
+        tokenEstimate: 380
+      }
+    ],
+    omitted: []
+  }),
+  snapshot: baseSnapshot(),
+  settings: { promptFootprint: 'rich', reasonerUse: 'off' }
+});
+assert(richLongPacket.sections.sceneBrief.includes(richLongMarker), 'rich prompt packet uses section budget instead of per-card text cap');
+assert(packetToPromptBlocks(richLongPacket)[0].text.includes(richLongMarker), 'injected prompt block preserves rich card text up to section budget');
+
 let offReasonerCalls = 0;
 const offReasonerPacket = await composePromptPacket({
   hand: baseHand(),

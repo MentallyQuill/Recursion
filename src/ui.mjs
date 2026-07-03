@@ -486,7 +486,7 @@ function briefChipClass(chip, priority = '') {
   const normalized = cleanText(chip).toLowerCase();
   if (normalized === 'critical' || priority === 'critical' && normalized === 'guard') return 'recursion-mini-chip recursion-brief-chip critical';
   if (normalized === 'strong' || priority === 'strong' && normalized === 'emphasized') return 'recursion-mini-chip recursion-brief-chip strong';
-  if (['fresh', 'generated', 'cached', 'injected', 'turn brief', 'compiler', 'memory', 'active'].includes(normalized)) {
+  if (['cached', 'fallback', 'retried', 'reasoner', 'focus', 'manual', 'guardrail'].includes(normalized)) {
     return 'recursion-mini-chip recursion-brief-chip state';
   }
   return 'recursion-mini-chip recursion-brief-chip';
@@ -564,18 +564,30 @@ function cardFamilyIconSvg(family) {
   ]);
 }
 
+function cardDisplayOrigin(card) {
+  const source = asObject(card);
+  const candidates = [
+    source.origin,
+    source.sourceType,
+    typeof source.source === 'string' ? source.source : '',
+    source.provenance
+  ].map((entry) => cleanText(entry).toLowerCase());
+  if (candidates.some((entry) => entry === 'cache' || entry === 'cached')) return 'cache';
+  if (candidates.some((entry) => entry === 'fallback' || entry === 'local' || entry === 'local-fallback')) return 'fallback';
+  if (candidates.some((entry) => entry === 'generated' || entry === 'provider')) return 'generated';
+  return '';
+}
+
 function cardMetaChips(card) {
   const source = asObject(card);
-  const chips = [
-    source.status,
-    source.source,
-    source.provenance,
-    source.detailProfile,
-    source.target,
-    source.sceneKey ? 'scene' : '',
-    source.turnId ? 'turn' : ''
-  ].map((entry) => cleanText(entry, ''))
-    .filter(Boolean);
+  const chips = [];
+  const origin = cardDisplayOrigin(source);
+  if (origin === 'cache') chips.push('cached');
+  if (origin === 'fallback') chips.push('fallback');
+  if (Number(source.providerRetryCount || source.retryCount || 0) > 0) chips.push('retried');
+  if (cleanText(source.providerLane || source.composerLane).toLowerCase() === 'reasoner') chips.push('reasoner');
+  const selectionTag = cleanText(source.selectionTag || source.scopeTag || source.selectionSource).toLowerCase();
+  if (['focus', 'manual', 'guardrail'].includes(selectionTag)) chips.push(selectionTag);
   return [...new Set(chips)];
 }
 
@@ -615,12 +627,13 @@ function briefCardTooltip(card, family, chips) {
 function briefChipTooltip(chip) {
   const normalized = cleanText(chip).toLowerCase();
   if (normalized.startsWith('+')) return '';
-  if (normalized === 'fresh') return 'Fresh card selected for this brief.';
-  if (normalized === 'generated') return 'Generated during the current turn.';
-  if (normalized === 'cached') return 'Read from valid scene cache.';
-  if (normalized === 'injected') return 'Included in the composed prompt packet.';
-  if (normalized === 'scene') return 'Scene-scoped metadata.';
-  if (normalized === 'turn') return 'Turn-scoped metadata.';
+  if (normalized === 'cached') return 'Read from valid scene cache for this brief.';
+  if (normalized === 'fallback') return 'Local fallback card used because provider cards were unavailable.';
+  if (normalized === 'retried') return 'Provider retry was needed before this card completed.';
+  if (normalized === 'reasoner') return 'Reasoner lane shaped this card or selection.';
+  if (normalized === 'focus') return 'Selected because it matched the current focus policy.';
+  if (normalized === 'manual') return 'Selected inside the current Manual card scope.';
+  if (normalized === 'guardrail') return 'Selected as a guardrail for scene safety or plausibility.';
   if (normalized === 'strong') return 'High priority for this turn.';
   if (normalized === 'critical') return 'Critical guardrail or scene-constraint priority.';
   return chip;
@@ -1385,8 +1398,9 @@ function briefCardDomId(card, index) {
 
 function renderHandDropdown(panel, view, model) {
   const packetPanelWasOpen = panel.querySelector?.('[data-recursion-prompt-packet-panel]')?.hidden === false;
+  const previousPacketPreviewNode = panel.querySelector?.('[data-recursion-prompt-packet-preview]');
   const previousBriefScrollTop = Number(panel.querySelector?.('[data-recursion-brief-scroll]')?.scrollTop || 0);
-  const previousPacketScrollTop = Number(panel.querySelector?.('[data-recursion-prompt-packet-preview]')?.scrollTop || 0);
+  const previousPacketScrollTop = Number(previousPacketPreviewNode?.scrollTop || 0);
   const expandedCards = new Set(Array.from(panel.querySelectorAll?.('[data-recursion-brief-card-id]') || [])
     .filter((row) => row.getAttribute?.('aria-expanded') === 'true')
     .map((row) => row.dataset?.recursionBriefCardId)
@@ -1395,6 +1409,7 @@ function renderHandDropdown(panel, view, model) {
   const cards = model.cards;
   const packetPreview = promptPacketPreview(view.lastPacket, view.lastHand);
   const packetText = promptPacketText(view.lastPacket, view.lastHand);
+  const packetTextUnchanged = previousPacketPreviewNode?.textContent === packetText;
   const packetMeta = promptPacketMeta(packetPreview);
   const packetButton = el('button', {
     className: 'recursion-prompt-packet-button',
@@ -1420,6 +1435,14 @@ function renderHandDropdown(panel, view, model) {
     }),
     packetButton
   ]));
+  const packetPreviewNode = previousPacketPreviewNode || el('pre', {
+    className: 'recursion-packet-text',
+    dataset: { recursionPromptPacketPreview: '' }
+  });
+  packetPreviewNode.className = 'recursion-packet-text';
+  if (packetPreviewNode.dataset) packetPreviewNode.dataset.recursionPromptPacketPreview = '';
+  if (!packetTextUnchanged) packetPreviewNode.textContent = packetText;
+
   const packetPanel = el('section', {
     className: 'recursion-prompt-packet-panel',
     attrs: { 'aria-label': 'Injected prompt packet' },
@@ -1432,17 +1455,17 @@ function renderHandDropdown(panel, view, model) {
         button('Copy', 'recursionCopyPromptPacket', 'Copy last Recursion prompt packet')
       ])
     ]),
-    el('pre', { className: 'recursion-packet-text', text: packetText, dataset: { recursionPromptPacketPreview: '' } })
+    packetPreviewNode
   ]);
   packetPanel.hidden = !packetPanelWasOpen || !view.lastPacket;
-  const packetPreviewNode = packetPanel.querySelector?.('[data-recursion-prompt-packet-preview]');
-  if (previousPacketScrollTop > 0 && packetPreviewNode) packetPreviewNode.scrollTop = previousPacketScrollTop;
+  const nextPacketScrollTop = packetTextUnchanged ? previousPacketScrollTop : 0;
   packetButton.addEventListener?.('click', () => {
     if (!view.lastPacket) return;
     packetPanel.hidden = !packetPanel.hidden;
     packetButton.setAttribute('aria-expanded', packetPanel.hidden ? 'false' : 'true');
   });
   panel.appendChild(packetPanel);
+  packetPreviewNode.scrollTop = nextPacketScrollTop;
   if (!cards.length) {
     panel.appendChild(el('p', { className: 'recursion-empty', text: 'No hand has been composed for this chat.' }));
     panel.appendChild(el('div', { className: 'recursion-brief-foot' }, [
@@ -1459,7 +1482,7 @@ function renderHandDropdown(panel, view, model) {
     const family = cardFamily(source);
     const priority = cardPriority(source);
     const metaChips = cardMetaChips(source);
-    const priorityLabel = priority === 'support' ? 'support' : priority;
+    const priorityLabel = ['critical', 'strong'].includes(priority) ? priority : '';
     const rawChips = [
       priorityLabel,
       ...metaChips
@@ -2246,7 +2269,7 @@ function appendViewerDeckSection(viewer, hand) {
       cardSource.status,
       cardSource.emphasis,
       cardSource.detailProfile,
-      cardSource.source || cardSource.provider || cardSource.provenance,
+      cardSource.origin || cardSource.source || cardSource.provider || cardSource.provenance,
       cardSource.updatedAt,
       cardSource.role || cardSource.target
     ].map((entry) => cleanText(entry, '')).filter(Boolean);
@@ -2441,7 +2464,9 @@ function promptPacketPreview(packet, hand = {}) {
 
 function promptPacketText(packet, hand = {}) {
   const preview = promptPacketPreview(packet, hand);
-  return cleanText(preview.injectedText, safeJson(preview, { maxString: 5000 }));
+  return preview.injectedText
+    ? safeText(preview.injectedText, Infinity).trim()
+    : safeJson(preview, { maxString: 5000 });
 }
 
 function promptPacketMeta(preview) {

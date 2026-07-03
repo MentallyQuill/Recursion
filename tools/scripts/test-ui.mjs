@@ -1172,8 +1172,8 @@ try {
         id: 'card-a',
         family: 'Scene Frame',
         role: 'sceneFrameCard',
-        status: 'fresh',
-        source: 'generated',
+        status: 'active',
+        origin: 'generated',
         detailProfile: 'standard',
         provenance: 'provider',
         target: 'blocked door',
@@ -1190,6 +1190,18 @@ try {
         ],
         selectedReason: 'anchors the blocked exit',
         omittedReason: ''
+      }, {
+        id: 'card-b',
+        family: 'Scene Constraints',
+        role: 'sceneConstraintsCard',
+        status: 'active',
+        origin: 'cache',
+        detailProfile: 'compact',
+        promptText: 'Cached constraint keeps the warped brass lock in view.',
+        summary: 'Cached lock constraint.',
+        emphasis: 'normal',
+        evidenceRefs: ['turn:42'],
+        selectedReason: 'cached source still matches'
       }]
     },
     activity: { phase: 'cardBatchRunning', severity: 'info', chips: ['Utility', 'Cards'] },
@@ -1515,7 +1527,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-status-trigger]').style.props['--columns'], '1', 'activity trigger exposes column count for width animation');
   assertEqual(root.querySelector('[data-recursion-hero-array]').style.props['--columns'], '1', 'hero array exposes column count for width animation');
   assertEqual(root.querySelector('[data-recursion-hero-array]').style.props['--block-count'], '1', 'hero array exposes top-level block count for animation timing');
-  assertEqual(root.querySelector('[data-recursion-hand-count]').textContent, 'Hand 1', 'rendered hand count');
+  assertEqual(root.querySelector('[data-recursion-hand-count]').textContent, 'Hand 2', 'rendered hand count');
   assertEqual(root.querySelector('[data-recursion-composer]').textContent, 'Utility', 'rendered composer');
 
   root.querySelector('[data-recursion-pipeline-button]').setBoundingClientRect({ left: 32, top: 3, width: 24, height: 24, right: 56, bottom: 27 });
@@ -1996,12 +2008,20 @@ try {
   assert(briefCard.querySelector('[data-recursion-brief-card-icon]').querySelector('svg'), 'brief card uses category SVG icon');
   assert(briefCard.querySelector('[data-recursion-brief-card-text]'), 'brief card renders text in the mockup card body');
   assert(briefCard.querySelector('[data-recursion-brief-card-meta]'), 'brief card renders compact meta chip row');
-  assertEqual(briefCard.querySelector('[data-recursion-brief-card-meta]').children.length, 4, 'brief card caps visible chips to avoid metadata clutter');
-  assert(/^\+\d+$/.test(briefCard.querySelector('[data-recursion-brief-card-meta]').children.at(-1).textContent), 'brief card collapses overflow chips behind +N');
+  const briefCardChips = Array.from(briefCard.querySelector('[data-recursion-brief-card-meta]').children)
+    .map((chip) => chip.textContent);
+  assertDeepEqual(briefCardChips, ['strong'], 'clean generated Last Brief card shows only meaningful priority chip');
+  assert(!briefCardChips.includes('active'), 'Last Brief card omits redundant active chip');
+  assert(!briefCardChips.includes('standard'), 'Last Brief card omits detail profile chip from compact rows');
+  assert(!briefCardChips.includes('generated'), 'Last Brief card omits routine generated chip');
+  const cachedBriefCard = root.querySelectorAll('[data-recursion-brief-card]')[1];
+  const cachedBriefCardChips = Array.from(cachedBriefCard.querySelector('[data-recursion-brief-card-meta]').children)
+    .map((chip) => chip.textContent);
+  assertDeepEqual(cachedBriefCardChips, ['cached'], 'cached Last Brief card uses a high-value cached chip');
   briefCard.click();
   assertEqual(briefCard.getAttribute('aria-expanded'), 'true', 'brief card expands on click');
   assert(fakeDocument.textTree(briefCard).includes('Door stays blocked and the brass lock remains warped.'), 'expanded brief card exposes full card text');
-  assert(fakeDocument.textTree(briefCard).includes('fresh'), 'expanded brief card exposes bounded meta chips');
+  assert(!fakeDocument.textTree(briefCard).includes('standard'), 'expanded brief card still keeps detail profile out of compact trust chips');
   const packetButton = root.querySelector('[data-recursion-prompt-packet-button]');
   assert(packetButton, 'last brief renders Prompt Packet button');
   packetButton.click();
@@ -2011,6 +2031,7 @@ try {
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Recursion Scene Brief'), 'prompt packet panel renders injected block titles');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-prompt-packet-panel]')).includes('Door stays blocked and the brass lock remains warped.'), 'prompt packet panel renders actual injected prompt text');
   assert(!root.querySelector('[data-recursion-prompt-packet-preview]').textContent.includes('"packetId"'), 'prompt packet panel does not show the packet JSON wrapper');
+  assert(root.querySelector('[data-recursion-prompt-packet-preview]').textContent.includes('Scene brief:\n- [Scene Frame]'), 'prompt packet panel preserves injected prompt line breaks');
   const progressList = root.querySelector('[data-recursion-progress-list]');
   const progressRow = root.querySelector('[data-recursion-progress-row]');
   const progressChildren = root.querySelector('[data-recursion-progress-children]');
@@ -2023,6 +2044,7 @@ try {
   ui.update();
   assertEqual(root.querySelector('[data-recursion-progress-list]'), progressList, 'progress list node is preserved across rerender');
   assertEqual(root.querySelector('[data-recursion-progress-row]'), progressRow, 'progress row node is preserved across rerender');
+  assertEqual(root.querySelector('[data-recursion-prompt-packet-preview]'), packetPreview, 'prompt packet preview node is preserved across rerender');
   assertEqual(root.querySelector('[data-recursion-progress-list]').scrollTop, 48, 'progress list preserves scroll position across rerender');
   assertEqual(root.querySelector('[data-recursion-progress-children]').scrollTop, 36, 'progress child list preserves scroll position across rerender');
   assertEqual(root.querySelector('[data-recursion-brief-scroll]').scrollTop, 44, 'brief card list preserves scroll position across rerender');
@@ -2165,7 +2187,7 @@ try {
   assert(cardDetail, 'full viewer renders structured card detail rows');
   const cardDetailText = fakeDocument.textTree(cardDetail);
   assert(cardDetailText.includes('Scene Frame'), 'viewer card detail includes card family');
-  assert(cardDetailText.includes('fresh'), 'viewer card detail includes lifecycle state');
+  assert(cardDetailText.includes('active'), 'viewer card detail includes lifecycle state');
   assert(cardDetailText.includes('emphasized'), 'viewer card detail includes emphasis');
   assert(cardDetailText.includes('standard'), 'viewer card detail includes detail profile');
   assert(cardDetailText.includes('generated'), 'viewer card detail includes provider/source state');

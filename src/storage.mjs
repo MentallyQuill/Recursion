@@ -292,6 +292,7 @@ function normalizeSceneCard(card) {
     tokenEstimate: Math.max(0, Math.min(1000, Number(card.tokenEstimate) || 0)),
     emphasis: ['normal', 'emphasized', 'muted'].includes(card.emphasis) ? card.emphasis : 'normal',
     detailProfile: ['compact', 'standard', 'expanded'].includes(card.detailProfile) ? card.detailProfile : 'standard',
+    ...(['cache', 'generated', 'fallback'].includes(card.origin) ? { origin: card.origin } : {}),
     generatedAt: timestampValue(card.generatedAt || freshness.generatedAt),
     sourceFingerprint,
     source: {

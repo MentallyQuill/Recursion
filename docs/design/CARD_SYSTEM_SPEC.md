@@ -134,6 +134,7 @@ type RecursionCard = {
   tokenEstimate: number;
   detailProfile: "compact" | "standard" | "expanded";
   emphasis: "normal" | "emphasized" | "muted";
+  origin?: "cache" | "generated" | "fallback";
   freshness: {
     generatedAt: string;
     sourceFingerprint: string;
@@ -297,7 +298,7 @@ V1 inspector visibility should include:
 
 - current scene deck;
 - current or latest turn hand;
-- card family, status, detail profile, and emphasis;
+- card family, status, detail profile, emphasis, and origin;
 - source message range and freshness status;
 - token estimate and budget outcome;
 - Arbiter decision reason;

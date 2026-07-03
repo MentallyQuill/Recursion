@@ -971,7 +971,7 @@ assertEqual(cardsFromProviderResult({
 const selectedDeck = [
   deckCard('Relationship', 'Keep it socially tense.', { id: 'low', tokenEstimate: 20 }),
   deckCard('Scene Constraints', 'Do not forget the cracked visor.', { id: 'risk', tokenEstimate: 220 }),
-  deckCard('Open Threads', 'The signal is unanswered.', { id: 'emph', tokenEstimate: 120, emphasis: 'emphasized' }),
+  deckCard('Open Threads', 'The signal is unanswered.', { id: 'emph', tokenEstimate: 120, emphasis: 'emphasized', origin: 'cache' }),
   deckCard('Scene Frame', 'The bay is sealed.', { id: 'scene', tokenEstimate: 80, inspectorNotes: 'private' }),
   deckCard('Active Cast', 'Mara waits outside.', { id: 'stowed', status: 'stowed', tokenEstimate: 30 })
 ];
@@ -981,7 +981,8 @@ assertEqual(budgetHand.cards.length, 2, 'maxCards enforced');
 assertEqual(budgetHand.tokenEstimate, 200, 'token estimate sums selected cards');
 assert(!budgetHand.cards.some((entry) => entry.inspectorNotes), 'hand excludes inspector notes');
 assert(!budgetHand.cards.some((entry) => entry.arbiter || entry.source || entry.freshness || entry.summary), 'hand uses prompt-facing allowlist shape');
-assertDeepEqual(Object.keys(budgetHand.cards[0]), ['id', 'family', 'role', 'status', 'promptText', 'tokenEstimate', 'detailProfile', 'emphasis', 'evidenceRefs'], 'hand card shape is allowlisted');
+assertDeepEqual(Object.keys(budgetHand.cards[0]), ['id', 'family', 'role', 'status', 'promptText', 'tokenEstimate', 'detailProfile', 'emphasis', 'evidenceRefs', 'origin'], 'hand card shape is allowlisted');
+assertEqual(budgetHand.cards[0].origin, 'cache', 'hand preserves safe card origin for Last Brief provenance');
 assert(budgetHand.omitted.some((entry) => entry.cardId === 'risk' && entry.reason === 'max-cards'), 'full hand reports maxCards omissions first');
 assert(budgetHand.omitted.some((entry) => entry.cardId === 'low' && entry.reason === 'max-cards'), 'maxCards omissions recorded');
 assert(budgetHand.omitted.some((entry) => entry.cardId === 'stowed' && entry.reason === 'inactive'), 'inactive omissions recorded');

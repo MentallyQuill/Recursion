@@ -213,6 +213,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
           summary: 'variant B summary',
           promptText: 'Variant B card guidance.',
           evidenceRefs: ['message:2'],
+          origin: 'cache',
           source: {
             chatId: 'Swipe Variant Chat',
             firstMesId: 2,
@@ -231,6 +232,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertEqual(cache.activeSourceRevisionHash, 'source-rev-b', 'scene cache records active source revision');
   assertDeepEqual(cache.variantOrder, ['source-rev-a', 'source-rev-b'], 'scene cache preserves bounded variant order');
   assertEqual(cache.variants['source-rev-a'].cards[0].source.sourceRevisionHash, 'source-rev-a', 'variant cards preserve source revision');
+  assertEqual(cache.variants['source-rev-b'].cards[0].origin, 'cache', 'variant cards preserve safe origin metadata');
   assertEqual(cache.variants['source-rev-b'].latestHand.handId, 'hand-b', 'variant latest hand is normalized');
 }
 

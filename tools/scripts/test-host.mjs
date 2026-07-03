@@ -2,6 +2,12 @@ import { createSillyTavernHost, promptBlocksFromPacket } from '../../src/hosts/s
 import { createGenerationRouter } from '../../src/providers.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
+async function flushMicrotasks(count = 6) {
+  for (let index = 0; index < count; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 const prompts = [];
 const context = {
   chatId: 'chat-file',
@@ -538,6 +544,7 @@ assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
 
 {
   const batchCalls = [];
+  const batchSlotEvents = [];
   let releaseFirst = null;
   const concurrentBatchHost = createSillyTavernHost({
     contextFactory: () => ({
@@ -569,9 +576,16 @@ assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
   const pendingBatch = concurrentBatchHost.generation.batch([
     { roleId: 'utilityArbiter', prompt: 'slow first', responseSchema: 'recursion.utilityArbiter.v1' },
     { roleId: 'providerTest', prompt: 'fast second', responseSchema: 'recursion.providerTest.v1' }
-  ]);
-  await Promise.resolve();
+  ], {
+    onSlotSettled: (slot) => batchSlotEvents.push(slot)
+  });
+  await flushMicrotasks();
   const submittedBeforeFirstSettled = [...batchCalls];
+  assertDeepEqual(
+    batchSlotEvents.map((slot) => [slot.index, slot.response?.text]),
+    [[1, 'batch:fast second']],
+    'host batch reports fast slot settlement before the blocked slot resolves'
+  );
   releaseFirst();
   const batchResults = await pendingBatch;
   assertDeepEqual(

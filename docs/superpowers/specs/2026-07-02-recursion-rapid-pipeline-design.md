@@ -83,8 +83,10 @@ The Pipeline control is a small modern icon button immediately to the left of th
 
 Pipeline icons:
 
-- `Standard`: a compact full-route / stacked-workflow icon, meaning Recursion runs the full foreground pipeline.
-- `Rapid`: a compact lightning / fast-lane icon, meaning Recursion uses warmed scene guidance plus a foreground delta.
+- `Standard`: three large stacked layers, meaning Recursion runs the full foreground pipeline with broad scene coverage and detailed conditioning.
+- `Rapid`: one compressed layer tapering into a forward spike, meaning Recursion uses warmed provider-generated scene guidance plus a foreground delta.
+
+The icons should share a layer-based visual language so Rapid reads as the same system moving faster, not as a lower-quality shortcut. Do not use a lightning bolt, timer, or empty shortcut glyph for Rapid.
 
 Clicking the Pipeline icon opens a compact dropdown with two rows:
 

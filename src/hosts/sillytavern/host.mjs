@@ -318,6 +318,16 @@ function normalizeGenerationFailure(error) {
   };
 }
 
+function notifyBatchSlotSettled(onSlotSettled, slot) {
+  if (typeof onSlotSettled !== 'function') return;
+  try {
+    const result = onSlotSettled(slot);
+    if (result && typeof result.catch === 'function') result.catch(() => {});
+  } catch {
+    // Batch slot observers are advisory; generation results must still resolve.
+  }
+}
+
 function requestProviderSource(request = {}) {
   return stringValue(request.providerSource ?? request.providerConfig?.source).trim();
 }
@@ -643,13 +653,19 @@ export function createSillyTavernHost({
       }
       throw new Error('SillyTavern generation API is unavailable.');
     },
-    async batch(requests = []) {
-      const settled = await Promise.allSettled(requests.map((request) => Promise.resolve().then(() => this.generate(request))));
-      return settled.map((result) => (
-        result.status === 'fulfilled'
-          ? result.value
-          : normalizeGenerationFailure(result.reason)
-      ));
+    async batch(requests = [], options = {}) {
+      const onSlotSettled = typeof options?.onSlotSettled === 'function' ? options.onSlotSettled : null;
+      const slots = requests.map((request, index) => Promise.resolve()
+        .then(() => this.generate(request))
+        .then((response) => {
+          notifyBatchSlotSettled(onSlotSettled, { index, request, response });
+          return response;
+        }, (error) => {
+          const response = normalizeGenerationFailure(error);
+          notifyBatchSlotSettled(onSlotSettled, { index, request, response, error: response.error });
+          return response;
+        }));
+      return Promise.all(slots);
     }
   };
   generation.capabilities = {

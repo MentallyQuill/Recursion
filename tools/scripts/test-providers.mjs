@@ -50,6 +50,12 @@ function responseTextForRole(roleId, fields = {}) {
   return JSON.stringify({ schema: responseSchemaForRole(roleId), ok: true, ...fields });
 }
 
+async function flushMicrotasks(count = 6) {
+  for (let index = 0; index < count; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 assertEqual(parseStructuredOutput('```json\n{"schema":"x"}\n```').schema, 'x', 'structured parser accepts fenced json');
 assertEqual(parseStructuredOutput('Here is the JSON:\n{"schema":"x","ok":true}\nDone.').schema, 'x', 'structured parser extracts a JSON object from wrapper prose');
 assertEqual(roleLane('unknownRole'), '', 'unknown roles have no provider lane');
@@ -657,15 +663,20 @@ assertDeepEqual(fallbackBatchCalls.map((request) => request.roleId), ['utilityAr
 assertDeepEqual(fallbackBatchCalls.map((request) => request.lane), ['utility', 'utility'], 'batch fallback enriches lanes');
 
 const hostBatchCalls = [];
+const hostBatchSlotEvents = [];
 const hostBatchClient = createProviderClient({
   host: {
     generation: {
       async generate() {
         throw new Error('host generate should not be used when batch is available');
       },
-      async batch(requests) {
+      async batch(requests, options = {}) {
         hostBatchCalls.push(...requests);
-        return requests.map((request) => ({ text: `{"schema":"${request.roleId}","lane":"${request.lane}"}` }));
+        return requests.map((request, index) => {
+          const response = { text: responseTextForRole(request.roleId, { lane: request.lane }) };
+          options.onSlotSettled?.({ index, request, response });
+          return response;
+        });
       },
       capabilities: {
         batch: {
@@ -683,10 +694,20 @@ const hostBatchClient = createProviderClient({
 const hostBatchResults = await hostBatchClient.batch([
   { roleId: 'utilityArbiter', prompt: 'A' },
   { roleId: 'providerTest', prompt: 'B' }
-]);
+], {
+  onSlotSettled: (slot) => hostBatchSlotEvents.push(slot)
+});
 assertEqual(hostBatchResults.length, 2, 'host batch returns all responses');
 assertDeepEqual(hostBatchCalls.map((request) => request.roleId), ['utilityArbiter', 'providerTest'], 'host batch receives enriched role ids');
 assertDeepEqual(hostBatchCalls.map((request) => request.lane), ['utility', 'utility'], 'host batch receives enriched lanes');
+assertDeepEqual(
+  hostBatchSlotEvents.map((slot) => [slot.index, slot.roleId, slot.response?.text && JSON.parse(slot.response.text).schema]),
+  [
+    [0, 'utilityArbiter', 'recursion.utilityArbiter.v1'],
+    [1, 'providerTest', 'recursion.providerTest.v1']
+  ],
+  'provider client forwards normalized host batch slot callbacks'
+);
 assertDeepEqual(
   hostBatchResults.map((entry) => ({
     batchMode: entry.batchMode,
@@ -755,6 +776,52 @@ assertDeepEqual(
   ],
   'router batch diagnostics preserve host batch capability metadata'
 );
+
+{
+  let releaseSlowSlot = null;
+  let streamedBatchFinished = false;
+  const streamedActivity = createActivityReporter();
+  const streamedRouter = createGenerationRouter({
+    client: {
+      async generate() {
+        throw new Error('single generate should not be used for streamed batch progress');
+      },
+      async batch(requests, options = {}) {
+        return Promise.all(requests.map(async (request, index) => {
+          if (request.roleId === 'utilityArbiter') {
+            await new Promise((resolve) => {
+              releaseSlowSlot = resolve;
+            });
+          }
+          const response = {
+            text: responseTextForRole(request.roleId, { lane: request.lane || 'utility' }),
+            providerId: 'fake-host',
+            model: 'fake-model'
+          };
+          options.onSlotSettled?.({ index, request, response });
+          return response;
+        }));
+      }
+    },
+    activity: streamedActivity
+  });
+  const pendingStreamedBatch = streamedRouter.batch([
+    { roleId: 'utilityArbiter', prompt: 'Slow slot.' },
+    { roleId: 'providerTest', prompt: 'Fast slot.' }
+  ], { runId: 'provider-batch-streamed-progress' });
+  pendingStreamedBatch.then(() => {
+    streamedBatchFinished = true;
+  });
+  await flushMicrotasks();
+  const fastSettledEvents = streamedActivity.history()
+    .filter((event) => event.phase === 'providerCallSettled' && event.detail?.roleId === 'providerTest');
+  assertEqual(streamedBatchFinished, false, 'router streamed progress test keeps batch pending while slow slot is blocked');
+  assertEqual(fastSettledEvents.length, 1, 'router emits settled progress for a completed batch slot before the whole batch resolves');
+  assertEqual(fastSettledEvents[0].outcome, 'success', 'router streamed slot progress marks successful slot done');
+  releaseSlowSlot();
+  const streamedResults = await pendingStreamedBatch;
+  assertDeepEqual(streamedResults.map((entry) => entry.ok), [true, true], 'router streamed batch still returns all slot results');
+}
 
 const routerHostSlotFailure = await createGenerationRouter({
   client: createProviderClient({

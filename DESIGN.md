@@ -209,7 +209,7 @@ Do not introduce large rounded cards or soft marketing panels. Keep cards at 8px
 
 ## Components
 
-**Recursion Bar:** One compact chat-attached row with power, pipeline selector, mode, icon-only card scope, Hero Pixel Array/current step, reasoning chain, Last Brief arrow, and options ellipsis. The Pipeline selector is an icon-only button immediately left of Mode with a compact Standard/Rapid dropdown. The bar is neutral graphite chrome; it should not become a message strip or dashboard.
+**Recursion Bar:** One compact chat-attached row with power, pipeline selector, mode, icon-only card scope, Hero Pixel Array/current step, reasoning chain, Last Brief arrow, and options ellipsis. The Pipeline selector is an icon-only button immediately left of Mode with a compact Standard/Rapid dropdown. When no work is active, the current-step slot may show quiet standby copy such as `Ready for Recursion`, `Recursion prompt ready`, `Scene deck standing by`, or `Manual scope armed`; this is display-only and must not create Hero Pixel Array blocks or progress rows. The bar is neutral graphite chrome; it should not become a message strip or dashboard.
 
 **Icon buttons:** Familiar controls should be icon-first, 24px square, with accessible labels and tooltips. Power, pipeline, and mode use muted foreground, not bright brand color.
 

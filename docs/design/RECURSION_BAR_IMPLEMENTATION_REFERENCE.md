@@ -9,7 +9,7 @@ Regenerate the standalone mockup with `node tools/scripts/build-recursion-bar-pr
 Runtime toggles:
 
 - `.power-toggle.is-on` / `.power-toggle.is-off` shows whether Recursion is enabled.
-- `.activity-trigger` opens the progress menu from either the Hero Pixel Array or current status text.
+- `.activity-trigger` opens the progress menu from either the Hero Pixel Array or current status text. When no progress step is active, the current status text may show a display-only standby phrase such as `Ready for Recursion`; this must not add progress rows or Hero Pixel Array blocks.
 - `.hero-pixel-array[data-state="pending|running|done|cached|skipped|warning|failed"]` controls the compact Hero Pixel Array state.
 - `.hero-block.pending`, `.hero-block.running`, `.hero-block.done`, `.hero-block.cached`, `.hero-block.skipped`, `.hero-block.warning`, and `.hero-block.failed` control each Hero Pixel Array block.
 - `.mode-menu.is-open` opens the mode menu.
@@ -862,7 +862,7 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
     const steps = visibleSteps();
     root.querySelector('#status-subtitle').textContent = progressSummary(steps);
     root.querySelector('#status-foot-text').textContent = steps.length ? 'Auto - Utility and Reasoner lanes' : 'Waiting for next turn';
-    root.querySelector('#current-step').textContent = currentText || (steps.length ? `${progressSummary(steps)}...` : 'Ready');
+    root.querySelector('#current-step').textContent = currentText || (steps.length ? `${progressSummary(steps)}...` : 'Ready for Recursion');
     renderHeroBlocks(root);
     renderProgressRows(root, changedId);
   }
@@ -895,7 +895,7 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
     arrayButton.style.setProperty('--columns', '0');
     arrayButton.style.setProperty('--block-count', '0');
     root.querySelector('#status-subtitle').textContent = 'Waiting for next turn';
-    root.querySelector('#current-step').textContent = 'Ready';
+    root.querySelector('#current-step').textContent = 'Ready for Recursion';
     arrayButton.classList.remove('is-resetting');
     return true;
   }
@@ -930,7 +930,7 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
     }
     await wait(900);
     if (token !== animationToken) return false;
-    root.querySelector('#current-step').textContent = 'Ready';
+    root.querySelector('#current-step').textContent = 'Ready for Recursion';
     return true;
   }
 

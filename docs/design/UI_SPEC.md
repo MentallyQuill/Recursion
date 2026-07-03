@@ -59,8 +59,10 @@ The first control is a dedicated icon-only power toggle. It uses the same power 
 
 The pipeline control is a single icon-only button immediately to the left of the Mode button. It is not duplicated in Settings. It opens a compact dropdown with two choices:
 
-- Full-route/workflow icon, `Standard`: runs the full foreground Arbiter, card, compose, and install path on send.
-- Lightning/fast-lane icon, `Rapid`: warms provider-generated scene guidance in the background and uses a short provider delta on send.
+- Three stacked layer icon, `Standard`: runs the full foreground Arbiter, card, compose, and install path on send.
+- Tapered layer spike icon, `Rapid`: warms provider-generated scene guidance in the background and uses a short provider delta on send.
+
+The icons share one layer-based visual language. Standard shows three large stacked layers, signaling broad foreground scene coverage and detailed conditioning. Rapid shows one compressed layer shape tapering into a forward spike, signaling warmed provider-generated context moving through a faster foreground turn-delta path. Rapid must not use a lightning bolt, timer, or empty shortcut glyph because the product promise is smarter-faster rather than lower-quality or skipped work.
 
 The selected pipeline changes the compact button icon immediately after selection. The dropdown follows the Mode menu pattern: icon, short name, hover/focus tip, native SillyTavern popup compactness, and close on selection, outside click, or `Esc`.
 
@@ -167,7 +169,17 @@ Blocks build down from the top of a three-row column, then start the next column
 
 The Hero Pixel Array must respect reduced-motion preferences. It may pulse active blocks while work is running, but it must not animate when `prefers-reduced-motion: reduce` is active.
 
-The bar may show exactly one live generation status: the current in-progress step, rendered as short muted text to the right of the Hero Pixel Array. The full step list belongs in the Hero Pixel Array menu. The bar may expose last-brief details through tooltip/accessibility text on the preview arrow, but it should not become a row of status chips.
+The bar may show exactly one live generation status: the current in-progress step, rendered as short muted text to the right of the Hero Pixel Array. The full step list belongs in the Hero Pixel Array menu. When no work is active, the same text slot may show one quiet standby phrase. Standby phrases are display-only and must not create progress rows, Hero Pixel Array blocks, or activity-ribbon events.
+
+Standby phrase defaults:
+
+- Fresh enabled load or newly opened chat with no composed hand: `Ready for Recursion`.
+- Settled prompt install: `Recursion prompt ready`.
+- Idle Standard mode with selected cached/generated cards available: `Scene deck standing by`.
+- Idle Rapid mode with a warmed hand available: `Rapid deck standing by`; `rapidWarmReady` activity may show `Rapid deck ready`.
+- Idle Manual mode: `Manual scope armed`.
+- Disabled: `Recursion off`.
+- Warning or error standby: `Needs attention`.
 
 Pending or waiting progress rows must not appear as the compact current-step text. They remain visible in the progress menu as empty/waiting rows while the bar stays quiet until work is actually running, warning, or failed.
 
@@ -383,7 +395,7 @@ Every active progress-row ring must continue to use the same small spinner visua
 
 The inner cutout must not be transparent. It should use the same dark cutout fill and subtle inner border for every active row ring; otherwise active progress rows read as colored dots instead of rings.
 
-The active work also appears inline in the bar as the current status, immediately after the Hero Pixel Array. Use concise phrases such as `Reading current turn...`, `2 model calls running...`, `Composing prompt packet...`, `Installing prompt...`, and `Saving cache...`. When idle, the text can collapse to empty space or a quiet `Ready`.
+The active work also appears inline in the bar as the current status, immediately after the Hero Pixel Array. Use concise phrases such as `Reading current turn...`, `2 model calls running...`, `Composing prompt packet...`, `Installing prompt...`, and `Saving cache...`. When idle, use the standby phrase contract above instead of generic `Ready`.
 
 The status menu should use friendly stage text, not internal event names. It must not show raw prompts, raw provider responses, stack traces, hidden reasoning, private story plans, or unbounded provider error text.
 

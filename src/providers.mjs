@@ -1422,32 +1422,68 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
     }, enriched);
   }
 
-  async function batch(requests = []) {
+  async function batch(requests = [], options = {}) {
     const normalized = requests.map((entry) => normalizeBatchRequest(entry));
     const enriched = normalized.map(({ roleId, request }) => enrich(roleId, request));
+    const onSlotSettled = typeof options?.onSlotSettled === 'function' ? options.onSlotSettled : null;
+
+    function normalizeHostBatchSlot(response, index, batchDiagnostics = {}) {
+      const responseObject = response && typeof response === 'object' && !Array.isArray(response)
+        ? response
+        : { text: String(response ?? '') };
+      if (responseObject.ok === false && responseObject.error) {
+        return normalizeProviderSlotFailure(responseObject, enriched[index], batchDiagnostics);
+      }
+      return normalizeProviderResponse({ ...batchDiagnostics, ...responseObject }, enriched[index]);
+    }
+
+    function notifyClientSlotSettled(index, response, batchDiagnostics = {}) {
+      if (!onSlotSettled) return;
+      if (!Number.isInteger(index) || index < 0 || index >= enriched.length) return;
+      let normalizedResponse;
+      try {
+        normalizedResponse = normalizeHostBatchSlot(response, index, batchDiagnostics);
+      } catch (error) {
+        normalizedResponse = normalizeProviderSlotFailure({ ok: false, error }, enriched[index], batchDiagnostics);
+      }
+      safeInvoke(() => onSlotSettled({
+        index,
+        roleId: normalized[index].roleId,
+        request: enriched[index],
+        response: normalizedResponse
+      }));
+    }
+
     const canUseHostBatch = typeof host?.generation?.batch === 'function'
       && enriched.every((request) => HOST_SOURCES.has(request.providerSource));
 
     if (canUseHostBatch) {
       const batchDiagnostics = batchCapabilityDiagnostics(host.generation.capabilities?.batch);
-      const responses = await host.generation.batch(enriched);
+      const responses = await host.generation.batch(enriched, {
+        onSlotSettled: (slot = {}) => {
+          const index = Number(slot.index);
+          const response = Object.prototype.hasOwnProperty.call(slot, 'response')
+            ? slot.response
+            : (Object.prototype.hasOwnProperty.call(slot, 'result') ? slot.result : slot.value);
+          notifyClientSlotSettled(index, response, batchDiagnostics);
+        }
+      });
       if (!Array.isArray(responses) || responses.length !== enriched.length) {
         throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Host batch response shape did not match request batch.', {
           retryable: false
         });
       }
-      return responses.map((response, index) => {
-        const responseObject = response && typeof response === 'object' && !Array.isArray(response)
-          ? response
-          : { text: String(response ?? '') };
-        if (responseObject.ok === false && responseObject.error) {
-          return normalizeProviderSlotFailure(responseObject, enriched[index], batchDiagnostics);
-        }
-        return normalizeProviderResponse({ ...batchDiagnostics, ...responseObject }, enriched[index]);
-      });
+      return responses.map((response, index) => normalizeHostBatchSlot(response, index, batchDiagnostics));
     }
 
-    return Promise.all(normalized.map(({ roleId, request }) => generate(roleId, request)));
+    return Promise.all(normalized.map(({ roleId, request }, index) => generate(roleId, request)
+      .then((response) => {
+        notifyClientSlotSettled(index, response);
+        return response;
+      }, (error) => {
+        notifyClientSlotSettled(index, { ok: false, error });
+        throw error;
+      })));
   }
 
   function listProfiles(options = {}) {
@@ -1792,7 +1828,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       return batchEntry;
     });
 
-    async function successResult(entry, raw, retryCount = 0) {
+    function throwSlotFailure(raw) {
       if (raw?.slotError) {
         throw providerError(
           raw.slotError.code || 'RECURSION_PROVIDER_BATCH_SLOT_FAILED',
@@ -1803,6 +1839,10 @@ export function createGenerationRouter({ client, activity = null, journal = null
           }
         );
       }
+    }
+
+    async function successResult(entry, raw, retryCount = 0) {
+      throwSlotFailure(raw);
       const parsed = parseProviderStructuredOutput(raw?.text);
       const data = parsed.data;
       validateRoleResponseSchema(entry.roleId, data);
@@ -1836,6 +1876,80 @@ export function createGenerationRouter({ client, activity = null, journal = null
         text: JSON.stringify(data),
         diagnostics
       };
+    }
+
+    const settledActivitySlots = new Set();
+
+    function emitSlotActivity(entry, event, { force = false } = {}) {
+      if (!entry) return;
+      const key = String(entry.index);
+      if (!force && settledActivitySlots.has(key)) return;
+      settledActivitySlots.add(key);
+      activityStage(activity, {
+        runId: batchRunId,
+        phase: 'providerCallSettled',
+        severity: event.severity,
+        outcome: event.outcome,
+        providerLane: entry.lane,
+        composerLane: entry.lane === 'reasoner' ? 'reasoner' : 'utility',
+        label: event.label,
+        detail: event.detail
+      });
+    }
+
+    function emitSlotSuccessActivity(entry, raw, retryCount = 0) {
+      const parsed = parseProviderStructuredOutput(raw?.text);
+      const data = parsed.data;
+      validateRoleResponseSchema(entry.roleId, data);
+      emitSlotActivity(entry, {
+        severity: retryCount > 0 ? 'warning' : 'success',
+        outcome: retryCount > 0 ? 'warning' : 'success',
+        label: retryCount > 0 ? 'Provider batch slot completed after retry.' : 'Provider batch slot completed.',
+        detail: sanitize({
+          ...entry.diagnostics,
+          ...parsed.diagnostics,
+          ...reasoningDiagnostics(raw),
+          providerSource: raw?.providerSource,
+          providerId: raw?.providerId,
+          model: raw?.model,
+          responseId: raw?.responseId,
+          responseHash: responseTextHash(raw?.text),
+          schema: data.schema,
+          ...batchDiagnosticsFromResponse(raw),
+          retryCount,
+          latencyMs: Date.now() - entry.started,
+          completedAt: nowIso(),
+          batchIndex: entry.index
+        }, 300)
+      });
+    }
+
+    function emitSlotFailureActivity(entry, error, raw = null, retryCount = 0, options = {}) {
+      const safeError = sanitizedError(error, entry.request);
+      emitSlotActivity(entry, {
+        severity: 'error',
+        outcome: 'error',
+        label: 'Provider batch slot failed.',
+        detail: sanitize({
+          ...entry.diagnostics,
+          ...batchDiagnosticsFromResponse(raw),
+          retryCount,
+          latencyMs: Date.now() - entry.started,
+          error: safeError,
+          status: statusForError(error),
+          failedAt: nowIso(),
+          batchIndex: entry.index
+        }, 300)
+      }, options);
+    }
+
+    function emitSlotSettledActivity(entry, raw, retryCount = 0) {
+      try {
+        throwSlotFailure(raw);
+        emitSlotSuccessActivity(entry, raw, retryCount);
+      } catch (error) {
+        emitSlotFailureActivity(entry, error, raw, retryCount);
+      }
     }
 
     function settleBatchActivity() {
@@ -1901,7 +2015,16 @@ export function createGenerationRouter({ client, activity = null, journal = null
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         rawResponses = await withBatchTimeout(
-          (requestsWithSignals) => client.batch(requestsWithSignals),
+          (requestsWithSignals) => client.batch(requestsWithSignals, {
+            onSlotSettled: (slot = {}) => {
+              const batchIndex = Number(slot.index);
+              if (!Number.isInteger(batchIndex) || batchIndex < 0 || batchIndex >= pendingEntries.length) return;
+              const raw = Object.prototype.hasOwnProperty.call(slot, 'response')
+                ? slot.response
+                : (Object.prototype.hasOwnProperty.call(slot, 'result') ? slot.result : slot.value);
+              emitSlotSettledActivity(pendingEntries[batchIndex], raw, batchRetryCount);
+            }
+          }),
           pendingEntries.map((entry) => ({ roleId: entry.roleId, ...entry.request })),
           effectiveTimeoutMs,
           options.signal || null
@@ -1948,6 +2071,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         }
         for (const entry of pendingEntries) {
           results[entry.index] = await failureResult(entry, error, batchRetryCount, retrySkippedReason ? { retrySkippedReason } : {});
+          emitSlotFailureActivity(entry, error, null, batchRetryCount, { force: true });
         }
         settleBatchActivity();
         return results;
@@ -1959,8 +2083,10 @@ export function createGenerationRouter({ client, activity = null, journal = null
       const entry = pendingEntries[batchIndex];
       try {
         results[entry.index] = await successResult(entry, raw, batchRetryCount);
+        emitSlotSettledActivity(entry, raw, batchRetryCount);
       } catch (error) {
         results[entry.index] = await failureResult(entry, error, batchRetryCount, batchDiagnosticsFromResponse(raw));
+        emitSlotFailureActivity(entry, error, raw, batchRetryCount, { force: true });
       }
     }
 

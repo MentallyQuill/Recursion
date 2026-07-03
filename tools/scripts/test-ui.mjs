@@ -20,10 +20,56 @@ const model = createRecursionViewModel({
 assertEqual(model.runtimeHealthLabel, 'Ready', 'runtime health label built');
 assertEqual(model.modeLabel, 'Auto', 'mode label built');
 assertEqual(model.statusText, undefined, 'view model does not expose combined runtime/mode status');
+assertEqual(model.standbyStatusText, 'Recursion prompt ready', 'settled prompt-ready activity exposes compact standby text');
 assertEqual(model.handCount, 2, 'hand count built');
 assertEqual(model.composerLabel, 'Utility', 'composer label built');
 assertEqual(model.tooltipsEnabled, true, 'view model defaults tooltip hover help on');
 assertEqual(createRecursionViewModel({ settings: { ui: { tooltipsEnabled: false } } }).tooltipsEnabled, false, 'view model can disable tooltip hover help');
+assertEqual(
+  createRecursionViewModel({
+    settings: { mode: 'auto', enabled: true },
+    activity: { phase: 'idle' },
+    lastHand: { cards: [] }
+  }).standbyStatusText,
+  'Ready for Recursion',
+  'fresh enabled idle view exposes first-load standby text'
+);
+assertEqual(
+  createRecursionViewModel({
+    settings: { mode: 'auto', enabled: false },
+    activity: { phase: 'idle' },
+    lastHand: { cards: [] }
+  }).standbyStatusText,
+  'Recursion off',
+  'disabled idle view exposes off standby text'
+);
+assertEqual(
+  createRecursionViewModel({
+    settings: { mode: 'manual', enabled: true },
+    activity: { phase: 'idle' },
+    lastHand: { cards: [{ id: 'manual-card' }] }
+  }).standbyStatusText,
+  'Manual scope armed',
+  'manual idle view exposes scoped standby text'
+);
+assertEqual(
+  createRecursionViewModel({
+    settings: { mode: 'auto', enabled: true },
+    activity: { phase: 'idle' },
+    lastHand: { cards: [{ id: 'deck-card' }] }
+  }).standbyStatusText,
+  'Scene deck standing by',
+  'auto idle view with cards exposes scene deck standby text'
+);
+assertEqual(
+  createRecursionViewModel({
+    settings: { mode: 'auto', enabled: true, pipelineMode: 'rapid' },
+    activity: { phase: 'rapidWarmReady', severity: 'success', label: 'Rapid deck ready.' },
+    lastHand: { cards: [{ id: 'rapid-card' }] }
+  }).standbyStatusText,
+  'Rapid deck ready',
+  'rapid warm success exposes rapid standby text'
+);
 
 const explicitProgress = createProgressRunModel({
   progressRun: {
@@ -2103,6 +2149,7 @@ try {
   ui.update();
   assertEqual(root.querySelector('[data-recursion-status]').textContent, 'Ready', 'update refreshes runtime health');
   assertEqual(root.querySelector('[data-recursion-mode]').textContent, 'Auto', 'update refreshes mode text');
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Recursion prompt ready', 'settled prompt ready renders compact standby text');
   runNextTimeout(2000);
   assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, true, 'success ribbon collapses after the success timeout');
   ui.update();
@@ -2115,6 +2162,7 @@ try {
 
   view = { settings: { mode: 'auto' }, activity: { phase: 'idle' }, lastHand: { cards: [] } };
   ui.update();
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Ready for Recursion', 'fresh idle view renders first-load standby text');
   const idleViewerText = fakeDocument.textTree(viewer);
   assert(!idleViewerText.includes('Recursion is working...'), 'idle viewer does not report active work');
 

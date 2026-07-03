@@ -281,12 +281,14 @@ function pipelineIcon(value) {
 function pipelineIconSvg(kind) {
   if (kind === 'rapid') {
     return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true', 'data-recursion-pipeline-rapid': '' } }, [
-      el('path', { attrs: { d: 'M9.5 1.8 4.2 9h3.2l-.9 6.2 6.3-8.1H9.3l.2-5.3Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' } })
+      el('path', { attrs: { d: 'M2.8 5.1 7.5 3.2 14.4 8.5 7.5 13.8 2.8 11.9 7.1 8.5 2.8 5.1Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round' } }),
+      el('path', { attrs: { d: 'M4.2 6.5 7.7 5.1M4.2 10.5 7.7 11.9', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: '.65' } })
     ]);
   }
   return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true', 'data-recursion-pipeline-standard': '' } }, [
-    el('path', { attrs: { d: 'M3.2 4.1h7.5M3.2 8.5h10.6M3.2 12.9h7.5', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linecap': 'round' } }),
-    el('path', { attrs: { d: 'M11.1 2.6 13.8 4.1 11.1 5.6M11.1 11.4 13.8 12.9 11.1 14.4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
+    el('path', { attrs: { d: 'M8.5 2.3 14 4.8 8.5 7.3 3 4.8 8.5 2.3Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round' } }),
+    el('path', { attrs: { d: 'M8.5 5.8 14 8.3 8.5 10.8 3 8.3 8.5 5.8Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round' } }),
+    el('path', { attrs: { d: 'M8.5 9.3 14 11.8 8.5 14.3 3 11.8 8.5 9.3Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round' } })
   ]);
 }
 
@@ -665,6 +667,28 @@ function runtimeHealthLabel(activity, progressRun) {
   return 'Ready';
 }
 
+function standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards) {
+  if (!enabled) return 'Recursion off';
+  if (progressRun?.currentStepText) return '';
+  const severity = normalizeSeverity(activity.severity);
+  if (severity === 'error') return 'Needs attention';
+  if (severity === 'warning') return 'Needs attention';
+  const phase = cleanText(activity.phase, 'idle');
+  if (phase === 'rapidWarmReady') return 'Rapid deck ready';
+  if (phase === 'rapidWarmStale') return 'Rapid deck stale';
+  const label = cleanText(activity.label).replace(/\.+$/g, '');
+  if (phase === 'settled' || phase === 'promptPacketBuilt') {
+    if (/recursion prompt ready/i.test(label)) return 'Recursion prompt ready';
+    if (/generation canceled/i.test(label)) return 'Generation canceled';
+    return label || 'Ready for next turn';
+  }
+  if (!READY_PHASES.has(activity.phase)) return '';
+  if (mode === 'manual') return 'Manual scope armed';
+  if (pipelineMode === 'rapid' && Array.isArray(cards) && cards.length > 0) return 'Rapid deck standing by';
+  if (Array.isArray(cards) && cards.length > 0) return 'Scene deck standing by';
+  return 'Ready for Recursion';
+}
+
 export function createRecursionViewModel(view = {}) {
   const source = asObject(view);
   const settings = asObject(source.settings);
@@ -703,6 +727,7 @@ export function createRecursionViewModel(view = {}) {
     activityChips,
     progressRun,
     currentStepText: progressRun.currentStepText,
+    standbyStatusText: standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards),
     heroPixelBlocks,
     heroPixelColumnCount: heroPixelBlocks.at(-1)?.columnCount || 0,
     progressChildVisibleLimit,
@@ -2720,6 +2745,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const activity = asObject(view.activity);
     return [
       model.currentStepText || '',
+      model.standbyStatusText || '',
       model.runtimeHealthLabel || '',
       activity.runId || '',
       activity.recordedAt || '',
@@ -2732,10 +2758,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function currentStepTextForRender(view, model) {
-    if (!transientCurrentStepText) return model.currentStepText || '';
+    if (!transientCurrentStepText) return model.currentStepText || model.standbyStatusText || '';
     if (statusFingerprint(view, model) !== transientCurrentStepStatusKey) {
       clearTransientCurrentStepText();
-      return model.currentStepText || '';
+      return model.currentStepText || model.standbyStatusText || '';
     }
     return transientCurrentStepText;
   }

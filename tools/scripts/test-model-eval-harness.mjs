@@ -203,4 +203,38 @@ assertEqual(traversalOnly.result, 'model-effectiveness-not-implemented', 'live e
 assertEqual(traversalOnly.live.servedStatus, 'served-extension-match', 'live eval records served extension status from Playwright smoke');
 assertEqual(traversalOnly.live.triggerSource, 'ui-send', 'live eval records Playwright trigger source');
 
+const traversalFailure = await runModelEval({
+  argv: [
+    '--live',
+    '--pack', 'smoke',
+    '--user', 'recursion-soak-a',
+    '--target-model', 'target-model',
+    '--judge-model', 'judge-model',
+    '--max-provider-calls', '100'
+  ],
+  env: { SILLYTAVERN_BASE_URL: 'http://127.0.0.1:8000' },
+  liveSmokeRunner: async () => ({
+    status: 'fail',
+    result: 'generation-host-continuation-failed',
+    checks: [{ name: 'browser-live-smoke', status: 'fail' }],
+    browser: {
+      snapshot: {
+        served: { status: 'served-extension-match' },
+        generation: {
+          triggerSource: 'ui-send',
+          promptInstalled: true,
+          hostGenerationContinued: false
+        }
+      }
+    }
+  })
+});
+assertEqual(traversalFailure.status, 'fail', 'live eval propagates traversal failure status');
+assertEqual(traversalFailure.defects.length, 1, 'live eval emits repair-ready defect record for traversal failure');
+assertEqual(traversalFailure.defects[0].layer, 'live-host', 'traversal failure defect classifies live-host layer');
+assertEqual(traversalFailure.defects[0].severity, 'high', 'host continuation traversal defect is high severity');
+assert(traversalFailure.defects[0].reproduction.command.includes('eval-recursion-models.mjs'), 'defect includes reproduction command');
+assert(traversalFailure.defects[0].regressionTarget.includes('test-live-harness'), 'defect names regression target');
+assertEqual(traversalFailure.repairSummary.openDefects, 1, 'live eval summarizes open defects');
+
 console.log('[pass] model eval harness');

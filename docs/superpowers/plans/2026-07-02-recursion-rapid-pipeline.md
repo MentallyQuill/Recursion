@@ -365,7 +365,7 @@ In `styles/recursion.css`, include the new classes wherever compact icon buttons
 In `docs/design/UI_SPEC.md`, add this under the Recursion Bar controls:
 
 ```markdown
-Pipeline is a separate compact control from Auto/Manual mode. It lives immediately to the left of the Mode button and uses a Mode-like icon button plus dropdown, not a Settings control. The selected icon represents the active pipeline: Standard uses a compact full-route/workflow icon, Rapid uses a compact lightning/fast-lane icon. Clicking the Pipeline icon opens a compact Standard/Rapid menu with icon, short name, and hover/focus tip rows. Standard runs the full foreground Arbiter, card, compose, and install path on send. Rapid warms provider-generated scene guidance in the background and uses a short provider turn-delta or fast-start pack on send.
+Pipeline is a separate compact control from Auto/Manual mode. It lives immediately to the left of the Mode button and uses a Mode-like icon button plus dropdown, not a Settings control. The selected icon represents the active pipeline: Standard uses three large stacked layers, while Rapid uses one compressed layer tapering into a forward spike. Clicking the Pipeline icon opens a compact Standard/Rapid menu with icon, short name, and hover/focus tip rows. Standard runs the full foreground Arbiter, card, compose, and install path on send. Rapid warms provider-generated scene guidance in the background and uses a short provider turn-delta or fast-start pack on send.
 ```
 
 - [ ] **Step 8: Verify and commit**

@@ -299,6 +299,55 @@ function timeoutFloor(value, floorMs) {
   return String(Math.max(floorMs, parsePositiveInt(value, floorMs)));
 }
 
+function traversalDefectFromSmoke(smoke = {}, args = {}) {
+  const result = String(smoke?.result || 'playwright-traversal-failed');
+  const generation = smoke?.browser?.snapshot?.generation || {};
+  const layer = result.includes('host-continuation') ? 'live-host' : 'runtime';
+  const severity = result.includes('secret') || result.includes('prompt-clear') || result.includes('host-continuation')
+    ? 'high'
+    : 'medium';
+  const command = [
+    'node tools\\scripts\\eval-recursion-models.mjs',
+    '--live',
+    '--pack', args.pack,
+    '--profile', args.profile,
+    '--runs', String(args.runs),
+    '--user', args.user,
+    '--target-model', args.targetModel || '<model-id>',
+    '--judge-model', args.judgeModel || '<model-id>',
+    '--max-provider-calls', String(args.maxProviderCalls || 0)
+  ].filter(Boolean).join(' ');
+  return {
+    id: `defect-${result}`,
+    severity,
+    layer,
+    status: 'open',
+    traversalId: args.traversal || 'traversal-smoke',
+    scenarioId: args.scenario || '',
+    result,
+    expected: 'Live Playwright traversal completes Recursion prompt install and host continuation checks.',
+    actual: `Live Playwright traversal failed with ${result}.`,
+    reproduction: { command },
+    evidence: {
+      triggerSource: String(generation.triggerSource || ''),
+      promptInstalled: generation.promptInstalled === true,
+      hostGenerationContinued: generation.hostGenerationContinued === null ? null : generation.hostGenerationContinued === true
+    },
+    regressionTarget: 'tools/scripts/test-live-harness.mjs'
+  };
+}
+
+function summarizeRepairs(defects = []) {
+  const entries = Array.isArray(defects) ? defects : [];
+  return {
+    openDefects: entries.filter((entry) => entry?.status !== 'closed').length,
+    highSeverityDefects: entries.filter((entry) => entry?.severity === 'high').length,
+    repairReadyDefectRate: entries.length > 0
+      ? entries.filter((entry) => entry?.reproduction?.command && entry?.expected && entry?.actual && entry?.regressionTarget).length / entries.length
+      : 1
+  };
+}
+
 function writeArtifacts(report, artifactRoot) {
   const runRoot = join(artifactRoot || join('artifacts', 'model-evals'), report.runId);
   mkdirSync(runRoot, { recursive: true });
@@ -364,6 +413,7 @@ export async function runModelEval({ argv = [], env = process.env, artifactRoot 
     callEstimate: estimateModelCalls({ scenarioCount: scenarios.length, runs: args.runs, profile: args.profile, judgeTasks: JUDGE_TASKS }),
     metrics: {},
     judgeSummary: {},
+    defects: [],
     failures: [],
     warnings: []
   };
@@ -419,6 +469,7 @@ export async function runModelEval({ argv = [], env = process.env, artifactRoot 
     report.live.servedStatus = String(smoke?.browser?.snapshot?.served?.status || '');
     report.live.triggerSource = String(smoke?.browser?.snapshot?.generation?.triggerSource || '');
     if (smoke?.status !== 'pass') {
+      report.defects.push(traversalDefectFromSmoke(smoke, args));
       report.failures.push({
         name: 'playwright-traversal',
         status: smoke?.status || 'fail',
@@ -435,6 +486,7 @@ export async function runModelEval({ argv = [], env = process.env, artifactRoot 
     }
   }
 
+  report.repairSummary = summarizeRepairs(report.defects);
   const redaction = scanModelEvalRedactions(report);
   report.redaction = redaction;
   if (!redaction.ok) reportStatus(report, 'fail', 'redaction-failed');

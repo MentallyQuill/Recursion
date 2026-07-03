@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   addCheck,
   attachReportArtifacts,
+  computeBrowserSmokeTimeoutMs,
   createBaseReport,
   exitCodeForReport,
   finalizeReport,
@@ -172,6 +173,7 @@ function recursionSmokeFixtureHtml({
   staleModeChip = false,
   reasonerFallback = false,
   directBridgeNeverResolves = false,
+  visibleSendButtonClicksIgnored = false,
   sendSurface = 'complete'
 } = {}) {
   const disableHookScript = missingDisableHook
@@ -308,7 +310,7 @@ function recursionSmokeFixtureHtml({
           document.querySelector('[data-recursion-status]').textContent = 'Ready';
         }
       });
-      document.querySelector('#send_but')?.addEventListener('click', async () => {
+      async function sendSmokeMessage() {
         const input = document.querySelector('#send_textarea');
         const message = {
           mesid: smokeContext.chat.length,
@@ -337,6 +339,15 @@ function recursionSmokeFixtureHtml({
             messageLength: message.mes.length
           };
         }
+      }
+      document.querySelector('#send_textarea')?.addEventListener('keydown', async (event) => {
+        if (event.key !== 'Enter' || event.shiftKey) return;
+        event.preventDefault();
+        await sendSmokeMessage();
+      });
+      document.querySelector('#send_but')?.addEventListener('click', async () => {
+        if (${visibleSendButtonClicksIgnored ? 'true' : 'false'}) return;
+        await sendSmokeMessage();
       });
       document.querySelector('[data-recursion-actions]').addEventListener('click', () => {
         const panel = document.querySelector('[data-recursion-settings-panel]');
@@ -423,6 +434,7 @@ async function createSillyTavernSmokeFixtureServer({
   staleModeChip = false,
   reasonerFallback = false,
   directBridgeNeverResolves = false,
+  visibleSendButtonClicksIgnored = false,
   sendSurface = 'complete'
 } = {}) {
   const sessions = new Map();
@@ -582,6 +594,7 @@ async function createSillyTavernSmokeFixtureServer({
         staleModeChip,
         reasonerFallback,
         directBridgeNeverResolves,
+        visibleSendButtonClicksIgnored,
         sendSurface
       }));
       return;
@@ -610,6 +623,8 @@ assertEqual(validateSoakUserHandle('').reason, 'missing-user', 'empty user rejec
 assertEqual(validateSoakUserList('recursion-soak-a, recursion-soak-b').status, 'pass', 'safe user list passes');
 assertEqual(validateSoakUserList('recursion-soak-a, default-user').status, 'unsafe-user', 'mixed unsafe user list fails');
 assertEqual(validateSoakUserList('recursion-soak-a, recursion-soak-a').failed[0].reason, 'duplicate-user', 'duplicate soak users rejected');
+assertEqual(computeBrowserSmokeTimeoutMs({ generationRequested: true, timeoutMs: 120000 }), 390000, 'generation browser timeout leaves room for manual proof, generation assertion, host continuation, and cleanup');
+assertEqual(computeBrowserSmokeTimeoutMs({ generationRequested: false, timeoutMs: 30000 }), 45000, 'no-generation browser timeout remains compact');
 await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTavern live-test user/, 'rejectUnsafeLiveUser throws on default-user');
 
 {
@@ -986,6 +1001,29 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.browser.snapshot.generation.triggerSource, 'ui-send', 'markerless visible send still records ui-send trigger');
     assertEqual(report.browser.snapshot.generation.visibleSend.ok, true, 'markerless visible send is inferred from prompt evidence');
     assertEqual(report.browser.snapshot.generation.hostGenerationContinued, true, 'markerless visible send proves host generation continued');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ visibleSendButtonClicksIgnored: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      }
+    });
+    assertEqual(report.status, 'pass', 'visible send smoke retries with Enter when first click is ignored');
+    assertEqual(report.browser.snapshot.generation.triggerSource, 'ui-send', 'retry still records visible send trigger');
+    assert(
+      report.browser.snapshot.generation.visibleSend.inputMethod.includes('keyboard-enter'),
+      `visible send retry records keyboard-enter activation: ${JSON.stringify(report.browser.snapshot.generation.visibleSend)}`
+    );
+    assertEqual(report.browser.snapshot.generation.hostGenerationContinued, true, 'visible send retry proves host generation continued');
   } finally {
     await server.close();
   }

@@ -1504,6 +1504,53 @@ async function fillVisibleSendInput(page, locator, text, timeoutMs) {
   }
 }
 
+async function readVisibleSendChatLength(page) {
+  return page.evaluate(() => {
+    try {
+      const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      return Array.isArray(context?.chat) ? context.chat.length : null;
+    } catch {
+      return null;
+    }
+  }).catch(() => null);
+}
+
+async function waitForVisibleSendAccepted(page, chatLengthBefore, timeoutMs) {
+  if (typeof chatLengthBefore !== 'number') return false;
+  return page.waitForFunction((before) => {
+    try {
+      const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      return Array.isArray(context?.chat) && context.chat.length > before;
+    } catch {
+      return false;
+    }
+  }, chatLengthBefore, { timeout: Math.min(Math.max(1000, timeoutMs), 3000) })
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function activateVisibleSend(page, inputLocator, buttonLocator, timeoutMs) {
+  const methods = [];
+  const chatLengthBefore = await readVisibleSendChatLength(page);
+  methods.push('button-click');
+  await buttonLocator.click({ timeout: timeoutMs });
+  if (await waitForVisibleSendAccepted(page, chatLengthBefore, timeoutMs)) {
+    return methods.join('+');
+  }
+
+  methods.push('keyboard-enter');
+  await inputLocator.focus({ timeout: timeoutMs }).catch(() => {});
+  await page.keyboard.press('Enter');
+  if (await waitForVisibleSendAccepted(page, chatLengthBefore, timeoutMs)) {
+    return methods.join('+');
+  }
+
+  methods.push('dom-click');
+  await buttonLocator.evaluate((button) => button?.click?.()).catch(() => {});
+  await waitForVisibleSendAccepted(page, chatLengthBefore, timeoutMs);
+  return methods.join('+');
+}
+
 async function proveReasonerProviderReady(page, timeoutMs, browserPhase = () => {}) {
   const shortTimeoutMs = Math.min(timeoutMs, 5000);
   browserPhase('reasoner-provider-test-start');
@@ -1969,6 +2016,11 @@ function cleanupTimeoutResult(generation, timeoutMs) {
   };
 }
 
+export function computeBrowserSmokeTimeoutMs({ generationRequested = false, timeoutMs = 30000 } = {}) {
+  const normalized = Math.max(1000, Number(timeoutMs) || 30000);
+  return generationRequested ? (normalized * 3) + 30000 : normalized + 15000;
+}
+
 function browserSmokeTimeoutResult(timeoutMs) {
   return {
     status: 'fail',
@@ -2388,17 +2440,17 @@ async function runBrowserUiSmoke({
       if (triggerSource === 'ui-send') {
         try {
           const inputMethod = await fillVisibleSendInput(page, surface.input.locator, setup.smokeMessageText || '', timeoutMs);
-          await surface.button.locator.click({ timeout: timeoutMs });
-          generation = await page.evaluate((inputMethod) => {
+          const activationMethod = await activateVisibleSend(page, surface.input.locator, surface.button.locator, timeoutMs);
+          generation = await page.evaluate(({ inputMethod, activationMethod }) => {
             const base = globalThis.__recursionSmokeGenerationBase || {};
             base.visibleSend = {
               ...(base.visibleSend || {}),
-              inputMethod: String(inputMethod || '')
+              inputMethod: [inputMethod, activationMethod].filter(Boolean).join('+')
             };
             globalThis.__recursionSmokeGenerationBase = base;
             globalThis.__recursionSmokeGeneration = { ...(globalThis.__recursionSmokeGeneration || {}), visibleSend: base.visibleSend };
             return base;
-          }, inputMethod).catch(() => generation);
+          }, { inputMethod, activationMethod }).catch(() => generation);
         } catch (error) {
           generation = await page.evaluate(generationEvidenceScript()).catch(() => generation);
           const failed = new Error('Recursion visible send action failed.');
@@ -3824,7 +3876,7 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
           const generationRequested = env.RECURSION_LIVE_GENERATION === '1' || env.RECURSION_LIVE_REASONER === '1';
           const reasonerRequested = env.RECURSION_LIVE_REASONER === '1';
           const swipeRequested = env.RECURSION_LIVE_SWIPE === '1';
-          const browserTimeoutMs = generationRequested ? (timeoutMs * 2) + 15000 : timeoutMs + 15000;
+          const browserTimeoutMs = computeBrowserSmokeTimeoutMs({ generationRequested, timeoutMs });
           let browserTimeoutId = null;
           const browserResult = await Promise.race([
             runBrowserUiSmoke({

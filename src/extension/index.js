@@ -157,59 +157,28 @@ function resolveAssistantLandedEvents(context) {
   ].filter(Boolean))];
 }
 
-function isRawAssistantChatMessage(message) {
-  return Boolean(message && typeof message === 'object' && message.is_user !== true && !isSuppressedMessage(message));
-}
-
-function latestAssistantMessageIdentity(context) {
-  const messages = chatMessagesFromPayload(context);
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!isRawAssistantChatMessage(message)) continue;
-    const text = messageText(message);
-    if (!text) continue;
-    return [
-      String(context?.chatId || context?.chat_id || ''),
-      String(messageMesId(message) ?? index)
-    ].join('::');
-  }
-  return '';
-}
-
-function isSwipeEventName(eventName) {
-  return String(eventName || '').toLowerCase() === 'message_swiped';
-}
-
-function latestVisibleChatMessage(context) {
-  const messages = chatMessagesFromPayload(context);
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (isSuppressedMessage(message)) continue;
-    if (!messageText(message)) continue;
-    return { message, index };
-  }
-  return null;
-}
-
-function isLatestAssistantSwipe(context, details = {}) {
-  if (!isSwipeEventName(details.eventName)) return false;
-  const messageId = Number(details.messageId);
-  const latestVisible = latestVisibleChatMessage(context);
-  if (!latestVisible || !isRawAssistantChatMessage(latestVisible.message)) return false;
-  const latestAssistantId = Number(messageMesId(latestVisible.message) ?? latestVisible.index);
-  if (!Number.isFinite(messageId)) return true;
-  return Number.isFinite(messageId)
-    && Number.isFinite(latestAssistantId)
-    && messageId === latestAssistantId;
-}
-
-function sourceEventDetails(eventName, payload) {
+function normalizeHostMessageEvent(currentHost, eventName, payload) {
+  const normalized = currentHost?.normalizeMessageEvent?.(payload, { eventName });
+  if (normalized && typeof normalized === 'object') return normalized;
   const source = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
-  const rawId = Number(source.messageId ?? source.mesid ?? source.id ?? source.message_id ?? payload);
+  const rawId = source.messageId ?? source.mesid ?? source.id ?? source.message_id ?? payload;
   return {
     eventName: String(eventName || ''),
-    ...(Number.isFinite(rawId) ? { messageId: rawId } : {})
+    messageId: rawId ?? null,
+    swiped: String(eventName || '').toLowerCase() === 'message_swiped',
+    deleted: String(eventName || '').toLowerCase() === 'message_deleted',
+    edited: /message_(edited|updated)/i.test(String(eventName || '')),
+    latestAssistant: false,
+    text: ''
   };
+}
+
+function latestAssistantMessageIdentityFromHost(currentHost) {
+  try {
+    return currentHost?.latestAssistantMessageIdentity?.() || '';
+  } catch {
+    return '';
+  }
 }
 
 function registerRuntimeHostEvent(eventSource, eventName, handler) {
@@ -224,13 +193,13 @@ function invokeRuntimeCleanup(methodName, label, ...args) {
   });
 }
 
-function registerHostEvents(nextRuntime) {
+function registerHostEvents(nextRuntime, currentHost = host) {
   clearHostEventSubscriptions();
   const context = getSillyTavernContextSafe();
   const eventSource = context.eventSource || globalThis.eventSource;
-  let lastAssistantIdentity = latestAssistantMessageIdentity(context);
+  let lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
   const refreshAssistantSignature = () => {
-    lastAssistantIdentity = latestAssistantMessageIdentity(getSillyTavernContextSafe());
+    lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
   };
   const chatChangedEvent = resolveChatChangedEvent(context);
   registerRuntimeHostEvent(eventSource, chatChangedEvent, () => {
@@ -240,9 +209,8 @@ function registerHostEvents(nextRuntime) {
   });
   for (const eventName of resolveSourceChangedEvents(context)) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
-      const details = sourceEventDetails(eventName, payload);
-      const currentContext = getSillyTavernContextSafe();
-      if (isLatestAssistantSwipe(currentContext, details)) {
+      const details = normalizeHostMessageEvent(currentHost, eventName, payload);
+      if (details.swiped && details.latestAssistant) {
         refreshAssistantSignature();
         runtime ||= nextRuntime;
         return invokeRuntimeCleanup('handleLatestAssistantSwipeRetry', 'Latest assistant swipe retry marker failed.', details);
@@ -256,18 +224,17 @@ function registerHostEvents(nextRuntime) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
       refreshAssistantSignature();
       runtime ||= nextRuntime;
-      return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', sourceEventDetails(eventName, payload));
+      return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', normalizeHostMessageEvent(currentHost, eventName, payload));
     });
   }
   for (const eventName of resolveAssistantLandedEvents(context)) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
-      const currentContext = getSillyTavernContextSafe();
-      const nextAssistantIdentity = latestAssistantMessageIdentity(currentContext);
+      const nextAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
       runtime ||= nextRuntime;
       const ended = invokeRuntimeCleanup(
         'handleHostGenerationEnded',
         'Generation end cleanup failed.',
-        sourceEventDetails(eventName, payload)
+        normalizeHostMessageEvent(currentHost, eventName, payload)
       );
       if (!nextAssistantIdentity || nextAssistantIdentity === lastAssistantIdentity) {
         return ended.then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }));
@@ -399,7 +366,7 @@ export function bootstrapRecursion() {
     runtime = nextRuntime;
     ui = nextUi;
     publishLiveHarnessRuntime(nextRuntime);
-    registerHostEvents(nextRuntime);
+    registerHostEvents(nextRuntime, nextHost);
     return runtime;
   } catch (error) {
     warn('Bootstrap failed.', error);

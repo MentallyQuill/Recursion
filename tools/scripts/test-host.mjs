@@ -1,4 +1,4 @@
-import { createSillyTavernHost, promptBlocksFromPacket } from '../../src/hosts/sillytavern/host.mjs';
+import { createSillyTavernHost, normalizeSillyTavernMessageEvent, promptBlocksFromPacket } from '../../src/hosts/sillytavern/host.mjs';
 import { listSillyTavernConnectionProfiles } from '../../src/hosts/sillytavern/provider-profiles.mjs';
 import { createGenerationRouter } from '../../src/providers.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
@@ -25,6 +25,33 @@ const host = createSillyTavernHost({ contextFactory: () => context, settingsRoot
 const snap = await host.snapshot();
 assertEqual(snap.chatId, 'chat-file', 'chat id read');
 assertEqual(snap.messages[0].text, 'Hello', 'message text read');
+
+const normalizedSwipeEvent = normalizeSillyTavernMessageEvent(
+  { type: 'MESSAGE_SWIPED', id: 'm-2', content: { schema: 'x', ok: true } },
+  { latestAssistantMessageId: 'm-2' }
+);
+assertEqual(normalizedSwipeEvent.swiped, true, 'swipe event is normalized by host adapter');
+assertEqual(normalizedSwipeEvent.latestAssistant, true, 'latest assistant identity is normalized by host adapter');
+assert(!String(normalizedSwipeEvent.text).includes('[object Object]'), 'object-shaped event content is JSON-normalized');
+
+{
+  const eventHost = createSillyTavernHost({
+    contextFactory: () => ({
+      chatId: 'event-chat',
+      chat: [{ mesid: 42, is_user: false, mes: 'Assistant text.' }]
+    }),
+    settingsRoot: {}
+  });
+  assertEqual(eventHost.latestAssistantMessageIdentity(), 'event-chat::42', 'host exposes latest assistant identity');
+  assertEqual(
+    eventHost.normalizeMessageEvent({ mesid: 42 }, { eventName: 'message_swiped' }).latestAssistant,
+    true,
+    'host instance marks latest assistant swipe events'
+  );
+  const sparseSwipe = eventHost.normalizeMessageEvent({}, { eventName: 'message_swiped' });
+  assertEqual(sparseSwipe.messageId, 42, 'host instance fills sparse latest-assistant swipe id');
+  assertEqual(sparseSwipe.latestAssistant, true, 'sparse latest-assistant swipe remains marked as latest assistant');
+}
 
 {
   const contextProfileService = {

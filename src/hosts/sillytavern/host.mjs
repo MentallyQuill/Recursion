@@ -164,6 +164,98 @@ function normalizeMessage(message, index) {
   };
 }
 
+function rawChatMessages(context = {}) {
+  if (Array.isArray(context?.messages)) return context.messages;
+  if (Array.isArray(context?.chat)) return context.chat;
+  return [];
+}
+
+function latestAssistantMessage(context = {}) {
+  const messages = rawChatMessages(context);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const normalized = normalizeMessage(messages[index], index);
+    if (normalized.visible === false || normalized.isUser || normalized.isSystem || !normalized.text) continue;
+    return normalized;
+  }
+  return null;
+}
+
+export function latestSillyTavernAssistantMessageIdentity(context = {}) {
+  const latestAssistant = latestAssistantMessage(context);
+  if (!latestAssistant) return '';
+  return [
+    stringValue(context?.chatId || context?.chat_id || ''),
+    stringValue(latestAssistant.mesId ?? latestAssistant.index)
+  ].join('::');
+}
+
+function eventPayload(event) {
+  if (event && typeof event === 'object' && !Array.isArray(event) && Object.prototype.hasOwnProperty.call(event, 'payload')) {
+    return event.payload;
+  }
+  return event;
+}
+
+function eventSourceObject(event) {
+  const payload = eventPayload(event);
+  return payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+}
+
+function eventMessageId(event) {
+  const source = eventSourceObject(event);
+  const payload = eventPayload(event);
+  if (Object.prototype.hasOwnProperty.call(source, 'messageId')) return source.messageId;
+  if (Object.prototype.hasOwnProperty.call(source, 'mesid')) return source.mesid;
+  if (Object.prototype.hasOwnProperty.call(source, 'id')) return source.id;
+  if (Object.prototype.hasOwnProperty.call(source, 'message_id')) return source.message_id;
+  if (typeof payload === 'number' || typeof payload === 'string') return payload;
+  return null;
+}
+
+function eventNameOf(event, context = {}) {
+  const source = eventSourceObject(event);
+  const wrapper = asObject(event);
+  return stringValue(
+    context.eventName
+      || wrapper.eventName
+      || wrapper.type
+      || wrapper.event
+      || source.eventName
+      || source.type
+      || source.event
+  ).toLowerCase();
+}
+
+function isLatestAssistantEvent(messageId, context = {}, swiped = false) {
+  const explicitLatestId = context.latestAssistantMessageId;
+  if (explicitLatestId !== undefined && explicitLatestId !== null && explicitLatestId !== '') {
+    return stringValue(messageId) === stringValue(explicitLatestId);
+  }
+  const latestAssistant = latestAssistantMessage(context.context || context);
+  if (!latestAssistant) return false;
+  if (messageId === undefined || messageId === null || messageId === '') return Boolean(swiped);
+  return stringValue(messageId) === stringValue(latestAssistant.mesId ?? latestAssistant.index);
+}
+
+export function normalizeSillyTavernMessageEvent(event = {}, context = {}) {
+  const source = eventSourceObject(event);
+  const eventName = eventNameOf(event, context);
+  const rawMessageId = eventMessageId(event);
+  const swiped = Boolean(source.swiped || eventName === 'message_swiped');
+  const latestAssistant = latestAssistantMessage(context.context || context);
+  const messageId = rawMessageId ?? (swiped && latestAssistant ? latestAssistant.mesId : null);
+  return {
+    eventName,
+    messageId,
+    ...(Number.isFinite(Number(messageId)) ? { mesid: Number(messageId) } : {}),
+    swiped,
+    deleted: Boolean(source.deleted || eventName === 'message_deleted'),
+    edited: Boolean(source.edited || eventName === 'message_edited' || eventName === 'message_updated'),
+    latestAssistant: isLatestAssistantEvent(messageId, context, swiped),
+    text: generationResponseText(source.text, source.message, source.content, typeof eventPayload(event) === 'string' ? eventPayload(event) : '')
+  };
+}
+
 function latestMessageIdFromRawChat(messages) {
   const source = Array.isArray(messages) ? messages : [];
   for (let index = source.length - 1; index >= 0; index -= 1) {
@@ -830,6 +922,15 @@ export function createSillyTavernHost({
           globals: options.globals ?? globalThis
         });
       }
+    },
+    normalizeMessageEvent(event = {}, options = {}) {
+      return normalizeSillyTavernMessageEvent(event, {
+        ...asObject(options),
+        context: currentContext(contextFactory)
+      });
+    },
+    latestAssistantMessageIdentity() {
+      return latestSillyTavernAssistantMessageIdentity(currentContext(contextFactory));
     },
     providerClient: null,
     prompt,

@@ -5881,6 +5881,8 @@ for (const scenario of [
   assert(result.packet.sections.cardEvidence.includes('FUSED_PARTIAL_VALID_SCENE'), 'valid fused sibling reaches packet');
   assert(result.packet.sections.cardEvidence.includes('FUSED_TARGETED_REPAIR_CONSTRAINT'), 'repaired sibling reaches packet');
   assert(result.plan.diagnostics.includes('fused-partial-repair-standard'), 'plan records targeted repair path');
+  assert(result.plan.diagnostics.includes('fused-repair:Scene Constraints'), 'targeted repair names repaired family');
+  assert(!result.plan.diagnostics.includes('fused-repair:Scene Frame'), 'targeted repair does not name accepted fused family');
   assert(!result.plan.diagnostics.includes('fused-fallback-standard'), 'targeted repair is not full Standard fallback');
 }
 

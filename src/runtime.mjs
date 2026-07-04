@@ -1692,11 +1692,14 @@ function cardProgressDetail(card, source, state) {
   const providerLane = safeText(card?.providerLane || card?.lane || '', 40);
   const retryCount = progressRetryCount(card?.providerRetryCount || card?.retryCount);
   const reason = safeText(card?.providerProgressReason || card?.progressReason || '', 180);
+  const progressSource = card?.providerProgressSource === 'fused-repair' ? 'fused-repair' : source;
   return {
-    parentStepId: card?.providerRole === 'fusedCardBundle' ? 'fused-card-bundle' : 'utility-card-batch',
+    parentStepId: progressSource === 'fused-repair'
+      ? 'utility-card-batch'
+      : (card?.providerRole === 'fusedCardBundle' ? 'fused-card-bundle' : 'utility-card-batch'),
     roleId,
     family,
-    source,
+    source: progressSource,
     state,
     providerLane: providerLane === 'reasoner' ? 'reasoner' : 'utility',
     cardId: safeIdentifier(card?.id || '', 'card', 160),
@@ -2418,15 +2421,16 @@ export function createRecursionRuntime({
       const detail = cardProgressDetail(card, source, cardState);
       if (!detail.roleId && !detail.family) continue;
       const providerLane = source === 'generated' ? detail.providerLane : 'utility';
+      const progressSource = detail.source || source;
       stageRuntimeActivity({
         runId,
         phase: 'cardProgress',
         severity,
         providerLane,
         composerLane: providerLane,
-        label: `${detail.family || 'Card'} ${source === 'cache' ? 'reused from cache' : (source === 'fallback' ? 'fell back locally' : (retryCount > 0 ? 'generated after retry' : 'generated'))}.`,
+        label: `${detail.family || 'Card'} ${progressSource === 'cache' ? 'reused from cache' : (progressSource === 'fallback' ? 'fell back locally' : (retryCount > 0 ? 'generated after retry' : 'generated'))}.`,
         detail,
-        chips: ['Cards', source]
+        chips: ['Cards', progressSource]
       });
     }
   }
@@ -3875,7 +3879,8 @@ export function createRecursionRuntime({
                 ...card,
                 providerLane: repairResult?.lane || repairRequests[index]?.lane || 'utility',
                 providerRole: repairRequests[index]?.roleId || card.providerRole || '',
-                fusedRepair: true
+                fusedRepair: true,
+                providerProgressSource: 'fused-repair'
               })));
             }
             const retryCount = progressRetryCount(result?.diagnostics?.retryCount);

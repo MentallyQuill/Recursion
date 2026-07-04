@@ -144,6 +144,44 @@ assertEqual(fusedBundleStep.providerLane, 'reasoner', 'Fused progress keeps Reas
 assert(fusedBundleStep.children.some((child) => child.id === 'scene-frame-card' && child.state === 'done'), 'Fused progress nests generated card rows under the bundle row');
 assert(fusedBundleStep.children.some((child) => child.id === 'scene-constraints-card' && child.state === 'pending'), 'Fused progress seeds pending requested siblings under the bundle row');
 
+const fusedRepairProgress = createProgressRunModel({
+  activityHistory: [
+    { runId: 'fused-repair-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },
+    { runId: 'fused-repair-progress', phase: 'fusedCardBundleRunning', label: 'Generating fused card bundle...', providerLane: 'utility', cardCounts: { requested: 2 }, recordedAt: '2' },
+    {
+      runId: 'fused-repair-progress',
+      phase: 'cardProgress',
+      providerLane: 'utility',
+      detail: {
+        parentStepId: 'fused-card-bundle',
+        roleId: 'sceneFrameCard',
+        family: 'Scene Frame',
+        state: 'done'
+      },
+      recordedAt: '3'
+    },
+    {
+      runId: 'fused-repair-progress',
+      phase: 'cardProgress',
+      providerLane: 'utility',
+      detail: {
+        parentStepId: 'utility-card-batch',
+        roleId: 'sceneConstraintsCard',
+        family: 'Scene Constraints',
+        state: 'done',
+        source: 'fused-repair'
+      },
+      recordedAt: '4'
+    }
+  ],
+  activity: { runId: 'fused-repair-progress', phase: 'cardBatchRunning', label: 'Repairing fused cards...', providerLane: 'utility', recordedAt: '4' },
+  settings: { pipelineMode: 'fused' }
+});
+const repairBatch = fusedRepairProgress.steps.find((step) => step.id === 'utility-card-batch');
+const repairChild = repairBatch.children.find((child) => child.id === 'scene-constraints-card');
+assert(repairChild && repairChild.state === 'done', 'Fused repair progress shows repaired sibling under utility card batch');
+assertEqual(repairChild.source, 'fused-repair', 'Fused repair progress preserves repaired-card source');
+
 const swipeFreshRunProgress = createProgressRunModel({
   activityHistory: [
     {

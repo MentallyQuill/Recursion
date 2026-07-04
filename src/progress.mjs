@@ -8,7 +8,7 @@ const HERO_CONTROL_ONLY_STEP_IDS = new Set([
   'clearing-recursion-prompt',
   'recursion-prompt-ready'
 ]);
-const VALID_CHILD_SOURCES = new Set(['generated', 'cache', 'fallback', 'provider', 'local']);
+const VALID_CHILD_SOURCES = new Set(['generated', 'cache', 'fallback', 'provider', 'local', 'fused-repair']);
 const MODEL_CALL_ROLE_IDS = new Set([
   'sceneFrameCard',
   'activeCastCard',

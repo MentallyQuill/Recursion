@@ -1219,6 +1219,8 @@ The visual direction is SillyTavern-native graphite:
 - Green for ready/success.
 - Red for provider failures or blocked states.
 
+Production CSS is organized by surface comments for root/bar, progress, cards/Last Brief, settings, provider, and diagnostics/dialog surfaces. These comments are refactor anchors only; they must not imply a visible separator in the UI.
+
 Recommended bar treatment:
 
 - Bar height: 34-38 px.

@@ -1,3 +1,5 @@
+/* Recursion root and compact bar */
+
 .recursion-root {
   --recursion-bg: color-mix(in srgb, var(--SmartThemeBlurTintColor, #202020) 86%, #111);
   --recursion-panel: color-mix(in srgb, var(--SmartThemeBlurTintColor, #242424) 72%, #0f0f0f);
@@ -494,6 +496,8 @@
   border-color: var(--recursion-error);
   box-shadow: 0 0 5px color-mix(in srgb, var(--recursion-error) 28%, transparent);
 }
+
+/* Progress panel */
 
 .recursion-status-popover {
   display: flex;
@@ -1011,6 +1015,8 @@
   padding: 2px 6px;
 }
 
+/* Cards and Last Brief */
+
 .recursion-hand-dropdown {
   backdrop-filter: blur(12px);
   display: block;
@@ -1401,6 +1407,8 @@
   color: color-mix(in srgb, var(--recursion-accent) 68%, var(--SmartThemeBodyColor, #ddd));
 }
 
+/* Settings shell */
+
 .recursion-settings-panel {
   background: color-mix(in srgb, var(--recursion-bg) 94%, #000);
   border-top: 1px solid color-mix(in srgb, var(--recursion-border) 65%, transparent);
@@ -1436,6 +1444,8 @@
   gap: 7px;
   padding-top: 9px;
 }
+
+/* Provider panel */
 
 .recursion-provider-section {
   display: grid;
@@ -1744,6 +1754,8 @@
 .recursion-provider-status.pass {
   color: color-mix(in srgb, var(--recursion-success) 84%, transparent);
 }
+
+/* Dialogs and diagnostics */
 
 .recursion-viewer {
   background: var(--recursion-bg);

@@ -555,6 +555,15 @@ const uiSpec = readFileSync(new URL('../../docs/design/UI_SPEC.md', import.meta.
 const recursionCss = readFileSync(new URL('../../styles/recursion.css', import.meta.url), 'utf8');
 const recursionUi = readFileSync(new URL('../../src/ui.mjs', import.meta.url), 'utf8');
 const regenerateIconPath = new URL('../../assets/icons/regenerate.svg', import.meta.url);
+for (const section of [
+  '/* Recursion root and compact bar */',
+  '/* Progress panel */',
+  '/* Cards and Last Brief */',
+  '/* Settings shell */',
+  '/* Provider panel */'
+]) {
+  assert(recursionCss.includes(section), `CSS includes ${section}`);
+}
 assert(!recursionUi.includes('save and test it'), 'provider tooltip copy does not mention a removed save action');
 assert(recursionUi.includes('changes auto-save'), 'provider tooltip copy explains autosave behavior');
 assert(existsSync(regenerateIconPath), 'Regenerate uses a named SVG asset');

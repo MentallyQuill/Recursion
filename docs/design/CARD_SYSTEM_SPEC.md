@@ -155,6 +155,7 @@ type RecursionCard = {
 Contract rules:
 
 - `promptText` is the only card text eligible for injection.
+- `promptText` is instruction-shaped private evidence, not story prose. A generated card should contain short lines such as `Keep Jack at Capodichino immediately after landing`, `Preserve his weak cover and lack of field readiness`, and `Do not skip the sergeant response beat`. It must not contain mini-scenes, dialogue, sensory recap paragraphs, or decorative narration.
 - `inspectorNotes` is diagnostic-only and must never be sent to prompt composition.
 - `evidenceRefs` should point to source turns or extracted facts, not create new canon.
 - `summary` is for UI scanning and diagnostics, not a second prompt body.
@@ -168,7 +169,7 @@ The lifecycle is intentionally short:
 1. Runtime captures the current turn snapshot, scene fingerprint, active deck, and fixed card catalog.
 2. The Utility Arbiter reviews the catalog menu against the current scene deck.
 3. The Arbiter decides which card slots are already represented, missing, stale, overrepresented, or newly important.
-4. Sidecar generation creates or refreshes only the requested cards.
+4. Runtime budgets requested `cardJobs` before sidecar generation, so provider calls are made only for card jobs that can fit the effective turn hand.
 5. Runtime validates schema, token estimates, source ranges, status transitions, and freshness metadata.
 6. The Arbiter may stow, discard, regenerate, select, or emphasize cards after seeing the validated deck.
 7. Runtime builds a turn hand and passes it to prompt composition.

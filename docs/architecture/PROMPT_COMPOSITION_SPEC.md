@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Recursion improves the next SillyTavern generation by composing an inspectable prompt packet from the selected turn hand. The packet preserves the full raw selected-card text as evidence and adds provider-authored guidance about how that evidence should shape the next response. Recursion does not try to own all story context; it helps the model notice the active scene's immediate implications: recent turn pressure, visible character posture, spatial and social affordances, reveal boundaries, and hard plausibility constraints.
+Recursion improves the next SillyTavern generation by composing an inspectable prompt packet from the selected turn hand. The packet preserves the full selected-card instruction text as evidence and adds provider-authored guidance about how that evidence should shape the next response. Recursion does not try to own all story context; it helps the model notice the active scene's immediate implications: recent turn pressure, visible character posture, spatial and social affordances, reveal boundaries, and hard plausibility constraints.
 
 Related specs:
 
@@ -70,14 +70,14 @@ Guidance must stay evidence-bound. It can synthesize selected cards, but it cann
 
 ### Card Evidence
 
-Card Evidence contains the full raw `promptText` from selected cards. It is grouped and labeled as evidence rather than rewritten into a local summary. It preserves:
+Card Evidence contains the full raw `promptText` from selected cards. That `promptText` is instruction-shaped private evidence, not story prose. Card Evidence is grouped and labeled as evidence rather than rewritten into a local summary. It preserves:
 
 - the card family and role;
 - the card id for source tracing;
 - the selected card's prompt-facing text;
 - card-level emphasis/detail metadata when safe and useful.
 
-Card Evidence should include selected cards only. The full scene deck, omitted cards, inspector-only notes, provider prompts, provider responses, and hidden reasoning stay out of the model-facing packet.
+Card Evidence should include selected cards only. It preserves line breaks under each card label and never rewrites cards into mini-scenes, sensory recap, or local prose summaries. The full scene deck, omitted cards, inspector-only notes, provider prompts, provider responses, and hidden reasoning stay out of the model-facing packet.
 
 ### Guardrails
 
@@ -171,7 +171,7 @@ Reasoner Composer triggers may include:
 
 Reasoner output is not authoritative by itself. Runtime must validate, cap, and merge it into the guidance section. The Reasoner must echo the packet's frozen `snapshotHash`; missing or mismatched hashes are stale output and must be rejected. The Reasoner must not invent lore, future plot, hidden motivations, or private analysis. It should transform selected evidence into concise scene-reasoning guidance, then return structured output that the runtime validator can accept, trim, or reject.
 
-If the Reasoner fails, times out, returns invalid schema, returns the wrong snapshot hash, or exceeds safety limits, Recursion keeps the Utility guidance plus raw card evidence and records the fallback in diagnostics.
+If the Reasoner fails, times out, returns invalid schema, returns the wrong snapshot hash, or exceeds safety limits, Recursion keeps the Utility guidance plus raw card evidence and records the fallback in diagnostics. If `guidanceComposer` itself completes at the provider boundary but fails Recursion validation, packet diagnostics record `guidanceStatus: fallback-raw-only` plus a compact `guidanceFallbackReason` such as `snapshot-mismatch`, `schema-mismatch`, `source-ids-invalid`, `hidden-reasoning`, or `text-missing`.
 
 ## Injection Lanes/Depths
 

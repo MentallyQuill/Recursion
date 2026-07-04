@@ -39,6 +39,9 @@ Highest-priority invariants:
 - Older SillyTavern swipe changes clear stale Recursion prompts and cannot reuse cards from a different active source revision; latest-assistant swipe retries reuse the same prompt packet without provider work.
 - Utility is the default provider lane for Arbiter and composition work.
 - Reasoner composition is optional and must fall back to Utility or local composition on timeout, failure, off state, or invalid schema.
+- Runtime must trim over-budget `cardJobs` before provider card calls; deterministic tests should prove provider card-call count cannot exceed the effective hand budget for the turn.
+- Generated card `promptText` must be instruction-shaped private evidence, not story prose or mini-scene narration.
+- `guidanceComposer` provider-call success and prompt packet guidance acceptance are separate; tests should prove fallback reasons persist without raw guidance text.
 - Direct endpoint API keys are session-only and never written to settings, cache, journals, reports, screenshots, artifacts, or prompt packets.
 - Raw provider prompts and raw provider responses are not persisted by default.
 - Character Motivation cards may produce behavior-facing motivation guidance but must not inject private internal-thought dumps.
@@ -70,6 +73,7 @@ The gate calls the focused local suite rather than duplicating test logic. Cover
 - Utility Arbiter Auto Control Plan validation;
 - Rapid turn-delta structured schema validation and warm-miss Standard escalation;
 - card catalog, lifecycle, emphasis, detail, and hand-selection contracts;
+- pre-generation card-job budgeting, instruction-shaped card text validation, and multiline Card Evidence rendering;
 - Utility and Reasoner prompt packet composition;
 - prompt budget trimming and omission reasons;
 - prompt injection metadata, replacement, and clearing through a fake host;

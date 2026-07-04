@@ -49,6 +49,8 @@ Recursion exposes route visibility as a compact Reasoning Level summary rather t
 
 Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `socialSubtextCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`. Fused wraps those card families in `fusedCardBundle` with response schema `recursion.cardBundle.v1`; each accepted item inside the bundle still validates as one `recursion.card.v1` card. Rapid foreground roles are Utility-only; they do not run on the Reasoner lane.
 
+Runtime sends card roles only for jobs that can fit the effective selected-hand budget. The Arbiter is still instructed to respect `budgets.maxCards`, but runtime enforces that boundary before the expensive provider-call layer and records `card-jobs-budgeted` when it trims over-requested jobs.
+
 Fused is meant for stronger reasoning model families that can maintain a larger multi-card structured contract in one response, such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar models. Standard is a better fit for fast, cheaper utility-class models, including 500B-and-lower models, Nemotron, GPT-OSS, Gemma, and similar, because each call has a narrower one-card contract.
 
 Rapid foreground roles are latency-sensitive structured Utility calls. `rapidTurnDelta` is used only when an exact-source warm artifact is ready. If no warm artifact is available, Rapid escalates to Standard for that same pending user message. Runtime must not replace missing Rapid output with local scene briefs, turn briefs, or summary packs.
@@ -85,6 +87,8 @@ The structured parser may recover common provider formatting damage: markdown fe
 Every generation-role request carries `responseSchema` and `machineJson: true` into the host adapter. Requests with a frozen snapshot also carry `snapshotHash`. Host adapters may use that metadata to request structured JSON support, but the metadata is advisory until the router validates the visible response body.
 
 Validation failures do not become successful model calls. Prompt composition consumes accepted structured data only. Success diagnostics may include compact repair metadata such as `structuredOutputRepaired`, `structuredOutputRepairCode`, and `visibleContentLength`; raw malformed response text and hidden reasoning stay out of journals, activity details, and reports.
+
+`guidanceComposer` has two validation layers. Provider-call journal success means the transport and schema parser returned a response. Prompt packet diagnostics then record whether that guidance passed Recursion validation. A `guidanceComposer success` entry followed by `guidanceStatus: fallback-raw-only` means the model call completed but the guidance payload was rejected by schema, snapshot, source-id, hidden-reasoning, or empty-text validation.
 
 ## Reasoning Amount Routing
 

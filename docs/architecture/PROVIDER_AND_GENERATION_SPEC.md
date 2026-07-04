@@ -177,7 +177,7 @@ Card names should align with [Card System Spec](../design/CARD_SYSTEM_SPEC.md). 
 
 The literal `compose-brief` Arbiter action is retained as a V1 enum name, but it now means compose the V3 Guidance/Card Evidence/Guardrails packet. The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Fused card bundles use `recursion.cardBundle.v1`, Rapid foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses `recursion.guidanceComposer.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`.
 
-Card roles, `guidanceComposer`, `reasonerComposer`, and `rapidTurnDelta` receive the Arbiter-normalized `recursion.storyForm.v1` object as request context. They must align generated card prose and prompt guidance to that tense and point of view rather than deriving their own independent form from the prompt.
+Card roles, `guidanceComposer`, `reasonerComposer`, and `rapidTurnDelta` receive the Arbiter-normalized `recursion.storyForm.v1` object as request context. Card roles must return instruction-shaped `promptText` in that form rather than narrative prose, mini-scenes, dialogue, sensory recap, or decorative narration. Guidance roles must align their prompt guidance to the same tense and point of view rather than deriving an independent form from the prompt.
 
 When a `fusedCardBundle` provider call fails structured-output parsing but exposes visible response text, runtime may recover complete card objects from the `items` array prefix. Recovered fragments still pass the normal snapshot and per-card validation before use. Full Standard card fallback is reserved for zero trusted Fused cards.
 
@@ -238,6 +238,8 @@ Required output shape:
 ```
 
 The Utility Arbiter must echo the frozen request `snapshotHash`. Missing or mismatched Arbiter hashes are stale output; runtime rejects the plan and uses the conservative local fallback instead of trusting its action, card jobs, lifecycle, diagnostics, or Reasoner decision.
+
+The provider router only receives card jobs that can fit the effective hand budget. The Arbiter is instructed not to emit more `cardJobs` than `budgets.maxCards`, but runtime enforces this mechanically before provider calls because provider calls are the expensive boundary.
 
 Invalid or unsupported `storyForm` values normalize to `unknown` rather than failing the whole plan. Unknown story form produces conservative downstream prompt text that tells card and story models to match the active chat's established form.
 

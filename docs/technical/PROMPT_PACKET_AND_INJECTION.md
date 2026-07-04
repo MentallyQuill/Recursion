@@ -44,7 +44,7 @@ The composer receives:
 - generation router for `guidanceComposer` and optional Reasoner augmentation
 - activity reporter for fallback events
 
-Cards are normalized before composition. Unsafe evidence refs, unsupported families, secret-looking ids, hidden-thought wording, and invalid omission reasons are cleaned or rejected. Full selected-card prompt text is preserved in the Card Evidence section; packet budgeting is applied to guidance and guardrails, not by locally summarizing selected cards into a smaller semantic brief.
+Cards are normalized before composition. Unsafe evidence refs, unsupported families, secret-looking ids, prose-shaped card paragraphs, hidden-thought wording, and invalid omission reasons are cleaned or rejected. Full selected-card prompt text is preserved in the Card Evidence section; packet budgeting is applied to guidance and guardrails, not by locally summarizing selected cards into a smaller semantic brief.
 
 ## Utility Composition
 
@@ -52,7 +52,7 @@ Utility guidance composition is the default path. It calls `guidanceComposer` wi
 
 The composer includes the normalized story form in the provider request and in fallback guidance. When tense and POV are known, the guidance section names the target form directly. When either field is unknown, it tells the host model to match the active chat's established story form instead of introducing a new form from card evidence.
 
-The selected raw card evidence remains model-facing even when guidance composition is unavailable. If `guidanceComposer` fails, Recursion installs a raw-card-only packet with minimal fallback guidance that tells the model to use the card evidence directly.
+The selected raw card evidence remains model-facing even when guidance composition is unavailable. If `guidanceComposer` fails or returns an invalid payload, Recursion installs a raw-card-only packet with minimal fallback guidance that tells the model to use the card evidence directly. `guidanceComposer` provider-call success means the provider returned a response; it does not by itself mean Recursion used that response. Packet diagnostics expose `guidanceStatus` and `guidanceFallbackReason`, and the run journal repeats those compact fields on `hand.selected` so operators can distinguish transport success from packet-validation fallback.
 
 ## Reasoner Composition
 
@@ -75,6 +75,8 @@ Prompt Footprint is the size/detail owner for the final composed packet. Strengt
 | Rich | expanded Guidance with bounded guardrails and full selected Card Evidence | High complexity or high drift risk. |
 
 Budget order favors critical guardrails, guidance that points at immediate scene constraints and current user focus, and then lower-priority directional nuance. Omission is part of the contract, but selected card evidence is not locally rewritten into shorter scene and turn briefs.
+
+The Card Evidence section serializes selected instruction-shaped card text verbatim, preserving line breaks under each card label. It does not rewrite cards into prose and it does not expose card labels as final-response content.
 
 ## Omissions
 

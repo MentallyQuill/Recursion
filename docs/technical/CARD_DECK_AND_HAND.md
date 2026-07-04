@@ -73,7 +73,7 @@ A normalized card contains:
 - `arbiter`
 - optional `inspectorNotes`
 
-`promptText` is the only card text eligible for prompt composition. `summary` supports scanning. `inspectorNotes` are diagnostics and must never be injected.
+`promptText` is the only card text eligible for prompt composition. It is instruction-shaped private evidence, not story prose: short lines such as `Keep Jack at Capodichino immediately after landing`, `Preserve his weak cover and lack of field readiness`, and `Do not skip the sergeant response beat`. It must not contain mini-scenes, dialogue, sensory recap paragraphs, or decorative narration. `summary` supports scanning. `inspectorNotes` are diagnostics and must never be injected.
 
 ## Lifecycle
 
@@ -108,7 +108,7 @@ Runtime applies these decisions only after schema and safety checks. If an expli
 
 The scene deck is the cached set of cards for one scene. It can contain active, stowed, stale, and discarded cards. Only active cards can enter the turn hand.
 
-The turn hand is a compact selection for one prompt packet. It is rebuilt each generation attempt and sorted by emphasis, catalog priority, and id. It is capped by max-card and token budgets.
+The turn hand is a compact selection for one prompt packet. It is rebuilt each generation attempt and sorted by emphasis, catalog priority, and id. It is capped by max-card and token budgets. Runtime also applies the effective max-card budget before provider generation, so fresh provider calls are not made for card jobs that cannot reach the hand.
 
 ```mermaid
 flowchart LR

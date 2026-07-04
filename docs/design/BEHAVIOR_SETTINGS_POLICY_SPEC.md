@@ -76,7 +76,7 @@ flowchart LR
 | Mode | Auto versus Manual enforcement. | Provider lane depth, prompt size, or semantic relevance. |
 | Card Scope | Family/sub-item preference in Auto and strict family/sub-item whitelist in Manual. | Final prose style or provider cost. |
 | Reasoning Level | Provider lane policy and Reasoner cost depth. | Prompt size, card family focus, or intervention strength. |
-| Min Cards / Max Cards | Reasoning Level card-count bounds: Low uses Min, Medium/High use the average, Ultra uses Max. | Prompt section size, provider lane routing, or semantic relevance. |
+| Min Cards / Max Cards | Reasoning Level card-count bounds: Low uses Min, Medium/High use the average, Ultra uses Max. Runtime also applies the effective Max Cards ceiling before card provider calls. | Prompt section size, provider lane routing, or semantic relevance. |
 | Strength | Intervention pressure, refresh pressure, cache reuse posture, and composer assertiveness. | Prompt Footprint size or Reasoning Level lane selection. |
 | Focus | Broad family priority profile. | Hard exclusion, except where Manual card scope already excludes a family. |
 | Prompt Footprint | Packet size, section budgets, and detail level. | Provider lane policy, semantic truth, or card-count bounds. |
@@ -151,6 +151,7 @@ Mechanical effects:
 - Arbiter prompt includes a short Strength policy line.
 - Local fallback plan uses Strength to choose conservative versus full hand pressure.
 - Post-Arbiter plan shaping keeps Strength inside the active card budget instead of enlarging the hand.
+- Post-Arbiter card-job budgeting trims provider work before generation when the Arbiter over-requests the effective hand size.
 - Hand selection applies Strength inside existing max-card and token caps; Light uses lean pressure, Balanced uses normal pressure, and Strong uses the active footprint fully without enlarging it.
 - Composer gets a Strength line so Utility and Reasoner composition use matching assertiveness.
 - Diagnostics record the resolved Strength policy and any plan shaping labels.

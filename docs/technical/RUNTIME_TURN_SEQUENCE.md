@@ -35,6 +35,7 @@ sequenceDiagram
     Runtime->>Utility: utilityArbiter(snapshot, settings, catalog)
     Utility-->>Runtime: Auto Control Plan
     Runtime->>Storage: load scene cache
+    Runtime->>Runtime: budget card jobs
     Runtime->>Cards: generate or reuse scene cards
     Cards-->>Runtime: accepted cards and omissions
     Runtime->>Runtime: apply lifecycle and select hand
@@ -139,17 +140,19 @@ The Arbiter must infer `storyForm` from visible story text before card jobs run.
 
 Runtime validates and normalizes the plan. If the Utility provider is unavailable, runtime reuses a valid cache when safe or clears Recursion injection and continues the turn without new guidance. If the Arbiter returns invalid structured output, including a missing or mismatched `snapshotHash`, runtime uses the conservative local fallback plan because the provider responded but the plan was unsafe. Rejected Arbiter card jobs, lifecycle actions, diagnostics, and Reasoner decisions are not trusted.
 
+After the Arbiter plan is normalized, scoped, and shaped by Reasoning Level plus behavior policy, runtime budgets `cardJobs` before any provider card calls. Over-budget card jobs are recorded as `card-jobs-budgeted` diagnostics and are not sent to Utility or Reasoner. Final hand selection should not normally omit freshly generated cards for `max-cards`; that reason indicates cache/manual/fallback competition, not routine provider over-generation.
+
 Reasoner decisions are advisory after normalization. When the Arbiter requests Reasoner but the Reasoner lane is disabled, untested, has a failed provider test, lacks a required direct-endpoint session key, or has incomplete route settings, runtime rewrites the decision to `skip`, records a stable `reasoner-unavailable` diagnostic, and composes through Utility only.
 
 ## Card Jobs And Deck Update
 
 Card requests are built from the Arbiter plan, the frozen snapshot, and the selected sub-item focus for each requested family. The selected focus facets are copied into the model-visible card-generation prompt with their labels and descriptions, while also remaining in safe request metadata for diagnostics. Sub-items guide what the provider should emphasize inside a family; they do not create separate card instances.
 
-Card-generation prompts receive the normalized `storyForm` block from the Arbiter. Card providers must write card prose and instructions in that same tense and point of view, or use the conservative active-chat form when the Arbiter could not identify both fields. Runtime also stores compact story-form metadata with each request for diagnostics.
+Card-generation prompts receive the normalized `storyForm` block from the Arbiter. Card providers must write instruction-shaped `promptText` in that same tense and point of view, or use the conservative active-chat form when the Arbiter could not identify both fields. Runtime rejects narrative prose paragraphs, mini-scenes, dialogue, sensory recap, and hidden-reasoning wording before generated cards can enter the deck. Runtime also stores compact story-form metadata with each request for diagnostics.
 
 In Manual mode, runtime enforces the whitelist after the Arbiter returns. Disabled-family jobs are omitted before provider generation, disabled cached/provider/fallback cards are filtered before deck and hand selection, and diagnostics use compact `manual-scope-omitted:<family>` reasons without prompt text. In Auto mode, disabled focus is advisory: runtime keeps the full catalog available, but records compact exception diagnostics when an unselected critical family is used.
 
-Utility card calls are batched when the provider router supports batching. Each accepted provider result is converted into a normalized V1 card, then sanitized before entering the deck.
+Utility card calls are batched when the provider router supports batching. The router only receives budgeted card jobs that can fit the effective hand budget. Each accepted provider result is converted into a normalized V1 card, then sanitized before entering the deck.
 
 Runtime can create local fallback Scene Frame and Scene Constraints role cards from the latest visible messages after a valid or locally recoverable plan exists. These local cards keep the first loop useful by deriving basic scene frame and hard-constraint guidance when card generation is unavailable, but they are not used to mask a missing or transport-failing Utility provider.
 
@@ -169,7 +172,7 @@ The resulting hand contains sanitized card ids, families, roles, prompt text, to
 
 ## Composition And Injection
 
-The prompt composer turns the hand into Guidance, Card Evidence, and Guardrails. `guidanceComposer` writes the provider-authored direction layer; selected raw card text is preserved in Card Evidence. Reasoner composition can add a validated synthesis patch when settings and the Arbiter permit it.
+The prompt composer turns the hand into Guidance, Card Evidence, and Guardrails. `guidanceComposer` writes the provider-authored direction layer; selected instruction-shaped card text is preserved in Card Evidence. Reasoner composition can add a validated synthesis patch when settings and the Arbiter permit it. A `guidanceComposer` provider-call success means the model call completed; packet diagnostics still determine whether Recursion used that payload or fell back to raw-card-only guidance.
 
 Auto and Manual install prompt blocks through the SillyTavern adapter when the current run produces a valid hand and packet. Committed prompt install attempts write a sanitized `hand.selected` journal breadcrumb for the final hand before the prompt install event. Power-off clears without compilation.
 
@@ -185,7 +188,7 @@ Install uses a clear-then-install sequence and rolls back all known Recursion pr
 
 Activity events are emitted for reading the turn, planning, cache inspection, card generation or cache reuse, nested card progress, hand selection, prompt install, prompt clear, storage save, warnings, and settled results. The compact progress model renders the latest active run state rather than a raw log. Routine cache inspection after source changes is neutral completed work; actual scene-deck reuse renders as cached/purple.
 
-Storage writes are sequenced separately from prompt mutations. Storage failure records a warning and keeps the current generation path moving when in-memory state is sufficient. `hand.selected` entries store hand id, selected and omitted counts, up to 16 selected card ids/families/roles/emphasis/token estimates with `listedCount` and `truncated`, source hashes, and prompt packet hashes; they do not store card `promptText`, prompt sections, inspector notes, or provider payloads.
+Storage writes are sequenced separately from prompt mutations. Storage failure records a warning and keeps the current generation path moving when in-memory state is sufficient. `hand.selected` entries store hand id, selected and omitted counts, compact guidance validation status/fallback reason/counts, up to 16 selected card ids/families/roles/emphasis/token estimates with `listedCount` and `truncated`, source hashes, and prompt packet hashes; they do not store card `promptText`, prompt sections, inspector notes, raw guidance text, or provider payloads.
 
 ## Cancellation And Stale Results
 

@@ -381,6 +381,15 @@ const fusedWrongSnapshotEnvelope = cardsFromFusedProviderResult({
 }, fusedCardContext);
 assertEqual(fusedWrongSnapshotEnvelope.cards.length, 0, 'Fused validator never salvages wrong-snapshot envelope');
 assert(fusedWrongSnapshotEnvelope.diagnostics.includes('fused-bundle-snapshot-mismatch'), 'wrong snapshot still records mismatch diagnostic');
+const fusedRecoveredFragment = cardsFromFusedProviderResult({
+  ok: false,
+  roleId: 'fusedCardBundle',
+  recoverableText: '{"schema":"recursion.cardBundle.v1","snapshotHash":"snapshot-fused-1","items":[{"schema":"recursion.card.v1","family":"Scene Frame","role":"sceneFrameCard","promptText":"FUSED_FRAGMENT_RECOVERED_SCENE survives truncation.","evidenceRefs":["message:8"]},{"schema":"recursion.card.v1","family":"Scene Constraints","role":"sceneConstraintsCard","promptText":"unfinished"'
+}, fusedCardContext);
+assertEqual(fusedRecoveredFragment.cards.length, 1, 'Fused validator recovers complete item before malformed tail');
+assert(fusedRecoveredFragment.cards[0].promptText.includes('FUSED_FRAGMENT_RECOVERED_SCENE'), 'recovered fragment card text is preserved');
+assert(fusedRecoveredFragment.diagnostics.includes('fused-bundle-fragment-recovered'), 'fragment recovery diagnostic recorded');
+assertDeepEqual(fusedRecoveredFragment.missingFamilies, ['Character Motivation'], 'fragment recovery still reports missing requested sibling');
 const storyFormRequest = buildCardRequests({
   cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve narrative form.' }]
 }, {

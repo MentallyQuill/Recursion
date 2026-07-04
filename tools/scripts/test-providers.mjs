@@ -324,6 +324,22 @@ const malformed = await malformedRouter.generate('utilityArbiter', { prompt: 'Re
 assertEqual(malformed.ok, false, 'malformed json returns failure result');
 assertEqual(malformed.error.code, 'RECURSION_JSON_PARSE_FAILED', 'malformed json exposes useful parse code');
 
+const fusedRecoverableText = '{"schema":"recursion.cardBundle.v1","snapshotHash":"snapshot-fused-1","items":[{"schema":"recursion.card.v1","family":"Scene Frame","role":"sceneFrameCard","promptText":"FUSED_FRAGMENT_RECOVERED_SCENE survives truncation.","evidenceRefs":["message:8"]},{"schema":"recursion.card.v1","family":"Scene Constraints","role":"sceneConstraintsCard","promptText":"unfinished"';
+const fusedMalformedRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return { text: fusedRecoverableText, providerId: 'fake-host', model: 'fake-model' };
+    }
+  }
+});
+const fusedMalformed = await fusedMalformedRouter.generate('fusedCardBundle', {
+  prompt: 'Return malformed fused JSON.',
+  snapshotHash: 'snapshot-fused-1'
+});
+assertEqual(fusedMalformed.ok, false, 'malformed fused bundle returns failure result');
+assert(fusedMalformed.recoverableText.includes('FUSED_FRAGMENT_RECOVERED_SCENE'), 'malformed fused bundle exposes bounded recoverable text');
+assert(fusedMalformed.recoverableText.length <= 12000, 'malformed fused recoverable text is bounded');
+
 const repairedMarker = 'RAW_REPAIRED_PROVIDER_TEXT';
 const repairedActivity = createActivityReporter();
 const repairedJournal = [];

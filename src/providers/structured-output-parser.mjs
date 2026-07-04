@@ -247,3 +247,53 @@ export function parseStructuredJsonText(text = '', options = {}) {
     })
   };
 }
+
+export function extractJsonObjectsFromArrayProperty(text = '', propertyName = 'items') {
+  const source = String(text || '');
+  const escapedPropertyName = String(propertyName || 'items').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const propertyPattern = new RegExp(`"${escapedPropertyName}"\\s*:\\s*\\[`, 'i');
+  const match = propertyPattern.exec(source);
+  if (!match) return [];
+  let index = match.index + match[0].length;
+  const values = [];
+  while (index < source.length) {
+    while (index < source.length && /[\s,]/.test(source[index] || '')) index += 1;
+    if (source[index] === ']') break;
+    if (source[index] !== '{') {
+      index += 1;
+      continue;
+    }
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    const start = index;
+    for (; index < source.length; index += 1) {
+      const char = source[index];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\' && inString) {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (char === '{') depth += 1;
+      if (char === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          const parsed = parseStructuredJsonText(source.slice(start, index + 1), { requireObject: true });
+          if (parsed.ok) values.push(parsed.value);
+          index += 1;
+          break;
+        }
+      }
+    }
+    if (depth !== 0) break;
+  }
+  return values;
+}

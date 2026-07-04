@@ -1475,6 +1475,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     const composedExternalSignal = composeAbortSignal([options.signal, request.signal]);
     try {
+      let raw = null;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const attemptRequest = attempt === 0
           ? request
@@ -1491,7 +1492,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
         try {
           if (!providerRoleKnown) throw unsupportedRoleError(roleId);
-          const raw = await withTimeout(
+          raw = await withTimeout(
             (requestWithSignal) => client.generate(roleId, requestWithSignal),
             attemptRequest,
             effectiveTimeoutMs,
@@ -1597,7 +1598,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
             roleId,
             lane,
             error: safeError,
-            diagnostics
+            diagnostics,
+            recoverableText: roleId === 'fusedCardBundle' ? truncate(String(raw?.text || ''), 12000) : ''
           };
         }
       }

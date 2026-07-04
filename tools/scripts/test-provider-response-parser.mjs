@@ -15,6 +15,7 @@ import {
   isProviderResponseTokenLimitFinishReason
 } from '../../src/providers/provider-response-normalizer.mjs';
 import {
+  extractJsonObjectsFromArrayProperty,
   STRUCTURED_OUTPUT_PARSE_ERROR_CODES,
   parseStructuredJsonText,
   repairCommonJson,
@@ -47,6 +48,16 @@ Line two",
 assertEqual(commented.ok, true, 'comments trailing commas and literal line breaks are repaired');
 assertEqual(commented.repaired, true, 'commented json is marked repaired');
 assertEqual(commented.value.message, 'Line one\nLine two', 'literal line break inside string is preserved as newline');
+
+const partialFusedItems = extractJsonObjectsFromArrayProperty(`{
+  "schema": "recursion.cardBundle.v1",
+  "snapshotHash": "snapshot-fused-1",
+  "items": [
+    {"schema":"recursion.card.v1","family":"Scene Frame","role":"sceneFrameCard","promptText":"Recovered first item.","evidenceRefs":["message:8"]},
+    {"schema":"recursion.card.v1","family":"Scene Constraints","role":"sceneConstraintsCard","promptText":"Unclosed second item"
+`, 'items');
+assertEqual(partialFusedItems.length, 1, 'parser recovers complete objects before damaged array tail');
+assertEqual(partialFusedItems[0].family, 'Scene Frame', 'parser preserves recovered fused item family');
 
 const smartQuoted = parseStructuredJsonText('\uFEFF{\u201cschema\u201d:\u201crecursion.providerTest.v1\u201d,\u201cok\u201d:true}');
 assertEqual(smartQuoted.ok, true, 'BOM and smart quotes are repaired');

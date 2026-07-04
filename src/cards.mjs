@@ -1,6 +1,7 @@
 import { compact, hashJson, makeId, nowIso, redact, safeId, truncate } from './core.mjs';
 import { CARD_SCOPE_CATALOG } from './card-scope.mjs';
 import { UTILITY_ROLE_IDS } from './providers.mjs';
+import { extractJsonObjectsFromArrayProperty } from './providers/structured-output-parser.mjs';
 import { summarizeBehaviorPolicyForDiagnostics } from './settings-policy.mjs';
 import { UNKNOWN_STORY_FORM, normalizeStoryForm, storyFormPromptBlock } from './story-form.mjs';
 
@@ -1026,7 +1027,18 @@ export function cardsFromFusedProviderResult(result, context = {}) {
   };
   if (!result?.ok) {
     output.diagnostics.push('fused-bundle-provider-failed');
-    return finalize();
+    const recoveredItems = extractJsonObjectsFromArrayProperty(result?.recoverableText || result?.text || '', 'items');
+    if (!recoveredItems.length) return finalize();
+    output.diagnostics.push('fused-bundle-fragment-recovered');
+    result = {
+      ...result,
+      ok: true,
+      data: {
+        schema: CARD_BUNDLE_RESPONSE_SCHEMA,
+        snapshotHash: context.expectedSnapshotHash || context.snapshotHash || '',
+        items: recoveredItems
+      }
+    };
   }
   const data = asObject(result.data);
   const envelopeSchemaOk = data.schema === CARD_BUNDLE_RESPONSE_SCHEMA;

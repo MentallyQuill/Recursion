@@ -337,6 +337,11 @@ assert(
   fusedInvalidUnsafeText.diagnostics.includes('fused-item-invalid:Scene Frame:Card-promptText-contains-unsafe-hidden-reasoning-wording'),
   'Fused validator records the concrete invalid-item reason'
 );
+assertDeepEqual(fusedParsed.acceptedFamilies, ['Scene Frame', 'Character Motivation'], 'Fused parser reports accepted families');
+assertDeepEqual(fusedParsed.missingFamilies, [], 'Fused parser reports no missing families when requested siblings are accepted');
+assertDeepEqual(fusedInvalidUnsafeText.acceptedFamilies, [], 'Fused parser reports no accepted families for invalid-only bundle');
+assertDeepEqual(fusedInvalidUnsafeText.invalidFamilies, ['Scene Frame'], 'Fused parser reports invalid families for targeted repair');
+assertDeepEqual(fusedInvalidUnsafeText.missingFamilies, ['Character Motivation'], 'Fused parser reports requested siblings absent from damaged bundle');
 const storyFormRequest = buildCardRequests({
   cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve narrative form.' }]
 }, {

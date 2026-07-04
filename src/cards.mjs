@@ -1009,19 +1009,33 @@ export function cardsFromProviderResult(result, context = {}) {
 }
 
 export function cardsFromFusedProviderResult(result, context = {}) {
-  const output = { cards: [], omissions: [], diagnostics: [] };
+  const output = {
+    cards: [],
+    omissions: [],
+    diagnostics: [],
+    acceptedFamilies: [],
+    invalidFamilies: [],
+    rejectedFamilies: [],
+    missingFamilies: []
+  };
+  const finalize = () => {
+    for (const key of ['acceptedFamilies', 'invalidFamilies', 'rejectedFamilies', 'missingFamilies']) {
+      output[key] = [...new Set(output[key])];
+    }
+    return output;
+  };
   if (!result?.ok) {
     output.diagnostics.push('fused-bundle-provider-failed');
-    return output;
+    return finalize();
   }
   const data = asObject(result.data);
   if (data.schema !== CARD_BUNDLE_RESPONSE_SCHEMA) {
     output.diagnostics.push('fused-bundle-schema-mismatch');
-    return output;
+    return finalize();
   }
   if (!providerSnapshotMatches(data, context)) {
     output.diagnostics.push('fused-bundle-snapshot-mismatch');
-    return output;
+    return finalize();
   }
   const requested = new Map((Array.isArray(context.requestedCards) ? context.requestedCards : [])
     .map((card) => {
@@ -1030,15 +1044,18 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     })
     .filter(Boolean));
   const seen = new Set();
+  const encounteredRequested = new Set();
   const items = Array.isArray(data.items) ? data.items : [];
   for (const rawItem of items) {
     const item = asObject(rawItem);
     const catalog = resolveCatalog({ family: item.family, role: item.role ?? item.roleId }, { strict: false });
     const diagnosticName = cleanOptionalText(item.family || item.role || item.roleId || 'unknown', 80) || 'unknown';
     if (!catalog || !requested.has(catalog.family) || seen.has(catalog.family)) {
+      if (catalog?.family) output.rejectedFamilies.push(catalog.family);
       output.diagnostics.push(`fused-item-rejected:${diagnosticName}`);
       continue;
     }
+    encounteredRequested.add(catalog.family);
     const cards = cardsFromProviderResult({
       ok: true,
       data: {
@@ -1054,6 +1071,7 @@ export function cardsFromFusedProviderResult(result, context = {}) {
       expectedRole: catalog.role
     });
     if (!cards.length) {
+      output.invalidFamilies.push(catalog.family);
       const rejectReason = providerCardRejectReason({
         ok: true,
         data: {
@@ -1072,6 +1090,7 @@ export function cardsFromFusedProviderResult(result, context = {}) {
       continue;
     }
     seen.add(catalog.family);
+    output.acceptedFamilies.push(catalog.family);
     output.cards.push(...cards.map((card) => ({
       ...card,
       providerRole: 'fusedCardBundle',
@@ -1086,9 +1105,12 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     if (family || role) output.omissions.push({ family, role, reason });
   }
   for (const family of requested.keys()) {
-    if (!seen.has(family)) output.diagnostics.push(`fused-item-missing:${family}`);
+    if (!encounteredRequested.has(family)) {
+      output.missingFamilies.push(family);
+      output.diagnostics.push(`fused-item-missing:${family}`);
+    }
   }
-  return output;
+  return finalize();
 }
 
 export function applyCardPlan(existingCards = [], plan = {}) {

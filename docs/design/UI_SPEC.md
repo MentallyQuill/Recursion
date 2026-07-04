@@ -1167,6 +1167,8 @@ Injection controls apply to the final prompt packet after Utility guidance or Re
 
 Advanced commands without V1 runtime handlers must render disabled with tooltip copy. They should not appear active until they perform the named action. V1 wires `Reset Scene Cache`, `Export Diagnostics`, and `Clear Run Journal`.
 
+UI command failures use the compact bar's existing transient status line. They must not open a modal or create a progress run unless runtime work actually started.
+
 Checkboxes inside Recursion settings must use the compact dark Recursion control skin instead of SillyTavern's global checkbox background. The unchecked state is a dark 20px square with a subtle hairline border; the checked state fills with the Recursion cyan and shows a small checkmark.
 
 Most internal Auto settings should not be exposed as controls. The UI can display Auto decisions for inspection, but users should not have to manage per-turn action, scene status, Reasoner decision rules, or individual card families.

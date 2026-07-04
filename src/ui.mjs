@@ -23,6 +23,7 @@ import {
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 import { FOCUS_BOOSTED_FAMILIES } from './settings-policy.mjs';
 import { DEFAULT_RETENTION_SETTINGS, RETENTION_LIMITS } from './retention-policy.mjs';
+import { createUiActionStatus } from './ui/action-status.mjs';
 
 const PHASE_LABELS = Object.freeze({
   idle: '',
@@ -3137,6 +3138,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let standbyStatusTimer = null;
   let cardScopeNotice = '';
   let pendingCardScope = null;
+  let destroyed = false;
+  const uiActionStatus = createUiActionStatus();
   const focusOriginByPanel = typeof WeakMap === 'function' ? new WeakMap() : new Map();
   const providerModelFetchState = {
     utility: { models: [], status: '' },
@@ -3240,6 +3243,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function currentStepTextForRender(view, model) {
+    const actionFailure = uiActionStatus.current();
+    if (actionFailure?.label) return cleanText(actionFailure.label);
     if (!transientCurrentStepText) return model.currentStepText || standbyStatusTextForRender(view, model);
     if (statusFingerprint(view, model) !== transientCurrentStepStatusKey) {
       clearTransientCurrentStepText();
@@ -3749,7 +3754,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (control('recursionCopyPromptPacket')) {
       const view = currentView();
       const packetText = promptPacketText(view.lastPacket, view.lastHand);
-      runAction(globalThis.navigator?.clipboard?.writeText?.(packetText));
+      runAction(globalThis.navigator?.clipboard?.writeText?.(packetText), null, 'Copy prompt failed.');
     }
     const settingsDisclosure = control('recursionSettingsSectionToggle');
     if (settingsDisclosure) {
@@ -3781,7 +3786,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       runAction(Promise.resolve(runtime?.exportDiagnostics?.()).then((result) => {
         const payload = result?.diagnostics || result || {};
         return globalThis.navigator?.clipboard?.writeText?.(safeJson(payload, { maxString: 5000 }));
-      }));
+      }), null, 'Export diagnostics failed.');
     }
     const modeChoice = control('recursionModeChoice');
     if (modeChoice) {
@@ -3877,7 +3882,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         .then((result) => applyProviderModelFetchResult(lane, result || {
           ok: false,
           error: { message: 'Model fetch is unavailable.' }
-        })));
+        })), null, 'Fetch models failed.');
     }
     const providerTest = control('recursionProviderTest');
     if (providerTest) {
@@ -3886,7 +3891,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       runAction(runtime?.testProvider?.(lane), () => {
         settingsPanelRendered = false;
         update();
-      });
+      }, 'Provider test failed.');
     }
     const providerClearKey = control('recursionProviderClearKey');
     if (providerClearKey) {
@@ -3961,16 +3966,26 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   globalThis.addEventListener?.('resize', handleViewportChange);
   globalThis.addEventListener?.('orientationchange', handleViewportChange);
 
-  function runAction(result, after = null) {
-    if (result && typeof result.then === 'function') {
-      result.then(() => after?.()).catch(() => {});
+  function runAction(result, after = null, failureLabel = 'Action failed.') {
+    if (!result || typeof result.then !== 'function') {
+      try {
+        after?.();
+      } catch (error) {
+        uiActionStatus.setFailure(error, failureLabel);
+        update();
+      }
       return;
     }
-    if (result && typeof result.catch === 'function') {
-      result.catch(() => {});
-      return;
-    }
-    after?.();
+    result
+      .then(() => {
+        uiActionStatus.clear();
+        after?.();
+        update();
+      })
+      .catch((error) => {
+        uiActionStatus.setFailure(error, failureLabel);
+        update();
+      });
   }
 
   function openViewer(trigger = null) {
@@ -4116,7 +4131,20 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function update(viewOverride = null) {
-    const view = viewOverride || currentView();
+    if (destroyed || !canUseDocument()) return;
+    let view = viewOverride || currentView();
+    const actionFailure = uiActionStatus.current();
+    if (actionFailure) {
+      view = {
+        ...view,
+        activity: {
+          ...(view.activity || {}),
+          phase: 'uiActionFailed',
+          severity: actionFailure.severity,
+          label: actionFailure.label
+        }
+      };
+    }
     const model = createRecursionViewModel(view);
     const currentStepText = currentStepTextForRender(view, model);
     setText(root, '[data-recursion-status]', model.runtimeHealthLabel);
@@ -4195,6 +4223,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     root,
     update,
     destroy() {
+      destroyed = true;
       if (timer !== null && typeof clearInterval === 'function') clearInterval(timer);
       clearRibbonRevealTimer();
       clearRibbonSuccessTimer();

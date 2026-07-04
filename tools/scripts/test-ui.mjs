@@ -7,6 +7,7 @@ import {
   setSubItemEnabled
 } from '../../src/card-scope.mjs';
 import { activityLabel, createRecursionViewModel, mountRecursionUi, providerFromControls } from '../../src/ui.mjs';
+import { createUiActionStatus, normalizeUiActionFailure } from '../../src/ui/action-status.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -47,6 +48,14 @@ const missingProviderDraft = providerFromControls(fakeProviderControls({}), 'uti
 assertEqual(missingProviderDraft.hostConnectionProfileId, 'saved-profile', 'missing profile control falls back to saved profile');
 assertEqual(missingProviderDraft.openAICompatible.baseUrl, 'https://saved.example/v1', 'missing base URL control falls back to saved base URL');
 assertEqual(missingProviderDraft.openAICompatible.model, 'saved-model', 'missing model control falls back to saved model');
+const normalizedUiFailure = normalizeUiActionFailure(new Error('Clipboard denied'), 'Copy failed.');
+assertEqual(normalizedUiFailure.severity, 'warning', 'UI action failure uses warning severity');
+assertEqual(normalizedUiFailure.label, 'Clipboard denied', 'UI action failure preserves concise error message');
+const uiActionStatus = createUiActionStatus();
+uiActionStatus.setFailure('', 'Copy failed.');
+assertEqual(uiActionStatus.current().label, 'Copy failed.', 'UI action status uses fallback for empty failures');
+uiActionStatus.clear();
+assertEqual(uiActionStatus.current(), null, 'UI action status clears transient state');
 const model = createRecursionViewModel({
   settings: { mode: 'auto' },
   lastHand: { cards: [{ id: 'c1' }, { id: 'c2' }] },
@@ -1298,6 +1307,32 @@ try {
   assertEqual(pendingTooltipRoot.dataset.recursionTooltips, 'off', 'tooltip checkbox disables hover help immediately before runtime update resolves');
   assertDeepEqual(titleAttributes(pendingTooltipRoot), [], 'tooltip checkbox removes hover title attributes immediately before runtime update resolves');
   pendingTooltipUi.destroy();
+
+  let failingDiagnosticsCalls = 0;
+  const failingActionUi = mountRecursionUi({
+    runtime: {
+      view: () => ({
+        settings: { mode: 'auto', enabled: true, ui: { tooltipsEnabled: true } },
+        activity: { phase: 'idle' },
+        lastHand: { cards: [] }
+      }),
+      exportDiagnostics: () => {
+        failingDiagnosticsCalls += 1;
+        return Promise.reject(new Error('Diagnostics denied'));
+      }
+    },
+    mountPoint: fakeDocument.body
+  });
+  const failingActionRoot = fakeDocument.getElementById('recursion-root');
+  failingActionRoot.querySelector('[data-recursion-actions]').click();
+  failingActionRoot.querySelector('[data-recursion-settings-tab-advanced]').click({ ignoreStopPropagation: true });
+  failingActionRoot.querySelector('[data-recursion-export-diagnostics]').click();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assertEqual(failingDiagnosticsCalls, 1, 'failed Export Diagnostics action calls runtime once');
+  assert(fakeDocument.textTree(failingActionRoot).includes('Diagnostics denied'), 'failed UI action surfaces concise failure text in the Recursion UI');
+  failingActionUi.destroy();
 
   let refreshed = 0;
   let closeCount = 0;

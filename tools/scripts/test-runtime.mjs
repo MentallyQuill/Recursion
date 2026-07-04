@@ -1081,6 +1081,45 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 
 {
   const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash }));
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot,
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: ['warm-card-1'],
+              turnGuidanceText: '',
+              guardrailCardIds: [],
+              packetInstructions: ['Use warm guidance only.'],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['warm-guidance-only']
+            }
+          };
+        }
+        throw new Error(`unexpected warm-guidance-only role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Continue with warm guidance only.' });
+  assertEqual(result.ok, true, 'Rapid accepts packet instructions without turn guidance prose');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'rapid', 'packet-instruction-only delta remains Rapid');
+}
+
+{
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
   const pendingText = 'The pending user message is already visible in the host snapshot.';
   const hostSnapshot = {
     ...snapshot,
@@ -1524,6 +1563,66 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assert(roleCalls.includes('rapidTurnDelta'), 'Rapid tries turn delta before schema escalation');
   assert(roleCalls.includes('utilityArbiter'), 'invalid Rapid schema continues through Standard Arbiter');
   assert(result.plan.diagnostics.includes('rapid-escalated-standard:invalid-provider-output'), 'plan records invalid Rapid output escalation');
+}
+
+{
+  const roleCalls = [];
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash }));
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot,
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: ['warm-card-1'],
+              turnGuidanceText: 'Do not use this when mandatory card is missing.',
+              guardrailCardIds: [],
+              packetInstructions: [],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [{ family: 'Scene Constraints', reason: 'Need safety boundary.' }],
+              escalateToStandard: false,
+              diagnostics: ['mandatory-gap-delta']
+            }
+          };
+        }
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'compact',
+              cardJobs: [],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'mandatory gap standard fallback' },
+              diagnostics: []
+            }
+          };
+        }
+        throw new Error(`unexpected mandatory gap role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Try the hatch safely.' });
+  assertEqual(result.ok, true, 'mandatory Rapid gap escalates and Standard installs');
+  assert(roleCalls.includes('rapidTurnDelta'), 'mandatory gap test tries Rapid delta first');
+  assert(roleCalls.includes('utilityArbiter'), 'mandatory gap continues through Standard Arbiter');
+  assert(result.plan.diagnostics.includes('rapid-escalated-standard:mandatory-gap'), 'plan records mandatory gap escalation');
+  assert(result.plan.diagnostics.includes('rapid-mandatory-gap:Scene Constraints'), 'plan records first mandatory gap family');
 }
 
 {

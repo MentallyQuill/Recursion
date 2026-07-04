@@ -129,6 +129,23 @@ assertEqual(normalized.turnGuidanceText, 'Use Rhya rest boundary as current beat
 assertDeepEqual(normalized.guardrailCardIds, ['constraint-card'], 'guardrail card ids preserved');
 assertDeepEqual(normalized.packetInstructions, ['Keep Hermione as escort.'], 'packet instructions preserved');
 
+const refreshOnlyDelta = normalizeRapidTurnDelta({
+  schema: RAPID_TURN_DELTA_SCHEMA,
+  selectedCardIds: ['scene-card'],
+  turnGuidanceText: 'Use the warm scene card.',
+  backgroundRefreshRequests: [{ family: 'Open Threads', reason: 'Refresh soon' }],
+  mandatoryMissingCards: [],
+  escalateToStandard: false,
+  diagnostics: ['refresh-only']
+}, {
+  snapshotHash: 'trusted-snapshot',
+  baseSourceRevisionHash: 'trusted-base',
+  turnSourceRevisionHash: 'trusted-turn',
+  allowedCardIds: ['scene-card']
+});
+assertEqual(refreshOnlyDelta.escalateToStandard, false, 'background refresh requests do not escalate Rapid');
+assertEqual(refreshOnlyDelta.backgroundRefreshRequests.length, 1, 'background refresh request is preserved');
+
 const aliasedDelta = normalizeRapidTurnDelta({
   schema: RAPID_TURN_DELTA_SCHEMA,
   brief: {

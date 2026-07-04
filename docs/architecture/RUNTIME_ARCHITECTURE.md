@@ -92,6 +92,8 @@ The Rapid pipeline moves most scene work out of the send path:
 
 Rapid does not gain latency by using local cards, local fallback plans, local scene briefs, local turn briefs, summary fast-start packs, or timeout-based quality cuts. Its speed comes from precomputation, exact-source cache reuse, delta work, and optional hedged Utility foreground calls.
 
+Rapid `backgroundRefreshRequests` are advisory and do not escalate by themselves. Mandatory missing cards do escalate, and Standard fallback diagnostics include bounded `rapid-mandatory-gap:*` entries for the first reported gaps.
+
 Every Rapid warm miss records one bounded miss snapshot in activity details and `rapid.warm_missed` journal entries. The snapshot includes the reason code/label, whether an exact variant existed, whether a join was attempted or timed out, whether an active warm run was present and had a known base hash, candidate and selected-card counts, and sanitized diagnostics. This is the root-cause surface for live Rapid fallbacks before changing pipeline behavior.
 
 Rapid warm artifact eligibility uses a Rapid-specific settings signature rather than the broader scene-cache settings hash. It includes prompt/card/behavior settings and the Utility provider that builds warm and delta outputs, while ignoring retention, UI/diagnostic, and Reasoner-only drift that does not change the reusable warm artifact.

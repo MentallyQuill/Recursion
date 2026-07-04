@@ -4642,10 +4642,16 @@ export function createRecursionRuntime({
       };
     }
     if (normalized.escalateToStandard || normalized.mandatoryMissingCards.length) {
+      const mandatoryGapDiagnostics = normalized.mandatoryMissingCards
+        .slice(0, 3)
+        .map((entry) => `rapid-mandatory-gap:${safeText(entry.family || entry.role || 'unknown', 80)}`);
       return {
         ok: false,
         escalateToStandard: true,
-        diagnostics: ['rapid-escalated-standard:mandatory-gap']
+        diagnostics: [
+          'rapid-escalated-standard:mandatory-gap',
+          ...mandatoryGapDiagnostics
+        ]
       };
     }
     const hasPromptText = safeText(rapid?.guidance?.text || '', 2000)

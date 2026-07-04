@@ -4021,7 +4021,7 @@ export function createRecursionRuntime({
       const candidateCards = [...cacheCards, ...providerCards];
       if (!candidateCards.length) {
         const failedAt = nowIso();
-        const failureReasonCode = 'warm-failed';
+        const failureReasonCode = 'no-candidate-cards';
         const failureReasonLabel = rapidWarmReasonLabel(failureReasonCode);
         warmingRapid = await saveRapidWarmStatus(runId, snapshot, cache, {
           status: 'failed',

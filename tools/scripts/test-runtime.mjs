@@ -503,6 +503,40 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'skip',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'compact',
+              cardJobs: [],
+              reasonerDecision: { mode: 'skip', reason: 'provider said skip', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['warm-arbiter-skip-no-cache']
+            }
+          };
+        }
+        throw new Error(`unexpected no-candidate warm role ${roleId}`);
+      }
+    }
+  });
+  const warm = await harness.runtime.warmRapidScene({ reason: 'unit-no-candidate-skip' });
+  assertEqual(warm.reason, 'rapid-warm-failed', 'Rapid warm still fails without candidate cards');
+  assertEqual(harness.runtime.view().rapidWarm.reasonCode, 'no-candidate-cards', 'Rapid view exposes no-candidate-card root cause');
+  const cache = await harness.storage.loadSceneCache('chat-1', 'scene-1');
+  const variant = cache.variants[cache.activeSourceRevisionHash];
+  assertEqual(variant.rapid.status, 'failed', 'Rapid no-candidate warm persists failed artifact');
+  assertEqual(variant.rapid.failureReasonCode, 'no-candidate-cards', 'Rapid no-candidate warm persists root cause');
+}
+
+{
   const arbiterGate = deferred();
   const roleCalls = [];
   const harness = createRuntimeHarness({

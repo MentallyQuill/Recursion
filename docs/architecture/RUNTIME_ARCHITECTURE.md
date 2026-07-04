@@ -96,6 +96,8 @@ Every Rapid warm miss records one bounded miss snapshot in activity details and 
 
 Rapid warm artifact eligibility uses a Rapid-specific settings signature rather than the broader scene-cache settings hash. It includes prompt/card/behavior settings and the Utility provider that builds warm and delta outputs, while ignoring retention, UI/diagnostic, and Reasoner-only drift that does not change the reusable warm artifact.
 
+If a Rapid warm Arbiter pass yields no cache cards and requests no provider cards, the warm artifact is persisted as failed with `no-candidate-cards`. Rapid remains provider-artifact-only in this branch; it does not manufacture local warm cards or mark an empty deck ready.
+
 When a foreground Rapid send sees an active warm run whose provider/settings/card/prompt contracts already match but whose base source hash has not been published yet, runtime waits briefly for that hash before declaring a miss. If the warm run publishes a matching base hash or completes during that bounded wait, foreground joins that warm promise instead of immediately falling back to Standard.
 
 The Fused pipeline keeps the Standard foreground sequence but fuses the card-generation stage:

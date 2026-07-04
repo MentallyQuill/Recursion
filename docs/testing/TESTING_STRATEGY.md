@@ -134,9 +134,10 @@ Pipeline-specific live proof is handled by:
 ```powershell
 node tools\scripts\prove-live-pipelines.mjs --live --pipeline standard
 node tools\scripts\prove-live-pipelines.mjs --live --pipeline rapid
+node tools\scripts\prove-live-pipelines.mjs --live --pipeline fused
 ```
 
-The script uses the same `SILLYTAVERN_BASE_URL`, `RECURSION_SILLYTAVERN_USER`, and dedicated-user guardrails as the smoke harness. It drives the real compact Pipeline dropdown, verifies the Pipeline button is left of Mode, verifies no Pipeline control appears in Settings, sends through visible SillyTavern controls, proves an assistant message follows the exact proof user message, and fails on browser console warnings/errors or page errors. Standard proof requires a ready hand. Rapid proof requires a `warm-v2` Rapid packet; a warm miss must be reported as Standard escalation, not as a Rapid summary install.
+The script uses the same `SILLYTAVERN_BASE_URL`, `RECURSION_SILLYTAVERN_USER`, and dedicated-user guardrails as the smoke harness. It drives the real compact Pipeline dropdown, verifies the Pipeline button is left of Mode, verifies no Pipeline control appears in Settings, sends through visible SillyTavern controls, proves an assistant message follows the exact proof user message, and fails on browser console warnings/errors or page errors. Standard proof requires a ready hand. Rapid proof requires a `warm-v2` Rapid packet; a warm miss must be reported as Standard escalation, not as a Rapid summary install. Fused proof requires accepted bundle cards or a reported Standard fallback from an unusable bundle, never a silent empty-card install.
 
 ## Dedicated Live Users
 

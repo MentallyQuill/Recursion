@@ -75,4 +75,4 @@ Passed:
 
 ## Remaining Risk
 
-No remaining live pipeline gap found in this pass. Standard and Rapid both installed V3 prompt packets into the live SillyTavern prompt surface, and Rapid proved `warm-v2` end to end.
+No remaining live gap was found for the Prompt Packet V3 and Rapid Pipeline V2 scope of this pass. Standard and Rapid both installed V3 prompt packets into the live SillyTavern prompt surface, and Rapid proved `warm-v2` end to end. Fused pipeline live proof is tracked by the broader pipeline smoke flow rather than this Rapid-focused report.

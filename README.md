@@ -44,15 +44,15 @@ Instead of generating one stream of character thoughts, Recursion builds a scene
 On a run, Recursion turns the active SillyTavern chat into a short-lived prompt packet for the next generation:
 
 1. It builds a bounded snapshot of the current scene.
-2. It runs either the Standard or Rapid pipeline, depending on the selected pipeline mode.
-3. It uses the Utility provider to plan, update scene cards, select the turn hand, or run a Rapid foreground delta.
+2. It runs the Standard, Rapid, or Fused pipeline, depending on the selected pipeline mode.
+3. It uses the Utility provider to plan, update scene cards, select the turn hand, compose guidance, run a Rapid foreground delta, or build a Fused card bundle.
 4. It can use the Reasoner provider for deeper synthesis at higher reasoning levels.
 5. It composes a prompt packet with provider-authored Guidance, full selected Card Evidence, Guardrails, card references, omissions, and metadata.
 6. It injects the packet through Recursion-owned SillyTavern prompt entries.
 
-## Standard vs Rapid Pipelines
+## Standard, Rapid, And Fused Pipelines
 
-Pipeline controls are separate from Auto and Manual. Auto and Manual decide when Recursion prepares guidance; Standard and Rapid decide how much scene work happens in the send path.
+Pipeline controls are separate from Auto and Manual. Auto and Manual decide when Recursion prepares guidance; Standard, Rapid, and Fused decide how that scene work is scheduled.
 
 Standard is the default reference pipeline. When you send a message, Recursion performs the full foreground sequence: snapshot, Utility Arbiter planning, card generation or reuse, hand selection, composition, validation, and prompt install. Use Standard when you want maximum coverage, when a scene has shifted, or when you want the most debuggable behavior.
 
@@ -81,6 +81,19 @@ flowchart LR
     Delta -. "mandatory gap, invalid, empty, or unavailable output" .-> Standard
 ```
 
+Fused is the large foreground card-call pipeline. It keeps Standard's Arbiter, hand selection, guidance composition, packet validation, and install path, but asks one provider call to generate every requested card family as a structured `fusedCardBundle`. Valid requested cards enter the normal hand and Card Evidence path; an unusable bundle falls back to Standard individual card calls for that same turn.
+
+```mermaid
+flowchart LR
+    Send["User sends message"] --> Arbiter["Utility Arbiter plans card work"]
+    Arbiter --> Bundle["One fusedCardBundle call"]
+    Bundle --> Validate["Validate bundle and card items"]
+    Validate --> Hand["Select turn hand"]
+    Hand --> Compose["Compose V3 prompt packet"]
+    Compose --> Install["Install Recursion prompt keys"]
+    Validate -. "empty or invalid bundle" .-> Standard["Run Standard card calls"]
+```
+
 ![Full Viewer overview with Now, Deck, Activity, Prompt Packet, Settings, and Providers](assets/documentation/renders/recursion-full-viewer-overview.png)
 
 ## Fast Start
@@ -90,7 +103,8 @@ flowchart LR
 3. Start with the `Standard` pipeline while you confirm behavior in a scene.
 4. Use `Auto` when you want Recursion to prepare the next reply on its own. Use `Manual` for explicit card selection.
 5. Switch to `Rapid` when you want warmed card evidence and guidance plus a shorter send-time delta.
-6. Open `Last Brief` or the Full Viewer whenever you want to see what Recursion prepared.
+6. Try `Fused` when you use a stronger model that can reliably return one larger structured card bundle.
+7. Open `Last Brief` or the Full Viewer whenever you want to see what Recursion prepared.
 
 For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md). For the full surface-by-surface guide, use the [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md).
 
@@ -98,7 +112,7 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 
 | Surface | Purpose |
 | --- | --- |
-| Recursion Bar | Chat-attached controls for power, Standard/Rapid pipeline, Auto/Manual mode, Cards scope, Hero Pixel Array progress, reasoning level, Last Brief, settings, and viewer access. |
+| Recursion Bar | Chat-attached controls for power, Standard/Rapid/Fused pipeline, Auto/Manual mode, Cards scope, Hero Pixel Array progress, reasoning level, Last Brief, settings, and viewer access. |
 | Hero Pixel Array | Compact progress menu for snapshot reading, Utility planning, card generation, prompt composition, prompt install, fallback, and ready states. |
 | Last Brief | Quick inspection surface for the latest selected hand and prompt packet without leaving the chat. |
 | Full Viewer | Detailed view of Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics. |

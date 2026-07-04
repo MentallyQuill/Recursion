@@ -5,7 +5,7 @@ Recursion uses two provider lanes:
 - Utility: required, default, and used for Arbiter planning, scene/card extraction, card generation, lifecycle support, structured diagnostics, guidance composition, and fail-soft fallback guidance.
 - Reasoner: optional, used by Medium/High/Ultra Reasoning Level routing when enabled and healthy, with Utility fallback when unavailable.
 
-Reasoner is not a better default Utility. Utility remains the required path and the fallback path. The compact-bar Reasoning Level chain controls how much Recursion tries to use Reasoner: Low is Utility-only, Medium uses Reasoner for guidance composition when healthy, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when the lane is healthy.
+Reasoner is not a better default Utility. Utility remains the required path and the fallback path. The compact-bar Reasoning Level chain controls how much Recursion tries to use Reasoner: Low is Utility-only, Medium uses Reasoner for guidance composition when healthy, High adds Reasoner for Arbiter, priority card families, and Fused bundles when healthy, and Ultra is Reasoner-heavy when the lane is healthy.
 
 ![Utility and Reasoner provider controls with session-only key state](../../assets/documentation/renders/recursion-provider-controls-utility-reasoner.png)
 
@@ -51,8 +51,8 @@ Reasoning Level also sets the amount of provider-side reasoning Recursion reques
 | --- | --- | --- |
 | Low | minimal | minimal |
 | Medium | medium | minimal |
-| High | medium | Arbiter medium, cards minimal |
-| Ultra | high | Arbiter medium, cards medium |
+| High | medium | Arbiter medium, cards and Fused bundles minimal |
+| Ultra | high | Arbiter medium, cards and Fused bundles medium |
 
 Provider tests always use minimal reasoning. Direct OpenAI-compatible endpoints receive native reasoning fields only when Recursion knows the dialect. OpenRouter and OpenAI use an effort field, GLM/Z.AI uses thinking plus `reasoning_effort`, MiniMax M3 uses its thinking mode, and unsupported/unknown endpoints are left alone. SillyTavern connection profiles receive compact reasoning metadata so profile-backed Claude, Gemini, OpenRouter, and other integrations can apply their own native controls.
 

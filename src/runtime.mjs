@@ -43,6 +43,7 @@ import { createMemoryStorageAdapter, createStorageRepository } from './storage.m
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { asObject } from './safe-values.mjs';
 import { buildDiagnosticsPayload } from './runtime/diagnostics.mjs';
+import { createRuntimeRunState } from './runtime/run-state.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
@@ -1977,10 +1978,7 @@ export function createRecursionRuntime({
   rapidHedgeDelayMs = 4000,
   rapidWarmJoinWaitMs = RAPID_WARM_JOIN_WAIT_MS
 } = {}) {
-  let activeRunId = null;
-  let activeRunController = null;
-  let activeRapidWarmRun = null;
-  let hostGenerationActive = false;
+  const runState = createRuntimeRunState();
   let hostStopCleanupPromise = null;
   let lastPacket = null;
   let lastHand = { cards: [], omitted: [] };
@@ -1996,12 +1994,8 @@ export function createRecursionRuntime({
   };
   let lastRapidWarmView = rapidWarmStatusView({ pipelineMode: settingsStore.get().pipelineMode });
   let lastSavedSceneCacheRef = null;
-  let pendingLatestAssistantSwipeRetry = null;
-  let pendingForceRegenerate = null;
   let promptInstallTail = Promise.resolve();
   let storageSaveTail = Promise.resolve();
-  const activeRuntimeMutations = new Set();
-  let activePromptMutationId = null;
 
   async function readSnapshot() {
     if (typeof host?.snapshot !== 'function') {
@@ -2011,11 +2005,11 @@ export function createRecursionRuntime({
   }
 
   function isActiveRun(runId) {
-    return activeRunId === runId;
+    return runState.current().activeRunId === runId;
   }
 
   function isActiveRapidWarmRun(runId) {
-    return activeRapidWarmRun?.runId === runId;
+    return runState.current().activeRapidWarmRun?.runId === runId;
   }
 
   function isRuntimeRunCurrent(runId) {
@@ -2024,14 +2018,14 @@ export function createRecursionRuntime({
 
   function abortActiveRun() {
     try {
-      activeRunController?.abort?.();
+      runState.current().activeRunController?.abort?.();
     } catch {
       // Abort notification is best-effort; supersession guards still prevent stale writes.
     }
   }
 
   function abortActiveRapidWarmRun(reasonCode = 'stale') {
-    const current = activeRapidWarmRun;
+    const current = runState.current().activeRapidWarmRun;
     if (!current) return;
     try {
       current.controller?.abort?.();
@@ -2045,20 +2039,19 @@ export function createRecursionRuntime({
       reasonLabel: rapidWarmReasonLabel(reasonCode),
       joinable: false
     });
-    activeRapidWarmRun = null;
+    runState.clearRapidWarmRun(current.runId);
   }
 
   function supersedeActiveRun() {
     abortActiveRun();
-    activeRunId = null;
-    activeRunController = null;
+    runState.clearActiveRun();
   }
 
   function startRun(runId) {
     abortActiveRun();
-    activeRunController = typeof AbortController === 'function' ? new AbortController() : null;
-    activeRunId = runId;
-    return activeRunController?.signal ?? null;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    runState.setActiveRun(runId, controller);
+    return controller?.signal ?? null;
   }
 
   function startRapidWarmRun(runId, context = {}) {
@@ -2068,7 +2061,7 @@ export function createRecursionRuntime({
     const promise = new Promise((resolve) => {
       resolvePromise = resolve;
     });
-    activeRapidWarmRun = {
+    const warmRun = {
       runId,
       controller,
       signal: controller?.signal ?? null,
@@ -2078,27 +2071,25 @@ export function createRecursionRuntime({
       promise,
       resolve: resolvePromise
     };
+    runState.setRapidWarmRun(warmRun);
     lastRapidWarmView = rapidWarmStatusView({
       status: 'warming',
       pipelineMode: settingsStore.get().pipelineMode,
       runId,
       baseSourceRevisionHash: context.baseSourceRevisionHash,
-      startedAt: activeRapidWarmRun.startedAt,
+      startedAt: warmRun.startedAt,
       reasonCode: 'warming',
       joinable: true
     });
-    return activeRapidWarmRun.signal;
+    return warmRun.signal;
   }
 
   function clearActiveRun(runId = null) {
-    if (runId && activeRunId !== runId) return;
-    activeRunId = null;
-    activeRunController = null;
+    runState.clearActiveRun(runId);
   }
 
   function clearRapidWarmRun(runId = null) {
-    if (runId && activeRapidWarmRun?.runId !== runId) return;
-    activeRapidWarmRun = null;
+    runState.clearRapidWarmRun(runId);
   }
 
   function rapidWarmRunMatchesSource(warm, baseSourceRevisionHash, expectedContracts = {}) {
@@ -2113,11 +2104,11 @@ export function createRecursionRuntime({
   }
 
   function exactWarmRunForSource(baseSourceRevisionHash, expectedContracts = {}) {
-    return rapidWarmRunMatchesSource(activeRapidWarmRun, baseSourceRevisionHash, expectedContracts);
+    return rapidWarmRunMatchesSource(runState.current().activeRapidWarmRun, baseSourceRevisionHash, expectedContracts);
   }
 
   async function waitForRapidWarmBaseSource(runId, expectedContracts = {}, timeoutMs = 250) {
-    const warm = activeRapidWarmRun;
+    const warm = runState.current().activeRapidWarmRun;
     if (!warm?.promise || warm.signal?.aborted === true) return null;
     const contract = asObject(warm.contract);
     for (const key of ['settingsHash', 'providerContractHash', 'cardCatalogHash', 'promptContractHash']) {
@@ -2128,8 +2119,9 @@ export function createRecursionRuntime({
     while (Date.now() - started < timeoutMs) {
       if (!isActiveRun(runId)) return null;
       if (safeText(warm.baseSourceRevisionHash || '', 180)) return warm;
-      if (!activeRapidWarmRun || activeRapidWarmRun.runId !== warm.runId) return null;
-      if (safeText(activeRapidWarmRun.baseSourceRevisionHash || '', 180)) return activeRapidWarmRun;
+      const activeWarm = runState.current().activeRapidWarmRun;
+      if (!activeWarm || activeWarm.runId !== warm.runId) return null;
+      if (safeText(activeWarm.baseSourceRevisionHash || '', 180)) return activeWarm;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     return null;
@@ -2168,14 +2160,15 @@ export function createRecursionRuntime({
   }
 
   function setHostGenerationActive(value) {
-    hostGenerationActive = Boolean(value);
+    runState.setHostGenerationActive(value);
   }
 
   function clearPendingLatestAssistantSwipeRetry() {
-    pendingLatestAssistantSwipeRetry = null;
+    runState.clearLatestAssistantSwipeRetry();
   }
 
   function forceRegenerateView() {
+    const pendingForceRegenerate = runState.current().pendingForceRegenerate;
     if (!pendingForceRegenerate) {
       return {
         pending: false,
@@ -2195,7 +2188,7 @@ export function createRecursionRuntime({
   }
 
   function clearPendingForceRegenerate() {
-    pendingForceRegenerate = null;
+    runState.clearForceRegenerate();
   }
 
   function forceRegenerateDetails(forceContext, snapshot = null) {
@@ -2221,12 +2214,13 @@ export function createRecursionRuntime({
   }
 
   function consumePendingForceRegenerate(runId) {
+    const pendingForceRegenerate = runState.current().pendingForceRegenerate;
     if (!pendingForceRegenerate) return null;
     const token = {
       ...pendingForceRegenerate,
       consumeByRunId: safeText(runId || '', 160)
     };
-    pendingForceRegenerate = null;
+    runState.clearForceRegenerate();
     return token;
   }
 
@@ -2239,13 +2233,13 @@ export function createRecursionRuntime({
       return { ok: true, skipped: true, reason: 'disabled' };
     }
     const source = asObject(details);
-    pendingForceRegenerate = {
+    runState.setForceRegenerate({
       id: makeId('force-regenerate'),
       reason: 'user-force-regenerate',
       requestedAt: nowIso(),
       consumeByRunId: '',
       source: safeText(source.source || 'bar', 80) || 'bar'
-    };
+    });
     clearPendingLatestAssistantSwipeRetry();
     clearLastBrief({ status: 'clearing', reason: 'user-force-regenerate' });
     return {
@@ -2305,12 +2299,12 @@ export function createRecursionRuntime({
     const eventName = safeText(source.eventName || source.event || 'message_swiped', 80);
     const messageId = finiteNumberOrNull(source.messageId ?? source.mesid ?? source.id);
     clearLastBrief({ status: 'clearing', reason: 'latest-assistant-swipe' });
-    pendingLatestAssistantSwipeRetry = {
+    runState.setLatestAssistantSwipeRetry({
       eventName,
       ...(messageId !== null ? { messageId } : {}),
       recordedAtMs: Date.now(),
       recordedAt: nowIso()
-    };
+    });
     return {
       ok: true,
       skipped: true,
@@ -2369,9 +2363,8 @@ export function createRecursionRuntime({
   }
 
   function reusableSnapshotForLatestAssistantSwipeRetry(snapshot, pendingUserMessage) {
-    if (!pendingLatestAssistantSwipeRetry) return null;
-    const retry = pendingLatestAssistantSwipeRetry;
-    pendingLatestAssistantSwipeRetry = null;
+    const retry = runState.takeLatestAssistantSwipeRetry();
+    if (!retry) return null;
     if (Date.now() - numberOr(retry.recordedAtMs, 0) > LATEST_ASSISTANT_SWIPE_RETRY_MAX_AGE_MS) return null;
     if (safeText(pendingUserMessage?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT)) return null;
     if (!lastSnapshot || !canReuseLastPacketForSnapshot(lastSnapshot)) return null;
@@ -2391,8 +2384,8 @@ export function createRecursionRuntime({
     lastPlan = null;
     lastSnapshot = null;
     lastSavedSceneCacheRef = null;
-    pendingLatestAssistantSwipeRetry = null;
-    pendingForceRegenerate = null;
+    runState.clearLatestAssistantSwipeRetry();
+    runState.clearForceRegenerate();
     clearLastBrief({ status: 'empty', reason: 'source-cleared' });
   }
 
@@ -2449,7 +2442,7 @@ export function createRecursionRuntime({
   }
 
   function ownsPromptMutationActivity(runId) {
-    return activePromptMutationId === runId && safeCurrentActivity(activity)?.runId === runId;
+    return runState.current().activePromptMutationId === runId && safeCurrentActivity(activity)?.runId === runId;
   }
 
   async function clearPromptAfterSupersede({
@@ -2459,7 +2452,7 @@ export function createRecursionRuntime({
     const runId = makeId('settings');
     clearPendingLatestAssistantSwipeRetry();
     clearPendingForceRegenerate();
-    activePromptMutationId = runId;
+    runState.setPromptMutation(runId);
     startRuntimeActivity({
       runId,
       phase: 'promptClearing',
@@ -2472,12 +2465,12 @@ export function createRecursionRuntime({
       return result;
     });
     if (!ownsPromptMutationActivity(runId)) {
-      if (activePromptMutationId === runId) activePromptMutationId = null;
+      runState.clearPromptMutation(runId);
       return clear;
     }
     if (clear?.ok === false) {
       reportClearWarning(runId, clear);
-      if (activePromptMutationId === runId) activePromptMutationId = null;
+      runState.clearPromptMutation(runId);
       return clear;
     }
     settleRuntimeActivity({
@@ -2487,7 +2480,7 @@ export function createRecursionRuntime({
       label: successLabel,
       chips: ['Prompt']
     });
-    if (activePromptMutationId === runId) activePromptMutationId = null;
+    runState.clearPromptMutation(runId);
     return clear;
   }
 
@@ -2660,9 +2653,10 @@ export function createRecursionRuntime({
   }
 
   function safeRuntimeView() {
+    const state = runState.current();
     return {
-      activeRunId,
-      hostGenerationActive,
+      activeRunId: state.activeRunId,
+      hostGenerationActive: state.hostGenerationActive,
       lastPacket,
       lastHand,
       lastPlan,
@@ -2798,8 +2792,8 @@ export function createRecursionRuntime({
       lastHand = { cards: [], omitted: [] };
       lastPlan = null;
       lastSavedSceneCacheRef = null;
-      pendingLatestAssistantSwipeRetry = null;
-      pendingForceRegenerate = null;
+      runState.clearLatestAssistantSwipeRetry();
+      runState.clearForceRegenerate();
       clearLastBrief({ status: 'empty', reason: 'scene-cache-reset' });
       stageRuntimeActivity({
         runId,
@@ -3182,13 +3176,13 @@ export function createRecursionRuntime({
     while (true) {
       const promptTail = promptInstallTail;
       const storageTail = storageSaveTail;
-      const mutations = [...activeRuntimeMutations];
+      const mutations = runState.runtimeMutations();
       try {
         await Promise.all([promptTail, storageTail, ...mutations]);
       } catch {
         // Mutation failures are normalized at their source; tails are only sequencing gates.
       }
-      if (promptTail === promptInstallTail && storageTail === storageSaveTail && activeRuntimeMutations.size === 0) {
+      if (promptTail === promptInstallTail && storageTail === storageSaveTail && runState.runtimeMutationCount() === 0) {
         return;
       }
     }
@@ -3196,9 +3190,9 @@ export function createRecursionRuntime({
 
   function trackRuntimeMutation(mutationWork) {
     const current = Promise.resolve().then(mutationWork);
-    activeRuntimeMutations.add(current);
+    runState.addRuntimeMutation(current);
     current.finally(() => {
-      activeRuntimeMutations.delete(current);
+      runState.deleteRuntimeMutation(current);
     }).catch(() => {});
     return current;
   }
@@ -3994,8 +3988,10 @@ export function createRecursionRuntime({
     try {
       snapshot = await readSnapshot();
       const warmBaseSourceRevisionHash = activeSourceRevisionHash(snapshot);
-      if (activeRapidWarmRun?.runId === runId) {
-        activeRapidWarmRun.baseSourceRevisionHash = warmBaseSourceRevisionHash;
+      if (runState.current().activeRapidWarmRun?.runId === runId) {
+        runState.mutateRapidWarmRun((warm) => {
+          warm.baseSourceRevisionHash = warmBaseSourceRevisionHash;
+        });
         lastRapidWarmView = rapidWarmStatusView({
           ...lastRapidWarmView,
           baseSourceRevisionHash: warmBaseSourceRevisionHash,
@@ -4015,7 +4011,7 @@ export function createRecursionRuntime({
       }
       warmingRapid = await saveRapidWarmStatus(runId, snapshot, cache, {
         status: 'warming',
-        startedAt: activeRapidWarmRun?.startedAt || nowIso(),
+        startedAt: runState.current().activeRapidWarmRun?.startedAt || nowIso(),
         diagnostics: [`rapid-warm-started:${safeText(reason, 80)}`]
       }, settings);
       if (!isActiveRapidWarmRun(runId)) {
@@ -4095,7 +4091,7 @@ export function createRecursionRuntime({
         const failureReasonLabel = rapidWarmReasonLabel(failureReasonCode);
         warmingRapid = await saveRapidWarmStatus(runId, snapshot, cache, {
           status: 'failed',
-          startedAt: warmingRapid?.startedAt || activeRapidWarmRun?.startedAt || failedAt,
+          startedAt: warmingRapid?.startedAt || runState.current().activeRapidWarmRun?.startedAt || failedAt,
           failedAt,
           failureReasonCode,
           failureReasonLabel,
@@ -4242,8 +4238,9 @@ export function createRecursionRuntime({
       warmOutcome = { ok: true, skipped: true, reason: 'rapid-warm-failed', error: safeError };
       return warmOutcome;
     } finally {
-      if (activeRapidWarmRun?.runId === runId) {
-        activeRapidWarmRun.resolve?.(warmOutcome);
+      const activeWarm = runState.current().activeRapidWarmRun;
+      if (activeWarm?.runId === runId) {
+        activeWarm.resolve?.(warmOutcome);
       }
       clearRapidWarmRun(runId);
     }
@@ -4519,8 +4516,8 @@ export function createRecursionRuntime({
         exactVariant: activeVariant.exact,
         joinAttempted,
         joinTimedOut,
-        activeWarmRunPresent: Boolean(activeRapidWarmRun),
-        activeWarmRunBaseKnown: Boolean(activeRapidWarmRun?.baseSourceRevisionHash),
+        activeWarmRunPresent: Boolean(runState.current().activeRapidWarmRun),
+        activeWarmRunBaseKnown: Boolean(runState.current().activeRapidWarmRun?.baseSourceRevisionHash),
         candidateCardCount: candidateCards.length,
         selectedCardCount: Array.isArray(rapid?.selectedCardIds) ? rapid.selectedCardIds.length : 0,
         diagnostics: warmMissDiagnostics()
@@ -4853,9 +4850,10 @@ export function createRecursionRuntime({
     const modeChip = settings.mode === 'manual' ? 'Manual' : 'Auto';
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: [modeChip] });
     if (lastBrief.status !== 'clearing') {
+      const hasSwipeRetry = Boolean(runState.current().pendingLatestAssistantSwipeRetry);
       clearLastBrief({
         status: 'clearing',
-        reason: forceReason || (pendingLatestAssistantSwipeRetry ? 'latest-assistant-swipe' : (refreshReason || 'generation-started')),
+        reason: forceReason || (hasSwipeRetry ? 'latest-assistant-swipe' : (refreshReason || 'generation-started')),
         runId
       });
     }

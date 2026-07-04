@@ -3,6 +3,7 @@ import { createActivityReporter } from '../../src/activity.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
 import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
+import { createRuntimeRunState } from '../../src/runtime/run-state.mjs';
 import { CARD_CATALOG, cardsFromProviderResult } from '../../src/cards.mjs';
 import {
   CARD_SCOPE_CATALOG,
@@ -67,6 +68,19 @@ function assertNotEqual(actual, expected, message) {
   if (actual === expected) {
     throw new Error(`${message}: did not expect ${expected}`);
   }
+}
+
+{
+  const runState = createRuntimeRunState();
+  runState.setActiveRun('run-state-1', { abort() {} });
+  assertEqual(runState.current().activeRunId, 'run-state-1', 'run state stores active run id');
+  runState.setLatestAssistantSwipeRetry({ reason: 'latest-assistant-swipe' });
+  assertEqual(runState.takeLatestAssistantSwipeRetry().reason, 'latest-assistant-swipe', 'run state takes swipe retry once');
+  assertEqual(runState.takeLatestAssistantSwipeRetry(), null, 'swipe retry is cleared after take');
+  runState.setForceRegenerate({ id: 'force-1' });
+  assertEqual(runState.takeForceRegenerate().id, 'force-1', 'force regenerate token is taken once');
+  runState.clearActiveRun('run-state-1');
+  assertEqual(runState.current().activeRunId, null, 'run state clears active run');
 }
 
 function parsePromptJsonSection(prompt, label) {

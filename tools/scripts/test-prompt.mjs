@@ -38,7 +38,7 @@ function markerHand(overrides = {}) {
       {
         id: 'scene-card',
         family: 'Scene Frame',
-        promptText: 'SCENE_FRAME_MARKER full office pressure and escort boundary.',
+        promptText: 'Keep SCENE_FRAME_MARKER full office pressure and escort boundary.\nPreserve the immediate escort beat without broad recap.',
         tokenEstimate: 20,
         evidenceRefs: ['message:913'],
         privateSecret: 'private-secret',
@@ -50,28 +50,28 @@ function markerHand(overrides = {}) {
       {
         id: 'cast-card',
         family: 'Active Cast',
-        promptText: 'ACTIVE_CAST_MARKER Dumbledore holds authority, Hermione guides, Rhya is fatigued.',
+        promptText: 'Keep ACTIVE_CAST_MARKER Dumbledore in authority and Hermione as guide.\nPreserve Rhya fatigue as visible state.',
         tokenEstimate: 20,
         evidenceRefs: ['message:915']
       },
       {
         id: 'constraint-card',
         family: 'Scene Constraints',
-        promptText: 'SCENE_CONSTRAINT_MARKER Rhya cannot leave until escorted; breach was one-time and patched.',
+        promptText: 'Respect SCENE_CONSTRAINT_MARKER Rhya cannot leave until escorted.\nDo not reopen the one-time breach.',
         tokenEstimate: 20,
         evidenceRefs: ['message:916']
       },
       {
         id: 'subtext-card',
         family: 'Social Subtext',
-        promptText: 'SOCIAL_SUBTEXT_MARKER courtesy functions as protective control and veiled pressure.',
+        promptText: 'Use SOCIAL_SUBTEXT_MARKER courtesy as protective control and veiled pressure.\nAvoid naming the subtext in final prose.',
         tokenEstimate: 20,
         evidenceRefs: ['message:918']
       },
       {
         id: 'thread-card',
         family: 'Open Threads',
-        promptText: 'OPEN_THREADS_MARKER rest request closes the exchange and moves toward Gryffindor escort.',
+        promptText: 'Track OPEN_THREADS_MARKER the rest request and Gryffindor escort.\nDo not start a new distant thread.',
         tokenEstimate: 20,
         evidenceRefs: ['message:923']
       }
@@ -145,6 +145,7 @@ assert(packet.sections.cardEvidence.includes('ACTIVE_CAST_MARKER'), 'raw Active 
 assert(packet.sections.cardEvidence.includes('SCENE_CONSTRAINT_MARKER'), 'raw Scene Constraints survives');
 assert(packet.sections.cardEvidence.includes('SOCIAL_SUBTEXT_MARKER'), 'raw Social Subtext survives');
 assert(packet.sections.cardEvidence.includes('OPEN_THREADS_MARKER'), 'raw Open Threads survives');
+assert(packet.sections.cardEvidence.includes('\n  Preserve the immediate escort beat without broad recap.'), 'multi-line card instructions render as one card evidence block');
 assert(!packet.sections.guidance.includes('Strength:'), 'behavior policy prose is not injected as guidance');
 assert(!JSON.stringify(packet.sections).includes('Scene brief:'), 'old scene brief header is removed');
 assert(!JSON.stringify(packet.sections).includes('Turn brief:'), 'old turn brief header is removed');

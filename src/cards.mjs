@@ -143,6 +143,8 @@ const CARD_FORBIDDEN_PATTERNS = Object.freeze([
   /\b(hidden|private|secret|undisclosed)\s+spoilers?\b/i,
   /\breveal\s+spoilers?\b/i
 ]);
+const CARD_INSTRUCTION_LINE_START_PATTERN = /^(Keep|Preserve|Respect|Use|Avoid|Do not|Track|Hold|Maintain|Show|Withhold|Reveal only|Ensure|Treat|Anchor|Continue)\b/i;
+const CARD_NARRATIVE_PROSE_PATTERN = /\b(?:had|was|were|stood|walked|looked|felt|smelled|tasted|sounded|realized|remembered|thought)\b[\s\S]{80,}[.!?]\s+[A-Z]/i;
 const CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS = Object.freeze([
   /\b(?:thinks?|thoughts?|inner\s+monologue|internal\s+monologue)\s*:/i,
   /\b(?:secret|hidden|private|undisclosed)\s+(?:thoughts?|motives?|motivations?|plans?|intentions?)\b/i,
@@ -526,7 +528,25 @@ function repairProviderEvidenceRefs(value, context = {}) {
   return fallback || value;
 }
 
+function instructionLines(promptText) {
+  return String(promptText || '')
+    .split(/\n+|;\s+/)
+    .map((line) => cleanText(line.replace(/^[-*]\s*/, ''), TEXT_LIMIT))
+    .filter(Boolean);
+}
+
+function assertInstructionShapedCardText(promptText) {
+  const lines = instructionLines(promptText);
+  if (lines.length === 0) throw new Error('Card promptText must be instruction-shaped.');
+  const instructionLineCount = lines.filter((line) => CARD_INSTRUCTION_LINE_START_PATTERN.test(line)).length;
+  const proseLike = CARD_NARRATIVE_PROSE_PATTERN.test(lines.join(' '));
+  if (proseLike && instructionLineCount === 0) {
+    throw new Error('Card promptText must be instruction-shaped, not narrative prose.');
+  }
+}
+
 function assertCardPromptTextSafe(catalog, promptText) {
+  assertInstructionShapedCardText(promptText);
   for (const pattern of CARD_FORBIDDEN_PATTERNS) {
     if (pattern.test(promptText)) {
       throw new Error('Card promptText contains unsafe hidden-reasoning wording.');
@@ -554,6 +574,15 @@ function cardPromptSafetyInstruction(catalog) {
   }
   if (catalog.family !== 'Character Motivation') return '';
   return 'Do not include first-person internal monologue, secret thoughts as truth, or instructions to reveal inner thoughts. Keep motives behavior-facing and observable or explicitly inferred.';
+}
+
+function cardInstructionContractLine() {
+  return [
+    'promptText must be instruction-shaped private evidence for the next assistant message.',
+    'Use 2-5 short lines. Start each line with an instruction verb such as Keep, Preserve, Respect, Use, Avoid, Do not, Track, Hold, Maintain, Show, Withhold, Reveal only, Ensure, Treat, Anchor, or Continue.',
+    'Do not write narrative prose, sensory scene description, dialogue, mini-scenes, or recap paragraphs in promptText.',
+    'Keep each line evidence-backed and immediately useful for the next response.'
+  ].join('\n');
 }
 
 function resolveCatalog(input, { strict = true, allowDefault = false } = {}) {
@@ -962,6 +991,7 @@ export function buildCardRequests(plan = {}, context = {}) {
           'The card object may contain promptText, summary, evidenceRefs, tokenEstimate, detailProfile, emphasis, and inspectorNotes.',
           'The card object must include at least one evidenceRefs entry containing a message:N reference.',
           'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
+          cardInstructionContractLine(),
           cardPromptSafetyInstruction(catalog),
           reason ? `Arbiter request reason: ${reason}` : '',
           `Snapshot hash: ${promptSnapshotHash}`,
@@ -1040,6 +1070,7 @@ export function buildFusedCardBundleRequest(plan = {}, context = {}) {
       'Return at most one item per requested family. Do not generate unrequested families.',
       'If a requested card cannot be safely generated, omit it from items and add an omitted entry with family, role, and reason.',
       'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
+      cardInstructionContractLine(),
       storyFormPromptBlock(storyForm),
       requestBlocks.join('\n\n'),
       `Snapshot hash: ${snapshotHash}`,

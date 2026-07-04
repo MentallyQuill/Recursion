@@ -93,6 +93,15 @@ function safeText(value, limit) {
   return cleanText(safeTextSource(value, limit).replace(new RegExp(SECRET_TEXT_PATTERN.source, 'ig'), '[redacted]'), limit);
 }
 
+function safeCardPromptText(value, limit) {
+  return safeTextSource(value, limit)
+    .replace(new RegExp(SECRET_TEXT_PATTERN.source, 'ig'), '[redacted]')
+    .split(/\n+/)
+    .map((line) => cleanText(line, limit))
+    .filter(Boolean)
+    .join('\n');
+}
+
 function safeOptionalText(value, limit) {
   const text = safeText(value, limit);
   return text || undefined;
@@ -195,7 +204,7 @@ function cardId(card, index) {
 
 function normalizeCard(card, index) {
   const source = asObject(card);
-  const promptText = safeText(source.promptText, MAX_CARD_TEXT);
+  const promptText = safeCardPromptText(source.promptText, MAX_CARD_TEXT);
   const id = cardId(source, index);
   const tokenEstimate = numberInRange(source.tokenEstimate, estimateTokens(promptText), 0, 100000);
   return {
@@ -257,7 +266,15 @@ function promptCard(card) {
 
 function cardEvidenceLine(card) {
   const emphasis = card.emphasis === 'normal' ? '' : ` ${card.emphasis}`;
-  return `- [${card.family || 'Card'}${emphasis}] ${card.promptText}`;
+  const text = String(card.promptText || '')
+    .split(/\n+/)
+    .map((line) => safeText(line, MAX_CARD_TEXT))
+    .filter(Boolean);
+  if (text.length <= 1) return `- [${card.family || 'Card'}${emphasis}] ${text[0] || ''}`;
+  return [
+    `- [${card.family || 'Card'}${emphasis}] ${text[0]}`,
+    ...text.slice(1).map((line) => `  ${line}`)
+  ].join('\n');
 }
 
 function buildCardEvidenceSection(cards) {

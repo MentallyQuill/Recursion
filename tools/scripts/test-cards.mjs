@@ -123,6 +123,21 @@ await assertRejects(
   /Character Motivation/,
   'character motivation rejects third-person hidden plan text'
 );
+await assertRejects(
+  async () => normalizeCard({
+    family: 'Scene Frame',
+    promptText: 'Jack Mercer had just landed at Capodichino with no reliable cover and no field readiness. The cargo hold smelled of fuel and wet canvas while the sergeant waited for his answer. He was too exhausted to improvise a clean lie.'
+  }, { sceneId: 'scene-1' }),
+  /instruction-shaped/,
+  'card promptText rejects narrative prose paragraphs'
+);
+
+const instructionCard = normalizeCard({
+  family: 'Scene Frame',
+  promptText: 'Keep Jack at Capodichino immediately after landing.\nPreserve his weak cover and lack of field readiness.\nDo not skip the sergeant response beat.',
+  evidenceRefs: ['message:6']
+}, { sceneId: 'scene-1', snapshotHash: 'hash-instruction' });
+assert(instructionCard.promptText.includes('Do not skip the sergeant response beat.'), 'card promptText accepts instruction-shaped multi-line evidence');
 
 const roleMapped = normalizeCard({
   role: 'sceneConstraintsCard',
@@ -246,6 +261,8 @@ assert(requests[0].prompt.includes('Return one JSON object'), 'request prompt as
 assert(requests[0].prompt.includes('Envelope role must be "sceneFrameCard"'), 'request prompt requires envelope role echo');
 assert(requests[0].prompt.includes('Envelope family must be "Scene Frame"'), 'request prompt requires envelope family echo');
 assert(requests[0].prompt.includes('Envelope snapshotHash must be "hash"'), 'request prompt requires envelope snapshot hash echo');
+assert(requests[0].prompt.includes('promptText must be instruction-shaped private evidence'), 'card request prompt requires instruction-shaped promptText');
+assert(requests[0].prompt.includes('Do not write narrative prose'), 'card request prompt forbids prose-shaped promptText');
 const fusedPlan = {
   cardJobs: [
     { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Frame the sealed doorway.' },
@@ -281,6 +298,8 @@ assert(fusedRequest.prompt.includes('Return one JSON object only.'), 'Fused prom
 assert(fusedRequest.prompt.includes('schema "recursion.cardBundle.v1"'), 'Fused prompt names bundle schema');
 assert(fusedRequest.prompt.includes('Character Motivation'), 'Fused prompt includes requested family blocks');
 assert(fusedRequest.prompt.includes('Do not include first-person internal monologue'), 'Fused prompt includes family safety instructions');
+assert(fusedRequest.prompt.includes('promptText must be instruction-shaped private evidence'), 'Fused prompt requires instruction-shaped promptText');
+assert(fusedRequest.prompt.includes('Do not write narrative prose'), 'Fused prompt forbids prose-shaped promptText');
 const fusedCardContext = {
   chatId: 'chat-fused',
   sceneId: 'scene-fused',

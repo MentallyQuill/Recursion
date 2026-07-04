@@ -177,7 +177,7 @@ The literal `compose-brief` Arbiter action is retained as a V1 enum name, but it
 
 Card roles, `guidanceComposer`, `reasonerComposer`, and `rapidTurnDelta` receive the Arbiter-normalized `recursion.storyForm.v1` object as request context. They must align generated card prose and prompt guidance to that tense and point of view rather than deriving their own independent form from the prompt.
 
-When a `fusedCardBundle` provider call fails structured-output parsing but exposes visible response text, runtime may recover complete card objects from the `items` array prefix. Recovered fragments still pass the normal snapshot and per-card validation before use.
+When a `fusedCardBundle` provider call fails structured-output parsing but exposes visible response text, runtime may recover complete card objects from the `items` array prefix. Recovered fragments still pass the normal snapshot and per-card validation before use. Full Standard card fallback is reserved for zero trusted Fused cards.
 
 ## Utility Arbiter Call
 

@@ -5963,6 +5963,79 @@ for (const scenario of [
 }
 
 {
+  const roleCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [
+                { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'No recoverable fused item.' },
+                { family: 'Scene Constraints', role: 'sceneConstraintsCard', reason: 'No recoverable fused item.' }
+              ],
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              reasonerDecision: { mode: 'skip', reason: 'full fallback boundary', signals: [] },
+              diagnostics: ['fused-full-fallback-boundary']
+            }
+          };
+        }
+        if (roleId === 'fusedCardBundle') {
+          return {
+            ok: true,
+            roleId,
+            data: { schema: 'wrong.schema', snapshotHash: request.snapshotHash, items: [] }
+          };
+        }
+        if (roleId === 'sceneFrameCard' || roleId === 'sceneConstraintsCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: roleId,
+              family: roleId === 'sceneFrameCard' ? 'Scene Frame' : 'Scene Constraints',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: `${roleId === 'sceneFrameCard' ? 'FULL_FALLBACK_SCENE' : 'FULL_FALLBACK_CONSTRAINT'} recovered from full Standard fallback.`,
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 16
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Use full fallback cards.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['full-fallback-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected full fallback role ${roleId}`);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Fallback only when nothing is salvageable.' });
+  assertEqual(result.ok, true, 'full fallback still succeeds when Fused has no recoverable items');
+  assert(roleCalls.includes('sceneFrameCard'), 'full fallback regenerates Scene Frame');
+  assert(roleCalls.includes('sceneConstraintsCard'), 'full fallback regenerates Scene Constraints');
+  assert(result.plan.diagnostics.includes('fused-fallback-standard'), 'full fallback diagnostic remains for zero trusted fused cards');
+}
+
+{
   const generatedCardTextByRole = {
     sceneFrameCard: 'SG1_SCENE_FRAME_CARD: ONeill holds the parking-lot line and must choose proof or withdrawal.',
     activeCastCard: 'SG1_ACTIVE_CAST_CARD: Carter verifies the construct while Daniel and Tealc hold position.',

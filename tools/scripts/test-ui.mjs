@@ -506,7 +506,7 @@ assert(/<path\b/i.test(regenerateIconSvg), 'regenerate.svg contains vector path 
 assert(!/source=rotate\.png; sourceSize=512x512; alphaTrace=horizontal-runs/.test(regenerateIconSvg), 'regenerate.svg is not the generated alpha-run approximation');
 assert(!/kind === 'restart'/.test(recursionUi), 'Regenerate uses the regenerate.svg asset instead of the old inline SVG branch');
 assert(/background:\s*currentColor;/.test(regenerateIconCss), 'Regenerate icon mask paints with inherited currentColor');
-assert(/mask:\s*url\('\.\.\/assets\/icons\/regenerate\.svg'\)\s*center\s*\/\s*14px 14px\s*no-repeat;/.test(regenerateIconCss), 'Regenerate icon mask is centered and visually scaled to match the surrounding icons');
+assert(/mask:\s*url\('\.\.\/assets\/icons\/regenerate\.svg'\)\s*center\s*\/\s*10px 10px\s*no-repeat;/.test(regenerateIconCss), 'Regenerate icon mask is centered and visually scaled to match the surrounding icons');
 assert(/padding:\s*0 8px 0 2px;/.test(barImplementationReference), 'recursion bar uses a tighter left inset than right controls');
 assert(/--hero-running:\s*var\(--cyan\);/.test(barImplementationReference), 'hero pixel running blocks use the active blue token');
 assert(/--hero-done:\s*var\(--green\);/.test(barImplementationReference), 'hero pixel done blocks use the success green token');

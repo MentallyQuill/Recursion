@@ -103,8 +103,8 @@
   display: inline-flex;
   height: 16px;
   justify-content: center;
-  mask: url('../assets/icons/regenerate.svg') center / 14px 14px no-repeat;
-  -webkit-mask: url('../assets/icons/regenerate.svg') center / 14px 14px no-repeat;
+  mask: url('../assets/icons/regenerate.svg') center / 10px 10px no-repeat;
+  -webkit-mask: url('../assets/icons/regenerate.svg') center / 10px 10px no-repeat;
   width: 16px;
 }
 

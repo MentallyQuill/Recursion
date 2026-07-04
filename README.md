@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/branding/recursion-banner-white-transparent.png" alt="Recursion" width="100%">
+</p>
+
 # Recursion
 
 Recursion is a SillyTavern extension for roleplay sessions where the model has the context, but still misses what matters in the next reply.

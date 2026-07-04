@@ -6,6 +6,7 @@ import { createGenerationRouter, createProviderClient } from '../../src/provider
 import { createRuntimeRunState } from '../../src/runtime/run-state.mjs';
 import { clearPromptBestEffort, installPrompt } from '../../src/runtime/prompt-install.mjs';
 import { runFusedCardPipeline } from '../../src/runtime/pipelines/fused.mjs';
+import { runRapidForegroundPipeline, warmRapidPipeline } from '../../src/runtime/pipelines/rapid.mjs';
 import { runStandardCardPipeline } from '../../src/runtime/pipelines/standard.mjs';
 import { CARD_CATALOG, cardsFromProviderResult } from '../../src/cards.mjs';
 import {
@@ -197,6 +198,40 @@ function assertNotEqual(actual, expected, message) {
   assertEqual(fusedResult.cards.length, 1, 'fused pipeline returns parsed card result');
   assert(fusedResult.diagnostics.includes('fused-bundle-used'), 'fused pipeline preserves bundle diagnostic');
   assertDeepEqual(pipelineCalls, ['standard:sceneFrameCard', 'fused:fusedCardBundle'], 'standard and fused pipeline helpers call their matching provider roles');
+}
+
+{
+  const rapidPipelineCalls = [];
+  await warmRapidPipeline({
+    reason: 'idle',
+    snapshot: {},
+    settings: { pipelineMode: 'rapid' },
+    providerClient: {
+      async generateRapidWarmDeck() {
+        rapidPipelineCalls.push('warm');
+        return { cards: [{ id: 'rapid-card' }] };
+      }
+    },
+    storage: {
+      async saveRapidWarm(result) {
+        rapidPipelineCalls.push(`save-${result.cards.length}`);
+      }
+    },
+    journal: () => {}
+  });
+  await runRapidForegroundPipeline({
+    snapshot: {},
+    settings: { pipelineMode: 'rapid' },
+    warmDeck: { cards: [{ id: 'rapid-card' }] },
+    providerClient: {
+      async generateRapidTurnDelta() {
+        rapidPipelineCalls.push('foreground');
+        return { cards: [{ id: 'rapid-card' }] };
+      }
+    },
+    journal: () => {}
+  });
+  assertDeepEqual(rapidPipelineCalls, ['warm', 'save-1', 'foreground'], 'rapid pipeline helpers run warm, save, and foreground paths');
 }
 
 function parsePromptJsonSection(prompt, label) {

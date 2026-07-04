@@ -95,6 +95,8 @@ The Rapid pipeline moves most scene work out of the send path:
 
 Rapid does not gain latency by using local cards, local fallback plans, local scene briefs, local turn briefs, summary fast-start packs, or timeout-based quality cuts. Its speed comes from precomputation, exact-source cache reuse, delta work, and optional hedged Utility foreground calls.
 
+Rapid foreground delta generation is a runtime pipeline module. The conductor still owns eligibility, warm-miss escalation, Standard fallback, prompt install, and warm artifact state.
+
 Rapid `backgroundRefreshRequests` are advisory and do not escalate by themselves. Mandatory missing cards do escalate, and Standard fallback diagnostics include bounded `rapid-mandatory-gap:*` entries for the first reported gaps.
 
 Every Rapid warm miss records one bounded miss snapshot in activity details and `rapid.warm_missed` journal entries. The snapshot includes the reason code/label, whether an exact variant existed, whether a join was attempted or timed out, whether an active warm run was present and had a known base hash, candidate and selected-card counts, and sanitized diagnostics. This is the root-cause surface for live Rapid fallbacks before changing pipeline behavior.

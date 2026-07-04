@@ -786,6 +786,85 @@ function effectiveMaxCardsForPolicy(maxCards, policy) {
   return next;
 }
 
+function plannedCardForJob(job) {
+  const source = asObject(job);
+  const catalog = resolveCatalog({
+    family: source.family,
+    role: source.role ?? source.roleId
+  }, { strict: false });
+  if (!catalog) return null;
+  return {
+    job: {
+      ...source,
+      family: catalog.family,
+      role: catalog.role
+    },
+    family: catalog.family,
+    role: catalog.role,
+    emphasis: validEnum(source.emphasis, EMPHASIS, 'normal'),
+    tokenEstimate: numberInRange(
+      source.tokenEstimate ?? source.tokenCost,
+      estimateTokens(source.reason || catalog.description),
+      1,
+      MAX_TOKEN_ESTIMATE
+    ),
+    id: source.id || `planned-${safeId(catalog.family)}`
+  };
+}
+
+export function limitCardJobsForHandBudget(cardJobs = [], { maxCards = 6, behaviorPolicy = null, forcedFamilies = [] } = {}) {
+  const policy = behaviorPolicyForHand(behaviorPolicy);
+  const requestedCardLimit = numberInRange(maxCards, 6, 0, 64);
+  const forcedOrder = forcedFamilyOrder(forcedFamilies);
+  const cardLimit = Math.max(effectiveMaxCardsForPolicy(requestedCardLimit, policy), forcedOrder.size);
+  const planned = (Array.isArray(cardJobs) ? cardJobs : [])
+    .map((job, index) => {
+      const card = plannedCardForJob(job);
+      return card ? { ...card, index } : null;
+    })
+    .filter(Boolean);
+  if (!planned.length || planned.length <= cardLimit) {
+    return {
+      cardJobs: planned.map((entry) => entry.job),
+      omitted: [],
+      metadata: {
+        maxCards: cardLimit,
+        requestedMaxCards: requestedCardLimit,
+        requestedCount: planned.length,
+        keptCount: planned.length,
+        omittedCount: 0
+      }
+    };
+  }
+  const sorted = planned.slice().sort((a, b) => {
+    const aForced = forcedOrder.has(a.family);
+    const bForced = forcedOrder.has(b.family);
+    if (aForced !== bForced) return aForced ? -1 : 1;
+    if (aForced && bForced) return forcedOrder.get(a.family) - forcedOrder.get(b.family);
+    return sortCardsForHand(a, b, policy);
+  });
+  const keptIndexes = new Set(sorted.slice(0, cardLimit).map((entry) => entry.index));
+  const kept = sorted.filter((entry) => keptIndexes.has(entry.index));
+  const omitted = sorted.filter((entry) => !keptIndexes.has(entry.index));
+  return {
+    cardJobs: kept.map((entry) => entry.job),
+    omitted: omitted.map((entry) => ({
+      family: entry.family,
+      role: entry.role,
+      reason: 'max-cards',
+      tokenEstimate: entry.tokenEstimate
+    })),
+    metadata: {
+      maxCards: cardLimit,
+      requestedMaxCards: requestedCardLimit,
+      requestedCount: planned.length,
+      keptCount: kept.length,
+      omittedCount: omitted.length,
+      forcedFamilies: [...forcedOrder.keys()]
+    }
+  };
+}
+
 function normalizeDeckCard(card, { preserveId = false } = {}) {
   const normalized = normalizeCard(card, {
     sceneId: card?.sceneId,

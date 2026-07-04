@@ -6,6 +6,7 @@ import {
   buildFusedCardBundleRequest,
   cardsFromFusedProviderResult,
   cardsFromProviderResult,
+  limitCardJobsForHandBudget,
   normalizeCard,
   selectHand
 } from '../../src/cards.mjs';
@@ -45,6 +46,45 @@ for (const entry of CARD_CATALOG) {
   assert(!entry.family.includes('/'), `${entry.family} uses a single-focus category label`);
   assert(UTILITY_ROLE_IDS.includes(entry.role), `${entry.role} exists in provider utility roles`);
 }
+
+const allCatalogCardJobs = CARD_CATALOG.map((entry) => ({
+  family: entry.family,
+  role: entry.role,
+  reason: `Generate ${entry.family}.`
+}));
+
+const mediumBudgetedJobs = limitCardJobsForHandBudget(allCatalogCardJobs, {
+  maxCards: 6,
+  behaviorPolicy: influencePolicyForSettings({
+    strength: 'strong',
+    focus: 'balanced',
+    minCards: 5,
+    maxCards: 12,
+    promptFootprint: 'rich'
+  })
+});
+
+assertDeepEqual(
+  mediumBudgetedJobs.cardJobs.map((job) => job.family),
+  ['Scene Frame', 'Scene Constraints', 'Active Cast', 'Knowledge', 'Consequences', 'Character Motivation'],
+  'card job budget keeps the same families the hand selector would keep'
+);
+assertEqual(mediumBudgetedJobs.omitted.length, 5, 'over-budget card jobs are omitted before provider calls');
+assert(mediumBudgetedJobs.omitted.every((entry) => entry.reason === 'max-cards'), 'card-job omissions use max-cards reason');
+assertEqual(mediumBudgetedJobs.metadata.requestedCount, 11, 'budget metadata records requested job count');
+assertEqual(mediumBudgetedJobs.metadata.keptCount, 6, 'budget metadata records kept job count');
+assertEqual(mediumBudgetedJobs.metadata.maxCards, 6, 'budget metadata records effective max cards');
+
+const forcedBudgetedJobs = limitCardJobsForHandBudget(allCatalogCardJobs, {
+  maxCards: 1,
+  forcedFamilies: ['Relationship', 'Open Threads'],
+  behaviorPolicy: influencePolicyForSettings({ focus: 'balanced' })
+});
+assertDeepEqual(
+  forcedBudgetedJobs.cardJobs.map((job) => job.family),
+  ['Relationship', 'Open Threads'],
+  'forced families floor the card job budget before provider calls'
+);
 
 const card = normalizeCard({
   family: 'Character Motivation',

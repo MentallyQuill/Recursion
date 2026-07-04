@@ -5,6 +5,7 @@ import {
   createProviderClient,
   fetchOpenAICompatibleModels,
   listProviderConnectionProfiles,
+  machineJsonSchemaForRequest,
   parseStructuredOutput,
   providerModelStatus,
   providerRouteSummary,
@@ -41,6 +42,7 @@ function responseSchemaForRole(roleId) {
   if (roleId === 'utilityArbiter') return 'recursion.utilityArbiter.v1';
   if (roleId === 'rapidTurnDelta') return 'recursion.rapidTurnDelta.v2';
   if (roleId === 'guidanceComposer') return 'recursion.guidanceComposer.v1';
+  if (roleId === 'fusedCardBundle') return 'recursion.cardBundle.v1';
   if (roleId === 'providerTest') return 'recursion.providerTest.v1';
   return 'recursion.card.v1';
 }
@@ -72,6 +74,7 @@ const expectedUtilityRoles = [
   'environmentAffordancesCard',
   'possessionsItemsCard',
   'openThreadsCard',
+  'fusedCardBundle',
   'rapidTurnDelta',
   'guidanceComposer',
   'providerTest'
@@ -299,6 +302,11 @@ assertEqual(calls.at(-1).responseSchema, 'recursion.rapidTurnDelta.v2', 'rapidTu
 await router.generate('guidanceComposer', { prompt: 'Guidance composer' });
 assertEqual(calls.at(-1).lane, 'utility', 'guidanceComposer uses utility lane');
 assertEqual(calls.at(-1).responseSchema, 'recursion.guidanceComposer.v1', 'guidanceComposer request carries expected response schema');
+await router.generate('fusedCardBundle', { prompt: 'Fused card bundle', snapshotHash: 'fused-provider-hash' });
+assertEqual(calls.at(-1).lane, 'utility', 'fusedCardBundle uses utility lane by default');
+assertEqual(calls.at(-1).responseSchema, 'recursion.cardBundle.v1', 'fusedCardBundle request carries card-bundle response schema');
+assertEqual(calls.at(-1).machineJson, true, 'fusedCardBundle request marks machine JSON calls');
+assertEqual(machineJsonSchemaForRequest(calls.at(-1)).schema.properties.schema.const, 'recursion.cardBundle.v1', 'fusedCardBundle machine schema constrains bundle schema');
 
 store.update({ reasonerUse: 'always' });
 store.updateProvider('reasoner', { enabled: true });

@@ -5,13 +5,13 @@ import {
   validateSoakUserHandle
 } from './lib/sillytavern-live-harness.mjs';
 
-const PIPELINES = new Set(['standard', 'rapid']);
+const PIPELINES = new Set(['standard', 'rapid', 'fused']);
 const DEFAULT_TIMEOUT_MS = 120000;
 
 function parseArgs(argv = []) {
   const args = {
     live: false,
-    pipelines: ['standard', 'rapid']
+    pipelines: ['standard', 'rapid', 'fused']
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -52,7 +52,7 @@ function assertPreflight(args, env) {
   const userResult = validateSoakUserHandle(user);
   if (!userResult.ok) fail('unsafe-user', 'RECURSION_SILLYTAVERN_USER must be a dedicated recursion-soak-* user.', { user, reason: userResult.reason });
   for (const pipeline of args.pipelines) {
-    if (!PIPELINES.has(pipeline)) fail('invalid-pipeline', `Unknown pipeline "${pipeline}". Use standard, rapid, or both.`);
+    if (!PIPELINES.has(pipeline)) fail('invalid-pipeline', `Unknown pipeline "${pipeline}". Use standard, rapid, fused, or a comma-separated subset.`);
   }
   return userResult.user;
 }
@@ -158,7 +158,7 @@ async function selectPipeline(page, pipeline, timeoutMs) {
   const pipelineButton = page.locator('[data-recursion-pipeline-button]').first();
   await pipelineButton.click({ timeout: timeoutMs });
   await page.locator(`[data-recursion-pipeline-choice="${pipeline}"], [data-recursion-pipeline-choice-${pipeline}]`).first().click({ timeout: timeoutMs });
-  const expectedLabel = pipeline === 'rapid' ? 'Rapid Pipeline' : 'Standard Pipeline';
+  const expectedLabel = pipeline === 'rapid' ? 'Rapid Pipeline' : (pipeline === 'fused' ? 'Fused Pipeline' : 'Standard Pipeline');
   await page.waitForFunction((expected) => {
     const button = document.querySelector('[data-recursion-pipeline-button]');
     return String(button?.getAttribute('aria-label') || '').includes(expected);
@@ -348,7 +348,7 @@ function assertPipelineProof(pipeline, proof, issues) {
   const snapshot = proof.snapshot || {};
   if (!snapshot.rootMounted) fail(`${pipeline}-root-missing`, 'Recursion root was not mounted.', { snapshot });
   if (!snapshot.powerPressed) fail(`${pipeline}-power-off`, 'Recursion was not enabled for pipeline proof.', { snapshot });
-  const expectedLabel = pipeline === 'rapid' ? 'Rapid Pipeline' : 'Standard Pipeline';
+  const expectedLabel = pipeline === 'rapid' ? 'Rapid Pipeline' : (pipeline === 'fused' ? 'Fused Pipeline' : 'Standard Pipeline');
   if (!String(snapshot.pipelineButtonLabel || '').includes(expectedLabel)) {
     fail(`${pipeline}-pipeline-not-selected`, 'Pipeline button did not expose the expected selected pipeline.', { expectedLabel, snapshot });
   }
@@ -384,6 +384,11 @@ function assertPipelineProof(pipeline, proof, issues) {
     }
     if (diagnostics.rapidPath !== 'warm-v2') {
       fail(`${pipeline}-path-missing`, 'Rapid proof did not expose a valid Rapid foreground path.', { snapshot, diagnosticsExport: proof.diagnosticsExport });
+    }
+  } else if (pipeline === 'fused') {
+    const diagnostics = rapidPacketDiagnostics;
+    if (diagnostics.pipelineMode !== 'fused') {
+      fail(`${pipeline}-diagnostics-missing`, 'Fused proof did not expose Fused packet diagnostics.', { snapshot, diagnosticsExport: proof.diagnosticsExport });
     }
   }
   if (/skipped|failed|failure|warning|caution/i.test(String(snapshot.ribbonText || ''))) {

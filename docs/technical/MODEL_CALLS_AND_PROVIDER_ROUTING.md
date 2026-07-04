@@ -6,8 +6,8 @@ Provider routing is implemented by `src/providers.mjs`, configured by `src/setti
 
 | Lane | Required | Uses | Fallback |
 | --- | --- | --- | --- |
-| Utility | Yes | Low/Medium Arbiter, Low/Medium card generation, lower-priority High cards, provider tests, and `guidanceComposer`. | Local fallback plan, cache reuse, raw-card-only packet, prompt clear, or skip. |
-| Reasoner | No | Medium+ guidance augmentation, High/Ultra Arbiter, high-priority High cards, Ultra card generation. | Utility guidance plus raw card evidence. |
+| Utility | Yes | Low/Medium Arbiter, Low/Medium card generation, Low/Medium Fused bundles, lower-priority High cards, provider tests, and `guidanceComposer`. | Local fallback plan, cache reuse, raw-card-only packet, prompt clear, or skip. |
+| Reasoner | No | Medium+ guidance augmentation, High/Ultra Arbiter, High/Ultra Fused bundles when healthy, high-priority High cards, Ultra card generation. | Utility guidance plus raw card evidence. |
 
 Utility remains the required operational lane. Reasoner is eligible only when enabled and selected by Reasoning Level policy.
 
@@ -41,12 +41,15 @@ Recursion exposes route visibility as a compact Reasoning Level summary rather t
 | --- | --- | --- |
 | `utilityArbiter` | Utility by default; Reasoner at High/Ultra when healthy | Plan action, scene status, card jobs, Reasoner decision, budgets, and compact diagnostics. |
 | Card roles | Utility by default; Reasoner for high-priority High cards and Ultra card calls when healthy | Generate fixed-family card JSON from the frozen snapshot. |
-| `guidanceComposer` | Utility | Provider-authored direction for using selected raw card evidence in Standard and Rapid warm packets. |
+| `fusedCardBundle` | Utility at Low/Medium; Reasoner at High/Ultra when healthy | Generate all requested card families in one structured bundle for the Fused pipeline. |
+| `guidanceComposer` | Utility | Provider-authored direction for using selected raw card evidence in Standard, Rapid warm, and Fused packets. |
 | `rapidTurnDelta` | Utility | Foreground Rapid role that selects from warmed raw cards and emits a small user-message guidance delta. |
 | `reasonerComposer` | Reasoner | Medium+ synthesis patch for Guidance. |
 | `providerTest` | Selected lane | Connectivity and structured response test for provider settings UI. |
 
-Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `socialSubtextCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`. Rapid foreground roles are Utility-only; they do not run on the Reasoner lane.
+Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `socialSubtextCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`. Fused wraps those card families in `fusedCardBundle` with response schema `recursion.cardBundle.v1`; each accepted item inside the bundle still validates as one `recursion.card.v1` card. Rapid foreground roles are Utility-only; they do not run on the Reasoner lane.
+
+Fused is meant for stronger reasoning model families that can maintain a larger multi-card structured contract in one response, such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar models. Standard is a better fit for fast, cheaper utility-class models, including 500B-and-lower models, Nemotron, GPT-OSS, Gemma, and similar, because each call has a narrower one-card contract.
 
 Rapid foreground roles are latency-sensitive structured Utility calls. `rapidTurnDelta` is used only when an exact-source warm artifact is ready. If no warm artifact is available, Rapid escalates to Standard for that same pending user message. Runtime must not replace missing Rapid output with local scene briefs, turn briefs, or summary packs.
 
@@ -87,6 +90,8 @@ Validation failures do not become successful model calls. Prompt composition con
 
 Runtime derives provider reasoning amount from the user-facing Reasoning Level and the work category. Final guidance augmentation uses minimal for Low, medium for Medium and High, and high for Ultra. Reasoner Arbiter calls use medium for High and Ultra. Reasoner card calls use minimal for High and medium for Ultra. Provider tests always use minimal.
 
+Fused card bundles use the card work category when they route to Reasoner. High therefore sends minimal reasoning intent on the Reasoner lane, while Ultra sends medium reasoning intent. Low and Medium keep the Fused bundle on Utility.
+
 The request contract is `reasoningCategory` plus `reasoningIntent`, where intent is normalized to `minimal`, `medium`, or `high`. Direct OpenAI-compatible calls apply provider fields only for known dialects:
 
 - OpenRouter and OpenAI: `reasoning: { effort, exclude: true }`.
@@ -111,6 +116,7 @@ Fallback behavior:
 - Invalid Utility Arbiter schema or missing/mismatched Arbiter `snapshotHash` can use a conservative local fallback plan because a provider result existed but failed structured validation.
 - Rapid warm miss escalates to Standard for the same pending user message; it does not permit local Rapid cards, local Rapid scene briefs, local Rapid turn briefs, or summary fast-start packs.
 - Rapid invalid structured output, mandatory missing cards, or provider-declared Standard escalation continue through the Standard pipeline for that same pending user message.
+- Fused bundle schema mismatch, snapshot mismatch, provider failure, or an empty valid result falls back to Standard individual card calls for the same pending user message.
 - Card call failure omits failed cards and keeps valid siblings.
 - Reasoner failure falls back to Utility guidance plus raw selected Card Evidence.
 - Provider test failure updates lane status with compact error text.

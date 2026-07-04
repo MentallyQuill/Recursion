@@ -13,7 +13,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Docs Folder Guide](README.md) - Folder-level guide for this documentation tree.
 - [User Guides](user/README.md) - Operator-facing table of contents.
 - [First Run Workflow](user/FIRST_RUN_WORKFLOW.md) - First-session path from install through Standard Auto, Manual, Rapid trial, inspection, and power-toggle cleanup.
-- [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for UI surfaces, Standard/Rapid pipelines, modes, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
+- [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for UI surfaces, Standard/Rapid/Fused pipelines, modes, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
 
 ## Provider, Privacy, And Safety Docs
 
@@ -25,7 +25,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 ## Technical Manuals
 
 - [Technical Manuals](technical/README.md) - Table of contents for the technical manual family.
-- [Recursion Technical Manual](technical/RECURSION_TECHNICAL_MANUAL.md) - Product boundary, runtime spine, component ownership, Standard/Rapid pipelines, modes, provider lanes, card/hand system, prompt packet, storage, diagnostics, host adapter, UI observability, fail-soft invariants, testing evidence, and non-goals.
+- [Recursion Technical Manual](technical/RECURSION_TECHNICAL_MANUAL.md) - Product boundary, runtime spine, component ownership, Standard/Rapid/Fused pipelines, modes, provider lanes, card/hand system, prompt packet, storage, diagnostics, host adapter, UI observability, fail-soft invariants, testing evidence, and non-goals.
 - [Runtime Turn Sequence](technical/RUNTIME_TURN_SEQUENCE.md) - Power toggle, Auto/Manual lifecycle, Standard foreground flow, Rapid warm/delta flow, cancellation, stale results, and failure branches.
 - [Card Deck And Hand](technical/CARD_DECK_AND_HAND.md) - Fixed V1 card families, card contract, lifecycle, Arbiter decisions, deck/hand separation, invalidation, Character Motivation safety, and inspector visibility.
 - [Prompt Packet And Injection](technical/PROMPT_PACKET_AND_INJECTION.md) - Packet sections, composer inputs, Utility and Reasoner composition, budgets, omissions, critical guardrail exception policy, SillyTavern injection lanes, cleanup, and privacy guardrails.

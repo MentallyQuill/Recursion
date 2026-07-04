@@ -5276,6 +5276,184 @@ for (const scenario of [
 }
 
 {
+  const roleCalls = [];
+  let fusedRequest = null;
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({ pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'high' }),
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              storyForm: {
+                schema: 'recursion.storyForm.v1',
+                tense: 'past',
+                pov: 'third-person-limited',
+                confidence: 'high',
+                evidenceRefs: ['message:2'],
+                reason: 'Assistant narration.'
+              },
+              cardJobs: [
+                { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Frame the scene.' },
+                { family: 'Scene Constraints', role: 'sceneConstraintsCard', reason: 'Keep the door blocked.' }
+              ],
+              reasonerDecision: { mode: 'skip', reason: 'unit fused', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['fused-runtime-plan']
+            }
+          };
+        }
+        if (roleId === 'fusedCardBundle') {
+          fusedRequest = request;
+          return {
+            ok: true,
+            roleId,
+            lane: request.lane,
+            diagnostics: { runId: 'fused-runtime-bundle' },
+            data: {
+              schema: 'recursion.cardBundle.v1',
+              snapshotHash: request.snapshotHash,
+              items: [
+                {
+                  schema: 'recursion.card.v1',
+                  family: 'Scene Frame',
+                  role: 'sceneFrameCard',
+                  promptText: 'FUSED_RUNTIME_SCENE_FRAME: The doorway remained blocked.',
+                  evidenceRefs: ['message:2'],
+                  tokenEstimate: 18
+                },
+                {
+                  schema: 'recursion.card.v1',
+                  family: 'Scene Constraints',
+                  role: 'sceneConstraintsCard',
+                  promptText: 'FUSED_RUNTIME_CONSTRAINT: Do not open the sealed door casually.',
+                  evidenceRefs: ['message:2'],
+                  tokenEstimate: 19
+                }
+              ]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Use fused cards.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['fused-guidance']
+            }
+          };
+        }
+        if (roleId === 'reasonerComposer') return reasonerComposerResponse(request, 'Fused reasoning synthesis.');
+        throw new Error(`unexpected Fused role ${roleId}`);
+      },
+      async batch() {
+        throw new Error('Fused pipeline should not run the Standard card batch path');
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Generate fused cards.' });
+  assertEqual(result.ok, true, 'Fused runtime installs prompt');
+  assertEqual(roleCalls.filter((roleId) => roleId === 'fusedCardBundle').length, 1, 'Fused runtime makes one bundle card call');
+  assert(!roleCalls.includes('sceneFrameCard'), 'Fused runtime does not call individual Scene Frame card role');
+  assert(!roleCalls.includes('sceneConstraintsCard'), 'Fused runtime does not call individual Scene Constraints card role');
+  assertEqual(fusedRequest.lane, 'reasoner', 'High Fused card bundle uses Reasoner when healthy');
+  assertEqual(fusedRequest.reasoningCategory, 'card', 'Fused card bundle keeps card reasoning category');
+  assertEqual(fusedRequest.reasoningIntent, 'minimal', 'High Fused card bundle keeps card reasoning intent');
+  assertEqual(fusedRequest.requestedCards.length, 2, 'Fused runtime sends both requested cards in one request');
+  assert(result.packet.sections.cardEvidence.includes('FUSED_RUNTIME_SCENE_FRAME'), 'Fused Scene Frame reaches packet evidence');
+  assert(result.packet.sections.cardEvidence.includes('FUSED_RUNTIME_CONSTRAINT'), 'Fused Constraints reaches packet evidence');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'fused', 'Fused prompt packet records pipeline mode');
+}
+
+{
+  const roleCalls = [];
+  let fusedRequest = null;
+  const { runtime } = createRuntimeHarness({
+    settings: { pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Need fallback frame.' }],
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              reasonerDecision: { mode: 'skip', reason: 'unit fused fallback', signals: [] },
+              diagnostics: ['fused-fallback-plan']
+            }
+          };
+        }
+        if (roleId === 'fusedCardBundle') {
+          fusedRequest = request;
+          return {
+            ok: true,
+            roleId,
+            data: { schema: 'wrong.schema', snapshotHash: request.snapshotHash, items: [] }
+          };
+        }
+        if (roleId === 'sceneFrameCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneFrameCard',
+              family: 'Scene Frame',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: 'FUSED_FALLBACK_STANDARD_CARD: Standard card fallback recovered.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 16
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Use fallback card.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['fused-fallback-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected Fused fallback role ${roleId}`);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Recover from unusable fused bundle.' });
+  assertEqual(result.ok, true, 'Fused fallback installs prompt');
+  assertEqual(fusedRequest.lane, 'utility', 'Low Fused card bundle stays on Utility');
+  assertEqual(fusedRequest.reasoningIntent, undefined, 'Utility Fused card bundle does not carry Reasoner reasoning intent');
+  assertDeepEqual(roleCalls, ['utilityArbiter', 'fusedCardBundle', 'sceneFrameCard', 'guidanceComposer'], 'unusable Fused bundle falls back to Standard card generation');
+  assert(result.plan.diagnostics.includes('fused-fallback-standard'), 'Fused fallback records Standard fallback diagnostic');
+  assert(result.plan.diagnostics.includes('fused-bundle-schema-mismatch'), 'Fused fallback keeps bundle validation diagnostic');
+  assert(result.packet.sections.cardEvidence.includes('FUSED_FALLBACK_STANDARD_CARD'), 'Standard fallback card reaches packet evidence');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'fused', 'Fused fallback packet still records requested pipeline mode');
+}
+
+{
   const generatedCardTextByRole = {
     sceneFrameCard: 'SG1_SCENE_FRAME_CARD: ONeill holds the parking-lot line and must choose proof or withdrawal.',
     activeCastCard: 'SG1_ACTIVE_CAST_CARD: Carter verifies the construct while Daniel and Tealc hold position.',

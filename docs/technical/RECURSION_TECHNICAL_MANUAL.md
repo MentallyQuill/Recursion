@@ -29,7 +29,7 @@ flowchart TD
 
 The runtime spine is implemented across `src/runtime.mjs`, `src/settings-policy.mjs`, `src/cards.mjs`, `src/card-scope.mjs`, `src/progress.mjs`, `src/prompt.mjs`, `src/providers.mjs`, `src/storage.mjs`, `src/activity.mjs`, and `src/hosts/sillytavern/host.mjs`.
 
-Pipeline selection is controlled by `settings.pipelineMode` and is independent from Auto/Manual mode. `standard` is the default normalized value. `rapid` is accepted as the alternate value, but invalid pipeline names normalize back to Standard.
+Pipeline selection is controlled by `settings.pipelineMode` and is independent from Auto/Manual mode. `standard` is the default normalized value. `rapid` and `fused` are accepted alternate values, but invalid pipeline names normalize back to Standard.
 
 Standard is the reference foreground implementation. It captures the turn, calls the Utility Arbiter, runs provider or cache card work, selects the hand, composes through Utility or Reasoner, validates the packet, installs Recursion-owned prompt keys, and records sanitized activity and journal evidence before generation continues.
 
@@ -45,6 +45,10 @@ flowchart LR
 ```
 
 Rapid changes when provider work happens, not who authors the guidance. `warmRapidScene()` runs only when Recursion is enabled and `pipelineMode` is `rapid`; it captures an exact source revision, builds a provider-generated warm card packet, and stores `variant.rapid` metadata without installing prompt text. On the foreground send path, Rapid uses `rapidTurnDelta` when the warm artifact matches the active source and contract hashes. If no usable warm artifact exists, Rapid continues through Standard for that same pending user message. Rapid foreground Utility calls may hedge, and invalid Rapid output, mandatory missing cards, or provider-declared Standard escalation also continue through Standard.
+
+Fused changes only the foreground card-generation stage. It keeps the Standard Arbiter, scope, Manual forced-card reconciliation, deck, hand, guidance, packet, and install stages, but sends all requested card families as one `fusedCardBundle` model call. Runtime accepts valid requested siblings, rejects unrequested or duplicate cards, and falls back to Standard individual card calls if the bundle yields no usable card. Fused still obeys Reasoning Level: Low/Medium use Utility, while High/Ultra use Reasoner when healthy and fall back to Utility if not.
+
+Fused is designed for stronger reasoning models such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar. Standard is usually the better pipeline for fast, cheaper utility-class models such as 500B-and-lower models, Nemotron, GPT-OSS, Gemma, and similar.
 
 ```mermaid
 flowchart LR
@@ -65,7 +69,7 @@ Rapid must not gain speed by using local fallback cards, local scene briefs, loc
 | Component | Owner module | Responsibility |
 | --- | --- | --- |
 | Core helpers | `src/core.mjs` | Stable hashing, safe ids, truncation, JSON parsing, cloning, timestamps, and redaction. |
-| Settings | `src/settings.mjs` | Mode, Standard/Rapid pipeline mode, Reasoning Level, strength, footprint, focus, provider preferences, injection settings, retention caps, UI limits, and session-only API key handling. |
+| Settings | `src/settings.mjs` | Mode, Standard/Rapid/Fused pipeline mode, Reasoning Level, strength, footprint, focus, provider preferences, injection settings, retention caps, UI limits, and session-only API key handling. |
 | Retention policy | `src/retention-policy.mjs` | User-facing cap defaults, ranges, settings normalization, and bounded source-window selection. |
 | Behavior policy | `src/settings-policy.mjs` | Source-backed Strength, Min/Max Cards, Focus, Prompt Footprint, policy prompt lines, effective footprint, and diagnostics summaries. |
 | Activity | `src/activity.mjs` | Sanitized user-facing activity events for the bar, progress menu, viewer, and diagnostics. |
@@ -75,7 +79,7 @@ Rapid must not gain speed by using local fallback cards, local scene briefs, loc
 | Card scope | `src/card-scope.mjs` | Fixed family/sub-item scope catalog, Auto focus payloads, Manual whitelist enforcement helpers, and safe scope summaries. |
 | Prompt | `src/prompt.mjs` | Guidance, card evidence, guardrail sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
 | Storage | `src/storage.mjs` | Logical scene-cache and run-journal records, key safety, redaction, index maintenance, and bounded retention. |
-| Runtime | `src/runtime.mjs` | Power toggle, Auto/Manual orchestration, Standard/Rapid pipeline orchestration, snapshot use, Utility Arbiter plan handling, card-scope enforcement, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
+| Runtime | `src/runtime.mjs` | Power toggle, Auto/Manual orchestration, Standard/Rapid/Fused pipeline orchestration, snapshot use, Utility Arbiter plan handling, card-scope enforcement, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
 | UI | `src/ui.mjs` | Recursion Bar, Hero Pixel Array progress menu, options/settings, Last Brief, Full Viewer, settings, and provider controls. |
 | SillyTavern host | `src/hosts/sillytavern/host.mjs` | Snapshot capture, prompt install/clear, provider bridge, settings store, and user-file storage adapter selection. |
 | Entrypoint | `src/extension/index.js` | Extension lifecycle hooks, runtime bootstrap, UI mount, generation interceptor, and teardown cleanup. |

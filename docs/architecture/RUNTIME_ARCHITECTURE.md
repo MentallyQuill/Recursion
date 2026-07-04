@@ -92,6 +92,18 @@ The Rapid pipeline moves most scene work out of the send path:
 
 Rapid does not gain latency by using local cards, local fallback plans, local scene briefs, local turn briefs, summary fast-start packs, or timeout-based quality cuts. Its speed comes from precomputation, exact-source cache reuse, delta work, and optional hedged Utility foreground calls.
 
+The Fused pipeline keeps the Standard foreground sequence but fuses the card-generation stage:
+
+1. Observe chat and turn snapshot.
+2. Run the Arbiter, scope filtering, Manual forced-family reconciliation, and behavior/reasoning policy exactly as Standard does.
+3. Build one `fusedCardBundle` request containing every requested card family, selected sub-item focus, story form, refresh metadata, and safety instructions.
+4. Validate the bundle envelope as `recursion.cardBundle.v1`, then validate each item as one normal `recursion.card.v1` card.
+5. Accept valid requested siblings, reject unrequested or duplicate items, and record compact diagnostics for omitted or invalid siblings.
+6. If the bundle yields no usable cards, fall back to the Standard individual card-generation path for the same turn.
+7. Continue through the shared deck, hand, guidance, Reasoner composition, prompt packet, cache save, freshness recheck, and prompt install path.
+
+Fused is designed for stronger reasoning model families such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar models that can hold a larger structured card contract in one response. It still obeys Reasoning Level routing: Low and Medium keep the bundle on Utility, High and Ultra use Reasoner when the lane is healthy, and unavailable Reasoner falls back to Utility. Fast, cheaper utility-class models such as 500B-and-lower models, Nemotron, GPT-OSS, Gemma, and similar are better suited to Standard's smaller per-card calls.
+
 Power and mode controls change how much of the pipeline runs:
 
 - Power off: remove or avoid installing Recursion prompt entries. Runtime may keep minimal UI/provider status, but it should not inspect or influence active generations.
@@ -102,6 +114,7 @@ Pipeline controls change when work happens:
 
 - Standard: run the foreground Arbiter, card, hand, compose, and install sequence on send.
 - Rapid: warm a provider-generated card packet in the background, then run a foreground Utility delta on send. Warm misses escalate to Standard.
+- Fused: run Standard foreground planning, then generate all requested cards through one `fusedCardBundle` call before the shared hand/compose/install stages.
 
 Pipeline is selected from the compact bar dropdown immediately left of Mode. It is not duplicated in Settings.
 
@@ -179,6 +192,7 @@ Expected failure behavior:
 - Rapid warm miss: run Standard for the current turn instead of inventing local Rapid cards, briefs, or summary fast-start packs.
 - Rapid mandatory gap: run Standard for the current turn and record the escalation diagnostic.
 - Invalid Rapid structured output: reject the output and run Standard for the current turn.
+- Fused bundle invalid or empty: record compact bundle diagnostics and run the Standard individual card path for the same turn.
 - Reasoner failure: continue with Utility guidance plus raw selected Card Evidence.
 - Prompt composition over budget: trim by lane priority and record budget omissions.
 - Injection failure: clear or leave untouched according to host adapter safety rules, then record the failed install attempt.
@@ -311,7 +325,7 @@ Clear failure, missing host clear API, missing scene cache, or invalidation stor
 
 `runtime.refreshScene()` is a first-class refresh operation. It waits for prior mutations, captures the current host snapshot without adding synthetic chat text, best-effort soft-invalidates that snapshot's scene cache with reason `user-refresh`, then runs the normal preparation loop so the Utility Arbiter can review the stale cache before the new active cache is saved.
 
-`runtime.forceRegenerateNow()` is different from refresh and reset. It starts the current turn fresh immediately, uses reason `user-force-regenerate`, bypasses prompt/cache/Rapid reuse paths once, invokes host regenerate after prompt install, and then returns future generations to the selected Standard or Rapid pipeline. `runtime.forceRegenerateNext()` remains the lower-level token primitive used by tests and internal compatibility, but the visible bar action is immediate.
+`runtime.forceRegenerateNow()` is different from refresh and reset. It starts the current turn fresh immediately, uses reason `user-force-regenerate`, bypasses prompt/cache/Fused/Rapid reuse paths once, invokes host regenerate after prompt install, and then returns future generations to the selected Standard, Rapid, or Fused pipeline. `runtime.forceRegenerateNext()` remains the lower-level token primitive used by tests and internal compatibility, but the visible bar action is immediate.
 
 ## Diagnostics Events
 

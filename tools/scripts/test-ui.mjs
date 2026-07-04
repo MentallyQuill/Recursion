@@ -12,6 +12,7 @@ import { DEFAULT_RECURSION_SETTINGS } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 assertEqual(activityLabel({ phase: 'cardBatchRunning' }), 'Generating scene cards...', 'phase label mapped');
+assertEqual(activityLabel({ phase: 'fusedCardBundleRunning' }), 'Generating fused card bundle...', 'Fused phase label mapped');
 const model = createRecursionViewModel({
   settings: { mode: 'auto' },
   lastHand: { cards: [{ id: 'c1' }, { id: 'c2' }] },
@@ -1557,14 +1558,15 @@ try {
   assert(root.querySelector('[data-recursion-pipeline-menu]'), 'compact bar renders the pipeline selector menu');
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('svg'), 'pipeline button renders an inline SVG icon');
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-standard]'), 'Standard pipeline button uses the standard pipeline icon');
-  assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-icon]').length, 2, 'pipeline selector renders icons only for Standard and Rapid');
-  assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-tip]').length, 2, 'pipeline selector renders tips only for Standard and Rapid');
+  assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-icon]').length, 3, 'pipeline selector renders icons only for Standard, Rapid, and Fused');
+  assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-tip]').length, 3, 'pipeline selector renders tips only for Standard, Rapid, and Fused');
   assert(root.querySelector('[data-recursion-pipeline-choice-standard]').querySelector('[data-recursion-pipeline-standard]'), 'Standard pipeline row uses the standard pipeline icon');
   assert(root.querySelector('[data-recursion-pipeline-choice-rapid]').querySelector('[data-recursion-pipeline-rapid]'), 'Rapid pipeline row uses the rapid pipeline icon');
+  assert(root.querySelector('[data-recursion-pipeline-choice-fused]').querySelector('[data-recursion-pipeline-fused]'), 'Fused pipeline row uses the fused pipeline icon');
   assertDeepEqual(
     root.querySelectorAll('[data-recursion-pipeline-choice]').map((choice) => choice.dataset.recursionPipelineChoice),
-    ['standard', 'rapid'],
-    'pipeline selector uses the Standard/Rapid order'
+    ['standard', 'rapid', 'fused'],
+    'pipeline selector uses the Standard/Rapid/Fused order'
   );
   assertEqual(
     root.querySelector('[data-recursion-pipeline-button]').getAttribute('aria-label'),
@@ -1723,6 +1725,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-pipeline-menu]').style.left, '38px', 'pipeline menu follows reference 6px inset from pipeline cluster');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-pipeline-choice-standard]')).includes('Standard'), 'Standard row has visible short name');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-pipeline-choice-rapid]')).includes('Rapid'), 'Rapid row has visible short name');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-pipeline-choice-fused]')).includes('Fused'), 'Fused row has visible short name');
   root.querySelector('[data-recursion-pipeline-choice-rapid]').querySelector('[data-recursion-pipeline-choice-name]').click();
   assertDeepEqual(settingsUpdates.at(-1), { pipelineMode: 'rapid' }, 'pipeline menu switches Standard to Rapid from nested row content clicks');
   assertEqual(root.querySelector('[data-recursion-pipeline-button]').getAttribute('aria-expanded'), 'false', 'pipeline button reflects closed menu after selection');
@@ -1732,6 +1735,13 @@ try {
     root.querySelector('[data-recursion-pipeline-button]').getAttribute('title').includes('Rapid Pipeline'),
     'Rapid pipeline tooltip explains current pipeline'
   );
+  root.querySelector('[data-recursion-pipeline-button]').click();
+  root.querySelector('[data-recursion-pipeline-choice-fused]').querySelector('[data-recursion-pipeline-choice-tip]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { pipelineMode: 'fused' }, 'pipeline menu switches to Fused from nested row content clicks');
+  view = { ...view, settings: { ...view.settings, pipelineMode: 'fused' } };
+  ui.update();
+  assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-fused]'), 'Fused pipeline button uses the fused pipeline icon after selection');
+  assert(root.querySelector('[data-recursion-pipeline-button]').getAttribute('title').includes('Fused Pipeline'), 'Fused pipeline tooltip explains current pipeline');
 
   root.querySelector('[data-recursion-mode-button]').setBoundingClientRect({ left: 63, top: 3, width: 24, height: 24, right: 87, bottom: 27 });
   let bubbledModeClicks = 0;
@@ -2565,7 +2575,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'idle view hides stop generation button');
   assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, false, 'idle view shows force regenerate button in stop slot');
   assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('aria-label'), 'Regenerate this turn', 'force regenerate button exposes accessible copy');
-  assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('title'), 'Regenerate this turn fresh, ignoring cached cards, Rapid warm, and swipe reuse.', 'force regenerate button exposes hover tip copy');
+  assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('title'), 'Regenerate this turn fresh, ignoring cached cards, Fused bundles, Rapid warm, and swipe reuse.', 'force regenerate button exposes hover tip copy');
   assert(root.querySelector('[data-recursion-force-regenerate-icon]'), 'force regenerate button renders the Regenerate icon');
   assertEqual(root.querySelector('[data-recursion-force-regenerate-icon]').children.length, 0, 'force regenerate icon uses the regenerate.svg asset mask instead of inline SVG');
   assertEqual(fakeDocument.textTree(root.querySelector('[data-recursion-force-regenerate]')).includes('Regenerate'), false, 'force regenerate button is icon-only when idle');

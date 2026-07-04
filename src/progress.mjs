@@ -49,6 +49,7 @@ const STEP_ORDER = [
   'rapid-deck-stale',
   'rapid-warm-failed',
   'reusing-scene-deck',
+  'fused-card-bundle',
   'utility-card-batch',
   'validating-cards',
   'repairing-card-json',
@@ -75,6 +76,7 @@ const STEP_DEFINITIONS = Object.freeze({
   'rapid-deck-stale': { label: 'Rapid deck stale', providerLane: 'utility' },
   'rapid-warm-failed': { label: 'Rapid warm', providerLane: 'utility' },
   'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
+  'fused-card-bundle': { label: 'Fused card bundle', providerLane: 'utility' },
   'utility-card-batch': { label: 'Utility card batch', providerLane: 'utility' },
   'validating-cards': { label: 'Validating cards', providerLane: 'utility' },
   'repairing-card-json': { label: 'Repairing card JSON', providerLane: 'utility' },
@@ -101,6 +103,7 @@ const PHASE_STEP_IDS = Object.freeze({
   rapidWarmStale: 'rapid-deck-stale',
   rapidWarmFailed: 'rapid-warm-failed',
   cardBatchRunning: 'utility-card-batch',
+  fusedCardBundleRunning: 'fused-card-bundle',
   cardValidating: 'validating-cards',
   deckUpdating: 'updating-scene-deck',
   handSelected: 'selecting-turn-hand',
@@ -132,7 +135,10 @@ function cleanText(value, fallback = '') {
 }
 
 function normalizePipelineMode(value) {
-  return cleanText(value, 'standard').toLowerCase() === 'rapid' ? 'rapid' : 'standard';
+  const mode = cleanText(value, 'standard').toLowerCase();
+  if (mode === 'rapid') return 'rapid';
+  if (mode === 'fused') return 'fused';
+  return 'standard';
 }
 
 function truncateText(value, limit = 120) {
@@ -297,6 +303,7 @@ function roleStepId(event) {
   if (roleId === 'utilityArbiter') return 'planning-card-pass';
   if (roleId === 'reasonerComposer') return 'reasoner-guidance';
   if (roleId === 'guidanceComposer') return 'composing-prompt-packet';
+  if (roleId === 'fusedCardBundle') return 'fused-card-bundle';
   if (MODEL_CALL_ROLE_IDS.has(roleId)) return 'utility-card-batch';
   return null;
 }
@@ -307,6 +314,7 @@ function roleLabel(roleId, fallback = '') {
   if (id === 'reasonerComposer') return 'Reasoner synthesis';
   if (id === 'utilityArbiter') return 'Utility Arbiter';
   if (id === 'guidanceComposer') return 'Guidance composer';
+  if (id === 'fusedCardBundle') return 'Fused card bundle';
   return fallback;
 }
 
@@ -423,6 +431,7 @@ function upsertStep(map, step) {
   const next = {
     ...existing,
     ...step,
+    providerLane: existing.providerLane === 'reasoner' ? 'reasoner' : step.providerLane,
     children: mergeChildren(existing.children, step.children),
     order: existing.order
   };
@@ -617,7 +626,7 @@ function appendPendingPlanSteps(map, view, orderStart = 0) {
   const enabled = source.settings?.enabled !== false;
   if (hasTerminalPromptOutcome(map)) return;
   let order = orderStart;
-  if (planWantsCards(source, activity) || map.has('utility-card-batch')) {
+  if (planWantsCards(source, activity) || map.has('utility-card-batch') || map.has('fused-card-bundle')) {
     for (const id of ['selecting-turn-hand', 'saving-scene-cache', 'composing-prompt-packet']) {
       if (!map.has(id)) upsertStep(map, pendingStep(id, order++));
     }
@@ -633,27 +642,28 @@ function appendPendingChildSteps(map, view, orderStart = 0) {
   const source = asObject(view);
   const jobs = Array.isArray(source.lastPlan?.cardJobs) ? source.lastPlan.cardJobs : [];
   if (hasTerminalPromptOutcome(map)) return;
-  if (jobs.length && map.has('utility-card-batch')) {
+  const parentStepId = map.has('fused-card-bundle') ? 'fused-card-bundle' : 'utility-card-batch';
+  if (jobs.length && map.has(parentStepId)) {
     let order = orderStart;
     for (const job of jobs) {
       const roleId = cleanText(job?.role || job?.roleId);
       const family = cleanText(job?.family);
       upsertStep(map, normalizeStep({
-        id: 'utility-card-batch',
-        label: STEP_DEFINITIONS['utility-card-batch'].label,
-        providerLane: 'utility',
-        state: map.get('utility-card-batch')?.state || 'pending',
-        order: map.get('utility-card-batch')?.order ?? order,
+        id: parentStepId,
+        label: STEP_DEFINITIONS[parentStepId].label,
+        providerLane: map.get(parentStepId)?.providerLane || STEP_DEFINITIONS[parentStepId].providerLane,
+        state: map.get(parentStepId)?.state || 'pending',
+        order: map.get(parentStepId)?.order ?? order,
         children: [
           {
             label: family || roleLabel(roleId, 'Card'),
-            providerLane: 'utility',
+            providerLane: map.get(parentStepId)?.providerLane || 'utility',
             state: 'pending',
             sourceRoleId: roleId,
             order: order++
           }
         ]
-      }, map.get('utility-card-batch')?.order ?? order));
+      }, map.get(parentStepId)?.order ?? order));
     }
   }
 }

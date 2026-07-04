@@ -107,7 +107,7 @@ Build a source-backed inventory before expanding public prose.
 ### Work
 
 - Audit `README.md`, `docs/README.md`, existing design docs, architecture docs, user docs, testing docs, and source READMEs.
-- Inventory user-facing surfaces: Recursion Bar, Hero Pixel Array progress menu, options menu, Last Brief dropdown, Full Viewer, Settings, Provider Controls, power toggle, Standard/Rapid Pipeline control, Auto/Manual mode controls, warnings, fallback states, and mobile behavior.
+- Inventory user-facing surfaces: Recursion Bar, Hero Pixel Array progress menu, options menu, Last Brief dropdown, Full Viewer, Settings, Provider Controls, power toggle, Standard/Rapid/Fused Pipeline control, Auto/Manual mode controls, warnings, fallback states, and mobile behavior.
 - Inventory technical seams: SillyTavern host adapter, generation interceptor, runtime coordinator, Utility Arbiter, card catalog, scene cache, turn hand selection, prompt packet composition, prompt injection, provider lanes, storage, activity reporting, diagnostics, and redaction.
 - Inventory verification evidence: `npm.cmd test`, `node tools\scripts\run-alpha-gate.mjs`, Playwright readiness artifacts, dedicated soak-user checks, live smoke plans, and artifact contracts.
 - Identify stale or overlapping docs that should be renamed, merged, or rewritten in place.

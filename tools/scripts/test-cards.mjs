@@ -3,6 +3,8 @@ import {
   CARD_CATALOG,
   applyCardPlan,
   buildCardRequests,
+  buildFusedCardBundleRequest,
+  cardsFromFusedProviderResult,
   cardsFromProviderResult,
   normalizeCard,
   selectHand
@@ -204,6 +206,137 @@ assert(requests[0].prompt.includes('Return one JSON object'), 'request prompt as
 assert(requests[0].prompt.includes('Envelope role must be "sceneFrameCard"'), 'request prompt requires envelope role echo');
 assert(requests[0].prompt.includes('Envelope family must be "Scene Frame"'), 'request prompt requires envelope family echo');
 assert(requests[0].prompt.includes('Envelope snapshotHash must be "hash"'), 'request prompt requires envelope snapshot hash echo');
+const fusedPlan = {
+  cardJobs: [
+    { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Frame the sealed doorway.' },
+    { family: 'Character Motivation', role: 'characterMotivationCard', reason: 'Track observable pressure.' }
+  ],
+  storyForm: {
+    schema: 'recursion.storyForm.v1',
+    tense: 'past',
+    pov: 'third-person-limited',
+    confidence: 'high',
+    evidenceRefs: ['message:8'],
+    reason: 'Assistant narration establishes form.'
+  }
+};
+const fusedRequest = buildFusedCardBundleRequest(fusedPlan, {
+  runId: 'run-fused-cards',
+  snapshotHash: 'snapshot-fused-1',
+  snapshot: { messages: [{ mesid: 8, role: 'assistant', text: 'The door stayed shut.' }] },
+  cardScope: {
+    mode: 'manual',
+    strictWhitelist: true,
+    selectedSubItemsByFamily: {
+      'Scene Frame': ['location-situation'],
+      'Character Motivation': ['observable-pressure']
+    }
+  },
+  storyForm: fusedPlan.storyForm
+});
+assertEqual(fusedRequest.roleId, 'fusedCardBundle', 'Fused request uses fusedCardBundle role');
+assertEqual(fusedRequest.snapshotHash, 'snapshot-fused-1', 'Fused request carries snapshot hash');
+assertEqual(fusedRequest.requestedCards.length, 2, 'Fused request carries all requested cards');
+assert(fusedRequest.prompt.includes('Return one JSON object only.'), 'Fused prompt requires one JSON object');
+assert(fusedRequest.prompt.includes('schema "recursion.cardBundle.v1"'), 'Fused prompt names bundle schema');
+assert(fusedRequest.prompt.includes('Character Motivation'), 'Fused prompt includes requested family blocks');
+assert(fusedRequest.prompt.includes('Do not include first-person internal monologue'), 'Fused prompt includes family safety instructions');
+const fusedCardContext = {
+  chatId: 'chat-fused',
+  sceneId: 'scene-fused',
+  sceneKey: 'scene-fused',
+  sourceRevisionHash: 'source-fused',
+  firstMesId: 8,
+  lastMesId: 8,
+  expectedSnapshotHash: 'snapshot-fused-1',
+  requestedCards: fusedRequest.requestedCards
+};
+const fusedProviderResult = {
+  ok: true,
+  roleId: 'fusedCardBundle',
+  lane: 'reasoner',
+  diagnostics: { retryCount: 0 },
+  data: {
+    schema: 'recursion.cardBundle.v1',
+    snapshotHash: 'snapshot-fused-1',
+    items: [
+      {
+        schema: 'recursion.card.v1',
+        family: 'Scene Frame',
+        role: 'sceneFrameCard',
+        promptText: 'The blocked door is the immediate boundary.',
+        evidenceRefs: ['message:8'],
+        tokenEstimate: 24
+      },
+      {
+        schema: 'recursion.card.v1',
+        family: 'Character Motivation',
+        role: 'characterMotivationCard',
+        promptText: 'She appears under pressure to keep the exit sealed.',
+        evidenceRefs: ['message:8'],
+        tokenEstimate: 31
+      },
+      {
+        schema: 'recursion.card.v1',
+        family: 'Items',
+        role: 'possessionsItemsCard',
+        promptText: 'This unrequested item should be rejected.',
+        evidenceRefs: ['message:8'],
+        tokenEstimate: 18
+      }
+    ],
+    omitted: [{ family: 'Items', role: 'possessionsItemsCard', reason: 'provider-skipped' }]
+  }
+};
+const fusedParsed = cardsFromFusedProviderResult(fusedProviderResult, fusedCardContext);
+assertEqual(fusedParsed.cards.length, 2, 'Fused validator accepts valid requested siblings');
+assertDeepEqual(fusedParsed.cards.map((entry) => entry.family), ['Scene Frame', 'Character Motivation'], 'Fused validator rejects unrequested items');
+assertEqual(fusedParsed.cards[0].providerRole, 'fusedCardBundle', 'Fused cards retain provider role metadata');
+assertEqual(fusedParsed.cards[0].providerLane, 'reasoner', 'Fused cards retain provider lane metadata');
+assert(fusedParsed.diagnostics.includes('fused-item-rejected:Items'), 'Fused validator records rejected unrequested item');
+assertDeepEqual(fusedParsed.omissions, [{ family: 'Items', role: 'possessionsItemsCard', reason: 'provider-skipped' }], 'Fused validator keeps provider omissions');
+const fusedMixedEvidence = cardsFromFusedProviderResult({
+  ok: true,
+  data: {
+    schema: 'recursion.cardBundle.v1',
+    snapshotHash: 'snapshot-fused-1',
+    items: [{
+      schema: 'recursion.card.v1',
+      family: 'Scene Frame',
+      role: 'sceneFrameCard',
+      promptText: 'The blocked door stays central.',
+      evidenceRefs: ['message:8', 'message:999'],
+      tokenEstimate: 20
+    }]
+  }
+}, fusedCardContext);
+assertEqual(fusedMixedEvidence.cards.length, 1, 'Fused validator keeps cards with at least one valid message evidence ref');
+assertDeepEqual(fusedMixedEvidence.cards[0].evidenceRefs, ['message:8'], 'Fused validator drops stale evidence refs and keeps valid refs');
+const fusedMismatch = cardsFromFusedProviderResult({
+  ok: true,
+  data: { schema: 'recursion.cardBundle.v1', snapshotHash: 'wrong', items: [] }
+}, fusedCardContext);
+assertEqual(fusedMismatch.cards.length, 0, 'Fused snapshot mismatch accepts no cards');
+assert(fusedMismatch.diagnostics.includes('fused-bundle-snapshot-mismatch'), 'Fused snapshot mismatch records diagnostic');
+const fusedInvalidUnsafeText = cardsFromFusedProviderResult({
+  ok: true,
+  data: {
+    schema: 'recursion.cardBundle.v1',
+    snapshotHash: 'snapshot-fused-1',
+    items: [{
+      schema: 'recursion.card.v1',
+      family: 'Scene Frame',
+      role: 'sceneFrameCard',
+      promptText: 'The hidden chain of thought says the door stays central.',
+      evidenceRefs: ['message:8'],
+      tokenEstimate: 20
+    }]
+  }
+}, fusedCardContext);
+assert(
+  fusedInvalidUnsafeText.diagnostics.includes('fused-item-invalid:Scene Frame:Card-promptText-contains-unsafe-hidden-reasoning-wording'),
+  'Fused validator records the concrete invalid-item reason'
+);
 const storyFormRequest = buildCardRequests({
   cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve narrative form.' }]
 }, {
@@ -910,7 +1043,7 @@ const repairedOutOfWindowCards = cardsFromProviderResult({
 });
 assertEqual(repairedOutOfWindowCards.length, 1, 'provider card with only out-of-window message refs repairs to active source window');
 assertDeepEqual(repairedOutOfWindowCards[0].evidenceRefs, ['message:2'], 'out-of-window provider message refs repair to latest source-window message');
-assertEqual(cardsFromProviderResult({
+const mixedEvidenceCards = cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
   data: {
@@ -918,7 +1051,7 @@ assertEqual(cardsFromProviderResult({
     role: 'sceneFrameCard',
     family: 'Scene Frame',
     snapshotHash: 'request-frozen-hash',
-    items: [{ promptText: 'Mixed in-window and out-of-window evidence must be ignored.', evidenceRefs: ['message:1', 'message:99'] }]
+    items: [{ promptText: 'Mixed in-window and out-of-window evidence keeps the valid ref.', evidenceRefs: ['message:1', 'message:99'] }]
   }
 }, {
   sceneId: 'scene-provider',
@@ -929,8 +1062,10 @@ assertEqual(cardsFromProviderResult({
   expectedSnapshotHash: 'request-frozen-hash',
   expectedRole: 'sceneFrameCard',
   expectedFamily: 'Scene Frame'
-}).length, 0, 'provider card with mixed out-of-window evidence ignored');
-assertEqual(cardsFromProviderResult({
+});
+assertEqual(mixedEvidenceCards.length, 1, 'provider card with mixed out-of-window evidence keeps valid refs');
+assertDeepEqual(mixedEvidenceCards[0].evidenceRefs, ['message:1'], 'mixed out-of-window evidence drops stale refs');
+const displayLimitEvidenceCards = cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
   data: {
@@ -939,7 +1074,7 @@ assertEqual(cardsFromProviderResult({
     family: 'Scene Frame',
     snapshotHash: 'request-frozen-hash',
     items: [{
-      promptText: 'Out-of-window evidence after normalized display limit must still be ignored.',
+      promptText: 'Out-of-window evidence after normalized display limit keeps valid refs.',
       evidenceRefs: [...Array.from({ length: 12 }, () => 'message:1'), 'message:99']
     }]
   }
@@ -952,8 +1087,10 @@ assertEqual(cardsFromProviderResult({
   expectedSnapshotHash: 'request-frozen-hash',
   expectedRole: 'sceneFrameCard',
   expectedFamily: 'Scene Frame'
-}).length, 0, 'provider card with out-of-window evidence past normalized ref limit ignored');
-assertEqual(cardsFromProviderResult({
+});
+assertEqual(displayLimitEvidenceCards.length, 1, 'provider card with out-of-window evidence past normalized ref limit keeps valid refs');
+assert(displayLimitEvidenceCards[0].evidenceRefs.every((entry) => entry === 'message:1'), 'display-limited evidence drops stale refs');
+const textLimitEvidenceCards = cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
   data: {
@@ -975,7 +1112,9 @@ assertEqual(cardsFromProviderResult({
   expectedSnapshotHash: 'request-frozen-hash',
   expectedRole: 'sceneFrameCard',
   expectedFamily: 'Scene Frame'
-}).length, 0, 'provider card with out-of-window evidence past normalized text limit ignored');
+});
+assertEqual(textLimitEvidenceCards.length, 1, 'provider card with out-of-window evidence past normalized text limit repairs');
+assertDeepEqual(textLimitEvidenceCards[0].evidenceRefs, ['message:2'], 'mixed refs in one overlong entry fall back to latest source-window message');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',

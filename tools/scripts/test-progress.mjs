@@ -109,6 +109,41 @@ assertEqual(retriedGeneratedChild.meta, 'retried', 'generated card retry has vis
 assert(retriedGeneratedChild.reason.includes('retried once'), 'generated card retry keeps a safe visible reason');
 assertEqual(retriedGeneratedBatch.state, 'warning', 'retried generated child keeps batch caution-colored');
 
+const fusedBundleProgress = createProgressRunModel({
+  activityHistory: [
+    { runId: 'fused-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },
+    { runId: 'fused-progress', phase: 'fusedCardBundleRunning', label: 'Generating fused card bundle...', providerLane: 'reasoner', cardCounts: { requested: 2 }, recordedAt: '2' },
+    {
+      runId: 'fused-progress',
+      phase: 'cardProgress',
+      severity: 'success',
+      detail: {
+        parentStepId: 'fused-card-bundle',
+        roleId: 'sceneFrameCard',
+        family: 'Scene Frame',
+        source: 'generated',
+        state: 'done',
+        providerLane: 'reasoner'
+      },
+      recordedAt: '3'
+    }
+  ],
+  activity: { runId: 'fused-progress', phase: 'fusedCardBundleRunning', label: 'Generating fused card bundle...', providerLane: 'reasoner', cardCounts: { requested: 2 }, recordedAt: '2' },
+  settings: { pipelineMode: 'fused' },
+  lastPlan: {
+    cardJobs: [
+      { role: 'sceneFrameCard', family: 'Scene Frame' },
+      { role: 'sceneConstraintsCard', family: 'Scene Constraints' }
+    ]
+  }
+});
+const fusedBundleStep = fusedBundleProgress.steps.find((step) => step.id === 'fused-card-bundle');
+assert(fusedBundleStep, 'Fused progress renders a Fused card bundle row');
+assertEqual(fusedBundleStep.label, 'Fused card bundle', 'Fused progress labels the bundle row');
+assertEqual(fusedBundleStep.providerLane, 'reasoner', 'Fused progress keeps Reasoner lane on the bundle row');
+assert(fusedBundleStep.children.some((child) => child.id === 'scene-frame-card' && child.state === 'done'), 'Fused progress nests generated card rows under the bundle row');
+assert(fusedBundleStep.children.some((child) => child.id === 'scene-constraints-card' && child.state === 'pending'), 'Fused progress seeds pending requested siblings under the bundle row');
+
 const swipeFreshRunProgress = createProgressRunModel({
   activityHistory: [
     {

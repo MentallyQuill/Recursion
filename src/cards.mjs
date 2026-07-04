@@ -13,6 +13,7 @@ const INSPECTOR_NOTES_LIMIT = 800;
 const ARBITER_REASON_LIMIT = 240;
 const MAX_TOKEN_ESTIMATE = 1000;
 const CARD_RESPONSE_SCHEMA = 'recursion.card.v1';
+const CARD_BUNDLE_RESPONSE_SCHEMA = 'recursion.cardBundle.v1';
 const PROVIDER_PROMPT_SECRET_KEY_SUFFIXES = Object.freeze([
   'apikey',
   'authorization',
@@ -510,13 +511,17 @@ function repairProviderEvidenceRefs(value, context = {}) {
   const fallback = sourceWindowFallbackEvidenceRefs(context);
   if (entries.length === 0) return fallback || value;
   const refs = messageEvidenceRefs(entries);
-  if (refs.length !== entries.length) return value;
   if (hasValidMessageEvidenceRefs(entries, context)) return value;
   const firstMesId = optionalNumber(context.firstMesId);
   const lastMesId = optionalNumber(context.lastMesId);
-  const minMesId = firstMesId ?? 0;
-  const maxMesId = lastMesId ?? Number.MAX_SAFE_INTEGER;
-  if (refs.some((entry) => entry >= minMesId && entry <= maxMesId)) return value;
+  if (firstMesId === undefined || lastMesId === undefined) return value;
+  const minMesId = Math.min(firstMesId, lastMesId);
+  const maxMesId = Math.max(firstMesId, lastMesId);
+  const validEntries = entries.filter((entry) => {
+    const entryRefs = messageEvidenceRefs([entry]);
+    return entryRefs.length > 0 && entryRefs.every((ref) => ref >= minMesId && ref <= maxMesId);
+  });
+  if (validEntries.length > 0) return validEntries;
   return fallback || value;
 }
 
@@ -613,6 +618,37 @@ function itemMatchesProviderCatalog(item, catalog) {
   } catch {
     return false;
   }
+}
+
+function providerCardRejectReason(result, context = {}) {
+  if (!result?.ok) return 'provider-failed';
+  const data = asObject(result.data);
+  if (data.schema !== CARD_RESPONSE_SCHEMA) return 'schema-mismatch';
+  const items = Array.isArray(data.items)
+    ? data.items
+    : (Array.isArray(data.cards) ? data.cards : []);
+  if (items.length !== 1) return `item-count-${items.length}`;
+  const catalog = resolveProviderEnvelopeCatalog(data, context);
+  if (!catalog) return 'catalog-mismatch';
+  if (!providerSnapshotMatches(data, context)) return 'snapshot-mismatch';
+  const item = asObject(items[0]);
+  if (!itemMatchesProviderCatalog(item, catalog)) return 'item-catalog-mismatch';
+  const evidenceRefs = repairProviderEvidenceRefs(item.evidenceRefs ?? item.evidence, context);
+  if (!hasValidMessageEvidenceRefs(evidenceRefs, context)) return 'evidence-message-missing';
+  try {
+    normalizeCard({
+      ...item,
+      role: catalog.role,
+      family: catalog.family,
+      promptText: item.promptText ?? item.text ?? item.claim,
+      evidenceRefs,
+      tokenEstimate: item.tokenEstimate ?? item.tokenCost,
+      inspectorNotes: item.inspectorNotes
+    }, context);
+  } catch (error) {
+    return safeId(cleanText(error?.message || error || 'normalization-failed', 120), 'normalization-failed');
+  }
+  return '';
 }
 
 function cardIdFor(input, catalog, promptText, context) {
@@ -873,6 +909,73 @@ export function buildCardRequests(plan = {}, context = {}) {
     .filter(Boolean);
 }
 
+export function buildFusedCardBundleRequest(plan = {}, context = {}) {
+  const cardScope = asObject(context.cardScope);
+  const storyForm = normalizeStoryForm(context.storyForm || plan.storyForm || UNKNOWN_STORY_FORM);
+  const snapshotHash = cleanProviderPromptText(context.snapshotHash ?? plan.snapshotHash ?? '', TEXT_LIMIT);
+  const cardJobs = Array.isArray(plan?.cardJobs) ? plan.cardJobs : [];
+  const requestedCards = buildCardRequests(plan, { ...context, storyForm }).map((request) => {
+    const job = cardJobs.find((entry) => {
+      const source = asObject(entry);
+      return String(source.family || '').trim() === request.metadata.family
+        || String(source.role || source.roleId || '').trim() === request.metadata.role;
+    });
+    return {
+      family: request.metadata.family,
+      role: request.metadata.role,
+      priority: request.metadata.priority,
+      reason: request.metadata.reason || '',
+      selectedSubItems: Array.isArray(request.cardScope?.selectedSubItems) ? request.cardScope.selectedSubItems : [],
+      refreshOfCardId: request.metadata.refreshOfCardId || '',
+      forcedBy: String(asObject(job).forcedBy || '').trim()
+    };
+  });
+  if (!requestedCards.length) return null;
+
+  const requestBlocks = requestedCards.map((card, index) => {
+    const catalog = resolveCatalog({ family: card.family, role: card.role }, { strict: true });
+    return [
+      `Requested card ${index + 1}:`,
+      `- family: ${catalog.family}`,
+      `- role: ${catalog.role}`,
+      `- catalog priority: ${catalog.priority}`,
+      card.reason ? `- Arbiter reason: ${card.reason}` : '- Arbiter reason: none provided',
+      card.refreshOfCardId ? `- Refreshes cached card: ${card.refreshOfCardId}` : '- Refreshes cached card: none',
+      card.forcedBy ? `- Forced by: ${card.forcedBy}` : '- Forced by: none',
+      cardScopePromptBlock(catalog, card.selectedSubItems),
+      cardPromptSafetyInstruction(catalog)
+    ].filter(Boolean).join('\n');
+  });
+
+  return {
+    roleId: 'fusedCardBundle',
+    runId: cleanProviderPromptText(context.runId ?? plan.runId ?? '', TEXT_LIMIT),
+    snapshotHash,
+    cardScope,
+    storyForm,
+    requestedCards,
+    prompt: [
+      'Generate all requested Recursion scene cards in one structured card bundle.',
+      'Return one JSON object only. Do not wrap it in markdown.',
+      `The JSON object must use schema "${CARD_BUNDLE_RESPONSE_SCHEMA}".`,
+      snapshotHash ? `Top-level snapshotHash must be "${snapshotHash}".` : '',
+      'Top-level items must be an array. Each item is one card object for one requested family.',
+      `Each item must include schema "${CARD_RESPONSE_SCHEMA}", family, role, promptText, and evidenceRefs.`,
+      'Return at most one item per requested family. Do not generate unrequested families.',
+      'If a requested card cannot be safely generated, omit it from items and add an omitted entry with family, role, and reason.',
+      'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
+      storyFormPromptBlock(storyForm),
+      requestBlocks.join('\n\n'),
+      `Snapshot hash: ${snapshotHash}`,
+      `Snapshot:\n${stringifyForPrompt(context.snapshot ?? {})}`
+    ].filter(Boolean).join('\n\n'),
+    metadata: {
+      requestedCount: requestedCards.length,
+      requestedFamilies: requestedCards.map((card) => card.family)
+    }
+  };
+}
+
 export function cardsFromProviderResult(result, context = {}) {
   if (!result?.ok) return [];
   const data = asObject(result.data);
@@ -903,6 +1006,89 @@ export function cardsFromProviderResult(result, context = {}) {
       return [];
     }
   });
+}
+
+export function cardsFromFusedProviderResult(result, context = {}) {
+  const output = { cards: [], omissions: [], diagnostics: [] };
+  if (!result?.ok) {
+    output.diagnostics.push('fused-bundle-provider-failed');
+    return output;
+  }
+  const data = asObject(result.data);
+  if (data.schema !== CARD_BUNDLE_RESPONSE_SCHEMA) {
+    output.diagnostics.push('fused-bundle-schema-mismatch');
+    return output;
+  }
+  if (!providerSnapshotMatches(data, context)) {
+    output.diagnostics.push('fused-bundle-snapshot-mismatch');
+    return output;
+  }
+  const requested = new Map((Array.isArray(context.requestedCards) ? context.requestedCards : [])
+    .map((card) => {
+      const catalog = resolveCatalog({ family: card?.family, role: card?.role ?? card?.roleId }, { strict: false });
+      return catalog ? [catalog.family, catalog] : null;
+    })
+    .filter(Boolean));
+  const seen = new Set();
+  const items = Array.isArray(data.items) ? data.items : [];
+  for (const rawItem of items) {
+    const item = asObject(rawItem);
+    const catalog = resolveCatalog({ family: item.family, role: item.role ?? item.roleId }, { strict: false });
+    const diagnosticName = cleanOptionalText(item.family || item.role || item.roleId || 'unknown', 80) || 'unknown';
+    if (!catalog || !requested.has(catalog.family) || seen.has(catalog.family)) {
+      output.diagnostics.push(`fused-item-rejected:${diagnosticName}`);
+      continue;
+    }
+    const cards = cardsFromProviderResult({
+      ok: true,
+      data: {
+        schema: CARD_RESPONSE_SCHEMA,
+        snapshotHash: data.snapshotHash,
+        family: catalog.family,
+        role: catalog.role,
+        items: [item]
+      }
+    }, {
+      ...context,
+      expectedFamily: catalog.family,
+      expectedRole: catalog.role
+    });
+    if (!cards.length) {
+      const rejectReason = providerCardRejectReason({
+        ok: true,
+        data: {
+          schema: CARD_RESPONSE_SCHEMA,
+          snapshotHash: data.snapshotHash,
+          family: catalog.family,
+          role: catalog.role,
+          items: [item]
+        }
+      }, {
+        ...context,
+        expectedFamily: catalog.family,
+        expectedRole: catalog.role
+      });
+      output.diagnostics.push(`fused-item-invalid:${catalog.family}${rejectReason ? `:${rejectReason}` : ''}`);
+      continue;
+    }
+    seen.add(catalog.family);
+    output.cards.push(...cards.map((card) => ({
+      ...card,
+      providerRole: 'fusedCardBundle',
+      providerLane: result.lane || context.providerLane || 'utility',
+      fusedBundleId: result.diagnostics?.runId || result.diagnostics?.requestHash || ''
+    })));
+  }
+  for (const omission of Array.isArray(data.omitted) ? data.omitted : []) {
+    const family = cleanOptionalText(omission?.family || '', 120);
+    const role = cleanOptionalText(omission?.role || omission?.roleId || '', 120);
+    const reason = cleanOptionalText(omission?.reason || 'provider-skipped', 120);
+    if (family || role) output.omissions.push({ family, role, reason });
+  }
+  for (const family of requested.keys()) {
+    if (!seen.has(family)) output.diagnostics.push(`fused-item-missing:${family}`);
+  }
+  return output;
 }
 
 export function applyCardPlan(existingCards = [], plan = {}) {

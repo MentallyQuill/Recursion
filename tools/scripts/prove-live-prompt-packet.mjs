@@ -6,19 +6,22 @@ import {
 } from './lib/sillytavern-live-harness.mjs';
 
 const DEFAULT_TIMEOUT_MS = 180000;
-const PIPELINES = new Set(['standard', 'rapid']);
+const PIPELINES = new Set(['standard', 'rapid', 'fused']);
 const EXPECTED_STORY_FORM = Object.freeze({
   tense: 'past',
   pov: 'third-person-limited'
 });
 
 function parseArgs(argv = []) {
-  const args = { live: false, pipeline: 'standard' };
+  const args = { live: false, pipeline: 'standard', providerProfile: '' };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--live') args.live = true;
     else if (arg === '--pipeline') {
       args.pipeline = String(argv[index + 1] || '').trim().toLowerCase() || args.pipeline;
+      index += 1;
+    } else if (arg === '--provider-profile' || arg === '--profile') {
+      args.providerProfile = String(argv[index + 1] || '').trim();
       index += 1;
     }
   }
@@ -42,7 +45,7 @@ function passwordForUser(user, env) {
 
 function assertPreflight(args, env) {
   if (!args.live) fail('dry-run', 'Pass --live to mutate a dedicated SillyTavern user.');
-  if (!PIPELINES.has(args.pipeline)) fail('invalid-pipeline', 'Use --pipeline standard or --pipeline rapid.', { pipeline: args.pipeline });
+  if (!PIPELINES.has(args.pipeline)) fail('invalid-pipeline', 'Use --pipeline standard, rapid, or fused.', { pipeline: args.pipeline });
   if (!env.SILLYTAVERN_BASE_URL) fail('missing-base-url', 'SILLYTAVERN_BASE_URL is required.');
   const user = String(env.RECURSION_SILLYTAVERN_USER || '').trim();
   const userResult = validateSoakUserHandle(user);
@@ -171,6 +174,7 @@ function installProviderRequestRecorderScript() {
     const classifyPrompt = (text) => {
       const source = String(text || '');
       if (/recursion\.utilityArbiter\.v1/.test(source)) return 'utilityArbiter';
+      if (/recursion\.cardBundle\.v1/.test(source)) return 'fusedCardBundle';
       if (/recursion\.card\.v1/.test(source)) return 'card';
       if (/recursion\.guidanceComposer\.v1/.test(source)) return 'guidanceComposer';
       if (/recursion\.reasonerComposer\.v1/.test(source)) return 'reasonerComposer';
@@ -190,11 +194,72 @@ function installProviderRequestRecorderScript() {
       }).join('\n\n');
     };
 
+    const parseObject = (value) => {
+      if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+      if (typeof value !== 'string' || !value.trim()) return null;
+      try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+      } catch {
+        return null;
+      }
+    };
+    const stringifyValue = (value) => {
+      if (value === undefined || value === null) return '';
+      if (typeof value === 'string') return value;
+      if (typeof value === 'object') {
+        try {
+          return JSON.stringify(value);
+        } catch {
+          return String(value || '');
+        }
+      }
+      return String(value);
+    };
+
+    const responseShape = (result) => {
+      const source = result && typeof result === 'object' ? result : { text: String(result ?? '') };
+      const text = stringifyValue(source.text) || stringifyValue(source.content) || stringifyValue(source.message);
+      const data = parseObject(source.data)
+        || parseObject(source.content)
+        || parseObject(source.message)
+        || parseObject(source.extractedData)
+        || parseObject(source.extractData)
+        || parseObject(text);
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const omitted = Array.isArray(data?.omitted) ? data.omitted : [];
+      return {
+        resultKeys: Object.keys(source).slice(0, 20),
+        ok: source.ok === undefined ? true : source.ok === true,
+        textLength: text.length,
+        dataDetected: Boolean(data),
+        dataSchema: String(data?.schema || ''),
+        snapshotHash: String(data?.snapshotHash || ''),
+        itemCount: items.length,
+        omittedCount: omitted.length,
+        itemSummaries: items.slice(0, 6).map((item) => ({
+          schema: String(item?.schema || ''),
+          family: String(item?.family || ''),
+          role: String(item?.role || item?.roleId || ''),
+          promptTextLength: String(item?.promptText || '').length,
+          evidenceRefCount: Array.isArray(item?.evidenceRefs) ? item.evidenceRefs.length : 0
+        }))
+      };
+    };
+
     const record = (source, payload = {}) => {
       const prompt = String(payload.prompt || payload.systemPrompt || textFromMessages(payload.messages) || '');
-      events.push({
+      const parameters = payload.parameters || {};
+      const reasoning = parameters.reasoning || payload.reasoning || {};
+      const event = {
         source,
         role: classifyPrompt(prompt),
+        profileId: String(payload.profileId || payload.hostConnectionProfileId || ''),
+        providerSource: String(payload.providerSource || (payload.profileId ? 'host-connection-profile' : '')),
+        maxTokens: Number(payload.maxTokens || payload.responseLength || 0),
+        responseSchema: String(payload.responseSchema || parameters?.json_schema?.name || ''),
+        reasoningIntent: String(reasoning.intent || payload.reasoningIntent || ''),
+        reasoningCategory: String(reasoning.category || payload.reasoningCategory || ''),
         promptLength: prompt.length,
         hasStoryFormSchema: /recursion\.storyForm\.v1/.test(prompt),
         hasStoryFormJson: /"storyForm"|"Story form:"|Story form:/.test(prompt),
@@ -203,7 +268,9 @@ function installProviderRequestRecorderScript() {
         hasCardStoryBlock: /Story form contract for card promptText:/.test(prompt),
         hasTargetTense: /Target tense: past\./.test(prompt),
         hasTargetPov: /Target POV: third-person-limited\./.test(prompt)
-      });
+      };
+      events.push(event);
+      return event;
     };
 
     const install = (context) => {
@@ -220,9 +287,19 @@ function installProviderRequestRecorderScript() {
       if (service && typeof service.sendRequest === 'function' && !service.__recursionProviderRequestProofSendRequest) {
         const original = service.sendRequest.bind(service);
         service.__recursionProviderRequestProofSendRequest = original;
-        service.sendRequest = (profileId, messages, maxTokens, options, parameters) => {
-          record('connectionProfile', { messages, profileId, maxTokens, options, parameters });
-          return original(profileId, messages, maxTokens, options, parameters);
+        service.sendRequest = async (profileId, messages, maxTokens, options, parameters) => {
+          const event = record('connectionProfile', { messages, profileId, maxTokens, options, parameters });
+          try {
+            const result = await original(profileId, messages, maxTokens, options, parameters);
+            event.responseShape = responseShape(result);
+            return result;
+          } catch (error) {
+            event.responseError = {
+              code: String(error?.code || error?.name || 'Error').slice(0, 120),
+              message: String(error?.message || error || '').replace(/\s+/g, ' ').slice(0, 300)
+            };
+            throw error;
+          }
         };
       }
       return true;
@@ -244,6 +321,128 @@ function installProviderRequestRecorderScript() {
     wrap(globalThis, 'getContext');
     return install(current);
   };
+}
+
+async function forceProviderProfile(page, profileName, timeoutMs) {
+  const requestedProfile = String(profileName || '').trim();
+  if (!requestedProfile) return null;
+  const result = await page.evaluate(async (target) => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    const text = (value) => String(value ?? '').trim();
+    const normalize = (value) => text(value).toLowerCase();
+    const words = (value) => normalize(value).split(/[^a-z0-9._-]+/).filter(Boolean);
+    const profileHaystack = (profile) => [
+      profile.id,
+      profile.name,
+      profile.label,
+      profile.model
+    ].map((value) => normalize(value)).join(' ');
+    const profileId = (profile = {}) => text(profile.id || profile.profileId || profile.name || profile.label || profile.key);
+    const profileName = (profile = {}, id = '') => text(profile.name || profile.label || profile.displayName || profile.title || id);
+    const profileModel = (profile = {}) => text(profile.model || profile.modelId || profile.model_id || profile.apiModel || profile.completionModel);
+    const normalizeProfile = (profile = {}) => {
+      const id = profileId(profile);
+      if (!id) return null;
+      const name = profileName(profile, id);
+      const model = profileModel(profile);
+      return {
+        id,
+        name,
+        model,
+        label: model ? `${name} / ${model}` : name
+      };
+    };
+    const profiles = [];
+    try {
+      const service = context.ConnectionManagerRequestService || globalThis.ConnectionManagerRequestService;
+      const supported = service?.getSupportedProfiles?.();
+      const values = Array.isArray(supported) ? supported : (supported && typeof supported === 'object' ? Object.values(supported) : []);
+      profiles.push(...values.map(normalizeProfile).filter(Boolean));
+    } catch {}
+    try {
+      const module = await import('/scripts/extensions/third-party/Recursion/src/providers.mjs');
+      const detected = module.listProviderConnectionProfiles?.({ context, globals: globalThis }) || [];
+      profiles.push(...detected.map(normalizeProfile).filter(Boolean));
+    } catch {}
+    const byId = new Map();
+    for (const profile of profiles) {
+      if (!byId.has(profile.id)) byId.set(profile.id, profile);
+    }
+    const candidates = [...byId.values()];
+    const needle = normalize(target);
+    const selected = candidates.find((profile) => [
+      profile.id,
+      profile.name,
+      profile.label,
+      profile.model
+    ].some((value) => normalize(value) === needle))
+      || candidates.find((profile) => [
+        profile.id,
+        profile.name,
+        profile.label,
+        profile.model
+      ].some((value) => normalize(value).includes(needle)))
+      || candidates.find((profile) => words(target).every((word) => profileHaystack(profile).includes(word)));
+    if (!selected) {
+      return {
+        ok: false,
+        reason: 'profile-not-detected',
+        requested: target,
+        profiles: candidates.map((profile) => profile.label || profile.id).slice(0, 20)
+      };
+    }
+    if (!runtime || typeof runtime.updateSettings !== 'function' || typeof runtime.updateProvider !== 'function') {
+      return {
+        ok: false,
+        reason: 'runtime-provider-api-unavailable',
+        selected
+      };
+    }
+    await runtime.updateSettings({ reasoningLevel: 'high' });
+    const providerPatch = {
+      enabled: true,
+      source: 'host-connection-profile',
+      hostConnectionProfileId: selected.id
+    };
+    await runtime.updateProvider('utility', providerPatch);
+    await runtime.updateProvider('reasoner', providerPatch);
+    const utilityTest = typeof runtime.testProvider === 'function'
+      ? await runtime.testProvider('utility')
+      : { ok: false, error: { code: 'testProvider-unavailable' } };
+    const reasonerTest = typeof runtime.testProvider === 'function'
+      ? await runtime.testProvider('reasoner')
+      : { ok: false, error: { code: 'testProvider-unavailable' } };
+    const view = runtime.view?.() || {};
+    return {
+      ok: utilityTest?.ok === true && reasonerTest?.ok === true,
+      reason: utilityTest?.ok === true && reasonerTest?.ok === true ? '' : 'provider-test-failed',
+      selected,
+      utilityTestOk: utilityTest?.ok === true,
+      reasonerTestOk: reasonerTest?.ok === true,
+      settings: {
+        reasoningLevel: view.settings?.reasoningLevel || '',
+        utility: view.settings?.providers?.utility || null,
+        reasoner: view.settings?.providers?.reasoner || null
+      },
+      utilityError: utilityTest?.ok === true ? null : (utilityTest?.error || null),
+      reasonerError: reasonerTest?.ok === true ? null : (reasonerTest?.error || null)
+    };
+  }, requestedProfile);
+  if (!result?.ok) {
+    fail('provider-profile-setup-failed', 'Failed to configure requested SillyTavern connection profile.', result || {});
+  }
+  await page.waitForFunction((profileId) => {
+    const settings = globalThis.__recursionLiveHarnessRuntime?.view?.()?.settings || {};
+    return settings.reasoningLevel === 'high'
+      && settings.providers?.utility?.source === 'host-connection-profile'
+      && settings.providers?.reasoner?.source === 'host-connection-profile'
+      && settings.providers?.utility?.hostConnectionProfileId === profileId
+      && settings.providers?.reasoner?.hostConnectionProfileId === profileId
+      && settings.providers?.utility?.lastTest?.status === 'pass'
+      && settings.providers?.reasoner?.lastTest?.status === 'pass';
+  }, result.selected.id, { timeout: timeoutMs });
+  return result;
 }
 
 async function seedStoryFormScene(page, timeoutMs) {
@@ -404,6 +603,10 @@ function assertPacketState(state, { afterStop = false, pipeline = 'standard' } =
     if (diagnostics.pipelineMode !== 'rapid' || diagnostics.rapidPath !== 'warm-v2') {
       fail('rapid-warm-v2-missing', 'Rapid packet did not expose warm-v2 diagnostics.', { diagnostics, state });
     }
+  } else if (pipeline === 'fused') {
+    if (diagnostics.pipelineMode !== 'fused') {
+      fail('fused-pipeline-diagnostics-missing', 'Fused packet did not expose Fused diagnostics.', { diagnostics, state });
+    }
   } else if (diagnostics.pipelineMode && diagnostics.pipelineMode !== 'standard') {
     fail('standard-pipeline-diagnostics-mismatch', 'Standard packet diagnostics did not report standard pipeline.', { diagnostics, state });
   }
@@ -443,7 +646,7 @@ function assertPacketState(state, { afterStop = false, pipeline = 'standard' } =
   if (/Scene brief:|Turn brief:|conditionedSceneBrief|rapidFastStartPack/.test(serialized)) {
     fail('legacy-brief-text-leaked', 'Legacy brief or fast-start text leaked into prompt blocks.', { serialized });
   }
-  if (/recursion\.utilityArbiter\.v1|recursion\.card\.v1|Story form contract for card promptText:|Output contract:/.test(serialized)) {
+  if (/recursion\.utilityArbiter\.v1|recursion\.card\.v1|recursion\.cardBundle\.v1|Story form contract for card promptText:|Output contract:/.test(serialized)) {
     fail('internal-provider-prompt-leaked', 'Internal provider prompt text leaked into installed prompt blocks.', { serialized });
   }
   const requests = Array.isArray(state.providerRequests) ? state.providerRequests : [];
@@ -457,11 +660,21 @@ function assertPacketState(state, { afterStop = false, pipeline = 'standard' } =
     if (!arbiter?.hasStoryFormSchema || !arbiter?.hasStoryFormJson || !arbiter?.hasArbiterStoryPriority) {
       fail('arbiter-story-form-request-missing', 'Arbiter provider request did not include story-form detection contract.', { requests });
     }
-    const card = requests.find((request) => request.role === 'card');
-    if (!card?.hasCardStoryBlock || !card?.hasTargetTense || !card?.hasTargetPov) {
-      fail('card-story-form-request-missing', 'Card provider request did not include expected story-form block.', { requests });
+    if (pipeline === 'fused') {
+      const fusedBundle = requests.find((request) => request.role === 'fusedCardBundle');
+      if (!fusedBundle?.hasCardStoryBlock || !fusedBundle?.hasTargetTense || !fusedBundle?.hasTargetPov) {
+        fail('fused-card-bundle-story-form-request-missing', 'Fused card bundle request did not include expected story-form block.', { requests, diagnostics });
+      }
+      if (requests.some((request) => request.role === 'card')) {
+        fail('fused-individual-card-request-observed', 'Fused proof made individual card requests instead of one bundle request.', { requests, diagnostics });
+      }
+    } else {
+      const card = requests.find((request) => request.role === 'card');
+      if (!card?.hasCardStoryBlock || !card?.hasTargetTense || !card?.hasTargetPov) {
+        fail('card-story-form-request-missing', 'Card provider request did not include expected story-form block.', { requests });
+      }
     }
-    const guidance = requests.find((request) => request.role === 'guidanceComposer');
+    const guidance = requests.find((request) => request.role === 'guidanceComposer' || request.role === 'reasonerComposer');
     if (!guidance?.hasStoryFormJson || !guidance?.hasStoryFormInstruction) {
       fail('guidance-story-form-request-missing', 'Guidance composer request did not include expected story-form instruction.', { requests });
     }
@@ -479,6 +692,7 @@ function assertPacketState(state, { afterStop = false, pipeline = 'standard' } =
 export async function runLivePromptPacketProof({ argv = process.argv.slice(2), env = process.env } = {}) {
   const args = parseArgs(argv);
   const user = assertPreflight(args, env);
+  const providerProfile = args.providerProfile || String(env.RECURSION_LIVE_PROVIDER_PROFILE || '').trim();
   const timeoutMs = Number(env.RECURSION_LIVE_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
   const headless = env.RECURSION_SILLYTAVERN_HEADLESS !== '0';
   const session = createSillyTavernHttpSession({
@@ -501,6 +715,7 @@ export async function runLivePromptPacketProof({ argv = process.argv.slice(2), e
     await selectPipeline(page, args.pipeline, timeoutMs);
     await selectMode(page, 'auto', timeoutMs);
     await forcePipelineSetting(page, args.pipeline, timeoutMs);
+    const providerProfileResult = await forceProviderProfile(page, providerProfile, timeoutMs);
     await seedStoryFormScene(page, timeoutMs);
     if (args.pipeline === 'rapid') await warmRapidDeck(page, timeoutMs);
     const message = `Recursion ${args.pipeline} prompt packet proof ${Date.now().toString(36)}: keep the archive door scene coherent.`;
@@ -508,7 +723,7 @@ export async function runLivePromptPacketProof({ argv = process.argv.slice(2), e
       const packetText = String(document.querySelector('[data-recursion-prompt-packet]')?.textContent || '').trim();
       if (Array.isArray(globalThis.__recursionPromptPacketProofEvents)) globalThis.__recursionPromptPacketProofEvents.length = 0;
       else globalThis.__recursionPromptPacketProofEvents = [];
-      if (Array.isArray(globalThis.__recursionProviderRequestProofEvents)) globalThis.__recursionProviderRequestProofEvents.length = 0;
+    if (Array.isArray(globalThis.__recursionProviderRequestProofEvents)) globalThis.__recursionProviderRequestProofEvents.length = 0;
       else globalThis.__recursionProviderRequestProofEvents = [];
       try {
         return packetText ? String(JSON.parse(packetText)?.packetId || '') : '';
@@ -516,6 +731,14 @@ export async function runLivePromptPacketProof({ argv = process.argv.slice(2), e
         return '';
       }
     });
+    if (args.pipeline === 'fused') {
+      await page.evaluate(async () => {
+        const runtime = globalThis.__recursionLiveHarnessRuntime;
+        if (typeof runtime?.forceRegenerateNext === 'function') {
+          await runtime.forceRegenerateNext({ source: 'prompt-packet-proof' });
+        }
+      });
+    }
     await page.evaluate(directPrepareScript(), message);
     await page.waitForFunction((stalePacketId) => {
       const state = (() => {
@@ -551,6 +774,7 @@ export async function runLivePromptPacketProof({ argv = process.argv.slice(2), e
       clearedKeys: afterStop.clearedKeys,
       storyForm: beforeStop.packet.storyForm,
       providerRequestRoles: [...new Set(beforeStop.providerRequests.map((request) => request.role))],
+      providerProfile: providerProfileResult?.selected || null,
       textLengths: {
         guidance: beforeStop.guidance.length,
         cardEvidence: beforeStop.cardEvidence.length,

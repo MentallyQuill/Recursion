@@ -39,6 +39,7 @@ const PHASE_LABELS = Object.freeze({
   rapidWarmFailed: 'Rapid warm failed.',
   cacheReusing: 'Reusing scene deck...',
   cardBatchRunning: 'Generating scene cards...',
+  fusedCardBundleRunning: 'Generating fused card bundle...',
   cardValidating: 'Validating cards...',
   deckUpdating: 'Updating scene deck...',
   handSelected: 'Selecting turn hand...',
@@ -89,6 +90,12 @@ const PIPELINE_MENU_OPTIONS = Object.freeze([
     label: 'Rapid',
     title: 'Rapid Pipeline',
     tip: 'Uses provider-warmed card evidence and guidance plus a foreground turn delta.'
+  },
+  {
+    value: 'fused',
+    label: 'Fused',
+    title: 'Fused Pipeline',
+    tip: 'Generates required cards together in one foreground bundle call.'
   }
 ]);
 const STRENGTH_OPTIONS = Object.freeze([
@@ -209,7 +216,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   providerTest: 'Send a small structured test call through this lane to verify routing, credentials, and JSON output before using it in chat.',
   providerClearKey: 'Remove the in-memory session key for this lane. Saved endpoint, model, and profile settings stay unchanged.'
 });
-const FORCE_REGENERATE_TOOLTIP = 'Regenerate this turn fresh, ignoring cached cards, Rapid warm, and swipe reuse.';
+const FORCE_REGENERATE_TOOLTIP = 'Regenerate this turn fresh, ignoring cached cards, Fused bundles, Rapid warm, and swipe reuse.';
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -288,7 +295,10 @@ function modeLabel(value) {
 }
 
 function normalizePipelineMode(value) {
-  return cleanText(value, 'standard').toLowerCase() === 'rapid' ? 'rapid' : 'standard';
+  const mode = cleanText(value, 'standard').toLowerCase();
+  if (mode === 'rapid') return 'rapid';
+  if (mode === 'fused') return 'fused';
+  return 'standard';
 }
 
 function normalizeLastBriefStatus(value, hasCards = false, hasPacket = false) {
@@ -298,7 +308,10 @@ function normalizeLastBriefStatus(value, hasCards = false, hasPacket = false) {
 }
 
 function pipelineLabel(value) {
-  return normalizePipelineMode(value) === 'rapid' ? 'Rapid Pipeline' : 'Standard Pipeline';
+  const mode = normalizePipelineMode(value);
+  if (mode === 'rapid') return 'Rapid Pipeline';
+  if (mode === 'fused') return 'Fused Pipeline';
+  return 'Standard Pipeline';
 }
 
 function normalizeMode(value) {
@@ -316,6 +329,14 @@ function pipelineIcon(value) {
 }
 
 function pipelineIconSvg(kind) {
+  if (kind === 'fused') {
+    return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true', 'data-recursion-pipeline-fused': '' } }, [
+      el('path', { attrs: { d: 'M3 6 8.5 3.4 14 6 8.5 8.6 3 6Z', fill: 'currentColor', opacity: '.22' } }),
+      el('path', { attrs: { d: 'M3 6v5l5.5 2.6 5.5-2.6V6', fill: 'currentColor', opacity: '.12' } }),
+      el('path', { attrs: { d: 'M3 6 8.5 3.4 14 6 8.5 8.6 3 6Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.45', 'stroke-linejoin': 'round' } }),
+      el('path', { attrs: { d: 'M3 8.5 8.5 11.1 14 8.5M3 11 8.5 13.6 14 11M3 6v5M14 6v5M8.5 8.6v5', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.45', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
+    ]);
+  }
   if (kind === 'rapid') {
     return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true', 'data-recursion-pipeline-rapid': '' } }, [
       el('path', { attrs: { d: 'M2.8 5.1 7.5 3.2 14.4 8.5 7.5 13.8 2.8 11.9 7.1 8.5 2.8 5.1Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round' } }),

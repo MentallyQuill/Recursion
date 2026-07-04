@@ -1,6 +1,6 @@
 # Recursion Operator Manual
 
-Recursion is a pre-alpha SillyTavern extension that compiles current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Manual mode is active. Standard and Rapid pipelines control how that work is scheduled: Standard does the full foreground pass on send, while Rapid warms a provider-generated card packet in the background and uses a shorter foreground delta.
+Recursion is a pre-alpha SillyTavern extension that compiles current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Manual mode is active. Standard, Rapid, and Fused pipelines control how that work is scheduled: Standard does the full foreground pass on send, Rapid warms a provider-generated card packet in the background and uses a shorter foreground delta, and Fused generates all requested foreground cards in one structured bundle call.
 
 Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, character database, or card-editing product. It does not own durable canon. It improves the next response by preserving selected scene evidence and adding provider-authored direction for the scene in front of the user.
 
@@ -8,7 +8,7 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 ![Install and enable flow with Recursion mounted in SillyTavern](../../assets/documentation/renders/recursion-operator-install-enable.png)
 
-![Standard and Rapid pipeline dropdown](../../assets/documentation/renders/recursion-operator-pipeline-controls.png)
+![Standard, Rapid, and Fused pipeline dropdown](../../assets/documentation/renders/recursion-operator-pipeline-controls.png)
 
 ![Auto and Manual mode controls](../../assets/documentation/renders/recursion-operator-mode-controls.png)
 
@@ -40,7 +40,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 
 - runtime health: Ready, Working, Paused, Issue, or Off;
 - power toggle;
-- icon-only Pipeline control: Standard or Rapid;
+- icon-only Pipeline control: Standard, Rapid, or Fused;
 - icon-only mode control: Auto or Manual;
 - Hero Pixel Array plus current-step text;
 - command slot: Stop generation while active, Regenerate icon while idle;
@@ -50,11 +50,11 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 
 The bar should be stable. Status changes should not repeatedly resize the transcript or cover message input controls.
 
-The Pipeline control is a small icon-only dropdown immediately to the left of the Mode button. `Standard` uses the full foreground Arbiter, card, hand, compose, validate, and install path on send. `Rapid` warms a provider-generated card packet in the background and uses a short provider delta on send. The selected icon updates on the bar, and the dropdown follows the compact Mode-menu pattern. Pipeline is not duplicated in Settings.
+The Pipeline control is a small icon-only dropdown immediately to the left of the Mode button. `Standard` uses the full foreground Arbiter, card, hand, compose, validate, and install path on send. `Rapid` warms a provider-generated card packet in the background and uses a short provider delta on send. `Fused` keeps the foreground Arbiter and shared deck/hand/compose/install path, but asks one provider call to generate all requested cards as a bundle. The selected icon updates on the bar, and the dropdown follows the compact Mode-menu pattern. Pipeline is not duplicated in Settings.
 
 The command slot changes by state. Stop generation appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
 
-When Recursion is idle, the same slot shows the Regenerate icon. Use it when Last Brief or Prompt Packet looks stale and you want the current turn regenerated fresh without deleting chat data. Regenerate immediately starts a one-shot forced pass: it bypasses same-turn packet reinstall, latest-assistant swipe reuse, cached card hand reuse, and Rapid warm for this regeneration only. The icon swaps to Stop, the normal progress menu/status feedback appears, and Last Brief clears to `Preparing fresh prompt packet.` until the fresh packet installs. You can stop the forced regeneration with the Recursion Bar Stop button or SillyTavern's native Stop button.
+When Recursion is idle, the same slot shows the Regenerate icon. Use it when Last Brief or Prompt Packet looks stale and you want the current turn regenerated fresh without deleting chat data. Regenerate immediately starts a one-shot forced pass: it bypasses same-turn packet reinstall, latest-assistant swipe reuse, cached card hand reuse, Fused bundle reuse, and Rapid warm for this regeneration only. The icon swaps to Stop, the normal progress menu/status feedback appears, and Last Brief clears to `Preparing fresh prompt packet.` until the fresh packet installs. You can stop the forced regeneration with the Recursion Bar Stop button or SillyTavern's native Stop button.
 
 ### Hero Pixel Array Progress Menu
 
@@ -66,6 +66,7 @@ Expected stages include:
 - `Checking scene shift...`
 - `Planning card pass...`
 - `Generating scene cards...`
+- `Generating fused card bundle...`
 - `Selecting turn hand...`
 - `Composing prompt packet with Utility...`
 - `Reasoner refining guidance...`
@@ -127,7 +128,7 @@ Sub-items under a selected family are focus facets. They shape that one family c
 
 ## Pipelines
 
-Pipeline selection is separate from Auto and Manual. Auto and Manual decide whether Recursion prepares guidance automatically or only on explicit operation; Standard and Rapid decide how the preparation work is scheduled.
+Pipeline selection is separate from Auto and Manual. Auto and Manual decide whether Recursion prepares guidance automatically or only on explicit operation; Standard, Rapid, and Fused decide how the preparation work is scheduled.
 
 ### Standard
 
@@ -174,6 +175,30 @@ flowchart LR
     Check -- "no" --> Standard["Run Standard for same turn"]
     Delta --> Install["Install valid Rapid packet"]
     Delta -. "mandatory gap or invalid output" .-> Standard["Run Standard for same turn"]
+```
+
+### Fused
+
+Fused is the large foreground card-call pipeline. It runs the same Arbiter, card-scope filtering, Manual forced-card reconciliation, scene deck, hand selection, guidance composition, prompt packet validation, and install flow as Standard. The difference is the card-generation stage: all Arbiter-requested or manually forced card families are appended into one `fusedCardBundle` request and returned as one `recursion.cardBundle.v1` response.
+
+Fused accepts valid requested card items, rejects unrequested or duplicate items, records compact omissions, and falls back to Standard individual card calls if the bundle produces no usable cards. It still obeys Reasoning Level: Low and Medium use Utility, while High and Ultra use Reasoner when the Reasoner lane is healthy.
+
+Fused is designed for stronger reasoning models such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar. Standard is usually better for fast, cheaper utility-class models such as 500B-and-lower models, Nemotron, GPT-OSS, Gemma, and similar.
+
+Use Fused when:
+
+- your selected provider can reliably return larger structured JSON;
+- you want one stronger model pass to coordinate multiple scene cards;
+- the Reasoner lane is healthy and selected through High or Ultra Reasoning Level;
+- you are comfortable with Standard fallback if the bundle fails validation.
+
+```mermaid
+flowchart LR
+    Send["User sends message"] --> Arbiter["Arbiter and scope policy"]
+    Arbiter --> Bundle["One fusedCardBundle call"]
+    Bundle --> Validate["Validate bundle and card items"]
+    Validate --> Shared["Shared deck, hand, compose, install"]
+    Validate -. "no usable cards" .-> Standard["Run Standard card calls"]
 ```
 
 ## Settings
@@ -347,7 +372,7 @@ Use this checklist for a practical browser pass:
 8. Turn power off and confirm prompt lanes are absent or cleared.
 9. Set Auto and confirm Recursion is ready to compile.
 10. Set Manual and confirm it applies as a distinct mode.
-11. Confirm the Pipeline icon dropdown sits immediately left of Mode and offers Standard and Rapid only.
+11. Confirm the Pipeline icon dropdown sits immediately left of Mode and offers Standard, Rapid, and Fused.
 12. Run a safe Standard Auto pass only when provider and live mutation are intended.
 13. Run a safe Rapid Auto pass only when provider and live mutation are intended.
 14. Confirm Activity reaches ready, Rapid delta, warm-miss Standard escalation, or a clear fallback.

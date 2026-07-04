@@ -3,7 +3,7 @@ import { defaultCardScope, normalizeCardScope } from './card-scope.mjs';
 import { DEFAULT_RETENTION_SETTINGS, normalizeRetentionSettings } from './retention-policy.mjs';
 
 const MODES = new Set(['auto', 'manual']);
-const PIPELINE_MODES = new Set(['standard', 'rapid']);
+const PIPELINE_MODES = new Set(['standard', 'rapid', 'fused']);
 const STRENGTHS = new Set(['light', 'balanced', 'strong']);
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
 const FOOTPRINTS = new Set(['compact', 'normal', 'rich']);

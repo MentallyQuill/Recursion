@@ -99,7 +99,7 @@ Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIV
 | Scenario | Mutates chat | Requires provider | Must prove |
 | --- | --- | --- | --- |
 | Mount smoke | no | no | Recursion extension loads, Recursion Bar renders, Hero Pixel Array progress menu can open, settings/options can open, viewer can open. |
-| Pipeline smoke | no | no | Pipeline button appears immediately left of Mode, opens the Standard/Rapid menu, persists selected pipeline mode, and does not duplicate Pipeline controls in Settings. |
+| Pipeline smoke | no | no | Pipeline button appears immediately left of Mode, opens the Standard/Rapid/Fused menu, persists selected pipeline mode, and does not duplicate Pipeline controls in Settings. |
 | Mode smoke | no | no | Disabled power, Auto, Manual, and return-to-disabled controls update runtime state, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
 | Swipe smoke | temporary in-page only | no | Older-message `MESSAGE_SWIPED` clears Recursion prompts, changes active source revision A -> B, and returns to the same A revision on swipe back; deterministic latest-assistant retry tests prove no clear, no Rapid warm, and same-packet reinstall. |
 | Storage probe | files only | no | Dedicated user can write/read/delete Recursion-owned files and records are isolated from other users. |
@@ -144,7 +144,7 @@ The smoke should fail if controls overlap chat input, if text escapes compact co
 
 - Seed a Recursion-owned prompt key as a cleanup sentinel.
 - Turn power off and verify prompt keys are absent or cleared.
-- Open the Pipeline menu and verify Standard and Rapid choices are present, selectable, and persisted through `pipelineMode`.
+- Open the Pipeline menu and verify Standard, Rapid, and Fused choices are present, selectable, and persisted through `pipelineMode`.
 - Set Auto mode and verify the runtime is ready to compile when a generation begins.
 - Set Manual mode and verify it applies as a distinct mode.
 - Return to power off and verify cleanup.

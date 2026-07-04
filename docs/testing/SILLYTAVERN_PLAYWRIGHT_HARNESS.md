@@ -158,7 +158,7 @@ When only one user is configured, the script verifies that user's storage but em
 - locate the Recursion Bar;
 - open the options/settings menu;
 - open the Hero Pixel Array progress menu;
-- switch disabled power, Standard/Rapid Pipeline, Auto, and Manual states;
+- switch disabled power, Standard/Rapid/Fused Pipeline, Auto, and Manual states;
 - seed and clear a Recursion-owned prompt sentinel during no-generation mode smoke;
 - run Test Provider actions through visible controls when configured;
 - send a safe test message only when the live run explicitly allows chat mutation;

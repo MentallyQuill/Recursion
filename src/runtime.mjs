@@ -1,5 +1,14 @@
 import { createActivityReporter } from './activity.mjs';
-import { CARD_CATALOG, applyCardPlan, buildCardRequests, cardsFromProviderResult, normalizeCard, selectHand } from './cards.mjs';
+import {
+  CARD_CATALOG,
+  applyCardPlan,
+  buildCardRequests,
+  buildFusedCardBundleRequest,
+  cardsFromFusedProviderResult,
+  cardsFromProviderResult,
+  normalizeCard,
+  selectHand
+} from './cards.mjs';
 import {
   cardScopeSummary,
   enforceManualSelectionCap,
@@ -711,6 +720,24 @@ function applyReasoningLaneToCardRequest(request, settings) {
   const routedRequest = {
     ...request,
     lane: cardLaneForRequest(request, settings)
+  };
+  if (routedRequest.lane !== 'reasoner') return routedRequest;
+  return {
+    ...routedRequest,
+    ...reasoningRequestMetadata(settings, 'card')
+  };
+}
+
+function fusedCardBundleLaneForSettings(settings) {
+  const policy = reasoningPolicyForSettings(settings);
+  if ((policy.level === 'high' || policy.level === 'ultra') && reasonerLaneAvailable(settings)) return 'reasoner';
+  return 'utility';
+}
+
+function applyReasoningLaneToFusedCardBundleRequest(request, settings) {
+  const routedRequest = {
+    ...request,
+    lane: fusedCardBundleLaneForSettings(settings)
   };
   if (routedRequest.lane !== 'reasoner') return routedRequest;
   return {
@@ -1640,7 +1667,7 @@ function cardProgressDetail(card, source, state) {
   const retryCount = progressRetryCount(card?.providerRetryCount || card?.retryCount);
   const reason = safeText(card?.providerProgressReason || card?.progressReason || '', 180);
   return {
-    parentStepId: 'utility-card-batch',
+    parentStepId: card?.providerRole === 'fusedCardBundle' ? 'fused-card-bundle' : 'utility-card-batch',
     roleId,
     family,
     source,
@@ -3735,17 +3762,69 @@ export function createRecursionRuntime({
   }
 
   async function generatePlanCards({ runId, plan, snapshot, settings, signal }) {
-    if (!generationRouter) return [];
+    const empty = { cards: [], diagnostics: [] };
+    if (!generationRouter) return empty;
     const cardScope = scopePayloadForArbiter(settings);
-    const requests = buildCardRequests(plan, {
+    const requestContext = {
       runId,
       snapshotHash: plan.snapshotHash || hashJson(snapshot),
       snapshot: providerSafeSnapshot(snapshot, settings.retention),
       cardScope,
       storyForm: plan.storyForm || UNKNOWN_STORY_FORM
-    }).map((request) => applyReasoningLaneToCardRequest(request, settings));
-    if (!requests.length) return [];
-    if (typeof generationRouter.batch !== 'function' && typeof generationRouter.generate !== 'function') return [];
+    };
+    const requests = buildCardRequests(plan, requestContext).map((request) => applyReasoningLaneToCardRequest(request, settings));
+    if (!requests.length) return empty;
+    if (typeof generationRouter.batch !== 'function' && typeof generationRouter.generate !== 'function') return empty;
+    const fusedDiagnostics = [];
+    if (settings.pipelineMode === 'fused' && typeof generationRouter.generate === 'function') {
+      const fusedBaseRequest = buildFusedCardBundleRequest(plan, requestContext);
+      if (fusedBaseRequest) {
+        const fusedRequest = applyReasoningLaneToFusedCardBundleRequest(fusedBaseRequest, settings);
+        stageRuntimeActivity({
+          runId,
+          phase: 'fusedCardBundleRunning',
+          label: 'Generating fused card bundle...',
+          cardCounts: { requested: fusedRequest.requestedCards.length },
+          providerLane: fusedRequest.lane,
+          chips: ['Fused', String(fusedRequest.requestedCards.length), fusedRequest.lane === 'reasoner' ? 'Reasoner' : 'Utility']
+        });
+        try {
+          const requestWithSignal = signal ? { ...fusedRequest, signal } : fusedRequest;
+          const result = await generationRouter.generate('fusedCardBundle', requestWithSignal, {
+            runId,
+            signal,
+            isCurrent: () => isRuntimeRunCurrent(runId)
+          });
+          const parsed = cardsFromFusedProviderResult(result, {
+            ...cardSourceContext(snapshot),
+            expectedSnapshotHash: fusedRequest.snapshotHash,
+            requestedCards: fusedRequest.requestedCards,
+            providerLane: fusedRequest.lane
+          });
+          fusedDiagnostics.push(...parsed.diagnostics);
+          if (parsed.omissions.length) {
+            fusedDiagnostics.push(...parsed.omissions.map((entry) => `fused-omitted:${safeText(entry.family || entry.role || 'unknown', 80)}`));
+          }
+          if (parsed.cards.length > 0) {
+            const retryCount = progressRetryCount(result?.diagnostics?.retryCount);
+            return {
+              cards: parsed.cards.map((card) => ({
+                ...card,
+                providerLane: result?.lane || fusedRequest.lane || 'utility',
+                ...(retryCount ? {
+                  providerRetryCount: retryCount,
+                  providerProgressReason: providerCardRetryReason(retryCount, true)
+                } : {})
+              })),
+              diagnostics: mergeDiagnostics(['fused-bundle-used'], fusedDiagnostics)
+            };
+          }
+          fusedDiagnostics.push('fused-fallback-standard');
+        } catch {
+          fusedDiagnostics.push('fused-bundle-provider-failed', 'fused-fallback-standard');
+        }
+      }
+    }
     const lanes = new Set(requests.map((request) => request.lane));
     const batchLane = lanes.size === 1 && lanes.has('reasoner') ? 'reasoner' : 'utility';
     stageRuntimeActivity({
@@ -3780,7 +3859,7 @@ export function createRecursionRuntime({
           }
         }
       }
-      return results.flatMap((result, index) => cardsFromProviderResult(result, {
+      const cards = results.flatMap((result, index) => cardsFromProviderResult(result, {
         ...cardSourceContext(snapshot),
         expectedSnapshotHash: requests[index]?.snapshotHash,
         expectedRole: requests[index]?.metadata?.role,
@@ -3796,8 +3875,15 @@ export function createRecursionRuntime({
           } : {})
         };
       }));
+      return {
+        cards,
+        diagnostics: fusedDiagnostics
+      };
     } catch {
-      return [];
+      return {
+        cards: [],
+        diagnostics: fusedDiagnostics
+      };
     }
   }
 
@@ -3906,7 +3992,15 @@ export function createRecursionRuntime({
         )
       };
       lastPlan = plan;
-      const providerCards = cardsWithOrigin((await generatePlanCards({ runId, plan, snapshot, settings, signal })).map(sanitizeGeneratedCard), 'generated');
+      const warmGeneratedCardResult = await generatePlanCards({ runId, plan, snapshot, settings, signal });
+      if (warmGeneratedCardResult.diagnostics.length) {
+        plan = {
+          ...plan,
+          diagnostics: mergeDiagnostics(plan.diagnostics, warmGeneratedCardResult.diagnostics)
+        };
+        lastPlan = plan;
+      }
+      const providerCards = cardsWithOrigin(warmGeneratedCardResult.cards.map(sanitizeGeneratedCard), 'generated');
       if (!isActiveRapidWarmRun(runId)) {
         warmOutcome = supersededResult(runId);
         return warmOutcome;
@@ -4814,8 +4908,18 @@ export function createRecursionRuntime({
         ? []
         : filterScopedCards(cardsWithOrigin(sanitizedCacheCards(runId, sceneSnapshot, activeCache.cards), 'cache'));
       const reuseCacheOnly = !forceContext && action === 'reuse-cache' && cacheCards.length > 0;
+      const generatedCardResult = reuseCacheOnly
+        ? { cards: [], diagnostics: [] }
+        : await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, settings, signal });
+      if (generatedCardResult.diagnostics.length) {
+        plan = {
+          ...plan,
+          diagnostics: mergeDiagnostics(plan.diagnostics, generatedCardResult.diagnostics)
+        };
+        lastPlan = plan;
+      }
       const providerCards = reuseCacheOnly ? [] : filterScopedCards(
-        cardsWithOrigin((await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, settings, signal })).map(sanitizeGeneratedCard), 'generated')
+        cardsWithOrigin(generatedCardResult.cards.map(sanitizeGeneratedCard), 'generated')
       );
       if (!isActiveRun(runId)) return supersededResult(runId);
       const useLocalFallbackCards = !reuseCacheOnly && !cacheCards.length && !providerCards.length;
@@ -4930,6 +5034,7 @@ export function createRecursionRuntime({
         runId,
         signal,
         storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
+        pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'standard',
         planDiagnostics: plan.diagnostics
       });
       if (!isActiveRun(runId)) return supersededResult(runId);
@@ -5000,6 +5105,7 @@ export function createRecursionRuntime({
             runId,
             signal,
             storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
+            pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'standard',
             planDiagnostics: plan.diagnostics
           });
           if (!isActiveRun(runId)) return supersededResult(runId);

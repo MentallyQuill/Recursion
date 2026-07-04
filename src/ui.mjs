@@ -2320,7 +2320,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
     attrs: {
       type: 'button',
       'aria-expanded': open ? 'true' : 'false',
-      ...tooltipAttrs(tooltipsEnabled, `${title} settings. Choose the model source for this lane, then save and test it before relying on it during generation. Current status: ${statusText}.`)
+      ...tooltipAttrs(tooltipsEnabled, `${title} settings. Choose the model source for this lane; changes auto-save. Test it before relying on it during generation. Current status: ${statusText}.`)
     },
     dataset: {
       recursionProviderToggle: lane,

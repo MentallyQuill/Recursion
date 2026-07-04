@@ -523,6 +523,8 @@ const uiSpec = readFileSync(new URL('../../docs/design/UI_SPEC.md', import.meta.
 const recursionCss = readFileSync(new URL('../../styles/recursion.css', import.meta.url), 'utf8');
 const recursionUi = readFileSync(new URL('../../src/ui.mjs', import.meta.url), 'utf8');
 const regenerateIconPath = new URL('../../assets/icons/regenerate.svg', import.meta.url);
+assert(!recursionUi.includes('save and test it'), 'provider tooltip copy does not mention a removed save action');
+assert(recursionUi.includes('changes auto-save'), 'provider tooltip copy explains autosave behavior');
 assert(existsSync(regenerateIconPath), 'Regenerate uses a named SVG asset');
 const regenerateIconSvg = existsSync(regenerateIconPath) ? readFileSync(regenerateIconPath, 'utf8') : '';
 const activityTriggerCss = barImplementationReference.match(/\.activity-trigger\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';

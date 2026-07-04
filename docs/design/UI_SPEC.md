@@ -1195,6 +1195,8 @@ The Providers tab should build Utility and Reasoner profile comboboxes from one 
 
 Provider cards must not sprawl by rendering profile and OpenAI endpoint fields together. The selected Source owns the visible option context, while hidden alternate-source values remain available if the user switches back.
 
+Provider lane controls autosave. Tooltip and helper copy must not mention a Save Provider action; testing a provider is a separate explicit command.
+
 API keys are session-only. They must not be written to extension settings, scene caches, prompt packets, run journals, diagnostics, reports, or artifacts.
 
 ## Visual System

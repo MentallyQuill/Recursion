@@ -81,6 +81,8 @@ The Standard pipeline is the reference foreground path:
 8. Emit user-visible activity updates for status, fallbacks, and prompt readiness.
 9. Record diagnostics.
 
+Standard and Fused are runtime pipeline modules. The runtime conductor selects the module; each module returns the same card result shape consumed by deck lifecycle, hand selection, guidance/reasoner composition, and prompt install.
+
 The Rapid pipeline moves most scene work out of the send path:
 
 1. Background warm observes the current source revision after assistant output, source changes, or idle time.

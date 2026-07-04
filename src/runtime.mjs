@@ -3,9 +3,6 @@ import {
   CARD_CATALOG,
   applyCardPlan,
   buildCardRequests,
-  buildFusedCardBundleRequest,
-  cardsFromFusedProviderResult,
-  cardsFromProviderResult,
   normalizeCard,
   selectHand
 } from './cards.mjs';
@@ -53,6 +50,8 @@ import {
   installSummary,
   sanitizePromptError
 } from './runtime/prompt-install.mjs';
+import { runFusedCardPipeline } from './runtime/pipelines/fused.mjs';
+import { runStandardCardPipeline } from './runtime/pipelines/standard.mjs';
 import { createRuntimeRunState } from './runtime/run-state.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
@@ -1685,15 +1684,6 @@ function progressRetryCount(value) {
   const count = Number(value);
   if (!Number.isFinite(count) || count <= 0) return 0;
   return Math.min(99, Math.floor(count));
-}
-
-function providerCardRetryReason(retryCount, batched = false) {
-  const count = progressRetryCount(retryCount);
-  if (!count) return '';
-  const countText = count === 1 ? 'once' : `${count} times`;
-  return batched
-    ? `Provider card batch retried ${countText} before this card completed.`
-    : `Provider card call retried ${countText} before this card completed.`;
 }
 
 function cardProgressDetail(card, source, state) {
@@ -3653,172 +3643,36 @@ export function createRecursionRuntime({
     const requests = buildCardRequests(plan, requestContext).map((request) => applyReasoningLaneToCardRequest(request, settings));
     if (!requests.length) return empty;
     if (typeof generationRouter.batch !== 'function' && typeof generationRouter.generate !== 'function') return empty;
-    function repairRequestsForFusedResult(parsed, allRequests) {
-      const accepted = new Set(Array.isArray(parsed.acceptedFamilies)
-        ? parsed.acceptedFamilies
-        : parsed.cards.map((card) => card.family));
-      const damaged = new Set([
-        ...(Array.isArray(parsed.invalidFamilies) ? parsed.invalidFamilies : []),
-        ...(Array.isArray(parsed.missingFamilies) ? parsed.missingFamilies : []),
-        ...(Array.isArray(parsed.omissions)
-          ? parsed.omissions.map((entry) => safeText(entry.family || '', 120)).filter(Boolean)
-          : [])
-      ]);
-      return allRequests.filter((request) => {
-        const family = safeText(request.metadata?.family || '', 120);
-        return family && !accepted.has(family) && damaged.has(family);
+    if (settings.pipelineMode === 'fused' && typeof generationRouter.generate === 'function') {
+      return runFusedCardPipeline({
+        runId,
+        plan,
+        snapshot,
+        settings,
+        generationRouter,
+        requests,
+        requestContext,
+        sourceContext: cardSourceContext(snapshot),
+        applyFusedRequest: applyReasoningLaneToFusedCardBundleRequest,
+        stageRuntimeActivity,
+        signal,
+        isCurrent: () => isRuntimeRunCurrent(runId),
+        safeText
       });
     }
-    const fusedDiagnostics = [];
-    if (settings.pipelineMode === 'fused' && typeof generationRouter.generate === 'function') {
-      const fusedBaseRequest = buildFusedCardBundleRequest(plan, requestContext);
-      if (fusedBaseRequest) {
-        const fusedRequest = applyReasoningLaneToFusedCardBundleRequest(fusedBaseRequest, settings);
-        stageRuntimeActivity({
-          runId,
-          phase: 'fusedCardBundleRunning',
-          label: 'Generating fused card bundle...',
-          cardCounts: { requested: fusedRequest.requestedCards.length },
-          providerLane: fusedRequest.lane,
-          chips: ['Fused', String(fusedRequest.requestedCards.length), fusedRequest.lane === 'reasoner' ? 'Reasoner' : 'Utility']
-        });
-        try {
-          const requestWithSignal = signal ? { ...fusedRequest, signal } : fusedRequest;
-          const result = await generationRouter.generate('fusedCardBundle', requestWithSignal, {
-            runId,
-            signal,
-            isCurrent: () => isRuntimeRunCurrent(runId)
-          });
-          const parsed = cardsFromFusedProviderResult(result, {
-            ...cardSourceContext(snapshot),
-            expectedSnapshotHash: fusedRequest.snapshotHash,
-            requestedCards: fusedRequest.requestedCards,
-            providerLane: fusedRequest.lane
-          });
-          fusedDiagnostics.push(...parsed.diagnostics);
-          if (parsed.omissions.length) {
-            fusedDiagnostics.push(...parsed.omissions.map((entry) => `fused-omitted:${safeText(entry.family || entry.role || 'unknown', 80)}`));
-          }
-          if (parsed.cards.length > 0) {
-            const repairRequests = repairRequestsForFusedResult(parsed, requests);
-            let repairedCards = [];
-            if (repairRequests.length) {
-              fusedDiagnostics.push('fused-partial-repair-standard');
-              fusedDiagnostics.push(...repairRequests.map((request) => `fused-repair:${safeText(request.metadata?.family || request.roleId || 'unknown', 80)}`));
-              const signalRepairRequests = signal
-                ? repairRequests.map((request) => ({ ...request, signal }))
-                : repairRequests;
-              const repairOptions = { runId, signal, isCurrent: () => isRuntimeRunCurrent(runId) };
-              const usedRepairBatch = typeof generationRouter.batch === 'function';
-              const repairResults = usedRepairBatch
-                ? await generationRouter.batch(signalRepairRequests, repairOptions)
-                : [];
-              if (!usedRepairBatch) {
-                for (const request of signalRepairRequests) {
-                  if (signal?.aborted === true || !isRuntimeRunCurrent(runId)) break;
-                  try {
-                    repairResults.push(await generationRouter.generate(request.roleId, request, repairOptions));
-                  } catch {
-                    if (signal?.aborted === true || !isRuntimeRunCurrent(runId)) break;
-                    repairResults.push({ ok: false });
-                  }
-                }
-              }
-              repairedCards = repairResults.flatMap((repairResult, index) => cardsFromProviderResult(repairResult, {
-                ...cardSourceContext(snapshot),
-                expectedSnapshotHash: repairRequests[index]?.snapshotHash,
-                expectedRole: repairRequests[index]?.metadata?.role,
-                expectedFamily: repairRequests[index]?.metadata?.family
-              }).map((card) => ({
-                ...card,
-                providerLane: repairResult?.lane || repairRequests[index]?.lane || 'utility',
-                providerRole: repairRequests[index]?.roleId || card.providerRole || '',
-                fusedRepair: true,
-                providerProgressSource: 'fused-repair'
-              })));
-            }
-            const retryCount = progressRetryCount(result?.diagnostics?.retryCount);
-            return {
-              cards: [
-                ...parsed.cards.map((card) => ({
-                  ...card,
-                  providerLane: result?.lane || fusedRequest.lane || 'utility',
-                  ...(retryCount ? {
-                    providerRetryCount: retryCount,
-                    providerProgressReason: providerCardRetryReason(retryCount, true)
-                  } : {})
-                })),
-                ...repairedCards
-              ],
-              diagnostics: mergeDiagnostics(['fused-bundle-used'], fusedDiagnostics)
-            };
-          }
-          fusedDiagnostics.push('fused-fallback-standard');
-        } catch {
-          fusedDiagnostics.push('fused-bundle-provider-failed', 'fused-fallback-standard');
-        }
-      }
-    }
-    const lanes = new Set(requests.map((request) => request.lane));
-    const batchLane = lanes.size === 1 && lanes.has('reasoner') ? 'reasoner' : 'utility';
-    stageRuntimeActivity({
+
+    return runStandardCardPipeline({
       runId,
-      phase: 'cardBatchRunning',
-      label: 'Generating scene cards...',
-      cardCounts: { requested: requests.length },
-      providerLane: batchLane,
-      chips: [
-        'Cards',
-        String(requests.length),
-        ...(lanes.has('utility') && lanes.has('reasoner') ? ['Utility', 'Reasoner'] : [batchLane === 'reasoner' ? 'Reasoner' : 'Utility'])
-      ]
+      plan,
+      snapshot,
+      settings,
+      generationRouter,
+      requests,
+      sourceContext: cardSourceContext(snapshot),
+      stageRuntimeActivity,
+      signal,
+      isCurrent: () => isRuntimeRunCurrent(runId)
     });
-    try {
-      const signalRequests = signal
-        ? requests.map((request) => ({ ...request, signal }))
-        : requests;
-      const options = { runId, signal, isCurrent: () => isRuntimeRunCurrent(runId) };
-      const usedBatch = typeof generationRouter.batch === 'function';
-      const results = typeof generationRouter.batch === 'function'
-        ? await generationRouter.batch(signalRequests, options)
-        : [];
-      if (typeof generationRouter.batch !== 'function') {
-        for (const request of signalRequests) {
-          if (signal?.aborted === true || !isRuntimeRunCurrent(runId)) break;
-          try {
-            results.push(await generationRouter.generate(request.roleId, request, options));
-          } catch {
-            if (signal?.aborted === true || !isRuntimeRunCurrent(runId)) break;
-            results.push({ ok: false });
-          }
-        }
-      }
-      const cards = results.flatMap((result, index) => cardsFromProviderResult(result, {
-        ...cardSourceContext(snapshot),
-        expectedSnapshotHash: requests[index]?.snapshotHash,
-        expectedRole: requests[index]?.metadata?.role,
-        expectedFamily: requests[index]?.metadata?.family
-      }).map((card) => {
-        const retryCount = progressRetryCount(result?.diagnostics?.retryCount);
-        return {
-          ...card,
-          providerLane: result?.lane || requests[index]?.lane || 'utility',
-          ...(retryCount ? {
-            providerRetryCount: retryCount,
-            providerProgressReason: providerCardRetryReason(retryCount, usedBatch)
-          } : {})
-        };
-      }));
-      return {
-        cards,
-        diagnostics: fusedDiagnostics
-      };
-    } catch {
-      return {
-        cards: [],
-        diagnostics: fusedDiagnostics
-      };
-    }
   }
 
   async function warmRapidScene({ reason = 'idle' } = {}) {

@@ -5,6 +5,8 @@ import { createMemoryStorageAdapter, createStorageRepository } from '../../src/s
 import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
 import { createRuntimeRunState } from '../../src/runtime/run-state.mjs';
 import { clearPromptBestEffort, installPrompt } from '../../src/runtime/prompt-install.mjs';
+import { runFusedCardPipeline } from '../../src/runtime/pipelines/fused.mjs';
+import { runStandardCardPipeline } from '../../src/runtime/pipelines/standard.mjs';
 import { CARD_CATALOG, cardsFromProviderResult } from '../../src/cards.mjs';
 import {
   CARD_SCOPE_CATALOG,
@@ -103,6 +105,98 @@ function assertNotEqual(actual, expected, message) {
   assertEqual(promptInstallCalls.length, 2, 'prompt install helper calls clear and install');
   assertEqual(install.ok, true, 'prompt install helper preserves successful install result');
   assertEqual(clear.ok, true, 'prompt clear helper preserves successful clear result');
+}
+
+{
+  const pipelineCalls = [];
+  const pipelinePlan = {
+    snapshotHash: 'pipeline-snapshot',
+    storyForm: UNKNOWN_STORY_FORM,
+    cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Pipeline helper test.' }]
+  };
+  const pipelineRequest = {
+    roleId: 'sceneFrameCard',
+    snapshotHash: 'pipeline-snapshot',
+    lane: 'utility',
+    metadata: { family: 'Scene Frame', role: 'sceneFrameCard' }
+  };
+  const pipelineSourceContext = {
+    sceneId: 'pipeline-scene',
+    chatId: 'pipeline-chat',
+    firstMesId: 0,
+    lastMesId: 2,
+    snapshotHash: 'pipeline-snapshot',
+    sourceRevisionHash: 'pipeline-source'
+  };
+  const standardResult = await runStandardCardPipeline({
+    plan: pipelinePlan,
+    snapshot: {},
+    settings: { pipelineMode: 'standard' },
+    requests: [pipelineRequest],
+    sourceContext: pipelineSourceContext,
+    generationRouter: {
+      async generate(roleId) {
+        pipelineCalls.push(`standard:${roleId}`);
+        return {
+          ok: true,
+          lane: 'utility',
+          data: {
+            schema: 'recursion.card.v1',
+            snapshotHash: 'pipeline-snapshot',
+            family: 'Scene Frame',
+            role: 'sceneFrameCard',
+            items: [{
+              family: 'Scene Frame',
+              role: 'sceneFrameCard',
+              promptText: 'Keep the pipeline test scene spatially coherent.',
+              evidenceRefs: ['message:1']
+            }]
+          }
+        };
+      }
+    }
+  });
+  assertEqual(standardResult.cards.length, 1, 'standard pipeline returns parsed card result');
+
+  const fusedResult = await runFusedCardPipeline({
+    plan: pipelinePlan,
+    snapshot: {},
+    settings: { pipelineMode: 'fused' },
+    requests: [pipelineRequest],
+    requestContext: {
+      runId: 'pipeline-run',
+      snapshotHash: 'pipeline-snapshot',
+      snapshot: {},
+      cardScope: {},
+      storyForm: UNKNOWN_STORY_FORM
+    },
+    sourceContext: pipelineSourceContext,
+    applyFusedRequest: (request) => ({ ...request, lane: 'utility' }),
+    safeText,
+    generationRouter: {
+      async generate(roleId) {
+        pipelineCalls.push(`fused:${roleId}`);
+        return {
+          ok: true,
+          lane: 'utility',
+          data: {
+            schema: 'recursion.cardBundle.v1',
+            snapshotHash: 'pipeline-snapshot',
+            items: [{
+              schema: 'recursion.card.v1',
+              family: 'Scene Frame',
+              role: 'sceneFrameCard',
+              promptText: 'Use one recovered fused card from the helper test.',
+              evidenceRefs: ['message:1']
+            }]
+          }
+        };
+      }
+    }
+  });
+  assertEqual(fusedResult.cards.length, 1, 'fused pipeline returns parsed card result');
+  assert(fusedResult.diagnostics.includes('fused-bundle-used'), 'fused pipeline preserves bundle diagnostic');
+  assertDeepEqual(pipelineCalls, ['standard:sceneFrameCard', 'fused:fusedCardBundle'], 'standard and fused pipeline helpers call their matching provider roles');
 }
 
 function parsePromptJsonSection(prompt, label) {

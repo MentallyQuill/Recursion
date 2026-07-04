@@ -92,105 +92,23 @@ for (const utilityRole of expectedUtilityRoles) {
 assert(providerSpec.includes('`reasonerComposer`'), 'provider spec documents reasonerComposer');
 assert(!/characterLensCard|environmentTextureCard/.test(providerSpec), 'provider spec omits legacy card role names');
 
-const contextProfileService = {
-  getSupportedProfiles() {
-    return [
-      { profileId: 'ctx-utility', label: 'Context Utility', model_name: 'glm-fast' },
-      { id: 'ctx-reasoner', name: 'Context Reasoner', settings: { model: 'o-reasoner' } }
-    ];
-  }
-};
-const contextProfiles = listProviderConnectionProfiles({
-  context: { ConnectionManagerRequestService: contextProfileService },
-  globals: {}
-});
+const delegatedProfiles = [
+  { id: 'ctx-utility', name: 'Context Utility', label: 'Context Utility / glm-fast', model: 'glm-fast' }
+];
 assertDeepEqual(
-  contextProfiles.map((profile) => [profile.id, profile.label, profile.model]),
-  [
-    ['ctx-utility', 'Context Utility / glm-fast', 'glm-fast'],
-    ['ctx-reasoner', 'Context Reasoner / o-reasoner', 'o-reasoner']
-  ],
-  'connection profiles are detected from context.ConnectionManagerRequestService'
+  listProviderConnectionProfiles({ host: { providerProfiles: { list: () => delegatedProfiles } } }),
+  delegatedProfiles,
+  'provider core delegates connection profile listing to host capability'
 );
-
-const objectMapProfiles = listProviderConnectionProfiles({
-  context: {
-    state: {
-      connectionManager: {
-        profiles: {
-          mapUtility: { uuid: 'map-utility', title: 'Map Utility', generationSettings: { model: 'map-fast' } },
-          mapReasoner: { profile_id: 'map-reasoner', profileName: 'Map Reasoner', modelId: 'map-deep' }
-        }
-      }
-    }
-  },
-  globals: {}
-});
 assertDeepEqual(
-  objectMapProfiles.map((profile) => [profile.id, profile.label, profile.model]),
-  [
-    ['map-utility', 'Map Utility / map-fast', 'map-fast'],
-    ['map-reasoner', 'Map Reasoner / map-deep', 'map-deep']
-  ],
-  'connection profiles are detected from nested object-map host state'
+  listProviderConnectionProfiles({ listConnectionProfiles: () => delegatedProfiles }),
+  delegatedProfiles,
+  'provider core supports explicit profile-list callback'
 );
-
-const profilesBesideCharacters = listProviderConnectionProfiles({
-  context: {
-    characters: [
-      { id: 'char-sam', name: 'Sam Vickers', avatar: 'sam.png', data: { description: 'character card' } },
-      { id: 'char-ash', name: 'Ashes of Peace', model: 'not-a-provider-model' }
-    ],
-    ConnectionManagerRequestService: {
-      getSupportedProfiles() {
-        return [{ id: 'real-profile', label: 'Real Profile', model: 'glm-real' }];
-      }
-    }
-  },
-  globals: {
-    extension_settings: {
-      characterCards: {
-        charMap: { id: 'char-map', name: 'Mapped Character Card', model: 'not-a-profile' }
-      }
-    }
-  }
-});
 assertDeepEqual(
-  profilesBesideCharacters.map((profile) => [profile.id, profile.label]),
-  [['real-profile', 'Real Profile / glm-real']],
-  'connection profile discovery rejects SillyTavern character cards'
-);
-
-const characterCardWithExpensiveData = {
-  id: 'char-expensive',
-  name: 'Character Card That Must Not Be Traversed',
-  get data() {
-    throw new Error('character card data was traversed during connection profile discovery');
-  }
-};
-const profilesBesideExpensiveCharacters = listProviderConnectionProfiles({
-  context: {
-    characters: [characterCardWithExpensiveData],
-    state: {
-      connectionManager: {
-        profiles: [{ id: 'state-profile', label: 'State Profile', model: 'glm-state' }]
-      }
-    }
-  },
-  globals: {
-    extension_settings: {
-      characterCards: {
-        get charExpensive() {
-          throw new Error('extension character card map was traversed during connection profile discovery');
-        }
-      }
-    }
-  }
-});
-assertDeepEqual(
-  profilesBesideExpensiveCharacters.map((profile) => [profile.id, profile.label]),
-  [['state-profile', 'State Profile / glm-state']],
-  'connection profile discovery skips character-card containers instead of walking them'
+  listProviderConnectionProfiles({}),
+  [],
+  'provider core returns empty profiles without host discovery capability'
 );
 
 const profileStatus = providerModelStatus({
@@ -198,8 +116,7 @@ const profileStatus = providerModelStatus({
   source: 'host-connection-profile',
   hostConnectionProfileId: 'ctx-utility'
 }, {
-  context: { ConnectionManagerRequestService: contextProfileService },
-  globals: {}
+  host: { providerProfiles: { list: () => delegatedProfiles } }
 });
 assertEqual(profileStatus.ready, true, 'provider status reports selected connection profile ready');
 assertEqual(profileStatus.model, 'glm-fast', 'provider status resolves connection profile model');

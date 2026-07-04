@@ -355,14 +355,18 @@ async function forceProviderProfile(page, profileName, timeoutMs) {
     };
     const profiles = [];
     try {
+      const detected = runtime?.listProviderConnectionProfiles?.() || [];
+      profiles.push(...detected.map(normalizeProfile).filter(Boolean));
+    } catch {}
+    try {
       const service = context.ConnectionManagerRequestService || globalThis.ConnectionManagerRequestService;
       const supported = service?.getSupportedProfiles?.();
       const values = Array.isArray(supported) ? supported : (supported && typeof supported === 'object' ? Object.values(supported) : []);
       profiles.push(...values.map(normalizeProfile).filter(Boolean));
     } catch {}
     try {
-      const module = await import('/scripts/extensions/third-party/Recursion/src/providers.mjs');
-      const detected = module.listProviderConnectionProfiles?.({ context, globals: globalThis }) || [];
+      const module = await import('/scripts/extensions/third-party/Recursion/src/hosts/sillytavern/provider-profiles.mjs');
+      const detected = module.listSillyTavernConnectionProfiles?.({ context, globals: globalThis }) || [];
       profiles.push(...detected.map(normalizeProfile).filter(Boolean));
     } catch {}
     const byId = new Map();

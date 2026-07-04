@@ -7,6 +7,7 @@ import { asObject } from '../../safe-values.mjs';
 import { createSettingsStore } from '../../settings.mjs';
 import { createMemoryStorageAdapter } from '../../storage.mjs';
 import { createSillyTavernUserFileStorageAdapter } from './storage.mjs';
+import { listSillyTavernConnectionProfiles } from './provider-profiles.mjs';
 
 const KNOWN_RECURSION_PROMPT_KEYS = Object.freeze([
   'recursion.guidance',
@@ -822,6 +823,14 @@ export function createSillyTavernHost({
     settingsStore,
     storageAdapter: storage,
     generation,
+    providerProfiles: {
+      list(options = {}) {
+        return listSillyTavernConnectionProfiles({
+          context: currentContext(contextFactory),
+          globals: options.globals ?? globalThis
+        });
+      }
+    },
     providerClient: null,
     prompt,
     snapshot

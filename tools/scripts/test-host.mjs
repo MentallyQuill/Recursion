@@ -1,4 +1,5 @@
 import { createSillyTavernHost, promptBlocksFromPacket } from '../../src/hosts/sillytavern/host.mjs';
+import { listSillyTavernConnectionProfiles } from '../../src/hosts/sillytavern/provider-profiles.mjs';
 import { createGenerationRouter } from '../../src/providers.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
@@ -24,6 +25,109 @@ const host = createSillyTavernHost({ contextFactory: () => context, settingsRoot
 const snap = await host.snapshot();
 assertEqual(snap.chatId, 'chat-file', 'chat id read');
 assertEqual(snap.messages[0].text, 'Hello', 'message text read');
+
+{
+  const contextProfileService = {
+    getSupportedProfiles() {
+      return [
+        { profileId: 'ctx-utility', label: 'Context Utility', model_name: 'glm-fast' },
+        { id: 'ctx-reasoner', name: 'Context Reasoner', settings: { model: 'o-reasoner' } }
+      ];
+    }
+  };
+  const contextProfiles = listSillyTavernConnectionProfiles({
+    context: { ConnectionManagerRequestService: contextProfileService },
+    globals: {}
+  });
+  assertDeepEqual(
+    contextProfiles.map((profile) => [profile.id, profile.label, profile.model]),
+    [
+      ['ctx-utility', 'Context Utility / glm-fast', 'glm-fast'],
+      ['ctx-reasoner', 'Context Reasoner / o-reasoner', 'o-reasoner']
+    ],
+    'host connection profiles are detected from context.ConnectionManagerRequestService'
+  );
+
+  const objectMapProfiles = listSillyTavernConnectionProfiles({
+    context: {
+      state: {
+        connectionManager: {
+          profiles: {
+            mapUtility: { uuid: 'map-utility', title: 'Map Utility', generationSettings: { model: 'map-fast' } },
+            mapReasoner: { profile_id: 'map-reasoner', profileName: 'Map Reasoner', modelId: 'map-deep' }
+          }
+        }
+      }
+    },
+    globals: {}
+  });
+  assertDeepEqual(
+    objectMapProfiles.map((profile) => [profile.id, profile.label, profile.model]),
+    [
+      ['map-utility', 'Map Utility / map-fast', 'map-fast'],
+      ['map-reasoner', 'Map Reasoner / map-deep', 'map-deep']
+    ],
+    'host connection profiles are detected from nested object-map host state'
+  );
+
+  const profilesBesideCharacters = listSillyTavernConnectionProfiles({
+    context: {
+      characters: [
+        { id: 'char-sam', name: 'Sam Vickers', avatar: 'sam.png', data: { description: 'character card' } },
+        { id: 'char-ash', name: 'Ashes of Peace', model: 'not-a-provider-model' }
+      ],
+      ConnectionManagerRequestService: {
+        getSupportedProfiles() {
+          return [{ id: 'real-profile', label: 'Real Profile', model: 'glm-real' }];
+        }
+      }
+    },
+    globals: {
+      extension_settings: {
+        characterCards: {
+          charMap: { id: 'char-map', name: 'Mapped Character Card', model: 'not-a-profile' }
+        }
+      }
+    }
+  });
+  assertDeepEqual(
+    profilesBesideCharacters.map((profile) => [profile.id, profile.label]),
+    [['real-profile', 'Real Profile / glm-real']],
+    'host connection profile discovery rejects SillyTavern character cards'
+  );
+
+  const characterCardWithExpensiveData = {
+    id: 'char-expensive',
+    name: 'Character Card That Must Not Be Traversed',
+    get data() {
+      throw new Error('character card data was traversed during connection profile discovery');
+    }
+  };
+  const profilesBesideExpensiveCharacters = listSillyTavernConnectionProfiles({
+    context: {
+      characters: [characterCardWithExpensiveData],
+      state: {
+        connectionManager: {
+          profiles: [{ id: 'state-profile', label: 'State Profile', model: 'glm-state' }]
+        }
+      }
+    },
+    globals: {
+      extension_settings: {
+        characterCards: {
+          get charExpensive() {
+            throw new Error('extension character card map was traversed during connection profile discovery');
+          }
+        }
+      }
+    }
+  });
+  assertDeepEqual(
+    profilesBesideExpensiveCharacters.map((profile) => [profile.id, profile.label]),
+    [['state-profile', 'State Profile / glm-state']],
+    'host connection profile discovery skips character-card containers instead of walking them'
+  );
+}
 
 {
   const boundedContext = {

@@ -1347,6 +1347,19 @@ try {
   let stopGenerationCalls = 0;
   let forceRegenerateCalls = 0;
   const forceRegenerateDetails = [];
+  function fakeRuntimeConnectionProfiles() {
+    return globalThis.SillyTavern.getContext().ConnectionManagerRequestService.getSupportedProfiles().map((profile) => {
+      const id = profile.id || profile.profileId;
+      const name = profile.name || profile.label || id;
+      const model = profile.model || profile.model_name || '';
+      return {
+        id,
+        name,
+        model,
+        label: model ? `${name} / ${model}` : name
+      };
+    });
+  }
   let view = {
     settings: {
       mode: 'auto',
@@ -1472,6 +1485,7 @@ try {
   const ui = mountRecursionUi({
     runtime: {
       view: () => view,
+      listProviderConnectionProfiles: fakeRuntimeConnectionProfiles,
       refreshScene: () => {
         refreshed += 1;
       },

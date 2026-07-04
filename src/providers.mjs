@@ -406,39 +406,7 @@ function hostContext(globals = globalThis) {
   }
 }
 
-function connectionProfileService(context = null, globals = globalThis) {
-  return context?.ConnectionManagerRequestService
-    || globals?.ConnectionManagerRequestService
-    || null;
-}
-
-function profileId(profile = {}) {
-  return textValue(
-    profile.id
-      || profile.profileId
-      || profile.profile_id
-      || profile.uuid
-      || profile.key
-      || profile.name
-      || profile.label
-  );
-}
-
-function profileName(profile = {}, fallback = '') {
-  return textValue(
-    profile.label
-      || profile.name
-      || profile.profileName
-      || profile.profile_name
-      || profile.title
-      || profile.displayName,
-    fallback
-  );
-}
-
 const MODEL_KEY_PATTERN = /(^|_|\b)(model|modelid|model_id|modelname|model_name|selectedmodel|selected_model|chatmodel|chat_model|completionmodel|completion_model)$/i;
-const CONNECTION_PROFILE_PATH_PATTERN = /(^|\.)(connectionProfiles?|connection_profiles|connectionManagerProfiles?|profileList|supportedProfiles|ConnectionManagerRequestService)(\.|$)|connectionManager\.(profiles|profileList)$/i;
-const NON_PROVIDER_PROFILE_PATH_PATTERN = /(^|\.)(characters?|characterCards?|personas?|avatars?|groups?|cards?)(\.|$)/i;
 
 function modelFromProfile(profile = {}) {
   const seen = new Set();
@@ -461,101 +429,16 @@ function modelFromProfile(profile = {}) {
   return visit(profile);
 }
 
-function profileLike(value, path = '') {
-  if (!plainObject(value)) return false;
-  const id = profileId(value);
-  if (!id) return false;
-  if (NON_PROVIDER_PROFILE_PATH_PATTERN.test(path) && !/connection/i.test(path)) return false;
-  const explicitProfileKeys = [
-    'profileId',
-    'profile_id',
-    'profileName',
-    'profile_name',
-    'connectionProfileId',
-    'connection_profile_id'
-  ];
-  const hasExplicitProfileKey = explicitProfileKeys.some((key) => Object.prototype.hasOwnProperty.call(value, key));
-  return Boolean(
-    CONNECTION_PROFILE_PATH_PATTERN.test(path)
-      || hasExplicitProfileKey
-      || value.sendRequest
-      || value.api
-  );
-}
-
-function collectProfileCandidates(root, path = '', depth = 0, seen = new Set(), out = []) {
-  if (!root || typeof root !== 'object' || seen.has(root) || depth > 6) return out;
-  if (path && NON_PROVIDER_PROFILE_PATH_PATTERN.test(path) && !/connection/i.test(path)) return out;
-  seen.add(root);
-  if (Array.isArray(root)) {
-    if (root.some((entry) => profileLike(entry, path))) {
-      for (const entry of root) {
-        if (profileLike(entry, path)) out.push(entry);
-      }
-    }
-    for (const entry of root) collectProfileCandidates(entry, path, depth + 1, seen, out);
-    return out;
-  }
-  if (profileLike(root, path)) out.push(root);
-  for (const [key, child] of Object.entries(root)) {
-    const childPath = path ? `${path}.${key}` : key;
-    if (Array.isArray(child) && /profile|connection/i.test(key)) {
-      for (const entry of child) {
-        if (profileLike(entry, childPath)) out.push(entry);
-      }
-    } else if (plainObject(child) && /profile|connection/i.test(key)) {
-      for (const entry of Object.values(child)) {
-        if (profileLike(entry, childPath)) out.push(entry);
-      }
-    }
-    collectProfileCandidates(child, childPath, depth + 1, seen, out);
-  }
-  return out;
-}
-
-function normalizeConnectionProfile(profile = {}) {
-  const id = profileId(profile);
-  if (!id) return null;
-  const name = profileName(profile, id);
-  const model = modelFromProfile(profile);
-  return {
-    id,
-    name,
-    model,
-    label: model ? `${name} / ${model}` : name,
-    raw: profile
-  };
-}
-
 export function listProviderConnectionProfiles(options = {}) {
-  const { globals } = controlOptions(options);
-  const context = options?.context ?? hostContext(globals);
-  let supportedProfiles = [];
-  try {
-    const service = connectionProfileService(context, globals);
-    const result = service?.getSupportedProfiles?.();
-    if (Array.isArray(result)) supportedProfiles = result;
-    else if (plainObject(result)) supportedProfiles = Object.values(result);
-  } catch {
-    supportedProfiles = [];
+  if (typeof options?.host?.providerProfiles?.list === 'function') {
+    const profiles = options.host.providerProfiles.list(options);
+    return Array.isArray(profiles) ? profiles : [];
   }
-  const roots = [
-    { connectionProfiles: supportedProfiles },
-    context,
-    context?.ConnectionManagerRequestService,
-    globals?.connectionManager,
-    globals?.ConnectionManager,
-    globals?.extension_settings,
-    globals?.power_user
-  ];
-  const byId = new Map();
-  for (const root of roots) {
-    for (const candidate of collectProfileCandidates(root)) {
-      const normalized = normalizeConnectionProfile(candidate);
-      if (normalized && !byId.has(normalized.id)) byId.set(normalized.id, normalized);
-    }
+  if (typeof options?.listConnectionProfiles === 'function') {
+    const profiles = options.listConnectionProfiles(options);
+    return Array.isArray(profiles) ? profiles : [];
   }
-  return [...byId.values()];
+  return [];
 }
 
 function currentHostModel(options = {}) {
@@ -1487,7 +1370,7 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
   }
 
   function listProfiles(options = {}) {
-    return listProviderConnectionProfiles(options);
+    return listProviderConnectionProfiles({ ...options, host });
   }
 
   function status(lane = 'utility', options = {}) {
@@ -1495,6 +1378,7 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
     const { config } = providerConfigFor(settingsStore, resolvedLane);
     return providerModelStatus(config, {
       ...options,
+      host,
       apiKey: settingsStore?.getApiKey?.(resolvedLane) || options.apiKey || ''
     });
   }

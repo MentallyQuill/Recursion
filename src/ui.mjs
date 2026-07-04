@@ -16,7 +16,6 @@ import {
 import { packetToPromptBlocks } from './prompt.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from './progress.mjs';
 import {
-  listProviderConnectionProfiles,
   providerModelStatus,
   providerRouteSummary
 } from './providers.mjs';
@@ -2068,12 +2067,24 @@ function normalizeProviderSource(value) {
   return PROVIDER_SOURCE_OPTIONS.some(([candidate]) => candidate === source) ? source : 'host-current-model';
 }
 
-function listConnectionProfiles(profiles = null) {
-  const source = Array.isArray(profiles) ? profiles : listProviderConnectionProfiles();
+function listConnectionProfiles(profiles = []) {
+  const source = Array.isArray(profiles) ? profiles : [];
   return source.map((profile) => ({
     id: profile.id,
     label: profile.label
   }));
+}
+
+function runtimeConnectionProfiles(view = {}, runtime = null) {
+  try {
+    if (typeof runtime?.listProviderConnectionProfiles === 'function') {
+      const profiles = runtime.listProviderConnectionProfiles();
+      if (Array.isArray(profiles)) return profiles;
+    }
+  } catch {
+    // Fall back to the last runtime view snapshot below.
+  }
+  return Array.isArray(view?.providerProfiles) ? view.providerProfiles : [];
 }
 
 function connectionProfileEntries(selectedId = '', profiles = null) {
@@ -2547,7 +2558,7 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
   }, [
     el('span', { text: route.text })
   ]));
-  const connectionProfiles = listProviderConnectionProfiles();
+  const connectionProfiles = runtimeConnectionProfiles(view, runtime);
   renderProviderSettings(providersPane, 'utility', settings.providers?.utility || {}, tooltipsEnabled, {
     modelFetchState: providerModelFetchState.utility,
     connectionProfiles

@@ -2568,6 +2568,34 @@ export function createRecursionRuntime({
     }
   }
 
+  function safeProviderProfiles(profiles = []) {
+    return Array.isArray(profiles)
+      ? profiles.slice(0, 100).map((profile) => ({
+        id: safeIdentifier(profile?.id || '', '', 160),
+        name: safeText(profile?.name || profile?.label || profile?.id || '', 180),
+        model: safeText(profile?.model || '', 180),
+        label: safeText(profile?.label || profile?.name || profile?.id || '', 240)
+      })).filter((profile) => profile.id)
+      : [];
+  }
+
+  function listProviderConnectionProfilesForUi(options = {}) {
+    try {
+      if (typeof host?.providerProfiles?.list === 'function') {
+        return safeProviderProfiles(host.providerProfiles.list(options));
+      }
+      if (typeof host?.listConnectionProfiles === 'function') {
+        return safeProviderProfiles(host.listConnectionProfiles(options));
+      }
+      if (typeof host?.providerClient?.listProfiles === 'function') {
+        return safeProviderProfiles(host.providerClient.listProfiles(options));
+      }
+    } catch {
+      return [];
+    }
+    return [];
+  }
+
   function safeRuntimeView() {
     return {
       activeRunId,
@@ -2584,6 +2612,7 @@ export function createRecursionRuntime({
       }),
       activity: safeCurrentActivity(activity),
       activityHistory: safeActivityHistory(activity),
+      providerProfiles: listProviderConnectionProfilesForUi(),
       settings: safeSettingsView(settingsStore.get()),
       updatedAt: nowIso()
     };
@@ -5118,6 +5147,7 @@ export function createRecursionRuntime({
     clearProviderKey,
     fetchProviderModels,
     testProvider,
+    listProviderConnectionProfiles: listProviderConnectionProfilesForUi,
     resetSceneCache,
     clearRunJournal,
     exportDiagnostics,

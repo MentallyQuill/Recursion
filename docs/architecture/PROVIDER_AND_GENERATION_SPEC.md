@@ -100,7 +100,8 @@ Utility and Reasoner provider settings default to `8192` max tokens. The same ma
 
 Provider setup uses the same control-plane helpers as generation:
 
-- `listProviderConnectionProfiles()` detects saved SillyTavern profiles from `context.ConnectionManagerRequestService`, global `ConnectionManagerRequestService`, and host state objects that expose profile arrays or profile maps.
+- Connection-profile discovery is a host-adapter capability. Provider core accepts an already discovered profile list or a host capability callback; it does not inspect SillyTavern globals.
+- `listProviderConnectionProfiles()` delegates to the active host capability or explicit callback and otherwise returns an empty list.
 - `providerModelStatus()` resolves the selected source into a compact readiness label before a test call runs, including selected connection profile model labels when the host exposes them.
 - `fetchOpenAICompatibleModels()` discovers direct endpoint models by normalizing the configured base URL to `/models` and parsing OpenAI-style `data[]` or `models[]` responses.
 

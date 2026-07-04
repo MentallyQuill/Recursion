@@ -540,6 +540,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/cards.mjs',
     'src/core.mjs',
     'src/hosts/sillytavern/host.mjs',
+    'src/hosts/sillytavern/provider-profiles.mjs',
     'src/hosts/sillytavern/storage.mjs',
     'src/progress.mjs',
     'src/prompt.mjs',

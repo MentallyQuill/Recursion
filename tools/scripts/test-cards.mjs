@@ -342,6 +342,45 @@ assertDeepEqual(fusedParsed.missingFamilies, [], 'Fused parser reports no missin
 assertDeepEqual(fusedInvalidUnsafeText.acceptedFamilies, [], 'Fused parser reports no accepted families for invalid-only bundle');
 assertDeepEqual(fusedInvalidUnsafeText.invalidFamilies, ['Scene Frame'], 'Fused parser reports invalid families for targeted repair');
 assertDeepEqual(fusedInvalidUnsafeText.missingFamilies, ['Character Motivation'], 'Fused parser reports requested siblings absent from damaged bundle');
+const fusedDamagedEnvelope = cardsFromFusedProviderResult({
+  ok: true,
+  roleId: 'fusedCardBundle',
+  lane: 'reasoner',
+  data: {
+    schema: 'recursion.cardBundle.damaged',
+    snapshotHash: 'snapshot-fused-1',
+    items: [{
+      schema: 'recursion.card.v1',
+      family: 'Scene Frame',
+      role: 'sceneFrameCard',
+      promptText: 'DAMAGED_ENVELOPE_SCENE_FRAME survives envelope schema damage.',
+      evidenceRefs: ['message:8'],
+      tokenEstimate: 20
+    }]
+  }
+}, fusedCardContext);
+assertEqual(fusedDamagedEnvelope.cards.length, 1, 'Fused validator salvages valid requested item from damaged envelope schema');
+assert(fusedDamagedEnvelope.diagnostics.includes('fused-bundle-envelope-damaged'), 'damaged envelope salvage records diagnostic');
+assertDeepEqual(fusedDamagedEnvelope.acceptedFamilies, ['Scene Frame'], 'damaged envelope salvage reports accepted family');
+assertDeepEqual(fusedDamagedEnvelope.missingFamilies, ['Character Motivation'], 'damaged envelope salvage reports missing sibling');
+
+const fusedWrongSnapshotEnvelope = cardsFromFusedProviderResult({
+  ok: true,
+  roleId: 'fusedCardBundle',
+  data: {
+    schema: 'recursion.cardBundle.damaged',
+    snapshotHash: 'wrong-snapshot',
+    items: [{
+      schema: 'recursion.card.v1',
+      family: 'Scene Frame',
+      role: 'sceneFrameCard',
+      promptText: 'Wrong snapshot must not be salvaged.',
+      evidenceRefs: ['message:8']
+    }]
+  }
+}, fusedCardContext);
+assertEqual(fusedWrongSnapshotEnvelope.cards.length, 0, 'Fused validator never salvages wrong-snapshot envelope');
+assert(fusedWrongSnapshotEnvelope.diagnostics.includes('fused-bundle-snapshot-mismatch'), 'wrong snapshot still records mismatch diagnostic');
 const storyFormRequest = buildCardRequests({
   cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve narrative form.' }]
 }, {

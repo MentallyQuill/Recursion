@@ -1029,9 +1029,11 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     return finalize();
   }
   const data = asObject(result.data);
-  if (data.schema !== CARD_BUNDLE_RESPONSE_SCHEMA) {
+  const envelopeSchemaOk = data.schema === CARD_BUNDLE_RESPONSE_SCHEMA;
+  if (!envelopeSchemaOk) {
     output.diagnostics.push('fused-bundle-schema-mismatch');
-    return finalize();
+    if (!Array.isArray(data.items) || data.items.length === 0) return finalize();
+    output.diagnostics.push('fused-bundle-envelope-damaged');
   }
   if (!providerSnapshotMatches(data, context)) {
     output.diagnostics.push('fused-bundle-snapshot-mismatch');

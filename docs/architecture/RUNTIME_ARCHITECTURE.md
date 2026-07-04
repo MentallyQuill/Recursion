@@ -109,9 +109,9 @@ The Fused pipeline keeps the Standard foreground sequence but fuses the card-gen
 1. Observe chat and turn snapshot.
 2. Run the Arbiter, scope filtering, Manual forced-family reconciliation, and behavior/reasoning policy exactly as Standard does.
 3. Build one `fusedCardBundle` request containing every requested card family, selected sub-item focus, story form, refresh metadata, and safety instructions.
-4. Validate the bundle envelope as `recursion.cardBundle.v1`, then validate each item as one normal `recursion.card.v1` card.
-5. Accept valid requested siblings, reject unrequested or duplicate items, and record compact diagnostics for omitted or invalid siblings.
-6. If the bundle yields no usable cards, fall back to the Standard individual card-generation path for the same turn.
+4. Validate the bundle snapshot first. A wrong snapshot is a hard stop.
+5. Validate each requested item as a normal `recursion.card.v1` card. A damaged top-level schema may still yield trustworthy requested items if the snapshot matches.
+6. Regenerate only damaged or missing requested siblings through individual card generation; run full Standard card generation only when no Fused item is trustworthy.
 7. Continue through the shared deck, hand, guidance, Reasoner composition, prompt packet, cache save, freshness recheck, and prompt install path.
 
 Fused is designed for stronger reasoning model families such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar models that can hold a larger structured card contract in one response. It still obeys Reasoning Level routing: Low and Medium keep the bundle on Utility, High and Ultra use Reasoner when the lane is healthy, and unavailable Reasoner falls back to Utility. Fast, cheaper utility-class models such as 500B-and-lower models, Nemotron, GPT-OSS, Gemma, and similar are better suited to Standard's smaller per-card calls.

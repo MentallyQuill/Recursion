@@ -116,6 +116,8 @@ The Fused pipeline keeps the Standard foreground sequence but fuses the card-gen
 
 Fused is designed for stronger reasoning model families such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar models that can hold a larger structured card contract in one response. It still obeys Reasoning Level routing: Low and Medium keep the bundle on Utility, High and Ultra use Reasoner when the lane is healthy, and unavailable Reasoner falls back to Utility. Fast, cheaper utility-class models such as 500B-and-lower models, Nemotron, GPT-OSS, Gemma, and similar are better suited to Standard's smaller per-card calls.
 
+When Fused repairs only damaged or missing siblings, diagnostics include `fused-partial-repair-standard` plus `fused-repair:*` entries naming the repaired families. `fused-fallback-standard` is reserved for zero-trust fused bundles.
+
 Power and mode controls change how much of the pipeline runs:
 
 - Power off: remove or avoid installing Recursion prompt entries. Runtime may keep minimal UI/provider status, but it should not inspect or influence active generations.

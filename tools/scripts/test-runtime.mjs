@@ -5779,6 +5779,113 @@ for (const scenario of [
 
 {
   const roleCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              cardJobs: [
+                { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Valid fused sibling.' },
+                { family: 'Scene Constraints', role: 'sceneConstraintsCard', reason: 'Damaged fused sibling.' }
+              ],
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              reasonerDecision: { mode: 'skip', reason: 'targeted fused repair', signals: [] },
+              diagnostics: ['targeted-fused-repair-plan']
+            }
+          };
+        }
+        if (roleId === 'fusedCardBundle') {
+          return {
+            ok: true,
+            roleId,
+            lane: request.lane,
+            data: {
+              schema: 'recursion.cardBundle.v1',
+              snapshotHash: request.snapshotHash,
+              items: [
+                {
+                  schema: 'recursion.card.v1',
+                  family: 'Scene Frame',
+                  role: 'sceneFrameCard',
+                  promptText: 'FUSED_PARTIAL_VALID_SCENE: keep this fused sibling.',
+                  evidenceRefs: ['message:2'],
+                  tokenEstimate: 18
+                },
+                {
+                  schema: 'recursion.card.v1',
+                  family: 'Scene Constraints',
+                  role: 'sceneConstraintsCard',
+                  promptText: 'The hidden chain of thought says this sibling is damaged.',
+                  evidenceRefs: ['message:2'],
+                  tokenEstimate: 18
+                }
+              ]
+            }
+          };
+        }
+        if (roleId === 'sceneConstraintsCard') {
+          return {
+            ok: true,
+            roleId,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneConstraintsCard',
+              family: 'Scene Constraints',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: 'FUSED_TARGETED_REPAIR_CONSTRAINT: repaired only the damaged sibling.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 16
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Use fused partial repair cards.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['targeted-fused-repair-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected targeted fused repair role ${roleId}`);
+      },
+      async batch(requests = [], options = {}) {
+        const results = [];
+        for (const request of requests) {
+          results.push(await this.generate(request.roleId, request, options));
+        }
+        return results;
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Repair only damaged fused card.' });
+  assertEqual(result.ok, true, 'Fused targeted repair installs prompt');
+  assertDeepEqual(roleCalls, ['utilityArbiter', 'fusedCardBundle', 'sceneConstraintsCard', 'guidanceComposer'], 'Fused targeted repair reruns only damaged requested sibling');
+  assert(!roleCalls.includes('sceneFrameCard'), 'Fused targeted repair does not rerun valid fused sibling');
+  assert(result.packet.sections.cardEvidence.includes('FUSED_PARTIAL_VALID_SCENE'), 'valid fused sibling reaches packet');
+  assert(result.packet.sections.cardEvidence.includes('FUSED_TARGETED_REPAIR_CONSTRAINT'), 'repaired sibling reaches packet');
+  assert(result.plan.diagnostics.includes('fused-partial-repair-standard'), 'plan records targeted repair path');
+  assert(!result.plan.diagnostics.includes('fused-fallback-standard'), 'targeted repair is not full Standard fallback');
+}
+
+{
+  const roleCalls = [];
   let fusedRequest = null;
   const { runtime } = createRuntimeHarness({
     settings: { pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },

@@ -2317,6 +2317,65 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 }
 
 {
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Need a card.' }],
+              budgets: { targetBriefTokens: 500, maxCards: 1 },
+              reasonerDecision: { mode: 'skip', reason: 'journal fallback test', signals: [] },
+              diagnostics: ['journal-fallback-test']
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: 'wrong-snapshot',
+              guidanceText: 'Rejected guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['wrong-snapshot']
+            }
+          };
+        }
+        return {
+          ok: true,
+          roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: 'Keep the scene frame anchored to the current user action.',
+              evidenceRefs: ['message:2']
+            }]
+          }
+        };
+      }
+    }
+  });
+
+  const result = await runtime.prepareForGeneration({ userMessage: 'Persist guidance fallback reason.' });
+  const journal = await storage.loadRunJournal(runtime.view().lastSnapshot.chatKey);
+  const handEntry = journal.entries.find((entry) => entry.event === 'hand.selected' && entry.runId === result.packet.diagnostics.runId);
+  assertEqual(result.packet.diagnostics.guidanceStatus, 'fallback-raw-only', 'runtime packet records guidance fallback');
+  assertEqual(handEntry.details.guidanceStatus, 'fallback-raw-only', 'hand journal records guidance fallback status');
+  assertEqual(handEntry.details.guidanceFallbackReason, 'snapshot-mismatch', 'hand journal records guidance fallback reason');
+}
+
+{
   let activeSwipe = 'a';
   let arbiterCalls = 0;
   let swipeACardId = '';

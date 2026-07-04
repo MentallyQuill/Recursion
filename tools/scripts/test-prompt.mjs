@@ -215,6 +215,32 @@ assert(rawOnlyPacket.sections.cardEvidence.includes('SOCIAL_SUBTEXT_MARKER'), 'r
 assert(!rawOnlyPacket.sections.guidance.includes('BAD_GUIDANCE'), 'invalid guidance is not injected');
 assertEqual(rawOnlyPacket.diagnostics.guidanceStatus, 'fallback-raw-only', 'fallback status recorded');
 
+const badGuidancePacket = await composePromptPacket({
+  runId: 'bad-guidance-run',
+  hand: markerHand({ omitted: [] }),
+  snapshot,
+  settings: { promptFootprint: 'normal', reasonerUse: 'off' },
+  generationRouter: {
+    async generate() {
+      return {
+        ok: true,
+        data: {
+          schema: 'recursion.guidanceComposer.v1',
+          snapshotHash: 'wrong-snapshot',
+          guidanceText: 'This should be rejected.',
+          sourceCardIds: ['scene-card'],
+          guardrailCardIds: [],
+          omittedCardIds: [],
+          diagnostics: ['wrong-snapshot']
+        }
+      };
+    }
+  }
+});
+assertEqual(badGuidancePacket.diagnostics.guidanceStatus, 'fallback-raw-only', 'invalid guidance falls back to raw card evidence');
+assertEqual(badGuidancePacket.diagnostics.guidanceFallbackReason, 'snapshot-mismatch', 'invalid guidance records exact fallback reason');
+assert(badGuidancePacket.sections.guidance.includes('Guidance unavailable'), 'fallback guidance text is visible in guidance section');
+
 const noRouterPacket = await composePromptPacket({
   hand: markerHand(),
   snapshot: baseSnapshot(),

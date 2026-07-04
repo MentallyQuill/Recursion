@@ -523,6 +523,12 @@ function normalizeHandSelectedDetails(details) {
     handId: safeJournalText(source.handId, 160),
     selectedCount: numberValue(source.selectedCount, 0, 100000),
     omittedCount: numberValue(source.omittedCount, 0, 100000),
+    guidanceStatus: safeJournalText(source.guidanceStatus, 80),
+    guidanceFallbackReason: safeJournalText(source.guidanceFallbackReason, 180),
+    guidanceInvalidSourceIdCount: numberValue(source.guidanceInvalidSourceIdCount, 0, 100000),
+    guidanceSourceCardCount: numberValue(source.guidanceSourceCardCount, 0, 100000),
+    guidanceGuardrailCardCount: numberValue(source.guidanceGuardrailCardCount, 0, 100000),
+    guidanceOmittedCardCount: numberValue(source.guidanceOmittedCardCount, 0, 100000),
     listedCount: numberValue(source.listedCount, cards.length, 16),
     truncated: source.truncated === true,
     cards

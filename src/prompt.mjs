@@ -371,7 +371,7 @@ function normalizePrecomposedGuidance(value, allowedIds) {
   const source = asObject(value);
   const text = safeText(source.text ?? source.guidanceText, MAX_GUIDANCE_TEXT);
   if (!text || hiddenReasoningDetected(text)) {
-    return guidanceFallback('fallback-raw-only', 'precomposed_guidance_invalid');
+    return guidanceFallback('fallback-raw-only', 'precomposed-guidance-invalid');
   }
   const sourceIds = filterGuidanceIds(source.sourceCardIds, allowedIds);
   const guardrailIds = filterGuidanceIds(source.guardrailCardIds, allowedIds);
@@ -404,13 +404,13 @@ function guidanceFallback(status, reason) {
 }
 
 function fallbackReasonFromGuidanceResult(result, expectedSnapshotHash = '') {
-  if (!result) return 'guidance_returned_no_result';
-  if (result.ok === false) return safeText(result.error?.code || result.error?.message || 'guidance_failed', MAX_DIAGNOSTIC_TEXT);
-  if (result.data?.schema !== GUIDANCE_SCHEMA) return 'guidance_schema_mismatch';
-  if (expectedSnapshotHash && String(result.data?.snapshotHash || '') !== expectedSnapshotHash) return 'guidance_snapshot_mismatch';
-  if (!safeText(result.data?.guidanceText, MAX_GUIDANCE_TEXT)) return 'guidance_text_missing';
-  if (hiddenReasoningDetected(result.data?.guidanceText)) return 'guidance_hidden_reasoning';
-  return 'guidance_invalid';
+  if (!result) return 'no-result';
+  if (result.ok === false) return safeText(result.error?.code || result.error?.message || 'provider-failed', MAX_DIAGNOSTIC_TEXT);
+  if (result.data?.schema !== GUIDANCE_SCHEMA) return 'schema-mismatch';
+  if (expectedSnapshotHash && String(result.data?.snapshotHash || '') !== expectedSnapshotHash) return 'snapshot-mismatch';
+  if (!safeText(result.data?.guidanceText, MAX_GUIDANCE_TEXT)) return 'text-missing';
+  if (hiddenReasoningDetected(result.data?.guidanceText)) return 'hidden-reasoning';
+  return 'invalid';
 }
 
 function validateGuidanceResult(result, allowedIds, expectedSnapshotHash) {
@@ -426,7 +426,7 @@ function validateGuidanceResult(result, allowedIds, expectedSnapshotHash) {
   const guardrailIds = filterGuidanceIds(result.data?.guardrailCardIds, allowedIds);
   const omitted = filterGuidanceOmissions(result.data?.omittedCardIds, allowedIds);
   if (sourceIds.rawCount > 0 && sourceIds.ids.length === 0 && allowedIds.size > 0) {
-    return { ok: false, reason: 'guidance_source_ids_invalid' };
+    return { ok: false, reason: 'source-ids-invalid' };
   }
   return {
     ok: true,

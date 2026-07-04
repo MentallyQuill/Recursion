@@ -3313,6 +3313,7 @@ export function createRecursionRuntime({
   async function appendHandSelectedJournal(runId, snapshot, hand, packet) {
     const selectedCards = Array.isArray(hand?.cards) ? hand.cards : [];
     const omittedCards = Array.isArray(hand?.omitted) ? hand.omitted : [];
+    const packetDiagnostics = asObject(packet?.diagnostics);
     const selectedTokenEstimate = selectedCards.reduce((total, card) => {
       const tokenEstimate = numberOr(card?.tokenEstimate, 0);
       return total + Math.max(0, Math.round(tokenEstimate));
@@ -3327,6 +3328,18 @@ export function createRecursionRuntime({
         handId: safeIdentifier(hand?.handId || '', 'hand', 160),
         selectedCount: selectedCards.length,
         omittedCount: omittedCards.length,
+        guidanceStatus: safeText(packetDiagnostics.guidanceStatus || '', 80),
+        guidanceFallbackReason: safeText(packetDiagnostics.guidanceFallbackReason || '', 180),
+        guidanceInvalidSourceIdCount: Math.max(0, Math.round(numberOr(packetDiagnostics.guidanceInvalidSourceIdCount, 0))),
+        guidanceSourceCardCount: Array.isArray(packetDiagnostics.guidanceSourceCardIds)
+          ? packetDiagnostics.guidanceSourceCardIds.length
+          : 0,
+        guidanceGuardrailCardCount: Array.isArray(packetDiagnostics.guidanceGuardrailCardIds)
+          ? packetDiagnostics.guidanceGuardrailCardIds.length
+          : 0,
+        guidanceOmittedCardCount: Array.isArray(packetDiagnostics.guidanceOmittedCardIds)
+          ? packetDiagnostics.guidanceOmittedCardIds.length
+          : 0,
         listedCount: Math.min(selectedCards.length, 16),
         truncated: selectedCards.length > 16,
         cards: selectedCards.map((card) => ({

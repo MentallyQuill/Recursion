@@ -1,4 +1,4 @@
-import { cacheContractVersions, createRecursionRuntime } from '../../src/runtime.mjs';
+import { cacheContractVersions, createRecursionRuntime, rapidWarmContractVersions } from '../../src/runtime.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
@@ -152,6 +152,7 @@ function rapidWarmSnapshotFixture() {
 }
 
 function rapidWarmCacheFixture({ cardId = 'warm-card-1', baseSourceRevisionHash } = {}) {
+  const rapidContracts = rapidWarmContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
   return {
     cacheState: 'active',
     versions: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }),
@@ -205,10 +206,10 @@ function rapidWarmCacheFixture({ cardId = 'warm-card-1', baseSourceRevisionHash 
             evidenceRefs: ['message:2'],
             reason: 'Warm assistant narration establishes form.'
           },
-          settingsHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).settingsHash,
-          providerContractHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).providerContractHash,
-          cardCatalogHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).cardCatalogHash,
-          promptContractHash: cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' }).promptContractHash,
+          settingsHash: rapidContracts.settingsHash,
+          providerContractHash: rapidContracts.providerContractHash,
+          cardCatalogHash: rapidContracts.cardCatalogHash,
+          promptContractHash: rapidContracts.promptContractHash,
           diagnostics: ['rapid-warm-ready']
         }
       }
@@ -397,6 +398,41 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
       };
     }
   };
+}
+
+{
+  const baseline = rapidWarmContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
+  const unrelated = rapidWarmContractVersions({
+    pipelineMode: 'rapid',
+    mode: 'auto',
+    retention: { sourceVariantsPerScene: 12, runJournalEntries: 12 },
+    providers: {
+      reasoner: {
+        enabled: true,
+        source: 'openai-compatible',
+        openAICompatible: { baseUrl: 'https://reasoner.changed/v1', model: 'changed-reasoner' },
+        temperature: 0.1,
+        topP: 1,
+        maxTokens: 4096
+      }
+    }
+  });
+  const utilityChanged = rapidWarmContractVersions({
+    pipelineMode: 'rapid',
+    mode: 'auto',
+    providers: {
+      utility: {
+        enabled: true,
+        source: 'openai-compatible',
+        openAICompatible: { baseUrl: 'https://utility.changed/v1', model: 'changed-utility' },
+        temperature: 0.3,
+        topP: 1,
+        maxTokens: 4096
+      }
+    }
+  });
+  assertEqual(unrelated.settingsHash, baseline.settingsHash, 'Rapid warm settings hash ignores unrelated retention and Reasoner drift');
+  assertNotEqual(utilityChanged.settingsHash, baseline.settingsHash, 'Rapid warm settings hash changes for Utility provider drift');
 }
 
 {
@@ -768,6 +804,133 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  const warmCache = rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, warmCache);
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: {
+      pipelineMode: 'rapid',
+      mode: 'auto',
+      retention: { sourceVariantsPerScene: 12, runJournalEntries: 12 },
+      providers: {
+        reasoner: {
+          enabled: true,
+          source: 'openai-compatible',
+          openAICompatible: { baseUrl: 'https://reasoner.changed/v1', model: 'changed-reasoner' },
+          temperature: 0.1,
+          topP: 1,
+          maxTokens: 4096
+        }
+      }
+    },
+    snapshot,
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: ['warm-card-1'],
+              turnGuidanceText: 'UNRELATED_SETTINGS_MARKER still use Rapid.',
+              guardrailCardIds: [],
+              packetInstructions: [],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['unrelated-settings-rapid']
+            }
+          };
+        }
+        throw new Error(`unexpected unrelated settings role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Use warm deck after unrelated setting drift.' });
+  assertEqual(result.ok, true, 'Rapid succeeds after unrelated setting drift');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'rapid', 'unrelated retention/reasoner settings do not invalidate Rapid warm deck');
+  assertDeepEqual(roleCalls, ['rapidTurnDelta'], 'unrelated setting drift does not run Standard');
+}
+
+{
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  const warmCache = rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, warmCache);
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: {
+      pipelineMode: 'rapid',
+      mode: 'auto',
+      providers: {
+        utility: {
+          enabled: true,
+          source: 'openai-compatible',
+          openAICompatible: { baseUrl: 'https://utility.changed/v1', model: 'changed-utility' },
+          temperature: 0.3,
+          topP: 1,
+          maxTokens: 4096
+        }
+      }
+    },
+    snapshot,
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Utility drift standard fallback.' }],
+              reasonerDecision: { mode: 'skip', reason: 'utility drift standard fallback', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['standard-after-utility-drift']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') return cardProviderResponse(roleId, request, 'utility drift standard card.');
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'UTILITY_DRIFT_STANDARD_MARKER rebuild after Utility change.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['utility-drift-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected utility drift role ${roleId}`);
+      }
+    }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Use changed Utility settings.' });
+  assertEqual(result.ok, true, 'Rapid Utility drift falls back through Standard');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'standard', 'Utility drift invalidates the Rapid warm deck');
+  assert(!roleCalls.includes('rapidTurnDelta'), 'Utility drift does not reuse the old Rapid artifact');
+  assert(roleCalls.includes('utilityArbiter'), 'Utility drift runs Standard Arbiter');
+  assert(result.plan.diagnostics.includes('rapid-warm-miss:settings-mismatch'), 'Utility drift records a Rapid settings mismatch');
+}
+
+{
   const adapter = createMemoryStorageAdapter();
   const storage = createStorageRepository({ storage: adapter });
   const harness = createRuntimeHarness({
@@ -974,10 +1137,11 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
     latestMesId: 2,
     messages: [message0, pending2]
   };
-  const contracts = cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
+  const cacheContracts = cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
+  const rapidContracts = rapidWarmContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
   const cache = {
     cacheState: 'active',
-    versions: contracts,
+    versions: cacheContracts,
     activeSourceRevisionHash: warmHash,
     variantOrder: [olderHash, warmHash],
     variants: {
@@ -1023,10 +1187,10 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
             diagnostics: ['sparse-assistant-warm']
           },
           storyForm: UNKNOWN_STORY_FORM,
-          settingsHash: contracts.settingsHash,
-          providerContractHash: contracts.providerContractHash,
-          cardCatalogHash: contracts.cardCatalogHash,
-          promptContractHash: contracts.promptContractHash,
+          settingsHash: rapidContracts.settingsHash,
+          providerContractHash: rapidContracts.providerContractHash,
+          cardCatalogHash: rapidContracts.cardCatalogHash,
+          promptContractHash: rapidContracts.promptContractHash,
           diagnostics: ['rapid-warm-ready']
         }
       }
@@ -1122,10 +1286,11 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
     sourceRevisionHash: sourceFingerprintForMessages([message0, finalAssistant1, pending2], 0, 2),
     messages: [message0, finalAssistant1, pending2]
   };
-  const contracts = cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
+  const cacheContracts = cacheContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
+  const rapidContracts = rapidWarmContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
   const cache = {
     cacheState: 'active',
-    versions: contracts,
+    versions: cacheContracts,
     activeSourceRevisionHash: warmHash,
     variantOrder: [warmHash],
     variants: {
@@ -1166,10 +1331,10 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
             diagnostics: ['current-base-warm']
           },
           storyForm: UNKNOWN_STORY_FORM,
-          settingsHash: contracts.settingsHash,
-          providerContractHash: contracts.providerContractHash,
-          cardCatalogHash: contracts.cardCatalogHash,
-          promptContractHash: contracts.promptContractHash,
+          settingsHash: rapidContracts.settingsHash,
+          providerContractHash: rapidContracts.providerContractHash,
+          cardCatalogHash: rapidContracts.cardCatalogHash,
+          promptContractHash: rapidContracts.promptContractHash,
           diagnostics: ['rapid-warm-ready']
         }
       }

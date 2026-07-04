@@ -198,6 +198,23 @@ function cacheSettingsSignature(settings = {}) {
   };
 }
 
+function rapidWarmSettingsSignature(settings = {}) {
+  const normalized = normalizeSettings(settings);
+  return {
+    enabled: normalized.enabled,
+    mode: normalized.mode,
+    pipelineMode: normalized.pipelineMode,
+    cardScope: normalized.cardScope,
+    strength: normalized.strength,
+    minCards: normalized.minCards,
+    maxCards: normalized.maxCards,
+    reasoningLevel: normalized.reasoningLevel,
+    promptFootprint: normalized.promptFootprint,
+    focus: normalized.focus,
+    utilityProvider: cacheProviderSettingsSignature(normalized.providers?.utility)
+  };
+}
+
 export function cacheContractVersions(settings = {}) {
   return {
     storageSchemaVersion: STORAGE_SCHEMA_VERSION,
@@ -211,6 +228,16 @@ export function cacheContractVersions(settings = {}) {
     }),
     providerContractHash: PROVIDER_CONTRACT_HASH,
     settingsHash: hashJson(cacheSettingsSignature(settings))
+  };
+}
+
+export function rapidWarmContractVersions(settings = {}) {
+  const base = cacheContractVersions(settings);
+  return {
+    providerContractHash: base.providerContractHash,
+    cardCatalogHash: base.cardCatalogHash,
+    promptContractHash: base.promptContractHash,
+    settingsHash: hashJson(rapidWarmSettingsSignature(settings))
   };
 }
 
@@ -3331,7 +3358,7 @@ export function createRecursionRuntime({
         diagnostics: []
       },
       storyForm: rapidPatch.storyForm || UNKNOWN_STORY_FORM,
-      ...cacheContractVersions(settings),
+      ...rapidWarmContractVersions(settings),
       startedAt: safeText(rapidPatch.startedAt || nowIso(), 80),
       builtAt: safeText(rapidPatch.builtAt || '', 80),
       failedAt: safeText(rapidPatch.failedAt || '', 80),
@@ -3886,7 +3913,7 @@ export function createRecursionRuntime({
     let cache = null;
     let warmingRapid = null;
     const signal = startRapidWarmRun(runId, {
-      contract: cacheContractVersions(settings)
+      contract: rapidWarmContractVersions(settings)
     });
     startRuntimeActivity({
       runId,
@@ -4066,7 +4093,7 @@ export function createRecursionRuntime({
           diagnostics: guidance.diagnostics
         },
         storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
-        ...cacheContractVersions(settings),
+        ...rapidWarmContractVersions(settings),
         startedAt: warmingRapid.startedAt,
         builtAt: nowIso(),
         runId,
@@ -4341,7 +4368,7 @@ export function createRecursionRuntime({
     let candidateCards = sanitizedCacheCards(runId, turnSnapshot, activeVariant.cards, {
       allowSparseSourceRange: true
     });
-    const expectedContracts = cacheContractVersions(settings);
+    const expectedContracts = rapidWarmContractVersions(settings);
     const rapidVariantIsUsable = (artifact, cards, expectedBaseSourceRevisionHash) => rapidWarmArtifactIsUsable(artifact, {
       baseSourceRevisionHash: expectedBaseSourceRevisionHash,
       ...expectedContracts,

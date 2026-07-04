@@ -30,6 +30,14 @@ node tools\scripts\run-alpha-gate.mjs
 
 It launches offline Playwright readiness, but does not contact SillyTavern, mutate chat state, or produce live-smoke artifacts. It includes deterministic coverage for the live-harness guardrail slice.
 
+Refactor hotspot audit:
+
+```powershell
+node tools\scripts\audit-refactor-hotspots.mjs
+```
+
+This static guard checks that the major refactor boundaries remain in place: guidance activity lane support, provider core host neutrality, explicit runtime helper modules, pipeline modules, and UI/provider presenter modules.
+
 ## Current Guardrail Commands
 
 The commands in this section prove safety gates, report shape, offline Playwright readiness, dedicated-user storage probes, served-extension freshness, no-generation Recursion UI smoke, and opt-in generation evidence when the required flags and providers are configured. They do not contact SillyTavern unless a live script is run with `--live`. Live scripts reject unsafe users before mutation.

@@ -669,6 +669,12 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assert(result.plan.diagnostics.includes('rapid-warm-miss:warm-timeout'), 'timeout reason is visible in Standard diagnostics');
   assertEqual(harness.runtime.view().rapidWarm.status, 'missed', 'runtime view exposes Rapid warm miss after timeout');
   assertEqual(harness.runtime.view().rapidWarm.reasonCode, 'warm-timeout', 'runtime view exposes Rapid warm timeout reason');
+  const timeoutActivity = harness.activity.history().find((event) => event.phase === 'rapidWarmMissStandard');
+  assert(timeoutActivity, 'Rapid timeout activity history records warm miss stage');
+  assertEqual(timeoutActivity.detail.reasonCode, 'warm-timeout', 'Rapid timeout activity exposes reason code');
+  assertEqual(timeoutActivity.detail.joinAttempted, true, 'Rapid timeout activity records join attempt');
+  assertEqual(timeoutActivity.detail.joinTimedOut, true, 'Rapid timeout activity records timeout');
+  assertEqual(timeoutActivity.detail.activeWarmRunPresent, true, 'Rapid timeout activity records active warm run presence');
   gate.resolve();
   await warmPromise;
   assert(roleCalls.filter((roleId) => roleId === 'utilityArbiter').length >= 2, 'timeout test runs warm Arbiter and Standard Arbiter');

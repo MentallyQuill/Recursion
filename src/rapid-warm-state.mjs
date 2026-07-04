@@ -54,6 +54,25 @@ export function rapidWarmReasonLabel(code) {
   return REASON_LABELS[cleanText(code, 80)] || 'Rapid warm unavailable.';
 }
 
+export function rapidWarmMissSnapshot(input = {}) {
+  const diagnostics = Array.isArray(input.diagnostics)
+    ? input.diagnostics.map((entry) => cleanText(entry, 160)).filter(Boolean).slice(0, 16)
+    : [];
+  return {
+    reasonCode: cleanText(input.reasonCode || 'no-active-variant', 80) || 'no-active-variant',
+    reasonLabel: cleanText(input.reasonLabel || rapidWarmReasonLabel(input.reasonCode), SAFE_LABEL_LIMIT)
+      || rapidWarmReasonLabel(input.reasonCode),
+    exactVariant: input.exactVariant === true,
+    joinAttempted: input.joinAttempted === true,
+    joinTimedOut: input.joinTimedOut === true,
+    activeWarmRunPresent: input.activeWarmRunPresent === true,
+    activeWarmRunBaseKnown: input.activeWarmRunBaseKnown === true,
+    candidateCardCount: Math.max(0, Math.floor(Number(input.candidateCardCount) || 0)),
+    selectedCardCount: Math.max(0, Math.floor(Number(input.selectedCardCount) || 0)),
+    diagnostics
+  };
+}
+
 export function rapidWarmMissReason({
   activeVariant = {},
   rapid = null,

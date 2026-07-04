@@ -1,6 +1,7 @@
 import {
   RAPID_WARM_JOIN_WAIT_MS,
   rapidWarmMissReason,
+  rapidWarmMissSnapshot,
   rapidWarmReasonLabel,
   rapidWarmStatusView
 } from '../../src/rapid-warm-state.mjs';
@@ -50,6 +51,33 @@ assertDeepEqual(
   }),
   { code: 'settings-mismatch', label: 'Rapid deck was built with different settings.' },
   'settings mismatch reason is detected'
+);
+
+assertDeepEqual(
+  rapidWarmMissSnapshot({
+    reasonCode: 'warm-timeout',
+    exactVariant: true,
+    joinAttempted: true,
+    joinTimedOut: true,
+    activeWarmRunPresent: true,
+    activeWarmRunBaseKnown: true,
+    candidateCardCount: 2,
+    selectedCardCount: 1,
+    diagnostics: ['rapid-warm-miss-standard', 'authorization Bearer secret-token']
+  }),
+  {
+    reasonCode: 'warm-timeout',
+    reasonLabel: 'Rapid deck still warming; Standard started.',
+    exactVariant: true,
+    joinAttempted: true,
+    joinTimedOut: true,
+    activeWarmRunPresent: true,
+    activeWarmRunBaseKnown: true,
+    candidateCardCount: 2,
+    selectedCardCount: 1,
+    diagnostics: ['rapid-warm-miss-standard']
+  },
+  'Rapid miss snapshot is bounded, stable, and redacts unsafe diagnostic text'
 );
 
 assertDeepEqual(

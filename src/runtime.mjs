@@ -31,6 +31,7 @@ import {
 import {
   RAPID_WARM_JOIN_WAIT_MS,
   rapidWarmMissReason,
+  rapidWarmMissSnapshot,
   rapidWarmReasonLabel,
   rapidWarmStatusView
 } from './rapid-warm-state.mjs';
@@ -4382,18 +4383,33 @@ export function createRecursionRuntime({
       `rapid-prompt-contract:${safeText(rapid?.promptContractHash || '', 12)}:${safeText(expectedContracts.promptContractHash || '', 12)}`,
       ...alternateWarmDiagnostics.slice(0, 8)
     ];
-    async function appendRapidWarmMissJournal(reasonCode, reasonLabel) {
+    function buildRapidWarmMissSnapshot({
+      reasonCode,
+      reasonLabel,
+      joinAttempted = false,
+      joinTimedOut = false
+    } = {}) {
+      return rapidWarmMissSnapshot({
+        reasonCode,
+        reasonLabel,
+        exactVariant: activeVariant.exact,
+        joinAttempted,
+        joinTimedOut,
+        activeWarmRunPresent: Boolean(activeRapidWarmRun),
+        activeWarmRunBaseKnown: Boolean(activeRapidWarmRun?.baseSourceRevisionHash),
+        candidateCardCount: candidateCards.length,
+        selectedCardCount: Array.isArray(rapid?.selectedCardIds) ? rapid.selectedCardIds.length : 0,
+        diagnostics: warmMissDiagnostics()
+      });
+    }
+    async function appendRapidWarmMissJournal(missSnapshot) {
       await appendJournalSafe(runId, turnSnapshot.chatKey, {
         event: 'rapid.warm_missed',
         severity: 'warn',
         summary: 'Rapid warm missed; Standard started.',
         runId,
         sceneKey: turnSnapshot.sceneKey,
-        details: {
-          reasonCode: safeText(reasonCode || '', 80),
-          reasonLabel: safeText(reasonLabel || '', 240),
-          diagnostics: warmMissDiagnostics()
-        },
+        details: missSnapshot,
         hashes: {
           baseSourceRevisionHash: safeText(baseSourceRevisionHash, 180),
           turnSourceRevisionHash: safeText(turnSourceRevisionHash, 180)
@@ -4436,11 +4452,17 @@ export function createRecursionRuntime({
             signal
           });
         }
+        const missSnapshot = buildRapidWarmMissSnapshot({
+          reasonCode: joined.reasonCode || 'warm-failed',
+          reasonLabel: rapidWarmReasonLabel(joined.reasonCode || 'warm-failed'),
+          joinAttempted: true,
+          joinTimedOut: joined.reasonCode === 'warm-timeout'
+        });
         lastRapidWarmView = rapidWarmStatusView({
           ...lastRapidWarmView,
           status: 'missed',
-          reasonCode: joined.reasonCode || 'warm-failed',
-          reasonLabel: rapidWarmReasonLabel(joined.reasonCode || 'warm-failed'),
+          reasonCode: missSnapshot.reasonCode,
+          reasonLabel: missSnapshot.reasonLabel,
           joinable: false
         });
         stageRuntimeActivity({
@@ -4448,23 +4470,26 @@ export function createRecursionRuntime({
           phase: 'rapidWarmMissStandard',
           label: 'Rapid warm missed; Standard started.',
           chips: ['Rapid', 'Standard'],
-          detail: {
-            reasonCode: joined.reasonCode || 'warm-failed',
-            reasonLabel: rapidWarmReasonLabel(joined.reasonCode || 'warm-failed')
-          }
+          detail: missSnapshot
         });
-        await appendRapidWarmMissJournal(joined.reasonCode || 'warm-failed', rapidWarmReasonLabel(joined.reasonCode || 'warm-failed'));
+        await appendRapidWarmMissJournal(missSnapshot);
         return {
           ok: false,
           escalateToStandard: true,
-          diagnostics: [...warmMissDiagnostics(), `rapid-warm-miss:${joined.reasonCode || 'warm-failed'}`]
+          diagnostics: [...missSnapshot.diagnostics, `rapid-warm-miss:${missSnapshot.reasonCode}`]
         };
       }
+      const missSnapshot = buildRapidWarmMissSnapshot({
+        reasonCode: miss.code,
+        reasonLabel: miss.label,
+        joinAttempted: Boolean(joinableWarm),
+        joinTimedOut: false
+      });
       lastRapidWarmView = rapidWarmStatusView({
         ...lastRapidWarmView,
         status: 'missed',
-        reasonCode: miss.code,
-        reasonLabel: miss.label,
+        reasonCode: missSnapshot.reasonCode,
+        reasonLabel: missSnapshot.reasonLabel,
         joinable: false
       });
       stageRuntimeActivity({
@@ -4472,33 +4497,40 @@ export function createRecursionRuntime({
         phase: 'rapidWarmMissStandard',
         label: 'Rapid warm missed; Standard started.',
         chips: ['Rapid', 'Standard'],
-        detail: {
-          reasonCode: miss.code,
-          reasonLabel: miss.label,
-          exactVariant: activeVariant.exact,
-          candidateCardCount: candidateCards.length,
-          baseSourceRevisionHash: safeText(baseSourceRevisionHash, 80),
-          artifactBaseSourceRevisionHash: safeText(rapid?.baseSourceRevisionHash || '', 80),
-          artifactStatus: safeText(rapid?.status || '', 80),
-          settingsHash: safeText(expectedContracts.settingsHash || '', 80),
-          artifactSettingsHash: safeText(rapid?.settingsHash || '', 80),
-          promptContractHash: safeText(expectedContracts.promptContractHash || '', 80),
-          artifactPromptContractHash: safeText(rapid?.promptContractHash || '', 80)
-        }
+        detail: missSnapshot
       });
-      await appendRapidWarmMissJournal(miss.code, miss.label);
+      await appendRapidWarmMissJournal(missSnapshot);
       return {
         ok: false,
         escalateToStandard: true,
-        diagnostics: [...warmMissDiagnostics(), `rapid-warm-miss:${miss.code}`]
+        diagnostics: [...missSnapshot.diagnostics, `rapid-warm-miss:${missSnapshot.reasonCode}`]
       };
     }
     const selectedWarmCards = candidateCards.filter((card) => (rapid.selectedCardIds || []).includes(card.id));
     if (!selectedWarmCards.length) {
+      const missSnapshot = buildRapidWarmMissSnapshot({
+        reasonCode: 'selected-card-miss',
+        reasonLabel: rapidWarmReasonLabel('selected-card-miss')
+      });
+      lastRapidWarmView = rapidWarmStatusView({
+        ...lastRapidWarmView,
+        status: 'missed',
+        reasonCode: missSnapshot.reasonCode,
+        reasonLabel: missSnapshot.reasonLabel,
+        joinable: false
+      });
+      stageRuntimeActivity({
+        runId,
+        phase: 'rapidWarmMissStandard',
+        label: 'Rapid warm missed; Standard started.',
+        chips: ['Rapid', 'Standard'],
+        detail: missSnapshot
+      });
+      await appendRapidWarmMissJournal(missSnapshot);
       return {
         ok: false,
         escalateToStandard: true,
-        diagnostics: [...warmMissDiagnostics(), 'rapid-selected-card-miss']
+        diagnostics: [...missSnapshot.diagnostics, 'rapid-selected-card-miss']
       };
     }
     stageRuntimeActivity({

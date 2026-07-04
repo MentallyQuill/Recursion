@@ -23,6 +23,7 @@ import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 import { FOCUS_BOOSTED_FAMILIES } from './settings-policy.mjs';
 import { DEFAULT_RETENTION_SETTINGS, RETENTION_LIMITS } from './retention-policy.mjs';
 import { createUiActionStatus } from './ui/action-status.mjs';
+import { providerSelector, providerStatusClass, readProviderDraftFromControls } from './ui/provider-panel.mjs';
 
 const PHASE_LABELS = Object.freeze({
   idle: '',
@@ -1111,16 +1112,6 @@ function controlValue(root, selector) {
   return String(root.querySelector(selector)?.value ?? '').trim();
 }
 
-function controlElement(root, selector) {
-  return root?.querySelector?.(selector) ?? null;
-}
-
-function controlValueOrFallback(root, selector, fallback = '') {
-  const element = controlElement(root, selector);
-  if (!element) return fallback;
-  return cleanText(element.value);
-}
-
 function controlNumber(root, selector, fallback) {
   const value = Number(controlValue(root, selector));
   return Number.isFinite(value) ? value : fallback;
@@ -2016,17 +2007,6 @@ function providerDataset(name, lane) {
   return { [`recursionProvider${name}${suffix}`]: '' };
 }
 
-function providerSelector(name, lane) {
-  return `[data-recursion-provider-${name}-${lane}]`;
-}
-
-function providerStatusClass(text) {
-  const status = cleanText(text).toLowerCase();
-  return status === 'not run' || status === 'ok' || status === 'pass' || status === 'passed' || status === 'ready'
-    ? 'recursion-provider-status pass'
-    : 'recursion-provider-status';
-}
-
 function renderProviderHiddenDefaults(group, lane, provider) {
   const source = asObject(provider);
   group.appendChild(inputControl({
@@ -2283,17 +2263,13 @@ function providerReadinessNode(provider, lane, options = {}) {
 }
 
 export function providerFromControls(container, lane, savedProvider = {}) {
-  const saved = asObject(savedProvider);
-  const savedOpenAI = asObject(saved.openAICompatible);
-  return {
-    source: controlValueOrFallback(container, providerSelector('source', lane), saved.source || 'host-current-model') || 'host-current-model',
-    hostConnectionProfileId: controlValueOrFallback(container, providerSelector('profile', lane), saved.hostConnectionProfileId || ''),
-    openAICompatible: {
-      baseUrl: controlValueOrFallback(container, providerSelector('base-url', lane), savedOpenAI.baseUrl || ''),
-      model: controlValueOrFallback(container, providerSelector('model', lane), savedOpenAI.model || ''),
-      sessionApiKeyPresent: Boolean(controlValueOrFallback(container, providerSelector('api-key', lane), ''))
-    }
-  };
+  return readProviderDraftFromControls({
+    root: container,
+    lane,
+    savedProvider,
+    cleanText,
+    asObject
+  });
 }
 
 function syncProviderReadiness(container, lane, savedProvider = {}, options = {}) {
@@ -2342,7 +2318,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   }, [
     el('span', { className: 'recursion-provider-card-title', text: title }),
     el('span', {
-      className: providerStatusClass(statusText),
+      className: providerStatusClass(statusText, { baseClass: 'recursion-provider-status' }),
       text: statusText,
       dataset: providerDataset('Status', lane)
     })

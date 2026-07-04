@@ -1195,6 +1195,8 @@ The compact Providers tab shows Utility details by default and keeps Reasoner as
 
 The Providers tab should build Utility and Reasoner profile comboboxes from one connection-profile lookup per render. Profile discovery must not walk character-card, persona, group, avatar, or Recursion card collections; those collections can be large enough to make native dropdown expansion feel blocked. The combobox list must be scrollable for long SillyTavern profile collections, open inside the provider lane flow so rounded disclosures do not clip the options, and filter typing must not write partial text into provider settings.
 
+Provider selector, status-class, and draft-reading helpers live in the provider panel module so the Providers tab keeps one stable control contract while the surrounding settings surface is refactored.
+
 Provider cards must not sprawl by rendering profile and OpenAI endpoint fields together. The selected Source owns the visible option context, while hidden alternate-source values remain available if the user switches back.
 
 Provider lane controls autosave. Tooltip and helper copy must not mention a Save Provider action; testing a provider is a separate explicit command.

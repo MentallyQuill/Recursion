@@ -8,6 +8,7 @@ import {
 } from '../../src/card-scope.mjs';
 import { activityLabel, createRecursionViewModel, mountRecursionUi, providerFromControls } from '../../src/ui.mjs';
 import { createUiActionStatus, normalizeUiActionFailure } from '../../src/ui/action-status.mjs';
+import { providerSelector, providerStatusClass } from '../../src/ui/provider-panel.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -23,6 +24,10 @@ function fakeProviderControls(values = {}) {
 
 assertEqual(activityLabel({ phase: 'cardBatchRunning' }), 'Generating scene cards...', 'phase label mapped');
 assertEqual(activityLabel({ phase: 'fusedCardBundleRunning' }), 'Generating fused card bundle...', 'Fused phase label mapped');
+assertEqual(providerSelector('model', 'utility'), '[data-recursion-provider-model-utility]', 'provider selector helper is stable');
+assertEqual(providerStatusClass('Ready'), 'is-ready', 'provider status ready class is stable');
+assertEqual(providerStatusClass('Missing model'), 'is-warning', 'provider status warning class is stable');
+assertEqual(providerStatusClass('Ready', { baseClass: 'recursion-provider-status' }), 'recursion-provider-status pass', 'provider chrome status class preserves existing shape');
 const savedProviderDraft = {
   source: 'host-connection-profile',
   hostConnectionProfileId: 'saved-profile',

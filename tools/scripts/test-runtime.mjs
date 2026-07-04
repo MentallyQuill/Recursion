@@ -4,6 +4,7 @@ import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
 import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
 import { createRuntimeRunState } from '../../src/runtime/run-state.mjs';
+import { clearPromptBestEffort, installPrompt } from '../../src/runtime/prompt-install.mjs';
 import { CARD_CATALOG, cardsFromProviderResult } from '../../src/cards.mjs';
 import {
   CARD_SCOPE_CATALOG,
@@ -81,6 +82,27 @@ function assertNotEqual(actual, expected, message) {
   assertEqual(runState.takeForceRegenerate().id, 'force-1', 'force regenerate token is taken once');
   runState.clearActiveRun('run-state-1');
   assertEqual(runState.current().activeRunId, null, 'run state clears active run');
+}
+
+{
+  const promptInstallCalls = [];
+  const promptHost = {
+    prompt: {
+      async install(packet, options) {
+        promptInstallCalls.push({ packet, options });
+        return { ok: true, promptId: 'prompt-1' };
+      },
+      async clear(options) {
+        promptInstallCalls.push({ clear: true, options });
+        return { ok: true };
+      }
+    }
+  };
+  const install = await installPrompt(promptHost, { promptText: 'Prompt' });
+  const clear = await clearPromptBestEffort(promptHost);
+  assertEqual(promptInstallCalls.length, 2, 'prompt install helper calls clear and install');
+  assertEqual(install.ok, true, 'prompt install helper preserves successful install result');
+  assertEqual(clear.ok, true, 'prompt clear helper preserves successful clear result');
 }
 
 function parsePromptJsonSection(prompt, label) {

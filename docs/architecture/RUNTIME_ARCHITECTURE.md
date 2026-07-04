@@ -63,6 +63,7 @@ Primary components:
 - Composer: deterministic prompt assembly and optional model-mediated synthesis.
 - Reasoner: optional deeper synthesis lane that is never required for generation to continue.
 - Prompt Injector: installs, updates, and clears host prompt entries through the adapter.
+- Prompt Install Helper: normalizes host prompt writes and clear attempts into sanitized runtime diagnostics.
 - Diagnostics Recorder: records structured, sanitized runtime events for the status and inspector surfaces.
 - Activity Reporter: aggregates runtime, provider, storage, and prompt events into concise user-visible phases for the Recursion Bar, Hero Pixel Array progress menu, and Full Viewer.
 

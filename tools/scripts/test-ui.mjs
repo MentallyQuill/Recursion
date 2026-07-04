@@ -6,13 +6,47 @@ import {
   setFamilyEnabled,
   setSubItemEnabled
 } from '../../src/card-scope.mjs';
-import { activityLabel, createRecursionViewModel, mountRecursionUi } from '../../src/ui.mjs';
+import { activityLabel, createRecursionViewModel, mountRecursionUi, providerFromControls } from '../../src/ui.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
+function fakeProviderControls(values = {}) {
+  return {
+    querySelector(selector) {
+      if (!Object.hasOwn(values, selector)) return null;
+      return { value: values[selector] };
+    }
+  };
+}
+
 assertEqual(activityLabel({ phase: 'cardBatchRunning' }), 'Generating scene cards...', 'phase label mapped');
 assertEqual(activityLabel({ phase: 'fusedCardBundleRunning' }), 'Generating fused card bundle...', 'Fused phase label mapped');
+const savedProviderDraft = {
+  source: 'host-connection-profile',
+  hostConnectionProfileId: 'saved-profile',
+  openAICompatible: {
+    baseUrl: 'https://saved.example/v1',
+    model: 'saved-model',
+    sessionApiKeyPresent: true
+  }
+};
+const clearedProviderDraft = providerFromControls(fakeProviderControls({
+  '[data-recursion-provider-source-utility]': 'openai-compatible',
+  '[data-recursion-provider-profile-utility]': '',
+  '[data-recursion-provider-base-url-utility]': '',
+  '[data-recursion-provider-model-utility]': '',
+  '[data-recursion-provider-api-key-utility]': ''
+}), 'utility', savedProviderDraft);
+assertEqual(clearedProviderDraft.source, 'openai-compatible', 'provider draft uses current source control');
+assertEqual(clearedProviderDraft.hostConnectionProfileId, '', 'blank current profile does not fall back to saved profile');
+assertEqual(clearedProviderDraft.openAICompatible.baseUrl, '', 'blank current base URL does not fall back to saved base URL');
+assertEqual(clearedProviderDraft.openAICompatible.model, '', 'blank current model does not fall back to saved model');
+assertEqual(clearedProviderDraft.openAICompatible.sessionApiKeyPresent, false, 'blank current API key is not treated as present');
+const missingProviderDraft = providerFromControls(fakeProviderControls({}), 'utility', savedProviderDraft);
+assertEqual(missingProviderDraft.hostConnectionProfileId, 'saved-profile', 'missing profile control falls back to saved profile');
+assertEqual(missingProviderDraft.openAICompatible.baseUrl, 'https://saved.example/v1', 'missing base URL control falls back to saved base URL');
+assertEqual(missingProviderDraft.openAICompatible.model, 'saved-model', 'missing model control falls back to saved model');
 const model = createRecursionViewModel({
   settings: { mode: 'auto' },
   lastHand: { cards: [{ id: 'c1' }, { id: 'c2' }] },

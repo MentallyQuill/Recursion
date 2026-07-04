@@ -1111,6 +1111,16 @@ function controlValue(root, selector) {
   return String(root.querySelector(selector)?.value ?? '').trim();
 }
 
+function controlElement(root, selector) {
+  return root?.querySelector?.(selector) ?? null;
+}
+
+function controlValueOrFallback(root, selector, fallback = '') {
+  const element = controlElement(root, selector);
+  if (!element) return fallback;
+  return cleanText(element.value);
+}
+
 function controlNumber(root, selector, fallback) {
   const value = Number(controlValue(root, selector));
   return Number.isFinite(value) ? value : fallback;
@@ -2260,18 +2270,16 @@ function providerReadinessNode(provider, lane, options = {}) {
   ]);
 }
 
-function providerFromControls(container, lane, savedProvider = {}) {
+export function providerFromControls(container, lane, savedProvider = {}) {
   const saved = asObject(savedProvider);
+  const savedOpenAI = asObject(saved.openAICompatible);
   return {
-    ...saved,
-    source: controlValue(container, providerSelector('source', lane)) || saved.source || 'host-current-model',
-    hostConnectionProfileId: controlValue(container, providerSelector('profile', lane)) || saved.hostConnectionProfileId || '',
+    source: controlValueOrFallback(container, providerSelector('source', lane), saved.source || 'host-current-model') || 'host-current-model',
+    hostConnectionProfileId: controlValueOrFallback(container, providerSelector('profile', lane), saved.hostConnectionProfileId || ''),
     openAICompatible: {
-      ...asObject(saved.openAICompatible),
-      baseUrl: controlValue(container, providerSelector('base-url', lane)) || saved.openAICompatible?.baseUrl || '',
-      model: controlValue(container, providerSelector('model', lane)) || saved.openAICompatible?.model || '',
-      sessionApiKeyPresent: Boolean(controlValue(container, providerSelector('api-key', lane)))
-        || saved.openAICompatible?.sessionApiKeyPresent === true
+      baseUrl: controlValueOrFallback(container, providerSelector('base-url', lane), savedOpenAI.baseUrl || ''),
+      model: controlValueOrFallback(container, providerSelector('model', lane), savedOpenAI.model || ''),
+      sessionApiKeyPresent: Boolean(controlValueOrFallback(container, providerSelector('api-key', lane), ''))
     }
   };
 }

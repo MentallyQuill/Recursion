@@ -1051,6 +1051,7 @@ function pendingUserInstallStillCurrent(expected, current, pendingUserMessage, o
     );
   if (!latestMatches(expectedLatest) || !latestMatches(currentLatest)) return false;
   if (prefixContentMatches) return true;
+  if (options.allowPendingUserPrefixDrift === true) return true;
 
   const expectedBaseSourceRevisionHash = safeText(options.baseSourceRevisionHash || '', 180);
   if (!expectedBaseSourceRevisionHash) return false;
@@ -2366,10 +2367,13 @@ export function createRecursionRuntime({
     if (promptNeutralPatch) {
       return { ok: true, settings: next, clear: null };
     }
+    const shouldWarmRapidAfterSettingsChange = changedKeys.length > 0
+      && next.enabled !== false
+      && next.pipelineMode === 'rapid';
     if (changedKeys.length > 0) {
       supersedeActiveRun();
       abortActiveRapidWarmRun('settings-mismatch');
-      return trackRuntimeMutation(async () => {
+      const result = await trackRuntimeMutation(async () => {
         await invalidateActiveSceneCacheBestEffort('settings-changed', {
           changedKeys
         });
@@ -2381,6 +2385,11 @@ export function createRecursionRuntime({
         });
         return { ok: clear?.ok !== false, settings: next, clear };
       });
+      if (!shouldWarmRapidAfterSettingsChange) return result;
+      Promise.resolve()
+        .then(() => warmRapidScene({ reason: 'settings-changed' }))
+        .catch(() => {});
+      return { ...result, warm: { queued: true, reason: 'settings-changed' } };
     }
     return { ok: true, settings: next, clear: null };
   }
@@ -3494,11 +3503,26 @@ export function createRecursionRuntime({
         plan
       );
       if (!snapshotsMatchForPromptInstall(expectedSnapshot, currentSnapshot, pendingUserMessage, options)) {
+        const comparison = promptInstallComparisonDiagnostics(expectedSnapshot, currentSnapshot, pendingUserMessage, options);
+        const allowPrefixDrift = options.allowPendingUserPrefixDrift === true
+          && comparison.pendingTextPresent === true
+          && comparison.chatKeyMatch === true
+          && comparison.sceneKeyMatch === true
+          && comparison.sceneFingerprintMatch === true
+          && comparison.latestMesIdMatch === true
+          && comparison.messageCountMatch === true
+          && comparison.expectedLatest?.role === 'user'
+          && comparison.currentLatest?.role === 'user'
+          && comparison.expectedLatest?.textHashMatches === true
+          && comparison.currentLatest?.textHashMatches === true;
+        if (allowPrefixDrift) {
+          return { ok: true, snapshot: currentSnapshot, prefixDrift: true };
+        }
         return {
           ok: false,
           reason: 'stale-snapshot',
           currentSnapshot,
-          comparison: promptInstallComparisonDiagnostics(expectedSnapshot, currentSnapshot, pendingUserMessage, options)
+          comparison
         };
       }
       return { ok: true, snapshot: currentSnapshot };
@@ -3796,7 +3820,17 @@ export function createRecursionRuntime({
       }
       const activeCache = activeSceneCacheVariant(cache, snapshot);
       const cacheCards = cardsWithOrigin(sanitizedCacheCards(runId, snapshot, activeCache.cards), 'cache');
-      const candidateCards = [...cacheCards, ...providerCards];
+      const fallbackCards = !cacheCards.length && !providerCards.length
+        ? cardsWithOrigin(localCards(snapshot).map(sanitizeGeneratedCard), 'fallback')
+        : [];
+      if (fallbackCards.length) {
+        plan = {
+          ...plan,
+          diagnostics: mergeDiagnostics(plan.diagnostics, ['rapid-warm-local-fallback-cards'])
+        };
+        lastPlan = plan;
+      }
+      const candidateCards = [...cacheCards, ...providerCards, ...fallbackCards];
       if (!candidateCards.length) {
         const failedAt = nowIso();
         const failureReasonCode = 'no-candidate-cards';
@@ -3830,8 +3864,14 @@ export function createRecursionRuntime({
         return warmOutcome;
       }
       const deck = applyCardPlan(cacheCards, {
-        acceptedCards: providerCards,
-        lifecycle: lifecycleForDeck(candidateCards, plan, () => 'rapid background warm')
+        acceptedCards: [...fallbackCards, ...providerCards],
+        lifecycle: lifecycleForDeck(
+          candidateCards,
+          plan,
+          (card) => (providerCards.some((entry) => entry.id === card.id)
+            ? 'utility generated card'
+            : (fallbackCards.some((entry) => entry.id === card.id) ? 'rapid fallback warm hand' : 'rapid background warm'))
+        )
       });
       const behaviorPolicy = runPolicyForEffectivePlan(settings, plan);
       const hand = selectHand(deck.cards, {
@@ -4012,7 +4052,8 @@ export function createRecursionRuntime({
       omitted: []
     };
     const freshness = await recheckPromptInstallSnapshot(runId, turnSnapshot, plan, pendingUserMessage, {
-      baseSourceRevisionHash
+      baseSourceRevisionHash,
+      allowPendingUserPrefixDrift: true
     });
     if (!isActiveRun(runId)) return supersededResult(runId);
     if (freshness.ok === false) {
@@ -4455,7 +4496,7 @@ export function createRecursionRuntime({
     }
 
     await waitForExternalMutations();
-    const pendingUserMessage = normalizePendingUserMessage(userMessage);
+    let pendingUserMessage = normalizePendingUserMessage(userMessage);
     const runId = makeId('run');
     const signal = startRun(runId);
     const forceContext = consumePendingForceRegenerate(runId);
@@ -4472,6 +4513,15 @@ export function createRecursionRuntime({
     }
     try {
       const hostSnapshot = await readSnapshot();
+      if (!pendingUserMessage.text && hostGeneration === true) {
+        const latest = latestVisibleMessage(hostSnapshot);
+        if (latest?.role === 'user' && safeText(latest.text || '', PROVIDER_MESSAGE_TEXT_LIMIT)) {
+          pendingUserMessage = normalizePendingUserMessage({
+            text: latest.text,
+            mesid: latest.mesid
+          });
+        }
+      }
       const baseSnapshot = settings.pipelineMode === 'rapid' && !refreshReason && !forceContext
         ? snapshotWithoutVisiblePendingUserMessage(hostSnapshot, pendingUserMessage)
         : hostSnapshot;

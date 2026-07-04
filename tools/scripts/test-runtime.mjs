@@ -316,7 +316,13 @@ function rapidWarmSnapshotFixture() {
   };
 }
 
-function rapidWarmCacheFixture({ cardId = 'warm-card-1', baseSourceRevisionHash } = {}) {
+function rapidWarmCacheFixture({
+  cardId = 'warm-card-1',
+  baseSourceRevisionHash,
+  firstMesId = 2,
+  lastMesId = 2,
+  evidenceRefs = ['message:2']
+} = {}) {
   const rapidContracts = rapidWarmContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
   return {
     cacheState: 'active',
@@ -332,11 +338,11 @@ function rapidWarmCacheFixture({ cardId = 'warm-card-1', baseSourceRevisionHash 
           role: 'sceneConstraintsCard',
           summary: 'The hatch stays sealed until opened.',
           promptText: 'The hatch stays sealed until opened.',
-          evidenceRefs: ['message:2'],
+          evidenceRefs,
           source: {
             chatId: 'rapid-chat',
-            firstMesId: 2,
-            lastMesId: 2,
+            firstMesId,
+            lastMesId,
             fingerprint: baseSourceRevisionHash,
             snapshotHash: baseSourceRevisionHash,
             sourceRevisionHash: baseSourceRevisionHash
@@ -368,7 +374,7 @@ function rapidWarmCacheFixture({ cardId = 'warm-card-1', baseSourceRevisionHash 
             tense: 'past',
             pov: 'third-person-limited',
             confidence: 'high',
-            evidenceRefs: ['message:2'],
+            evidenceRefs,
             reason: 'Warm assistant narration establishes form.'
           },
           settingsHash: rapidContracts.settingsHash,
@@ -668,6 +674,66 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              storyForm: UNKNOWN_STORY_FORM,
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Warm on Rapid select.' }],
+              reasonerDecision: { mode: 'skip', reason: 'warm on rapid select', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['rapid-select-warm']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') return cardProviderResponse(roleId, request);
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Rapid selected pipeline warm guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['rapid-select-guidance']
+            }
+          };
+        }
+        throw new Error(`Unexpected role ${roleId}`);
+      }
+    }
+  });
+
+  const update = await harness.runtime.updateSettings({ pipelineMode: 'rapid' });
+  assertEqual(update.ok, true, 'switching to Rapid succeeds');
+  assertEqual(update.settings.pipelineMode, 'rapid', 'settings update records Rapid pipeline');
+  assertEqual(update.warm.queued, true, 'switching to Rapid queues a scene warm');
+  await waitUntil(
+    () => harness.runtime.view().rapidWarm.status === 'ready',
+    'switching to Rapid did not warm the current stable scene',
+    { attempts: 50, delayMs: 5 }
+  );
+  const view = harness.runtime.view();
+  assertEqual(view.rapidWarm.status, 'ready', 'switching to Rapid warms the current stable scene');
+  assert(roleCalls.includes('utilityArbiter'), 'Rapid selection warm calls Utility Arbiter');
+  assert(roleCalls.includes('sceneFrameCard'), 'Rapid selection warm generates scene cards');
+  assert(roleCalls.includes('guidanceComposer'), 'Rapid selection warm composes guidance');
+}
+
+{
   const harness = createRuntimeHarness({
     settings: { pipelineMode: 'rapid', mode: 'auto' },
     generationRouter: {
@@ -688,17 +754,33 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
             }
           };
         }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Rapid fallback warm guidance.',
+              sourceCardIds: request.sourceCardIds || [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['rapid-fallback-guidance']
+            }
+          };
+        }
         throw new Error(`unexpected no-candidate warm role ${roleId}`);
       }
     }
   });
   const warm = await harness.runtime.warmRapidScene({ reason: 'unit-no-candidate-skip' });
-  assertEqual(warm.reason, 'rapid-warm-failed', 'Rapid warm still fails without candidate cards');
-  assertEqual(harness.runtime.view().rapidWarm.reasonCode, 'no-candidate-cards', 'Rapid view exposes no-candidate-card root cause');
+  assertEqual(warm.ok, true, 'Rapid warm succeeds with fallback cards when provider returns no candidates');
+  assertEqual(warm.rapid.status, 'ready', 'Rapid no-candidate warm persists ready artifact');
+  assert(warm.rapid.diagnostics.includes('rapid-warm-local-fallback-cards'), 'Rapid no-candidate warm records fallback-card diagnostic');
+  assertEqual(harness.runtime.view().rapidWarm.status, 'ready', 'Rapid view exposes fallback warm as ready');
   const cache = await harness.storage.loadSceneCache('chat-1', 'scene-1');
   const variant = cache.variants[cache.activeSourceRevisionHash];
-  assertEqual(variant.rapid.status, 'failed', 'Rapid no-candidate warm persists failed artifact');
-  assertEqual(variant.rapid.failureReasonCode, 'no-candidate-cards', 'Rapid no-candidate warm persists root cause');
+  assertEqual(variant.rapid.status, 'ready', 'Rapid no-candidate warm persists ready artifact');
+  assert(variant.cards.length > 0, 'Rapid no-candidate warm persists fallback cards');
 }
 
 {
@@ -886,6 +968,152 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assertEqual(foregroundResult.ok, true, 'foreground completes after base-hash race');
   assertEqual(foregroundResult.packet.diagnostics.pipelineMode, 'rapid', 'foreground waits for warm base hash instead of immediate Standard fallback');
   assert(roleCalls.includes('rapidTurnDelta'), 'race foreground uses Rapid delta');
+}
+
+{
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const pendingText = 'Open the hatch now.';
+  const visiblePendingSnapshot = {
+    ...snapshot,
+    latestMesId: 3,
+    messages: [
+      ...snapshot.messages,
+      { mesid: 3, role: 'user', text: pendingText, textHash: hashJson(pendingText), visible: true }
+    ]
+  };
+  visiblePendingSnapshot.sourceRevisionHash = sourceFingerprintForMessages(visiblePendingSnapshot.messages, 2, 3);
+  visiblePendingSnapshot.turnFingerprint = hashJson({
+    latestMesId: 3,
+    sourceRevisionHash: visiblePendingSnapshot.sourceRevisionHash,
+    messages: visiblePendingSnapshot.messages.slice(-3)
+  });
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, rapidWarmCacheFixture({ cardId: 'warm-card-1', baseSourceRevisionHash }));
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot: visiblePendingSnapshot,
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: ['warm-card-1'],
+              turnGuidanceText: 'VISIBLE_PENDING_MARKER use warm deck after inferred pending user.',
+              guardrailCardIds: [],
+              packetInstructions: [],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['visible-pending-inferred']
+            }
+          };
+        }
+        throw new Error(`unexpected visible pending role ${roleId}`);
+      }
+    }
+  });
+
+  const result = await harness.runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
+  assertEqual(result.ok, true, 'visible pending-user host generation succeeds');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'rapid', 'visible pending user is stripped to find warm base');
+  assertEqual(result.packet.diagnostics.rapidPath, 'warm-v2', 'visible pending user uses warm-v2 Rapid path');
+  assert(roleCalls.includes('rapidTurnDelta'), 'visible pending user calls Rapid turn delta');
+}
+
+{
+  const { snapshot, baseSourceRevisionHash } = rapidWarmSnapshotFixture();
+  const assistantBefore = { mesid: 3, role: 'assistant', text: 'Mara starts to answer.', textHash: hashJson('Mara starts to answer.'), visible: true };
+  const pendingText = 'Ask Mara again.';
+  const pending = { mesid: 4, role: 'user', text: pendingText, textHash: hashJson(pendingText), visible: true };
+  const baseMessages = [...snapshot.messages, assistantBefore];
+  const firstSnapshot = {
+    ...snapshot,
+    latestMesId: 4,
+    messages: [...baseMessages, pending]
+  };
+  firstSnapshot.sourceRevisionHash = sourceFingerprintForMessages(firstSnapshot.messages, 2, 4);
+  const driftedAssistant = {
+    ...assistantBefore,
+    text: 'Mara starts to answer, then swallows the name.',
+    textHash: hashJson('Mara starts to answer, then swallows the name.')
+  };
+  const secondSnapshot = {
+    ...firstSnapshot,
+    messages: [snapshot.messages[0], driftedAssistant, pending]
+  };
+  secondSnapshot.sourceRevisionHash = sourceFingerprintForMessages(secondSnapshot.messages, 2, 4);
+  let snapshotReads = 0;
+  const adapter = createMemoryStorageAdapter();
+  const storage = createStorageRepository({ storage: adapter });
+  const warmBaseSnapshot = {
+    ...snapshot,
+    latestMesId: 3,
+    messages: baseMessages
+  };
+  warmBaseSnapshot.sourceRevisionHash = sourceFingerprintForMessages(warmBaseSnapshot.messages, 2, 3);
+  await storage.saveSceneCache(
+    snapshot.chatKey,
+    snapshot.sceneKey,
+    rapidWarmCacheFixture({
+      cardId: 'warm-card-1',
+      baseSourceRevisionHash: warmBaseSnapshot.sourceRevisionHash,
+      firstMesId: 2,
+      lastMesId: 3,
+      evidenceRefs: ['message:2', 'message:3']
+    })
+  );
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot: async () => {
+      snapshotReads += 1;
+      return snapshotReads <= 1 ? firstSnapshot : secondSnapshot;
+    },
+    storage,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: ['warm-card-1'],
+              turnGuidanceText: 'PREFIX_DRIFT_MARKER keep Rapid packet for same pending user.',
+              guardrailCardIds: [],
+              packetInstructions: [],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['prefix-drift-same-user']
+            }
+          };
+        }
+        throw new Error(`unexpected prefix drift role ${roleId}`);
+      }
+    }
+  });
+
+  const result = await harness.runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
+  assertEqual(result.ok, true, 'same pending-user prefix drift still installs');
+  assertEqual(result.skipped, undefined, `same pending-user prefix drift does not skip prompt install ${JSON.stringify({
+    skipped: result.skipped,
+    reason: result.reason,
+    diagnostics: result.plan?.diagnostics,
+    packet: result.packet?.diagnostics
+  })}`);
+  assertEqual(result.packet.diagnostics.pipelineMode, 'rapid', 'same pending-user prefix drift keeps Rapid packet');
+  assertEqual(result.packet.diagnostics.rapidPath, 'warm-v2', 'same pending-user prefix drift keeps Rapid warm path');
 }
 
 {

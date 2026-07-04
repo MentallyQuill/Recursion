@@ -7,6 +7,7 @@ import {
 
 const PIPELINES = new Set(['standard', 'rapid', 'fused']);
 const DEFAULT_TIMEOUT_MS = 120000;
+const CHAT_STABLE_MS = 4000;
 
 function parseArgs(argv = []) {
   const args = {
@@ -154,7 +155,24 @@ async function selectMode(page, mode, timeoutMs) {
   }, mode, { timeout: timeoutMs });
 }
 
-async function selectPipeline(page, pipeline, timeoutMs) {
+async function closeViewerIfOpen(page) {
+  await page.evaluate(() => {
+    const viewer = document.querySelector('[data-recursion-viewer]');
+    if (!viewer) return false;
+    if (viewer.open && typeof viewer.close === 'function') {
+      viewer.close();
+      return true;
+    }
+    if (viewer.hidden === false) {
+      viewer.hidden = true;
+      return true;
+    }
+    return false;
+  }).catch(() => false);
+}
+
+export async function selectPipeline(page, pipeline, timeoutMs) {
+  await closeViewerIfOpen(page);
   const pipelineButton = page.locator('[data-recursion-pipeline-button]').first();
   await pipelineButton.click({ timeout: timeoutMs });
   await page.locator(`[data-recursion-pipeline-choice="${pipeline}"], [data-recursion-pipeline-choice-${pipeline}]`).first().click({ timeout: timeoutMs });
@@ -181,6 +199,44 @@ async function findSendSurface(page, timeoutMs) {
     '#send_but',
     'button#send_but'
   ];
+  const surfaceDiagnostics = async () => page.evaluate((selectors) => {
+    const describe = (selector) => {
+      const node = document.querySelector(selector);
+      if (!node) return { selector, present: false };
+      const rect = node.getBoundingClientRect();
+      const style = globalThis.getComputedStyle?.(node);
+      return {
+        selector,
+        present: true,
+        disabled: node.disabled === true,
+        hidden: node.hidden === true,
+        ariaHidden: node.getAttribute('aria-hidden') || '',
+        display: style?.display || '',
+        visibility: style?.visibility || '',
+        opacity: style?.opacity || '',
+        rect: {
+          left: Math.round(rect.left),
+          top: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        }
+      };
+    };
+    return {
+      location: String(location.href || ''),
+      activeElement: document.activeElement ? {
+        tag: document.activeElement.tagName,
+        id: document.activeElement.id || '',
+        className: String(document.activeElement.className || '').slice(0, 120)
+      } : null,
+      openDialogs: [...document.querySelectorAll('dialog[open]')].map((node) => ({
+        className: String(node.className || '').slice(0, 120),
+        label: String(node.getAttribute('aria-label') || '').slice(0, 120)
+      })),
+      inputs: selectors.inputSelectors.map(describe),
+      buttons: selectors.buttonSelectors.map(describe)
+    };
+  }, { inputSelectors, buttonSelectors }).catch(() => null);
   let input = null;
   for (const selector of inputSelectors) {
     const candidate = page.locator(selector).first();
@@ -203,7 +259,9 @@ async function findSendSurface(page, timeoutMs) {
       }
     }
   }
-  if (!input || !button) fail('visible-send-unavailable', 'Visible SillyTavern send controls were not available.');
+  if (!input || !button) {
+    fail('visible-send-unavailable', 'Visible SillyTavern send controls were not available.', await surfaceDiagnostics());
+  }
   return { input, button };
 }
 
@@ -223,26 +281,87 @@ async function fillSendInput(input, text, timeoutMs) {
   }, text);
 }
 
-async function sendAndWait(page, message, { requirePrompt, timeoutMs }) {
-  const before = await page.evaluate(contextChatSummaryScript());
-  const surface = await findSendSurface(page, timeoutMs);
-  await fillSendInput(surface.input, message, timeoutMs);
-  await surface.button.click({ timeout: timeoutMs });
+async function armHostGenerationEnded(page) {
+  return page.evaluate(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const eventSource = context.eventSource || globalThis.eventSource;
+    const eventTypes = context.event_types || context.eventTypes || globalThis.event_types || globalThis.eventTypes || {};
+    const names = [...new Set([
+      eventTypes.GENERATION_ENDED,
+      eventTypes.MESSAGE_RECEIVED,
+      'generation_ended',
+      'message_received'
+    ].filter(Boolean))];
+    const id = `generation-ended-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    globalThis.__recursionProofGenerationEnded = { id, seen: false, eventName: '', at: 0 };
+    if (!eventSource || names.length === 0) return { id, armed: false };
+    const handler = (eventName) => {
+      globalThis.__recursionProofGenerationEnded = { id, seen: true, eventName, at: Date.now() };
+    };
+    for (const name of names) {
+      if (typeof eventSource.on === 'function') eventSource.on(name, () => handler(name));
+      else if (typeof eventSource.addEventListener === 'function') eventSource.addEventListener(name, () => handler(name));
+    }
+    return { id, armed: true };
+  }).catch(() => ({ id: '', armed: false }));
+}
+
+async function waitForHostGenerationEnded(page, armed, timeoutMs) {
+  if (!armed?.armed || !armed.id) return;
+  await page.waitForFunction((id) => {
+    const state = globalThis.__recursionProofGenerationEnded || {};
+    return state.id === id && state.seen === true;
+  }, armed.id, { timeout: timeoutMs });
+}
+
+async function waitForChatSettled(page, { message = '', requirePrompt = false, timeoutMs }) {
   await page.waitForFunction((input) => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
     const chat = Array.isArray(context.chat) ? context.chat : [];
-    const userIndex = chat.findIndex((entry) => {
-      const text = String(entry?.mes || entry?.message || entry?.text || '');
-      return entry && entry.is_user === true && text.includes(input.message);
-    });
-    const assistantObserved = userIndex >= 0 && chat.slice(userIndex + 1).some((entry) => entry && entry.is_user === false);
+    const textFor = (entry) => String(entry?.mes || entry?.message || entry?.text || '');
+    const userIndex = input.message
+      ? chat.findIndex((entry) => entry && entry.is_user === true && textFor(entry).includes(input.message))
+      : -1;
+    const assistantAfter = input.message
+      ? chat.slice(userIndex + 1).filter((entry) => entry && entry.is_user === false)
+      : chat.filter((entry) => entry && entry.is_user === false);
+    const assistantObserved = input.message ? userIndex >= 0 && assistantAfter.length > 0 : true;
     const promptInstalled = Array.isArray(globalThis.__recursionSmokePromptEvents)
       ? globalThis.__recursionSmokePromptEvents.some((entry) => entry && entry.cleared === false && String(entry.key || '').startsWith('recursion.'))
       : true;
-    return userIndex >= 0
-      && assistantObserved
-      && (!input.requirePrompt || promptInstalled || Boolean(document.querySelector('[data-recursion-hand-count]')?.textContent || '').match(/\bHand\s+[1-9]\d*/i));
-  }, { message, requirePrompt }, { timeout: timeoutMs });
+    const handReady = /\bHand\s+[1-9]\d*/i.test(String(document.querySelector('[data-recursion-hand-count]')?.textContent || ''));
+    if ((input.message && userIndex < 0) || !assistantObserved || (input.requirePrompt && !promptInstalled && !handReady)) {
+      globalThis.__recursionProofChatStable = { key: '', since: 0, message: input.message };
+      return false;
+    }
+    const latest = chat.length ? chat[chat.length - 1] : null;
+    const latestAssistant = assistantAfter.length ? assistantAfter[assistantAfter.length - 1] : null;
+    const key = JSON.stringify({
+      length: chat.length,
+      userIndex,
+      latestRole: latest?.is_user === true ? 'user' : (latest?.is_user === false ? 'assistant' : ''),
+      latestText: textFor(latest),
+      latestAssistantText: textFor(latestAssistant),
+      sendDisabled: document.querySelector('#send_but')?.disabled === true
+    });
+    const now = Date.now();
+    const previous = globalThis.__recursionProofChatStable || {};
+    if (previous.message !== input.message || previous.key !== key) {
+      globalThis.__recursionProofChatStable = { key, since: now, message: input.message };
+      return false;
+    }
+    return now - Number(previous.since || 0) >= input.stableMs;
+  }, { message, requirePrompt, stableMs: CHAT_STABLE_MS }, { timeout: timeoutMs });
+}
+
+async function sendAndWait(page, message, { requirePrompt, timeoutMs }) {
+  const before = await page.evaluate(contextChatSummaryScript());
+  const surface = await findSendSurface(page, timeoutMs);
+  const generationEnded = await armHostGenerationEnded(page);
+  await fillSendInput(surface.input, message, timeoutMs);
+  await surface.button.click({ timeout: timeoutMs });
+  await waitForHostGenerationEnded(page, generationEnded, timeoutMs).catch(() => {});
+  await waitForChatSettled(page, { message, requirePrompt, timeoutMs });
   const after = await page.evaluate(contextChatSummaryScript());
   const messageProof = await page.evaluate((expected) => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
@@ -262,31 +381,23 @@ async function sendAndWait(page, message, { requirePrompt, timeoutMs }) {
 }
 
 async function triggerRapidWarm(page, timeoutMs) {
-  const emitted = await page.evaluate(() => {
-    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
-    const eventSource = context.eventSource || globalThis.eventSource;
-    if (!eventSource) return false;
-    const payload = { source: 'recursion-live-pipeline-proof' };
-    if (typeof eventSource.emit === 'function') {
-      eventSource.emit('generation_ended', payload);
-      return true;
+  const warm = await page.evaluate(async () => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    if (!runtime || typeof runtime.warmRapidScene !== 'function') {
+      return { ok: false, reason: 'runtime-unavailable' };
     }
-    if (typeof eventSource.trigger === 'function') {
-      eventSource.trigger('generation_ended', payload);
-      return true;
-    }
-    if (typeof eventSource.dispatchEvent === 'function') {
-      eventSource.dispatchEvent(new CustomEvent('generation_ended', { detail: payload }));
-      return true;
-    }
-    return false;
-  });
-  if (!emitted) fail('rapid-warm-event-unavailable', 'Unable to emit host generation-ended event for Rapid warm proof.');
-  await page.waitForFunction(() => {
-    const text = String(document.querySelector('[data-recursion-current-step]')?.textContent || '')
-      || String(document.querySelector('#recursion-root')?.textContent || '');
-    return /Rapid deck ready\./i.test(text);
-  }, null, { timeout: timeoutMs });
+    return runtime.warmRapidScene({ reason: 'live-pipeline-proof' });
+  }).catch((error) => ({ ok: false, reason: 'runtime-error', message: String(error?.message || error) }));
+  if (warm?.ok !== true || warm?.skipped === true || warm?.rapid?.status !== 'ready') {
+    fail('rapid-warm-unavailable', 'Rapid warm did not produce a ready warm deck before foreground proof.', { warm });
+  }
+  await page.waitForFunction(async (expectedRunId) => {
+    const exported = await globalThis.__recursionLiveHarnessRuntime?.exportDiagnostics?.();
+    const warm = exported?.diagnostics?.runtime?.rapidWarm || null;
+    if (!warm || warm.status !== 'ready' || !warm.runId || !warm.warmArtifactId) return false;
+    if (expectedRunId && warm.runId !== expectedRunId) return false;
+    return true;
+  }, warm.rapid.runId, { timeout: timeoutMs });
 }
 
 async function openViewer(page, timeoutMs) {
@@ -342,6 +453,10 @@ function compactIssue(message) {
     text: String(message.text || '').slice(0, 500),
     url: String(message.url || '').slice(0, 300)
   };
+}
+
+function isBenignConsoleIssue(issue = {}) {
+  return issue.type === 'warning' && /^Stream stats:\s+\d+\s+tokens\b/i.test(String(issue.text || ''));
 }
 
 function assertPipelineProof(pipeline, proof, issues) {
@@ -415,13 +530,9 @@ async function provePipeline(page, pipeline, timeoutMs, runId) {
     await selectPipeline(page, pipeline, timeoutMs);
     phase = 'mode-select';
     await selectMode(page, 'auto', timeoutMs);
-    let primer = null;
     if (pipeline === 'rapid') {
-      phase = 'rapid-primer-send';
-      primer = await sendAndWait(page, proofMessageFor('rapid warm primer', runId), {
-        requirePrompt: true,
-        timeoutMs
-      });
+      phase = 'rapid-base-settle';
+      await waitForChatSettled(page, { timeoutMs });
       phase = 'rapid-warm';
       await triggerRapidWarm(page, timeoutMs);
     }
@@ -436,7 +547,7 @@ async function provePipeline(page, pipeline, timeoutMs, runId) {
     const diagnosticsExport = await exportDiagnosticsSnapshot(page, timeoutMs);
     phase = 'snapshot';
     const snapshot = await page.evaluate(liveSnapshotScript());
-    return { pipeline, primer, send, snapshot, diagnosticsExport };
+    return { pipeline, send, snapshot, diagnosticsExport };
   } catch (error) {
     const snapshot = await page.evaluate(liveSnapshotScript()).catch(() => null);
     const chat = await page.evaluate(contextChatSummaryScript()).catch(() => null);
@@ -472,11 +583,15 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
   const proofs = [];
   try {
     const context = await browser.newContext();
+    await context.addInitScript(() => {
+      globalThis.__recursionLiveHarness = true;
+    });
     await context.addCookies(session.playwrightCookies());
     const page = await context.newPage();
     page.on('console', (message) => {
       if (['warning', 'error'].includes(message.type())) {
-        consoleIssues.push(compactIssue({ type: message.type(), text: message.text(), url: message.location()?.url }));
+        const issue = compactIssue({ type: message.type(), text: message.text(), url: message.location()?.url });
+        if (!isBenignConsoleIssue(issue)) consoleIssues.push(issue);
       }
     });
     page.on('pageerror', (error) => {

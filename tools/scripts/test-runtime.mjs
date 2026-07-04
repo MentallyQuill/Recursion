@@ -784,6 +784,85 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const generatedRoles = [];
+  const harness = createRuntimeHarness({
+    settings: {
+      mode: 'auto',
+      pipelineMode: 'rapid',
+      reasoningLevel: 'medium',
+      reasonerUse: 'off',
+      strength: 'strong',
+      promptFootprint: 'rich',
+      minCards: 5,
+      maxCards: 12
+    },
+    generationRouter: {
+      async generate(roleId, request) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'rich',
+              cardJobs: CARD_CATALOG.map((entry) => ({
+                family: entry.family,
+                role: entry.role,
+                reason: `Warm ${entry.family}.`
+              })),
+              reasonerDecision: { mode: 'skip', reason: 'rapid cost regression fixture', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              diagnostics: ['rapid-cost-regression-fixture']
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Keep the Rapid warm selected cards only.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['rapid-guidance-ok']
+            }
+          };
+        }
+        generatedRoles.push(roleId);
+        return {
+          ok: true,
+          roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: `Keep ${request.metadata.family} available for the Rapid warm packet.`,
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 140
+            }]
+          }
+        };
+      },
+      async batch(requests) {
+        return Promise.all(requests.map((request) => this.generate(request.roleId, request)));
+      }
+    }
+  });
+
+  const warm = await harness.runtime.warmRapidScene({ reason: 'rapid-cost-regression' });
+  assertEqual(warm.ok, true, 'Rapid cost regression warm succeeds');
+  assertEqual(generatedRoles.length, 6, 'Rapid warm does not call providers for discarded card jobs');
+  assertEqual(warm.hand.cards.length, 6, 'Rapid warm selected hand uses the budgeted card jobs');
+  assert(warm.plan.diagnostics.includes('card-jobs-budgeted'), 'Rapid warm records card job budgeting diagnostic');
+}
+
+{
   const arbiterGate = deferred();
   const roleCalls = [];
   const harness = createRuntimeHarness({
@@ -6515,6 +6594,98 @@ for (const scenario of [
     assert(guidancePrompt.includes(marker), `guidance composer receives ${marker}`);
     assert(view.lastPacket.sections.cardEvidence.includes(marker), `card evidence injects ${marker}`);
     assert(installedCardEvidence.includes(marker), `installed prompt includes ${marker}`);
+  }
+}
+
+{
+  const requestedFamilies = CARD_CATALOG.map((entry) => entry.family);
+  const generatedRoles = [];
+  const guidancePrompts = [];
+  const { runtime } = createRuntimeHarness({
+    settings: {
+      mode: 'auto',
+      pipelineMode: 'standard',
+      reasoningLevel: 'medium',
+      reasonerUse: 'off',
+      strength: 'strong',
+      promptFootprint: 'rich',
+      minCards: 5,
+      maxCards: 12
+    },
+    generationRouter: {
+      async generate(roleId, request) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'rich',
+              cardJobs: CARD_CATALOG.map((entry) => ({
+                family: entry.family,
+                role: entry.role,
+                reason: `Generate ${entry.family}.`
+              })),
+              reasonerDecision: { mode: 'skip', reason: 'cost regression fixture', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              diagnostics: ['cost-regression-fixture']
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          guidancePrompts.push(request.prompt);
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Keep the selected cards only.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['guidance-ok']
+            }
+          };
+        }
+        generatedRoles.push(roleId);
+        return {
+          ok: true,
+          roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: `Keep ${request.metadata.family} active for this turn; preserve only evidence-backed constraints.`,
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 140
+            }]
+          }
+        };
+      },
+      async batch(requests) {
+        return Promise.all(requests.map((request) => this.generate(request.roleId, request)));
+      }
+    }
+  });
+
+  const result = await runtime.prepareForGeneration({ userMessage: 'Cost regression turn.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'cost regression run installs prompt');
+  assertEqual(generatedRoles.length, 6, 'runtime does not call providers for card jobs beyond the hand budget');
+  assertDeepEqual(
+    view.lastHand.cards.map((card) => card.family),
+    ['Scene Frame', 'Scene Constraints', 'Active Cast', 'Knowledge', 'Consequences', 'Character Motivation'],
+    'runtime hand uses the budgeted high-priority generated families'
+  );
+  assertEqual(view.lastHand.omitted.filter((entry) => entry.reason === 'max-cards').length, 0, 'ungenerated over-budget cards are not later omitted from the hand');
+  assert(view.lastPlan.diagnostics.includes('card-jobs-budgeted'), 'runtime records card job budgeting diagnostic');
+  assert(guidancePrompts[0].includes('Character Motivation'), 'guidance sees the last kept selected family');
+  for (const family of requestedFamilies.slice(6)) {
+    assert(!guidancePrompts[0].includes(`Keep ${family} active`), `${family} was not generated for discarded evidence`);
   }
 }
 

@@ -3,6 +3,7 @@ import {
   CARD_CATALOG,
   applyCardPlan,
   buildCardRequests,
+  limitCardJobsForHandBudget,
   normalizeCard,
   selectHand
 } from './cards.mjs';
@@ -1254,6 +1255,37 @@ function lifecycleForDeck(cards, plan, defaultReason) {
 function budgetOr(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function budgetCardJobsForGeneration(plan, behaviorPolicy, forcedFamilies = []) {
+  const limited = limitCardJobsForHandBudget(plan?.cardJobs, {
+    maxCards: budgetOr(plan?.budgets?.maxCards, 6),
+    behaviorPolicy,
+    forcedFamilies
+  });
+  if (!limited.omitted.length) {
+    return {
+      plan: {
+        ...plan,
+        cardJobs: limited.cardJobs
+      },
+      omitted: [],
+      metadata: limited.metadata
+    };
+  }
+  return {
+    plan: {
+      ...plan,
+      cardJobs: limited.cardJobs,
+      diagnostics: mergeDiagnostics(
+        plan.diagnostics,
+        ['card-jobs-budgeted'],
+        limited.omitted.map((entry) => `card-job-budgeted:${entry.family}`)
+      )
+    },
+    omitted: limited.omitted,
+    metadata: limited.metadata
+  };
 }
 
 function cardEvidenceTokenBudget(settings, plan, behaviorPolicy = null) {
@@ -3804,6 +3836,11 @@ export function createRecursionRuntime({
           manualReconciled.diagnostics
         )
       };
+      plan = budgetCardJobsForGeneration(
+        plan,
+        runPolicyForEffectivePlan(settings, plan),
+        manualForcedFamilies
+      ).plan;
       lastPlan = plan;
       const warmGeneratedCardResult = await generatePlanCards({ runId, plan, snapshot, settings, signal });
       if (warmGeneratedCardResult.diagnostics.length) {
@@ -4636,6 +4673,11 @@ export function createRecursionRuntime({
           manualReconciled.diagnostics
         )
       };
+      plan = budgetCardJobsForGeneration(
+        plan,
+        runPolicyForEffectivePlan(settings, plan),
+        manualForcedFamilies
+      ).plan;
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastPlan = plan;
       const sceneSnapshot = snapshotForPlan(snapshot, plan);

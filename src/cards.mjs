@@ -794,11 +794,7 @@ function plannedCardForJob(job) {
   }, { strict: false });
   if (!catalog) return null;
   return {
-    job: {
-      ...source,
-      family: catalog.family,
-      role: catalog.role
-    },
+    job: { ...source },
     family: catalog.family,
     role: catalog.role,
     emphasis: validEnum(source.emphasis, EMPHASIS, 'normal'),

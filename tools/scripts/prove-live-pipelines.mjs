@@ -500,8 +500,8 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
         assistantAfter: proof.send.after.assistantCount,
         messageProof: proof.send.messageProof,
         rapidPath: proof.snapshot.packet?.diagnostics?.rapidPath || proof.snapshot.promptPacketPreview?.diagnostics?.rapidPath || '',
-        planDiagnostics: Array.isArray(proof.diagnosticsExport?.plan?.diagnostics)
-          ? proof.diagnosticsExport.plan.diagnostics
+        planDiagnostics: Array.isArray(proof.diagnosticsExport?.runtime?.plan?.diagnostics)
+          ? proof.diagnosticsExport.runtime.plan.diagnostics
           : [],
         pipelineButtonLabel: proof.snapshot.pipelineButtonLabel,
         modeText: proof.snapshot.modeText,

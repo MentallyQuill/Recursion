@@ -41,6 +41,7 @@ import { STORY_FORM_SCHEMA, UNKNOWN_STORY_FORM, arbiterStoryFormContractLine, no
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { asObject } from './safe-values.mjs';
+import { buildDiagnosticsPayload } from './runtime/diagnostics.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
@@ -2567,64 +2568,30 @@ export function createRecursionRuntime({
     }
   }
 
+  function safeRuntimeView() {
+    return {
+      activeRunId,
+      hostGenerationActive,
+      lastPacket,
+      lastHand,
+      lastPlan,
+      lastSnapshot: viewSnapshot(lastSnapshot),
+      lastBrief: { ...lastBrief },
+      forceRegenerate: forceRegenerateView(),
+      rapidWarm: rapidWarmStatusView({
+        ...lastRapidWarmView,
+        pipelineMode: settingsStore.get().pipelineMode
+      }),
+      activity: safeCurrentActivity(activity),
+      activityHistory: safeActivityHistory(activity),
+      settings: safeSettingsView(settingsStore.get()),
+      updatedAt: nowIso()
+    };
+  }
+
   function currentDiagnosticsChatKey() {
     const snapshot = viewSnapshot(lastSnapshot);
     return safeText(snapshot?.chatKey || snapshot?.chatId || DEFAULT_CHAT_ID, 160) || DEFAULT_CHAT_ID;
-  }
-
-  function diagnosticsPacket(packet) {
-    const source = asObject(packet);
-    if (!source.packetId && !source.packetVersion) return null;
-    return redact({
-      packetId: safeText(source.packetId || '', 160),
-      packetVersion: numberOr(source.packetVersion, PROMPT_PACKET_VERSION),
-      footprint: safeText(source.footprint || '', 40),
-      selectedCardRefs: Array.isArray(source.selectedCardRefs)
-        ? source.selectedCardRefs.slice(0, 24).map((entry) => ({
-          cardId: safeIdentifier(entry?.cardId || entry?.id || '', '', 160),
-          family: safeText(entry?.family || '', 80),
-          emphasis: safeText(entry?.emphasis || '', 40),
-          tokenEstimate: numberOr(entry?.tokenEstimate, 0)
-        }))
-        : [],
-      omissions: Array.isArray(source.omissions)
-        ? source.omissions.slice(0, 24).map((entry) => ({
-          cardId: safeIdentifier(entry?.cardId || entry?.id || '', '', 160),
-          reason: safeText(entry?.reason || '', 120)
-        }))
-        : [],
-      injectionPlan: Array.isArray(source.injectionPlan)
-        ? source.injectionPlan.slice(0, 12).map((block) => ({
-          id: safeText(block?.id || '', 80),
-          promptKey: safeText(block?.promptKey || '', 160),
-          placement: safeText(block?.placement || '', 40),
-          depth: numberOr(block?.depth, 0),
-          role: safeText(block?.role || '', 40)
-        }))
-        : [],
-      diagnostics: source.diagnostics || {},
-      composedAt: safeText(source.composedAt || '', 80),
-      promptPacketHash: hashJson(source)
-    }, { maxString: 700 });
-  }
-
-  function diagnosticsHand(hand) {
-    const source = asObject(hand);
-    const cards = Array.isArray(source.cards) ? source.cards : [];
-    return redact({
-      handId: safeIdentifier(source.handId || '', '', 160),
-      selectedCount: cards.length,
-      cards: cards.slice(0, 24).map((card) => ({
-        id: safeIdentifier(card?.id || '', '', 160),
-        family: safeText(card?.family || '', 80),
-        role: safeText(card?.role || '', 80),
-        status: safeText(card?.status || '', 40),
-        emphasis: safeText(card?.emphasis || '', 40),
-        tokenEstimate: numberOr(card?.tokenEstimate, 0),
-        source: safeText(card?.source || card?.provider || '', 80)
-      })),
-      omittedCount: Array.isArray(source.omitted) ? source.omitted.length : 0
-    }, { maxString: 700 });
   }
 
   async function exportDiagnostics() {
@@ -2641,48 +2608,16 @@ export function createRecursionRuntime({
     } catch {
       journal = null;
     }
-    const payload = redact({
-      schema: 'recursion.diagnosticsExport.v1',
-      exportedAt: nowIso(),
-      activeRunId: safeIdentifier(activeRunId || '', '', 160),
-      chatKey: safeIdentifier(chatKey, 'chat', 160),
-      snapshot: lastSnapshot ? {
-        chatId: safeIdentifier(lastSnapshot.chatId || '', '', 160),
-        chatKey: safeIdentifier(lastSnapshot.chatKey || lastSnapshot.chatId || '', '', 160),
-        sceneKey: safeIdentifier(lastSnapshot.sceneKey || '', '', 160),
-        sceneFingerprint: safeText(lastSnapshot.sceneFingerprint || '', 180),
-        turnFingerprint: safeText(lastSnapshot.turnFingerprint || '', 180),
-        latestMesId: numberOr(lastSnapshot.latestMesId, 0),
-        visibleMessageCount: Array.isArray(lastSnapshot.messages)
-          ? lastSnapshot.messages.filter((message) => message?.visible !== false).length
-          : 0
-      } : null,
-      packet: diagnosticsPacket(lastPacket),
-      hand: diagnosticsHand(lastHand),
-      plan: lastPlan ? {
-        action: safeText(lastPlan.action || '', 40),
-        sceneStatus: safeText(lastPlan.sceneStatus || '', 40),
-        promptFootprint: safeText(lastPlan.promptFootprint || '', 40),
-        reasonerDecision: {
-          mode: safeText(lastPlan.reasonerDecision?.mode || '', 40),
-          reason: safeText(lastPlan.reasonerDecision?.reason || '', 160)
-        },
-        diagnostics: Array.isArray(lastPlan.diagnostics) ? lastPlan.diagnostics.slice(0, 24).map((entry) => safeText(entry, 160)) : []
-      } : null,
-      activity: safeCurrentActivity(activity),
-      activityHistory: safeActivityHistory(activity),
-      settings: safeSettingsView(settingsStore.get()),
-      storage: {
-        indexRecordCount: index?.records ? Object.keys(index.records).length : 0,
-        journalEntryCount: Array.isArray(journal?.entries) ? journal.entries.length : 0,
-        journal: journal ? {
-          chatKey: safeIdentifier(journal.chatKey || chatKey, 'chat', 160),
-          maxEntries: numberOr(journal.maxEntries, 0),
-          updatedAt: safeText(journal.updatedAt || '', 80),
-          entries: Array.isArray(journal.entries) ? journal.entries.slice(-50) : []
-        } : null
-      }
-    }, { maxString: 900 });
+    const settings = settingsStore.get();
+    const payload = buildDiagnosticsPayload({
+      view: safeRuntimeView(),
+      settings,
+      cacheContracts: cacheContractVersions(settings),
+      journal,
+      index,
+      chatKey,
+      includeExcerpts: Boolean(settings?.diagnostics?.includeExcerpts)
+    });
     return { ok: true, diagnostics: payload };
   }
 
@@ -5187,24 +5122,7 @@ export function createRecursionRuntime({
     clearRunJournal,
     exportDiagnostics,
     view() {
-      return {
-        activeRunId,
-        hostGenerationActive,
-        lastPacket,
-        lastHand,
-        lastPlan,
-        lastSnapshot: viewSnapshot(lastSnapshot),
-        lastBrief: { ...lastBrief },
-        forceRegenerate: forceRegenerateView(),
-        rapidWarm: rapidWarmStatusView({
-          ...lastRapidWarmView,
-          pipelineMode: settingsStore.get().pipelineMode
-        }),
-        activity: safeCurrentActivity(activity),
-        activityHistory: safeActivityHistory(activity),
-        settings: safeSettingsView(settingsStore.get()),
-        updatedAt: nowIso()
-      };
+      return safeRuntimeView();
     }
   };
 }

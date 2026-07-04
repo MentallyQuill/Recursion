@@ -2826,7 +2826,7 @@ for (const pipelineMode of ['standard', 'rapid']) {
   const exported = await runtime.exportDiagnostics();
   assertEqual(exported.ok, true, 'runtime diagnostics export succeeds');
   const serialized = assertNoSecretText(exported, 'runtime diagnostics export');
-  assert(serialized.includes('recursion.diagnosticsExport.v1'), 'diagnostics export includes schema');
+  assert(serialized.includes('recursion.diagnostics.v1'), 'diagnostics export includes schema');
   assert(serialized.includes('promptPacketHash'), 'diagnostics export includes prompt packet hash');
   assert(!serialized.includes('Scene brief:'), 'diagnostics export omits prompt packet sections');
   assert(!serialized.includes('The lamp breaks.'), 'diagnostics export omits transcript and card prompt text');

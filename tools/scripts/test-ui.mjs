@@ -1572,7 +1572,7 @@ try {
         return {
           ok: true,
           diagnostics: {
-            schema: 'recursion.diagnosticsExport.v1',
+            schema: 'recursion.diagnostics.v1',
             promptPacketHash: 'packet-hash'
           }
         };
@@ -2346,7 +2346,7 @@ try {
   root.querySelector('[data-recursion-export-diagnostics]').click();
   await Promise.resolve();
   assertEqual(exportDiagnosticsCalls, 1, 'Export Diagnostics action calls runtime');
-  assert(copied.at(-1).includes('recursion.diagnosticsExport.v1'), 'Export Diagnostics copies sanitized diagnostics JSON');
+  assert(copied.at(-1).includes('recursion.diagnostics.v1'), 'Export Diagnostics copies sanitized diagnostics JSON');
   assert(root.querySelector('[data-recursion-provider-grid]'), 'Providers pane renders the compact reference provider grid');
   assertEqual(root.querySelectorAll('[data-recursion-provider-section]').length, 2, 'Providers pane renders Utility plus collapsed Reasoner sections');
   assert(root.querySelector('[data-recursion-provider-model-reasoner]'), 'Reasoner provider section owns complete provider settings when expanded');

@@ -1948,6 +1948,30 @@ async function proveReasonerProviderReady(page, timeoutMs, browserPhase = () => 
 
 function generationBaseSetupScript() {
   return ({ reasonerRequested: pageReasonerRequested, triggerSource, chatMutationSource, visibleSend }) => {
+    globalThis.__recursionSmokeReadDomChatEvidence = (before) => {
+      const nodes = [...document.querySelectorAll('#chat .mes[mesid], .mes[mesid], [data-message-id], [data-mes-id]')];
+      const messages = nodes.map((node, index) => {
+        const rawMesId = node.getAttribute?.('mesid') ?? node.dataset?.messageId ?? node.dataset?.mesId ?? '';
+        const mesidNumber = Number(rawMesId);
+        const rawIsUser = String(node.getAttribute?.('is_user') ?? node.dataset?.isUser ?? '').trim().toLowerCase();
+        const rawIsSystem = String(node.getAttribute?.('is_system') ?? node.dataset?.isSystem ?? '').trim().toLowerCase();
+        const classText = String(node.className || '').toLowerCase();
+        const textNode = node.querySelector?.('.mes_text, .mes_text_body, [data-message-text]') || node;
+        return {
+          mesid: Number.isFinite(mesidNumber) ? mesidNumber : index,
+          isUser: rawIsUser === 'true' || rawIsUser === '1' || /\buser\b/.test(classText),
+          isSystem: rawIsSystem === 'true' || rawIsSystem === '1',
+          textLength: String(textNode?.textContent || '').trim().length
+        };
+      });
+      const minimumMesId = typeof before === 'number' ? before : -1;
+      const after = messages.filter((message) => message.mesid >= minimumMesId);
+      return {
+        messageCount: messages.length,
+        maxMesId: messages.reduce((max, message) => Math.max(max, message.mesid), -1),
+        assistantMessageObserved: after.some((message) => !message.isUser && !message.isSystem && message.textLength > 0)
+      };
+    };
     const context = (() => {
       try {
         return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
@@ -2180,11 +2204,29 @@ function generationEvidenceScript() {
       : (typeof base.visibleSend?.chatLength === 'number' ? base.visibleSend.chatLength : null);
     const chatLengthAfter = Array.isArray(context?.chat) ? context.chat.length : null;
     const newMessages = typeof chatLengthBefore === 'number' ? chat.slice(Math.max(0, chatLengthBefore)) : [];
-    const assistantMessageObserved = newMessages.some((message) => message && message.is_user === false);
+    const contextAssistantMessageObserved = newMessages.some((message) => message && message.is_user === false);
+    const domEvidence = typeof globalThis.__recursionSmokeReadDomChatEvidence === 'function'
+      ? globalThis.__recursionSmokeReadDomChatEvidence(chatLengthBefore)
+      : {};
+    const latestGeneration = globalThis.__recursionSmokeGeneration || {};
+    const visibleSendBaseline = typeof latestGeneration.visibleSend?.chatLength === 'number'
+      ? latestGeneration.visibleSend.chatLength
+      : (typeof base.visibleSend?.chatLength === 'number' ? base.visibleSend.chatLength : null);
+    const domContinuationBaseline = typeof visibleSendBaseline === 'number' ? visibleSendBaseline : chatLengthBefore;
+    const domMessageCountAdvanced = typeof domContinuationBaseline === 'number'
+      && Number.isFinite(domEvidence.messageCount)
+      && domEvidence.messageCount > domContinuationBaseline;
+    const contextLengthAdvanced = typeof domContinuationBaseline === 'number'
+      && typeof chatLengthAfter === 'number'
+      && chatLengthAfter > domContinuationBaseline;
+    const assistantMessageObserved = contextAssistantMessageObserved
+      || domEvidence.assistantMessageObserved === true
+      || domMessageCountAdvanced
+      || contextLengthAdvanced;
     const markerOk = globalThis.__recursionSmokeHostGeneration?.ok === true;
     const hostGenerationRequired = base.triggerSource === 'ui-send';
     const hostGenerationContinued = hostGenerationRequired
-      ? Boolean(markerOk || assistantMessageObserved || (typeof chatLengthAfter === 'number' && typeof chatLengthBefore === 'number' && chatLengthAfter > chatLengthBefore + 1))
+      ? Boolean(markerOk || assistantMessageObserved)
       : null;
     const promptPacketVisible = Boolean(packetId && handId && selectedCardRefs.length > 0);
     const handReady = /\bHand\s+[1-9]\d*/i.test(handText);
@@ -2210,6 +2252,13 @@ function generationEvidenceScript() {
         chatLengthBefore,
         chatLengthAfter,
         assistantMessageObserved,
+        contextAssistantMessageObserved,
+        domAssistantMessageObserved: domEvidence.assistantMessageObserved === true,
+        domContinuationBaseline,
+        domMessageCountAdvanced,
+        contextLengthAdvanced,
+        domMessageCount: Number.isFinite(domEvidence.messageCount) ? domEvidence.messageCount : null,
+        domMaxMesId: Number.isFinite(domEvidence.maxMesId) ? domEvidence.maxMesId : null,
         markerOk
       },
       promptInstalled,
@@ -2286,13 +2335,38 @@ function generationHostContinuationReadyScript() {
       : (typeof base.visibleSend?.chatLength === 'number' ? base.visibleSend.chatLength : null);
     const chatLengthAfter = Array.isArray(context?.chat) ? context.chat.length : null;
     const newMessages = typeof chatLengthBefore === 'number' ? chat.slice(Math.max(0, chatLengthBefore)) : [];
-    const assistantMessageObserved = newMessages.some((message) => message && message.is_user === false);
+    const contextAssistantMessageObserved = newMessages.some((message) => message && message.is_user === false);
+    const domEvidence = typeof globalThis.__recursionSmokeReadDomChatEvidence === 'function'
+      ? globalThis.__recursionSmokeReadDomChatEvidence(chatLengthBefore)
+      : {};
+    const latestGeneration = globalThis.__recursionSmokeGeneration || {};
+    const visibleSendBaseline = typeof latestGeneration.visibleSend?.chatLength === 'number'
+      ? latestGeneration.visibleSend.chatLength
+      : (typeof base.visibleSend?.chatLength === 'number' ? base.visibleSend.chatLength : null);
+    const domContinuationBaseline = typeof visibleSendBaseline === 'number' ? visibleSendBaseline : chatLengthBefore;
+    const domMessageCountAdvanced = typeof domContinuationBaseline === 'number'
+      && Number.isFinite(domEvidence.messageCount)
+      && domEvidence.messageCount > domContinuationBaseline;
+    const contextLengthAdvanced = typeof domContinuationBaseline === 'number'
+      && typeof chatLengthAfter === 'number'
+      && chatLengthAfter > domContinuationBaseline;
+    const assistantMessageObserved = contextAssistantMessageObserved
+      || domEvidence.assistantMessageObserved === true
+      || domMessageCountAdvanced
+      || contextLengthAdvanced;
     const markerOk = globalThis.__recursionSmokeHostGeneration?.ok === true;
-    const hostGenerationContinued = Boolean(markerOk || assistantMessageObserved || (typeof chatLengthAfter === 'number' && typeof chatLengthBefore === 'number' && chatLengthAfter > chatLengthBefore + 1));
+    const hostGenerationContinued = Boolean(markerOk || assistantMessageObserved);
     const hostGenerationEvidence = {
       chatLengthBefore,
       chatLengthAfter,
       assistantMessageObserved,
+      contextAssistantMessageObserved,
+      domAssistantMessageObserved: domEvidence.assistantMessageObserved === true,
+      domContinuationBaseline,
+      domMessageCountAdvanced,
+      contextLengthAdvanced,
+      domMessageCount: Number.isFinite(domEvidence.messageCount) ? domEvidence.messageCount : null,
+      domMaxMesId: Number.isFinite(domEvidence.maxMesId) ? domEvidence.maxMesId : null,
       markerOk
     };
     globalThis.__recursionSmokeGenerationBase = {
@@ -2978,7 +3052,25 @@ async function runBrowserUiSmoke({
               : (typeof base.visibleSend?.chatLength === 'number' ? base.visibleSend.chatLength : null);
             const chatLengthAfter = Array.isArray(context?.chat) ? context.chat.length : null;
             const newMessages = typeof chatLengthBefore === 'number' ? chat.slice(Math.max(0, chatLengthBefore)) : [];
-            const assistantMessageObserved = newMessages.some((message) => message && message.is_user === false);
+            const contextAssistantMessageObserved = newMessages.some((message) => message && message.is_user === false);
+            const domEvidence = typeof globalThis.__recursionSmokeReadDomChatEvidence === 'function'
+              ? globalThis.__recursionSmokeReadDomChatEvidence(chatLengthBefore)
+              : {};
+            const latestGeneration = globalThis.__recursionSmokeGeneration || {};
+            const visibleSendBaseline = typeof latestGeneration.visibleSend?.chatLength === 'number'
+              ? latestGeneration.visibleSend.chatLength
+              : (typeof base.visibleSend?.chatLength === 'number' ? base.visibleSend.chatLength : null);
+            const domContinuationBaseline = typeof visibleSendBaseline === 'number' ? visibleSendBaseline : chatLengthBefore;
+            const domMessageCountAdvanced = typeof domContinuationBaseline === 'number'
+              && Number.isFinite(domEvidence.messageCount)
+              && domEvidence.messageCount > domContinuationBaseline;
+            const contextLengthAdvanced = typeof domContinuationBaseline === 'number'
+              && typeof chatLengthAfter === 'number'
+              && chatLengthAfter > domContinuationBaseline;
+            const assistantMessageObserved = contextAssistantMessageObserved
+              || domEvidence.assistantMessageObserved === true
+              || domMessageCountAdvanced
+              || contextLengthAdvanced;
             const markerOk = globalThis.__recursionSmokeHostGeneration?.ok === true;
             const promptPacketVisible = Boolean(packetId && handId && selectedCardRefs.length > 0);
             const visibleSend = {
@@ -2990,7 +3082,7 @@ async function runBrowserUiSmoke({
             };
             const hostGenerationRequired = base.triggerSource === 'ui-send';
             const hostGenerationContinued = hostGenerationRequired
-              ? Boolean(markerOk || assistantMessageObserved || (typeof chatLengthAfter === 'number' && typeof chatLengthBefore === 'number' && chatLengthAfter > chatLengthBefore + 1))
+              ? Boolean(markerOk || assistantMessageObserved)
               : null;
             const current = {
               interceptorOk: base.interceptorOk === true || promptInstalled || promptPacketVisible,
@@ -3001,6 +3093,13 @@ async function runBrowserUiSmoke({
                 chatLengthBefore,
                 chatLengthAfter,
                 assistantMessageObserved,
+                contextAssistantMessageObserved,
+                domAssistantMessageObserved: domEvidence.assistantMessageObserved === true,
+                domContinuationBaseline,
+                domMessageCountAdvanced,
+                contextLengthAdvanced,
+                domMessageCount: Number.isFinite(domEvidence.messageCount) ? domEvidence.messageCount : null,
+                domMaxMesId: Number.isFinite(domEvidence.maxMesId) ? domEvidence.maxMesId : null,
                 markerOk
               },
               promptInstalled,
@@ -4318,9 +4417,11 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
           ? 'Sync the installed SillyTavern Recursion extension copy to this checkout before running browser smoke.'
           : 'Install Recursion for the dedicated recursion-soak-* SillyTavern user before running browser smoke.';
       } else {
+        const storageUsersResult = validateSoakUserList(env.RECURSION_SOAK_ST_USERS || userResult.user);
+        const storageUsers = storageUsersResult.ok ? storageUsersResult.users : [userResult.user];
         const storageProbe = await runStorageProbeSuite({
           baseUrl: env.SILLYTAVERN_BASE_URL,
-          users: [userResult.user],
+          users: storageUsers,
           env,
           fetchImpl,
           runId: report.runId

@@ -175,6 +175,7 @@ function recursionSmokeFixtureHtml({
   directBridgeNeverResolves = false,
   visibleSendButtonClicksIgnored = false,
   sendSurface = 'complete',
+  hostContinuationDomOnly = false,
   storyChatAvailable = false
 } = {}) {
   const disableHookScript = missingDisableHook
@@ -198,6 +199,7 @@ function recursionSmokeFixtureHtml({
   </head>
   <body>
     <main id="chat-root">
+      <section id="chat" aria-label="Chat messages"></section>
       <section id="recursion-root" class="recursion-root">
         <div class="recursion-bar" data-recursion-bar role="toolbar" aria-label="Recursion">
           <button type="button" data-recursion-power-toggle aria-pressed="true" aria-label="Turn Recursion off">Power</button>
@@ -346,6 +348,18 @@ function recursionSmokeFixtureHtml({
       });
       async function sendSmokeMessage() {
         const input = document.querySelector('#send_textarea');
+        const appendSmokeChatMessage = (message) => {
+          const row = document.createElement('div');
+          row.className = 'mes';
+          row.setAttribute('mesid', String(message.mesid));
+          row.setAttribute('is_user', message.is_user ? 'true' : 'false');
+          row.setAttribute('is_system', message.is_system ? 'true' : 'false');
+          const text = document.createElement('div');
+          text.className = 'mes_text';
+          text.textContent = message.mes;
+          row.append(text);
+          document.querySelector('#chat')?.append(row);
+        };
         const message = {
           mesid: smokeContext.chat.length,
           is_user: true,
@@ -353,18 +367,23 @@ function recursionSmokeFixtureHtml({
           mes: String(input?.value || '')
         };
         smokeContext.chat.push(message);
+        appendSmokeChatMessage(message);
         await globalThis.recursionGenerationInterceptor(smokeContext.chat);
         if (!${omitHostGenerationContinuation ? 'true' : 'false'}) {
-          smokeContext.chat.push({
+          const assistantMessage = {
             mesid: smokeContext.chat.length,
             is_user: false,
             name: 'Recursion Smoke Host',
             mes: 'Recursion smoke host generation continued.'
-          });
-          globalThis.__recursionSmokeHostGeneration = {
-            ok: true,
-            chatLength: smokeContext.chat.length
           };
+          if (!${hostContinuationDomOnly ? 'true' : 'false'}) {
+            smokeContext.chat.push(assistantMessage);
+            globalThis.__recursionSmokeHostGeneration = {
+              ok: true,
+              chatLength: smokeContext.chat.length
+            };
+          }
+          appendSmokeChatMessage(assistantMessage);
         }
         if (!${omitVisibleSendMarker ? 'true' : 'false'}) {
           globalThis.__recursionSmokeVisibleSend = {
@@ -1062,6 +1081,26 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
 }
 
 {
+  const server = await createSillyTavernSmokeFixtureServer();
+  server.users['recursion-soak-b'] = { password: '', files: new Map() };
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        RECURSION_SOAK_ST_USERS: 'recursion-soak-a,recursion-soak-b',
+        SILLYTAVERN_BASE_URL: server.baseUrl
+      }
+    });
+    assertEqual(report.storageProbe.status, 'pass', 'live smoke storage probe accepts configured soak user list');
+    assertDeepEqual(report.storageProbe.users, ['recursion-soak-a', 'recursion-soak-b'], 'live smoke probes all configured soak users');
+    assert(!report.warnings.some((warning) => warning.name === 'single-user-probe'), 'multi-user live smoke has no single-user warning');
+  } finally {
+    await server.close();
+  }
+}
+
+{
   const server = await createSillyTavernSmokeFixtureServer({ staleModeChip: true });
   try {
     const report = await runSillyTavernLiveSmoke({
@@ -1738,6 +1777,25 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     });
     assertEqual(report.status, 'pass', 'generation smoke waits for delayed UI-rendered prompt evidence');
     assertEqual(report.browser.snapshot.generation.promptPacketVisible, true, 'delayed UI prompt metadata is eventually observed');
+  } finally {
+    await server.close();
+  }
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ hostContinuationDomOnly: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_GENERATION: '1'
+      }
+    });
+    assertEqual(report.status, 'pass', 'generation smoke accepts DOM assistant evidence when context chat is stale');
+    assertEqual(report.browser.snapshot.generation.hostGenerationContinued, true, 'DOM assistant evidence proves host continuation');
+    assertEqual(report.browser.snapshot.generation.hostGenerationEvidence.domAssistantMessageObserved, true, 'DOM assistant evidence is recorded');
   } finally {
     await server.close();
   }

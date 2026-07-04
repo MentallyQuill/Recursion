@@ -2132,7 +2132,15 @@ export function createRecursionRuntime({
     return null;
   }
 
+  function rapidWarmElapsedFromView() {
+    const explicitElapsedMs = Number(lastRapidWarmView?.elapsedMs);
+    const startedMs = Date.parse(lastRapidWarmView?.startedAt || '');
+    if (Number.isFinite(startedMs)) return Math.max(0, Date.now() - startedMs);
+    return Number.isFinite(explicitElapsedMs) ? Math.max(0, Math.round(explicitElapsedMs)) : 0;
+  }
+
   async function waitForRapidWarm(runId, warmRun, timeoutMs = RAPID_WARM_JOIN_WAIT_MS) {
+    const joinWaitMs = Math.max(0, Number(timeoutMs) || 0);
     lastRapidWarmView = rapidWarmStatusView({
       ...lastRapidWarmView,
       status: 'waiting',
@@ -2144,10 +2152,11 @@ export function createRecursionRuntime({
       runId,
       phase: 'rapidWarmWaiting',
       label: 'Waiting for Rapid deck...',
-      chips: ['Rapid']
+      chips: ['Rapid'],
+      detail: { joinWaitMs }
     });
     const timeout = new Promise((resolve) => {
-      setTimeout(() => resolve({ ok: false, timeout: true }), Math.max(0, Number(timeoutMs) || 0));
+      setTimeout(() => resolve({ ok: false, timeout: true }), joinWaitMs);
     });
     const result = await Promise.race([warmRun.promise, timeout]);
     if (result?.ok === true && result?.rapid?.status === 'ready') return result;
@@ -3908,6 +3917,7 @@ export function createRecursionRuntime({
     }
     await waitForExternalMutations();
     const runId = makeId('rapid-warm');
+    const warmStartedAtMs = Date.now();
     let warmOutcome = supersededResult(runId);
     let snapshot = null;
     let cache = null;
@@ -4043,6 +4053,7 @@ export function createRecursionRuntime({
           status: 'failed',
           warmArtifactId: warmingRapid?.warmArtifactId,
           failedAt,
+          elapsedMs: Date.now() - warmStartedAtMs,
           reasonCode: failureReasonCode,
           reasonLabel: failureReasonLabel,
           joinable: false
@@ -4116,13 +4127,15 @@ export function createRecursionRuntime({
         label: 'Rapid deck ready.',
         chips: ['Rapid']
       });
+      const completedAt = nowIso();
       lastRapidWarmView = rapidWarmStatusView({
         ...lastRapidWarmView,
         status: 'ready',
         warmArtifactId: rapid.warmArtifactId,
         selectedCardCount: hand.cards.length,
         cardCount: deck.cards.length,
-        completedAt: nowIso(),
+        completedAt,
+        elapsedMs: Date.now() - warmStartedAtMs,
         reasonCode: 'ready',
         reasonLabel: 'Rapid deck ready.',
         joinable: false
@@ -4136,12 +4149,13 @@ export function createRecursionRuntime({
       }
       const safeError = runtimeError(error);
       let failedRapid = null;
+      const failedAt = nowIso();
       if (snapshot) {
         failedRapid = await saveRapidWarmStatus(runId, snapshot, cache, {
           status: 'failed',
           warmArtifactId: warmingRapid?.warmArtifactId,
           startedAt: warmingRapid?.startedAt || lastRapidWarmView.startedAt || nowIso(),
-          failedAt: nowIso(),
+          failedAt,
           failureReasonCode: 'warm-failed',
           failureReasonLabel: rapidWarmReasonLabel('warm-failed'),
           diagnostics: ['rapid-warm-failed']
@@ -4159,7 +4173,8 @@ export function createRecursionRuntime({
         ...lastRapidWarmView,
         status: 'failed',
         warmArtifactId: failedRapid?.warmArtifactId || lastRapidWarmView.warmArtifactId,
-        failedAt: nowIso(),
+        failedAt,
+        elapsedMs: Date.now() - warmStartedAtMs,
         reasonCode: 'warm-failed',
         reasonLabel: rapidWarmReasonLabel('warm-failed'),
         joinable: false
@@ -4515,6 +4530,7 @@ export function createRecursionRuntime({
           status: 'missed',
           reasonCode: missSnapshot.reasonCode,
           reasonLabel: missSnapshot.reasonLabel,
+          elapsedMs: rapidWarmElapsedFromView(),
           joinable: false
         });
         stageRuntimeActivity({
@@ -4542,6 +4558,7 @@ export function createRecursionRuntime({
         status: 'missed',
         reasonCode: missSnapshot.reasonCode,
         reasonLabel: missSnapshot.reasonLabel,
+        elapsedMs: rapidWarmElapsedFromView(),
         joinable: false
       });
       stageRuntimeActivity({
@@ -4569,6 +4586,7 @@ export function createRecursionRuntime({
         status: 'missed',
         reasonCode: missSnapshot.reasonCode,
         reasonLabel: missSnapshot.reasonLabel,
+        elapsedMs: rapidWarmElapsedFromView(),
         joinable: false
       });
       stageRuntimeActivity({

@@ -102,11 +102,23 @@ assertDeepEqual(
     failedAt: '',
     selectedCardCount: 0,
     cardCount: 0,
+    elapsedMs: 0,
     reasonCode: 'warming',
     reasonLabel: 'Rapid deck still warming.',
     joinable: true
   },
   'warm status view is sanitized and complete'
+);
+
+assertEqual(
+  rapidWarmStatusView({
+    status: 'ready',
+    pipelineMode: 'rapid',
+    startedAt: '2026-07-04T00:00:00.000Z',
+    completedAt: '2026-07-04T00:00:04.250Z'
+  }).elapsedMs,
+  4250,
+  'Rapid warm status view computes elapsed duration'
 );
 
 assert(

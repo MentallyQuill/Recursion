@@ -123,6 +123,14 @@ export function rapidWarmMissReason({
 export function rapidWarmStatusView(input = {}) {
   const reasonCode = cleanText(input.reasonCode || input.status || 'idle', 80) || 'idle';
   const fallbackLabel = rapidWarmReasonLabel(reasonCode);
+  const explicitElapsedMs = Number(input.elapsedMs);
+  const startedMs = Date.parse(input.startedAt || '');
+  const completedMs = Date.parse(input.completedAt || input.failedAt || '');
+  const elapsedMs = Number.isFinite(explicitElapsedMs)
+    ? Math.max(0, Math.round(explicitElapsedMs))
+    : (Number.isFinite(startedMs) && Number.isFinite(completedMs)
+        ? Math.max(0, completedMs - startedMs)
+        : 0);
   return {
     status: cleanStatus(input.status),
     pipelineMode: cleanText(input.pipelineMode, 40) === 'rapid' ? 'rapid' : 'standard',
@@ -134,6 +142,7 @@ export function rapidWarmStatusView(input = {}) {
     failedAt: cleanText(input.failedAt, 80),
     selectedCardCount: Math.max(0, Math.floor(Number(input.selectedCardCount) || 0)),
     cardCount: Math.max(0, Math.floor(Number(input.cardCount) || 0)),
+    elapsedMs,
     reasonCode,
     reasonLabel: cleanText(input.reasonLabel, SAFE_LABEL_LIMIT) || fallbackLabel,
     joinable: input.joinable === true

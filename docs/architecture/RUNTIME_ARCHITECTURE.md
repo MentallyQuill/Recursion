@@ -102,6 +102,8 @@ If a Rapid warm Arbiter pass yields no cache cards and requests no provider card
 
 When a foreground Rapid send sees an active warm run whose provider/settings/card/prompt contracts already match but whose base source hash has not been published yet, runtime waits briefly for that hash before declaring a miss. If the warm run publishes a matching base hash or completes during that bounded wait, foreground joins that warm promise instead of immediately falling back to Standard.
 
+Rapid warm status includes elapsed milliseconds for ready, failed, and missed states. Join-wait activity includes the configured wait budget so live `warm-timeout` rows can be compared against actual warm duration before changing the default wait.
+
 The Fused pipeline keeps the Standard foreground sequence but fuses the card-generation stage:
 
 1. Observe chat and turn snapshot.

@@ -94,6 +94,8 @@ Rapid does not gain latency by using local cards, local fallback plans, local sc
 
 Every Rapid warm miss records one bounded miss snapshot in activity details and `rapid.warm_missed` journal entries. The snapshot includes the reason code/label, whether an exact variant existed, whether a join was attempted or timed out, whether an active warm run was present and had a known base hash, candidate and selected-card counts, and sanitized diagnostics. This is the root-cause surface for live Rapid fallbacks before changing pipeline behavior.
 
+When a foreground Rapid send sees an active warm run whose provider/settings/card/prompt contracts already match but whose base source hash has not been published yet, runtime waits briefly for that hash before declaring a miss. If the warm run publishes a matching base hash or completes during that bounded wait, foreground joins that warm promise instead of immediately falling back to Standard.
+
 The Fused pipeline keeps the Standard foreground sequence but fuses the card-generation stage:
 
 1. Observe chat and turn snapshot.

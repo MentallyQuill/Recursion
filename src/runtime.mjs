@@ -2071,8 +2071,7 @@ export function createRecursionRuntime({
     activeRapidWarmRun = null;
   }
 
-  function exactWarmRunForSource(baseSourceRevisionHash, expectedContracts = {}) {
-    const warm = activeRapidWarmRun;
+  function rapidWarmRunMatchesSource(warm, baseSourceRevisionHash, expectedContracts = {}) {
     if (!warm?.promise) return null;
     if (warm.signal?.aborted === true) return null;
     if (safeText(warm.baseSourceRevisionHash || '', 180) !== safeText(baseSourceRevisionHash || '', 180)) return null;
@@ -2081,6 +2080,29 @@ export function createRecursionRuntime({
       if (safeText(contract[key] || '', 180) !== safeText(expectedContracts[key] || '', 180)) return null;
     }
     return warm;
+  }
+
+  function exactWarmRunForSource(baseSourceRevisionHash, expectedContracts = {}) {
+    return rapidWarmRunMatchesSource(activeRapidWarmRun, baseSourceRevisionHash, expectedContracts);
+  }
+
+  async function waitForRapidWarmBaseSource(runId, expectedContracts = {}, timeoutMs = 250) {
+    const warm = activeRapidWarmRun;
+    if (!warm?.promise || warm.signal?.aborted === true) return null;
+    const contract = asObject(warm.contract);
+    for (const key of ['settingsHash', 'providerContractHash', 'cardCatalogHash', 'promptContractHash']) {
+      if (safeText(contract[key] || '', 180) !== safeText(expectedContracts[key] || '', 180)) return null;
+    }
+    if (safeText(warm.baseSourceRevisionHash || '', 180)) return warm;
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      if (!isActiveRun(runId)) return null;
+      if (safeText(warm.baseSourceRevisionHash || '', 180)) return warm;
+      if (!activeRapidWarmRun || activeRapidWarmRun.runId !== warm.runId) return null;
+      if (safeText(activeRapidWarmRun.baseSourceRevisionHash || '', 180)) return activeRapidWarmRun;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return null;
   }
 
   async function waitForRapidWarm(runId, warmRun, timeoutMs = RAPID_WARM_JOIN_WAIT_MS) {
@@ -4435,7 +4457,10 @@ export function createRecursionRuntime({
         expectedContracts,
         baseSourceRevisionHash
       });
-      const joinableWarm = exactWarmRunForSource(baseSourceRevisionHash, expectedContracts);
+      const waitedWarm = await waitForRapidWarmBaseSource(runId, expectedContracts);
+      if (!isActiveRun(runId)) return supersededResult(runId);
+      const joinableWarm = exactWarmRunForSource(baseSourceRevisionHash, expectedContracts)
+        || rapidWarmRunMatchesSource(waitedWarm, baseSourceRevisionHash, expectedContracts);
       if (joinableWarm) {
         const joined = await waitForRapidWarm(runId, joinableWarm, rapidWarmJoinWaitMs);
         if (!isActiveRun(runId)) return supersededResult(runId);

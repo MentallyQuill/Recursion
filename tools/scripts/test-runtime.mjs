@@ -567,6 +567,93 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const snapshotGate = deferred();
+  let warmSnapshotReads = 0;
+  let baseReleased = false;
+  let standardStartedBeforeBase = false;
+  const roleCalls = [];
+  const { snapshot } = rapidWarmSnapshotFixture();
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', mode: 'auto' },
+    rapidWarmJoinWaitMs: 200,
+    snapshot: async () => {
+      warmSnapshotReads += 1;
+      if (warmSnapshotReads === 1) await snapshotGate.promise;
+      return snapshot;
+    },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          if (!baseReleased && warmSnapshotReads > 1) standardStartedBeforeBase = true;
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Race warm card.' }],
+              reasonerDecision: { mode: 'skip', reason: 'race warm', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['rapid-warm-race']
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') return cardProviderResponse(roleId, request, 'Race warm card text.');
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Race warm guidance.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['race-warm-guidance']
+            }
+          };
+        }
+        if (roleId === 'rapidTurnDelta') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.rapidTurnDelta.v2',
+              snapshotHash: request.snapshotHash,
+              baseSourceRevisionHash: request.baseSourceRevisionHash,
+              turnSourceRevisionHash: request.turnSourceRevisionHash,
+              selectedCardIds: [],
+              turnGuidanceText: 'RACE_JOIN_MARKER use newly warmed deck.',
+              guardrailCardIds: [],
+              packetInstructions: [],
+              backgroundRefreshRequests: [],
+              mandatoryMissingCards: [],
+              escalateToStandard: false,
+              diagnostics: ['race-joined']
+            }
+          };
+        }
+        throw new Error(`unexpected race role ${roleId}`);
+      }
+    }
+  });
+  const warmPromise = harness.runtime.warmRapidScene({ reason: 'unit-base-hash-race' });
+  await Promise.resolve();
+  const foregroundPromise = harness.runtime.prepareForGeneration({ userMessage: 'Join warm after base hash publishes.' });
+  await delay(0);
+  assertEqual(standardStartedBeforeBase, false, 'foreground waits for active warm base hash before starting Standard');
+  baseReleased = true;
+  snapshotGate.resolve();
+  const [warmResult, foregroundResult] = await Promise.all([warmPromise, foregroundPromise]);
+  assertEqual(warmResult.ok, true, 'race warm completes');
+  assertEqual(foregroundResult.ok, true, 'foreground completes after base-hash race');
+  assertEqual(foregroundResult.packet.diagnostics.pipelineMode, 'rapid', 'foreground waits for warm base hash instead of immediate Standard fallback');
+  assert(roleCalls.includes('rapidTurnDelta'), 'race foreground uses Rapid delta');
+}
+
+{
   const gate = deferred();
   let arbiterStarted = false;
   const adapter = createMemoryStorageAdapter();

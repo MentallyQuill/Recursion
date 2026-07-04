@@ -429,6 +429,110 @@ export function enabledSubItemsForFamily(scope, family) {
   return selectedForFamily(normalizeCardScope(scope), String(family || ''));
 }
 
+export function manualSelectionCap(settings = {}) {
+  const raw = Math.round(Number(settings?.maxCards));
+  const normalized = Number.isFinite(raw) ? raw : 10;
+  return Math.max(1, Math.min(20, normalized));
+}
+
+export function manualSelectedFamilies(scope = {}) {
+  const normalized = normalizeCardScope(scope);
+  return CARD_SCOPE_CATALOG
+    .filter((entry) => selectedForFamily(normalized, entry.family).length > 0)
+    .map((entry) => entry.family);
+}
+
+function orderedKnownFamilies(values = []) {
+  const known = new Set(CARD_SCOPE_CATALOG.map((entry) => entry.family));
+  const seen = new Set();
+  const output = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const family = String(value || '');
+    if (known.has(family) && !seen.has(family)) {
+      seen.add(family);
+      output.push(family);
+    }
+  }
+  return output;
+}
+
+export function rankManualSelectedFamilies(scope = {}, context = {}) {
+  const selected = new Set(manualSelectedFamilies(scope));
+  const preferred = orderedKnownFamilies(context.preferredFamilies).filter((family) => selected.has(family));
+  const seen = new Set(preferred);
+  const fallback = CARD_SCOPE_CATALOG
+    .map((entry) => entry.family)
+    .filter((family) => selected.has(family) && !seen.has(family));
+  return [...preferred, ...fallback];
+}
+
+function disabledFamilyState(catalog) {
+  return {
+    enabled: false,
+    subItems: Object.fromEntries(catalog.subItems.map((item) => [item.key, false]))
+  };
+}
+
+function enabledFamilyState(catalog) {
+  return {
+    enabled: true,
+    subItems: Object.fromEntries(catalog.subItems.map((item) => [item.key, true]))
+  };
+}
+
+export function enforceManualSelectionCap(scope = {}, settings = {}, context = {}) {
+  const cap = manualSelectionCap(settings);
+  const normalized = normalizeCardScope(scope);
+  const selected = rankManualSelectedFamilies(normalized, context);
+  if (selected.length <= cap) {
+    return { scope: normalized, trimmed: false, cap, notice: '' };
+  }
+  const keep = new Set(selected.slice(0, cap));
+  const next = cloneScope(normalized);
+  for (const catalog of CARD_SCOPE_CATALOG) {
+    if (!keep.has(catalog.family)) {
+      next.families[catalog.family] = disabledFamilyState(catalog);
+    }
+  }
+  return {
+    scope: next,
+    trimmed: true,
+    cap,
+    notice: `Manual selection trimmed to Max Cards: ${cap}.`
+  };
+}
+
+export function setFamilyEnabledWithCap(scope = {}, family, enabled, settings = {}) {
+  const mode = settings?.mode === 'manual' ? 'manual' : 'auto';
+  const normalized = normalizeCardScope(scope);
+  const catalog = familyCatalog(family);
+  if (!catalog) return { scope: normalized, blocked: false, reason: 'unknown-family', notice: '' };
+  if (mode !== 'manual' || enabled !== true) {
+    const result = setFamilyEnabled(normalized, family, enabled);
+    return {
+      ...result,
+      notice: result.blocked
+        ? (mode === 'manual' ? 'Keep at least one Manual card selected.' : 'Keep at least one card focus enabled.')
+        : ''
+    };
+  }
+  const selected = manualSelectedFamilies(normalized);
+  const alreadySelected = selected.includes(catalog.family);
+  const cap = manualSelectionCap(settings);
+  if (!alreadySelected && selected.length >= cap) {
+    return {
+      scope: normalized,
+      blocked: true,
+      reason: 'manual-card-cap',
+      cap,
+      notice: `Max Cards is ${cap}. Change it in Settings to select more.`
+    };
+  }
+  const next = cloneScope(normalized);
+  next.families[catalog.family] = enabledFamilyState(catalog);
+  return { scope: next, blocked: false, reason: '', cap, notice: '' };
+}
+
 export function scopePayloadForArbiter(settings = {}) {
   const mode = settings?.mode === 'manual' ? 'manual' : 'auto';
   const strictWhitelist = mode === 'manual';

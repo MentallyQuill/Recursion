@@ -4,7 +4,14 @@ import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
 import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
 import { CARD_CATALOG, cardsFromProviderResult } from '../../src/cards.mjs';
-import { defaultCardScope, setFamilyEnabled } from '../../src/card-scope.mjs';
+import {
+  CARD_SCOPE_CATALOG,
+  defaultCardScope,
+  manualSelectedFamilies,
+  normalizeCardScope,
+  setFamilyEnabled,
+  setSubItemEnabled
+} from '../../src/card-scope.mjs';
 import { packetToPromptBlocks } from '../../src/prompt.mjs';
 import { hashJson } from '../../src/core.mjs';
 import { UNKNOWN_STORY_FORM } from '../../src/story-form.mjs';
@@ -242,6 +249,15 @@ function sourceWindowHash(messages, firstMesId, lastMesId) {
 
 function scopeWithFamilyDisabled(family) {
   return setFamilyEnabled(defaultCardScope(), family, false).scope;
+}
+
+function scopeWithOnlyFamilies(families) {
+  const keep = new Set((Array.isArray(families) ? families : []).map((family) => String(family || '')));
+  let scope = defaultCardScope();
+  for (const entry of CARD_SCOPE_CATALOG) {
+    if (!keep.has(entry.family)) scope = setFamilyEnabled(scope, entry.family, false).scope;
+  }
+  return scope;
 }
 
 function runtimeSnapshotHash(snapshot) {
@@ -2918,6 +2934,38 @@ for (const pipelineMode of ['standard', 'rapid']) {
 }
 
 {
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'manual', maxCards: 5, reasonerUse: 'off' }
+  });
+  const view = runtime.view();
+  assertEqual(view.settings.maxCards, 5, 'runtime view exposes current Max Cards for Manual cap UI');
+  assert(view.settings.cardScopeSummary.counts.selectedFamilies >= 1, 'runtime view keeps at least one selected family');
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', maxCards: 2, cardScope: defaultCardScope(), reasonerUse: 'off' }
+  });
+  const update = await runtime.updateSettings({ mode: 'manual' });
+  const expected = CARD_SCOPE_CATALOG.slice(0, 2).map((entry) => entry.family);
+  assertDeepEqual(manualSelectedFamilies(update.settings.cardScope), expected, 'Auto-to-Manual over cap trims by catalog priority without randomness');
+  assertDeepEqual(manualSelectedFamilies(runtime.view().settings.cardScope), expected, 'trimmed Manual scope is visible in runtime view');
+}
+
+{
+  const keep = ['Scene Frame', 'Open Threads'];
+  const underCap = scopeWithOnlyFamilies(keep);
+  const firstSceneFacet = CARD_SCOPE_CATALOG.find((entry) => entry.family === 'Scene Frame').subItems[0].key;
+  const focused = setSubItemEnabled(underCap, 'Scene Frame', firstSceneFacet, false).scope;
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', maxCards: 5, cardScope: focused, reasonerUse: 'off' }
+  });
+  const update = await runtime.updateSettings({ mode: 'manual' });
+  assertEqual(update.settings.cardScope.families['Scene Frame'].subItems[firstSceneFacet], false, 'under-cap Auto-to-Manual preserves selected facets');
+  assertDeepEqual(update.settings.cardScope, normalizeCardScope(focused), 'under-cap Auto-to-Manual preserves selected families and facets exactly');
+}
+
+{
   const { runtime, calls } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     hostPrompt: {
@@ -5368,7 +5416,7 @@ for (const scenario of [
 }
 
 {
-  const manualNoScene = scopeWithFamilyDisabled('Scene Frame');
+  const manualNoScene = scopeWithOnlyFamilies(['Open Threads']);
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'manual', cardScope: manualNoScene, reasonerUse: 'off' },
@@ -5429,6 +5477,113 @@ for (const scenario of [
   assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'manual scoped hand includes enabled provider card');
   assert(!view.lastHand.cards.some((card) => card.family === 'Scene Frame'), 'manual scoped hand excludes disabled Scene Frame');
   assert(serializedPlan.includes('manual-scope-omitted:Scene Frame'), 'manual scoped diagnostics record omitted family');
+}
+
+{
+  const manualForcedScope = scopeWithOnlyFamilies(['Scene Frame', 'Open Threads']);
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'manual', maxCards: 2, cardScope: manualForcedScope, reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [{ family: 'Open Threads', role: 'openThreadsCard', reason: 'Arbiter chose only threads.' }],
+              budgets: { targetBriefTokens: 500, maxCards: 1 },
+              diagnostics: ['manual-force-test']
+            }
+          };
+        }
+        throw new Error(`Manual forced test expected batch routing, got generate ${roleId}`);
+      },
+      async batch(requests) {
+        routerCalls.push(...requests.map((request) => request.roleId));
+        assertDeepEqual(
+          requests.map((request) => request.metadata.family).sort(),
+          ['Open Threads', 'Scene Frame'].sort(),
+          'Manual runtime synthesizes missing selected family job'
+        );
+        return requests.map((request) => ({
+          ok: true,
+          roleId: request.roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: request.metadata.role,
+            family: request.metadata.family,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: `${request.metadata.family} forced card.`,
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 18
+            }]
+          }
+        }));
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Manual force selected cards.' });
+  const view = runtime.view();
+  assertEqual(result.ok, true, 'manual forced run installs prompt');
+  assert(routerCalls.includes('sceneFrameCard'), 'manual forced run generates Arbiter-omitted selected Scene Frame');
+  assert(view.lastHand.cards.some((card) => card.family === 'Scene Frame'), 'manual forced hand includes Scene Frame');
+  assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'manual forced hand includes Open Threads');
+  assertEqual(view.lastHand.metadata.maxCards >= 2, true, 'manual forced hand floors budget to selected family count');
+  assertDeepEqual(view.lastHand.metadata.forcedFamilies, ['Scene Frame', 'Open Threads'], 'manual forced hand metadata records selected families');
+  assert(JSON.stringify(view.lastPlan).includes('manual-forced-card:Scene Frame'), 'manual forced diagnostic records synthesized card');
+}
+
+{
+  const manualScope = scopeWithOnlyFamilies(['Scene Frame', 'Open Threads']);
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'manual', maxCards: 2, cardScope: manualScope, reasonerUse: 'off' },
+    generationRouter: {
+      async generate(roleId, request) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [],
+              budgets: { targetBriefTokens: 500, maxCards: 2 }
+            }
+          };
+        }
+        throw new Error(`Expected batch, got ${roleId}`);
+      },
+      async batch(requests) {
+        return requests.map((request) => request.metadata.family === 'Scene Frame'
+          ? { ok: false, roleId: request.roleId, error: { code: 'TEST_FORCED_FAILURE' } }
+          : {
+              ok: true,
+              roleId: request.roleId,
+              data: {
+                schema: 'recursion.card.v1',
+                role: request.metadata.role,
+                family: request.metadata.family,
+                snapshotHash: request.snapshotHash,
+                items: [{ promptText: 'Threads card.', evidenceRefs: ['message:2'], tokenEstimate: 18 }]
+              }
+            });
+      }
+    }
+  });
+  await runtime.prepareForGeneration({ userMessage: 'Manual forced failure.' });
+  const view = runtime.view();
+  assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'valid forced family remains selected');
+  assert(JSON.stringify(view.lastPacket).includes('Open Threads'), 'valid forced family reaches the packet');
+  assert(
+    view.lastPacket.omissions.some((entry) => entry.family === 'Scene Frame' && entry.reason === 'manual-forced-provider-failed'),
+    'failed forced family reaches packet omissions'
+  );
+  assert(JSON.stringify(view.lastPlan).includes('manual-forced-card:Scene Frame'), 'failed forced family is diagnosable');
 }
 
 {

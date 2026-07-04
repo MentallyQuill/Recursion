@@ -1019,6 +1019,17 @@ assertEqual(cardsFromProviderResult({
 }, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider card with hidden reasoning text ignored');
 assertEqual(cardsFromProviderResult({
   ok: true,
+  roleId: 'sceneFrameCard',
+  data: {
+    schema: 'recursion.card.v1',
+    role: 'sceneFrameCard',
+    family: 'Scene Frame',
+    snapshotHash: 'hash-provider',
+    items: [{ promptText: 'This card would reveal secret character motives.', evidenceRefs: ['message:8'] }]
+  }
+}, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider card with packet-forbidden motive wording ignored before prompt composition');
+assertEqual(cardsFromProviderResult({
+  ok: true,
   roleId: 'characterMotivationCard',
   data: {
     schema: 'recursion.card.v1',
@@ -1048,6 +1059,22 @@ assert(budgetHand.omitted.some((entry) => entry.cardId === 'low' && entry.reason
 assert(budgetHand.omitted.some((entry) => entry.cardId === 'stowed' && entry.reason === 'inactive'), 'inactive omissions recorded');
 assertEqual(budgetHand.metadata.maxCards, 2, 'hand metadata includes maxCards');
 assertEqual(budgetHand.metadata.maxTokens, 300, 'hand metadata includes maxTokens');
+
+const forcedHand = selectHand(selectedDeck, {
+  maxCards: 1,
+  maxTokens: 300,
+  forcedFamilies: ['Relationship', 'Scene Constraints']
+});
+assertDeepEqual(forcedHand.cards.map((entry) => entry.family), ['Relationship', 'Scene Constraints'], 'forced families select first and floor maxCards');
+assertDeepEqual(forcedHand.metadata.forcedFamilies, ['Relationship', 'Scene Constraints'], 'hand metadata records forced families');
+assertDeepEqual(forcedHand.metadata.selectedForcedFamilies, ['Relationship', 'Scene Constraints'], 'hand metadata records selected forced families');
+const missingForcedHand = selectHand(selectedDeck, {
+  maxCards: 2,
+  maxTokens: 300,
+  forcedFamilies: ['Open Threads', 'Environment']
+});
+assert(missingForcedHand.cards.some((entry) => entry.family === 'Open Threads'), 'available forced family is still selected');
+assert(missingForcedHand.omitted.some((entry) => entry.family === 'Environment' && entry.reason === 'manual-forced-provider-failed'), 'missing forced family records explicit omission');
 
 const characterFocusHand = selectHand([
   deckCard('Character Motivation', 'Mara seems guarded.', { id: 'motivation-tie', tokenEstimate: 20 }),

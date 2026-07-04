@@ -2,6 +2,7 @@ import { createActivityReporter } from './activity.mjs';
 import { CARD_CATALOG, applyCardPlan, buildCardRequests, cardsFromProviderResult, normalizeCard, selectHand } from './cards.mjs';
 import {
   cardScopeSummary,
+  enforceManualSelectionCap,
   filterCardJobsForScope,
   filterCardsForScope,
   normalizeCardScope,
@@ -1516,6 +1517,69 @@ function autoScopeExceptionReasons(entries, settings) {
     .map((family) => `auto-scope-exception:${family}`))];
 }
 
+function resolveCatalogForFamily(family) {
+  return CARD_CATALOG.find((entry) => entry.family === family) || null;
+}
+
+function activeCardFamilies(cards = []) {
+  return new Set((Array.isArray(cards) ? cards : [])
+    .filter((card) => card?.status === 'active' && card.family)
+    .map((card) => card.family));
+}
+
+function reconcileManualForcedCardJobs({ plan, settings, cacheCards = [], forceContext = null } = {}) {
+  const scope = scopePayloadForArbiter(settings);
+  const entries = Array.isArray(plan?.cardJobs) ? plan.cardJobs : [];
+  if (!scope.strictWhitelist) {
+    return {
+      cardJobs: entries,
+      diagnostics: [],
+      forcedFamilies: [],
+      reusedFamilies: [],
+      synthesizedFamilies: [],
+      omitted: []
+    };
+  }
+  const selectedFamilies = Array.isArray(scope.selectedFamilies) ? scope.selectedFamilies : [];
+  const reusableFamilies = forceContext ? new Set() : activeCardFamilies(cacheCards);
+  const jobsByFamily = new Map();
+  for (const job of entries) {
+    const catalog = catalogForCard(job);
+    if (catalog && selectedFamilies.includes(catalog.family) && !jobsByFamily.has(catalog.family)) {
+      jobsByFamily.set(catalog.family, { ...job, family: catalog.family, role: catalog.role });
+    }
+  }
+  const diagnostics = [];
+  const synthesizedFamilies = [];
+  const reusedFamilies = [];
+  for (const family of selectedFamilies) {
+    if (jobsByFamily.has(family)) continue;
+    if (reusableFamilies.has(family)) {
+      reusedFamilies.push(family);
+      diagnostics.push(`manual-forced-cache:${family}`);
+      continue;
+    }
+    const catalog = resolveCatalogForFamily(family);
+    if (!catalog) continue;
+    synthesizedFamilies.push(family);
+    diagnostics.push(`manual-forced-card:${family}`);
+    jobsByFamily.set(family, {
+      family: catalog.family,
+      role: catalog.role,
+      reason: 'Manual selected this card; runtime forced coverage because the Arbiter omitted it.',
+      forcedBy: 'manual-selection'
+    });
+  }
+  return {
+    cardJobs: [...jobsByFamily.values()],
+    diagnostics,
+    forcedFamilies: selectedFamilies.slice(),
+    reusedFamilies,
+    synthesizedFamilies,
+    omitted: []
+  };
+}
+
 function cardScopePolicyLine(cardScope) {
   if (cardScope?.strictWhitelist) {
     return 'Manual card scope policy: allowedCatalog is a strict whitelist. Do not request disabled families or sub-items.';
@@ -2339,9 +2403,34 @@ export function createRecursionRuntime({
     return clear;
   }
 
+  function manualTrimPreferenceFamiliesForRuntime(settings = {}) {
+    const fromLastHand = Array.isArray(lastHand?.cards)
+      ? lastHand.cards.map((card) => safeText(card?.family || '', 120)).filter(Boolean)
+      : [];
+    const focusFamilies = influencePolicyForSettings(settings).focus?.boostedFamilies || [];
+    return [...fromLastHand, ...focusFamilies];
+  }
+
+  function shouldEnforceManualSelectionCapForPatch(currentSettings = {}, nextSettings = {}, patch = {}) {
+    if (nextSettings?.mode !== 'manual') return false;
+    const changedToManual = patch.mode === 'manual' && currentSettings?.mode !== 'manual';
+    const changedScope = Object.prototype.hasOwnProperty.call(patch, 'cardScope');
+    const changedMaxCards = Object.prototype.hasOwnProperty.call(patch, 'maxCards');
+    return changedToManual || changedScope || changedMaxCards;
+  }
+
   async function updateSettings(patch = {}) {
     const cleanPatch = asObject(patch);
-    const next = settingsStore.update(cleanPatch);
+    const currentSettings = settingsStore.get();
+    let next = settingsStore.update(cleanPatch);
+    if (shouldEnforceManualSelectionCapForPatch(currentSettings, next, cleanPatch)) {
+      const manualScoped = enforceManualSelectionCap(next.cardScope, next, {
+        preferredFamilies: manualTrimPreferenceFamiliesForRuntime(next)
+      });
+      if (manualScoped.trimmed) {
+        next = settingsStore.update({ cardScope: manualScoped.scope });
+      }
+    }
     const changedKeys = Object.keys(cleanPatch);
     const promptNeutralPatch = changedKeys.length > 0
       && changedKeys.every((key) => PROMPT_NEUTRAL_SETTING_KEYS.has(key));
@@ -3791,13 +3880,29 @@ export function createRecursionRuntime({
         throw new Error(plan.utilityUnavailableReason || 'Utility provider unavailable.');
       }
       const scopedCardJobs = filterCardJobsForScope(plan.cardJobs, settings);
+      const activeCacheForManual = activeSceneCacheVariant(cache, snapshot);
+      const manualReconciled = reconcileManualForcedCardJobs({
+        plan: { ...plan, cardJobs: scopedCardJobs.cardJobs },
+        settings,
+        cacheCards: cardsWithOrigin(sanitizedCacheCards(runId, snapshot, activeCacheForManual.cards), 'cache'),
+        snapshot
+      });
+      const manualForcedFamilies = manualReconciled.forcedFamilies;
       plan = {
         ...plan,
-        cardJobs: scopedCardJobs.cardJobs,
+        cardJobs: manualReconciled.cardJobs,
+        ...(manualReconciled.synthesizedFamilies.length && planAction(plan) === 'reuse-cache' ? { action: 'compose-brief' } : {}),
+        budgets: settings.mode === 'manual'
+          ? {
+              ...asObject(plan.budgets),
+              maxCards: Math.max(budgetOr(plan.budgets?.maxCards, 6), manualForcedFamilies.length)
+            }
+          : plan.budgets,
         diagnostics: mergeDiagnostics(
           plan.diagnostics,
           scopeOmissionReasons(scopedCardJobs.omitted),
-          autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings)
+          autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings),
+          manualReconciled.diagnostics
         )
       };
       lastPlan = plan;
@@ -3848,7 +3953,8 @@ export function createRecursionRuntime({
       const hand = selectHand(deck.cards, {
         maxCards: budgetOr(plan.budgets?.maxCards, 6),
         maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
-        behaviorPolicy
+        behaviorPolicy,
+        forcedFamilies: manualForcedFamilies
       });
       const guidance = await composeGuidanceForCards({
         hand,
@@ -4618,15 +4724,32 @@ export function createRecursionRuntime({
       plan = applyReasoningPolicyToPlan(plan, settings);
       plan = applyBehaviorPolicyToPlan(plan, settings);
       const scopedCardJobs = filterCardJobsForScope(plan.cardJobs, settings);
+      const activeCacheForManual = activeSceneCacheVariant(initialCache, snapshot);
+      const manualReconciled = reconcileManualForcedCardJobs({
+        plan: { ...plan, cardJobs: scopedCardJobs.cardJobs },
+        settings,
+        cacheCards: cardsWithOrigin(sanitizedCacheCards(runId, snapshot, activeCacheForManual.cards), 'cache'),
+        forceContext,
+        snapshot
+      });
+      const manualForcedFamilies = manualReconciled.forcedFamilies;
       plan = {
         ...plan,
-        cardJobs: scopedCardJobs.cardJobs,
+        cardJobs: manualReconciled.cardJobs,
+        ...(manualReconciled.synthesizedFamilies.length && planAction(plan) === 'reuse-cache' ? { action: 'compose-brief' } : {}),
+        budgets: settings.mode === 'manual'
+          ? {
+              ...asObject(plan.budgets),
+              maxCards: Math.max(budgetOr(plan.budgets?.maxCards, 6), manualForcedFamilies.length)
+            }
+          : plan.budgets,
         diagnostics: mergeDiagnostics(
           plan.diagnostics,
           rapidEscalationDiagnostics,
           forceDiagnostics,
           scopeOmissionReasons(scopedCardJobs.omitted),
-          autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings)
+          autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings),
+          manualReconciled.diagnostics
         )
       };
       if (!isActiveRun(runId)) return supersededResult(runId);
@@ -4758,7 +4881,8 @@ export function createRecursionRuntime({
       let hand = selectHand(deck.cards, {
         maxCards: budgetOr(plan.budgets?.maxCards, 6),
         maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
-        behaviorPolicy
+        behaviorPolicy,
+        forcedFamilies: manualForcedFamilies
       });
 
       const freshness = await recheckPromptInstallSnapshot(runId, sceneSnapshot, plan, pendingUserMessage);
@@ -4783,7 +4907,8 @@ export function createRecursionRuntime({
         hand = selectHand(promptDeck.cards, {
           maxCards: budgetOr(plan.budgets?.maxCards, 6),
           maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
-          behaviorPolicy
+          behaviorPolicy,
+          forcedFamilies: manualForcedFamilies
         });
       }
       lastSnapshot = promptSnapshot;
@@ -4856,7 +4981,8 @@ export function createRecursionRuntime({
           hand = selectHand(promptDeck.cards, {
             maxCards: budgetOr(plan.budgets?.maxCards, 6),
             maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
-            behaviorPolicy
+            behaviorPolicy,
+            forcedFamilies: manualForcedFamilies
           });
           await runStorageSaveSection(runId, () => saveSceneCacheSafe(
             runId,

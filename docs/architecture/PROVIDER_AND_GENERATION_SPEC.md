@@ -278,6 +278,8 @@ Common card output envelope:
 
 Cards should be concise, observable, and player-message-adjacent. Provider cards are omitted independently when the envelope role/family does not match the requested catalog slot, the envelope `snapshotHash` is missing or does not match the frozen request hash, the card lacks parseable `message:N` evidence, or prompt-facing text contains hidden-reasoning wording. They must not include hidden character thoughts, private chain-of-thought, or broad plot plans.
 
+Manual forced selection does not create a new provider schema. Runtime still sends one request per selected or Arbiter-requested family and expects the same `recursion.card.v1` envelope with one prompt-facing item for that family. If Manual selected a family that the Arbiter omitted, runtime synthesizes the missing `cardJob` after scope filtering with `forcedBy: "manual-selection"`; the provider is not asked to generate multiple families in one response.
+
 ## Cached Card Freshness
 
 Scene cache entries may be shown to the Utility Arbiter as compact metadata so it can decide whether to reuse, stow, discard, or regenerate cards. Runtime must not treat that Arbiter visibility as permission to inject cached cards.

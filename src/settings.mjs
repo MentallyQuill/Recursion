@@ -99,6 +99,8 @@ function numberInRange(value, fallback, min, max) {
 
 export function normalizeCardBudgetSettings(value = {}) {
   const source = value && typeof value === 'object' ? value : {};
+  const hasMinCards = Object.prototype.hasOwnProperty.call(source, 'minCards');
+  const hasMaxCards = Object.prototype.hasOwnProperty.call(source, 'maxCards');
   const rawMin = Math.round(numberInRange(
     source.minCards,
     DEFAULT_RECURSION_SETTINGS.minCards,
@@ -111,6 +113,13 @@ export function normalizeCardBudgetSettings(value = {}) {
     CARD_BUDGET_MIN,
     CARD_BUDGET_MAX
   ));
+  if (hasMaxCards && !hasMinCards && rawMax < rawMin) {
+    return {
+      minCards: rawMax,
+      normalCards: rawMax,
+      maxCards: rawMax
+    };
+  }
   const minCards = Math.min(rawMin, rawMax);
   const maxCards = Math.max(rawMin, rawMax);
   return {
@@ -153,6 +162,24 @@ function mergePlainObjects(base, patch) {
     result[key] = isPlainObject(value) && isPlainObject(result[key])
       ? mergePlainObjects(result[key], value)
       : value;
+  }
+  return result;
+}
+
+function mergeSettingsPatch(base, patch) {
+  const result = mergePlainObjects(base, patch);
+  if (!isPlainObject(patch)) return result;
+  const hasMinCards = Object.prototype.hasOwnProperty.call(patch, 'minCards');
+  const hasMaxCards = Object.prototype.hasOwnProperty.call(patch, 'maxCards');
+  if (hasMaxCards && !hasMinCards) {
+    const maxCards = normalizeCardBudgetSettings({ minCards: 0, maxCards: patch.maxCards }).maxCards;
+    const currentMin = normalizeCardBudgetSettings(base).minCards;
+    if (maxCards < currentMin) result.minCards = maxCards;
+  }
+  if (hasMinCards && !hasMaxCards) {
+    const minCards = normalizeCardBudgetSettings({ minCards: patch.minCards, maxCards: CARD_BUDGET_MAX }).minCards;
+    const currentMax = normalizeCardBudgetSettings(base).maxCards;
+    if (minCards > currentMax) result.maxCards = minCards;
   }
   return result;
 }
@@ -297,7 +324,7 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
       return cloneJson(root.recursion);
     },
     update(patch = {}) {
-      return persist(mergePlainObjects(root.recursion, patch));
+      return persist(mergeSettingsPatch(root.recursion, patch));
     },
     updateProvider(lane, patch = {}) {
       const resolvedLane = requireProviderLane(lane);

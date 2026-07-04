@@ -186,8 +186,8 @@ function recursionSmokeFixtureHtml({
   const promptPacketMetadataExpression = omitPromptPacketMetadata
     ? "JSON.stringify({ packetId: '', handId: '', selectedCardRefs: [] })"
     : reasonerFallback
-      ? "JSON.stringify({ packetId: 'packet-smoke', handId: 'hand-smoke', selectedCardRefs: (smokeContext.disabledFamilies.includes('Scene Frame') ? [{ id: 'open-thread', family: 'Open Threads' }] : [{ id: 'scene-frame', family: 'Scene Frame' }, { id: 'turn-brief', family: 'Open Threads' }]), diagnostics: { composerLane: 'utility', reasonerStatus: 'fallback', fallbackReason: 'reasoner raw failure text should be redacted' } })"
-      : "JSON.stringify({ packetId: 'packet-smoke', handId: 'hand-smoke', selectedCardRefs: (smokeContext.disabledFamilies.includes('Scene Frame') ? [{ id: 'open-thread', family: 'Open Threads' }] : [{ id: 'scene-frame', family: 'Scene Frame' }, { id: 'turn-brief', family: 'Open Threads' }]), diagnostics: { composerLane: 'utility', reasonerStatus: 'skipped' } })";
+      ? "JSON.stringify({ packetId: 'packet-smoke', handId: 'hand-smoke', selectedCardRefs: (Array.isArray(smokeContext.manualForcedFamilies) && smokeContext.manualForcedFamilies.length ? smokeContext.manualForcedFamilies.map((family, index) => ({ id: `forced-${index}`, family })) : (smokeContext.disabledFamilies.includes('Scene Frame') ? [{ id: 'open-thread', family: 'Open Threads' }] : [{ id: 'scene-frame', family: 'Scene Frame' }, { id: 'turn-brief', family: 'Open Threads' }])), diagnostics: { composerLane: 'utility', reasonerStatus: 'fallback', fallbackReason: 'reasoner raw failure text should be redacted' } })"
+      : "JSON.stringify({ packetId: 'packet-smoke', handId: 'hand-smoke', selectedCardRefs: (Array.isArray(smokeContext.manualForcedFamilies) && smokeContext.manualForcedFamilies.length ? smokeContext.manualForcedFamilies.map((family, index) => ({ id: `forced-${index}`, family })) : (smokeContext.disabledFamilies.includes('Scene Frame') ? [{ id: 'open-thread', family: 'Open Threads' }] : [{ id: 'scene-frame', family: 'Scene Frame' }, { id: 'turn-brief', family: 'Open Threads' }])), diagnostics: { composerLane: 'utility', reasonerStatus: 'skipped' } })";
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -222,12 +222,16 @@ function recursionSmokeFixtureHtml({
         <div data-recursion-hand-dropdown hidden>No hand has been composed for this chat.</div>
         <button type="button" data-recursion-cards-button aria-expanded="false">Cards</button>
         <div data-recursion-cards-panel hidden>
-          <button type="button" data-recursion-card-scope-family-toggle data-recursion-card-scope-family-name="Scene Frame">Scene Frame</button>
+          <button type="button" data-recursion-card-scope-family-toggle data-recursion-card-scope-family-name="Scene Frame" aria-pressed="true">Scene Frame</button>
+          <button type="button" data-recursion-card-scope-family-toggle data-recursion-card-scope-family-name="Active Cast" aria-pressed="true">Active Cast</button>
+          <button type="button" data-recursion-card-scope-family-toggle data-recursion-card-scope-family-name="Open Threads" aria-pressed="true">Open Threads</button>
+          <div data-recursion-card-scope-error role="status"></div>
           <span data-recursion-cards-label>Cards</span>
         </div>
         <div data-recursion-settings-panel hidden>
           <button type="button" data-recursion-viewer-toggle>Open Viewer</button>
           <select data-recursion-setting-mode aria-label="Mode"><option value="auto" selected>Auto</option><option value="manual">Manual</option></select>
+          <input type="number" data-recursion-setting-max-cards aria-label="Max Cards" value="10">
           <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
           <input type="checkbox" data-recursion-provider-enabled-reasoner aria-label="Reasoner enabled">
           <button type="button" data-recursion-provider-test data-recursion-provider-lane="utility">Test Provider</button>
@@ -259,6 +263,7 @@ function recursionSmokeFixtureHtml({
         enabled: true,
         mode: 'auto',
         disabledFamilies: [],
+        manualForcedCap: 10,
         unclearedPromptOnDisable: ${unclearedPromptOnDisable ? 'true' : 'false'},
         async selectCharacterById(id) {
           const normalized = Number(id);
@@ -387,14 +392,54 @@ function recursionSmokeFixtureHtml({
         panel.hidden = !panel.hidden;
         document.querySelector('[data-recursion-cards-button]')?.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
       });
-      document.querySelector('[data-recursion-card-scope-family-toggle]')?.addEventListener('click', () => {
-        const family = 'Scene Frame';
-        if (smokeContext.disabledFamilies.includes(family)) {
-          smokeContext.disabledFamilies = smokeContext.disabledFamilies.filter((entry) => entry !== family);
-        } else {
-          smokeContext.disabledFamilies.push(family);
+      function updateCardScopeFixtureLabel() {
+        const selected = [...document.querySelectorAll('[data-recursion-card-scope-family-toggle]')]
+          .filter((button) => button.getAttribute('aria-pressed') !== 'false')
+          .length;
+        const cap = smokeContext.mode === 'manual' ? smokeContext.manualForcedCap : 3;
+        document.querySelector('[data-recursion-cards-label]').textContent = selected === 3 && smokeContext.mode !== 'manual'
+          ? 'Cards'
+          : String(selected) + '/' + String(cap) + ' cards selected';
+      }
+      function rerenderCardScopeFixtureButtons() {
+        for (const button of [...document.querySelectorAll('[data-recursion-card-scope-family-toggle]')]) {
+          button.replaceWith(button.cloneNode(true));
         }
-        document.querySelector('[data-recursion-cards-label]').textContent = smokeContext.disabledFamilies.includes(family) ? '21/24' : 'Cards';
+      }
+      document.querySelector('[data-recursion-cards-panel]')?.addEventListener('click', (event) => {
+          const button = event.target?.closest?.('[data-recursion-card-scope-family-toggle]');
+          if (!button) return;
+          const family = String(button.dataset.recursionCardScopeFamilyName || '');
+          const selected = [...document.querySelectorAll('[data-recursion-card-scope-family-toggle]')]
+            .filter((node) => node.getAttribute('aria-pressed') !== 'false')
+            .map((node) => String(node.dataset.recursionCardScopeFamilyName || ''));
+          const currentlyOn = button.getAttribute('aria-pressed') !== 'false';
+          const notice = document.querySelector('[data-recursion-card-scope-error]');
+          if (!currentlyOn && smokeContext.mode === 'manual' && selected.length >= smokeContext.manualForcedCap) {
+            if (notice) notice.textContent = 'Max Cards is ' + smokeContext.manualForcedCap + '. Change it in Settings to select more.';
+            return;
+          }
+          if (notice) notice.textContent = '';
+          if (currentlyOn) {
+            smokeContext.disabledFamilies.push(family);
+            button.setAttribute('aria-pressed', 'false');
+          } else {
+            smokeContext.disabledFamilies = smokeContext.disabledFamilies.filter((entry) => entry !== family);
+            button.setAttribute('aria-pressed', 'true');
+          }
+          updateCardScopeFixtureLabel();
+          rerenderCardScopeFixtureButtons();
+      });
+      function applyFixtureMaxCards(value) {
+        const number = Math.round(Number(value));
+        smokeContext.manualForcedCap = Number.isFinite(number) ? Math.max(1, Math.min(20, number)) : 10;
+        updateCardScopeFixtureLabel();
+      }
+      document.querySelector('[data-recursion-setting-max-cards]')?.addEventListener('input', (event) => {
+        applyFixtureMaxCards(event.target?.value);
+      });
+      document.querySelector('[data-recursion-setting-max-cards]')?.addEventListener('change', (event) => {
+        applyFixtureMaxCards(event.target?.value);
       });
       function applyModeChange(mode) {
         const applyMode = () => {
@@ -405,6 +450,7 @@ function recursionSmokeFixtureHtml({
           if (!${staleModeChip ? 'true' : 'false'}) {
             document.querySelector('[data-recursion-mode]').textContent = mode === 'manual' ? 'Manual' : 'Auto';
           }
+          updateCardScopeFixtureLabel();
         };
         if ('${manualModeSave}' === 'noop' && mode === 'manual') return;
         if ('${manualModeSave}' === 'async' && mode === 'manual') setTimeout(applyMode, 150);
@@ -1312,9 +1358,12 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.browser.snapshot.generation.manualProof?.ok, true, 'generation smoke proves Manual mode before Auto');
     assertEqual(report.browser.snapshot.generation.manualProof?.promptInstalled, true, 'Manual proof records prompt install');
     assertEqual(report.browser.snapshot.generation.manualScopeProof?.available, true, 'generation smoke finds Manual card scope controls');
-    assertEqual(report.browser.snapshot.generation.manualScopeProof?.disabledFamily, 'Scene Frame', 'Manual scope proof records disabled family');
+    assertEqual(report.browser.snapshot.generation.manualScopeProof?.disabledFamily, 'Active Cast', 'Manual scope proof records disabled family');
     assertEqual(report.browser.snapshot.generation.manualScopeProof?.disabled, true, 'Manual scope proof narrows the card scope');
     assertEqual(report.browser.snapshot.generation.manualScopeProof?.promptRespectsDisabledFamily, true, 'Manual scope proof shows disabled family absent from selected prompt refs');
+    assertEqual(report.browser.snapshot.generation.manualForcedProof?.available, true, 'generation smoke finds Manual forced controls');
+    assertEqual(report.browser.snapshot.generation.manualForcedProof?.capBlocked, true, 'manual forced proof records cap block');
+    assertDeepEqual(report.browser.snapshot.generation.manualForcedProof?.coveredFamilies, ['Scene Frame', 'Open Threads'], 'manual forced proof records covered selected families');
     assertEqual(/screenshot/i.test(report.nextAction || ''), false, 'generation success guidance does not ask for suppressed screenshots');
     assertEqual(report.browser.snapshot.generation.promptInstalled, true, 'generation smoke records Recursion prompt install');
     assertEqual(report.browser.cleanup?.promptCleared, true, 'generation smoke records Recursion prompt clear');
@@ -1342,6 +1391,8 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assert(promptMetadata.includes('"hostGenerationContinued": true'), 'generation prompt metadata records host continuation');
     assert(promptMetadata.includes('"manualProof"'), 'generation prompt metadata records Manual proof');
     assert(promptMetadata.includes('"manualScopeProof"'), 'generation prompt metadata records Manual scope proof');
+    assert(promptMetadata.includes('"manualForcedProof"'), 'generation prompt metadata records Manual forced proof');
+    assert(promptMetadata.includes('"capBlocked": true'), 'generation prompt metadata records Manual cap block');
     assert(promptMetadata.includes('"promptRespectsDisabledFamily": true'), 'generation prompt metadata records disabled family absence');
     assert(promptMetadata.includes('"mode": "manual"'), 'generation prompt metadata records Manual mode');
     assert(promptMetadata.includes('"promptInstalled": true'), 'generation prompt metadata records Manual injection');

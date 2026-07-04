@@ -229,14 +229,14 @@ Add a compact icon-only Regenerate control to the Recursion Bar command slot whe
 The slot is mutually exclusive:
 
 - Active prompt preparation or host generation: show Stop generation.
-- Idle and Recursion enabled: show the restart Regenerate icon button.
+- Idle and Recursion enabled: show the Regenerate icon button.
 - Force token pending before `activeRunId` is visible: show Stop generation.
 - Recursion disabled: hide Regenerate and Stop.
 
 Recommended desktop order:
 
 ```text
-[power] [pipeline] [mode] [cards] | [Hero Pixel Array] Current step... [restart/stop] [reasoning] v | ...
+[power] [pipeline] [mode] [cards] | [Hero Pixel Array] Current step... [regenerate/stop] [reasoning] v | ...
 ```
 
 The control is enabled when:
@@ -245,7 +245,7 @@ The control is enabled when:
 - `runtime.forceRegenerateNow` exists.
 - No active prompt-preparation or host-generation run needs the Stop button.
 
-If a force token is pending, Stop owns the command slot even before `activeRunId` is visible. The restart icon is hidden so the user has one clear action: cancel the in-flight forced regeneration.
+If a force token is pending, Stop owns the command slot even before `activeRunId` is visible. The Regenerate icon is hidden so the user has one clear action: cancel the in-flight forced regeneration.
 
 ### Copy
 
@@ -363,7 +363,7 @@ Add tests proving:
 
 Add tests proving:
 
-- Recursion Bar command slot renders an icon-only restart Regenerate control when idle.
+- Recursion Bar command slot renders an icon-only Regenerate control when idle.
 - Recursion Bar command slot renders Stop instead of Regenerate during active work or pending force state.
 - Click calls `runtime.forceRegenerateNow()`.
 - Button disables while pending.

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   CARD_SCOPE_CATALOG,
   CARD_SCOPE_TOTAL_SUB_ITEMS,
@@ -86,7 +86,7 @@ assertEqual(
     lastHand: { cards: [] }
   }).forceRegenerateVisible,
   false,
-  'pending force regenerate hides the restart icon while Stop owns the slot'
+  'pending force regenerate hides the Regenerate icon while Stop owns the slot'
 );
 assertEqual(
   createRecursionViewModel({
@@ -487,6 +487,9 @@ const barImplementationReference = readFileSync(new URL('../../docs/design/RECUR
 const uiSpec = readFileSync(new URL('../../docs/design/UI_SPEC.md', import.meta.url), 'utf8');
 const recursionCss = readFileSync(new URL('../../styles/recursion.css', import.meta.url), 'utf8');
 const recursionUi = readFileSync(new URL('../../src/ui.mjs', import.meta.url), 'utf8');
+const regenerateIconPath = new URL('../../assets/icons/regenerate.svg', import.meta.url);
+assert(existsSync(regenerateIconPath), 'Regenerate uses a named SVG asset');
+const regenerateIconSvg = existsSync(regenerateIconPath) ? readFileSync(regenerateIconPath, 'utf8') : '';
 const activityTriggerCss = barImplementationReference.match(/\.activity-trigger\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const referenceHostCss = barImplementationReference.match(/\.recursion-topbar-host\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const referenceBarCss = barImplementationReference.match(/\.recursion-bar\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
@@ -496,6 +499,14 @@ const heroBlockActiveCss = barImplementationReference.match(/@keyframes hero-blo
 const reasoningChainCss = barImplementationReference.match(/\.reasoning-chain\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const reasoningNodeCss = barImplementationReference.match(/\.reasoning-node\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const reasoningLitNodeCss = barImplementationReference.match(/\.reasoning-node\.is-lit\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const regenerateIconCss = recursionCss.match(/\.recursion-force-regenerate-icon\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+assert(/<svg\b/i.test(regenerateIconSvg), 'regenerate.svg is an SVG asset');
+assert(/\bviewBox="0 0 512 512"/.test(regenerateIconSvg), 'regenerate.svg preserves the attached full-size scalable viewBox');
+assert(/<path\b/i.test(regenerateIconSvg), 'regenerate.svg contains vector path data');
+assert(!/source=rotate\.png; sourceSize=512x512; alphaTrace=horizontal-runs/.test(regenerateIconSvg), 'regenerate.svg is not the generated alpha-run approximation');
+assert(!/kind === 'restart'/.test(recursionUi), 'Regenerate uses the regenerate.svg asset instead of the old inline SVG branch');
+assert(/background:\s*currentColor;/.test(regenerateIconCss), 'Regenerate icon mask paints with inherited currentColor');
+assert(/mask:\s*url\('\.\.\/assets\/icons\/regenerate\.svg'\)\s*center\s*\/\s*16px 16px\s*no-repeat;/.test(regenerateIconCss), 'Regenerate icon mask is centered and scaled in the 16px visual slot');
 assert(/padding:\s*0 8px 0 2px;/.test(barImplementationReference), 'recursion bar uses a tighter left inset than right controls');
 assert(/--hero-running:\s*var\(--cyan\);/.test(barImplementationReference), 'hero pixel running blocks use the active blue token');
 assert(/--hero-done:\s*var\(--green\);/.test(barImplementationReference), 'hero pixel done blocks use the success green token');
@@ -1596,8 +1607,8 @@ try {
     'Auto mode tooltip matches the reference copy'
   );
   assert(
-    fakeDocument.textTree(root.querySelector('[data-recursion-mode-choice-manual]')).includes('Uses only selected card scope.'),
-    'Manual mode tip explains strict card scope constraints'
+    fakeDocument.textTree(root.querySelector('[data-recursion-mode-choice-manual]')).includes('Forces selected card families up to Max Cards.'),
+    'Manual mode tip explains forced card-family selection'
   );
   assert(
     root.querySelector('[data-recursion-mode-choice-auto]').className.includes('is-selected'),
@@ -1733,7 +1744,12 @@ try {
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'true', 'mode button reflects open menu');
   assertEqual(root.querySelector('[data-recursion-mode-menu]').style.left, '69px', 'mode menu follows reference 6px inset from mode cluster');
   root.querySelector('[data-recursion-mode-choice-manual]').querySelector('[data-recursion-mode-choice-name]').click();
-  assertDeepEqual(settingsUpdates.at(-1), { mode: 'manual' }, 'mode menu updates Manual from nested row content clicks');
+  assertEqual(settingsUpdates.at(-1).mode, 'manual', 'mode menu updates Manual from nested row content clicks');
+  assertEqual(
+    CARD_SCOPE_CATALOG.filter((entry) => settingsUpdates.at(-1).cardScope?.families?.[entry.family]?.enabled === true).length,
+    10,
+    'Manual mode switch trims default all-scope to the Manual Max Cards cap'
+  );
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode button reflects closed menu after selection');
   ui.update();
   assert(root.querySelector('[data-recursion-mode-icon]').querySelector('[data-recursion-mode-arrow-parallel]'), 'Manual mode button uses the parallel three-arrow mode icon after selection');
@@ -1812,6 +1828,8 @@ try {
   assertEqual(root.querySelector('[data-recursion-mode-menu]').hidden, false, 'mode menu opens after closing progress popover');
   assertEqual(root.querySelector('[data-recursion-mobile-status-drawer]').hidden, true, 'opening mode menu keeps the mobile status drawer hidden');
   root.querySelector('[data-recursion-mode-choice-auto]').click();
+  view = { ...view, settings: { ...view.settings, mode: 'auto', cardScope: defaultCardScope() } };
+  ui.update();
   root.querySelector('[data-recursion-cards-button]').click();
   assertEqual(root.querySelector('[data-recursion-cards-panel]').hidden, false, 'Cards button opens card scope dropdown');
   assertEqual(root.querySelector('[data-recursion-mobile-status-drawer]').hidden, true, 'opening Cards hides the mobile status drawer');
@@ -1944,6 +1962,39 @@ try {
     .click();
   assertEqual(settingsUpdates.length, updatesBeforeZeroGuard, 'card scope zero-selection guard blocks the final sub-item disable');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('Keep at least one card focus enabled.'), 'Cards dropdown renders zero-selection guard copy');
+
+  let manualOne = defaultCardScope();
+  for (const family of CARD_SCOPE_CATALOG.filter((entry) => entry.family !== 'Scene Frame')) {
+    manualOne = setFamilyEnabled(manualOne, family.family, false).scope;
+  }
+  view = { ...view, settings: { ...view.settings, mode: 'manual', maxCards: 2, cardScope: manualOne } };
+  ui.update();
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('1/2 cards selected'), 'Manual Cards header shows selected card cap');
+  assertEqual(root.querySelector('[data-recursion-card-scope-all]').disabled, false, 'Manual All action enables below cap');
+  assertEqual(root.querySelector('[data-recursion-card-scope-all]').getAttribute('title'), 'Select up to 2 Manual cards.', 'Manual All action explains cap');
+  root.querySelector('[data-recursion-card-scope-all]').click();
+  assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].enabled, true, 'Manual All keeps current hand Scene Frame selected');
+  assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Constraints'].enabled, true, 'Manual All prefers current hand Scene Constraints before catalog fallback');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('Selected 2 cards. Max Cards limits Manual selection.'), 'Manual All notice names Max Cards limit');
+
+  let manualTwo = defaultCardScope();
+  for (const family of CARD_SCOPE_CATALOG.slice(2)) {
+    manualTwo = setFamilyEnabled(manualTwo, family.family, false).scope;
+  }
+  view = { ...view, settings: { ...view.settings, mode: 'manual', maxCards: 2, cardScope: manualTwo } };
+  ui.update();
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('2/2 cards selected'), 'Manual Cards header shows full selected card cap');
+  const previousSettingsUpdateCount = settingsUpdates.length;
+  root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
+    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Character Motivation')
+    .click();
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('Max Cards is 2. Change it in Settings to select more.'), 'Manual cap block notice appears');
+  assertEqual(settingsUpdates.length, previousSettingsUpdateCount, 'blocked Manual cap does not write settings');
+  root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
+    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame' && node.dataset.recursionCardScopeSubItem === 'locationSituation')
+    .click();
+  assert(settingsUpdates.at(-1).cardScope, 'Manual sub-item focus change writes settings under cap');
+
   root.querySelector('[data-recursion-reasoning-level-high]').keydown({ key: 'ArrowRight' });
   assertEqual(settingsUpdates.at(-1).reasoningLevel, 'ultra', 'ArrowRight advances reasoning roving selection');
   assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-reasoning-level-ultra]'), 'ArrowRight moves focus to the next reasoning node');
@@ -2515,7 +2566,8 @@ try {
   assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, false, 'idle view shows force regenerate button in stop slot');
   assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('aria-label'), 'Regenerate this turn', 'force regenerate button exposes accessible copy');
   assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('title'), 'Regenerate this turn fresh, ignoring cached cards, Rapid warm, and swipe reuse.', 'force regenerate button exposes hover tip copy');
-  assert(root.querySelector('[data-recursion-force-regenerate-icon]'), 'force regenerate button renders a restart icon');
+  assert(root.querySelector('[data-recursion-force-regenerate-icon]'), 'force regenerate button renders the Regenerate icon');
+  assertEqual(root.querySelector('[data-recursion-force-regenerate-icon]').children.length, 0, 'force regenerate icon uses the regenerate.svg asset mask instead of inline SVG');
   assertEqual(fakeDocument.textTree(root.querySelector('[data-recursion-force-regenerate]')).includes('Regenerate'), false, 'force regenerate button is icon-only when idle');
   root.querySelector('[data-recursion-force-regenerate]').click();
   assertEqual(forceRegenerateCalls, 1, 'force regenerate button starts runtime regeneration immediately');

@@ -133,7 +133,13 @@ const CARD_FORBIDDEN_PATTERNS = Object.freeze([
   /\bhidden\s+chain[-\s]of[-\s]thought\b/i,
   /\bchain[-\s]of[-\s]thought\b/i,
   /\bprivate\s+chain[-\s]of[-\s]thought\b/i,
-  /\b(hidden|private|secret|undisclosed)\s+future\s+(plans?|plot|story)\b/i
+  /\b(hidden|private|secret|undisclosed)\s+(internal\s+)?thoughts?\b/i,
+  /\b(private|hidden|secret|undisclosed)\s+(character\s+)?motives?\b/i,
+  /\b(hidden|private|secret|undisclosed)\s+future\s+(plans?|plot|story)\b/i,
+  /\breveal\s+future\s+plans?\b/i,
+  /\bfuture[-\s]plot\b/i,
+  /\b(hidden|private|secret|undisclosed)\s+spoilers?\b/i,
+  /\breveal\s+spoilers?\b/i
 ]);
 const CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS = Object.freeze([
   /\b(?:thinks?|thoughts?|inner\s+monologue|internal\s+monologue)\s*:/i,
@@ -714,6 +720,26 @@ function sortCardsForHand(a, b, policy = null) {
   return String(a.id || '').localeCompare(String(b.id || ''));
 }
 
+function forcedFamilyOrder(values = []) {
+  const order = new Map();
+  for (const value of Array.isArray(values) ? values : []) {
+    const family = String(value || '').trim();
+    if (family && !order.has(family)) order.set(family, order.size);
+  }
+  return order;
+}
+
+function forcedFamilyOmission(family) {
+  const cleanFamily = String(family || '').trim();
+  if (!cleanFamily) return null;
+  return {
+    cardId: `manual-forced-${safeId(cleanFamily)}`,
+    family: cleanFamily,
+    reason: 'manual-forced-provider-failed',
+    tokenEstimate: 0
+  };
+}
+
 function effectiveMaxCardsForPolicy(maxCards, policy) {
   const base = numberInRange(maxCards, 6, 0, 64);
   if (!policy) return base;
@@ -923,10 +949,11 @@ export function applyCardPlan(existingCards = [], plan = {}) {
   };
 }
 
-export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behaviorPolicy = null } = {}) {
+export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behaviorPolicy = null, forcedFamilies = [] } = {}) {
   const policy = behaviorPolicyForHand(behaviorPolicy);
   const requestedCardLimit = numberInRange(maxCards, 6, 0, 64);
-  const cardLimit = effectiveMaxCardsForPolicy(requestedCardLimit, policy);
+  const forcedOrder = forcedFamilyOrder(forcedFamilies);
+  const cardLimit = Math.max(effectiveMaxCardsForPolicy(requestedCardLimit, policy), forcedOrder.size);
   const tokenLimit = numberInRange(maxTokens, 700, 0, 20000);
   const active = [];
   const omitted = [];
@@ -946,7 +973,14 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
 
   const selected = [];
   let tokenEstimate = 0;
-  for (const card of active.slice().sort((a, b) => sortCardsForHand(a, b, policy))) {
+  const sortedCards = active.slice().sort((a, b) => {
+    const aForced = forcedOrder.has(a.family);
+    const bForced = forcedOrder.has(b.family);
+    if (aForced !== bForced) return aForced ? -1 : 1;
+    if (aForced && bForced) return forcedOrder.get(a.family) - forcedOrder.get(b.family);
+    return sortCardsForHand(a, b, policy);
+  });
+  for (const card of sortedCards) {
     const cardTokens = numberInRange(card.tokenEstimate, estimateTokens(card.promptText), 1, MAX_TOKEN_ESTIMATE);
     if (selected.length >= cardLimit) {
       omitted.push({
@@ -962,6 +996,14 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
       ...card,
       tokenEstimate: cardTokens
     }));
+  }
+
+  const activeFamilies = new Set(active.map((card) => String(card.family || '').trim()).filter(Boolean));
+  for (const family of forcedOrder.keys()) {
+    if (!activeFamilies.has(family)) {
+      const omission = forcedFamilyOmission(family);
+      if (omission) omitted.push(omission);
+    }
   }
 
   const behaviorPolicyMetadata = policy
@@ -990,6 +1032,8 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
       maxTokens: tokenLimit,
       selectedCount: selected.length,
       omittedCount: omitted.length,
+      forcedFamilies: [...forcedOrder.keys()],
+      selectedForcedFamilies: selected.map((card) => card.family).filter((family) => forcedOrder.has(family)),
       tokenBudgetExceeded: tokenLimit > 0 && tokenEstimate > tokenLimit,
       sourceCardCount: Array.isArray(cards) ? cards.length : 0,
       ...(behaviorPolicyMetadata ? { behaviorPolicy: behaviorPolicyMetadata } : {})

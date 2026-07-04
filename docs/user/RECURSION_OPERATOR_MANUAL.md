@@ -43,7 +43,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 - icon-only Pipeline control: Standard or Rapid;
 - icon-only mode control: Auto or Manual;
 - Hero Pixel Array plus current-step text;
-- command slot: Stop generation while active, restart Regenerate icon while idle;
+- command slot: Stop generation while active, Regenerate icon while idle;
 - Reasoning Level chain;
 - Last Brief dropdown arrow;
 - ellipsis options/settings entry.
@@ -54,7 +54,7 @@ The Pipeline control is a small icon-only dropdown immediately to the left of th
 
 The command slot changes by state. Stop generation appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
 
-When Recursion is idle, the same slot shows a restart icon for Regenerate. Use it when Last Brief or Prompt Packet looks stale and you want the current turn regenerated fresh without deleting chat data. Regenerate immediately starts a one-shot forced pass: it bypasses same-turn packet reinstall, latest-assistant swipe reuse, cached card hand reuse, and Rapid warm for this regeneration only. The icon swaps to Stop, the normal progress menu/status feedback appears, and Last Brief clears to `Preparing fresh prompt packet.` until the fresh packet installs. You can stop the forced regeneration with the Recursion Bar Stop button or SillyTavern's native Stop button.
+When Recursion is idle, the same slot shows the Regenerate icon. Use it when Last Brief or Prompt Packet looks stale and you want the current turn regenerated fresh without deleting chat data. Regenerate immediately starts a one-shot forced pass: it bypasses same-turn packet reinstall, latest-assistant swipe reuse, cached card hand reuse, and Rapid warm for this regeneration only. The icon swaps to Stop, the normal progress menu/status feedback appears, and Last Brief clears to `Preparing fresh prompt packet.` until the fresh packet installs. You can stop the forced regeneration with the Recursion Bar Stop button or SillyTavern's native Stop button.
 
 ### Hero Pixel Array Progress Menu
 
@@ -121,7 +121,9 @@ Auto lets Recursion compile and install the next prompt packet. It should finish
 
 ### Manual
 
-Manual uses the Cards selector as a strict whitelist. Disabled families stay out of planning, deck reuse, hand selection, composition, and injection.
+Manual uses the Cards selector as a force list. Selected family rows are mandatory cards up to `Max Cards`; disabled families stay out of planning, deck reuse, hand selection, composition, and injection. If the Arbiter omits a selected family, runtime either reuses a valid cached card for that family or generates the missing card.
+
+Sub-items under a selected family are focus facets. They shape that one family card and do not count as extra cards. If `Max Cards` is `5`, Manual allows at most five selected family rows and shows `Max Cards is 5. Change it in Settings to select more.` when another family is blocked.
 
 ## Pipelines
 
@@ -187,7 +189,7 @@ Operator settings should stay broad. Pipeline, Mode, and Reasoning Level live in
 
 Use Regenerate before Reset Scene Cache. Regenerate is the normal play control for "make the next packet fresh." Reset Scene Cache is a diagnostic cleanup action that deletes the current scene cache and clears the installed prompt.
 
-Behavior controls have distinct jobs. Prompt Footprint controls the size and detail of the final composed prompt packet. Min Cards controls Low's selected-card pressure, Max Cards controls Ultra's selected-card pressure, and Medium/High use their average. Strength controls intervention pressure inside that budget. Focus changes soft card-family priority without becoming a hard whitelist. The backend contract is defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
+Behavior controls have distinct jobs. Prompt Footprint controls the size and detail of the final composed prompt packet. Min Cards controls Low's selected-card pressure, Max Cards controls Manual selected-family count and Ultra's selected-card pressure, and Medium/High use the Min/Max average. Strength controls intervention pressure inside that budget. Focus changes soft card-family priority without becoming a hard whitelist. The backend contract is defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
 
 ```mermaid
 flowchart LR
@@ -237,7 +239,7 @@ Use this first-run path:
 6. Send a safe ordinary turn.
 7. Confirm progress reaches prompt ready or a clear fallback.
 8. Inspect Last Brief and Prompt Packet.
-9. Try Manual with a narrowed Cards scope and confirm prompt readiness respects that scope.
+9. Try Manual with a narrowed Cards scope and confirm selected families are covered while disabled families stay out.
 10. Try Rapid only when Utility provider work is intended, then confirm the progress text reports Rapid warm, delta, warm-miss Standard escalation, or clear fallback honestly.
 11. Use the power toggle to verify prompt cleanup.
 
@@ -340,7 +342,7 @@ Use this checklist for a practical browser pass:
 3. Open the Hero Pixel Array progress menu, Last Brief dropdown, Settings, and Full Viewer.
 4. Visit Play, Providers, Advanced, Prompt Packet, and Viewer sections.
 5. Configure and test Utility when provider work is intended.
-6. Confirm the restart Regenerate icon appears in the bar while idle; click it and confirm normal generation progress appears, Stop replaces Regenerate, and Last Brief clears to `Preparing fresh prompt packet.`
+6. Confirm the Regenerate icon appears in the bar while idle; click it and confirm normal generation progress appears, Stop replaces Regenerate, and Last Brief clears to `Preparing fresh prompt packet.`
 7. While the forced regeneration is active, click either Recursion Bar Stop or SillyTavern Stop and confirm the host generation stops with canceled/skipped Recursion progress.
 8. Turn power off and confirm prompt lanes are absent or cleared.
 9. Set Auto and confirm Recursion is ready to compile.

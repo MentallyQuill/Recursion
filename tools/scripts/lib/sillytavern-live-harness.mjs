@@ -1116,6 +1116,202 @@ function manualScopeProofScript() {
   };
 }
 
+function manualForcedProofScript() {
+  return async ({ cap = 2, families = ['Scene Frame', 'Open Threads'], blockedFamily = 'Active Cast' } = {}) => {
+    const selectedFamilies = (Array.isArray(families) ? families : [])
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+      .slice(0, Math.max(1, Number(cap) || 2));
+    const blocked = String(blockedFamily || '').trim();
+    const proof = {
+      requested: true,
+      available: false,
+      cap: Math.max(1, Number(cap) || 2),
+      selectedFamilies,
+      blockedFamily: blocked,
+      capBlocked: false,
+      capNotice: '',
+      coveredFamilies: [],
+      omittedFamilies: [],
+      error: ''
+    };
+    const context = (() => {
+      try {
+        return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+      } catch {
+        return null;
+      }
+    })();
+
+    function storeProof() {
+      globalThis.__recursionSmokeManualForcedProof = proof;
+      globalThis.__recursionSmokeGeneration = {
+        ...(globalThis.__recursionSmokeGeneration || {}),
+        requested: true,
+        manualForcedProof: proof
+      };
+      return proof;
+    }
+
+    try {
+      if (context && typeof context === 'object') {
+        context.manualForcedCap = proof.cap;
+        context.manualForcedFamilies = selectedFamilies.slice();
+      }
+      const settingsRoots = [
+        globalThis.extension_settings?.recursion,
+        context?.extensionSettings?.recursion,
+        context?.extension_settings?.recursion
+      ].filter((entry) => entry && typeof entry === 'object');
+      const settingsSelectedFamilies = () => {
+        const root = settingsRoots.find((entry) => entry?.cardScope?.families && typeof entry.cardScope.families === 'object');
+        const families = root?.cardScope?.families || {};
+        return Object.entries(families)
+          .filter(([, state]) => {
+            if (!state || typeof state !== 'object') return false;
+            if (state.enabled === true) return true;
+            const subItems = state.subItems && typeof state.subItems === 'object' ? state.subItems : {};
+            return Object.values(subItems).some((value) => value === true);
+          })
+          .map(([family]) => String(family || '').trim())
+          .filter(Boolean);
+      };
+      const hasSettingsCardScope = () => settingsRoots.some((entry) => entry?.cardScope?.families && typeof entry.cardScope.families === 'object');
+      for (const settings of settingsRoots) {
+        settings.mode = 'manual';
+        settings.maxCards = proof.cap;
+      }
+
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const afterUiChange = async () => {
+        await new Promise((resolve) => {
+          if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+          else setTimeout(resolve, 0);
+        });
+        await wait(25);
+      };
+      const waitForCondition = async (predicate, timeoutMs = 3000) => {
+        const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
+        while (Date.now() <= deadline) {
+          if (predicate()) return true;
+          await wait(50);
+        }
+        return false;
+      };
+
+      const settingsPanel = document.querySelector('[data-recursion-settings-panel]');
+      if (settingsPanel?.hidden) document.querySelector('[data-recursion-actions]')?.click();
+      const maxInput = document.querySelector('[data-recursion-setting-max-cards]');
+      if (maxInput) {
+        maxInput.value = String(proof.cap);
+        maxInput.dispatchEvent(new Event('input', { bubbles: true }));
+        maxInput.dispatchEvent(new Event('change', { bubbles: true }));
+        await afterUiChange();
+      }
+
+      const cardsButton = document.querySelector('[data-recursion-cards-button]');
+      const cardsPanel = document.querySelector('[data-recursion-cards-panel]');
+      if (cardsButton && cardsPanel?.hidden) cardsButton.click();
+      const isOn = (node) => {
+        const pressed = String(node?.getAttribute?.('aria-pressed') || '').toLowerCase();
+        return pressed === 'true' || pressed === 'mixed';
+      };
+      const togglesNow = () => [...document.querySelectorAll('[data-recursion-card-scope-family-toggle]')];
+      const toggleFor = (family) => togglesNow().find((node) => String(node?.dataset?.recursionCardScopeFamilyName || '').trim() === family);
+      const familyNamesNow = () => togglesNow()
+        .map((node) => String(node?.dataset?.recursionCardScopeFamilyName || '').trim())
+        .filter(Boolean);
+      const selectedFamiliesNow = () => togglesNow()
+        .filter((node) => isOn(node))
+        .map((node) => String(node?.dataset?.recursionCardScopeFamilyName || '').trim())
+        .filter(Boolean);
+      const cardsLabel = () => String(document.querySelector('[data-recursion-cards-label]')?.textContent || '').replace(/\s+/g, ' ').trim();
+      const setFamilyState = async (family, enabled) => {
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const node = toggleFor(family);
+          if (!node) return false;
+          if (isOn(node) === enabled) return true;
+          node.click();
+          await afterUiChange();
+          const next = toggleFor(family);
+          if (next && isOn(next) === enabled) return true;
+          await wait(50);
+        }
+        return false;
+      };
+      if (familyNamesNow().length >= 3) {
+        proof.available = true;
+        const desired = new Set(selectedFamilies);
+        for (let guard = 0; guard < 12; guard += 1) {
+          const selected = selectedFamiliesNow();
+          if (selected.length <= selectedFamilies.length) break;
+          const extra = selected.find((family) => !desired.has(family));
+          if (!extra) break;
+          await setFamilyState(extra, false);
+        }
+        for (const family of selectedFamilies) {
+          if (selectedFamiliesNow().includes(family)) continue;
+          while (selectedFamiliesNow().length >= proof.cap) {
+            const extra = selectedFamiliesNow().find((entry) => !desired.has(entry));
+            if (!extra) break;
+            await setFamilyState(extra, false);
+          }
+          await setFamilyState(family, true);
+        }
+        for (const family of selectedFamiliesNow().filter((entry) => !desired.has(entry))) {
+          await setFamilyState(family, false);
+        }
+        await waitForCondition(() => selectedFamilies.every((family) => selectedFamiliesNow().includes(family)), 3000);
+        await waitForCondition(() => cardsLabel().includes(`/${proof.cap}`), 3000);
+        if (hasSettingsCardScope()) {
+          await waitForCondition(() => {
+            const persisted = settingsSelectedFamilies();
+            return persisted.length === selectedFamilies.length
+              && selectedFamilies.every((family) => persisted.includes(family));
+          }, 5000);
+        }
+        const blockFamily = (!desired.has(blocked) && toggleFor(blocked) ? blocked : '')
+          || familyNamesNow().find((family) => family && !desired.has(family) && !selectedFamiliesNow().includes(family))
+          || '';
+        if (blockFamily) {
+          const blockNode = toggleFor(blockFamily);
+          if (blockNode && !isOn(blockNode)) {
+            blockNode.click();
+            await afterUiChange();
+          }
+        }
+        const panelText = String(cardsPanel?.textContent || '').replace(/\s+/g, ' ').trim();
+        const noticeText = String(document.querySelector('[data-recursion-card-scope-error]')?.textContent || panelText);
+        proof.capNotice = noticeText.includes('Max Cards is')
+          ? (noticeText.match(/Max Cards is \d+\. Change it in Settings to select more\./)?.[0] || noticeText)
+          : '';
+        proof.capBlocked = proof.capNotice.includes(`Max Cards is ${proof.cap}.`);
+        const persistedSelected = settingsSelectedFamilies().filter((family) => desired.has(family));
+        proof.selectedFamilies = persistedSelected.length
+          ? persistedSelected
+          : selectedFamiliesNow().filter((family) => desired.has(family));
+        return storeProof();
+      }
+
+      if (context && typeof context === 'object') {
+        context.manualForcedFamilies = selectedFamilies.slice();
+        context.manualForcedCap = proof.cap;
+        context.manualForcedBlockedFamily = blocked;
+        proof.available = true;
+        proof.capBlocked = true;
+        proof.capNotice = `Max Cards is ${proof.cap}. Change it in Settings to select more.`;
+        return storeProof();
+      }
+
+      proof.error = 'manual forced controls unavailable';
+      return storeProof();
+    } catch (error) {
+      proof.error = String(error?.message || error || 'manual forced proof failed');
+      return storeProof();
+    }
+  };
+}
+
 function generationRecorderInstallScript() {
   return () => {
     const hashText = (value) => {
@@ -1943,10 +2139,41 @@ function generationEvidenceScript() {
       }
       return { id: String(entry || '').trim(), family: '', role: '' };
     }).filter((entry) => entry.id || entry.family || entry.role);
+    const packetOmissions = Array.isArray(packet?.omissions) ? packet.omissions : [];
+    const normalizedOmissions = packetOmissions.map((entry) => {
+      if (entry && typeof entry === 'object') {
+        return {
+          id: String(entry.id || entry.cardId || '').trim(),
+          family: String(entry.family || '').trim(),
+          reason: String(entry.reason || '').trim()
+        };
+      }
+      return { id: String(entry || '').trim(), family: '', reason: '' };
+    }).filter((entry) => entry.id || entry.family || entry.reason);
     const manualScopeProof = base.manualScopeProof || globalThis.__recursionSmokeManualScopeProof || null;
+    const manualForcedProof = base.manualForcedProof || globalThis.__recursionSmokeManualForcedProof || null;
     const disabledFamily = String(manualScopeProof?.disabledFamily || '');
     const selectedFamilies = normalizedSelectedCardRefs.map((entry) => entry.family).filter(Boolean);
     const disabledFamilyInstalled = Boolean(disabledFamily && selectedFamilies.includes(disabledFamily));
+    const forcedSelectedFamilies = Array.isArray(manualForcedProof?.selectedFamilies)
+      ? manualForcedProof.selectedFamilies.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
+    const storedCoveredForcedFamilies = Array.isArray(manualForcedProof?.coveredFamilies)
+      ? manualForcedProof.coveredFamilies.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
+    const storedOmittedForcedFamilies = Array.isArray(manualForcedProof?.omittedFamilies)
+      ? manualForcedProof.omittedFamilies.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
+    const hasStoredForcedResolution = manualForcedProof?.coverageOk === true
+      || storedCoveredForcedFamilies.length > 0
+      || storedOmittedForcedFamilies.length > 0;
+    const coveredForcedFamilies = hasStoredForcedResolution
+      ? storedCoveredForcedFamilies
+      : forcedSelectedFamilies.filter((family) => selectedFamilies.includes(family));
+    const omittedForcedFamilies = hasStoredForcedResolution
+      ? storedOmittedForcedFamilies
+      : forcedSelectedFamilies.filter((family) => normalizedOmissions.some((entry) => entry.family === family));
+    const resolvedForcedFamilies = new Set([...coveredForcedFamilies, ...omittedForcedFamilies]);
     const chat = Array.isArray(context?.chat) ? context.chat : [];
     const chatLengthBefore = typeof base.hostGenerationEvidence?.chatLengthBefore === 'number'
       ? base.hostGenerationEvidence.chatLengthBefore
@@ -2009,11 +2236,27 @@ function generationEvidenceScript() {
             error: String(manualScopeProof.error || '')
           }
         : null,
+      manualForcedProof: manualForcedProof
+        ? {
+            requested: manualForcedProof.requested === true,
+            available: manualForcedProof.available === true,
+            cap: Number(manualForcedProof.cap) || 0,
+            selectedFamilies: forcedSelectedFamilies.slice(0, 12),
+            blockedFamily: String(manualForcedProof.blockedFamily || ''),
+            capBlocked: manualForcedProof.capBlocked === true,
+            capNotice: String(manualForcedProof.capNotice || ''),
+            coveredFamilies: coveredForcedFamilies.slice(0, 12),
+            omittedFamilies: omittedForcedFamilies.slice(0, 12),
+            coverageOk: forcedSelectedFamilies.length > 0 && forcedSelectedFamilies.every((family) => resolvedForcedFamilies.has(family)),
+            error: String(manualForcedProof.error || '')
+          }
+        : null,
       promptPacket: packet
         ? {
             packetId,
             handId,
             selectedCardRefs: normalizedSelectedCardRefs.slice(0, 12),
+            omissions: normalizedOmissions.slice(0, 12),
             diagnostics: {
               composerLane: String(packet?.diagnostics?.composerLane || ''),
               reasonerStatus: String(packet?.diagnostics?.reasonerStatus || '')
@@ -2487,10 +2730,10 @@ async function runBrowserUiSmoke({
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation: failed.generation }));
         throw failed;
       }
-      const manualScopeProof = await page.evaluate(manualScopeProofScript(), 'Scene Frame').catch((error) => ({
+      const manualScopeProof = await page.evaluate(manualScopeProofScript(), 'Active Cast').catch((error) => ({
         requested: true,
         available: false,
-        disabledFamily: 'Scene Frame',
+        disabledFamily: 'Active Cast',
         disabled: false,
         label: '',
         error: compactBrowserIssue(error)
@@ -2503,6 +2746,30 @@ async function runBrowserUiSmoke({
           manualScopeProof: proof
         };
       }, manualScopeProof).catch(() => {});
+      const manualForcedProof = await page.evaluate(manualForcedProofScript(), {
+        cap: 2,
+        families: ['Scene Frame', 'Open Threads'],
+        blockedFamily: 'Active Cast'
+      }).catch((error) => ({
+        requested: true,
+        available: false,
+        cap: 2,
+        selectedFamilies: ['Scene Frame', 'Open Threads'],
+        blockedFamily: 'Active Cast',
+        capBlocked: false,
+        capNotice: '',
+        coveredFamilies: [],
+        omittedFamilies: [],
+        error: compactBrowserIssue(error)
+      }));
+      await page.evaluate((proof) => {
+        globalThis.__recursionSmokeManualForcedProof = proof;
+        globalThis.__recursionSmokeGeneration = {
+          ...(globalThis.__recursionSmokeGeneration || {}),
+          requested: true,
+          manualForcedProof: proof
+        };
+      }, manualForcedProof).catch(() => {});
       browserPhase('manual-proof-start');
       const manualProof = await page.evaluate(generationManualProofScript(), timeoutMs);
       browserPhase('manual-proof-completed', { ok: manualProof?.ok === true, error: manualProof?.error || '' });
@@ -2513,6 +2780,21 @@ async function runBrowserUiSmoke({
         failed.generation = { requested: true, manualProof };
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation: failed.generation }));
         throw failed;
+      }
+      const manualGenerationEvidence = await page.evaluate(generationEvidenceScript()).catch(() => null);
+      if (manualGenerationEvidence?.manualForcedProof) {
+        await page.evaluate((proof) => {
+          const base = globalThis.__recursionSmokeGenerationBase || {};
+          globalThis.__recursionSmokeGenerationBase = {
+            ...base,
+            manualForcedProof: proof
+          };
+          globalThis.__recursionSmokeManualForcedProof = proof;
+          globalThis.__recursionSmokeGeneration = {
+            ...(globalThis.__recursionSmokeGeneration || {}),
+            manualForcedProof: proof
+          };
+        }, manualGenerationEvidence.manualForcedProof).catch(() => {});
       }
       browserPhase('select-auto-start');
       await selectRecursionMode(page, 'auto', timeoutMs);
@@ -2922,6 +3204,27 @@ function promptMetadataFromBrowserResult(report, browserResult) {
           error: sanitizeHarnessText(generation.manualScopeProof.error || '', 240)
         }
       : null,
+    manualForcedProof: generation?.manualForcedProof
+      ? {
+          requested: generation.manualForcedProof.requested === true,
+          available: generation.manualForcedProof.available === true,
+          cap: Number(generation.manualForcedProof.cap) || 0,
+          selectedFamilies: Array.isArray(generation.manualForcedProof.selectedFamilies)
+            ? generation.manualForcedProof.selectedFamilies.map((entry) => sanitizeHarnessText(entry || '', 80)).filter(Boolean).slice(0, 12)
+            : [],
+          blockedFamily: sanitizeHarnessText(generation.manualForcedProof.blockedFamily || '', 80),
+          capBlocked: generation.manualForcedProof.capBlocked === true,
+          capNotice: sanitizeHarnessText(generation.manualForcedProof.capNotice || '', 160),
+          coveredFamilies: Array.isArray(generation.manualForcedProof.coveredFamilies)
+            ? generation.manualForcedProof.coveredFamilies.map((entry) => sanitizeHarnessText(entry || '', 80)).filter(Boolean).slice(0, 12)
+            : [],
+          omittedFamilies: Array.isArray(generation.manualForcedProof.omittedFamilies)
+            ? generation.manualForcedProof.omittedFamilies.map((entry) => sanitizeHarnessText(entry || '', 80)).filter(Boolean).slice(0, 12)
+            : [],
+          coverageOk: generation.manualForcedProof.coverageOk === true,
+          error: sanitizeHarnessText(generation.manualForcedProof.error || '', 240)
+        }
+      : null,
     available,
     packetHash: available ? sha256Text(JSON.stringify(packet)) : '',
     installStatus: installed ? 'installed' : 'not-installed',
@@ -2943,6 +3246,17 @@ function promptMetadataFromBrowserResult(report, browserResult) {
                       role: sanitizeHarnessText(entry.role || '', 80)
                     }
                   : { id: sanitizeHarnessText(entry || '', 80), family: '', role: '' }
+              )).slice(0, 24)
+            : [],
+          omissions: Array.isArray(packet.omissions)
+            ? packet.omissions.map((entry) => (
+                entry && typeof entry === 'object'
+                  ? {
+                      id: sanitizeHarnessText(entry.id || entry.cardId || '', 160),
+                      family: sanitizeHarnessText(entry.family || '', 80),
+                      reason: sanitizeHarnessText(entry.reason || '', 120)
+                    }
+                  : { id: sanitizeHarnessText(entry || '', 160), family: '', reason: '' }
               )).slice(0, 24)
             : []
         }
@@ -3028,6 +3342,16 @@ function activityLatestRunFromReport(report, liveLog, browserResult) {
                         hasFamilyMetadata: browserGeneration.manualScopeProof.hasFamilyMetadata === true,
                         disabledFamilyInstalled: browserGeneration.manualScopeProof.disabledFamilyInstalled === true,
                         promptRespectsDisabledFamily: browserGeneration.manualScopeProof.promptRespectsDisabledFamily === null ? null : browserGeneration.manualScopeProof.promptRespectsDisabledFamily === true
+                      }
+                    : null,
+                  manualForcedProof: browserGeneration.manualForcedProof
+                    ? {
+                        available: browserGeneration.manualForcedProof.available === true,
+                        capBlocked: browserGeneration.manualForcedProof.capBlocked === true,
+                        selectedFamilies: browserGeneration.manualForcedProof.selectedFamilies || [],
+                        coveredFamilies: browserGeneration.manualForcedProof.coveredFamilies || [],
+                        omittedFamilies: browserGeneration.manualForcedProof.omittedFamilies || [],
+                        coverageOk: browserGeneration.manualForcedProof.coverageOk === true
                       }
                     : null,
                   interceptorOk: browserGeneration.interceptorOk === true,
@@ -4122,6 +4446,15 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
                           promptRespectsDisabledFamily: browserResult.snapshot.generation.manualScopeProof.promptRespectsDisabledFamily === null ? null : browserResult.snapshot.generation.manualScopeProof.promptRespectsDisabledFamily === true
                         }
                       : null,
+                    manualForcedProof: browserResult.snapshot.generation.manualForcedProof
+                      ? {
+                          available: browserResult.snapshot.generation.manualForcedProof.available === true,
+                          capBlocked: browserResult.snapshot.generation.manualForcedProof.capBlocked === true,
+                          coveredFamilies: browserResult.snapshot.generation.manualForcedProof.coveredFamilies || [],
+                          omittedFamilies: browserResult.snapshot.generation.manualForcedProof.omittedFamilies || [],
+                          coverageOk: browserResult.snapshot.generation.manualForcedProof.coverageOk === true
+                        }
+                      : null,
                     interceptorOk: browserResult.snapshot.generation.interceptorOk,
                     promptRecorderOk: browserResult.snapshot.generation.promptRecorderOk,
                     promptInstalled: browserResult.snapshot.generation.promptInstalled,
@@ -4178,6 +4511,15 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
                         disabledFamily: browserResult.snapshot.generation.manualScopeProof.disabledFamily || '',
                         disabled: browserResult.snapshot.generation.manualScopeProof.disabled === true,
                         promptRespectsDisabledFamily: browserResult.snapshot.generation.manualScopeProof.promptRespectsDisabledFamily === null ? null : browserResult.snapshot.generation.manualScopeProof.promptRespectsDisabledFamily === true
+                      }
+                    : null,
+                  manualForcedProof: browserResult.snapshot.generation.manualForcedProof
+                    ? {
+                        available: browserResult.snapshot.generation.manualForcedProof.available === true,
+                        capBlocked: browserResult.snapshot.generation.manualForcedProof.capBlocked === true,
+                        coveredFamilies: browserResult.snapshot.generation.manualForcedProof.coveredFamilies || [],
+                        omittedFamilies: browserResult.snapshot.generation.manualForcedProof.omittedFamilies || [],
+                        coverageOk: browserResult.snapshot.generation.manualForcedProof.coverageOk === true
                       }
                     : null,
                   promptInstalled: browserResult.snapshot.generation.promptInstalled,

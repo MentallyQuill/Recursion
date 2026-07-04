@@ -5,9 +5,12 @@ import {
   cardScopeLabel,
   defaultCardScope,
   enabledSubItemsForFamily,
+  enforceManualSelectionCap,
   familyState,
+  manualSelectedFamilies,
+  manualSelectionCap,
   normalizeCardScope,
-  setFamilyEnabled,
+  setFamilyEnabledWithCap,
   setSubItemEnabled
 } from './card-scope.mjs';
 import { packetToPromptBlocks } from './prompt.mjs';
@@ -18,6 +21,7 @@ import {
   providerRouteSummary
 } from './providers.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
+import { FOCUS_BOOSTED_FAMILIES } from './settings-policy.mjs';
 import { DEFAULT_RETENTION_SETTINGS, RETENTION_LIMITS } from './retention-policy.mjs';
 
 const PHASE_LABELS = Object.freeze({
@@ -69,8 +73,8 @@ const MODE_MENU_OPTIONS = Object.freeze([
   {
     value: 'manual',
     label: 'Manual',
-    title: 'Uses only selected card scope.',
-    tip: 'Uses only selected card scope.'
+    title: 'Forces selected card families up to Max Cards.',
+    tip: 'Forces selected card families up to Max Cards.'
   }
 ]);
 const PIPELINE_MENU_OPTIONS = Object.freeze([
@@ -172,7 +176,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   behavior: 'Controls how strongly Recursion shapes the next prompt packet. These settings affect card pressure, focus, and prompt size without changing provider credentials.',
   strength: 'Bias strength for the composed prompt packet. Light stays subtle, Balanced is the normal default, and Strong gives Recursion more room to steer scene adhesion.',
   minCards: 'Low Reasoning Level card target. Use fewer cards for faster, cheaper turns or more cards when sparse scenes need extra grounding.',
-  maxCards: 'Ultra Reasoning Level card target. Medium and High use the average, so this also sets the upper range for busier scenes.',
+  maxCards: 'Upper Manual card-selection cap and Ultra Reasoning Level card target. Medium and High use the average, so this also sets the upper range for busier scenes.',
   focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, constraints, scene, or plot without becoming a hard whitelist.',
   footprint: 'Prompt budget for the composed Recursion packet. Compact spends fewer tokens, Rich preserves more scene detail when the moment is complex.',
   injection: 'Compatibility controls for where the final composed Recursion packet lands in SillyTavern. These do not create per-card prompt controls.',
@@ -356,12 +360,6 @@ function modeIconSvg(kind) {
   if (kind === 'stop') {
     return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true', 'data-recursion-stop-icon': '' } }, [
       el('rect', { attrs: { x: '4.25', y: '4.25', width: '7.5', height: '7.5', rx: '1.2', fill: 'currentColor' } })
-    ]);
-  }
-  if (kind === 'restart') {
-    return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true', 'data-recursion-force-regenerate-icon': '' } }, [
-      el('path', { attrs: { d: 'M12.6 5.4V2.8h-2.6', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.35', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } }),
-      el('path', { attrs: { d: 'M12.2 3.2A5.2 5.2 0 1 0 13 9.1', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.35', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
     ]);
   }
   return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
@@ -1699,18 +1697,37 @@ function cardScopeSelectedCount(scope, family) {
   return enabledSubItemsForFamily(scope, family).length;
 }
 
+function manualTrimPreferenceFamilies(view = {}) {
+  const settings = asObject(view.settings);
+  const fromLastHand = Array.isArray(view.lastHand?.cards)
+    ? view.lastHand.cards.map((card) => cleanText(card?.family)).filter(Boolean)
+    : [];
+  const focus = cleanText(settings.focus, 'balanced');
+  const focusFamilies = FOCUS_BOOSTED_FAMILIES[focus] || FOCUS_BOOSTED_FAMILIES.balanced || [];
+  return [...fromLastHand, ...focusFamilies];
+}
+
 function renderCardsPanel(panel, view, model, notice = '') {
   panel.replaceChildren();
   const scope = model.cardScope || normalizeCardScope(view.settings?.cardScope || defaultCardScope());
   const counts = model.cardScopeCounts || cardScopeCounts(scope);
-  const summary = counts.selectedSubItems === counts.totalSubItems
+  const isManual = normalizeMode(view.settings?.mode) === 'manual';
+  const cap = manualSelectionCap(view.settings || {});
+  const selectedFamilies = manualSelectedFamilies(scope);
+  const summary = isManual
+    ? `${selectedFamilies.length}/${cap} cards selected`
+    : (counts.selectedSubItems === counts.totalSubItems
     ? 'All card focus enabled'
-    : `${counts.selectedSubItems}/${counts.totalSubItems} focus items enabled`;
-  const allSelected = counts.selectedSubItems === counts.totalSubItems;
+    : `${counts.selectedSubItems}/${counts.totalSubItems} focus items enabled`);
+  const allSelected = isManual
+    ? selectedFamilies.length >= cap
+    : counts.selectedSubItems === counts.totalSubItems;
   const allButtonAttrs = {
     type: 'button',
-    'aria-label': 'Select all card focus items',
-    title: allSelected ? 'All card focus items are already selected.' : 'Select all card focus items.'
+    'aria-label': isManual ? 'Select maximum Manual cards' : 'Select all card focus items',
+    title: isManual
+      ? (allSelected ? `Manual selection is already at Max Cards: ${cap}.` : `Select up to ${cap} Manual cards.`)
+      : (allSelected ? 'All card focus items are already selected.' : 'Select all card focus items.')
   };
   if (allSelected) allButtonAttrs.disabled = 'disabled';
 
@@ -1792,7 +1809,7 @@ function renderCardsPanel(panel, view, model, notice = '') {
   }
   panel.appendChild(list);
   panel.appendChild(el('div', { className: 'recursion-cards-foot' }, [
-    el('span', { text: 'Auto treats scope as preference. Manual uses scope as a strict whitelist.' }),
+    el('span', { text: isManual ? 'Manual forces selected card families. Sub-items shape each card.' : 'Auto treats scope as preference. Manual forces selected card families.' }),
     el('span', { className: 'recursion-mini-chip', text: 'Esc' })
   ]));
 }
@@ -2891,9 +2908,7 @@ function buildRoot() {
       attrs: { type: 'button', 'aria-label': 'Regenerate this turn', title: FORCE_REGENERATE_TOOLTIP },
       dataset: { recursionForceRegenerate: '' }
     }, [
-      el('span', { className: 'recursion-force-regenerate-icon', attrs: { 'aria-hidden': 'true' } }, [
-        modeIconSvg('restart')
-      ])
+      el('span', { className: 'recursion-force-regenerate-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionForceRegenerateIcon: '' } })
     ]),
     el('span', { className: 'recursion-chip recursion-legacy-hand-count', dataset: { recursionHandCount: '' } }),
     el('span', { className: 'recursion-chip recursion-legacy-composer', dataset: { recursionComposer: '' } }),
@@ -3500,11 +3515,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function applyCardScopeResult(result) {
     if (result?.blocked) {
-      cardScopeNotice = 'Keep at least one card focus enabled.';
+      const mode = normalizeMode(currentView().settings?.mode);
+      cardScopeNotice = cleanText(result.notice, mode === 'manual' ? 'Keep at least one Manual card selected.' : 'Keep at least one card focus enabled.');
       renderCardsPanelForView(currentView());
       return;
     }
-    cardScopeNotice = '';
+    cardScopeNotice = cleanText(result?.notice);
     const nextScope = normalizeCardScope(result?.scope || defaultCardScope());
     pendingCardScope = nextScope;
     renderCardsPanelForView(currentView());
@@ -3740,7 +3756,26 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     const modeChoice = control('recursionModeChoice');
     if (modeChoice) {
-      runAction(runtime?.updateSettings?.({ mode: modeChoice.dataset.recursionModeChoice }));
+      const nextMode = normalizeMode(modeChoice.dataset.recursionModeChoice);
+      const patch = { mode: nextMode };
+      if (nextMode === 'manual') {
+        const view = viewWithPendingCardScope(currentView());
+        const scoped = enforceManualSelectionCap(
+          normalizeCardScope(view.settings?.cardScope || defaultCardScope()),
+          { ...asObject(view.settings), mode: 'manual' },
+          { preferredFamilies: manualTrimPreferenceFamilies(view) }
+        );
+        if (scoped.trimmed) {
+          patch.cardScope = scoped.scope;
+          pendingCardScope = scoped.scope;
+          cardScopeNotice = scoped.notice;
+          renderCardsPanelForView(currentView());
+        }
+      } else {
+        pendingCardScope = null;
+        cardScopeNotice = '';
+      }
+      runAction(runtime?.updateSettings?.(patch));
       setModeMenuOpen(false);
     }
     const pipelineChoice = control('recursionPipelineChoice');
@@ -3754,7 +3789,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const view = viewWithPendingCardScope(currentView());
       const scope = normalizeCardScope(view.settings?.cardScope || defaultCardScope());
       const family = familyToggle.dataset.recursionCardScopeFamilyName;
-      applyCardScopeResult(setFamilyEnabled(scope, family, familyState(scope, family) !== 'on'));
+      applyCardScopeResult(setFamilyEnabledWithCap(scope, family, familyState(scope, family) !== 'on', {
+        mode: view.settings?.mode,
+        maxCards: view.settings?.maxCards
+      }));
     }
     const subItemToggle = control('recursionCardScopeSubItemToggle');
     if (subItemToggle) {
@@ -3769,7 +3807,18 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const cardScopeAll = control('recursionCardScopeAll');
     if (cardScopeAll && cardScopeAll.disabled !== true) {
       panelRerenderClickEvents?.add(event);
-      applyCardScopeResult({ scope: defaultCardScope(), blocked: false });
+      const view = viewWithPendingCardScope(currentView());
+      if (normalizeMode(view.settings?.mode) === 'manual') {
+        const scoped = enforceManualSelectionCap(defaultCardScope(), { ...asObject(view.settings), mode: 'manual' }, {
+          preferredFamilies: manualTrimPreferenceFamilies(view)
+        });
+        applyCardScopeResult({
+          ...scoped,
+          notice: scoped.trimmed ? `Selected ${scoped.cap} cards. Max Cards limits Manual selection.` : scoped.notice
+        });
+      } else {
+        applyCardScopeResult({ scope: defaultCardScope(), blocked: false });
+      }
     }
     const reasoningNode = control('recursionReasoningLevelNode');
     if (reasoningNode) {

@@ -158,10 +158,10 @@ Implementation notes:
 ## Task 4: UI Red Tests
 
 - [ ] Add UI tests for a Recursion Bar Regenerate control in the Stop command slot.
-- [ ] Assert the bar renders an icon-only restart Regenerate control when Recursion is enabled, idle, and runtime supports `forceRegenerateNow`.
+- [ ] Assert the bar renders an icon-only Regenerate control when Recursion is enabled, idle, and runtime supports `forceRegenerateNow`.
 - [ ] Assert the bar renders Stop instead of Regenerate during active prompt preparation, host generation, or pending force state.
 - [ ] Assert clicking Regenerate calls `runtime.forceRegenerateNow({ source: 'bar' })`.
-- [ ] Assert pending force state swaps the slot to Stop rather than leaving a disabled restart icon visible.
+- [ ] Assert pending force state swaps the slot to Stop rather than leaving a disabled Regenerate icon visible.
 - [ ] Assert the empty Last Brief text reads `Preparing fresh prompt packet.` for `user-force-regenerate`.
 - [ ] Assert the control does not call Reset Scene Cache.
 - [ ] Run `node tools\scripts\test-ui.mjs` and confirm these assertions fail for expected missing UI wiring.

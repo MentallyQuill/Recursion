@@ -47,6 +47,8 @@ V1 uses the audited fixed catalog below. The Arbiter receives this predetermined
 
 Each family also exposes fixed scope facets. Facets do not create separate cards; they define what the Arbiter and card generator should emphasize inside that family. The facet labels and descriptions live in `src/card-scope.mjs` and are reused for Arbiter catalog payloads, card-generation prompt focus, UI hover help, and diagnostics.
 
+In Manual mode, the selectable card unit is the family row, not the facet. A selected family counts as one forced Manual card and must be covered by valid cache reuse or provider generation unless that family fails validation. Facets remain per-family focus hints; toggling them never creates extra card jobs and never counts against `Max Cards`.
+
 V1 should not support arbitrary user-defined card families. Custom families can wait until the fixed catalog proves insufficient.
 
 ## Card Family Audit
@@ -204,6 +206,8 @@ The Arbiter outputs structured decisions:
 The Arbiter also decides whether a catalog slot is already represented by existing cards. For example, it should avoid generating a separate Relationship card if the relevant relationship pressure is already captured cleanly in Active Cast or Character Motivation.
 
 Runtime support is allowed but bounded. Deterministic code may deduplicate by ID, enforce maximum card counts, reject malformed outputs, cap tokens, and mark old cards stale. It should not be the primary semantic relevance judge.
+
+Manual mode is the exception where deterministic runtime support enforces user intent: after the Arbiter returns, runtime reconciles selected Manual families against filtered Arbiter jobs and valid cache cards. Missing selected families receive synthesized one-family `cardJobs` with `forcedBy: "manual-selection"`. The provider envelope remains unchanged: one `recursion.card.v1` response item for the requested family.
 
 Refresh is a two-part contract. The Arbiter requests new work through `cardJobs`, optionally naming `refreshOfCardId` for the cached card being replaced. Lifecycle `regenerate` marks the old cached card stale; by itself it does not create a replacement card. This keeps generation work explicit and prevents runtime from inventing semantic refreshes.
 

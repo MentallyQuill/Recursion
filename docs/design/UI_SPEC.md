@@ -82,7 +82,7 @@ Clicking the mode icon opens a compact mode selector menu. The selected mode cha
 Mode selector rows:
 
 - Divergent arrows icon, `Auto`: Recursion selects cards, composes the prompt packet, and injects it automatically when ready.
-- Parallel arrows icon, `Manual`: Recursion uses the selected card scope as a strict whitelist when planning, selecting, composing, and injecting context.
+- Parallel arrows icon, `Manual`: Recursion forces selected card families up to `Max Cards`; disabled families stay out of planning, selecting, composing, and injection.
 
 Each mode row should show the icon, short name, and a hover/focus tip with the longer explanation. The menu should use native SillyTavern popup compactness and close on selection, outside click, or `Esc`.
 
@@ -111,11 +111,11 @@ Reference mode selector shape:
   </button>
   <button class="recursion-mode-choice"
           data-mode="manual"
-          title="Uses only selected card scope.">...</button>
+          title="Forces selected card families up to Max Cards.">...</button>
 </div>
 ```
 
-Card scope is not a mode. The compact left-side stacked-cards icon opens a full-bar-width dropdown with the fixed V1 card families and their sub-item focus toggles. The compact bar control stays icon-only; the dropdown header summarizes whether all focus items are enabled or a partial count is active. Auto treats this scope as preference/focus, while Manual treats it as a strict whitelist. Category and sub-item clicks must visibly update the open dropdown in place without closing it or waiting for a host rerender. The UI must prevent disabling the final selected sub-item and show `Keep at least one card focus enabled.` when that guard is hit.
+Card scope is not a mode. The compact left-side stacked-cards icon opens a full-bar-width dropdown with the fixed V1 card families and their sub-item focus toggles. The compact bar control stays icon-only; the dropdown header summarizes whether all focus items are enabled or a partial count is active. Auto treats this scope as preference/focus. Manual treats selected families as forced cards, capped by `Max Cards`; sub-items only shape the selected family card and do not count against the cap. Category and sub-item clicks must visibly update the open dropdown in place without closing it or waiting for a host rerender. The UI must prevent disabling the final selected sub-item and show `Keep at least one card focus enabled.` when that guard is hit.
 
 Card scope family rows use the family description as hover/focus help. Sub-item rows use the canonical sub-item label and description from `src/card-scope.mjs`; they must explain what the focus asks Recursion to emphasize, not repeat the raw label.
 
@@ -157,7 +157,7 @@ Reference mode selector CSS:
 
 The card scope selector is an icon-only stacked-cards button in the left bar flow. It sits immediately to the right of Mode and to the left of the Hero Pixel Array separator. Its accessible label and tooltip carry the meaning; it must not render a visible `Cards` title or selected-count text in the compact bar.
 
-Inside the Cards dropdown, the header shows `Cards`, the selected focus summary, and a small neutral `All` command. `All` restores the default card scope with every family and sub-item enabled. It is disabled or visually muted when all card focus items are already selected. Use `All`, not `Reset`, because the action selects every card focus item and must not be confused with Reset Scene Cache or other runtime reset commands.
+Inside the Cards dropdown, the header shows `Cards`, the selected focus summary, and a small neutral `All` command. In Auto, `All` restores the default card scope with every family and sub-item enabled. In Manual, the header uses selected-family copy such as `2/5 cards selected`, `All` selects up to the current `Max Cards` cap, and selecting one more family at the cap is blocked with `Max Cards is 5. Change it in Settings to select more.` Use `All`, not `Reset`, because the action selects card scope and must not be confused with Reset Scene Cache or other runtime reset commands.
 
 The Hero Pixel Array sits to the right of the card scope selector separator and immediately before the compact current-step text. It shows runtime state at a glance and mirrors the visible top-level rows in the progress menu:
 
@@ -1119,11 +1119,11 @@ Play is the default tab. It contains one open `Behavior` disclosure for controls
 
 - Strength: Light, Balanced, Strong.
 - Min Cards: numeric `0..20`, used by Low Reasoning Level.
-- Max Cards: numeric `0..20`, used by Ultra Reasoning Level; Medium and High use the floor average of Min and Max.
+- Max Cards: numeric `0..20`, used as the Manual selected-family cap and the Ultra Reasoning Level card target; Medium and High use the floor average of Min and Max.
 - Focus: Balanced, Character, Constraints, Scene, Plot.
 - Prompt Footprint: Compact, Normal, Rich.
 
-The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). In short: Strength controls intervention pressure, Min/Max Cards control Reasoning Level card-count bounds, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
+The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). In short: Strength controls intervention pressure, Min/Max Cards control Reasoning Level card-count bounds, Max Cards also caps Manual selected families, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
 
 Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Pipeline is selected from its bar dropdown only; Settings may persist the value but must not render a separate Standard/Rapid toggle. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
 
@@ -1259,7 +1259,7 @@ Provider fallback states should appear in the Hero Pixel Array Progress Menu and
 
 On narrow viewports:
 
-- Keep the power toggle, pipeline icon, mode icon, card scope icon, Hero Pixel Array, active Stop generation button when visible, idle restart Regenerate icon when space permits, last-brief arrow, and ellipsis visible when possible.
+- Keep the power toggle, pipeline icon, mode icon, card scope icon, Hero Pixel Array, active Stop generation button when visible, idle Regenerate icon when space permits, last-brief arrow, and ellipsis visible when possible.
 - Keep the bar on one row. The inline current-step text must not force the right tool cluster onto a second row.
 - Use a mobile status drawer below the bar for the same current-step or transient standby text that desktop renders beside the Hero Pixel Array.
 - Hide the mobile status drawer when Progress, Last Brief, Cards, Settings, Pipeline, or Mode is open; those panels own the temporary vertical space.

@@ -152,6 +152,11 @@ assertDeepEqual(
 );
 assertEqual(normalizeSettings({ minCards: -20, maxCards: 99 }).minCards, 0, 'minimum cards clamps low');
 assertEqual(normalizeSettings({ minCards: -20, maxCards: 99 }).maxCards, 20, 'maximum cards clamps high');
+const zeroMaxManual = normalizeSettings({ mode: 'manual', maxCards: 0 });
+assertEqual(zeroMaxManual.maxCards, 0, 'stored Max Cards can remain zero for existing card budget semantics');
+assert(zeroMaxManual.cardScope, 'manual settings still normalize card scope');
+const highMax = normalizeSettings({ mode: 'manual', maxCards: 50 });
+assertEqual(highMax.maxCards, 20, 'Max Cards remains capped at twenty');
 
 const invalidReasoning = normalizeSettings({ reasoningLevel: 'maximum' });
 assertEqual(invalidReasoning.reasoningLevel, 'high', 'invalid reasoning level falls back to high');

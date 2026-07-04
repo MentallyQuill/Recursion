@@ -96,7 +96,7 @@ Power and mode controls change how much of the pipeline runs:
 
 - Power off: remove or avoid installing Recursion prompt entries. Runtime may keep minimal UI/provider status, but it should not inspect or influence active generations.
 - Auto: run the full automatic pipeline and install prompt packets when the Auto Control Plan says a pass is useful. Card scope acts as focus and preference; critical unselected families may still be requested when needed for coherence or safety.
-- Manual: use selected card scope as a strict whitelist for planning, deck reuse, hand selection, composition, and injection.
+- Manual: use selected card scope as a strict whitelist and force selected card-family coverage. Runtime may reuse valid selected-family cache cards, but if the Arbiter omits a selected family, runtime synthesizes a one-family card job before generation. The final hand selects forced Manual families first and floors the selected-card budget to the selected-family count.
 
 Pipeline controls change when work happens:
 
@@ -131,9 +131,10 @@ Runtime enforcement:
 - Invalid plans fall back to local `compose-brief` packet composition, cache reuse, or `skip`, depending on mode and cache state.
 - Token and card count caps are enforced after the Arbiter returns.
 - Runtime derives the behavior policy from Strength, Min/Max Cards, Focus, and Prompt Footprint, sends policy lines to the Arbiter, and applies mechanical shaping before cards are selected.
-- Min Cards caps Low's card count, Max Cards raises/caps Ultra's card count, and Medium/High use the floor average.
+- Min Cards caps Low's card count, Max Cards raises/caps Ultra's card count, and Medium/High use the floor average. In Manual mode, Max Cards is also the selected-family cap in the Cards dropdown.
 - `promptFootprint` is sanitized to `compact`, `normal`, or `rich`, then resolved through the user's stored Prompt Footprint policy. Compact may expand only for safety or hard scene-constraint evidence, Normal may use Rich only for high-risk evidence, and Rich may still choose smaller effective packets for simple turns. The effective footprint applies only to this run and never mutates stored settings.
 - Strength changes cache/hand pressure and composer assertiveness inside the selected card budget. Focus changes soft family ordering for the hand and diagnostics, but it is not a hard whitelist.
+- Manual forced reconciliation records compact diagnostics such as `manual-forced-card:<family>` and `manual-forced-cache:<family>` so Arbiter omissions are diagnosable without storing provider payloads.
 - Provider lane choices are resolved through the provider spec, not trusted as raw endpoints.
 - Reasoner triggers are advisory. If Reasoner is off, unavailable, too slow, or over budget, generation continues through the deterministic or Utility guidance path.
 

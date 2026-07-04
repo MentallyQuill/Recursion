@@ -5,12 +5,17 @@ import {
   cardScopeLabel,
   defaultCardScope,
   enabledSubItemsForFamily,
+  enforceManualSelectionCap,
   familyState,
   filterCardJobsForScope,
   filterCardsForScope,
+  manualSelectedFamilies,
+  manualSelectionCap,
   normalizeCardScope,
+  rankManualSelectedFamilies,
   scopePayloadForArbiter,
   setFamilyEnabled,
+  setFamilyEnabledWithCap,
   setSubItemEnabled
 } from '../../src/card-scope.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -181,6 +186,51 @@ const manualPayload = scopePayloadForArbiter({ mode: 'manual', cardScope: noScen
 assertEqual(manualPayload.strictWhitelist, true, 'Manual payload is strict');
 assert(!manualPayload.allowedCatalog.some((entry) => entry.family === 'Scene Frame'), 'Manual payload omits disabled family');
 assertEqual(manualPayload.autoExceptionFamilies.length, 0, 'Manual payload has no auto exception families');
+
+const cappedAll = enforceManualSelectionCap(defaultCardScope(), { maxCards: 5 });
+assertEqual(cappedAll.trimmed, true, 'Manual cap trims all-selected scope');
+assertEqual(manualSelectedFamilies(cappedAll.scope).length, 5, 'Manual cap keeps exactly maxCards families');
+assertDeepEqual(
+  manualSelectedFamilies(cappedAll.scope),
+  CARD_SCOPE_CATALOG.slice(0, 5).map((entry) => entry.family),
+  'Manual cap falls back to catalog priority'
+);
+assertEqual(cappedAll.notice, 'Manual selection trimmed to Max Cards: 5.', 'Manual cap exposes trim notice');
+
+const preferredTrim = enforceManualSelectionCap(defaultCardScope(), { maxCards: 3 }, {
+  preferredFamilies: ['Open Threads', 'Environment']
+});
+assertDeepEqual(
+  manualSelectedFamilies(preferredTrim.scope),
+  ['Scene Frame', 'Environment', 'Open Threads'],
+  'Manual cap keeps preferred current-scene families plus catalog fallback'
+);
+assertDeepEqual(
+  rankManualSelectedFamilies(defaultCardScope(), { preferredFamilies: ['Open Threads', 'Environment'] }).slice(0, 3),
+  ['Open Threads', 'Environment', 'Scene Frame'],
+  'Manual ranking preserves preferred order before catalog fallback'
+);
+const underCap = setFamilyEnabled(defaultCardScope(), CARD_SCOPE_CATALOG[5].family, false).scope;
+const underCapResult = enforceManualSelectionCap(underCap, { maxCards: 20 }, {
+  preferredFamilies: ['Open Threads', 'Environment']
+});
+assertEqual(underCapResult.trimmed, false, 'under-cap Manual transition does not trim');
+assertDeepEqual(underCapResult.scope, normalizeCardScope(underCap), 'under-cap Manual transition preserves selected families and facets exactly');
+
+const capValue = manualSelectionCap({ maxCards: 0 });
+assertEqual(capValue, 1, 'Manual selection cap floors to one selected family');
+
+let fiveSelected = enforceManualSelectionCap(defaultCardScope(), { maxCards: 5 }).scope;
+const sixthFamily = CARD_SCOPE_CATALOG[5].family;
+const blockedSixth = setFamilyEnabledWithCap(fiveSelected, sixthFamily, true, { mode: 'manual', maxCards: 5 });
+assertEqual(blockedSixth.blocked, true, 'Manual cap blocks sixth family selection');
+assertEqual(blockedSixth.reason, 'manual-card-cap', 'Manual cap block has stable reason');
+assertEqual(blockedSixth.notice, 'Max Cards is 5. Change it in Settings to select more.', 'Manual cap block names Max Cards');
+assertEqual(manualSelectedFamilies(blockedSixth.scope).length, 5, 'Blocked Manual cap does not mutate selection');
+
+const subItemChange = setSubItemEnabled(fiveSelected, CARD_SCOPE_CATALOG[0].family, CARD_SCOPE_CATALOG[0].subItems[0].key, false);
+assertEqual(subItemChange.blocked, false, 'Manual cap does not block sub-item focus changes');
+assertEqual(manualSelectedFamilies(subItemChange.scope).length, 5, 'Sub-item focus change does not change selected family count');
 
 const autoPayload = scopePayloadForArbiter({ mode: 'auto', cardScope: noScene });
 assertEqual(autoPayload.strictWhitelist, false, 'Auto payload is focus');

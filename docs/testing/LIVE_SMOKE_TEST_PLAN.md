@@ -103,7 +103,7 @@ Generation-enabled Utility and Reasoner smoke are opt-in. Setting `RECURSION_LIV
 | Mode smoke | no | no | Disabled power, Auto, Manual, and return-to-disabled controls update runtime state, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
 | Swipe smoke | temporary in-page only | no | Older-message `MESSAGE_SWIPED` clears Recursion prompts, changes active source revision A -> B, and returns to the same A revision on swipe back; deterministic latest-assistant retry tests prove no clear, no Rapid warm, and same-packet reinstall. |
 | Storage probe | files only | no | Dedicated user can write/read/delete Recursion-owned files and records are isolated from other users. |
-| Manual smoke | optional | Utility | Manual applies as a distinct mode, installs prompts, and records sanitized proof for the Manual branch. |
+| Manual smoke | optional | Utility | Manual applies as a distinct mode, blocks over-cap family selection, forces selected family coverage, installs prompts, and records sanitized proof for the Manual branch. |
 | Utility provider smoke | yes | Utility | Arbiter/card/composer work runs, progress menu reports it, prompt packet installs, and generation continues. |
 | Reasoner fallback smoke | yes | Utility and Reasoner | Reasoner can compose when healthy and falls back to Utility when off, timed out, or invalid. |
 | Prompt cleanup smoke | no | no | Power-off, disable, teardown, and chat change clear Recursion prompt keys. |
@@ -168,10 +168,12 @@ In Manual mode:
 
 - Capture a turn snapshot or current chat snapshot.
 - Verify the mode applies as `manual`.
+- Set `Max Cards` to a small value such as `2`, select two family rows, attempt a third, and verify the visible cap notice names Max Cards.
+- Run a Manual generation where the Arbiter omits one selected family; verify runtime covers the selected family through valid cache reuse or a synthesized card job.
 - Verify a prompt packet is installed through the Manual branch.
 - Verify the progress menu and Full Viewer show sanitized snapshot/card-plan metadata.
 
-Manual mode may record hashes, counts, ids, selected family keys, omitted family keys, and bounded labels. It must not leak raw provider payloads, prompt text, full transcript text, or secrets.
+Manual mode may record hashes, counts, ids, selected family keys, cap-block status, forced-family keys, omitted family keys, and bounded labels. It must not leak raw provider payloads, prompt text, full transcript text, or secrets.
 
 ### 6. Auto Utility Pass
 

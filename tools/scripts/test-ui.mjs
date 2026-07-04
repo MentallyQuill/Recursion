@@ -8,7 +8,10 @@ import {
 } from '../../src/card-scope.mjs';
 import { activityLabel, createRecursionViewModel, mountRecursionUi, providerFromControls } from '../../src/ui.mjs';
 import { createUiActionStatus, normalizeUiActionFailure } from '../../src/ui/action-status.mjs';
+import { renderCompactBar } from '../../src/ui/bar.mjs';
+import { cardsPanelState } from '../../src/ui/cards-panel.mjs';
 import { providerSelector, providerStatusClass } from '../../src/ui/provider-panel.mjs';
+import { progressPanelState } from '../../src/ui/progress-panel.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -28,6 +31,21 @@ assertEqual(providerSelector('model', 'utility'), '[data-recursion-provider-mode
 assertEqual(providerStatusClass('Ready'), 'is-ready', 'provider status ready class is stable');
 assertEqual(providerStatusClass('Missing model'), 'is-warning', 'provider status warning class is stable');
 assertEqual(providerStatusClass('Ready', { baseClass: 'recursion-provider-status' }), 'recursion-provider-status pass', 'provider chrome status class preserves existing shape');
+const compactBarPresentation = renderCompactBar({
+  viewModel: {
+    currentStepText: 'Generating scene cards...',
+    standbyStatusText: 'Ready for Recursion.',
+    modeLabel: 'Auto',
+    generationStopVisible: true,
+    forceRegenerateVisible: false
+  },
+  tooltipsEnabled: true
+});
+assertEqual(compactBarPresentation.statusText, 'Generating scene cards...', 'compact bar presenter prefers active step text');
+assertEqual(compactBarPresentation.showStop, true, 'compact bar presenter exposes stop visibility');
+assertEqual(compactBarPresentation.showForceRegenerate, false, 'compact bar presenter hides force regenerate during active work');
+assertEqual(progressPanelState({ progressRun: { title: 'Generating', steps: [{ id: 's1' }] } }).steps.length, 1, 'progress panel presenter exposes steps');
+assertEqual(cardsPanelState({ lastHand: { cards: [{ id: 'c1' }] } }).count, 1, 'cards panel presenter counts hand cards');
 const savedProviderDraft = {
   source: 'host-connection-profile',
   hostConnectionProfileId: 'saved-profile',

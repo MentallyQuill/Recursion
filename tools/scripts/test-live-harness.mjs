@@ -564,7 +564,11 @@ async function createSillyTavernSmokeFixtureServer({
     'src/storage.mjs',
     'src/story-form.mjs',
     'src/ui/action-status.mjs',
+    'src/ui/bar.mjs',
+    'src/ui/cards-panel.mjs',
+    'src/ui/progress-panel.mjs',
     'src/ui/provider-panel.mjs',
+    'src/ui/view-model.mjs',
     'src/ui.mjs'
   ];
   for (const relativePath of moduleFiles) {

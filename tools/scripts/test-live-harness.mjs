@@ -551,6 +551,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/reasoning-policy.mjs',
     'src/retention-policy.mjs',
     'src/runtime.mjs',
+    'src/safe-values.mjs',
     'src/settings.mjs',
     'src/settings-policy.mjs',
     'src/storage.mjs',

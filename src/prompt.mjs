@@ -7,6 +7,7 @@ import {
   summarizeBehaviorPolicyForDiagnostics
 } from './settings-policy.mjs';
 import { reasoningRequestMetadata } from './reasoning-policy.mjs';
+import { asObject } from './safe-values.mjs';
 import { UNKNOWN_STORY_FORM, normalizeStoryForm, storyFormInstruction } from './story-form.mjs';
 
 export const PROMPT_PACKET_VERSION = 3;
@@ -72,10 +73,6 @@ const DYNAMIC_FORBIDDEN_PATTERNS = Object.freeze([
   /\b(hidden|private|secret|undisclosed)\s+spoilers?\b/i,
   /\breveal\s+spoilers?\b/i
 ]);
-
-function asObject(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-}
 
 function cleanText(value, limit) {
   return truncate(compact(value ?? '', limit), limit);

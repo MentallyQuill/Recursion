@@ -3,6 +3,7 @@ import { packetToPromptBlocks } from '../../prompt.mjs';
 import { createProviderClient, machineJsonSchemaForRequest } from '../../providers.mjs';
 import { normalizeReasoningCategory, normalizeReasoningIntent } from '../../reasoning-policy.mjs';
 import { normalizeRetentionSettings, selectBoundedSourceWindow } from '../../retention-policy.mjs';
+import { asObject } from '../../safe-values.mjs';
 import { createSettingsStore } from '../../settings.mjs';
 import { createMemoryStorageAdapter } from '../../storage.mjs';
 import { createSillyTavernUserFileStorageAdapter } from './storage.mjs';
@@ -31,10 +32,6 @@ const PLACEMENT_TYPES = Object.freeze({
 });
 const PROMPT_ROLES = new Set(['system', 'user', 'assistant']);
 const UNSAFE_PROMPT_TEXT_PATTERN = /\bhidden\s+chain[-\s]of[-\s]thought\b|\bchain[-\s]of[-\s]thought\b|\b(hidden|private|secret|undisclosed)\s+(internal\s+)?thoughts?\b|\b(private|hidden|secret|undisclosed)\s+(character\s+)?motives?\b|\b(secret|hidden|private|undisclosed)\s+future\s+(plans?|plot|story)\b|\breveal\s+future\s+plans?\b|\bfuture[-\s]plot\b|\b(hidden|private|secret|undisclosed)\s+spoilers?\b|\breveal\s+spoilers?\b/i;
-
-function asObject(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-}
 
 function stringValue(value, fallback = '') {
   if (value === undefined || value === null) return fallback;

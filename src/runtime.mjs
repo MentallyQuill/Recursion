@@ -40,6 +40,7 @@ import { behaviorPolicyPromptLines, influencePolicyForSettings, runPolicyForEffe
 import { STORY_FORM_SCHEMA, UNKNOWN_STORY_FORM, arbiterStoryFormContractLine, normalizeStoryForm } from './story-form.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
 import { normalizeRetentionSettings } from './retention-policy.mjs';
+import { asObject } from './safe-values.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
@@ -109,10 +110,6 @@ const HARD_CACHE_VERSION_FIELDS = Object.freeze([
   'promptContractHash',
   'providerContractHash'
 ]);
-
-function asObject(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-}
 
 function cleanString(value, fallback = '') {
   const text = String(value ?? '').trim();

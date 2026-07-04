@@ -14,10 +14,15 @@ import {
 } from '../../src/card-scope.mjs';
 import { packetToPromptBlocks } from '../../src/prompt.mjs';
 import { hashJson } from '../../src/core.mjs';
+import { safeDiagnosticText, safeIdentifier, safeText, unsafeObjectString } from '../../src/safe-values.mjs';
 import { UNKNOWN_STORY_FORM } from '../../src/story-form.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
+assertEqual(safeText({ label: 'Visible', token: 'sk-live-secret' }).includes('[redacted]'), true, 'safeText redacts object secrets');
+assertEqual(unsafeObjectString('[object Object]'), true, 'unsafe object marker is detected');
+assertEqual(safeDiagnosticText('[object Object]'), '', 'unsafe object marker is removed from diagnostics text');
+assertEqual(safeIdentifier(' Scene / Beat 1 '), 'scene-beat-1', 'safeIdentifier normalizes labels');
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));

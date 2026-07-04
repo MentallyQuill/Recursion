@@ -175,6 +175,23 @@ assertEqual(laneReporter.current().severity, 'error', 'valid severity preserved'
 assertEqual(laneReporter.current().providerLane, 'reasoner', 'valid provider lane preserved');
 assertEqual(laneReporter.current().composerLane, 'reasoner', 'valid composer lane preserved');
 
+const guidanceLaneReporter = createActivityReporter();
+const guidanceLaneRun = guidanceLaneReporter.start({
+  runId: 'guidance-lane-run',
+  label: 'Guidance lane start'
+});
+guidanceLaneReporter.stage({
+  runId: guidanceLaneRun.runId,
+  phase: 'guidanceFallback',
+  composerLane: 'guidance',
+  label: 'Guidance fallback'
+});
+assertEqual(
+  guidanceLaneReporter.current().composerLane,
+  'guidance',
+  'guidance composer lane is preserved for fallback prompt composition'
+);
+
 const outcomes = [];
 const outcomeReporter = createActivityReporter({ onEvent: (event) => outcomes.push(event) });
 const warningRun = outcomeReporter.start({ runId: 'warning-run', label: 'Warning run' });

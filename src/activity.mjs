@@ -5,7 +5,7 @@ const VALID_MODES = new Set(['foreground', 'background', 'review']);
 const VALID_SEVERITIES = new Set(['info', 'success', 'warning', 'error']);
 const VALID_OUTCOMES = new Set(['success', 'warning', 'error', 'skipped', 'canceled']);
 const VALID_PROVIDER_LANES = new Set(['utility', 'reasoner']);
-const VALID_COMPOSER_LANES = new Set(['utility', 'reasoner', 'local']);
+const VALID_COMPOSER_LANES = new Set(['utility', 'guidance', 'reasoner', 'local']);
 const OUTCOME_SEVERITY = new Map([
   ['success', 'success'],
   ['warning', 'warning'],

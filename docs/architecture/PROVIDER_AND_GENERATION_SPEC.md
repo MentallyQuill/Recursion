@@ -105,6 +105,8 @@ Provider setup uses the same control-plane helpers as generation:
 - `providerModelStatus()` resolves the selected source into a compact readiness label before a test call runs, including selected connection profile model labels when the host exposes them.
 - `fetchOpenAICompatibleModels()` discovers direct endpoint models by normalizing the configured base URL to `/models` and parsing OpenAI-style `data[]` or `models[]` responses.
 
+Provider core is host-neutral. Host connection-profile discovery is supplied by the active host adapter; OpenAI-compatible endpoint model discovery remains provider-core behavior because it belongs to the endpoint contract rather than the SillyTavern object graph.
+
 Connection profile discovery must stay scoped to provider/connection-profile seams. It must not traverse SillyTavern character, character-card, persona, avatar, group, or Recursion card containers while searching for profiles. The Providers pane should reuse one detected profile list while rendering Utility and Reasoner controls instead of asking the host repeatedly during a single render. The Profile control is a filterable combobox: typed text filters the local detected list, and persisted provider settings change only after the user chooses a detected profile entry.
 
 Model discovery is read-only. It may use the currently typed session key, but it must not save settings, persist secrets, write diagnostics, clear prompts, or invalidate scene cache. Fetch failures are compact UI status, not runtime generation failures.

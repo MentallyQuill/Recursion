@@ -13,6 +13,11 @@ Recursion source is organized around a small host-neutral scene compiler plus a 
 - `progress.mjs` - Hero Pixel Array and progress-menu model builder that turns runtime/activity/provider events into stable visual rows.
 - `prompt.mjs` - Prompt packet composition, optional Reasoner synthesis, validation, omission rules, and SillyTavern prompt blocks.
 - `runtime.mjs` - Turn orchestration, Utility Arbiter planning, behavior-policy application, scene cache updates, prompt install/clear flow, cancellation cleanup, settings/provider actions, and view model data.
+- `runtime/` - Runtime conductor support modules: run state, prompt install, diagnostics, and pipeline runners.
+- `runtime/pipelines/` - Standard, Rapid, and Fused provider-generation paths.
 - `ui.mjs` - Recursion Bar, icon-only mode/card controls, Hero Pixel Array progress menu, options menu, Last Brief dropdown, full viewer, autosaving settings, model discovery, and provider controls.
+- `ui/` - Pure UI presenters and provider/action helpers used by `ui.mjs`.
+- `safe-values.mjs` - Shared text/object safety helpers for diagnostics and host/provider normalization.
 - `hosts/sillytavern/` - SillyTavern context, generation, prompt, settings, and file-storage adapters.
+- `hosts/sillytavern/provider-profiles.mjs` - SillyTavern connection-profile discovery owned by the host adapter.
 - `extension/index.js` - SillyTavern entrypoint, lifecycle hooks, and generation interceptor.

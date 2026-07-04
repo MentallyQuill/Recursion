@@ -72,7 +72,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 
 ## Source And Module READMEs
 
-- [Source Layout](../src/README.md)
+- [Source Layout](../src/README.md) - Current module map for runtime helpers, pipeline runners, UI presenters, safe-value helpers, and SillyTavern host adapters.
 - [Host Adapter Layout](../src/hosts/README.md)
 - [Tests](../tests/README.md)
 - [Tools](../tools/README.md)
@@ -82,6 +82,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 
 ```powershell
 npm.cmd test
+node tools\scripts\audit-refactor-hotspots.mjs
 node tools\scripts\run-alpha-gate.mjs
 rg -n "^<Render Needed>:" README.md docs --glob "*.md" --glob "!docs/planning/DOCUMENTATION_EXPANSION_PLAN.md"
 ```

@@ -2360,6 +2360,36 @@ try {
   assert(root.querySelector('[data-recursion-setting-scene-caches-total]'), 'Retention renders total scene cache cap');
   assert(root.querySelector('[data-recursion-setting-source-variants-per-scene]'), 'Retention renders source variant cap');
   assert(root.querySelector('[data-recursion-setting-run-journal-entries]'), 'Retention renders journal entry cap');
+  const typedIntegerSettingSelectors = [
+    '[data-recursion-setting-min-cards]',
+    '[data-recursion-setting-max-cards]',
+    '[data-recursion-setting-progress-child-limit]',
+    '[data-recursion-setting-progress-list-limit]',
+    '[data-recursion-setting-source-window-messages]',
+    '[data-recursion-setting-source-window-characters]',
+    '[data-recursion-setting-provider-visible-messages]',
+    '[data-recursion-setting-scene-caches-per-chat]',
+    '[data-recursion-setting-scene-caches-total]',
+    '[data-recursion-setting-source-variants-per-scene]',
+    '[data-recursion-setting-run-journal-entries]',
+    '[data-recursion-provider-max-tokens-utility]',
+    '[data-recursion-provider-max-tokens-reasoner]'
+  ];
+  assertDeepEqual(
+    typedIntegerSettingSelectors.map((selector) => root.querySelector(selector)?.getAttribute('type')),
+    typedIntegerSettingSelectors.map(() => 'text'),
+    'visible numeric settings render as typed integer text boxes instead of native number spinners'
+  );
+  assertDeepEqual(
+    typedIntegerSettingSelectors.map((selector) => root.querySelector(selector)?.getAttribute('inputmode')),
+    typedIntegerSettingSelectors.map(() => 'numeric'),
+    'visible numeric settings request numeric keyboard input without native spinner controls'
+  );
+  assertDeepEqual(
+    typedIntegerSettingSelectors.map((selector) => root.querySelector(selector)?.getAttribute('pattern')),
+    typedIntegerSettingSelectors.map(() => '[0-9]*'),
+    'visible numeric settings constrain typed values to integer-shaped input'
+  );
   assertEqual(
     root.querySelector('[data-recursion-setting-source-window-messages]').getAttribute('min'),
     '12',

@@ -894,6 +894,22 @@ function inputControl({ value = '', type = 'text', dataset, ariaLabel, min = nul
   return input;
 }
 
+function integerInputControl({ value = '', dataset, ariaLabel, min = null, max = null, step = 1, placeholder = '' }) {
+  const input = inputControl({
+    value,
+    type: 'text',
+    dataset,
+    ariaLabel,
+    min,
+    max,
+    step,
+    placeholder
+  });
+  input.setAttribute('inputmode', 'numeric');
+  input.setAttribute('pattern', '[0-9]*');
+  return input;
+}
+
 function dispatchControlChange(control) {
   if (!control || typeof control.dispatchEvent !== 'function') return;
   if (typeof Event === 'function') {
@@ -1655,9 +1671,8 @@ function settingsSelectRow(label, datasetName, value, options, tooltip = '', too
 }
 
 function settingsNumberRow(label, datasetName, value, { min = 0, max = 20, step = 1, tooltip = '', tooltipsEnabled = true } = {}) {
-  const control = inputControl({
+  const control = integerInputControl({
     value,
-    type: 'number',
     dataset: { [datasetName]: '' },
     ariaLabel: label,
     min,
@@ -1732,9 +1747,8 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     ariaLabel: 'Enable hover tooltips'
   });
   setTooltip(tooltipsControl, tooltipsEnabled, SETTINGS_TOOLTIPS.tooltips);
-  const progressChildControl = inputControl({
+  const progressChildControl = integerInputControl({
     value: integerInRange(ui.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20),
-    type: 'number',
     min: 1,
     max: 20,
     step: 1,
@@ -1742,9 +1756,8 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     ariaLabel: 'Visible sub-tier progress rows'
   });
   setTooltip(progressChildControl, tooltipsEnabled, SETTINGS_TOOLTIPS.progressChildLimit);
-  const progressListControl = inputControl({
+  const progressListControl = integerInputControl({
     value: integerInRange(ui.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80),
-    type: 'number',
     min: 5,
     max: 80,
     step: 1,
@@ -1759,9 +1772,8 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
   ], { tooltip: SETTINGS_TOOLTIPS.ui, tooltipsEnabled }));
   const retentionNumberControl = (key, datasetKey, ariaLabel) => {
     const limits = RETENTION_LIMITS[key];
-    return inputControl({
+    return integerInputControl({
       value: integerInRange(retention[key], defaultRetention[key], limits.min, limits.max),
-      type: 'number',
       min: limits.min,
       max: limits.max,
       step: limits.step,
@@ -2254,13 +2266,12 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
     providerField('Session Key', apiKeyControl)
   ]);
   grid.appendChild(openAiFields);
-  const maxTokensControl = inputControl({
-      value: source.maxTokens ?? '',
-      type: 'number',
-      min: 64,
-      step: 64,
-      dataset: providerDataset('MaxTokens', lane),
-      ariaLabel: `${title} max tokens`
+  const maxTokensControl = integerInputControl({
+    value: source.maxTokens ?? '',
+    min: 64,
+    step: 64,
+    dataset: providerDataset('MaxTokens', lane),
+    ariaLabel: `${title} max tokens`
   });
   setTooltip(maxTokensControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerMaxTokens);
   grid.appendChild(providerField('Max Tokens', maxTokensControl));

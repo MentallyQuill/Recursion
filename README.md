@@ -8,7 +8,7 @@ Recursion is a SillyTavern extension that helps a roleplay model notice what mat
 
 It reads the active chat, reasons over the immediate scene, builds a compact deck of scene cards, and selects the cards that matter for the next reply. The result is an inspectable prompt packet with guidance, card evidence, and guardrails for the current moment: pressure, intent, constraints, consequences, hidden boundaries, environmental affordances, and unresolved threads.
 
-Recursion is not a lorebook replacement or a second chat. It is a scene reasoning layer for the reply in front of you.
+Recursion is a scene reasoning layer for the reply in front of you.
 
 ## At A Glance
 
@@ -60,9 +60,9 @@ That makes it useful for long-running roleplay, scenes with layered motives, soc
 
 Stepped Thinking gives a character a private pre-generation pass. It is useful when the missing piece is character interiority: what a character feels, intends, hides, or thinks before speaking.
 
-Recursion works at the scene level. It does not just ask for a stream of thoughts; it builds a card deck across the live situation, chooses the most relevant cards for this turn, and turns that into prompt evidence the next reply can use. That makes Recursion a better fit when the problem is scene awareness: missed constraints, unresolved threads, hidden knowledge, social pressure, consequences, items, environment, and continuity that should affect the reply right now.
+Recursion works at the scene level, building a card deck across the live situation, choosing the most relevant cards for this turn, and turning that into prompt evidence the next reply can use. Recursion addresses the problem of scene awareness: missed constraints, unresolved threads, hidden knowledge, social pressure, consequences, items, environment, and continuity that should affect the reply right now.
 
-The tools can complement each other, but they are not the same category. Stepped Thinking is strongest as an inner-pass tool. Recursion is stronger as a structured scene-reasoning and prompt-packet tool.
+To that effect, it's a structured scene-reasoning and prompt-packet tool. It doesn't delve into character thoughts like Stepped Thinking, but instead acts as a dedicated thinknig layer to ask: *What needs to be tracked and expanded upon to make the next generation feel like a rich continuation of the scene?*
 
 ## Pipelines
 

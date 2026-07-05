@@ -378,6 +378,96 @@ const reasoningSettingDuringRunProgress = createProgressRunModel({
 });
 assert(!reasoningSettingDuringRunProgress.steps.some((step) => step.id === 'reasoner-guidance'), 'reasoning setting alone does not add a Reasoner row to an active run');
 
+const runningProviderTestProgress = createProgressRunModel({
+  settings: { enabled: true, mode: 'auto', reasonerUse: 'always' },
+  lastPlan: {
+    cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame' }],
+    reasonerDecision: { mode: 'use' }
+  },
+  activityHistory: [
+    {
+      runId: 'provider-test-utility-progress',
+      phase: 'providerCallStarted',
+      label: 'Utility provider test started.',
+      providerLane: 'utility',
+      recordedAt: '1'
+    },
+    {
+      runId: 'provider-test-utility-progress',
+      phase: 'providerCallRunning',
+      label: 'Provider call running.',
+      providerLane: 'utility',
+      detail: { roleId: 'providerTest', lane: 'utility' },
+      recordedAt: '2'
+    }
+  ],
+  activity: {
+    runId: 'provider-test-utility-progress',
+    phase: 'providerCallRunning',
+    label: 'Provider call running.',
+    providerLane: 'utility',
+    detail: { roleId: 'providerTest', lane: 'utility' },
+    recordedAt: '2'
+  }
+});
+const runningProviderTestStep = runningProviderTestProgress.steps.find((step) => step.id === 'provider-test');
+assert(runningProviderTestStep, 'running provider tests render a provider-test row');
+assertEqual(runningProviderTestStep.state, 'running', 'running provider tests keep active provider-test state');
+assertEqual(runningProviderTestStep.label, 'Utility provider test', 'running utility provider tests label the utility lane');
+assertEqual(runningProviderTestProgress.currentStepText, 'Utility provider test...', 'running provider tests get compact lane-specific status');
+assertEqual(runningProviderTestProgress.steps.length, 1, 'provider tests ignore stale turn plans');
+assert(!runningProviderTestProgress.steps.some((step) => step.id === 'utility-card-batch'), 'provider tests are not rendered as card batches');
+
+const failedReasonerProviderTestProgress = createProgressRunModel({
+  activityHistory: [
+    {
+      runId: 'provider-test-reasoner-progress',
+      phase: 'providerCallStarted',
+      label: 'Reasoner provider test started.',
+      providerLane: 'reasoner',
+      detail: { roleId: 'providerTest', lane: 'reasoner' },
+      recordedAt: '1'
+    },
+    {
+      runId: 'provider-test-reasoner-progress',
+      phase: 'settled',
+      outcome: 'error',
+      severity: 'error',
+      label: 'Provider call failed.',
+      providerLane: 'reasoner',
+      detail: { roleId: 'providerTest', lane: 'reasoner', error: { message: 'Reasoner test failed.' } },
+      recordedAt: '2'
+    },
+    {
+      runId: 'provider-test-reasoner-progress',
+      phase: 'settled',
+      outcome: 'warning',
+      severity: 'warning',
+      label: 'Reasoner provider test failed.',
+      providerLane: 'reasoner',
+      detail: { status: 'fail', compactError: 'Reasoner test failed.' },
+      recordedAt: '3'
+    }
+  ],
+  activity: {
+    runId: 'provider-test-reasoner-progress',
+    phase: 'settled',
+    outcome: 'warning',
+    severity: 'warning',
+    label: 'Reasoner provider test failed.',
+    providerLane: 'reasoner',
+    detail: { status: 'fail', compactError: 'Reasoner test failed.' },
+    recordedAt: '3'
+  }
+});
+const failedReasonerProviderTestStep = failedReasonerProviderTestProgress.steps.find((step) => step.id === 'provider-test');
+assert(failedReasonerProviderTestStep, 'failed provider tests render a provider-test row');
+assertEqual(failedReasonerProviderTestStep.state, 'failed', 'router provider-test errors keep failed provider-test state');
+assertEqual(failedReasonerProviderTestStep.label, 'Reasoner provider test', 'failed reasoner provider tests label the reasoner lane');
+assertEqual(failedReasonerProviderTestProgress.currentStepText, 'Reasoner provider test failed', 'failed provider tests get compact lane-specific failure status');
+assert(!failedReasonerProviderTestProgress.steps.some((step) => step.id === 'recursion-prompt-ready'), 'failed provider tests are not rendered as prompt-ready failures');
+assertEqual(createHeroPixelBlocks(failedReasonerProviderTestProgress).length, 0, 'provider test failures do not create generation hero pixels');
+
 const controlOnlyWarningProgress = createProgressRunModel({
   settings: { enabled: false, mode: 'auto' },
   activity: {

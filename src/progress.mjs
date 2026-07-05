@@ -6,7 +6,8 @@ const DEFAULT_HERO_PIXEL_MAX_COLUMNS = 12;
 const HERO_CONTROL_ONLY_STEP_IDS = new Set([
   'installing-recursion-prompt',
   'clearing-recursion-prompt',
-  'recursion-prompt-ready'
+  'recursion-prompt-ready',
+  'provider-test'
 ]);
 const VALID_CHILD_SOURCES = new Set(['generated', 'cache', 'fallback', 'provider', 'local', 'fused-repair']);
 const MODEL_CALL_ROLE_IDS = new Set([
@@ -49,6 +50,7 @@ const STEP_ORDER = [
   'rapid-deck-stale',
   'rapid-warm-failed',
   'reusing-scene-deck',
+  'provider-test',
   'fused-card-bundle',
   'utility-card-batch',
   'validating-cards',
@@ -76,6 +78,7 @@ const STEP_DEFINITIONS = Object.freeze({
   'rapid-deck-stale': { label: 'Rapid deck stale', providerLane: 'utility' },
   'rapid-warm-failed': { label: 'Rapid warm', providerLane: 'utility' },
   'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
+  'provider-test': { label: 'Provider test', providerLane: 'utility' },
   'fused-card-bundle': { label: 'Fused card bundle', providerLane: 'utility' },
   'utility-card-batch': { label: 'Utility card batch', providerLane: 'utility' },
   'validating-cards': { label: 'Validating cards', providerLane: 'utility' },
@@ -118,6 +121,7 @@ const PHASE_STEP_IDS = Object.freeze({
   promptInstalling: 'installing-recursion-prompt',
   promptClearing: 'clearing-recursion-prompt',
   promptClearFailed: 'clearing-recursion-prompt',
+  providerTestFailed: 'provider-test',
   cacheWarning: 'checking-scene-cache',
   settled: 'recursion-prompt-ready'
 });
@@ -300,6 +304,7 @@ function sameEvent(left, right) {
 function roleStepId(event) {
   const detail = asObject(event.detail);
   const roleId = cleanText(detail.roleId || event.roleId);
+  if (roleId === 'providerTest') return 'provider-test';
   if (roleId === 'utilityArbiter') return 'planning-card-pass';
   if (roleId === 'reasonerComposer') return 'reasoner-guidance';
   if (roleId === 'guidanceComposer') return 'composing-prompt-packet';
@@ -315,7 +320,30 @@ function roleLabel(roleId, fallback = '') {
   if (id === 'utilityArbiter') return 'Utility Arbiter';
   if (id === 'guidanceComposer') return 'Guidance composer';
   if (id === 'fusedCardBundle') return 'Fused card bundle';
+  if (id === 'providerTest') return 'Provider test';
   return fallback;
+}
+
+function providerTestStepLabel(event) {
+  const detail = asObject(event.detail);
+  const lane = normalizeProviderLane(event.providerLane || detail.lane, 'utility');
+  return `${lane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test`;
+}
+
+function stepLabelForEvent(id, event, definition = {}) {
+  if (id === 'provider-test') return providerTestStepLabel(event);
+  return definition.label || activityLabelText(event);
+}
+
+function isProviderTestEvent(event) {
+  const phase = cleanText(event.phase);
+  const detail = asObject(event.detail);
+  const roleId = cleanText(detail.roleId || event.roleId);
+  const runId = cleanText(event.runId).toLowerCase();
+  return roleId === 'providerTest'
+    || phase.startsWith('providerTest')
+    || runId === 'provider-test'
+    || runId.startsWith('provider-test-');
 }
 
 function isProviderSettledEvent(event) {
@@ -328,6 +356,7 @@ function eventStepId(event) {
   const phase = cleanText(event.phase);
   const detail = asObject(event.detail);
   if (phase === 'cardProgress') return cleanText(detail.parentStepId, 'utility-card-batch');
+  if (isProviderTestEvent(event)) return 'provider-test';
   if (phase.startsWith('providerCall')) return roleStepId(event) || 'utility-card-batch';
   if (isProviderSettledEvent(event)) return roleStepId(event);
   return PHASE_STEP_IDS[phase] || null;
@@ -389,6 +418,7 @@ function childStepFromEvent(event, state, order = 0) {
       order
     }, order);
   }
+  if (isProviderTestEvent(event)) return null;
   if (phase.startsWith('providerCall') || isProviderSettledEvent(event)) {
     const roleId = cleanText(detail.roleId || event.roleId);
     if (!roleId) return null;
@@ -568,9 +598,11 @@ function normalizeStep(input, index = 0) {
     ? aggregateParentState(normalizeStateWithRetry(source.state, retryCount), children)
     : normalizeStateWithRetry(source.state, retryCount);
   const reason = reasonFromSource(source, state, retryCount) || aggregateReason(children);
+  const fallbackLabel = id === 'provider-test' ? 'Provider test' : `Step ${index + 1}`;
+  const definitionLabel = id === 'provider-test' ? '' : definition.label;
   const step = {
     id,
-    label: definition.label || safeDisplayText(source.label, `Step ${index + 1}`, 80),
+    label: definitionLabel || safeDisplayText(source.label, fallbackLabel, 80),
     providerLane: normalizeProviderLane(source.providerLane, definition.providerLane || 'utility'),
     state,
     meta: metaForState(state, source.source || source.sourceType, reason, retryCount),
@@ -790,19 +822,31 @@ function shouldDiscardIdlePendingProgress(view, progress) {
     && !progress.steps.some(hasMaterialProgressState);
 }
 
-function shouldDiscardSuccessfulControlOnlyProgress(progress) {
-  const source = asObject(progress);
-  const runId = cleanText(source.runId).toLowerCase();
-  const steps = Array.isArray(source.steps) ? source.steps : [];
-  if (!runId.startsWith('settings-') || steps.length === 0) return false;
-  if (!steps.every((step) => HERO_CONTROL_ONLY_STEP_IDS.has(step.id))) return false;
-  return !steps.some((step) => ['warning', 'failed'].includes(normalizeState(step.state)));
+function isControlOnlyRunId(runId) {
+  const id = cleanText(runId).toLowerCase();
+  return id.startsWith('settings-')
+    || id === 'provider-test'
+    || id.startsWith('provider-test-');
 }
 
-function isControlOnlySettingsProgress(runId, steps = []) {
+function isProviderTestRunId(runId) {
   const id = cleanText(runId).toLowerCase();
+  return id === 'provider-test' || id.startsWith('provider-test-');
+}
+
+function shouldDiscardSuccessfulControlOnlyProgress(progress) {
+  const source = asObject(progress);
+  const steps = Array.isArray(source.steps) ? source.steps : [];
+  if (!isControlOnlyRunId(source.runId) || steps.length === 0) return false;
+  if (!steps.every((step) => HERO_CONTROL_ONLY_STEP_IDS.has(step.id))) return false;
+  if (steps.some((step) => ['warning', 'failed'].includes(normalizeState(step.state)))) return false;
+  if (isProviderTestRunId(source.runId) && steps.some((step) => normalizeState(step.state) === 'running')) return false;
+  return true;
+}
+
+function isControlOnlyProgress(runId, steps = []) {
   const list = Array.isArray(steps) ? steps : [];
-  return id.startsWith('settings-')
+  return isControlOnlyRunId(runId)
     && list.length > 0
     && list.every((step) => HERO_CONTROL_ONLY_STEP_IDS.has(step.id));
 }
@@ -831,7 +875,7 @@ function deriveProgressRun(view) {
     const reason = eventReason(event, state);
     upsertStep(steps, normalizeStep({
       id,
-      label: definition.label || activityLabelText(event),
+      label: stepLabelForEvent(id, event, definition),
       providerLane: event.providerLane || event.composerLane || definition.providerLane,
       state,
       retryCount,
@@ -844,7 +888,7 @@ function deriveProgressRun(view) {
   }
   appendRapidWarmStatusStep(steps, source, order++);
   const beforePlanSteps = [...steps.values()];
-  if (!isControlOnlySettingsProgress(runId, beforePlanSteps)) {
+  if (!isControlOnlyProgress(runId, beforePlanSteps)) {
     appendPendingPlanSteps(steps, view, order);
     appendPendingChildSteps(steps, view, order);
   }

@@ -1383,7 +1383,9 @@ try {
               ...DEFAULT_RECURSION_SETTINGS.providers.reasoner,
               enabled: false,
               source: 'host-connection-profile',
-              hostConnectionProfileId: 'deepseek-profile'
+              hostConnectionProfileId: 'deepseek-profile',
+              lastTest: { status: 'pass' },
+              resolvedModelLabel: 'deepseek-v4-pro'
             }
           }
         },
@@ -1402,6 +1404,20 @@ try {
   const configuredReasonerRoot = fakeDocument.getElementById('recursion-root');
   configuredReasonerRoot.querySelector('[data-recursion-actions]').click();
   configuredReasonerRoot.querySelector('[data-recursion-settings-tab-providers]').click({ ignoreStopPropagation: true });
+  assertEqual(
+    configuredReasonerRoot.querySelector('[data-recursion-provider-status-reasoner]').textContent.toLowerCase().includes('pass'),
+    true,
+    'configured disabled Reasoner provider header shows passing provider-test health instead of optional route eligibility'
+  );
+  assertEqual(
+    configuredReasonerRoot.querySelector('[data-recursion-provider-status-reasoner]').textContent.toLowerCase().includes('optional'),
+    false,
+    'configured disabled Reasoner provider header does not replace provider-test health with optional copy'
+  );
+  assert(
+    fakeDocument.textTree(configuredReasonerRoot.querySelector('[data-recursion-provider-route-summary]')).includes('Utility fallback'),
+    'disabled Reasoner route eligibility stays visible in the route summary'
+  );
   assertEqual(
     configuredReasonerRoot.querySelector('[data-recursion-provider-body-reasoner]').hidden,
     false,

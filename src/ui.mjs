@@ -2117,9 +2117,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   const connectionProfiles = Array.isArray(options.connectionProfiles) ? options.connectionProfiles : null;
   const readinessOptions = connectionProfiles ? { profiles: connectionProfiles } : {};
   const title = lane === 'reasoner' ? 'Reasoner Provider' : 'Utility Provider';
-  const statusText = lane === 'reasoner' && source.enabled !== true
-    ? 'optional'
-    : providerStatusText(source).toLowerCase();
+  const statusText = providerStatusText(source).toLowerCase();
   const selectedSource = cleanText(source.source, 'host-current-model');
   const hasProfileConfiguration = selectedSource === 'host-connection-profile' && Boolean(cleanText(source.hostConnectionProfileId));
   const hasDirectConfiguration = selectedSource === 'openai-compatible'

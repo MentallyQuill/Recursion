@@ -738,8 +738,8 @@ export async function runLivePromptPacketProof({ argv = process.argv.slice(2), e
     if (args.pipeline === 'fused') {
       await page.evaluate(async () => {
         const runtime = globalThis.__recursionLiveHarnessRuntime;
-        if (typeof runtime?.forceRegenerateNext === 'function') {
-          await runtime.forceRegenerateNext({ source: 'prompt-packet-proof' });
+        if (typeof runtime?.requestFreshNextGeneration === 'function') {
+          await runtime.requestFreshNextGeneration({ source: 'prompt-packet-proof' });
         }
       });
     }

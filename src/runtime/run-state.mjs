@@ -6,7 +6,7 @@ export function createRuntimeRunState() {
   const activeRuntimeMutations = new Set();
   let activePromptMutationId = null;
   let pendingLatestAssistantSwipeRetry = null;
-  let pendingForceRegenerate = null;
+  let pendingFreshNextGeneration = null;
 
   return {
     current() {
@@ -19,7 +19,7 @@ export function createRuntimeRunState() {
         activeRuntimeMutationSet: activeRuntimeMutations,
         activePromptMutationId,
         pendingLatestAssistantSwipeRetry,
-        pendingForceRegenerate
+        pendingFreshNextGeneration
       };
     },
     setActiveRun(runId, controller = null) {
@@ -86,16 +86,16 @@ export function createRuntimeRunState() {
     clearLatestAssistantSwipeRetry() {
       pendingLatestAssistantSwipeRetry = null;
     },
-    setForceRegenerate(token) {
-      pendingForceRegenerate = token || null;
+    setFreshNextGeneration(token) {
+      pendingFreshNextGeneration = token || null;
     },
-    takeForceRegenerate() {
-      const token = pendingForceRegenerate;
-      pendingForceRegenerate = null;
+    takeFreshNextGeneration() {
+      const token = pendingFreshNextGeneration;
+      pendingFreshNextGeneration = null;
       return token || null;
     },
-    clearForceRegenerate() {
-      pendingForceRegenerate = null;
+    clearFreshNextGeneration() {
+      pendingFreshNextGeneration = null;
     }
   };
 }

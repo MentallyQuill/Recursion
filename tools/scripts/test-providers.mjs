@@ -1058,13 +1058,16 @@ const openAiRouter = createGenerationRouter({
   client: createProviderClient({
     settingsStore: openAiStore,
     fetchImpl: async (url, options) => {
-      fetchCalls.push({ url, options, body: JSON.parse(options.body) });
+      const body = JSON.parse(options.body);
+      fetchCalls.push({ url, options, body });
+      const schema = body?.response_format?.json_schema?.schema?.properties?.schema?.const;
+      const responseRoleId = schema === 'recursion.providerTest.v1' ? 'providerTest' : 'utilityArbiter';
       return {
         ok: true,
         json: async () => ({
           id: 'chatcmpl-test',
           model: 'utility-model',
-          choices: [{ message: { content: responseTextForRole('utilityArbiter') } }]
+          choices: [{ message: { content: responseTextForRole(responseRoleId) } }]
         })
       };
     }
@@ -1085,6 +1088,12 @@ assertEqual(fetchCalls[0].body.response_format.type, 'json_schema', 'openai-comp
 assertEqual(fetchCalls[0].body.response_format.json_schema.schema.properties.schema.const, 'recursion.utilityArbiter.v1', 'openai-compatible JSON schema constrains role schema');
 assertEqual(fetchCalls[0].body.response_format.json_schema.schema.properties.snapshotHash.const, 'openai-snapshot-hash', 'openai-compatible JSON schema constrains snapshot hash');
 assertEqual(fetchCalls[0].body.messages[0].content, 'OpenAI compatible', 'prompt sent as chat message');
+const openAiProviderTestResult = await openAiRouter.generate('providerTest', {
+  prompt: 'OpenAI compatible provider test',
+  responseLength: 256
+});
+assertEqual(openAiProviderTestResult.ok, true, 'openai-compatible provider test route succeeds');
+assertEqual(fetchCalls[1].body.max_tokens, 256, 'openai-compatible provider test request uses responseLength instead of configured max tokens');
 
 async function captureReasoningBody({
   baseUrl,

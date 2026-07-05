@@ -3,7 +3,8 @@ export function renderCompactBar({ viewModel = {}, tooltipsEnabled } = {}) {
     statusText: viewModel.currentStepText || viewModel.standbyStatusText || 'Ready for Recursion.',
     modeLabel: viewModel.modeLabel,
     showStop: Boolean(viewModel.generationStopVisible),
-    showForceRegenerate: Boolean(viewModel.forceRegenerateVisible),
+    showFreshNextGeneration: Boolean(viewModel.freshNextGenerationVisible),
+    freshNextGenerationPending: Boolean(viewModel.freshNextGenerationPending),
     tooltipsEnabled: tooltipsEnabled !== false
   };
 }

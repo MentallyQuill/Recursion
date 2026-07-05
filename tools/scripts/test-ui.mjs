@@ -37,13 +37,13 @@ const compactBarPresentation = renderCompactBar({
     standbyStatusText: 'Ready for Recursion.',
     modeLabel: 'Auto',
     generationStopVisible: true,
-    forceRegenerateVisible: false
+    freshNextGenerationVisible: false
   },
   tooltipsEnabled: true
 });
 assertEqual(compactBarPresentation.statusText, 'Generating scene cards...', 'compact bar presenter prefers active step text');
 assertEqual(compactBarPresentation.showStop, true, 'compact bar presenter exposes stop visibility');
-assertEqual(compactBarPresentation.showForceRegenerate, false, 'compact bar presenter hides force regenerate during active work');
+assertEqual(compactBarPresentation.showFreshNextGeneration, false, 'compact bar presenter hides fresh-next generation during active work');
 assertEqual(progressPanelState({ progressRun: { title: 'Generating', steps: [{ id: 's1' }] } }).steps.length, 1, 'progress panel presenter exposes steps');
 assertEqual(cardsPanelState({ lastHand: { cards: [{ id: 'c1' }] } }).count, 1, 'cards panel presenter counts hand cards');
 const savedProviderDraft = {
@@ -118,42 +118,42 @@ assertEqual(
   createRecursionViewModel({
     settings: { mode: 'auto', enabled: true },
     activity: { phase: 'idle' },
-    forceRegenerate: { pending: false },
+    freshNextGeneration: { pending: false },
     lastHand: { cards: [] }
-  }).forceRegenerateVisible,
+  }).freshNextGenerationVisible,
   true,
-  'idle enabled view exposes force regenerate in the stop command slot'
+  'idle enabled view exposes fresh-next generation in the command slot'
 );
 assertEqual(
   createRecursionViewModel({
     activeRunId: 'run-active-force-slot',
     settings: { mode: 'auto', enabled: true },
     activity: { phase: 'cardBatchRunning' },
-    forceRegenerate: { pending: false },
+    freshNextGeneration: { pending: false },
     lastHand: { cards: [] }
-  }).forceRegenerateVisible,
+  }).freshNextGenerationVisible,
   false,
-  'active run hides force regenerate so stop owns the command slot'
+  'active run hides fresh-next generation so stop owns the command slot'
 );
 assertEqual(
   createRecursionViewModel({
     settings: { mode: 'auto', enabled: true },
     activity: { phase: 'idle' },
-    forceRegenerate: { pending: true },
+    freshNextGeneration: { pending: true },
     lastHand: { cards: [] }
   }).generationStopVisible,
-  true,
-  'pending force regenerate swaps the command slot to Stop'
+  false,
+  'pending fresh-next generation does not show Stop while idle'
 );
 assertEqual(
   createRecursionViewModel({
     settings: { mode: 'auto', enabled: true },
     activity: { phase: 'idle' },
-    forceRegenerate: { pending: true },
+    freshNextGeneration: { pending: true },
     lastHand: { cards: [] }
-  }).forceRegenerateVisible,
-  false,
-  'pending force regenerate hides the Regenerate icon while Stop owns the slot'
+  }).freshNextGenerationVisible,
+  true,
+  'pending fresh-next generation keeps Regenerate visible for cancel'
 );
 assertEqual(
   createRecursionViewModel({
@@ -577,7 +577,7 @@ const heroBlockActiveCss = barImplementationReference.match(/@keyframes hero-blo
 const reasoningChainCss = barImplementationReference.match(/\.reasoning-chain\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const reasoningNodeCss = barImplementationReference.match(/\.reasoning-node\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const reasoningLitNodeCss = barImplementationReference.match(/\.reasoning-node\.is-lit\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
-const regenerateIconCss = recursionCss.match(/\.recursion-force-regenerate-icon\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const regenerateIconCss = recursionCss.match(/\.recursion-fresh-next-generation-icon\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 assert(/<svg\b/i.test(regenerateIconSvg), 'regenerate.svg is an SVG asset');
 assert(/\bviewBox="0 0 512 512"/.test(regenerateIconSvg), 'regenerate.svg preserves the attached full-size scalable viewBox');
 assert(/<path\b/i.test(regenerateIconSvg), 'regenerate.svg contains vector path data');
@@ -1238,6 +1238,11 @@ try {
     timer.active = false;
     timer.callback();
   };
+  const flushMicrotasks = async (count = 6) => {
+    for (let index = 0; index < count; index += 1) {
+      await Promise.resolve();
+    }
+  };
 
   const fakeDocument = createFakeDocument();
   globalThis.document = fakeDocument;
@@ -1371,14 +1376,17 @@ try {
   const settingsUpdates = [];
   const providerUpdates = [];
   const providerTests = [];
+  const providerTestGates = [];
   const providerClears = [];
   const providerModelFetches = [];
   let resetSceneCacheCalls = 0;
   let clearRunJournalCalls = 0;
   let exportDiagnosticsCalls = 0;
   let stopGenerationCalls = 0;
-  let forceRegenerateCalls = 0;
-  const forceRegenerateDetails = [];
+  let freshNextGenerationCalls = 0;
+  const freshNextGenerationDetails = [];
+  let clearFreshNextGenerationCalls = 0;
+  const clearFreshNextGenerationDetails = [];
   function fakeRuntimeConnectionProfiles() {
     return globalThis.SillyTavern.getContext().ConnectionManagerRequestService.getSupportedProfiles().map((profile) => {
       const id = profile.id || profile.profileId;
@@ -1431,7 +1439,7 @@ try {
         }
       }
     },
-    forceRegenerate: { pending: false },
+    freshNextGeneration: { pending: false },
     lastHand: {
       handId: 'hand-ui',
       cards: [{
@@ -1571,9 +1579,14 @@ try {
         };
         return view.settings.providers[lane];
       },
-      testProvider: async (lane) => {
+      testProvider: (lane) => {
         providerTests.push(lane);
-        return { ok: true };
+        const gate = {};
+        gate.promise = new Promise((resolve) => {
+          gate.resolve = resolve;
+        });
+        providerTestGates.push(gate);
+        return gate.promise;
       },
       clearProviderKey: (lane) => {
         providerClears.push(lane);
@@ -1627,36 +1640,30 @@ try {
         stopGenerationCalls += 1;
         return { ok: true, details };
       },
-      forceRegenerateNow: (details = {}) => {
-        forceRegenerateCalls += 1;
-        forceRegenerateDetails.push(details);
+      requestFreshNextGeneration: (details = {}) => {
+        freshNextGenerationCalls += 1;
+        freshNextGenerationDetails.push(details);
         view = {
           ...view,
-          activeRunId: 'force-ui-run',
-          hostGenerationActive: true,
-          activity: {
-            phase: 'cardBatchRunning',
-            severity: 'info',
-            label: 'Reading current turn...',
-            chips: ['Auto']
-          },
-          progressRun: {
-            runId: 'force-ui-run',
-            title: 'Generating',
-            currentStepText: 'Reading current turn...',
-            steps: [
-              { id: 'read-current-turn', label: 'Reading current turn', state: 'running' }
-            ]
-          },
-          forceRegenerate: {
+          freshNextGeneration: {
             pending: true,
-            id: 'force-ui',
-            reason: 'user-force-regenerate',
+            id: 'fresh-ui',
+            reason: 'user-fresh-next-generation',
             source: details.source || 'bar'
           },
-          lastBrief: { status: 'clearing', reason: 'user-force-regenerate', previousPacketId: 'packet-ui' }
+          lastBrief: { status: 'clearing', reason: 'user-fresh-next-generation', previousPacketId: 'packet-ui' }
         };
-        return { ok: true, forceRegenerate: view.forceRegenerate };
+        return { ok: true, freshNextGeneration: view.freshNextGeneration };
+      },
+      clearFreshNextGeneration: (details = {}) => {
+        clearFreshNextGenerationCalls += 1;
+        clearFreshNextGenerationDetails.push(details);
+        view = {
+          ...view,
+          freshNextGeneration: { pending: false },
+          lastBrief: { status: 'empty', reason: 'fresh-next-generation-cleared' }
+        };
+        return { ok: true, freshNextGeneration: view.freshNextGeneration };
       }
     },
     mountPoint: fakeDocument.body
@@ -1752,8 +1759,8 @@ try {
   assert(root.querySelector('[data-recursion-stop-generation]'), 'compact bar renders the active stop generation button');
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, false, 'active run shows stop generation button');
   assert(root.querySelector('[data-recursion-stop-generation]').querySelector('[data-recursion-stop-icon]'), 'stop generation button uses a square stop icon');
-  assert(root.querySelector('[data-recursion-force-regenerate]'), 'compact bar renders the force regenerate command slot button');
-  assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, true, 'active run hides force regenerate while stop is visible');
+  assert(root.querySelector('[data-recursion-fresh-next-generation]'), 'compact bar renders the fresh-next generation command slot button');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').hidden, true, 'active run hides fresh-next generation while stop is visible');
   assert(root.querySelector('[data-recursion-status-popover]'), 'compact bar renders the progress popover');
   assert(root.querySelector('[data-recursion-current-step]'), 'compact bar renders one current-step status text');
   assert(root.querySelector('[data-recursion-mobile-status-drawer]'), 'compact root renders the mobile status drawer');
@@ -2227,6 +2234,18 @@ try {
   root.querySelector('[data-recursion-provider-toggle-reasoner]').click();
   assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, false, 'Reasoner provider section expands');
   assert(root.querySelector('[data-recursion-provider-model-reasoner]'), 'Reasoner provider expansion exposes model setting');
+  const reasonerSourceBeforeAutosave = root.querySelector('[data-recursion-provider-source-reasoner]');
+  const providerUpdatesBeforeReasonerAutosave = providerUpdates.length;
+  reasonerSourceBeforeAutosave.value = 'host-connection-profile';
+  for (const listener of root.querySelector('[data-recursion-settings-panel]').eventListeners.change || []) {
+    listener({ target: reasonerSourceBeforeAutosave });
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+  assertEqual(providerUpdates.length, providerUpdatesBeforeReasonerAutosave + 1, 'Reasoner provider autosave runs from expanded section');
+  assertEqual(providerUpdates.at(-1).lane, 'reasoner', 'Reasoner provider autosave targets reasoner lane');
+  assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, false, 'Reasoner provider stays expanded after provider autosave rerender');
+  assertEqual(root.querySelector('[data-recursion-provider-toggle-reasoner]').getAttribute('aria-expanded'), 'true', 'Reasoner provider toggle keeps expanded state after provider autosave rerender');
   const utilitySource = root.querySelector('[data-recursion-provider-source-utility]');
   const utilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
   const utilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
@@ -2611,6 +2630,9 @@ try {
   }, 'settings panel saves broad behavior controls without owning the power state');
   ui.update();
   assertDeepEqual(titleAttributes(root), [], 'disabling tooltips removes all hover title attributes from the rendered Recursion UI');
+  if (root.querySelector('[data-recursion-settings-panel]').hidden === true) {
+    root.querySelector('[data-recursion-actions]').click({ isTrusted: false });
+  }
   root.querySelector('[data-recursion-settings-tab-providers]').click({ ignoreStopPropagation: true });
   assertDeepEqual(titleAttributes(root), [], 'disabled tooltips stay removed after settings tab rerender');
 
@@ -2639,9 +2661,20 @@ try {
     if (event.target === root.querySelector('[data-recursion-utility-provider-test]')) hostGenerationClicks += 1;
   });
   root.querySelector('[data-recursion-utility-provider-test]').click();
-  await Promise.resolve();
+  const busyProviderTestButton = root.querySelector('[data-recursion-utility-provider-test]');
+  assertEqual(busyProviderTestButton.textContent, 'Testing...', 'utility provider test shows busy label before runtime work starts');
+  assertEqual(busyProviderTestButton.getAttribute('aria-busy'), 'true', 'utility provider test exposes busy state before runtime work starts');
+  assertEqual(busyProviderTestButton.getAttribute('disabled'), 'disabled', 'utility provider test is disabled while the request is pending');
+  assertDeepEqual(providerTests, [], 'utility provider test yields one microtask so busy state can paint before runtime work');
+  await flushMicrotasks(1);
   assertDeepEqual(providerTests, ['utility'], 'utility provider test action calls runtime');
   assertEqual(hostGenerationClicks, 0, 'utility provider test consumes its click before host generation handlers can see it');
+  providerTestGates[0].resolve({ ok: true });
+  await flushMicrotasks();
+  const settledProviderTestButton = root.querySelector('[data-recursion-utility-provider-test]');
+  assertEqual(settledProviderTestButton.textContent, 'Test Provider', 'utility provider test restores label after completion');
+  assertEqual(settledProviderTestButton.getAttribute('aria-busy'), 'false', 'utility provider test clears busy state after completion');
+  assertEqual(settledProviderTestButton.getAttribute('disabled'), null, 'utility provider test enables again after completion');
   root.querySelector('[data-recursion-utility-provider-clear-key]').click();
   assertDeepEqual(providerClears, ['utility'], 'utility clear session key action calls runtime');
   if (root.querySelector('[data-recursion-settings-panel]').hidden === false) {
@@ -2717,30 +2750,33 @@ try {
   root.querySelector('[data-recursion-viewer-close]').click();
   assertEqual(closeCount, 1, 'viewer close listener is not duplicated across updates');
 
-  view = { settings: { mode: 'auto' }, activity: { phase: 'idle' }, lastHand: { cards: [] } };
+  view = { settings: { mode: 'auto' }, activity: { phase: 'idle' }, lastHand: { cards: [] }, freshNextGeneration: { pending: false } };
   ui.update();
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'idle view hides stop generation button');
-  assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, false, 'idle view shows force regenerate button in stop slot');
-  assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('aria-label'), 'Regenerate this turn', 'force regenerate button exposes accessible copy');
-  assertEqual(root.querySelector('[data-recursion-force-regenerate]').getAttribute('title'), 'Regenerate this turn fresh, ignoring cached cards, Fused bundles, Rapid warm, and swipe reuse.', 'force regenerate button exposes hover tip copy');
-  assert(root.querySelector('[data-recursion-force-regenerate-icon]'), 'force regenerate button renders the Regenerate icon');
-  assertEqual(root.querySelector('[data-recursion-force-regenerate-icon]').children.length, 0, 'force regenerate icon uses the regenerate.svg asset mask instead of inline SVG');
-  assertEqual(fakeDocument.textTree(root.querySelector('[data-recursion-force-regenerate]')).includes('Regenerate'), false, 'force regenerate button is icon-only when idle');
-  root.querySelector('[data-recursion-force-regenerate]').click();
-  assertEqual(forceRegenerateCalls, 1, 'force regenerate button starts runtime regeneration immediately');
-  assertDeepEqual(forceRegenerateDetails.at(-1), { source: 'bar' }, 'force regenerate button identifies bar as source');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').hidden, false, 'idle view shows fresh-next generation button in command slot');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Force next generation fresh', 'fresh-next button exposes accessible copy');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('title'), 'Force the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards, Rapid warm, or same-turn packet reuse.', 'fresh-next button exposes hover tip copy');
+  assert(root.querySelector('[data-recursion-fresh-next-generation-icon]'), 'fresh-next button renders the Regenerate icon');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation-icon]').children.length, 0, 'fresh-next icon uses the regenerate.svg asset mask instead of inline SVG');
+  assertEqual(fakeDocument.textTree(root.querySelector('[data-recursion-fresh-next-generation]')).includes('Regenerate'), false, 'fresh-next button is icon-only when idle');
+  root.querySelector('[data-recursion-fresh-next-generation]').click();
+  assertEqual(freshNextGenerationCalls, 1, 'fresh-next button queues the next generation override');
+  assertDeepEqual(freshNextGenerationDetails.at(-1), { source: 'bar' }, 'fresh-next button identifies bar as source');
   ui.update();
-  assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, true, 'running force regenerate hides restart command');
-  assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, false, 'running force regenerate shows stop command');
-  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Reading current turn...', 'running force regenerate shows normal generation status');
+  assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'queued fresh-next state does not show Stop while idle');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-pressed'), 'true', 'queued fresh-next state renders armed button state');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Fresh next generation armed', 'armed fresh-next button exposes armed copy');
   root.querySelector('[data-recursion-hand-toggle]').click();
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Preparing fresh prompt packet.'), 'force regenerate clearing state uses fresh prompt copy');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Next generation will be fresh.'), 'fresh-next clearing state uses queued copy');
   root.querySelector('[data-recursion-hand-toggle]').click();
-  view = { settings: { mode: 'auto' }, activeRunId: 'run-active-force-slot', activity: { phase: 'cardBatchRunning' }, lastHand: { cards: [] }, forceRegenerate: { pending: false } };
+  root.querySelector('[data-recursion-fresh-next-generation]').click();
+  assertEqual(clearFreshNextGenerationCalls, 1, 'clicking armed fresh-next button clears the override');
+  assertDeepEqual(clearFreshNextGenerationDetails.at(-1), { source: 'bar' }, 'fresh-next clear identifies bar as source');
+  view = { settings: { mode: 'auto' }, activeRunId: 'run-active-force-slot', activity: { phase: 'cardBatchRunning' }, lastHand: { cards: [] }, freshNextGeneration: { pending: false } };
   ui.update();
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, false, 'active view restores stop generation button');
-  assertEqual(root.querySelector('[data-recursion-force-regenerate]').hidden, true, 'active view hides force regenerate so stop takes priority');
-  view = { settings: { mode: 'auto' }, activity: { phase: 'idle' }, lastHand: { cards: [] }, forceRegenerate: { pending: false } };
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').hidden, true, 'active view hides fresh-next generation so stop takes priority');
+  view = { settings: { mode: 'auto' }, activity: { phase: 'idle' }, lastHand: { cards: [] }, freshNextGeneration: { pending: false } };
   ui.update();
   assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Ready for Recursion.', 'fresh idle view renders first-load standby text with punctuation');
   assertEqual(root.querySelector('[data-recursion-mobile-status-text]').textContent, 'Ready for Recursion.', 'mobile status drawer mirrors first-load standby text');

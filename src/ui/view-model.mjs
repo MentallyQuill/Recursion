@@ -224,15 +224,14 @@ export function createRecursionViewModel(view = {}) {
   const composerLane = source.lastPacket?.diagnostics?.composerLane || activity.composerLane || activity.providerLane || 'utility';
   const progressRun = createProgressRunModel(source);
   const heroPixelBlocks = createHeroPixelBlocks(progressRun);
-  const forceRegenerate = asObject(source.forceRegenerate);
-  const forceRegeneratePending = forceRegenerate.pending === true;
+  const freshNextGeneration = asObject(source.freshNextGeneration);
+  const freshNextGenerationPending = freshNextGeneration.pending === true;
   const generationStopVisible = enabled && (
     Boolean(cleanText(source.activeRunId))
     || source.hostGenerationActive === true
     || Number(progressRun.activeCount || 0) > 0
-    || forceRegeneratePending
   );
-  const forceRegenerateVisible = enabled && !generationStopVisible;
+  const freshNextGenerationVisible = enabled && !generationStopVisible;
   const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
   const progressChildVisibleLimit = integerInRange(settings.ui?.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20);
   const progressListVisibleLimit = integerInRange(settings.ui?.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80);
@@ -261,9 +260,9 @@ export function createRecursionViewModel(view = {}) {
     activityChips,
     progressRun,
     generationStopVisible,
-    forceRegenerateVisible,
-    forceRegeneratePending,
-    forceRegenerateDisabled: !forceRegenerateVisible || forceRegeneratePending,
+    freshNextGenerationVisible,
+    freshNextGenerationPending,
+    freshNextGenerationDisabled: !enabled || generationStopVisible,
     currentStepText: progressRun.currentStepText,
     standbyStatusText: standbyStatusText(activity, progressRun, enabled, mode, pipelineMode, cards, source.rapidWarm),
     heroPixelBlocks,

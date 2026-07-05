@@ -1,5 +1,7 @@
 # Recursion Force Regenerate Implementation Plan
 
+> Superseded by [2026-07-05 Recursion Declarative Generation Controls](2026-07-05-recursion-declarative-generation-controls.md). The current V1 contract is declarative: Regenerate arms a fresh-next-generation token and never starts provider work or SillyTavern native generation on click.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a one-shot Force Regenerate control that immediately regenerates the current turn fresh, bypassing cached cards, Rapid warm, and swipe/same-turn packet reuse while preserving Reset Scene Cache as a destructive diagnostic action.

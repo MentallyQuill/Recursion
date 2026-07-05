@@ -145,7 +145,7 @@ export function buildDiagnosticsPayload({
       hostGenerationActive: Boolean(runtime.hostGenerationActive),
       activity: runtime.activity || null,
       activityHistory: asArray(runtime.activityHistory).slice(-20),
-      forceRegenerate: runtime.forceRegenerate || null,
+      freshNextGeneration: runtime.freshNextGeneration || null,
       rapidWarm: runtime.rapidWarm || null,
       packet: mapPacketSummary(runtime.lastPacket),
       hand: mapHandSummary(runtime.lastHand),

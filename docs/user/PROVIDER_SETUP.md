@@ -83,7 +83,7 @@ Recursion must not persist:
 
 Clear Session Key appears only when the lane source is OpenAI-Compatible Endpoint. Clearing a session key should immediately mark that lane untestable until a key is re-entered.
 
-Provider field changes auto-save on commit. Source, profile, base URL, model, fetched-model selection, and max-token changes apply immediately. Session keys are accepted into browser-session memory only and are not written to persisted settings. Hidden alternate-source fields keep their values when the selected source changes, but only the selected source participates in readiness, tests, and generation.
+Provider field changes auto-save on commit. Source, profile, base URL, model, fetched-model selection, and max-token changes apply immediately. Open provider cards stay open while autosave refreshes the settings panel, so expanding Reasoner and editing fields should not collapse the Reasoner section. Session keys are accepted into browser-session memory only and are not written to persisted settings. Hidden alternate-source fields keep their values when the selected source changes, but only the selected source participates in readiness, tests, and generation.
 
 ## Test Provider Flow
 
@@ -98,8 +98,9 @@ A safe provider test should:
 3. Record pass or fail status.
 4. Show resolved provider and model labels when available.
 5. Store only compact sanitized diagnostics.
+6. Show a lane-local `Testing...` state and disable that lane's `Test Provider` button while the request is pending.
 
-Provider tests should not store raw prompt bodies, raw responses, API keys, or unbounded error text.
+Provider tests should not store raw prompt bodies, raw responses, API keys, or unbounded error text. Test requests use a small response budget and a bounded timeout; normal generation still uses the configured lane max tokens.
 
 ```mermaid
 flowchart LR

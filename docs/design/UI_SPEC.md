@@ -59,7 +59,7 @@ The first control is a dedicated icon-only power toggle. It uses the same power 
 
 The Stop generation button is a separate active-only control, not a second power state. It appears while Recursion is preparing a prompt for a SillyTavern generation or while that host generation is still active. The button uses a square stop icon with accessible label and hover tooltip copy `Stop generation`. Clicking it must call the unified stop path: request SillyTavern generation stop through the host adapter, abort active Recursion provider work, prevent stale prompt installation, clear Recursion-owned prompt keys, mark the canceled attempt neutral/skipped, and close any active progress popover.
 
-When no active run or host generation exists, the same command slot shows an icon-only restart button with accessible label `Regenerate this turn`. Clicking it immediately starts a one-shot fresh regeneration for the current turn: cached cards, Fused bundles, Rapid warm, latest-assistant swipe packet reuse, and same-turn packet reinstall are bypassed, normal generation progress appears, and the command slot swaps to Stop. A pending force token also counts as active command-slot state so Stop appears during the short async gap before prompt preparation fully starts. Stop always has priority over Regenerate during Recursion preparation and SillyTavern host generation. Regenerate is not Reset Scene Cache; it soft-invalidates current cache for the forced run but does not delete scene cache records or SillyTavern messages.
+When no active run or host generation exists, the same command slot shows an icon-only restart button with accessible label `Force next generation fresh`. Clicking it arms a one-shot fresh-next-generation token for the next send or swipe; it does not start Recursion provider work, install a prompt packet, or call SillyTavern native generation. While armed, the button remains visible in a pressed state and can be clicked again to cancel the token. Stop appears only while Recursion preparation or SillyTavern host generation is actually active. The next generation consumes the token once, bypasses cached cards, Fused bundle reuse, Rapid warm, latest-assistant swipe packet reuse, and same-turn packet reinstall, then returns to the selected pipeline. Regenerate is not Reset Scene Cache; it soft-invalidates current cache for the fresh run but does not delete scene cache records or SillyTavern messages.
 
 The pipeline control is a single icon-only button immediately to the left of the Mode button. It is not duplicated in Settings. It opens a compact dropdown with three choices:
 
@@ -1148,6 +1148,8 @@ Providers contains the complete provider setup surface in collapsible lane secti
 - Test Provider. Clear Session Key appears only for OpenAI-compatible endpoints.
 - Status, resolved provider, and resolved model.
 - Temperature and top-p stay internal/defaulted in the compact V1 menu so the provider pane matches the mockup and does not become a dense admin form.
+- User-opened provider lane disclosures remain open across autosave rerenders. Editing Reasoner fields must not collapse the Reasoner Provider section.
+- Test Provider uses lane-local busy feedback: the clicked button changes to `Testing...`, becomes disabled, and clears back when the request settles.
 
 Provider Source changes the field context inside each lane immediately, matching the lean Directive/Saga pattern instead of showing every possible provider field at once:
 
@@ -1157,6 +1159,7 @@ Provider Source changes the field context inside each lane immediately, matching
 - Clear Session Key appears only for OpenAI-compatible endpoints.
 - Max Tokens and provider actions remain visible for every Source.
 - Provider lane fields auto-save on committed changes. Hidden alternate-source field values are preserved so a user can compare sources without losing typed settings, but the selected source/profile/endpoint/model/max tokens apply immediately. Session API keys are accepted by autosave into session memory only; they must not persist.
+- Provider test requests use a short bounded generation budget and timeout. They do not borrow the lane's full generation max-token budget.
 
 Advanced contains low-frequency controls grouped into collapsible sections:
 

@@ -184,7 +184,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   providerTest: 'Send a small structured test call through this lane to verify routing, credentials, and JSON output before using it in chat.',
   providerClearKey: 'Remove the in-memory session key for this lane. Saved endpoint, model, and profile settings stay unchanged.'
 });
-const FORCE_REGENERATE_TOOLTIP = 'Regenerate this turn fresh, ignoring cached cards, Fused bundles, Rapid warm, and swipe reuse.';
+const FRESH_NEXT_GENERATION_TOOLTIP = 'Force the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards, Rapid warm, or same-turn packet reuse.';
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -1280,7 +1280,7 @@ function syncStaticTooltips(root, model) {
   setTooltip(root.querySelector('[data-recursion-mode-button]'), true, `Mode: ${model.modeLabel}`);
   setTooltip(root.querySelector('[data-recursion-cards-button]'), true, 'Open card scope selector. Auto treats scope as preference; Manual uses scope as a strict whitelist.');
   setTooltip(root.querySelector('[data-recursion-status-trigger]'), true, 'Open generation progress');
-  setTooltip(root.querySelector('[data-recursion-force-regenerate]'), true, FORCE_REGENERATE_TOOLTIP);
+  setTooltip(root.querySelector('[data-recursion-fresh-next-generation]'), true, FRESH_NEXT_GENERATION_TOOLTIP);
   setTooltip(root.querySelector('[data-recursion-hand-toggle]'), true, 'Open last brief preview');
   setTooltip(root.querySelector('[data-recursion-options-button]'), true, 'Open Recursion settings');
   for (const option of MODE_MENU_OPTIONS) {
@@ -1346,7 +1346,8 @@ function clearHandDropdownFadeTimer(panel) {
 function lastBriefEmptyText(model) {
   const status = model.lastBriefStatus;
   if (status === 'clearing' || status === 'preparing') {
-    if (model.lastBriefReason === 'user-force-regenerate') return 'Preparing fresh prompt packet.';
+    if (model.lastBriefReason === 'user-fresh-next-generation') return 'Next generation will be fresh.';
+    if (model.lastBriefReason === 'fresh-next-generation-cleared') return 'Fresh generation request cleared.';
     return 'Preparing next prompt packet.';
   }
   return 'No hand has been composed for this chat.';
@@ -2111,13 +2112,19 @@ function fetchedModelOptions(models = []) {
 function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, options = {}) {
   const source = asObject(provider);
   const fetchState = asObject(asObject(options).modelFetchState);
+  const providerUiState = asObject(asObject(options).providerUiState);
+  const testState = asObject(providerUiState.test);
   const connectionProfiles = Array.isArray(options.connectionProfiles) ? options.connectionProfiles : null;
   const readinessOptions = connectionProfiles ? { profiles: connectionProfiles } : {};
   const title = lane === 'reasoner' ? 'Reasoner Provider' : 'Utility Provider';
   const statusText = lane === 'reasoner' && source.enabled !== true
     ? 'optional'
     : providerStatusText(source).toLowerCase();
-  const open = lane === 'utility' || source.openAICompatible?.sessionApiKeyPresent === true || Boolean(source.openAICompatible?.model);
+  const defaultOpen = lane === 'utility' || source.openAICompatible?.sessionApiKeyPresent === true || Boolean(source.openAICompatible?.model);
+  const open = typeof providerUiState.disclosureOpen === 'boolean'
+    ? providerUiState.disclosureOpen
+    : defaultOpen;
+  const testRunning = testState.running === true;
   const group = el('section', {
     className: `recursion-provider-section${open ? ' is-open' : ''}`,
     dataset: { recursionProviderSection: '', recursionProviderLane: lane }
@@ -2279,11 +2286,13 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   body.appendChild(grid);
   body.appendChild(el('div', { className: 'recursion-provider-actions' }, [
     el('button', {
-      className: 'recursion-button',
-      text: 'Test Provider',
+      className: `recursion-button${testRunning ? ' is-busy' : ''}`,
+      text: testRunning ? 'Testing...' : 'Test Provider',
       attrs: {
         type: 'button',
-        'aria-label': `Test ${title}`,
+        'aria-label': testRunning ? `Testing ${title}` : `Test ${title}`,
+        'aria-busy': testRunning ? 'true' : 'false',
+        ...(testRunning ? { disabled: 'disabled' } : {}),
         ...tooltipAttrs(tooltipsEnabled, SETTINGS_TOOLTIPS.providerTest)
       },
       dataset: {
@@ -2314,7 +2323,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   panel.appendChild(group);
 }
 
-function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, providerModelFetchState = {}) {
+function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, providerModelFetchState = {}, providerUiState = {}) {
   panel.replaceChildren();
   const settings = asObject(view.settings);
   const tooltipsEnabled = asObject(settings.ui).tooltipsEnabled !== false;
@@ -2355,10 +2364,18 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
   const connectionProfiles = runtimeConnectionProfiles(view, runtime);
   renderProviderSettings(providersPane, 'utility', settings.providers?.utility || {}, tooltipsEnabled, {
     modelFetchState: providerModelFetchState.utility,
+    providerUiState: {
+      disclosureOpen: asObject(asObject(providerUiState).disclosureOpen).utility,
+      test: asObject(asObject(providerUiState).tests).utility
+    },
     connectionProfiles
   });
   renderProviderSettings(providersPane, 'reasoner', settings.providers?.reasoner || {}, tooltipsEnabled, {
     modelFetchState: providerModelFetchState.reasoner,
+    providerUiState: {
+      disclosureOpen: asObject(asObject(providerUiState).disclosureOpen).reasoner,
+      test: asObject(asObject(providerUiState).tests).reasoner
+    },
     connectionProfiles
   });
   renderAdvancedSettings(advancedPane, settings, {
@@ -2739,11 +2756,11 @@ function buildRoot() {
       ])
     ]),
     el('button', {
-      className: 'recursion-force-regenerate',
-      attrs: { type: 'button', 'aria-label': 'Regenerate this turn', title: FORCE_REGENERATE_TOOLTIP },
-      dataset: { recursionForceRegenerate: '' }
+      className: 'recursion-fresh-next-generation',
+      attrs: { type: 'button', 'aria-label': 'Force next generation fresh', title: FRESH_NEXT_GENERATION_TOOLTIP, 'aria-pressed': 'false' },
+      dataset: { recursionFreshNextGeneration: '' }
     }, [
-      el('span', { className: 'recursion-force-regenerate-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionForceRegenerateIcon: '' } })
+      el('span', { className: 'recursion-fresh-next-generation-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionFreshNextGenerationIcon: '' } })
     ]),
     el('span', { className: 'recursion-chip recursion-legacy-hand-count', dataset: { recursionHandCount: '' } }),
     el('span', { className: 'recursion-chip recursion-legacy-composer', dataset: { recursionComposer: '' } }),
@@ -2920,7 +2937,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const modeButton = root.querySelector('[data-recursion-mode-button]');
   const statusButton = root.querySelector('[data-recursion-status-trigger]');
   const stopGenerationButton = root.querySelector('[data-recursion-stop-generation]');
-  const forceRegenerateButton = root.querySelector('[data-recursion-force-regenerate]');
+  const freshNextGenerationButton = root.querySelector('[data-recursion-fresh-next-generation]');
   const reasoningChain = root.querySelector('[data-recursion-reasoning-chain]');
   const pipelineMenu = root.querySelector('[data-recursion-pipeline-menu]');
   const modeMenu = root.querySelector('[data-recursion-mode-menu]');
@@ -2949,6 +2966,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const providerModelFetchState = {
     utility: { models: [], status: '' },
     reasoner: { models: [], status: '' }
+  };
+  const providerUiState = {
+    disclosureOpen: {},
+    tests: {
+      utility: { running: false },
+      reasoner: { running: false }
+    }
   };
 
   function rememberPanelFocus(panel, trigger) {
@@ -3498,13 +3522,14 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     update();
     runAction(action, () => update());
   });
-  forceRegenerateButton?.addEventListener('click', (event) => {
+  freshNextGenerationButton?.addEventListener('click', (event) => {
     consumeClickEvent(event);
     setProgressPopoverOpen(false);
-    const regenerate = typeof runtime?.forceRegenerateNow === 'function'
-      ? runtime.forceRegenerateNow.bind(runtime)
-      : runtime?.forceRegenerateNext?.bind(runtime);
-    const action = regenerate?.({ source: 'bar' });
+    const view = currentView();
+    const pending = asObject(view.freshNextGeneration).pending === true;
+    const action = pending
+      ? runtime?.clearFreshNextGeneration?.({ source: 'bar' })
+      : runtime?.requestFreshNextGeneration?.({ source: 'bar' });
     update();
     runAction(action, () => update());
   });
@@ -3573,7 +3598,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const lane = providerLaneFromDataset(providerDisclosure.dataset);
       const body = root.querySelector(`[data-recursion-provider-body-${lane}]`);
       const section = closestDatasetElement(providerDisclosure, 'recursionProviderSection', root);
-      setDisclosureOpen(providerDisclosure, body, section, body?.hidden === true);
+      const open = body?.hidden === true;
+      providerUiState.disclosureOpen[lane] = open;
+      setDisclosureOpen(providerDisclosure, body, section, open);
     }
     if (control('recursionResetSceneCache')) {
       runAction(runtime?.resetSceneCache?.(), () => {
@@ -3671,9 +3698,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       event?.stopPropagation?.();
       settingsTab = ['play', 'providers', 'advanced'].includes(settingsTabControl.dataset.recursionSettingsTab)
         ? settingsTabControl.dataset.recursionSettingsTab
-        : 'play';
+      : 'play';
       const view = currentView();
-      renderSettingsPanel(settingsPanel, view, settingsTab, runtime, providerModelFetchState);
+      renderSettingsPanel(settingsPanel, view, settingsTab, runtime, providerModelFetchState, providerUiState);
       settingsPanelRendered = true;
       syncStaticTooltips(root, createRecursionViewModel(view));
       syncFloatingPanelGeometry();
@@ -3693,7 +3720,16 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (providerTest) {
       consumeClickEvent(event);
       const lane = providerLaneFromDataset(providerTest.dataset);
-      runAction(runtime?.testProvider?.(lane), () => {
+      if (asObject(providerUiState.tests[lane]).running === true) return;
+      providerUiState.tests[lane] = { running: true };
+      settingsPanelRendered = false;
+      update();
+      const action = Promise.resolve()
+        .then(() => runtime?.testProvider?.(lane))
+        .finally(() => {
+          providerUiState.tests[lane] = { running: false };
+        });
+      runAction(action, () => {
         settingsPanelRendered = false;
         update();
       }, 'Provider test failed.');
@@ -3989,15 +4025,17 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       stopGenerationButton.setAttribute('tabindex', model.generationStopVisible ? '0' : '-1');
       setTooltip(stopGenerationButton, model.tooltipsEnabled, 'Stop generation');
     }
-    if (forceRegenerateButton) {
-      const supported = typeof runtime?.forceRegenerateNow === 'function' || typeof runtime?.forceRegenerateNext === 'function';
-      const visible = supported && model.forceRegenerateVisible;
-      forceRegenerateButton.hidden = !visible;
-      forceRegenerateButton.disabled = !visible || model.forceRegenerateDisabled;
-      forceRegenerateButton.setAttribute('aria-hidden', visible ? 'false' : 'true');
-      forceRegenerateButton.setAttribute('tabindex', visible ? '0' : '-1');
-      forceRegenerateButton.setAttribute('aria-label', model.forceRegeneratePending ? 'Regenerating this turn' : 'Regenerate this turn');
-      setTooltip(forceRegenerateButton, model.tooltipsEnabled, model.forceRegeneratePending ? 'Regenerating this turn.' : FORCE_REGENERATE_TOOLTIP);
+    if (freshNextGenerationButton) {
+      const supported = typeof runtime?.requestFreshNextGeneration === 'function' && typeof runtime?.clearFreshNextGeneration === 'function';
+      const visible = supported && model.freshNextGenerationVisible;
+      const pending = model.freshNextGenerationPending === true;
+      freshNextGenerationButton.hidden = !visible;
+      freshNextGenerationButton.disabled = !visible || model.freshNextGenerationDisabled;
+      freshNextGenerationButton.setAttribute('aria-hidden', visible ? 'false' : 'true');
+      freshNextGenerationButton.setAttribute('tabindex', visible ? '0' : '-1');
+      freshNextGenerationButton.setAttribute('aria-pressed', pending ? 'true' : 'false');
+      freshNextGenerationButton.setAttribute('aria-label', pending ? 'Fresh next generation armed' : 'Force next generation fresh');
+      setTooltip(freshNextGenerationButton, model.tooltipsEnabled, FRESH_NEXT_GENERATION_TOOLTIP);
     }
     renderPipelineMenuSelection(model.pipelineMode);
     renderModeMenuSelection(model.mode);
@@ -4014,7 +4052,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     renderHandDropdown(handPanel, view, model);
     if (!cardsPanel.hidden) renderCardsPanelForView(view);
     if (!settingsPanel.hidden && !settingsPanelRendered) {
-      renderSettingsPanel(settingsPanel, view, settingsTab, runtime, providerModelFetchState);
+      renderSettingsPanel(settingsPanel, view, settingsTab, runtime, providerModelFetchState, providerUiState);
       settingsPanelRendered = true;
     }
     renderViewer(viewer, view, model);

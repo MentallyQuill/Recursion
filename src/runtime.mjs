@@ -55,6 +55,8 @@ import { createRuntimeRunState } from './runtime/run-state.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
+const PROVIDER_TEST_RESPONSE_TOKENS = 256;
+const PROVIDER_TEST_TIMEOUT_MS = 30000;
 const STORAGE_SCHEMA_VERSION = 1;
 const RUNTIME_CACHE_CONTRACT_VERSION = 1;
 const DEFAULT_CHAT_ID = 'chat';
@@ -2048,9 +2050,9 @@ export function createRecursionRuntime({
     runState.clearLatestAssistantSwipeRetry();
   }
 
-  function forceRegenerateView() {
-    const pendingForceRegenerate = runState.current().pendingForceRegenerate;
-    if (!pendingForceRegenerate) {
+  function freshNextGenerationView() {
+    const pendingFreshNextGeneration = runState.current().pendingFreshNextGeneration;
+    if (!pendingFreshNextGeneration) {
       return {
         pending: false,
         id: '',
@@ -2061,88 +2063,82 @@ export function createRecursionRuntime({
     }
     return {
       pending: true,
-      id: safeText(pendingForceRegenerate.id || '', 180),
-      reason: safeText(pendingForceRegenerate.reason || 'user-force-regenerate', 120),
-      requestedAt: safeText(pendingForceRegenerate.requestedAt || '', 80),
-      source: safeText(pendingForceRegenerate.source || 'bar', 80)
+      id: safeText(pendingFreshNextGeneration.id || '', 180),
+      reason: safeText(pendingFreshNextGeneration.reason || 'user-fresh-next-generation', 120),
+      requestedAt: safeText(pendingFreshNextGeneration.requestedAt || '', 80),
+      source: safeText(pendingFreshNextGeneration.source || 'bar', 80)
     };
   }
 
-  function clearPendingForceRegenerate() {
-    runState.clearForceRegenerate();
+  function clearPendingFreshNextGeneration() {
+    runState.clearFreshNextGeneration();
   }
 
-  function forceRegenerateDetails(forceContext, snapshot = null) {
-    const source = asObject(forceContext);
+  function freshNextGenerationDetails(freshContext, snapshot = null) {
+    const source = asObject(freshContext);
     return {
       latestMesId: numberOr(snapshot?.latestMesId, 0),
       source: safeText(source.source || 'bar', 80),
-      forceRegenerateId: safeText(source.id || '', 180)
+      freshNextGenerationId: safeText(source.id || '', 180)
     };
   }
 
-  function forceStaleSceneCache(cache, forceContext, snapshot = null) {
-    if (!forceContext || !cache) return cache;
+  function freshStaleSceneCache(cache, freshContext, snapshot = null) {
+    if (!freshContext || !cache) return cache;
     return {
       ...cache,
       cacheState: 'stale',
       invalidation: {
-        reason: 'user-force-regenerate',
-        detectedAt: safeText(forceContext.requestedAt || nowIso(), 80),
-        details: forceRegenerateDetails(forceContext, snapshot)
+        reason: 'user-fresh-next-generation',
+        detectedAt: safeText(freshContext.requestedAt || nowIso(), 80),
+        details: freshNextGenerationDetails(freshContext, snapshot)
       }
     };
   }
 
-  function consumePendingForceRegenerate(runId) {
-    const pendingForceRegenerate = runState.current().pendingForceRegenerate;
-    if (!pendingForceRegenerate) return null;
+  function consumePendingFreshNextGeneration(runId) {
+    const pendingFreshNextGeneration = runState.current().pendingFreshNextGeneration;
+    if (!pendingFreshNextGeneration) return null;
     const token = {
-      ...pendingForceRegenerate,
+      ...pendingFreshNextGeneration,
       consumeByRunId: safeText(runId || '', 160)
     };
-    runState.clearForceRegenerate();
+    runState.clearFreshNextGeneration();
     return token;
   }
 
-  async function forceRegenerateNext(details = {}) {
+  async function requestFreshNextGeneration(details = {}) {
     const settings = settingsStore.get();
     if (settings.enabled === false) {
-      clearPendingForceRegenerate();
+      clearPendingFreshNextGeneration();
       clearPendingLatestAssistantSwipeRetry();
       clearLastBrief({ status: 'empty', reason: 'disabled' });
       return { ok: true, skipped: true, reason: 'disabled' };
     }
     const source = asObject(details);
-    runState.setForceRegenerate({
-      id: makeId('force-regenerate'),
-      reason: 'user-force-regenerate',
+    runState.setFreshNextGeneration({
+      id: makeId('fresh-next-generation'),
+      reason: 'user-fresh-next-generation',
       requestedAt: nowIso(),
       consumeByRunId: '',
       source: safeText(source.source || 'bar', 80) || 'bar'
     });
     clearPendingLatestAssistantSwipeRetry();
-    clearLastBrief({ status: 'clearing', reason: 'user-force-regenerate' });
+    clearLastBrief({ status: 'clearing', reason: 'user-fresh-next-generation' });
     return {
       ok: true,
-      forceRegenerate: forceRegenerateView()
+      freshNextGeneration: freshNextGenerationView()
     };
   }
 
-  async function forceRegenerateNow(details = {}) {
-    const queued = await forceRegenerateNext(details);
-    if (queued?.skipped) return queued;
-    const prepare = await prepareForGeneration({ userMessage: null, hostGeneration: true });
-    if (prepare?.superseded || prepare?.ok === false || prepare?.skipped) return prepare;
-    const hostGeneration = await requestHostGenerationStart({
-      type: 'regenerate',
-      source: 'recursion-ui',
-      reason: 'force-regenerate'
-    });
-    setHostGenerationActive(false);
+  async function clearFreshNextGeneration() {
+    clearPendingFreshNextGeneration();
+    if (lastBrief.status === 'clearing' && lastBrief.reason === 'user-fresh-next-generation') {
+      clearLastBrief({ status: 'empty', reason: 'fresh-next-generation-cleared' });
+    }
     return {
-      ...asObject(prepare),
-      hostGeneration
+      ok: true,
+      freshNextGeneration: freshNextGenerationView()
     };
   }
 
@@ -2266,7 +2262,7 @@ export function createRecursionRuntime({
     lastSnapshot = null;
     lastSavedSceneCacheRef = null;
     runState.clearLatestAssistantSwipeRetry();
-    runState.clearForceRegenerate();
+    runState.clearFreshNextGeneration();
     clearLastBrief({ status: 'empty', reason: 'source-cleared' });
   }
 
@@ -2332,7 +2328,7 @@ export function createRecursionRuntime({
   } = {}) {
     const runId = makeId('settings');
     clearPendingLatestAssistantSwipeRetry();
-    clearPendingForceRegenerate();
+    clearPendingFreshNextGeneration();
     runState.setPromptMutation(runId);
     startRuntimeActivity({
       runId,
@@ -2381,6 +2377,18 @@ export function createRecursionRuntime({
     return changedToManual || changedScope || changedMaxCards;
   }
 
+  function settingValuesEqual(left, right) {
+    return hashJson(left) === hashJson(right);
+  }
+
+  function changedSettingKeys(patch, before, after) {
+    return Object.keys(asObject(patch)).filter((key) => !settingValuesEqual(before?.[key], after?.[key]));
+  }
+
+  function isPipelineOnlySettingsChange(keys) {
+    return keys.length === 1 && keys[0] === 'pipelineMode';
+  }
+
   async function updateSettings(patch = {}) {
     const cleanPatch = asObject(patch);
     const currentSettings = settingsStore.get();
@@ -2393,11 +2401,34 @@ export function createRecursionRuntime({
         next = settingsStore.update({ cardScope: manualScoped.scope });
       }
     }
-    const changedKeys = Object.keys(cleanPatch);
+    const changedKeys = changedSettingKeys(cleanPatch, currentSettings, next);
+    if (changedKeys.length === 0) {
+      return { ok: true, settings: next, clear: null };
+    }
     const promptNeutralPatch = changedKeys.length > 0
       && changedKeys.every((key) => PROMPT_NEUTRAL_SETTING_KEYS.has(key));
     if (promptNeutralPatch) {
       return { ok: true, settings: next, clear: null };
+    }
+    if (isPipelineOnlySettingsChange(changedKeys)) {
+      supersedeActiveRun();
+      abortActiveRapidWarmRun('pipeline-mode-changed');
+      return trackRuntimeMutation(async () => {
+        const clear = await clearPromptAfterSupersede({
+          successLabel: 'Recursion prompt cleared after pipeline change.',
+          journalReason: 'pipeline-mode-changed'
+        });
+        return {
+          ok: clear?.ok !== false,
+          settings: next,
+          clear,
+          pipelineChange: {
+            deferred: true,
+            previous: safeText(currentSettings.pipelineMode || 'standard', 40),
+            next: safeText(next.pipelineMode || 'standard', 40)
+          }
+        };
+      });
     }
     const shouldWarmRapidAfterSettingsChange = changedKeys.length > 0
       && next.enabled !== false
@@ -2551,7 +2582,7 @@ export function createRecursionRuntime({
       lastPlan,
       lastSnapshot: viewSnapshot(lastSnapshot),
       lastBrief: { ...lastBrief },
-      forceRegenerate: forceRegenerateView(),
+      freshNextGeneration: freshNextGenerationView(),
       rapidWarm: rapidWarmStatusView({
         ...lastRapidWarmView,
         pipelineMode: settingsStore.get().pipelineMode
@@ -2682,7 +2713,7 @@ export function createRecursionRuntime({
       lastPlan = null;
       lastSavedSceneCacheRef = null;
       runState.clearLatestAssistantSwipeRetry();
-      runState.clearForceRegenerate();
+      runState.clearFreshNextGeneration();
       clearLastBrief({ status: 'empty', reason: 'scene-cache-reset' });
       stageRuntimeActivity({
         runId,
@@ -2791,7 +2822,7 @@ export function createRecursionRuntime({
   }) {
     const runId = makeId(idPrefix);
     clearPendingLatestAssistantSwipeRetry();
-    clearPendingForceRegenerate();
+    clearPendingFreshNextGeneration();
     supersedeActiveRun();
     return trackRuntimeMutation(async () => {
       const clearContext = promptClearContext();
@@ -2981,8 +3012,9 @@ export function createRecursionRuntime({
         runId,
         lane: resolvedLane,
         ...reasoningRequestMetadata({}, 'provider-test'),
+        responseLength: PROVIDER_TEST_RESPONSE_TOKENS,
         prompt: providerTestPrompt(resolvedLane)
-      });
+      }, { timeoutMs: PROVIDER_TEST_TIMEOUT_MS });
       if (validProviderTestResult(result)) {
         const provider = settingsStore.updateProvider(resolvedLane, {
           resolvedProviderLabel: safeText(result.diagnostics?.providerId || result.providerId || '', 120),
@@ -4524,7 +4556,7 @@ export function createRecursionRuntime({
     setHostGenerationActive(hostGeneration);
     if (settings.enabled === false) {
       clearPendingLatestAssistantSwipeRetry();
-      clearPendingForceRegenerate();
+      clearPendingFreshNextGeneration();
       await waitForExternalMutations();
       supersedeActiveRun();
       const clearRunId = makeId('run');
@@ -4549,15 +4581,17 @@ export function createRecursionRuntime({
     let pendingUserMessage = normalizePendingUserMessage(userMessage);
     const runId = makeId('run');
     const signal = startRun(runId);
-    const forceContext = consumePendingForceRegenerate(runId);
-    const forceReason = forceContext ? 'user-force-regenerate' : '';
+    const freshContext = hostGeneration === true
+      ? consumePendingFreshNextGeneration(runId)
+      : null;
+    const freshReason = freshContext ? 'user-fresh-next-generation' : '';
     const modeChip = settings.mode === 'manual' ? 'Manual' : 'Auto';
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: [modeChip] });
     if (lastBrief.status !== 'clearing') {
       const hasSwipeRetry = Boolean(runState.current().pendingLatestAssistantSwipeRetry);
       clearLastBrief({
         status: 'clearing',
-        reason: forceReason || (hasSwipeRetry ? 'latest-assistant-swipe' : (refreshReason || 'generation-started')),
+        reason: freshReason || (hasSwipeRetry ? 'latest-assistant-swipe' : (refreshReason || 'generation-started')),
         runId
       });
     }
@@ -4572,34 +4606,34 @@ export function createRecursionRuntime({
           });
         }
       }
-      const baseSnapshot = settings.pipelineMode === 'rapid' && !refreshReason && !forceContext
+      const baseSnapshot = settings.pipelineMode === 'rapid' && !refreshReason && !freshContext
         ? snapshotWithoutVisiblePendingUserMessage(hostSnapshot, pendingUserMessage)
         : hostSnapshot;
       const snapshot = snapshotWithPendingUserMessage(baseSnapshot, pendingUserMessage);
       if (!isActiveRun(runId)) return supersededResult(runId);
-      const swipeRetrySnapshot = !refreshReason && !forceContext
+      const swipeRetrySnapshot = !refreshReason && !freshContext
         ? reusableSnapshotForLatestAssistantSwipeRetry(snapshot, pendingUserMessage)
         : null;
-      if (refreshReason || forceContext) clearPendingLatestAssistantSwipeRetry();
+      if (refreshReason || freshContext) clearPendingLatestAssistantSwipeRetry();
       if (swipeRetrySnapshot) {
         lastSnapshot = swipeRetrySnapshot;
         return await reinstallLastPacketForSameTurn(runId, swipeRetrySnapshot);
       }
-      if (!refreshReason && !forceContext && canReuseLastPacketForSnapshot(snapshot)) {
+      if (!refreshReason && !freshContext && canReuseLastPacketForSnapshot(snapshot)) {
         lastSnapshot = snapshot;
         return await reinstallLastPacketForSameTurn(runId, snapshot);
       }
       clearPendingLatestAssistantSwipeRetry();
       lastSnapshot = snapshot;
-      const invalidationReason = forceReason || refreshReason;
+      const invalidationReason = freshReason || refreshReason;
       if (invalidationReason && typeof storage.invalidateSceneCache === 'function') {
         await runStorageSaveSection(runId, async () => {
           try {
             return await storage.invalidateSceneCache(snapshot.chatKey, snapshot.sceneKey, {
               reason: invalidationReason,
               runId,
-              details: forceContext
-                ? forceRegenerateDetails(forceContext, snapshot)
+              details: freshContext
+                ? freshNextGenerationDetails(freshContext, snapshot)
                 : { latestMesId: snapshot.latestMesId }
             });
           } catch {
@@ -4609,9 +4643,9 @@ export function createRecursionRuntime({
         });
         if (!isActiveRun(runId)) return supersededResult(runId);
       }
-      const rapidForeground = settings.pipelineMode === 'rapid' && !refreshReason && !forceContext;
+      const rapidForeground = settings.pipelineMode === 'rapid' && !refreshReason && !freshContext;
       const rapidCacheSnapshot = rapidForeground ? baseSnapshot : snapshot;
-      let initialCache = forceStaleSceneCache(await loadSceneCacheSafe(runId, rapidCacheSnapshot, settings), forceContext, rapidCacheSnapshot);
+      let initialCache = freshStaleSceneCache(await loadSceneCacheSafe(runId, rapidCacheSnapshot, settings), freshContext, rapidCacheSnapshot);
       if (!isActiveRun(runId)) return supersededResult(runId);
       let rapidEscalationDiagnostics = [];
       if (rapidForeground) {
@@ -4629,14 +4663,14 @@ export function createRecursionRuntime({
         rapidEscalationDiagnostics = Array.isArray(rapidResult.diagnostics)
           ? rapidResult.diagnostics
           : ['rapid-escalated-standard:mandatory-gap'];
-        initialCache = forceStaleSceneCache(await loadSceneCacheSafe(runId, snapshot, settings), forceContext, snapshot);
+        initialCache = freshStaleSceneCache(await loadSceneCacheSafe(runId, snapshot, settings), freshContext, snapshot);
         if (!isActiveRun(runId)) return supersededResult(runId);
       }
-      const forceDiagnostics = forceContext
+      const freshDiagnostics = freshContext
         ? [
-            'force-regenerate:user-force-regenerate',
-            'force-regenerate:cache-bypassed',
-            ...(settings.pipelineMode === 'rapid' ? ['force-regenerate:rapid-bypassed'] : [])
+            'fresh-next-generation:user-requested',
+            'fresh-next-generation:cache-bypassed',
+            ...(settings.pipelineMode === 'rapid' ? ['fresh-next-generation:rapid-bypassed'] : [])
           ]
         : [];
       const fallbackPlan = localFallbackPlan(snapshot, settings);
@@ -4663,7 +4697,7 @@ export function createRecursionRuntime({
         plan: { ...plan, cardJobs: scopedCardJobs.cardJobs },
         settings,
         cacheCards: cardsWithOrigin(sanitizedCacheCards(runId, snapshot, activeCacheForManual.cards), 'cache'),
-        forceContext,
+        forceContext: freshContext,
         snapshot
       });
       const manualForcedFamilies = manualReconciled.forcedFamilies;
@@ -4680,7 +4714,7 @@ export function createRecursionRuntime({
         diagnostics: mergeDiagnostics(
           plan.diagnostics,
           rapidEscalationDiagnostics,
-          forceDiagnostics,
+          freshDiagnostics,
           scopeOmissionReasons(scopedCardJobs.omitted),
           autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings),
           manualReconciled.diagnostics
@@ -4697,11 +4731,11 @@ export function createRecursionRuntime({
       if (sceneSnapshot !== snapshot) {
         lastSnapshot = sceneSnapshot;
       }
-      if (forceContext && planAction(plan) === 'reuse-cache') {
+      if (freshContext && planAction(plan) === 'reuse-cache') {
         plan = {
           ...plan,
           action: 'compose-brief',
-          diagnostics: mergeDiagnostics(plan.diagnostics, ['force-regenerate:reuse-cache-overridden'])
+          diagnostics: mergeDiagnostics(plan.diagnostics, ['fresh-next-generation:reuse-cache-overridden'])
         };
         lastPlan = plan;
       }
@@ -4737,7 +4771,7 @@ export function createRecursionRuntime({
       });
       const cache = sceneSnapshot.chatKey === snapshot.chatKey && sceneSnapshot.sceneKey === snapshot.sceneKey
         ? initialCache
-        : forceStaleSceneCache(await loadSceneCacheSafe(runId, sceneSnapshot, settings), forceContext, sceneSnapshot);
+        : freshStaleSceneCache(await loadSceneCacheSafe(runId, sceneSnapshot, settings), freshContext, sceneSnapshot);
       if (!isActiveRun(runId)) return supersededResult(runId);
       const scopedCardOmissionDiagnostics = [];
       const filterScopedCards = (cards) => {
@@ -4749,10 +4783,10 @@ export function createRecursionRuntime({
         return scoped.cards;
       };
       const activeCache = activeSceneCacheVariant(cache, sceneSnapshot);
-      const cacheCards = forceContext
+      const cacheCards = freshContext
         ? []
         : filterScopedCards(cardsWithOrigin(sanitizedCacheCards(runId, sceneSnapshot, activeCache.cards), 'cache'));
-      const reuseCacheOnly = !forceContext && action === 'reuse-cache' && cacheCards.length > 0;
+      const reuseCacheOnly = !freshContext && action === 'reuse-cache' && cacheCards.length > 0;
       const generatedCardResult = reuseCacheOnly
         ? { cards: [], diagnostics: [] }
         : await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, settings, signal });
@@ -4963,8 +4997,8 @@ export function createRecursionRuntime({
         readyLastBrief(packet, hand, {
           runId,
           reason: installOk
-            ? (forceContext ? 'force-regenerate-installed' : 'packet-installed')
-            : (forceContext ? 'force-regenerate-install-failed' : 'install-failed')
+            ? (freshContext ? 'fresh-next-generation-installed' : 'packet-installed')
+            : (freshContext ? 'fresh-next-generation-install-failed' : 'install-failed')
         });
         await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
         await appendJournalSafe(runId, promptSnapshot.chatKey, {
@@ -5009,12 +5043,12 @@ export function createRecursionRuntime({
     storage,
     prepareForGeneration,
     warmRapidScene,
-    forceRegenerateNext,
-    forceRegenerateNow,
+    requestFreshNextGeneration,
+    clearFreshNextGeneration,
     async dispose() {
       supersedeActiveRun();
       abortActiveRapidWarmRun('stale');
-      clearPendingForceRegenerate();
+      clearPendingFreshNextGeneration();
       await waitForExternalMutations();
     },
     async refreshScene() {

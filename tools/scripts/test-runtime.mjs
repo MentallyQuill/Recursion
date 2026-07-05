@@ -74,6 +74,10 @@ function assertNotEqual(actual, expected, message) {
   }
 }
 
+function runtimeHasOwnMethod(runtime, name) {
+  return typeof runtime?.[name] === 'function';
+}
+
 {
   const runState = createRuntimeRunState();
   runState.setActiveRun('run-state-1', { abort() {} });
@@ -81,8 +85,8 @@ function assertNotEqual(actual, expected, message) {
   runState.setLatestAssistantSwipeRetry({ reason: 'latest-assistant-swipe' });
   assertEqual(runState.takeLatestAssistantSwipeRetry().reason, 'latest-assistant-swipe', 'run state takes swipe retry once');
   assertEqual(runState.takeLatestAssistantSwipeRetry(), null, 'swipe retry is cleared after take');
-  runState.setForceRegenerate({ id: 'force-1' });
-  assertEqual(runState.takeForceRegenerate().id, 'force-1', 'force regenerate token is taken once');
+  runState.setFreshNextGeneration({ id: 'fresh-1' });
+  assertEqual(runState.takeFreshNextGeneration().id, 'fresh-1', 'fresh next generation token is taken once');
   runState.clearActiveRun('run-state-1');
   assertEqual(runState.current().activeRunId, null, 'run state clears active run');
 }
@@ -675,6 +679,45 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 
 {
   const roleCalls = [];
+  const hostStartCalls = [];
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' },
+    hostGeneration: {
+      async start(details = {}) {
+        hostStartCalls.push(details);
+        return { ok: true, started: true };
+      }
+    },
+    generationRouter: {
+      async generate(roleId) {
+        roleCalls.push(roleId);
+        throw new Error(`pipeline switch should not call provider role ${roleId}`);
+      }
+    }
+  });
+
+  const update = await harness.runtime.updateSettings({ pipelineMode: 'rapid' });
+  assertEqual(update.ok, true, 'switching to Rapid succeeds');
+  assertEqual(update.settings.pipelineMode, 'rapid', 'settings update records Rapid pipeline');
+  assertEqual(update.warm, undefined, 'switching to Rapid does not queue a scene warm');
+  assertDeepEqual(roleCalls, [], 'switching pipeline does not call providers');
+  assertDeepEqual(hostStartCalls, [], 'switching pipeline does not start host generation');
+  assertEqual(harness.runtime.view().settings.pipelineMode, 'rapid', 'runtime view shows the selected next pipeline');
+}
+
+{
+  const harness = createRuntimeHarness({
+    settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' }
+  });
+
+  const beforeClearCount = harness.calls.clear;
+  const result = await harness.runtime.updateSettings({ pipelineMode: 'standard' });
+  assertEqual(result.ok, true, 'selecting the current pipeline succeeds');
+  assertEqual(harness.calls.clear, beforeClearCount, 'selecting the current pipeline does not clear the prompt');
+}
+
+{
+  const roleCalls = [];
   const harness = createRuntimeHarness({
     settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
@@ -686,14 +729,30 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
             data: {
               schema: UTILITY_ARBITER_SCHEMA,
               snapshotHash: request.snapshotHash,
-              action: 'refresh-cards',
-              sceneStatus: 'same-scene',
-              promptFootprint: 'normal',
-              storyForm: UNKNOWN_STORY_FORM,
-              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Warm on Rapid select.' }],
-              reasonerDecision: { mode: 'skip', reason: 'warm on rapid select', signals: [] },
+              action: 'compose-brief',
+              cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Pipeline switch next generation.' }],
               budgets: { targetBriefTokens: 500, maxCards: 4 },
-              diagnostics: ['rapid-select-warm']
+              reasonerDecision: { mode: 'skip', reason: 'pipeline switch test', signals: [] },
+              diagnostics: ['pipeline-switch-next-generation']
+            }
+          };
+        }
+        if (roleId === 'fusedCardBundle') {
+          return {
+            ok: true,
+            roleId,
+            lane: 'utility',
+            data: {
+              schema: 'recursion.cardBundle.v1',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                schema: 'recursion.card.v1',
+                family: 'Scene Frame',
+                role: 'sceneFrameCard',
+                promptText: 'Pipeline-switched Fused card.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 12
+              }]
             }
           };
         }
@@ -704,33 +763,24 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
             data: {
               schema: 'recursion.guidanceComposer.v1',
               snapshotHash: request.snapshotHash,
-              guidanceText: 'Rapid selected pipeline warm guidance.',
+              guidanceText: 'Use the newly selected Standard path.',
               sourceCardIds: [],
               guardrailCardIds: [],
               omittedCardIds: [],
-              diagnostics: ['rapid-select-guidance']
+              diagnostics: ['pipeline-switch-guidance']
             }
           };
         }
-        throw new Error(`Unexpected role ${roleId}`);
+        throw new Error(`unexpected role after pipeline switch ${roleId}`);
       }
     }
   });
 
-  const update = await harness.runtime.updateSettings({ pipelineMode: 'rapid' });
-  assertEqual(update.ok, true, 'switching to Rapid succeeds');
-  assertEqual(update.settings.pipelineMode, 'rapid', 'settings update records Rapid pipeline');
-  assertEqual(update.warm.queued, true, 'switching to Rapid queues a scene warm');
-  await waitUntil(
-    () => harness.runtime.view().rapidWarm.status === 'ready',
-    'switching to Rapid did not warm the current stable scene',
-    { attempts: 50, delayMs: 5 }
-  );
-  const view = harness.runtime.view();
-  assertEqual(view.rapidWarm.status, 'ready', 'switching to Rapid warms the current stable scene');
-  assert(roleCalls.includes('utilityArbiter'), 'Rapid selection warm calls Utility Arbiter');
-  assert(roleCalls.includes('sceneFrameCard'), 'Rapid selection warm generates scene cards');
-  assert(roleCalls.includes('guidanceComposer'), 'Rapid selection warm composes guidance');
+  await harness.runtime.updateSettings({ pipelineMode: 'fused' });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Use the new pipeline.', hostGeneration: true });
+  assertEqual(result.ok, true, 'next generation after pipeline switch succeeds');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'fused', 'next generation uses the selected pipeline mode');
+  assert(roleCalls.includes('fusedCardBundle'), 'next generation enters the Fused card bundle path');
 }
 
 {
@@ -2668,7 +2718,7 @@ for (const pipelineMode of ['standard', 'rapid']) {
     turnFingerprint: 'force-same-turn-fp',
     latestMesId: 2,
     messages: [
-      { mesid: 2, role: 'assistant', text: 'Same turn force regenerate base response.', visible: true }
+      { mesid: 2, role: 'assistant', text: 'Same turn fresh-next base response.', visible: true }
     ]
   };
   const { runtime, installed, storage } = createRuntimeHarness({
@@ -2726,111 +2776,66 @@ for (const pipelineMode of ['standard', 'rapid']) {
       }
     }
   });
-  const userMessage = 'Force regenerate this same turn.';
-  const first = await runtime.prepareForGeneration({ userMessage });
-  assertEqual(first.ok, true, 'force same-turn setup installs');
-  assertEqual(installed.length, 1, 'force same-turn setup installs one packet');
+  const userMessage = 'Force next generation fresh for this same turn.';
+  const first = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
+  assertEqual(first.ok, true, 'fresh next same-turn setup installs');
+  assertEqual(installed.length, 1, 'fresh next same-turn setup installs one packet');
   const callsAfterFirst = providerCalls;
-  const queued = await runtime.forceRegenerateNext({ source: 'bar' });
-  assertEqual(queued.ok, true, 'force regenerate queues successfully');
-  assertEqual(runtime.view().forceRegenerate?.pending, true, 'force regenerate is visible as pending');
-  assertEqual(runtime.view().lastBrief?.status, 'clearing', 'force regenerate clears Last Brief immediately');
-  assertEqual(runtime.view().lastBrief?.reason, 'user-force-regenerate', 'force regenerate records Last Brief clear reason');
-  const second = await runtime.prepareForGeneration({ userMessage });
-  assertEqual(second.ok, true, 'force same-turn run succeeds');
-  assertEqual(second.reused, undefined, 'force same-turn run does not report packet reuse');
-  assert(providerCalls > callsAfterFirst, 'force same-turn run calls providers again');
-  assertEqual(installed.length, 2, 'force same-turn run installs a fresh packet');
-  assertNotEqual(installed[0].packetId, installed[1].packetId, 'force same-turn run changes packet identity');
-  assertEqual(runtime.view().forceRegenerate?.pending, false, 'force token is consumed after prepare');
-  assertEqual(runtime.view().lastBrief?.status, 'ready', 'force same-turn restores Last Brief ready state');
-  assertEqual(runtime.view().lastBrief?.reason, 'force-regenerate-installed', 'force same-turn marks forced install reason');
+  const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
+  assertEqual(queued.ok, true, 'fresh next generation queues successfully');
+  assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation is visible as pending');
+  assertEqual(runtime.view().lastBrief?.status, 'clearing', 'fresh next generation clears Last Brief immediately');
+  assertEqual(runtime.view().lastBrief?.reason, 'user-fresh-next-generation', 'fresh next generation records Last Brief clear reason');
+  const second = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
+  assertEqual(second.ok, true, 'fresh next same-turn run succeeds');
+  assertEqual(second.reused, undefined, 'fresh next same-turn run does not report packet reuse');
+  assert(providerCalls > callsAfterFirst, 'fresh next same-turn run calls providers again');
+  assertEqual(installed.length, 2, 'fresh next same-turn run installs a fresh packet');
+  assertNotEqual(installed[0].packetId, installed[1].packetId, 'fresh next same-turn run changes packet identity');
+  assertEqual(runtime.view().freshNextGeneration?.pending, false, 'fresh next token is consumed after host generation prepare');
+  assertEqual(runtime.view().lastBrief?.status, 'ready', 'fresh next same-turn restores Last Brief ready state');
+  assertEqual(runtime.view().lastBrief?.reason, 'fresh-next-generation-installed', 'fresh next same-turn marks forced install reason');
   const journal = await storage.loadRunJournal(baseSnapshot.chatKey);
-  assert(journal.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'user-force-regenerate'), 'force same-turn records cache invalidation journal');
+  assert(journal.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'user-fresh-next-generation'), 'fresh next same-turn records cache invalidation journal');
 }
 
 {
   const hostStartCalls = [];
-  const hostStarted = deferred();
-  const { runtime, installed } = createRuntimeHarness({
+  const { runtime } = createRuntimeHarness({
     settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' },
     hostGeneration: {
       async start(details = {}) {
         hostStartCalls.push(details);
-        await hostStarted.promise;
-        return { ok: true, started: true, completed: true, type: details.type, source: 'test-host-start' };
+        return { ok: true, started: true };
       }
     }
   });
-  assertEqual(typeof runtime.forceRegenerateNow, 'function', 'runtime exposes immediate force regenerate action');
-  const pending = runtime.forceRegenerateNow({ source: 'bar' });
-  await waitUntil(() => hostStartCalls.length === 1, 'immediate force regenerate did not start host regeneration');
-  assertEqual(hostStartCalls[0].type, 'regenerate', 'immediate force regenerate asks host to regenerate');
-  assertEqual(hostStartCalls[0].source, 'recursion-ui', 'immediate force regenerate identifies Recursion as host source');
-  assertEqual(runtime.view().hostGenerationActive, true, 'immediate force regenerate keeps stop affordance active during host regeneration');
-  assertEqual(runtime.view().forceRegenerate?.pending, false, 'immediate force regenerate consumes the force token during preparation');
-  assertEqual(installed.length, 1, 'immediate force regenerate installs a fresh prompt before host regeneration');
-  hostStarted.resolve();
-  const result = await pending;
-  assertEqual(result.ok, true, 'immediate force regenerate succeeds');
-  assertEqual(result.hostGeneration?.ok, true, 'immediate force regenerate reports host regeneration result');
-  assert(JSON.stringify(result.packet).includes('force-regenerate:cache-bypassed'), 'immediate force regenerate bypasses cache paths');
-  assertEqual(runtime.view().hostGenerationActive, false, 'host regenerate completion clears stop affordance');
+  assertEqual(runtimeHasOwnMethod(runtime, 'forceRegenerateNow'), false, 'runtime does not expose immediate forceRegenerateNow');
+  assertEqual(typeof runtime.requestFreshNextGeneration, 'function', 'runtime exposes fresh-next-generation request');
+  assertEqual(typeof runtime.clearFreshNextGeneration, 'function', 'runtime exposes fresh-next-generation clear');
+
+  const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
+  assertEqual(queued.ok, true, 'fresh next generation queues successfully');
+  assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation is visible as pending');
+  assertEqual(runtime.view().lastBrief?.reason, 'user-fresh-next-generation', 'fresh next generation clears Last Brief with queued reason');
+  assertDeepEqual(hostStartCalls, [], 'queuing fresh next generation does not start host generation');
 }
 
 {
-  let releaseArbiter;
-  const hostStartCalls = [];
-  const hostStopCalls = [];
-  const { runtime, calls, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    hostGeneration: {
-      async start(details = {}) {
-        hostStartCalls.push(details);
-        return { ok: true, started: true, type: details.type };
-      },
-      async stop(details = {}) {
-        hostStopCalls.push(details);
-        return { ok: true, stopped: true, eventEmitted: false, source: 'test-host-stop' };
-      }
-    },
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        assertEqual(roleId, 'utilityArbiter', 'stopped immediate force regenerate only needs utility arbiter');
-        await new Promise((resolve) => {
-          releaseArbiter = resolve;
-        });
-        assertEqual(request.signal?.aborted, true, 'stopping immediate force regenerate aborts in-flight provider signal');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'compose-brief',
-            diagnostics: ['force-regenerate-stop-regression']
-          }
-        };
-      }
-    }
+  const { runtime } = createRuntimeHarness({
+    settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' }
   });
-  const pending = runtime.forceRegenerateNow({ source: 'bar' });
-  await waitUntil(() => typeof releaseArbiter === 'function', 'immediate force regenerate did not enter arbiter before stop');
-  assertEqual(runtime.view().hostGenerationActive, true, 'immediate force regenerate exposes stop state before host generation starts');
-  const stopped = runtime.stopGeneration({ source: 'recursion-ui' });
-  releaseArbiter();
-  const [stopResult, pendingResult] = await Promise.all([stopped, pending]);
-  assertEqual(pendingResult.superseded, true, 'stop supersedes immediate force regenerate preparation');
-  assertEqual(stopResult.ok, true, 'stop cleanup succeeds during immediate force regenerate');
-  assertEqual(hostStopCalls.length, 1, 'stop still calls SillyTavern stop during immediate force regenerate');
-  assertEqual(hostStartCalls.length, 0, 'stopped immediate force regenerate does not start host regeneration');
-  assertEqual(calls.clear, 1, 'stopped immediate force regenerate clears host prompt');
-  assertEqual(installed.length, 0, 'stopped immediate force regenerate prevents prompt install');
-  assertEqual(runtime.view().hostGenerationActive, false, 'stop clears immediate force regenerate host state');
+
+  await runtime.requestFreshNextGeneration({ source: 'bar' });
+  assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation starts pending');
+  const cleared = await runtime.clearFreshNextGeneration({ source: 'bar' });
+  assertEqual(cleared.ok, true, 'fresh next generation clear succeeds');
+  assertEqual(runtime.view().freshNextGeneration?.pending, false, 'fresh next generation clear removes pending token');
 }
 
 {
   let providerCalls = 0;
-  const userMessage = 'Force regenerate the latest assistant swipe.';
+  const userMessage = 'Fresh next generation for the latest assistant swipe.';
   const chatId = 'force-latest-assistant-chat';
   const initialMessages = [
     { mesid: 20, role: 'user', text: userMessage, textHash: hashJson(userMessage), visible: true }
@@ -2859,8 +2864,8 @@ for (const pipelineMode of ['standard', 'rapid']) {
               action: 'compose-brief',
               cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
               budgets: { targetBriefTokens: 500, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'force latest assistant setup', signals: [] },
-              diagnostics: ['force-latest-assistant-arbiter']
+              reasonerDecision: { mode: 'skip', reason: 'fresh latest assistant setup', signals: [] },
+              diagnostics: ['fresh-latest-assistant-arbiter']
             }
           };
         }
@@ -2874,7 +2879,7 @@ for (const pipelineMode of ['standard', 'rapid']) {
               family: 'Scene Frame',
               snapshotHash: request.snapshotHash,
               items: [{
-                promptText: 'Force latest assistant generated card.',
+                promptText: 'Fresh latest assistant generated card.',
                 evidenceRefs: ['message:20'],
                 tokenEstimate: 8
               }]
@@ -2887,20 +2892,20 @@ for (const pipelineMode of ['standard', 'rapid']) {
             data: {
               schema: 'recursion.guidanceComposer.v1',
               snapshotHash: request.snapshotHash,
-              guidanceText: 'Force latest assistant guidance.',
+              guidanceText: 'Fresh latest assistant guidance.',
               sourceCardIds: [],
               guardrailCardIds: [],
               omittedCardIds: [],
-              diagnostics: ['force-latest-assistant-guidance']
+              diagnostics: ['fresh-latest-assistant-guidance']
             }
           };
         }
-        throw new Error(`unexpected force latest assistant role ${roleId}`);
+        throw new Error(`unexpected fresh latest assistant role ${roleId}`);
       }
     }
   });
   const first = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
-  assertEqual(first.ok, true, 'force latest assistant setup installs');
+  assertEqual(first.ok, true, 'fresh latest assistant setup installs');
   const callsAfterFirst = providerCalls;
   activeSnapshot = snapshotFromMessages([
     ...initialMessages,
@@ -2916,16 +2921,16 @@ for (const pipelineMode of ['standard', 'rapid']) {
     }
   ]);
   await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped', messageId: 21 });
-  const queued = await runtime.forceRegenerateNext({ source: 'bar' });
-  assertEqual(queued.ok, true, 'force latest assistant queues after swipe marker');
-  assertEqual(runtime.view().lastBrief?.reason, 'user-force-regenerate', 'force latest assistant replaces swipe clear reason');
+  const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
+  assertEqual(queued.ok, true, 'fresh latest assistant queues after swipe marker');
+  assertEqual(runtime.view().lastBrief?.reason, 'user-fresh-next-generation', 'fresh latest assistant replaces swipe clear reason');
   const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
-  assertEqual(second.ok, true, 'force latest assistant run succeeds');
-  assertEqual(second.reused, undefined, 'force latest assistant does not reuse previous packet');
-  assert(providerCalls > callsAfterFirst, 'force latest assistant run calls providers again');
-  assertEqual(installed.length, 2, 'force latest assistant installs a second packet');
-  assertNotEqual(installed[0].packetId, installed[1].packetId, 'force latest assistant changes packet identity');
-  assertEqual(runtime.view().lastSnapshot.latestMesId, 21, 'force latest assistant uses current post-swipe snapshot');
+  assertEqual(second.ok, true, 'fresh latest assistant run succeeds');
+  assertEqual(second.reused, undefined, 'fresh latest assistant does not reuse previous packet');
+  assert(providerCalls > callsAfterFirst, 'fresh latest assistant run calls providers again');
+  assertEqual(installed.length, 2, 'fresh latest assistant installs a second packet');
+  assertNotEqual(installed[0].packetId, installed[1].packetId, 'fresh latest assistant changes packet identity');
+  assertEqual(runtime.view().lastSnapshot.latestMesId, 21, 'fresh latest assistant uses current post-swipe snapshot');
 }
 
 {
@@ -2946,10 +2951,10 @@ for (const pipelineMode of ['standard', 'rapid']) {
             data: {
               schema: 'recursion.rapidTurnDelta.v2',
               snapshotHash: request.snapshotHash,
-              guidanceText: 'Rapid delta should be bypassed during force regenerate.',
+              guidanceText: 'Rapid delta should be bypassed during fresh next generation.',
               mandatoryGapIds: [],
               sourceCardIds: ['warm-card-1'],
-              diagnostics: ['force-rapid-delta']
+              diagnostics: ['fresh-rapid-delta']
             }
           };
         }
@@ -2962,8 +2967,8 @@ for (const pipelineMode of ['standard', 'rapid']) {
               action: 'compose-brief',
               cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
               budgets: { targetBriefTokens: 500, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'force rapid standard path', signals: [] },
-              diagnostics: ['force-rapid-standard-arbiter']
+              reasonerDecision: { mode: 'skip', reason: 'fresh rapid standard path', signals: [] },
+              diagnostics: ['fresh-rapid-standard-arbiter']
             }
           };
         }
@@ -2977,7 +2982,7 @@ for (const pipelineMode of ['standard', 'rapid']) {
               family: 'Scene Frame',
               snapshotHash: request.snapshotHash,
               items: [{
-                promptText: 'Force rapid generated card.',
+                promptText: 'Fresh rapid generated card.',
                 evidenceRefs: ['message:2'],
                 tokenEstimate: 8
               }]
@@ -2990,24 +2995,24 @@ for (const pipelineMode of ['standard', 'rapid']) {
             data: {
               schema: 'recursion.guidanceComposer.v1',
               snapshotHash: request.snapshotHash,
-              guidanceText: 'Force rapid standard guidance.',
+              guidanceText: 'Fresh rapid standard guidance.',
               sourceCardIds: [],
               guardrailCardIds: [],
               omittedCardIds: [],
-              diagnostics: ['force-rapid-standard-guidance']
+              diagnostics: ['fresh-rapid-standard-guidance']
             }
           };
         }
-        throw new Error(`unexpected force rapid role ${roleId}`);
+        throw new Error(`unexpected fresh rapid role ${roleId}`);
       }
     }
   });
-  await runtime.forceRegenerateNext({ source: 'bar' });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Try the hatch fresh.' });
-  assertEqual(result.ok, true, 'force rapid run succeeds');
-  assert(!roleCalls.includes('rapidTurnDelta'), 'force rapid run bypasses Rapid foreground delta');
-  assert(roleCalls.includes('utilityArbiter'), 'force rapid run uses Standard utility Arbiter');
-  assert(JSON.stringify(result.packet).includes('force-regenerate:rapid-bypassed'), 'force rapid packet records Rapid bypass diagnostic');
+  await runtime.requestFreshNextGeneration({ source: 'bar' });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Try the hatch fresh.', hostGeneration: true });
+  assertEqual(result.ok, true, 'fresh rapid run succeeds');
+  assert(!roleCalls.includes('rapidTurnDelta'), 'fresh rapid run bypasses Rapid foreground delta');
+  assert(roleCalls.includes('utilityArbiter'), 'fresh rapid run uses Standard utility Arbiter');
+  assert(JSON.stringify(result.packet).includes('fresh-next-generation:rapid-bypassed'), 'fresh rapid packet records Rapid bypass diagnostic');
 }
 
 {
@@ -3018,16 +3023,16 @@ for (const pipelineMode of ['standard', 'rapid']) {
     sceneFingerprint: 'force-cache-exclusion-scene-fp',
     turnFingerprint: 'force-cache-exclusion-turn-fp',
     latestMesId: 2,
-    messages: [{ mesid: 2, role: 'user', text: 'Force cached hand fresh.', visible: true }]
+    messages: [{ mesid: 2, role: 'user', text: 'Fresh cached hand.', visible: true }]
   };
   const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
   await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, {
     cacheState: 'active',
     versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
     cards: [{
-      id: 'force-cache-card',
+      id: 'fresh-cache-card',
       family: 'Scene Frame',
-      promptText: 'FORCE CACHE TEXT MUST NOT INSTALL.',
+      promptText: 'FRESH CACHE TEXT MUST NOT INSTALL.',
       evidenceRefs: ['message:2'],
       source: {
         chatId: snapshot.chatId,
@@ -3039,8 +3044,8 @@ for (const pipelineMode of ['standard', 'rapid']) {
     }],
     latestHand: {
       handId: 'force-cache-hand',
-      cardIds: ['force-cache-card'],
-      cards: [{ id: 'force-cache-card', family: 'Scene Frame' }]
+      cardIds: ['fresh-cache-card'],
+      cards: [{ id: 'fresh-cache-card', family: 'Scene Frame' }]
     }
   });
   let arbiterPrompt = '';
@@ -3060,24 +3065,24 @@ for (const pipelineMode of ['standard', 'rapid']) {
               action: 'reuse-cache',
               cardJobs: [],
               budgets: { targetBriefTokens: 500, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'force should override reuse-cache', signals: [] },
-              diagnostics: ['force-cache-reuse-requested']
+              reasonerDecision: { mode: 'skip', reason: 'fresh next should override reuse-cache', signals: [] },
+              diagnostics: ['fresh-cache-reuse-requested']
             }
           };
         }
-        throw new Error(`unexpected force cache exclusion role ${roleId}`);
+        throw new Error(`unexpected fresh cache exclusion role ${roleId}`);
       }
     }
   });
-  await runtime.forceRegenerateNext({ source: 'bar' });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Force cached hand fresh.' });
-  assertEqual(result.ok, true, 'force cache exclusion run succeeds');
-  assertEqual(result.skipped, undefined, 'force cache exclusion does not skip as cache-unavailable');
-  assertEqual(installed.length, 1, 'force cache exclusion installs a prompt');
-  assert(!JSON.stringify(installed[0]).includes('FORCE CACHE TEXT MUST NOT INSTALL'), 'force cache exclusion does not install cached prompt text');
+  await runtime.requestFreshNextGeneration({ source: 'bar' });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Fresh cached hand.', hostGeneration: true });
+  assertEqual(result.ok, true, 'fresh cache exclusion run succeeds');
+  assertEqual(result.skipped, undefined, 'fresh cache exclusion does not skip as cache-unavailable');
+  assertEqual(installed.length, 1, 'fresh cache exclusion installs a prompt');
+  assert(!JSON.stringify(installed[0]).includes('FRESH CACHE TEXT MUST NOT INSTALL'), 'fresh cache exclusion does not install cached prompt text');
   const sceneCacheView = parsePromptJsonSection(arbiterPrompt, 'Scene cache');
-  assertEqual(sceneCacheView.cacheState, 'stale', 'force cache exclusion marks cache stale for Arbiter evidence');
-  assertEqual(sceneCacheView.invalidation?.reason, 'user-force-regenerate', 'force cache exclusion tells Arbiter why cache is stale');
+  assertEqual(sceneCacheView.cacheState, 'stale', 'fresh cache exclusion marks cache stale for Arbiter evidence');
+  assertEqual(sceneCacheView.invalidation?.reason, 'user-fresh-next-generation', 'fresh cache exclusion tells Arbiter why cache is stale');
 }
 
 {
@@ -9781,8 +9786,8 @@ for (const scenario of [
   const routerCalls = [];
   const { runtime, settingsStore } = createRuntimeHarness({
     generationRouter: {
-      async generate(roleId, request) {
-        routerCalls.push({ roleId, request });
+      async generate(roleId, request, options) {
+        routerCalls.push({ roleId, request, options });
         return {
           ok: true,
           diagnostics: { providerId: 'host-current-model', model: 'utility-test-model' },
@@ -9833,6 +9838,8 @@ for (const scenario of [
   assertEqual(routerCalls[0].request.lane, 'utility', 'runtime provider test targets selected lane');
   assertEqual(routerCalls[0].request.reasoningCategory, 'provider-test', 'runtime provider test labels diagnostic provider calls');
   assertEqual(routerCalls[0].request.reasoningIntent, 'minimal', 'runtime provider test always uses minimal provider reasoning');
+  assertEqual(routerCalls[0].request.responseLength, 256, 'runtime provider test uses a small bounded response length');
+  assertEqual(routerCalls[0].options.timeoutMs, 30000, 'runtime provider test uses a bounded test timeout');
   assertEqual(settingsStore.get().providers.utility.lastTest.status, 'pass', 'runtime provider test records passing provider status');
   assertEqual(settingsStore.get().providers.utility.resolvedModelLabel, 'utility-test-model', 'runtime provider test records resolved model');
 

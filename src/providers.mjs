@@ -696,11 +696,22 @@ function providerVisibleText(value, enriched = {}) {
   try {
     return assertProviderResponseText(value, {
       providerTitle: enriched.providerSource || 'Provider',
-      maxTokens: enriched.providerConfig?.maxTokens
+      maxTokens: providerRequestMaxTokens(enriched)
     });
   } catch (error) {
     providerResponseFailureError(error);
   }
+}
+
+function positiveTokenLimit(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+function providerRequestMaxTokens(enriched = {}) {
+  return positiveTokenLimit(enriched.responseLength)
+    ?? positiveTokenLimit(enriched.maxTokens)
+    ?? positiveTokenLimit(enriched.providerConfig?.maxTokens);
 }
 
 function parseOpenAiText(payload, enriched = {}) {
@@ -1201,7 +1212,7 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
           messages: chatMessages(enriched),
           temperature: enriched.providerConfig.temperature,
           top_p: enriched.providerConfig.topP,
-          max_tokens: enriched.providerConfig.maxTokens,
+          max_tokens: providerRequestMaxTokens(enriched),
           response_format: machineSchema
             ? {
                 type: 'json_schema',

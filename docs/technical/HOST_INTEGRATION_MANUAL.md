@@ -109,7 +109,7 @@ If only `generateQuietPrompt` is available, host connection profiles are unsuppo
 
 The stop adapter exposes `generation.stop(details)`. It prefers SillyTavern's extension-context `stopGeneration()` function, which triggers the same host stop path as the native Stop control. If that API is absent, it falls back to clicking the native `#mes_stop` / `.mes_stop` button. If neither seam exists, it returns `RECURSION_HOST_STOP_UNAVAILABLE` so runtime can still abort Recursion work and clear prompt lanes without claiming the host model was stopped.
 
-The native chat-generation adapter exposes `generation.start(details)`. Force Regenerate uses it with `{ type: 'regenerate' }` after the fresh Recursion packet installs, which maps to SillyTavern's extension-context `Generate('regenerate')` function. This seam is separate from `generation.generate(...)`, which remains the provider/quiet machine-JSON path for Utility and Reasoner calls.
+The native chat-generation adapter exposes `generation.start(details)` for host-owned generation flows, but the Recursion Bar Regenerate command does not call it. Regenerate only arms a fresh-next-generation token; the next SillyTavern send or swipe remains the host generation trigger and consumes that token through the generation interceptor. This seam is separate from `generation.generate(...)`, which remains the provider/quiet machine-JSON path for Utility and Reasoner calls.
 
 ## UI Mount
 

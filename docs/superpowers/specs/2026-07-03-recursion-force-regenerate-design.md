@@ -1,5 +1,7 @@
 # Recursion Force Regenerate Design
 
+> Superseded by [2026-07-05 Recursion Declarative Generation Controls](../plans/2026-07-05-recursion-declarative-generation-controls.md). The current V1 contract is declarative: Regenerate arms a fresh-next-generation token and never starts provider work or SillyTavern native generation on click.
+
 ## Purpose
 
 Give users a direct way to tell Recursion, "do this turn fresh." The control must immediately regenerate the current turn while bypassing cached cards, Rapid warm artifacts, and latest-assistant swipe packet reuse without deleting SillyTavern chat data or turning into a hidden persistent no-cache mode.

@@ -165,10 +165,12 @@ When providers are configured:
 
 - Run Utility Test Provider.
 - Run Reasoner Test Provider when enabled.
+- While Reasoner is expanded, change a committed provider field and verify the Reasoner Provider section stays expanded after autosave.
+- Verify the clicked Test Provider button changes to `Testing...`, disables while pending, and the settings panel remains responsive.
 - Verify provider test activity appears in the progress menu or Full Viewer Activity section.
 - Verify model, lane, status, duration, and redacted error category appear in diagnostics.
 
-Provider tests must not persist API keys, raw prompts, or raw responses.
+Provider tests must not persist API keys, raw prompts, or raw responses. They should complete as short bounded health checks, not full-length generation calls.
 
 ### 5. Manual Pass
 

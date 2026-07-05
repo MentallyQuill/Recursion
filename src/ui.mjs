@@ -2120,7 +2120,11 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   const statusText = lane === 'reasoner' && source.enabled !== true
     ? 'optional'
     : providerStatusText(source).toLowerCase();
-  const defaultOpen = lane === 'utility' || source.openAICompatible?.sessionApiKeyPresent === true || Boolean(source.openAICompatible?.model);
+  const selectedSource = cleanText(source.source, 'host-current-model');
+  const hasProfileConfiguration = selectedSource === 'host-connection-profile' && Boolean(cleanText(source.hostConnectionProfileId));
+  const hasDirectConfiguration = selectedSource === 'openai-compatible'
+    && (source.openAICompatible?.sessionApiKeyPresent === true || Boolean(cleanText(source.openAICompatible?.model)));
+  const defaultOpen = lane === 'utility' || hasProfileConfiguration || hasDirectConfiguration;
   const open = typeof providerUiState.disclosureOpen === 'boolean'
     ? providerUiState.disclosureOpen
     : defaultOpen;

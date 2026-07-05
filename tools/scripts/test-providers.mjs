@@ -296,6 +296,40 @@ assertEqual(wrongSchemaBatch[0].ok, true, 'batch schema validation keeps valid s
 assertEqual(wrongSchemaBatch[1].ok, false, 'batch schema validation fails wrong-schema slot');
 assertEqual(wrongSchemaBatch[1].error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'batch wrong-schema slot uses stable error code');
 
+const disabledReasonerProviderTestCalls = [];
+const disabledReasonerProviderTestStore = createStore();
+disabledReasonerProviderTestStore.updateProvider('reasoner', {
+  enabled: false,
+  source: 'host-connection-profile',
+  hostConnectionProfileId: 'reasoner-profile'
+});
+const disabledReasonerProviderTestRouter = createGenerationRouter({
+  client: createProviderClient({
+    host: {
+      generation: {
+        async generate(request) {
+          disabledReasonerProviderTestCalls.push(request);
+          return {
+            text: responseTextForRole(request.roleId),
+            providerId: 'deepseek',
+            model: 'deepseek-v4-pro'
+          };
+        }
+      }
+    },
+    settingsStore: disabledReasonerProviderTestStore
+  })
+});
+const disabledReasonerProviderTest = await disabledReasonerProviderTestRouter.generate('providerTest', {
+  lane: 'reasoner',
+  prompt: 'Reasoner provider test while lane is disabled.'
+});
+assertEqual(disabledReasonerProviderTest.ok, true, 'provider test can validate a configured disabled Reasoner lane');
+assertEqual(disabledReasonerProviderTestCalls.length, 1, 'disabled Reasoner provider test calls host once');
+assertEqual(disabledReasonerProviderTestCalls[0].lane, 'reasoner', 'disabled Reasoner provider test keeps the requested lane');
+assertEqual(disabledReasonerProviderTestCalls[0].roleId, 'providerTest', 'disabled Reasoner provider test keeps providerTest role');
+assertEqual(disabledReasonerProviderTestCalls[0].providerSource, 'host-connection-profile', 'disabled Reasoner provider test uses selected Reasoner provider source');
+
 const reasonerOverrideStore = createStore();
 const reasonerOverrideRouter = createGenerationRouter({
   client: createProviderClient({ host, settingsStore: reasonerOverrideStore })

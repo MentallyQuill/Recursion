@@ -1148,7 +1148,7 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
 
     const lane = laneName(requestLane(resolvedRoleId, request));
     const { settings, config } = providerConfigFor(settingsStore, lane);
-    if (lane === 'reasoner' && !shouldAllowReasoner(settings, config)) {
+    if (lane === 'reasoner' && resolvedRoleId !== 'providerTest' && !shouldAllowReasoner(settings, config)) {
       throw providerError('RECURSION_REASONER_DISABLED', 'Reasoner provider lane is disabled.', { retryable: false });
     }
 

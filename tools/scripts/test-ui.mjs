@@ -1371,6 +1371,52 @@ try {
   assert(fakeDocument.textTree(failingActionRoot).includes('Diagnostics denied'), 'failed UI action surfaces concise failure text in the Recursion UI');
   failingActionUi.destroy();
 
+  const configuredReasonerUi = mountRecursionUi({
+    runtime: {
+      view: () => ({
+        settings: {
+          mode: 'auto',
+          enabled: true,
+          ui: { tooltipsEnabled: true },
+          providers: {
+            reasoner: {
+              ...DEFAULT_RECURSION_SETTINGS.providers.reasoner,
+              enabled: false,
+              source: 'host-connection-profile',
+              hostConnectionProfileId: 'deepseek-profile'
+            }
+          }
+        },
+        activity: { phase: 'idle' },
+        lastHand: { cards: [] }
+      }),
+      listProviderConnectionProfiles: () => [{
+        id: 'deepseek-profile',
+        name: 'deepseek-v4-pro - Provider',
+        model: 'deepseek-v4-pro',
+        label: 'deepseek-v4-pro - Provider / deepseek-v4-pro'
+      }]
+    },
+    mountPoint: fakeDocument.body
+  });
+  const configuredReasonerRoot = fakeDocument.getElementById('recursion-root');
+  configuredReasonerRoot.querySelector('[data-recursion-actions]').click();
+  configuredReasonerRoot.querySelector('[data-recursion-settings-tab-providers]').click({ ignoreStopPropagation: true });
+  assertEqual(
+    configuredReasonerRoot.querySelector('[data-recursion-provider-body-reasoner]').hidden,
+    false,
+    'configured Reasoner profile section defaults open on a fresh settings render'
+  );
+  configuredReasonerRoot.querySelector('[data-recursion-provider-toggle-reasoner]').click();
+  configuredReasonerRoot.querySelector('[data-recursion-settings-tab-advanced]').click({ ignoreStopPropagation: true });
+  configuredReasonerRoot.querySelector('[data-recursion-settings-tab-providers]').click({ ignoreStopPropagation: true });
+  assertEqual(
+    configuredReasonerRoot.querySelector('[data-recursion-provider-body-reasoner]').hidden,
+    true,
+    'explicitly collapsed configured Reasoner profile section stays collapsed during the UI session'
+  );
+  configuredReasonerUi.destroy();
+
   let refreshed = 0;
   let closeCount = 0;
   const settingsUpdates = [];
@@ -2675,6 +2721,22 @@ try {
   assertEqual(settledProviderTestButton.textContent, 'Test Provider', 'utility provider test restores label after completion');
   assertEqual(settledProviderTestButton.getAttribute('aria-busy'), 'false', 'utility provider test clears busy state after completion');
   assertEqual(settledProviderTestButton.getAttribute('disabled'), null, 'utility provider test enables again after completion');
+  if (root.querySelector('[data-recursion-provider-body-reasoner]').hidden === true) {
+    root.querySelector('[data-recursion-provider-toggle-reasoner]').click();
+  }
+  root.querySelector('[data-recursion-reasoner-provider-test]').click();
+  const busyReasonerProviderTestButton = root.querySelector('[data-recursion-reasoner-provider-test]');
+  assertEqual(busyReasonerProviderTestButton.textContent, 'Testing...', 'reasoner provider test shows busy label before runtime work starts');
+  assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, false, 'Reasoner provider stays expanded while provider test is pending');
+  assertEqual(root.querySelector('[data-recursion-provider-toggle-reasoner]').getAttribute('aria-expanded'), 'true', 'Reasoner provider toggle stays expanded while provider test is pending');
+  await flushMicrotasks(1);
+  assertDeepEqual(providerTests, ['utility', 'reasoner'], 'reasoner provider test action calls runtime after busy state paints');
+  providerTestGates[1].resolve({ ok: true });
+  await flushMicrotasks();
+  const settledReasonerProviderTestButton = root.querySelector('[data-recursion-reasoner-provider-test]');
+  assertEqual(settledReasonerProviderTestButton.textContent, 'Test Provider', 'reasoner provider test restores label after completion');
+  assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, false, 'Reasoner provider stays expanded after provider test completion');
+  assertEqual(root.querySelector('[data-recursion-provider-toggle-reasoner]').getAttribute('aria-expanded'), 'true', 'Reasoner provider toggle stays expanded after provider test completion');
   root.querySelector('[data-recursion-utility-provider-clear-key]').click();
   assertDeepEqual(providerClears, ['utility'], 'utility clear session key action calls runtime');
   if (root.querySelector('[data-recursion-settings-panel]').hidden === false) {

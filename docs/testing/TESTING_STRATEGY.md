@@ -29,7 +29,7 @@ Highest-priority invariants:
 - Pipeline selection lives as a compact bar dropdown left of Mode and must not be duplicated as a Settings toggle.
 - Manual mode uses card scope as a strict whitelist and must remain a distinct selectable mode.
 - Auto mode may install prompt packets only through Recursion-owned SillyTavern prompt keys.
-- Standard, Rapid, and Fused remain distinct pipelines; Standard keeps the full foreground path, Rapid uses background provider warm plus foreground Utility delta, and Fused uses one foreground card-bundle call. Warm miss escalates to Standard, and an empty or invalid Fused bundle falls back to Standard individual card calls.
+- Standard, Rapid, and Fused remain distinct pipelines; Standard keeps the full foreground path, Rapid uses background provider warm plus foreground Utility delta, and Fused uses one foreground card-bundle call. Warm miss escalates to Standard. Fused repairs damaged or missing siblings with targeted Standard card calls when at least one bundle item is trustworthy, and full Standard fallback is reserved for zero-trust bundles.
 - Rapid background warm never installs prompt keys.
 - Rapid foreground never creates local fallback cards, local scene briefs, local turn briefs, or summary fast-start packs.
 - Rapid warm artifacts are exact-source keyed and must not survive source revision, settings/provider/catalog/prompt contract, or pipeline-version mismatch.

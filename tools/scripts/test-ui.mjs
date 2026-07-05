@@ -1712,8 +1712,7 @@ try {
             id: 'fresh-ui',
             reason: 'user-fresh-next-generation',
             source: details.source || 'bar'
-          },
-          lastBrief: { status: 'clearing', reason: 'user-fresh-next-generation', previousPacketId: 'packet-ui' }
+          }
         };
         return { ok: true, freshNextGeneration: view.freshNextGeneration };
       },
@@ -1722,8 +1721,7 @@ try {
         clearFreshNextGenerationDetails.push(details);
         view = {
           ...view,
-          freshNextGeneration: { pending: false },
-          lastBrief: { status: 'empty', reason: 'fresh-next-generation-cleared' }
+          freshNextGeneration: { pending: false }
         };
         return { ok: true, freshNextGeneration: view.freshNextGeneration };
       }
@@ -2828,8 +2826,20 @@ try {
   root.querySelector('[data-recursion-viewer-close]').click();
   assertEqual(closeCount, 1, 'viewer close listener is not duplicated across updates');
 
-  view = { settings: { mode: 'auto' }, activity: { phase: 'idle' }, lastHand: { cards: [] }, freshNextGeneration: { pending: false } };
+  view = {
+    ...readyBriefView,
+    settings: { ...readyBriefView.settings, mode: 'auto', enabled: true },
+    activeRunId: null,
+    hostGenerationActive: false,
+    activity: { phase: 'idle' },
+    progressRun: null,
+    freshNextGeneration: { pending: false },
+    lastBrief: { status: 'ready', packetId: 'packet-ui', handId: 'hand-ui', cardCount: 2 }
+  };
   ui.update();
+  if (root.querySelector('[data-recursion-hand-dropdown]').hidden === false) {
+    root.querySelector('[data-recursion-hand-toggle]').click();
+  }
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'idle view hides stop generation button');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').hidden, false, 'idle view shows fresh-next generation button in command slot');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Force next generation fresh', 'fresh-next button exposes accessible copy');
@@ -2845,7 +2855,8 @@ try {
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-pressed'), 'true', 'queued fresh-next state renders armed button state');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Fresh next generation armed', 'armed fresh-next button exposes armed copy');
   root.querySelector('[data-recursion-hand-toggle]').click();
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Next generation will be fresh.'), 'fresh-next clearing state uses queued copy');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Door stays blocked and the brass lock remains warped.'), 'fresh-next armed state keeps previous Last Brief cards visible until send or swipe');
+  assert(!fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Next generation will be fresh.'), 'fresh-next armed state does not spend the Last Brief clearing copy before generation');
   root.querySelector('[data-recursion-hand-toggle]').click();
   root.querySelector('[data-recursion-fresh-next-generation]').click();
   assertEqual(clearFreshNextGenerationCalls, 1, 'clicking armed fresh-next button clears the override');

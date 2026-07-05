@@ -81,17 +81,20 @@ flowchart LR
     Delta -. "mandatory gap, invalid, empty, or unavailable output" .-> Standard
 ```
 
-Fused is the large foreground card-call pipeline. It keeps Standard's Arbiter, hand selection, guidance composition, packet validation, and install path, but asks one provider call to generate every requested card family as a structured `fusedCardBundle`. Valid requested cards enter the normal hand and Card Evidence path; an unusable bundle falls back to Standard individual card calls for that same turn.
+Fused is the large foreground card-call pipeline. It keeps Standard's Arbiter, hand selection, guidance composition, packet validation, and install path, but asks one provider call to generate every requested card family as a structured `fusedCardBundle`. Valid requested cards enter the normal hand and Card Evidence path. If only some requested siblings are damaged or missing, Recursion repairs those families through individual Standard card calls; a full Standard fallback is reserved for a zero-trust bundle.
 
 ```mermaid
 flowchart LR
     Send["User sends message"] --> Arbiter["Utility Arbiter plans card work"]
     Arbiter --> Bundle["One fusedCardBundle call"]
     Bundle --> Validate["Validate bundle and card items"]
-    Validate --> Hand["Select turn hand"]
+    Validate --> Repair{"Damaged siblings?"}
+    Repair -- "no" --> Hand["Select turn hand"]
+    Repair -- "yes" --> Targeted["Repair missing families with Standard card calls"]
+    Targeted --> Hand
     Hand --> Compose["Compose V3 prompt packet"]
     Compose --> Install["Install Recursion prompt keys"]
-    Validate -. "empty or invalid bundle" .-> Standard["Run Standard card calls"]
+    Validate -. "zero trustworthy cards" .-> Standard["Run full Standard card path"]
 ```
 
 ![Full Viewer overview with Now, Deck, Activity, Prompt Packet, Settings, and Providers](assets/documentation/renders/recursion-full-viewer-overview.png)

@@ -120,7 +120,7 @@ Fallback behavior:
 - Invalid Utility Arbiter schema or missing/mismatched Arbiter `snapshotHash` can use a conservative local fallback plan because a provider result existed but failed structured validation.
 - Rapid warm miss escalates to Standard for the same pending user message; it does not permit local Rapid cards, local Rapid scene briefs, local Rapid turn briefs, or summary fast-start packs.
 - Rapid invalid structured output, mandatory missing cards, or provider-declared Standard escalation continue through the Standard pipeline for that same pending user message.
-- Fused bundle schema mismatch, snapshot mismatch, provider failure, or an empty valid result falls back to Standard individual card calls for the same pending user message.
+- Fused bundle validation reports accepted, invalid, rejected, omitted, and missing requested families. When at least one requested item is trustworthy, runtime repairs only damaged or missing siblings through individual Standard card calls for the same pending user message. Wrong snapshot, provider failure with no recoverable item fragments, or zero trustworthy items triggers full Standard card fallback.
 - Card call failure omits failed cards and keeps valid siblings.
 - Reasoner failure falls back to Utility guidance plus raw selected Card Evidence.
 - Provider test failure updates lane status with compact error text.

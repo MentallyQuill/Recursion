@@ -430,9 +430,10 @@ async function main() {
       const freshButton = document.querySelector('[data-recursion-fresh-next-generation]');
       const probe = globalThis.__recursionFreshNextProof?.probe;
       return view.freshNextGeneration?.pending === true
-        && view.lastBrief?.reason === 'user-fresh-next-generation'
-        && panel?.dataset?.recursionLastBriefState === 'clearing'
-        && /Next generation will be fresh\./.test(String(panel?.textContent || ''))
+        && view.lastBrief?.status === 'ready'
+        && panel?.dataset?.recursionLastBriefState === 'ready'
+        && document.querySelectorAll('[data-recursion-brief-card]').length > 0
+        && !/Next generation will be fresh\./.test(String(panel?.textContent || ''))
         && stopButton?.hidden === true
         && freshButton?.hidden === false
         && freshButton?.getAttribute('aria-pressed') === 'true'
@@ -442,7 +443,7 @@ async function main() {
         && probe.generateCalls.length === 0;
     }, null, { timeout: timeoutMs });
     const armed = await page.evaluate(readDomStateScript());
-    if (armed.runtimeLastBrief?.reason !== 'user-fresh-next-generation' || armed.freshNextGeneration?.pending !== true) {
+    if (armed.runtimeLastBrief?.status !== 'ready' || armed.freshNextGeneration?.pending !== true || armed.cardRows <= 0) {
       fail('fresh-not-armed', 'Regenerate click did not arm a fresh-next token.', { armed });
     }
     if (armed.stopButtonHidden !== true || armed.freshButtonHidden || armed.freshButtonPressed !== 'true') {

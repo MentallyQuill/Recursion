@@ -93,7 +93,7 @@ Fused is optional for a first session, but it is useful to verify once Standard 
 
 1. Set Pipeline to `Fused`.
 2. Send a safe, ordinary chat message.
-3. Confirm progress reports `Generating fused card bundle...` or a clear Standard fallback.
+3. Confirm progress reports `Generating fused card bundle...`, targeted Standard repair, or a clear full Standard fallback.
 4. Inspect Last Brief or Prompt Packet to confirm accepted Fused cards enter the normal Card Evidence path.
 
 ```mermaid
@@ -101,7 +101,9 @@ flowchart LR
     Standard["Standard works"] --> Fused["Switch to Fused"]
     Fused --> Bundle["One fusedCardBundle call"]
     Bundle --> Packet["Normal prompt packet"]
-    Bundle -. "empty or invalid" .-> Fallback["Standard card-call fallback"]
+    Bundle -. "damaged sibling" .-> Repair["Targeted Standard repair"]
+    Repair --> Packet
+    Bundle -. "zero trustworthy cards" .-> Fallback["Full Standard fallback"]
 ```
 
 ## 8. Inspect Last Brief And Viewer
@@ -139,7 +141,7 @@ The first run is healthy when:
 - Standard Auto mode reaches prompt ready or a clear fail-soft fallback.
 - Manual mode respects the selected card scope and reaches prompt ready or a clear fallback.
 - Rapid mode reports warm, turn-delta, warm-miss Standard escalation, or clear fallback states without installing local substitute Rapid guidance.
-- Fused mode reports bundle generation or Standard fallback, and accepted bundle cards appear as normal Card Evidence.
+- Fused mode reports bundle generation, targeted Standard repair, or full Standard fallback, and accepted bundle cards appear as normal Card Evidence.
 - Active Stop generation cancels both the host generation and Recursion prompt work without showing a provider failure.
 - Last Brief and Full Viewer inspection are available.
 - Prompt Packet inspection shows bounded current-scene guidance.

@@ -26,6 +26,8 @@ Inspection metadata can include:
 
 ![Prompt Packet viewer with selected card refs, omissions, injection metadata, and sanitized diagnostics](../../assets/documentation/renders/recursion-prompt-packet-viewer.png)
 
+<Render Needed>: assets/documentation/renders/recursion-prompt-packet-instruction-card-evidence.png - Prompt Packet viewer showing instruction-shaped Card Evidence, Guidance status, and sanitized route metadata.
+
 The packet should stay current-scene oriented. It should not become a lore recap, transcript summary, future plot plan, or memory replacement.
 
 ## Prompt Injection Boundary

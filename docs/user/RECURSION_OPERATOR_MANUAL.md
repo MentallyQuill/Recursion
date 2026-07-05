@@ -54,7 +54,9 @@ The Pipeline control is a small icon-only dropdown immediately to the left of th
 
 The command slot changes by state. Stop generation appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
 
-When Recursion is idle, the same slot shows the Regenerate icon. Use it when Last Brief or Prompt Packet looks stale and you want the next send or swipe to rebuild fresh guidance without deleting chat data. Regenerate arms a one-shot fresh-next-generation token; it does not start provider work or SillyTavern generation on click. While armed, the icon stays visible in a pressed state, Last Brief says `Next generation will be fresh.`, and clicking the icon again cancels the token. The next send or swipe consumes the token once, bypasses same-turn packet reinstall, latest-assistant swipe reuse, cached card hand reuse, Fused bundle reuse, and Rapid warm for that generation only. Stop appears only once Recursion preparation or the host generation is actually active.
+When Recursion is idle, the same slot shows the Regenerate icon. Use it when Last Brief or Prompt Packet looks stale and you want the next send or swipe to rebuild fresh guidance without deleting chat data. Regenerate arms a one-shot fresh-next-generation token; it does not start provider work or SillyTavern generation on click. While armed, the icon stays visible in a pressed state and Last Brief keeps showing the previous completed packet until the next send or swipe begins; clicking the icon again cancels the token. The next send or swipe consumes the token once, bypasses same-turn packet reinstall, latest-assistant swipe reuse, cached card hand reuse, Fused bundle reuse, and Rapid warm for that generation only. Stop appears only once Recursion preparation or the host generation is actually active.
+
+<Render Needed>: assets/documentation/renders/recursion-operator-fresh-next-generation-armed.png - Recursion Bar idle command slot with fresh-next-generation armed, pressed Regenerate icon, and Last Brief still showing the previous completed packet.
 
 ### Hero Pixel Array Progress Menu
 
@@ -183,7 +185,7 @@ flowchart LR
 
 Fused is the large foreground card-call pipeline. It runs the same Arbiter, card-scope filtering, Manual forced-card reconciliation, scene deck, hand selection, guidance composition, prompt packet validation, and install flow as Standard. The difference is the card-generation stage: all Arbiter-requested or manually forced card families are appended into one `fusedCardBundle` request and returned as one `recursion.cardBundle.v1` response.
 
-Fused accepts valid requested card items, rejects unrequested or duplicate items, records compact omissions, and falls back to Standard individual card calls if the bundle produces no usable cards. It still obeys Reasoning Level: Low and Medium use Utility, while High and Ultra use Reasoner when the Reasoner lane is healthy.
+Fused accepts valid requested card items, rejects unrequested or duplicate items, records compact omissions, and repairs damaged or missing requested siblings through individual Standard card calls when at least one Fused item is trustworthy. It runs full Standard card fallback only when no useful bundle item survives. It still obeys Reasoning Level: Low and Medium use Utility, while High and Ultra use Reasoner when the Reasoner lane is healthy.
 
 Fused is designed for stronger reasoning models such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar. Standard is usually better for fast, cheaper utility-class models such as 500B-and-lower models, Nemotron, GPT-OSS, Gemma, and similar.
 
@@ -192,16 +194,21 @@ Use Fused when:
 - your selected provider can reliably return larger structured JSON;
 - you want one stronger model pass to coordinate multiple scene cards;
 - the Reasoner lane is healthy and selected through High or Ultra Reasoning Level;
-- you are comfortable with Standard fallback if the bundle fails validation.
+- you are comfortable with targeted Standard repair for damaged siblings and full Standard fallback if the bundle has no trustworthy cards.
 
 ```mermaid
 flowchart LR
     Send["User sends message"] --> Arbiter["Arbiter and scope policy"]
     Arbiter --> Bundle["One fusedCardBundle call"]
     Bundle --> Validate["Validate bundle and card items"]
-    Validate --> Shared["Shared deck, hand, compose, install"]
-    Validate -. "no usable cards" .-> Standard["Run Standard card calls"]
+    Validate --> Repair{"Damaged siblings?"}
+    Repair -- "no" --> Shared["Shared deck, hand, compose, install"]
+    Repair -- "yes" --> Targeted["Repair siblings with Standard card calls"]
+    Targeted --> Shared
+    Validate -. "zero trustworthy cards" .-> Standard["Run full Standard card path"]
 ```
+
+<Render Needed>: assets/documentation/renders/recursion-operator-fused-repair-progress.png - Hero Pixel Array progress menu showing accepted Fused bundle cards plus targeted Standard repair for a damaged or missing sibling.
 
 ## Settings
 
@@ -231,6 +238,8 @@ flowchart LR
 Default injection settings use Recursion's recommended concrete plan: `In Prompt`, `System`, depth `1`. Injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
 
 Retention caps are local Recursion tuning controls. Lower Source Messages or Source Text Budget if a very long chat makes Recursion feel slow. Raise Scene Caches or Journal Entries when debugging. These caps only affect Recursion-owned files and analysis windows; they do not prune SillyTavern chat history.
+
+<Render Needed>: assets/documentation/renders/recursion-operator-retention-settings.png - Advanced Retention controls showing source-window, provider-message, scene-cache, source-variant, and run-journal caps.
 
 ## Provider Controls
 
@@ -296,7 +305,7 @@ Expected behavior:
 - Utility invalid output: reject unsafe structured output and use conservative fallback.
 - Rapid warm unavailable: escalate to Standard for the same pending user message; do not install local substitute Rapid briefs.
 - Rapid invalid output or mandatory gap: escalate the current turn to Standard.
-- Bar Regenerate: immediately regenerate the current turn fresh, bypass cached cards, Rapid warm, and same-turn/swipe packet reuse for that one run, then return to the selected pipeline.
+- Bar Regenerate: arm one fresh-next-generation token without starting provider or host generation; the next send or swipe consumes it once, bypasses cached cards, Rapid warm, Fused bundle reuse, and same-turn/swipe packet reuse for that run, then returns to the selected pipeline.
 - Card failure: omit failed cards and keep valid siblings.
 - Reasoner disabled, unhealthy, missing credentials, or failed: compose with Utility.
 - Player Stop / host generation stop, including the Recursion Bar Stop generation button: abort active Recursion work, stop the host generation when the SillyTavern stop seam is available, clear owned prompt keys, and show skipped/canceled progress rather than a provider warning.
@@ -369,7 +378,7 @@ Use this checklist for a practical browser pass:
 3. Open the Hero Pixel Array progress menu, Last Brief dropdown, Settings, and Full Viewer.
 4. Visit Play, Providers, Advanced, Prompt Packet, and Viewer sections.
 5. Configure and test Utility when provider work is intended.
-6. Confirm the Regenerate icon appears in the bar while idle; click it and confirm the icon stays visible in a pressed armed state, Stop remains hidden, and Last Brief reads `Next generation will be fresh.`
+6. Confirm the Regenerate icon appears in the bar while idle; click it and confirm the icon stays visible in a pressed armed state, Stop remains hidden, and Last Brief keeps showing the previous completed packet.
 7. Send or swipe once and confirm the armed token is consumed, normal generation progress appears, and Stop is available only while Recursion or the host generation is active.
 8. Turn power off and confirm prompt lanes are absent or cleared.
 9. Set Auto and confirm Recursion is ready to compile.

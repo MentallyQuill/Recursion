@@ -2781,11 +2781,14 @@ for (const pipelineMode of ['standard', 'rapid']) {
   assertEqual(first.ok, true, 'fresh next same-turn setup installs');
   assertEqual(installed.length, 1, 'fresh next same-turn setup installs one packet');
   const callsAfterFirst = providerCalls;
+  const firstPacketId = runtime.view().lastBrief?.packetId;
+  const firstHandId = runtime.view().lastBrief?.handId;
   const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
   assertEqual(queued.ok, true, 'fresh next generation queues successfully');
   assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation is visible as pending');
-  assertEqual(runtime.view().lastBrief?.status, 'clearing', 'fresh next generation clears Last Brief immediately');
-  assertEqual(runtime.view().lastBrief?.reason, 'user-fresh-next-generation', 'fresh next generation records Last Brief clear reason');
+  assertEqual(runtime.view().lastBrief?.status, 'ready', 'fresh next generation keeps Last Brief ready until send or swipe');
+  assertEqual(runtime.view().lastBrief?.packetId, firstPacketId, 'fresh next generation keeps the previous packet visible while armed');
+  assertEqual(runtime.view().lastBrief?.handId, firstHandId, 'fresh next generation keeps the previous hand visible while armed');
   const second = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
   assertEqual(second.ok, true, 'fresh next same-turn run succeeds');
   assertEqual(second.reused, undefined, 'fresh next same-turn run does not report packet reuse');
@@ -2817,7 +2820,7 @@ for (const pipelineMode of ['standard', 'rapid']) {
   const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
   assertEqual(queued.ok, true, 'fresh next generation queues successfully');
   assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation is visible as pending');
-  assertEqual(runtime.view().lastBrief?.reason, 'user-fresh-next-generation', 'fresh next generation clears Last Brief with queued reason');
+  assertEqual(runtime.view().lastBrief?.status, 'empty', 'fresh next generation does not synthesize Last Brief state before a packet exists');
   assertDeepEqual(hostStartCalls, [], 'queuing fresh next generation does not start host generation');
 }
 
@@ -2831,6 +2834,7 @@ for (const pipelineMode of ['standard', 'rapid']) {
   const cleared = await runtime.clearFreshNextGeneration({ source: 'bar' });
   assertEqual(cleared.ok, true, 'fresh next generation clear succeeds');
   assertEqual(runtime.view().freshNextGeneration?.pending, false, 'fresh next generation clear removes pending token');
+  assertEqual(runtime.view().lastBrief?.status, 'empty', 'fresh next generation cancel leaves Last Brief state alone');
 }
 
 {
@@ -2923,7 +2927,7 @@ for (const pipelineMode of ['standard', 'rapid']) {
   await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped', messageId: 21 });
   const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
   assertEqual(queued.ok, true, 'fresh latest assistant queues after swipe marker');
-  assertEqual(runtime.view().lastBrief?.reason, 'user-fresh-next-generation', 'fresh latest assistant replaces swipe clear reason');
+  assertEqual(runtime.view().lastBrief?.reason, 'latest-assistant-swipe', 'fresh latest assistant arming does not spend another Last Brief clear before generation');
   const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
   assertEqual(second.ok, true, 'fresh latest assistant run succeeds');
   assertEqual(second.reused, undefined, 'fresh latest assistant does not reuse previous packet');

@@ -102,10 +102,10 @@ Rapid foreground roles are small Utility jobs. They may hedge by starting a prim
 Regenerate is one-shot and bar-owned:
 
 1. The bar calls `runtime.requestFreshNextGeneration({ source: 'bar' })`.
-2. Runtime records `freshNextGeneration.pending = true`, clears any pending latest-assistant swipe retry, and clears Last Brief with reason `user-fresh-next-generation`.
-3. No prompt preparation, provider work, prompt installation, Rapid warm, or SillyTavern native generation starts on click. The command slot keeps Regenerate visible in a pressed armed state; Stop stays hidden while idle.
-4. A second click before consumption calls `runtime.clearFreshNextGeneration({ source: 'bar' })` and clears the armed state.
-5. The next host generation calls `prepareForGeneration({ hostGeneration: true })`, consumes the token before reuse checks, and clears the pending view.
+2. Runtime records `freshNextGeneration.pending = true`, clears any pending latest-assistant swipe retry, and leaves Last Brief showing the previous completed packet.
+3. No prompt preparation, provider work, prompt installation, prompt clearing, Rapid warm, or SillyTavern native generation starts on click. The command slot keeps Regenerate visible in a pressed armed state; Stop stays hidden while idle.
+4. A second click before consumption calls `runtime.clearFreshNextGeneration({ source: 'bar' })` and clears the armed state without changing Last Brief.
+5. The next host generation calls `prepareForGeneration({ hostGeneration: true })`, consumes the token before reuse checks, clears Last Brief with reason `user-fresh-next-generation`, and clears the pending view.
 6. Runtime skips latest-assistant swipe packet reinstall and same-turn packet reuse.
 7. Runtime soft-invalidates the current scene cache with reason `user-fresh-next-generation`.
 8. If Rapid is selected, runtime bypasses Rapid foreground warm for this run and continues through Standard foreground work.

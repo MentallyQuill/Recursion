@@ -50,6 +50,8 @@ The 2026-07-03 render pass promotes 25 live UI screenshot assets. Explanatory pi
 
 State-set renders such as bar states, progress states, Last Brief states, and fail-soft states are contact sheets composed from fresh live-mounted source captures. Their raw source tiles stay in `.recursion-doc-renderer/` and are not promoted separately.
 
+The 2026-07-05 documentation audit found new or changed UI states after the promoted render pass: declarative fresh-next-generation arming, provider-test lane-local busy state, Advanced Retention controls, instruction-shaped Card Evidence inspection, and Fused targeted repair progress. These remain open render markers until live host captures are refreshed.
+
 Future live screenshots should be promoted only when all of these are true:
 
 - the dedicated `recursion-soak-*` render profile is sterile, with no non-Recursion third-party extensions installed;
@@ -120,7 +122,13 @@ These assets are promoted live UI documentation renders and may be embedded dire
 
 ## Open Render Inventory
 
-There are no open render markers outside the fenced syntax examples in `docs/planning/DOCUMENTATION_EXPANSION_PLAN.md`.
+| Asset | Source Type | Target Doc | Visual Scope |
+| --- | --- | --- | --- |
+| `recursion-operator-fresh-next-generation-armed.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Recursion Bar idle command slot with fresh-next-generation armed, pressed Regenerate icon, and Last Brief still showing the previous completed packet. |
+| `recursion-operator-fused-repair-progress.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Hero Pixel Array progress menu showing accepted Fused bundle cards plus targeted Standard repair for a damaged or missing sibling. |
+| `recursion-operator-retention-settings.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Advanced Retention controls showing source-window, provider-message, scene-cache, source-variant, and run-journal caps. |
+| `recursion-provider-test-busy-state.png` | live host | `docs/user/PROVIDER_SETUP.md` | Reasoner Provider disclosure staying open while the clicked Test Provider button shows lane-local `Testing...` busy state. |
+| `recursion-prompt-packet-instruction-card-evidence.png` | live host | `docs/user/PROMPT_PRIVACY_AND_SAFETY.md` | Prompt Packet viewer showing instruction-shaped Card Evidence, Guidance status, selected refs, and sanitized route metadata. |
 
 ## Verification Commands
 

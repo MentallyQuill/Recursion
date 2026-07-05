@@ -2124,7 +2124,6 @@ export function createRecursionRuntime({
       source: safeText(source.source || 'bar', 80) || 'bar'
     });
     clearPendingLatestAssistantSwipeRetry();
-    clearLastBrief({ status: 'clearing', reason: 'user-fresh-next-generation' });
     return {
       ok: true,
       freshNextGeneration: freshNextGenerationView()
@@ -2133,9 +2132,6 @@ export function createRecursionRuntime({
 
   async function clearFreshNextGeneration() {
     clearPendingFreshNextGeneration();
-    if (lastBrief.status === 'clearing' && lastBrief.reason === 'user-fresh-next-generation') {
-      clearLastBrief({ status: 'empty', reason: 'fresh-next-generation-cleared' });
-    }
     return {
       ok: true,
       freshNextGeneration: freshNextGenerationView()

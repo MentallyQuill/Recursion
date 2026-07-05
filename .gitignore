@@ -10,6 +10,9 @@ coverage/
 .tmp/
 tmp/
 artifacts/
+.agents/
+.codex/
+.superpowers/
 *.log
 
 # Local documentation render tooling

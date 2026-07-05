@@ -56,7 +56,7 @@ The command slot changes by state. Stop generation appears only while Recursion 
 
 When Recursion is idle, the same slot shows the Regenerate icon. Use it when Last Brief or Prompt Packet looks stale and you want the next send or swipe to rebuild fresh guidance without deleting chat data. Regenerate arms a one-shot fresh-next-generation token; it does not start provider work or SillyTavern generation on click. While armed, the icon stays visible in a pressed state and Last Brief keeps showing the previous completed packet until the next send or swipe begins; clicking the icon again cancels the token. The next send or swipe consumes the token once, bypasses same-turn packet reinstall, latest-assistant swipe reuse, cached card hand reuse, Fused bundle reuse, and Rapid warm for that generation only. Stop appears only once Recursion preparation or the host generation is actually active.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-fresh-next-generation-armed.png - Recursion Bar idle command slot with fresh-next-generation armed, pressed Regenerate icon, and Last Brief still showing the previous completed packet.
+![Recursion Bar with fresh-next-generation armed and Last Brief still showing the previous packet](../../assets/documentation/renders/recursion-operator-fresh-next-generation-armed.png)
 
 ### Hero Pixel Array Progress Menu
 
@@ -208,7 +208,7 @@ flowchart LR
     Validate -. "zero trustworthy cards" .-> Standard["Run full Standard card path"]
 ```
 
-<Render Needed>: assets/documentation/renders/recursion-operator-fused-repair-progress.png - Hero Pixel Array progress menu showing accepted Fused bundle cards plus targeted Standard repair for a damaged or missing sibling.
+![Fused repair progress with accepted bundle cards and targeted Standard repair](../../assets/documentation/renders/recursion-operator-fused-repair-progress.png)
 
 ## Settings
 
@@ -239,7 +239,7 @@ Default injection settings use Recursion's recommended concrete plan: `In Prompt
 
 Retention caps are local Recursion tuning controls. Lower Source Messages or Source Text Budget if a very long chat makes Recursion feel slow. Raise Scene Caches or Journal Entries when debugging. These caps only affect Recursion-owned files and analysis windows; they do not prune SillyTavern chat history.
 
-<Render Needed>: assets/documentation/renders/recursion-operator-retention-settings.png - Advanced Retention controls showing source-window, provider-message, scene-cache, source-variant, and run-journal caps.
+![Advanced Retention controls for source windows, provider-visible messages, scene caches, source variants, and run journals](../../assets/documentation/renders/recursion-operator-retention-settings.png)
 
 ## Provider Controls
 

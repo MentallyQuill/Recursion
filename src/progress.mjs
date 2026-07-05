@@ -422,6 +422,7 @@ function childStepFromEvent(event, state, order = 0) {
   if (phase.startsWith('providerCall') || isProviderSettledEvent(event)) {
     const roleId = cleanText(detail.roleId || event.roleId);
     if (!roleId) return null;
+    if (roleId === 'fusedCardBundle') return null;
     return normalizeChildStep({
       label: roleLabel(roleId, activityLabelText(event)),
       providerLane: event.providerLane || detail.lane,
@@ -675,6 +676,7 @@ function appendPendingChildSteps(map, view, orderStart = 0) {
   const jobs = Array.isArray(source.lastPlan?.cardJobs) ? source.lastPlan.cardJobs : [];
   if (hasTerminalPromptOutcome(map)) return;
   const parentStepId = map.has('fused-card-bundle') ? 'fused-card-bundle' : 'utility-card-batch';
+  if (parentStepId === 'fused-card-bundle') return;
   if (jobs.length && map.has(parentStepId)) {
     let order = orderStart;
     for (const job of jobs) {

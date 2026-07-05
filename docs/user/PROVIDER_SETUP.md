@@ -9,7 +9,7 @@ Reasoner is not a better default Utility. Utility remains the required path and 
 
 ![Utility and Reasoner provider controls with session-only key state](../../assets/documentation/renders/recursion-provider-controls-utility-reasoner.png)
 
-<Render Needed>: assets/documentation/renders/recursion-provider-test-busy-state.png - Reasoner Provider disclosure staying open while Test Provider shows lane-local `Testing...` busy state.
+![Reasoner Provider stays open while its Test Provider button shows the lane-local Testing state](../../assets/documentation/renders/recursion-provider-test-busy-state.png)
 
 ## Source Options
 

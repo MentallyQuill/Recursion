@@ -4,125 +4,94 @@
 
 # Recursion
 
-Recursion is a SillyTavern extension for roleplay sessions where the model has the context, but still misses what matters in the next reply.
+Recursion is a SillyTavern extension that helps a roleplay model notice what matters before it writes.
 
-It reads the active chat, reasons over the immediate scene, builds a compact deck of scene cards, and chooses the cards that matter right now. Before generation, it turns that work into an inspectable prompt packet so the next response has a sharper sense of pressure, intent, constraints, consequences, hidden boundaries, environmental affordances, and unresolved threads.
+It reads the active chat, reasons over the immediate scene, builds a compact deck of scene cards, and selects the cards that matter for the next reply. The result is an inspectable prompt packet with guidance, card evidence, and guardrails for the current moment: pressure, intent, constraints, consequences, hidden boundaries, environmental affordances, and unresolved threads.
 
-Recursion is a focused scene reasoning layer for the moment in front of you.
+Recursion is not a lorebook replacement or a second chat. It is a scene reasoning layer for the reply in front of you.
 
-![Recursion Bar mounted in SillyTavern on desktop](assets/documentation/renders/recursion-bar-desktop.png)
+## At A Glance
+
+- Builds scene cards for motivations, social subtext, consequences, knowledge, environment, items, and open threads.
+- Selects a focused turn hand so the prompt gets what matters now, not every possible note.
+- Uses separate Utility and optional Reasoner lanes, so fast planning and deeper synthesis can be tuned independently.
+- Supports Auto mode for hands-off preparation and Manual mode for explicit operator control.
+- Installs Recursion-owned SillyTavern prompt entries, then shows exactly what was prepared through Last Brief, progress states, and the Full Viewer.
+- Keeps provider secrets and raw model I/O out of saved settings, prompt packets, run journals, diagnostics, browser storage, and SillyTavern file storage.
+
+## Feature Surfaces
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="assets/documentation/renders/recursion-operator-pipeline-controls.png" alt="Recursion pipeline controls" width="100%"><br>
+      <strong>Pipelines</strong><br>
+      Pick Standard, Rapid, or Fused depending on whether you want maximum clarity, lower send-time latency, or one larger structured card pass.
+    </td>
+    <td width="50%">
+      <img src="assets/documentation/renders/recursion-operator-mode-controls.png" alt="Recursion mode controls" width="100%"><br>
+      <strong>Modes</strong><br>
+      Use Auto when Recursion should prepare the next reply on its own, or Manual when you want to choose when scene work runs.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="assets/documentation/renders/recursion-operator-progress-menu-states.png" alt="Recursion progress dropdown states" width="100%"><br>
+      <strong>Progress Dropdown</strong><br>
+      Watch snapshot, planning, card work, prompt composition, install, fallback, and ready states without leaving the chat.
+    </td>
+    <td width="50%">
+      <img src="assets/documentation/renders/recursion-operator-last-brief-states.png" alt="Recursion Last Brief card viewer" width="100%"><br>
+      <strong>Last Brief</strong><br>
+      Inspect the latest selected hand, card evidence, guidance, guardrails, omissions, and packet metadata from the compact viewer.
+    </td>
+  </tr>
+</table>
 
 ## Why Use It
 
 LLMs can lose the practical shape of a scene even when the relevant text is still in context. They remember that a room exists, but miss the locked door. They know a character is angry, but fail to let that anger change the exchange. They know a secret, but reveal it too early.
 
-Recursion is built for that gap. It helps the model notice what the scene is asking for before it writes.
+Recursion is built for that gap. It helps the model read the scene like an operator would: what changed, what is under pressure, what should stay hidden, what consequences are now active, and what details should shape the next reply.
 
-| What Recursion adds | Why it matters |
-| --- | --- |
-| Scene cards | Breaks the current situation into usable reasoning pieces: motivations, social subtext, consequences, knowledge, environment, items, and open threads. |
-| Turn hand selection | Chooses the cards that matter for this reply, so the prompt does not become a pile of every possible note. |
-| Utility and Reasoner lanes | Uses a reliable Utility lane for planning, with an optional Reasoner lane when you want deeper synthesis. |
-| Auto and Manual modes | Lets you choose whether Recursion prepares replies automatically or only when you ask it to. |
-| Inspectable prompt packet | Shows what Recursion injected, why cards were selected, what was left out, and where fallback behavior occurred. |
-| SillyTavern-native UI | Keeps controls, progress, Last Brief, settings, and the Full Viewer close to the chat instead of hiding them in a separate workflow. |
+That makes it useful for long-running roleplay, scenes with layered motives, social tension, investigations, hidden information, object continuity, environmental constraints, and any setup where the next reply should respond to more than the last line of dialogue.
 
-![Hero Pixel Array progress menu during an Auto pass](assets/documentation/renders/recursion-progress-menu-auto-pass.png)
+## Recursion vs Stepped Thinking
 
-## Stepped Thinking vs Recursion
+Stepped Thinking gives a character a private pre-generation pass. It is useful when the missing piece is character interiority: what a character feels, intends, hides, or thinks before speaking.
 
-Stepped Thinking and Recursion both improve a reply before it is generated, but they solve different problems.
+Recursion works at the scene level. It does not just ask for a stream of thoughts; it builds a card deck across the live situation, chooses the most relevant cards for this turn, and turns that into prompt evidence the next reply can use. That makes Recursion a better fit when the problem is scene awareness: missed constraints, unresolved threads, hidden knowledge, social pressure, consequences, items, environment, and continuity that should affect the reply right now.
 
-Stepped Thinking gives a character a private pre-generation pass. It asks the model to generate inner thoughts, plans, emotions, or other user-defined material before the visible reply. If the missing piece is character interiority, that is the right category: what a character feels, intends, hides, or thinks before speaking. It also runs the risk of inadvertently injecting secrets, mind reading, and inner thoughts that shouldn't be public.
+The tools can complement each other, but they are not the same category. Stepped Thinking is strongest as an inner-pass tool. Recursion is stronger as a structured scene-reasoning and prompt-packet tool.
 
-Recursion goes after a broader failure mode. In long or complex roleplay, the model can have the right text in context and still miss what the scene demands next. It forgets the locked door, ignores the implied threat, reveals a secret too early, treats a major emotional shift as flavor, or misses that an item, relationship, or environmental detail should change the reply.
+## Pipelines
 
-Instead of generating one stream of character thoughts, Recursion builds a scene deck across motivations, social subtext, consequences, knowledge, environment, items, and open threads. It then selects a turn hand, giving the prompt details that matter now, helping the model focus on what is important given the context.
+Pipeline controls decide how Recursion schedules scene work. Auto and Manual decide when it runs.
 
-## What It Does
+| Pipeline | Best Fit | Tradeoff |
+| --- | --- | --- |
+| Standard | Cheap and fast models such as Gemma, GPT OSS, o3-mini, Flash-style variants from DeepSeek, Gemini, Qwen, and similar. | Most debuggable and reliable path, but it does the full foreground pass before generation continues. |
+| Rapid | Stable scenes where you want a shorter send-time pass after Recursion has warmed exact-source card evidence in the background. | Lower latency when warm, but escalates to Standard if the warm artifact is missing, stale, invalid, empty, or marked with a mandatory gap. |
+| Fused | Lower-cost models with stronger structured reasoning, such as DeepSeek, MiniMax, MiMo, Nemotron, Qwen, and similar. | Fewer card calls through one larger bundle, but depends on the model returning trustworthy structured card output. |
 
-On a run, Recursion turns the active SillyTavern chat into a short-lived prompt packet for the next generation:
+## What You Can Inspect
 
-1. It builds a bounded snapshot of the current scene.
-2. It runs the Standard, Rapid, or Fused pipeline, depending on the selected pipeline mode.
-3. It uses the Utility provider to plan, update scene cards, select the turn hand, compose guidance, run a Rapid foreground delta, or build a Fused card bundle.
-4. It can use the Reasoner provider for deeper synthesis at higher reasoning levels.
-5. It composes a prompt packet with provider-authored Guidance, full selected Card Evidence, Guardrails, card references, omissions, and metadata.
-6. It injects the packet through Recursion-owned SillyTavern prompt entries.
-
-## Standard, Rapid, And Fused Pipelines
-
-Pipeline controls are separate from Auto and Manual. Auto and Manual decide when Recursion prepares guidance; Standard, Rapid, and Fused decide how that scene work is scheduled.
-
-Standard is the default reference pipeline. When you send a message, Recursion performs the full foreground sequence: snapshot, Utility Arbiter planning, card generation or reuse, hand selection, composition, validation, and prompt install. Use Standard when you want maximum coverage, when a scene has shifted, or when you want the most debuggable behavior.
-
-```mermaid
-flowchart LR
-    Send["User sends message"] --> Snapshot["Capture scene snapshot"]
-    Snapshot --> Arbiter["Utility Arbiter plans card work"]
-    Arbiter --> Cards["Generate or reuse scene cards"]
-    Cards --> Hand["Select turn hand"]
-    Hand --> Compose["Compose and validate packet"]
-    Compose --> Install["Install Recursion prompt keys"]
-    Install --> Continue["Host generation continues"]
-```
-
-Rapid is the lower-latency pipeline. It warms a provider-generated card packet in the background after an assistant message lands or the scene settles, then uses a short Utility `rapidTurnDelta` on the next send. If no exact warm artifact is ready, Rapid escalates that same turn to Standard rather than creating a lower-quality summary path. If Rapid output is invalid, empty, unavailable, or the provider marks a mandatory gap, Recursion escalates that turn to Standard rather than inventing local Rapid guidance.
-
-```mermaid
-flowchart LR
-    Settle["Assistant lands or scene settles"] --> Warm["Warm provider-generated card packet"]
-    Warm --> Cache["Store exact-source Rapid V2 metadata"]
-    Cache --> Send["User sends next message"]
-    Send --> Decision{"Warm artifact usable?"}
-    Decision -- "yes" --> Delta["Utility rapidTurnDelta"]
-    Decision -- "no" --> Standard["Run Standard for same turn"]
-    Delta --> Packet["Install V3 Rapid packet"]
-    Delta -. "mandatory gap, invalid, empty, or unavailable output" .-> Standard
-```
-
-Fused is the large foreground card-call pipeline. It keeps Standard's Arbiter, hand selection, guidance composition, packet validation, and install path, but asks one provider call to generate every requested card family as a structured `fusedCardBundle`. Valid requested cards enter the normal hand and Card Evidence path. If only some requested siblings are damaged or missing, Recursion repairs those families through individual Standard card calls; a full Standard fallback is reserved for a zero-trust bundle.
-
-```mermaid
-flowchart LR
-    Send["User sends message"] --> Arbiter["Utility Arbiter plans card work"]
-    Arbiter --> Bundle["One fusedCardBundle call"]
-    Bundle --> Validate["Validate bundle and card items"]
-    Validate --> Repair{"Damaged siblings?"}
-    Repair -- "no" --> Hand["Select turn hand"]
-    Repair -- "yes" --> Targeted["Repair missing families with Standard card calls"]
-    Targeted --> Hand
-    Hand --> Compose["Compose V3 prompt packet"]
-    Compose --> Install["Install Recursion prompt keys"]
-    Validate -. "zero trustworthy cards" .-> Standard["Run full Standard card path"]
-```
-
-![Full Viewer overview with Now, Deck, Activity, Prompt Packet, Settings, and Providers](assets/documentation/renders/recursion-full-viewer-overview.png)
+- Last Brief: the latest selected card hand and prepared prompt packet.
+- Full Viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics.
+- Prompt Packet: guidance, card evidence, guardrails, references, omissions, fallbacks, and metadata.
+- Progress States: live pass status, fallback paths, repair work, install state, and readiness.
+- Provider Health: Utility and Reasoner tests, session-only direct keys, fallback visibility, and lane status.
 
 ## Fast Start
 
-1. Install as a SillyTavern extension and refresh your browser.
-2. Configure and test the Utility provider, and add the optional Reasoner provider if you want a deeper synthesis lane.
-3. Start with the `Standard` pipeline while you confirm behavior in a scene.
-4. Use `Auto` when you want Recursion to prepare the next reply on its own. Use `Manual` for explicit card selection.
-5. Switch to `Rapid` when you want warmed card evidence and guidance plus a shorter send-time delta.
-6. Try `Fused` when you use a stronger model that can reliably return one larger structured card bundle.
-7. Open `Last Brief` or the Full Viewer whenever you want to see what Recursion prepared.
+1. Install Recursion as a SillyTavern extension and refresh your browser.
+2. Configure and test the Utility provider.
+3. Add the optional Reasoner provider if you want deeper synthesis at higher reasoning levels.
+4. Start with the Standard pipeline while you confirm behavior in a scene.
+5. Use Auto for normal hands-off preparation, or Manual when you want explicit control.
+6. Open Last Brief after generation to inspect what Recursion prepared.
 
 For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md). For the full surface-by-surface guide, use the [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md).
-
-## Key Surfaces
-
-| Surface | Purpose |
-| --- | --- |
-| Recursion Bar | Chat-attached controls for power, Standard/Rapid/Fused pipeline, Auto/Manual mode, Cards scope, Hero Pixel Array progress, reasoning level, Last Brief, settings, and viewer access. |
-| Hero Pixel Array | Compact progress menu for snapshot reading, Utility planning, card generation, prompt composition, prompt install, fallback, and ready states. |
-| Last Brief | Quick inspection surface for the latest selected hand and prompt packet without leaving the chat. |
-| Full Viewer | Detailed view of Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics. |
-| Provider controls | Utility and Reasoner setup, provider tests, session-only direct keys, fallback visibility, and lane health. |
-| Prompt Packet viewer | Redaction-aware inspection of the Recursion-owned prompt material prepared for the next generation. |
-
-![Recursion Bar in a phone-width SillyTavern viewport](assets/documentation/renders/recursion-bar-mobile.png)
 
 ## Documentation
 
@@ -137,7 +106,7 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 
 ## Security And Privacy
 
-Recursion treats provider secrets and raw model I/O as sensitive. OpenAI-compatible direct keys are session-only and don't persist to settings, scene cache, prompt packets, run journals, diagnostics, browser local storage, SillyTavern file storage, or test artifacts.
+Recursion treats provider secrets and raw model I/O as sensitive. OpenAI-compatible direct keys are session-only and do not persist to settings, scene cache, prompt packets, run journals, diagnostics, browser local storage, SillyTavern file storage, or test artifacts.
 
 Normal diagnostics use hashes, compact statuses, bounded metadata, and sanitized activity instead of raw prompts, raw provider responses, hidden reasoning, or full transcript text.
 

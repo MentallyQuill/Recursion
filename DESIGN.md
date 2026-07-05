@@ -217,7 +217,7 @@ Do not introduce large rounded cards or soft marketing panels. Keep cards at 8px
 
 **Hero Pixel Array:** The primary state indicator. Running is cyan, done is green, cached is purple, warning is amber, failed is red, pending is empty muted. Respect reduced-motion preferences and never rely on animation alone.
 
-**Progress menu:** A compact Codex-like task list attached to the Hero Pixel Array. Rows update in place, support nested card-generation children, and share the same normalized `progressRun.steps[]` model as the pixel array.
+**Progress menu:** A compact Codex-like task list attached to the Hero Pixel Array. Rows update in place, support nested card-generation children, and share the same normalized `progressRun.steps[]` model as the pixel array. For Fused, the bundle call is the parent row only; child rows represent actual accepted, repaired, cached, fallback, warning, or failed card-family outcomes, not the bundle role itself or speculative requested-card placeholders.
 
 **Last Brief dropdown:** A read-only trust surface. Collapsed rows use category icons, compact one-line card text, and subtle metachips. Expanded rows show the full card text at natural height with no character cap, ellipsis, or nested card scroll; the dropdown/list remains the single scroll surface. Priority is the only strong chip color.
 

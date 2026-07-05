@@ -115,6 +115,14 @@ const fusedBundleProgress = createProgressRunModel({
     { runId: 'fused-progress', phase: 'fusedCardBundleRunning', label: 'Generating fused card bundle...', providerLane: 'reasoner', cardCounts: { requested: 2 }, recordedAt: '2' },
     {
       runId: 'fused-progress',
+      phase: 'providerCallRunning',
+      label: 'fusedCardBundle started',
+      providerLane: 'reasoner',
+      detail: { roleId: 'fusedCardBundle' },
+      recordedAt: '2.5'
+    },
+    {
+      runId: 'fused-progress',
       phase: 'cardProgress',
       severity: 'success',
       detail: {
@@ -128,7 +136,7 @@ const fusedBundleProgress = createProgressRunModel({
       recordedAt: '3'
     }
   ],
-  activity: { runId: 'fused-progress', phase: 'fusedCardBundleRunning', label: 'Generating fused card bundle...', providerLane: 'reasoner', cardCounts: { requested: 2 }, recordedAt: '2' },
+  activity: { runId: 'fused-progress', phase: 'providerCallRunning', label: 'fusedCardBundle started', providerLane: 'reasoner', detail: { roleId: 'fusedCardBundle' }, recordedAt: '2.5' },
   settings: { pipelineMode: 'fused' },
   lastPlan: {
     cardJobs: [
@@ -142,7 +150,50 @@ assert(fusedBundleStep, 'Fused progress renders a Fused card bundle row');
 assertEqual(fusedBundleStep.label, 'Fused card bundle', 'Fused progress labels the bundle row');
 assertEqual(fusedBundleStep.providerLane, 'reasoner', 'Fused progress keeps Reasoner lane on the bundle row');
 assert(fusedBundleStep.children.some((child) => child.id === 'scene-frame-card' && child.state === 'done'), 'Fused progress nests generated card rows under the bundle row');
-assert(fusedBundleStep.children.some((child) => child.id === 'scene-constraints-card' && child.state === 'pending'), 'Fused progress seeds pending requested siblings under the bundle row');
+assert(!fusedBundleStep.children.some((child) => child.sourceRoleId === 'fusedCardBundle'), 'Fused progress does not duplicate the bundle provider call as a child row');
+assert(!fusedBundleStep.children.some((child) => child.id === 'scene-constraints-card' && child.state === 'pending'), 'Fused progress does not seed speculative requested siblings under the bundle row');
+
+const fusedSettledProgress = createProgressRunModel({
+  activityHistory: [
+    { runId: 'fused-settled-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },
+    { runId: 'fused-settled-progress', phase: 'fusedCardBundleRunning', label: 'Generating fused card bundle...', providerLane: 'utility', cardCounts: { requested: 2 }, recordedAt: '2' },
+    {
+      runId: 'fused-settled-progress',
+      phase: 'providerCallSettled',
+      label: 'fusedCardBundle success',
+      outcome: 'success',
+      providerLane: 'utility',
+      detail: { roleId: 'fusedCardBundle' },
+      recordedAt: '3'
+    },
+    {
+      runId: 'fused-settled-progress',
+      phase: 'cardProgress',
+      severity: 'success',
+      detail: {
+        parentStepId: 'fused-card-bundle',
+        roleId: 'sceneFrameCard',
+        family: 'Scene Frame',
+        source: 'generated',
+        state: 'done'
+      },
+      recordedAt: '4'
+    },
+    { runId: 'fused-settled-progress', phase: 'settled', label: 'Recursion prompt ready.', severity: 'success', recordedAt: '5' }
+  ],
+  activity: { runId: 'fused-settled-progress', phase: 'settled', label: 'Recursion prompt ready.', severity: 'success', recordedAt: '5' },
+  settings: { pipelineMode: 'fused' },
+  lastPlan: {
+    cardJobs: [
+      { role: 'sceneFrameCard', family: 'Scene Frame' },
+      { role: 'sceneConstraintsCard', family: 'Scene Constraints' }
+    ]
+  }
+});
+const fusedSettledStep = fusedSettledProgress.steps.find((step) => step.id === 'fused-card-bundle');
+assert(fusedSettledStep, 'settled Fused progress keeps the Fused card bundle parent row');
+assertEqual(fusedSettledStep.children.length, 1, 'settled Fused progress shows only actual accepted card child rows');
+assertEqual(fusedSettledStep.children[0].id, 'scene-frame-card', 'settled Fused progress keeps the accepted card as the child row');
 
 const fusedRepairProgress = createProgressRunModel({
   activityHistory: [

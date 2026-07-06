@@ -18,25 +18,50 @@ const SOAK_USER_PATTERN = /^recursion-soak-[a-z0-9][a-z0-9_.-]{0,63}$/;
 
 export function inspectRecursionPromptRequest(body = {}) {
   const messages = Array.isArray(body?.messages) ? body.messages : [];
-  const content = messages.map((message) => {
+  const serializedMessages = messages.map((message) => {
+    let content = '';
     if (typeof message?.content === 'string') return message.content;
     try {
-      return JSON.stringify(message?.content ?? '');
+      content = JSON.stringify(message?.content ?? '');
     } catch {
-      return '';
+      content = '';
     }
-  }).join('\n');
+    return content;
+  });
+  const content = serializedMessages.join('\n');
   const guidance = content.includes('Guidance:');
   const cardEvidence = content.includes('Private Recursion card evidence for the next assistant message.')
     && content.includes('Card evidence:');
   const guardrails = content.includes('Guardrails:');
+  const recursionMessageIndexes = serializedMessages
+    .map((messageContent, index) => (
+      messageContent.includes('Guidance:')
+      || messageContent.includes('Private Recursion card evidence for the next assistant message.')
+      || messageContent.includes('Card evidence:')
+      || messageContent.includes('Guardrails:')
+        ? index
+        : -1
+    ))
+    .filter((index) => index >= 0);
+  const recursionMessageRoles = [...new Set(recursionMessageIndexes
+    .map((index) => String(messages[index]?.role || ''))
+    .filter(Boolean))];
+  const systemInjected = guidance
+    && cardEvidence
+    && guardrails
+    && recursionMessageIndexes.length > 0
+    && recursionMessageRoles.length === 1
+    && recursionMessageRoles[0] === 'system';
   return {
     type: String(body?.type || ''),
     messageCount: messages.length,
     guidance,
     cardEvidence,
     guardrails,
-    complete: guidance && cardEvidence && guardrails
+    recursionMessageIndexes,
+    recursionMessageRoles,
+    systemInjected,
+    complete: systemInjected
   };
 }
 
@@ -2691,14 +2716,7 @@ async function runBrowserUiSmoke({
         serializedPromptRequests.push(inspectRecursionPromptRequest(body));
         if (serializedPromptRequests.length > 40) serializedPromptRequests.shift();
       } catch {
-        serializedPromptRequests.push({
-          type: '',
-          messageCount: 0,
-          guidance: false,
-          cardEvidence: false,
-          guardrails: false,
-          complete: false
-        });
+        serializedPromptRequests.push(inspectRecursionPromptRequest({}));
       }
     });
     page.on('console', (message) => {
@@ -3215,14 +3233,7 @@ async function runBrowserUiSmoke({
       }
       const outboundPromptEvidence = [...serializedPromptRequests].reverse().find((entry) => entry.complete)
         || serializedPromptRequests.at(-1)
-        || {
-          type: '',
-          messageCount: 0,
-          guidance: false,
-          cardEvidence: false,
-          guardrails: false,
-          complete: false
-        };
+        || inspectRecursionPromptRequest({});
       generation = {
         ...(generation || {}),
         outboundPromptEvidence
@@ -3479,6 +3490,13 @@ function promptMetadataFromBrowserResult(report, browserResult) {
           guidance: generation.outboundPromptEvidence.guidance === true,
           cardEvidence: generation.outboundPromptEvidence.cardEvidence === true,
           guardrails: generation.outboundPromptEvidence.guardrails === true,
+          recursionMessageIndexes: Array.isArray(generation.outboundPromptEvidence.recursionMessageIndexes)
+            ? generation.outboundPromptEvidence.recursionMessageIndexes.map((value) => Number(value)).filter(Number.isInteger)
+            : [],
+          recursionMessageRoles: Array.isArray(generation.outboundPromptEvidence.recursionMessageRoles)
+            ? generation.outboundPromptEvidence.recursionMessageRoles.map((value) => sanitizeHarnessText(value, 20))
+            : [],
+          systemInjected: generation.outboundPromptEvidence.systemInjected === true,
           complete: generation.outboundPromptEvidence.complete === true
         }
       : null,

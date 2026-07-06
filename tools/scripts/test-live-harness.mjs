@@ -38,9 +38,33 @@ assertDeepEqual(
     guidance: true,
     cardEvidence: true,
     guardrails: true,
+    recursionMessageIndexes: [0, 1, 2],
+    recursionMessageRoles: ['system'],
+    systemInjected: true,
     complete: true
   },
-  'serialized prompt inspection detects all Recursion sections without retaining prompt text'
+  'serialized prompt inspection detects all Recursion sections in system messages without retaining prompt text'
+);
+assertDeepEqual(
+  inspectRecursionPromptRequest({
+    type: 'normal',
+    messages: [{
+      role: 'user',
+      content: 'Guidance:\nKeep moving.\nPrivate Recursion card evidence for the next assistant message.\nCard evidence:\n- Evidence.\nGuardrails:\n- Honor facts.'
+    }]
+  }),
+  {
+    type: 'normal',
+    messageCount: 1,
+    guidance: true,
+    cardEvidence: true,
+    guardrails: true,
+    recursionMessageIndexes: [0],
+    recursionMessageRoles: ['user'],
+    systemInjected: false,
+    complete: false
+  },
+  'serialized prompt inspection rejects complete Recursion text outside a system message'
 );
 assertEqual(
   inspectRecursionPromptRequest({ messages: [{ role: 'system', content: 'Unrelated system prompt.' }] }).complete,

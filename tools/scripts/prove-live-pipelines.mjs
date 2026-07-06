@@ -2,17 +2,29 @@ import { chromium } from 'playwright';
 import { pathToFileURL } from 'url';
 import {
   createSillyTavernHttpSession,
+  inspectRecursionPromptRequest,
   validateSoakUserHandle
 } from './lib/sillytavern-live-harness.mjs';
 
 const PIPELINES = new Set(['standard', 'rapid', 'fused']);
+const PLACEMENTS = new Set(['in_prompt', 'in_chat']);
+const PLACEMENT_POSITIONS = Object.freeze({ in_prompt: 0, in_chat: 1 });
+const PROMPT_ROLE_VALUES = Object.freeze({ system: 0, user: 1, assistant: 2 });
+const RECURSION_PROMPT_KEYS = Object.freeze([
+  'recursion.guidance',
+  'recursion.cardEvidence',
+  'recursion.guardrails'
+]);
 const DEFAULT_TIMEOUT_MS = 120000;
 const CHAT_STABLE_MS = 4000;
 
-function parseArgs(argv = []) {
+export function parseArgs(argv = []) {
   const args = {
     live: false,
-    pipelines: ['standard', 'rapid', 'fused']
+    pipelines: ['standard', 'rapid', 'fused'],
+    placements: ['in_prompt', 'in_chat'],
+    depth: 4,
+    role: 'system'
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -26,9 +38,116 @@ function parseArgs(argv = []) {
       const value = String(argv[index + 1] || '');
       index += 1;
       args.pipelines = value.split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+    } else if (arg === '--placement') {
+      const value = String(argv[index + 1] || '').trim().toLowerCase();
+      index += 1;
+      args.placements = value ? [value] : args.placements;
+    } else if (arg === '--placements') {
+      const value = String(argv[index + 1] || '');
+      index += 1;
+      args.placements = value.split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+    } else if (arg === '--depth') {
+      args.depth = Number(argv[index + 1]);
+      index += 1;
     }
   }
+  for (const placement of args.placements) {
+    if (!PLACEMENTS.has(placement)) throw new Error(`Unknown placement "${placement}". Use in_prompt or in_chat.`);
+  }
+  if (!Number.isInteger(args.depth) || args.depth < 0 || args.depth > 10) {
+    throw new Error('Injection depth must be an integer from 0 through 10.');
+  }
   return args;
+}
+
+export function inspectStoredRecursionPrompts(store = {}, settings = {}) {
+  const placement = String(settings.placement || '').trim().toLowerCase();
+  const role = String(settings.role || 'system').trim().toLowerCase();
+  const expectedPosition = PLACEMENT_POSITIONS[placement];
+  const expectedDepth = Number(settings.depth);
+  const expectedRole = PROMPT_ROLE_VALUES[role];
+  const blocks = RECURSION_PROMPT_KEYS.map((key) => {
+    const entry = store?.[key] || {};
+    const present = typeof entry.value === 'string' && entry.value.length > 0;
+    const position = Number.isFinite(Number(entry.position)) ? Number(entry.position) : null;
+    const depth = Number.isFinite(Number(entry.depth)) ? Number(entry.depth) : null;
+    const storedRole = Number.isFinite(Number(entry.role)) ? Number(entry.role) : null;
+    return {
+      key,
+      present,
+      position,
+      depth,
+      role: storedRole,
+      valid: present
+        && position === expectedPosition
+        && depth === expectedDepth
+        && storedRole === expectedRole
+    };
+  });
+  return {
+    placement,
+    expectedPosition,
+    expectedDepth,
+    expectedRole,
+    blocks,
+    complete: blocks.every((block) => block.valid)
+  };
+}
+
+export function inspectPacketInjectionMetadata(packet = {}, settings = {}) {
+  const placement = String(settings.placement || '').trim().toLowerCase();
+  const role = String(settings.role || 'system').trim().toLowerCase();
+  const expectedPosition = PLACEMENT_POSITIONS[placement];
+  const expectedDepth = Number(settings.depth);
+  const expectedRole = PROMPT_ROLE_VALUES[role];
+  const injectedBlocks = Array.isArray(packet?.injectedBlocks) ? packet.injectedBlocks : [];
+  const blocks = RECURSION_PROMPT_KEYS.map((key) => {
+    const block = injectedBlocks.find((entry) => String(entry?.promptKey || '') === key) || {};
+    const blockPlacement = String(block.placement || '');
+    const blockRole = String(block.role || '').toLowerCase();
+    const position = PLACEMENT_POSITIONS[blockPlacement];
+    const depth = Number.isFinite(Number(block.depth)) ? Number(block.depth) : null;
+    const numericRole = PROMPT_ROLE_VALUES[blockRole];
+    const present = Boolean(block.promptKey);
+    return {
+      key,
+      present,
+      placement: blockPlacement,
+      position,
+      depth,
+      role: numericRole,
+      valid: present
+        && blockPlacement === placement
+        && position === expectedPosition
+        && depth === expectedDepth
+        && numericRole === expectedRole
+    };
+  });
+  return {
+    source: 'validated-packet',
+    placement,
+    expectedPosition,
+    expectedDepth,
+    expectedRole,
+    blocks,
+    complete: blocks.every((block) => block.valid)
+  };
+}
+
+function promptStoreSnapshotScript() {
+  return (keys) => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const prompts = context.extensionPrompts || context.extension_prompts || {};
+    return Object.fromEntries(keys.map((key) => {
+      const entry = prompts[key] || {};
+      return [key, {
+        value: typeof entry.value === 'string' && entry.value.length > 0 ? 'present' : '',
+        position: entry.position,
+        depth: entry.depth,
+        role: entry.role
+      }];
+    }));
+  };
 }
 
 function passwordEnvKey(user) {
@@ -54,6 +173,9 @@ function assertPreflight(args, env) {
   if (!userResult.ok) fail('unsafe-user', 'RECURSION_SILLYTAVERN_USER must be a dedicated recursion-soak-* user.', { user, reason: userResult.reason });
   for (const pipeline of args.pipelines) {
     if (!PIPELINES.has(pipeline)) fail('invalid-pipeline', `Unknown pipeline "${pipeline}". Use standard, rapid, fused, or a comma-separated subset.`);
+  }
+  for (const placement of args.placements) {
+    if (!PLACEMENTS.has(placement)) fail('invalid-placement', `Unknown placement "${placement}". Use in_prompt, in_chat, or both.`);
   }
   return userResult.user;
 }
@@ -186,6 +308,37 @@ export async function selectPipeline(page, pipeline, timeoutMs) {
     const settings = context?.extensionSettings?.recursion || globalThis.extension_settings?.recursion || {};
     return String(settings.pipelineMode || '') === expected;
   }, pipeline, { timeout: timeoutMs });
+}
+
+export async function selectInjectionSettings(page, settings, timeoutMs) {
+  const panel = page.locator('[data-recursion-settings-panel]').first();
+  const panelOpen = await panel.evaluate((node) => node.hidden === false).catch(() => false);
+  if (!panelOpen) {
+    await page.locator('[data-recursion-actions]').first().click({ timeout: timeoutMs });
+  }
+  await panel.waitFor({ state: 'visible', timeout: timeoutMs });
+  await page.locator('[data-recursion-settings-tab="advanced"]').first().click({ timeout: timeoutMs });
+  const controls = [
+    ['[data-recursion-setting-injection-role]', settings.role, 'role'],
+    ['[data-recursion-setting-injection-depth]', String(settings.depth), 'depth'],
+    ['[data-recursion-setting-injection-placement]', settings.placement, 'placement']
+  ];
+  for (const [selector, value, key] of controls) {
+    await page.locator(selector).first().selectOption(value, { timeout: timeoutMs });
+    await page.waitForFunction(({ expected, settingKey }) => {
+      const injection = globalThis.__recursionLiveHarnessRuntime?.view?.()?.settings?.injection || {};
+      return String(injection[settingKey] ?? '') === String(expected);
+    }, { expected: value, settingKey: key }, { timeout: timeoutMs });
+  }
+  await page.waitForFunction((expected) => {
+    const injection = globalThis.__recursionLiveHarnessRuntime?.view?.()?.settings?.injection || {};
+    return String(injection.placement || '') === expected.placement
+      && String(injection.role || '') === expected.role
+      && Number(injection.depth) === expected.depth;
+  }, settings, { timeout: timeoutMs });
+  if (await panel.evaluate((node) => node.hidden === false).catch(() => false)) {
+    await page.locator('[data-recursion-actions]').first().click({ timeout: timeoutMs });
+  }
 }
 
 async function findSendSurface(page, timeoutMs) {
@@ -461,6 +614,16 @@ function isBenignConsoleIssue(issue = {}) {
 
 function assertPipelineProof(pipeline, proof, issues) {
   const snapshot = proof.snapshot || {};
+  if (proof.storedPromptEvidence?.complete !== true) {
+    fail(`${pipeline}-${proof.placement}-stored-prompt-mismatch`, 'Stored SillyTavern prompt metadata did not match the selected Recursion injection settings.', {
+      storedPromptEvidence: proof.storedPromptEvidence
+    });
+  }
+  if (proof.outboundPromptEvidence?.systemInjected !== true) {
+    fail(`${pipeline}-${proof.placement}-outbound-system-prompt-missing`, 'Final SillyTavern request omitted Recursion system-prompt content.', {
+      outboundPromptEvidence: proof.outboundPromptEvidence
+    });
+  }
   if (!snapshot.rootMounted) fail(`${pipeline}-root-missing`, 'Recursion root was not mounted.', { snapshot });
   if (!snapshot.powerPressed) fail(`${pipeline}-power-off`, 'Recursion was not enabled for pipeline proof.', { snapshot });
   const expectedLabel = pipeline === 'rapid' ? 'Rapid Pipeline' : (pipeline === 'fused' ? 'Fused Pipeline' : 'Standard Pipeline');
@@ -514,15 +677,15 @@ function assertPipelineProof(pipeline, proof, issues) {
   }
 }
 
-function proofMessageFor(pipeline, runId) {
+function proofMessageFor(pipeline, placement, runId) {
   return [
-    `Recursion ${pipeline} pipeline proof ${runId}:`,
+    `Recursion ${pipeline} ${placement} pipeline proof ${runId}:`,
     'I push open the rain-soaked archive door with my shoulder, keep the candle low,',
     'and ask Mara what she remembers about the missing captain before the guards hear us.'
   ].join(' ');
 }
 
-async function provePipeline(page, pipeline, timeoutMs, runId) {
+async function provePipeline(page, pipeline, placement, depth, role, timeoutMs, runId) {
   let phase = 'power-on';
   try {
     await setPower(page, true, timeoutMs);
@@ -530,6 +693,9 @@ async function provePipeline(page, pipeline, timeoutMs, runId) {
     await selectPipeline(page, pipeline, timeoutMs);
     phase = 'mode-select';
     await selectMode(page, 'auto', timeoutMs);
+    phase = 'injection-settings';
+    const injection = { placement, depth, role };
+    await selectInjectionSettings(page, injection, timeoutMs);
     if (pipeline === 'rapid') {
       phase = 'rapid-base-settle';
       await waitForChatSettled(page, { timeoutMs });
@@ -537,7 +703,7 @@ async function provePipeline(page, pipeline, timeoutMs, runId) {
       await triggerRapidWarm(page, timeoutMs);
     }
     phase = 'pipeline-send';
-    const send = await sendAndWait(page, proofMessageFor(pipeline, runId), {
+    const send = await sendAndWait(page, proofMessageFor(pipeline, placement, runId), {
       requirePrompt: true,
       timeoutMs
     });
@@ -547,7 +713,7 @@ async function provePipeline(page, pipeline, timeoutMs, runId) {
     const diagnosticsExport = await exportDiagnosticsSnapshot(page, timeoutMs);
     phase = 'snapshot';
     const snapshot = await page.evaluate(liveSnapshotScript());
-    return { pipeline, send, snapshot, diagnosticsExport };
+    return { pipeline, placement, depth, role, send, snapshot, diagnosticsExport };
   } catch (error) {
     const snapshot = await page.evaluate(liveSnapshotScript()).catch(() => null);
     const chat = await page.evaluate(contextChatSummaryScript()).catch(() => null);
@@ -582,47 +748,87 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
   const pageIssues = [];
   const proofs = [];
   try {
-    const context = await browser.newContext();
-    await context.addInitScript(() => {
-      globalThis.__recursionLiveHarness = true;
-    });
-    await context.addCookies(session.playwrightCookies());
-    const page = await context.newPage();
-    page.on('console', (message) => {
-      if (['warning', 'error'].includes(message.type())) {
-        const issue = compactIssue({ type: message.type(), text: message.text(), url: message.location()?.url });
-        if (!isBenignConsoleIssue(issue)) consoleIssues.push(issue);
+    for (const placement of args.placements) {
+      const context = await browser.newContext();
+      const serializedPromptRequests = [];
+      try {
+        await context.addInitScript(() => {
+          globalThis.__recursionLiveHarness = true;
+        });
+        await context.addCookies(session.playwrightCookies());
+        const page = await context.newPage();
+        page.on('console', (message) => {
+          if (['warning', 'error'].includes(message.type())) {
+            const issue = compactIssue({ type: message.type(), text: message.text(), url: message.location()?.url });
+            if (!isBenignConsoleIssue(issue)) consoleIssues.push(issue);
+          }
+        });
+        page.on('pageerror', (error) => {
+          pageIssues.push({ message: String(error?.message || error).slice(0, 500) });
+        });
+        page.on('request', (request) => {
+          if (!String(request.url?.() || '').includes('/api/backends/chat-completions/generate')) return;
+          const promptStore = page.evaluate(promptStoreSnapshotScript(), RECURSION_PROMPT_KEYS).catch(() => ({}));
+          try {
+            serializedPromptRequests.push({
+              evidence: inspectRecursionPromptRequest(JSON.parse(String(request.postData?.() || ''))),
+              promptStore
+            });
+          } catch {
+            serializedPromptRequests.push({ evidence: inspectRecursionPromptRequest({}), promptStore });
+          }
+        });
+        await page.goto(env.SILLYTAVERN_BASE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+        await waitForRoot(page, timeoutMs);
+        for (const pipeline of args.pipelines) {
+          const issueStart = { console: consoleIssues.length, page: pageIssues.length };
+          const requestStart = serializedPromptRequests.length;
+          const proof = await provePipeline(page, pipeline, placement, args.depth, args.role, timeoutMs, runId);
+          const pipelineRequests = serializedPromptRequests.slice(requestStart);
+          const selectedRequest = [...pipelineRequests].reverse().find((entry) => entry.evidence.complete)
+            || pipelineRequests.at(-1)
+            || { evidence: inspectRecursionPromptRequest({}), promptStore: Promise.resolve({}) };
+          proof.outboundPromptEvidence = selectedRequest.evidence;
+          const requestTimeStoreEvidence = inspectStoredRecursionPrompts(
+            await selectedRequest.promptStore,
+            { placement, depth: args.depth, role: args.role }
+          );
+          proof.storedPromptEvidence = requestTimeStoreEvidence.complete
+            ? { source: 'request-time-store', ...requestTimeStoreEvidence }
+            : inspectPacketInjectionMetadata(
+              proof.snapshot.packet || proof.snapshot.promptPacketPreview || {},
+              { placement, depth: args.depth, role: args.role }
+            );
+          const issues = {
+            console: consoleIssues.slice(issueStart.console),
+            page: pageIssues.slice(issueStart.page)
+          };
+          assertPipelineProof(pipeline, proof, issues);
+          proofs.push({
+            pipeline,
+            placement,
+            configuredDepth: args.depth,
+            configuredRole: args.role,
+            chatBefore: proof.send.before.length,
+            chatAfter: proof.send.after.length,
+            assistantBefore: proof.send.before.assistantCount,
+            assistantAfter: proof.send.after.assistantCount,
+            messageProof: proof.send.messageProof,
+            rapidPath: proof.snapshot.packet?.diagnostics?.rapidPath || proof.snapshot.promptPacketPreview?.diagnostics?.rapidPath || '',
+            planDiagnostics: Array.isArray(proof.diagnosticsExport?.runtime?.plan?.diagnostics)
+              ? proof.diagnosticsExport.runtime.plan.diagnostics
+              : [],
+            storedPromptEvidence: proof.storedPromptEvidence,
+            outboundPromptEvidence: proof.outboundPromptEvidence,
+            pipelineButtonLabel: proof.snapshot.pipelineButtonLabel,
+            modeText: proof.snapshot.modeText,
+            ribbonText: proof.snapshot.ribbonText,
+            handText: proof.snapshot.handText
+          });
+        }
+      } finally {
+        await context.close().catch(() => {});
       }
-    });
-    page.on('pageerror', (error) => {
-      pageIssues.push({ message: String(error?.message || error).slice(0, 500) });
-    });
-    await page.goto(env.SILLYTAVERN_BASE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-    await waitForRoot(page, timeoutMs);
-    for (const pipeline of args.pipelines) {
-      const issueStart = { console: consoleIssues.length, page: pageIssues.length };
-      const proof = await provePipeline(page, pipeline, timeoutMs, runId);
-      const issues = {
-        console: consoleIssues.slice(issueStart.console),
-        page: pageIssues.slice(issueStart.page)
-      };
-      assertPipelineProof(pipeline, proof, issues);
-      proofs.push({
-        pipeline,
-        chatBefore: proof.send.before.length,
-        chatAfter: proof.send.after.length,
-        assistantBefore: proof.send.before.assistantCount,
-        assistantAfter: proof.send.after.assistantCount,
-        messageProof: proof.send.messageProof,
-        rapidPath: proof.snapshot.packet?.diagnostics?.rapidPath || proof.snapshot.promptPacketPreview?.diagnostics?.rapidPath || '',
-        planDiagnostics: Array.isArray(proof.diagnosticsExport?.runtime?.plan?.diagnostics)
-          ? proof.diagnosticsExport.runtime.plan.diagnostics
-          : [],
-        pipelineButtonLabel: proof.snapshot.pipelineButtonLabel,
-        modeText: proof.snapshot.modeText,
-        ribbonText: proof.snapshot.ribbonText,
-        handText: proof.snapshot.handText
-      });
     }
     return {
       status: 'pass',

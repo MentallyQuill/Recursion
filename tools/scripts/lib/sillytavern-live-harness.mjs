@@ -2718,6 +2718,13 @@ async function runBrowserUiSmoke({
         && typeof globalThis.recursionOnEnable === 'function'
         && typeof globalThis.recursionOnDisable === 'function';
     }, null, { timeout: timeoutMs });
+    await page.evaluate(() => {
+      const dismiss = [...document.querySelectorAll('button')].find((button) => (
+        /^\s*not now\s*$/i.test(String(button.textContent || ''))
+        && button.offsetParent !== null
+      ));
+      dismiss?.click();
+    });
 
     const actionsButton = page.locator('[data-recursion-actions]').first();
     await actionsButton.click({ timeout: timeoutMs });

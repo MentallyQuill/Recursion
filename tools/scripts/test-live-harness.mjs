@@ -202,7 +202,8 @@ function recursionSmokeFixtureHtml({
   visibleSendButtonClicksIgnored = false,
   sendSurface = 'complete',
   hostContinuationDomOnly = false,
-  storyChatAvailable = false
+  storyChatAvailable = false,
+  blockingHostModal = false
 } = {}) {
   const disableHookScript = missingDisableHook
     ? ''
@@ -224,6 +225,7 @@ function recursionSmokeFixtureHtml({
     <script id="recursion-script-probe" data-src="/scripts/extensions/third-party/Recursion/src/extension/index.js"></script>
   </head>
   <body>
+    ${blockingHostModal ? '<div data-host-blocking-modal role="dialog" aria-label="Host extension notice" style="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.8)"><button type="button" data-host-overlay-dismiss>Not now</button></div>' : ''}
     <main id="chat-root">
       <section id="chat" aria-label="Chat messages"></section>
       <section id="recursion-root" class="recursion-root">
@@ -326,6 +328,9 @@ function recursionSmokeFixtureHtml({
           };
         }
       };
+      document.querySelector('[data-host-overlay-dismiss]')?.addEventListener('click', () => {
+        document.querySelector('[data-host-blocking-modal]')?.remove();
+      });
       globalThis.SillyTavern = { getContext: () => smokeContext };
       if (smokeContext.unclearedPromptOnDisable) {
         smokeContext.setExtensionPrompt('recursion.guidance', 'Recursion stale disabled baseline prompt.', 0, 4, false, 0);
@@ -571,7 +576,8 @@ async function createSillyTavernSmokeFixtureServer({
   directBridgeNeverResolves = false,
   visibleSendButtonClicksIgnored = false,
   sendSurface = 'complete',
-  storyChatAvailable = false
+  storyChatAvailable = false,
+  blockingHostModal = false
 } = {}) {
   const sessions = new Map();
   let nextSession = 1;
@@ -754,7 +760,8 @@ async function createSillyTavernSmokeFixtureServer({
         directBridgeNeverResolves,
         visibleSendButtonClicksIgnored,
         sendSurface,
-        storyChatAvailable
+        storyChatAvailable,
+        blockingHostModal
       }));
       return;
     }
@@ -771,6 +778,23 @@ async function createSillyTavernSmokeFixtureServer({
     },
     users
   };
+}
+
+{
+  const server = await createSillyTavernSmokeFixtureServer({ blockingHostModal: true });
+  try {
+    const report = await runSillyTavernLiveSmoke({
+      argv: ['--live'],
+      env: {
+        RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
+        SILLYTAVERN_BASE_URL: server.baseUrl,
+        RECURSION_LIVE_TIMEOUT_MS: '1000'
+      }
+    });
+    assertEqual(report.status, 'pass', 'browser smoke dismisses a blocking host-extension notice before Recursion interactions');
+  } finally {
+    await server.close();
+  }
 }
 
 assertEqual(normalizeSoakUserHandle(' Recursion-Soak-A '), 'recursion-soak-a', 'user handles normalize to trimmed lowercase');

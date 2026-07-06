@@ -75,9 +75,13 @@ Install behavior:
 1. Build prompt blocks.
 2. Validate keys and prompt text.
 3. Clear known Recursion prompt keys.
-4. Call `setExtensionPrompt` for each block.
-5. Track installed keys.
-6. Roll back known keys if a partial install fails.
+4. Resolve placement and role to SillyTavern's numeric prompt enums.
+5. Call `setExtensionPrompt` for each block.
+6. When the shared `extensionPrompts` store is available, verify exact text plus finite numeric position, depth, and role metadata.
+7. Track installed keys only after verification.
+8. Roll back known keys if a partial install fails or SillyTavern stores malformed metadata.
+
+`SillyTavern.getContext()` exposes `setExtensionPrompt` and the shared prompt store, but does not expose `extension_prompt_types` or `extension_prompt_roles`. The adapter therefore owns numeric fallbacks matching SillyTavern's public enums; string enum names are invalid because the host coerces them with `Number(...)`. A successful setter call is not sufficient evidence of installation.
 
 Clear behavior calls `setExtensionPrompt` with empty text for known Recursion keys and any keys installed during the session. It attempts every key even if one clear fails, returns a stable prompt-clear failure result with failed keys, and keeps failed non-core keys tracked for a later retry. Prompt install validates the packet first, then aborts before writing new prompt text if the pre-install clear reports failure.
 

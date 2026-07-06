@@ -9,6 +9,7 @@ import {
   createBaseReport,
   exitCodeForReport,
   finalizeReport,
+  inspectRecursionPromptRequest,
   normalizeSoakUserHandle,
   printReportAndSetExitCode,
   rejectUnsafeLiveUser,
@@ -21,6 +22,31 @@ import {
   validateSoakUserList
 } from './lib/sillytavern-live-harness.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
+
+assertDeepEqual(
+  inspectRecursionPromptRequest({
+    type: 'swipe',
+    messages: [
+      { role: 'system', content: 'Guidance:\nKeep the immediate beat coherent.' },
+      { role: 'system', content: 'Private Recursion card evidence for the next assistant message.\nCard evidence:\n- [Scene Frame] Stay aboard.' },
+      { role: 'system', content: 'Guardrails:\n- Honor facts.' }
+    ]
+  }),
+  {
+    type: 'swipe',
+    messageCount: 3,
+    guidance: true,
+    cardEvidence: true,
+    guardrails: true,
+    complete: true
+  },
+  'serialized prompt inspection detects all Recursion sections without retaining prompt text'
+);
+assertEqual(
+  inspectRecursionPromptRequest({ messages: [{ role: 'system', content: 'Unrelated system prompt.' }] }).complete,
+  false,
+  'serialized prompt inspection rejects setter-only evidence without Recursion content'
+);
 
 function createJsonResponse(status, value, headers = {}) {
   const text = value === undefined ? '' : JSON.stringify(value);
@@ -181,8 +207,8 @@ function recursionSmokeFixtureHtml({
   const disableHookScript = missingDisableHook
     ? ''
       : disableHookNeverResolves
-        ? "globalThis.recursionOnDisable = async function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.guidance', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.cardEvidence', '', 'IN_PROMPT', 4, false, 'SYSTEM'); } if (globalThis.__recursionSmokePromptClearActive === true) await new Promise(() => {}); return true; };"
-        : "globalThis.recursionOnDisable = function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.guidance', '', 'IN_PROMPT', 4, false, 'SYSTEM'); smokeContext.setExtensionPrompt('recursion.cardEvidence', '', 'IN_PROMPT', 4, false, 'SYSTEM'); } return true; };";
+        ? "globalThis.recursionOnDisable = async function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.guidance', '', 0, 4, false, 0); smokeContext.setExtensionPrompt('recursion.cardEvidence', '', 0, 4, false, 0); smokeContext.setExtensionPrompt('recursion.guardrails', '', 0, 4, false, 0); } if (globalThis.__recursionSmokePromptClearActive === true) await new Promise(() => {}); return true; };"
+        : "globalThis.recursionOnDisable = function recursionOnDisable() { if (!smokeContext.unclearedPromptOnDisable) { smokeContext.setExtensionPrompt('recursion.guidance', '', 0, 4, false, 0); smokeContext.setExtensionPrompt('recursion.cardEvidence', '', 0, 4, false, 0); smokeContext.setExtensionPrompt('recursion.guardrails', '', 0, 4, false, 0); } return true; };";
   const reasonerFallbackFlag = reasonerFallback ? 'true' : 'false';
   const promptPacketMetadataExpression = omitPromptPacketMetadata
     ? "JSON.stringify({ packetId: '', handId: '', selectedCardRefs: [] })"
@@ -261,7 +287,7 @@ function recursionSmokeFixtureHtml({
         ],
         characterId: 0,
         chatId: 'Assistant - fixture',
-        prompts: {},
+        extensionPrompts: {},
         enabled: true,
         mode: 'auto',
         disabledFamilies: [],
@@ -291,12 +317,18 @@ function recursionSmokeFixtureHtml({
         },
         setExtensionPrompt(key, text, position, depth, scan, role) {
           if (${ignorePromptClear ? 'true' : 'false'} && String(key || '').startsWith('recursion.') && String(text || '') === '') return;
-          this.prompts[key] = { text, position, depth, scan, role };
+          this.extensionPrompts[key] = {
+            value: String(text),
+            position: Number(position),
+            depth: Number(depth),
+            scan: Boolean(scan),
+            role: Number(role)
+          };
         }
       };
       globalThis.SillyTavern = { getContext: () => smokeContext };
       if (smokeContext.unclearedPromptOnDisable) {
-        smokeContext.setExtensionPrompt('recursion.guidance', 'Recursion stale disabled baseline prompt.', 'IN_PROMPT', 4, false, 'SYSTEM');
+        smokeContext.setExtensionPrompt('recursion.guidance', 'Recursion stale disabled baseline prompt.', 0, 4, false, 0);
       }
       globalThis.recursionGenerationInterceptor = async function recursionGenerationInterceptor(chat) {
         const sourceChat = Array.isArray(chat) ? chat : smokeContext.chat;
@@ -321,8 +353,9 @@ function recursionSmokeFixtureHtml({
           renderGenerationUi();
           return sourceChat;
         }
-        smokeContext.setExtensionPrompt('recursion.guidance', 'Recursion smoke guidance.', 'IN_PROMPT', 4, false, 'SYSTEM');
-        smokeContext.setExtensionPrompt('recursion.cardEvidence', 'Recursion smoke card evidence.', 'IN_PROMPT', 4, false, 'SYSTEM');
+        smokeContext.setExtensionPrompt('recursion.guidance', 'Guidance:\\nRecursion smoke guidance.', 0, 1, false, 0);
+        smokeContext.setExtensionPrompt('recursion.cardEvidence', 'Private Recursion card evidence for the next assistant message.\\nCard evidence:\\n- [Scene Frame] Recursion smoke card evidence.', 0, 1, false, 0);
+        smokeContext.setExtensionPrompt('recursion.guardrails', 'Guardrails:\\n- Honor facts.', 0, 1, false, 0);
         if (${asyncUiGeneration ? 'true' : 'false'}) setTimeout(renderGenerationUi, 650);
         else renderGenerationUi();
         if (activeMode === 'manual' && ${manualInterceptorNeverResolves ? 'true' : 'false'}) {
@@ -339,7 +372,7 @@ function recursionSmokeFixtureHtml({
         button?.setAttribute('aria-label', smokeContext.enabled ? 'Turn Recursion off' : 'Turn Recursion on');
         if (!smokeContext.enabled) {
           for (const key of ['recursion.guidance', 'recursion.cardEvidence', 'recursion.guardrails']) {
-            smokeContext.setExtensionPrompt(key, '', 'IN_PROMPT', 0, false, 'SYSTEM');
+            smokeContext.setExtensionPrompt(key, '', 0, 0, false, 0);
           }
           document.querySelector('[data-recursion-status]').textContent = 'Off';
         } else {
@@ -369,6 +402,14 @@ function recursionSmokeFixtureHtml({
         smokeContext.chat.push(message);
         appendSmokeChatMessage(message);
         await globalThis.recursionGenerationInterceptor(smokeContext.chat);
+        const promptMessages = Object.values(smokeContext.extensionPrompts)
+          .filter((entry) => entry.value && entry.position === 0)
+          .map((entry) => ({ role: 'system', content: entry.value }));
+        await fetch('/api/backends/chat-completions/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'normal', messages: promptMessages })
+        }).catch(() => {});
         if (!${omitHostGenerationContinuation ? 'true' : 'false'}) {
           const assistantMessage = {
             mesid: smokeContext.chat.length,
@@ -635,6 +676,11 @@ async function createSillyTavernSmokeFixtureServer({
     }
 
     const user = session.user ? users[session.user] : null;
+    if (request.method === 'POST' && url.pathname === '/api/backends/chat-completions/generate') {
+      await readRequestJson(request);
+      sendJson(response, 200, { choices: [{ message: { content: 'fixture response' } }] });
+      return;
+    }
     if (request.method === 'POST' && ['/api/files/upload', '/api/files/verify', '/api/files/delete'].includes(url.pathname)) {
       if (!user || request.headers['x-csrf-token'] !== session.csrf) {
         sendJson(response, 403, { error: 'not authorized' });

@@ -233,6 +233,74 @@ assertEqual(installResult.ok, true, 'prompt install returns ok result');
 assert(installResult.installed.includes('recursion.guidance'), 'prompt install returns installed keys');
 assertEqual(prompts.find((entry) => entry.text === 'Use the alley scene.').key, 'recursion.guidance', 'prompt installed with Recursion key');
 
+const liveShapePromptStore = {};
+const liveShapeHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'live-shape-prompt-chat',
+    chat: [],
+    extensionPrompts: liveShapePromptStore,
+    setExtensionPrompt(key, text, position, depth, scan, role) {
+      liveShapePromptStore[key] = {
+        value: String(text),
+        position: Number(position),
+        depth: Number(depth),
+        scan: Boolean(scan),
+        role: Number(role)
+      };
+    }
+  }),
+  settingsRoot: {}
+});
+const liveShapePacket = {
+  injectionPlan: {
+    blocks: [
+      { id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 1, role: 'system' },
+      { id: 'cardEvidence', promptKey: 'recursion.cardEvidence', placement: 'in_prompt', depth: 1, role: 'system' },
+      { id: 'guardrails', promptKey: 'recursion.guardrails', placement: 'in_prompt', depth: 1, role: 'system' }
+    ]
+  },
+  sections: {
+    guidance: 'Guidance:\nUse the live host contract.',
+    cardEvidence: 'Private Recursion card evidence for the next assistant message.\nCard evidence:\n- [Scene Frame] Hold the boundary.',
+    guardrails: 'Guardrails:\n- Honor facts.'
+  }
+};
+const liveShapeInstall = await liveShapeHost.prompt.install(liveShapePacket);
+assertEqual(liveShapeInstall.ok, true, 'live SillyTavern context shape installs prompt blocks');
+assertDeepEqual(
+  Object.values(liveShapePromptStore).filter((entry) => entry.value).map((entry) => [entry.position, entry.role]),
+  [[0, 0], [0, 0], [0, 0]],
+  'live SillyTavern context shape stores numeric in-prompt system metadata'
+);
+
+const rejectedPromptStore = {};
+const rejectedPromptHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'rejected-prompt-chat',
+    chat: [],
+    extensionPrompts: rejectedPromptStore,
+    setExtensionPrompt(key, text, position, depth, scan, role) {
+      rejectedPromptStore[key] = {
+        value: String(text),
+        position: text ? Number.NaN : Number(position),
+        depth: Number(depth),
+        scan: Boolean(scan),
+        role: Number(role)
+      };
+    }
+  }),
+  settingsRoot: {}
+});
+await assertRejects(
+  async () => rejectedPromptHost.prompt.install(liveShapePacket),
+  /prompt install rejected/i,
+  'prompt install rejects malformed metadata stored by the live host boundary'
+);
+assert(
+  Object.values(rejectedPromptStore).every((entry) => entry.value === ''),
+  'rejected prompt install rolls back all known Recursion prompt text'
+);
+
 const roleFallbackPrompts = [];
 const roleFallbackHost = createSillyTavernHost({
   contextFactory: () => ({

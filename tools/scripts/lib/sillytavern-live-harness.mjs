@@ -16,6 +16,30 @@ const DEFAULT_USER_ALIASES = new Set([
 
 const SOAK_USER_PATTERN = /^recursion-soak-[a-z0-9][a-z0-9_.-]{0,63}$/;
 
+export function inspectRecursionPromptRequest(body = {}) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const content = messages.map((message) => {
+    if (typeof message?.content === 'string') return message.content;
+    try {
+      return JSON.stringify(message?.content ?? '');
+    } catch {
+      return '';
+    }
+  }).join('\n');
+  const guidance = content.includes('Guidance:');
+  const cardEvidence = content.includes('Private Recursion card evidence for the next assistant message.')
+    && content.includes('Card evidence:');
+  const guardrails = content.includes('Guardrails:');
+  return {
+    type: String(body?.type || ''),
+    messageCount: messages.length,
+    guidance,
+    cardEvidence,
+    guardrails,
+    complete: guidance && cardEvidence && guardrails
+  };
+}
+
 export function parseHarnessArgs(argv = []) {
   const args = new Set(argv);
   const liveRequested = args.has('--live');
@@ -1005,13 +1029,16 @@ function modeSmokeSeedPromptScript() {
       if (!context || typeof context.setExtensionPrompt !== 'function') {
         throw new Error('setExtensionPrompt unavailable for mode smoke');
       }
-      context.setExtensionPrompt('recursion.guidance', 'Recursion mode smoke baseline.', 'IN_PROMPT', 4, false, 'SYSTEM');
-      seeded = true;
+      context.setExtensionPrompt('recursion.guidance', 'Recursion mode smoke baseline.', 0, 4, false, 0);
+      const stored = context.extensionPrompts?.['recursion.guidance'];
+      seeded = stored?.value === 'Recursion mode smoke baseline.'
+        && stored.position === 0
+        && stored.role === 0;
     } catch (seedError) {
       error = String(seedError?.message || seedError || 'mode smoke seed failed');
     }
-    const promptKeys = Object.entries(context?.prompts || {})
-      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
+    const promptKeys = Object.entries(context?.extensionPrompts || {})
+      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.value || '').length > 0)
       .map(([key]) => String(key))
       .slice(0, 24);
     return { seeded, promptKeys, error };
@@ -1036,8 +1063,8 @@ function modeSmokeReadStepScript() {
     const observedMode = /manual/.test(modeLower)
       ? 'manual'
       : (/auto/.test(modeLower) ? 'auto' : 'unknown');
-    const promptKeys = Object.entries(context?.prompts || {})
-      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
+    const promptKeys = Object.entries(context?.extensionPrompts || {})
+      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.value || '').length > 0)
       .map(([key]) => String(key))
       .slice(0, 24);
     const expectedMode = mode === 'disabled' ? (selectedValue || observedMode) : mode;
@@ -1073,8 +1100,8 @@ function modeSmokeWaitScript() {
     const observedMode = /manual/.test(modeText)
       ? 'manual'
       : (/auto/.test(modeText) ? 'auto' : 'unknown');
-    const promptKeys = Object.entries(context?.prompts || {})
-      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
+    const promptKeys = Object.entries(context?.extensionPrompts || {})
+      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.value || '').length > 0)
       .map(([key]) => String(key));
     if (mode === 'disabled') return powerPressed === false && promptKeys.length === 0;
     return powerPressed === true && (!selectedValue || selectedValue === mode) && observedMode === mode;
@@ -1334,20 +1361,27 @@ function generationRecorderInstallScript() {
       context.setExtensionPrompt = (...args) => {
         const [key, text, position, depth, scan, role] = args;
         const promptKey = String(key || '');
+        const result = context.__recursionSmokeOriginalSetExtensionPrompt(...args);
         if (promptKey.startsWith('recursion.')) {
           const promptText = String(text || '');
+          const stored = context.extensionPrompts?.[promptKey] || null;
           sharedEvents.push({
             key: promptKey,
             textHash: hashText(promptText),
             textLength: promptText.length,
             cleared: promptText.length === 0,
-            position: String(position ?? ''),
+            position: Number(position),
             depth: Number(depth) || 0,
             scan: Boolean(scan),
-            role: String(role ?? '')
+            role: Number(role),
+            storedPosition: Number(stored?.position),
+            storedRole: Number(stored?.role),
+            storedValid: stored?.value === promptText
+              && Number.isFinite(stored?.position)
+              && Number.isFinite(stored?.role)
           });
         }
-        return context.__recursionSmokeOriginalSetExtensionPrompt(...args);
+        return result;
       };
       context.__recursionSmokePromptRecorderInstalled = true;
       return true;
@@ -1441,21 +1475,28 @@ function swipeProofScript() {
       context.setExtensionPrompt = (...args) => {
         const [key, text, position, depth, scan, role] = args;
         const promptKey = String(key || '');
+        const result = originalSetExtensionPrompt.apply(context, args);
         if (promptKey.startsWith('recursion.')) {
           const promptText = String(text || '');
+          const stored = context.extensionPrompts?.[promptKey] || null;
           promptEvents.push({
             key: promptKey,
             cleared: promptText.length === 0,
             textHash: hashText(promptText),
-            position: String(position ?? ''),
+            position: Number(position),
             depth: Number(depth) || 0,
             scan: Boolean(scan),
-            role: String(role ?? '')
+            role: Number(role),
+            storedPosition: Number(stored?.position),
+            storedRole: Number(stored?.role),
+            storedValid: stored?.value === promptText
+              && Number.isFinite(stored?.position)
+              && Number.isFinite(stored?.role)
           });
           if (promptText.length > 0) installedPromptKeys.add(promptKey);
           else installedPromptKeys.delete(promptKey);
         }
-        return originalSetExtensionPrompt.apply(context, args);
+        return result;
       };
     }
     const emitSwipe = async () => {
@@ -1515,7 +1556,7 @@ function swipeProofScript() {
       proof.swipeIdA = snapA.messages?.[1]?.swipeId ?? null;
       proof.swipeCount = snapA.messages?.[1]?.swipeCount ?? null;
       if (typeof context.setExtensionPrompt !== 'function') throw new Error('setExtensionPrompt unavailable');
-      context.setExtensionPrompt('recursion.cardEvidence', 'Recursion swipe smoke stale prompt.', 'IN_PROMPT', 4, false, 'SYSTEM');
+      context.setExtensionPrompt('recursion.cardEvidence', 'Recursion swipe smoke stale prompt.', 0, 4, false, 0);
       proof.promptSeeded = promptEvents.some((event) => event.cleared === false && event.key === 'recursion.cardEvidence');
       chat[1].swipe_id = 1;
       chat[1].mes = chat[1].swipes[1];
@@ -1571,8 +1612,8 @@ function generationManualProofScript() {
         return null;
       }
     })();
-    const promptKeys = () => Object.entries(context?.prompts || {})
-      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
+    const promptKeys = () => Object.entries(context?.extensionPrompts || {})
+      .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.value || '').length > 0)
       .map(([key]) => String(key));
     const eventSlice = () => Array.isArray(globalThis.__recursionSmokePromptEvents)
       ? globalThis.__recursionSmokePromptEvents.slice()
@@ -2424,10 +2465,10 @@ function generationPromptClearScript() {
     const clearedPromptKeys = [...new Set(afterEvents
       .filter((entry) => entry && entry.cleared === true && String(entry.key || '').startsWith('recursion.'))
       .map((entry) => String(entry.key)))];
-    const promptStateAvailable = Boolean(context?.prompts && typeof context.prompts === 'object');
+    const promptStateAvailable = Boolean(context?.extensionPrompts && typeof context.extensionPrompts === 'object');
     const remainingPromptKeys = promptStateAvailable
-      ? Object.entries(context.prompts)
-        .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
+      ? Object.entries(context.extensionPrompts)
+        .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.value || '').length > 0)
         .map(([key]) => String(key))
       : [];
     const recorderCleared = installedKeys.length > 0 && installedKeys.every((key) => clearedPromptKeys.includes(key));
@@ -2585,6 +2626,7 @@ async function runBrowserUiSmoke({
 } = {}) {
   const consoleMessages = [];
   const pageErrors = [];
+  const serializedPromptRequests = [];
   let browser = null;
   let context = null;
   let page = null;
@@ -2642,6 +2684,23 @@ async function runBrowserUiSmoke({
       traceStarted = true;
     }
     page = await context.newPage();
+    page.on('request', (request) => {
+      if (!String(request.url?.() || '').includes('/api/backends/chat-completions/generate')) return;
+      try {
+        const body = JSON.parse(String(request.postData?.() || ''));
+        serializedPromptRequests.push(inspectRecursionPromptRequest(body));
+        if (serializedPromptRequests.length > 40) serializedPromptRequests.shift();
+      } catch {
+        serializedPromptRequests.push({
+          type: '',
+          messageCount: 0,
+          guidance: false,
+          cardEvidence: false,
+          guardrails: false,
+          complete: false
+        });
+      }
+    });
     page.on('console', (message) => {
       consoleMessages.push({
         type: message.type(),
@@ -2758,8 +2817,8 @@ async function runBrowserUiSmoke({
           const observedMode = /manual/.test(modeText)
             ? 'manual'
             : (/auto/.test(modeText) ? 'auto' : 'unknown');
-          const promptKeys = Object.entries(context?.prompts || {})
-            .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.text ?? value ?? '').length > 0)
+          const promptKeys = Object.entries(context?.extensionPrompts || {})
+            .filter(([key, value]) => String(key || '').startsWith('recursion.') && String(value?.value || '').length > 0)
             .map(([key]) => String(key));
           const proof = {
             requested: true,
@@ -3147,6 +3206,34 @@ async function runBrowserUiSmoke({
         failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation }));
         throw failed;
       }
+      const outboundPromptEvidence = [...serializedPromptRequests].reverse().find((entry) => entry.complete)
+        || serializedPromptRequests.at(-1)
+        || {
+          type: '',
+          messageCount: 0,
+          guidance: false,
+          cardEvidence: false,
+          guardrails: false,
+          complete: false
+        };
+      generation = {
+        ...(generation || {}),
+        outboundPromptEvidence
+      };
+      await page.evaluate((evidence) => {
+        globalThis.__recursionSmokeGeneration = {
+          ...(globalThis.__recursionSmokeGeneration || {}),
+          outboundPromptEvidence: evidence
+        };
+      }, outboundPromptEvidence).catch(() => {});
+      if (generation?.triggerSource === 'ui-send' && outboundPromptEvidence.complete !== true) {
+        const failed = new Error('Final SillyTavern request omitted Recursion prompt content.');
+        failed.status = 'fail';
+        failed.result = 'generation-outbound-prompt-missing';
+        failed.generation = generation;
+        failed.snapshot = await page.evaluate(browserSnapshotScript()).catch(() => ({ generation }));
+        throw failed;
+      }
     }
 
     const snapshot = await page.evaluate(browserSnapshotScript());
@@ -3370,11 +3457,24 @@ function promptMetadataFromBrowserResult(report, browserResult) {
           textHash: String(entry?.textHash || ''),
           textLength: Number(entry?.textLength) || 0,
           cleared: entry?.cleared === true,
-          position: String(entry?.position || ''),
+          position: Number.isFinite(entry?.position) ? Number(entry.position) : null,
           depth: Number(entry?.depth) || 0,
-          role: String(entry?.role || '')
+          role: Number.isFinite(entry?.role) ? Number(entry.role) : null,
+          storedPosition: Number.isFinite(entry?.storedPosition) ? Number(entry.storedPosition) : null,
+          storedRole: Number.isFinite(entry?.storedRole) ? Number(entry.storedRole) : null,
+          storedValid: entry?.storedValid === true
         })).slice(-12)
       : [],
+    outboundPromptEvidence: generation?.outboundPromptEvidence
+      ? {
+          type: sanitizeHarnessText(generation.outboundPromptEvidence.type || '', 40),
+          messageCount: Number(generation.outboundPromptEvidence.messageCount) || 0,
+          guidance: generation.outboundPromptEvidence.guidance === true,
+          cardEvidence: generation.outboundPromptEvidence.cardEvidence === true,
+          guardrails: generation.outboundPromptEvidence.guardrails === true,
+          complete: generation.outboundPromptEvidence.complete === true
+        }
+      : null,
     cleanup: cleanup
       ? {
           clearRequested: cleanup.clearRequested === true,

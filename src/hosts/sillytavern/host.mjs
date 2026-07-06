@@ -31,6 +31,17 @@ const PLACEMENT_TYPES = Object.freeze({
   in_prompt: 'IN_PROMPT',
   in_chat: 'IN_CHAT'
 });
+const SILLYTAVERN_PROMPT_TYPES = Object.freeze({
+  NONE: -1,
+  IN_PROMPT: 0,
+  IN_CHAT: 1,
+  BEFORE_PROMPT: 2
+});
+const SILLYTAVERN_PROMPT_ROLES = Object.freeze({
+  SYSTEM: 0,
+  USER: 1,
+  ASSISTANT: 2
+});
 const PROMPT_ROLES = new Set(['system', 'user', 'assistant']);
 const UNSAFE_PROMPT_TEXT_PATTERN = /\bhidden\s+chain[-\s]of[-\s]thought\b|\bchain[-\s]of[-\s]thought\b|\b(hidden|private|secret|undisclosed)\s+(internal\s+)?thoughts?\b|\b(private|hidden|secret|undisclosed)\s+(character\s+)?motives?\b|\b(secret|hidden|private|undisclosed)\s+future\s+(plans?|plot|story)\b|\breveal\s+future\s+plans?\b|\bfuture[-\s]plot\b|\b(hidden|private|secret|undisclosed)\s+spoilers?\b|\breveal\s+spoilers?\b/i;
 
@@ -339,7 +350,8 @@ function validatePromptBlocksForInstall(blocks) {
 function promptPosition(context, placement) {
   const key = PLACEMENT_TYPES[String(placement || '').trim().toLowerCase()] || PLACEMENT_TYPES.in_prompt;
   const types = asObject(context.extension_prompt_types);
-  return types[key] ?? key;
+  const contextualValue = Number(types[key]);
+  return Number.isFinite(contextualValue) ? contextualValue : SILLYTAVERN_PROMPT_TYPES[key];
 }
 
 function resolvePromptRole(context, role) {
@@ -347,16 +359,25 @@ function resolvePromptRole(context, role) {
   const requestedRole = PROMPT_ROLES.has(requested) ? requested : 'system';
   const key = requestedRole.toUpperCase();
   const roles = asObject(context.extension_prompt_roles);
-  if (Object.prototype.hasOwnProperty.call(roles, key)) {
+  const contextualValue = Number(roles[key]);
+  if (Number.isFinite(contextualValue)) {
     return {
-      value: roles[key],
+      value: contextualValue,
+      requestedRole,
+      usedRole: requestedRole,
+      fallback: false
+    };
+  }
+  if (Object.keys(roles).length === 0) {
+    return {
+      value: SILLYTAVERN_PROMPT_ROLES[key],
       requestedRole,
       usedRole: requestedRole,
       fallback: false
     };
   }
   return {
-    value: Object.prototype.hasOwnProperty.call(roles, 'SYSTEM') ? roles.SYSTEM : 'SYSTEM',
+    value: Number.isFinite(Number(roles.SYSTEM)) ? Number(roles.SYSTEM) : SILLYTAVERN_PROMPT_ROLES.SYSTEM,
     requestedRole,
     usedRole: 'system',
     fallback: requestedRole !== 'system'
@@ -371,6 +392,28 @@ function scanValue(block) {
   if (Object.prototype.hasOwnProperty.call(block, 'scan')) return block.scan;
   if (Object.prototype.hasOwnProperty.call(block, 'scanDepth')) return block.scanDepth;
   return false;
+}
+
+function inspectablePromptStore(context) {
+  const store = context?.extensionPrompts ?? context?.extension_prompts;
+  return store && typeof store === 'object' && !Array.isArray(store) ? store : null;
+}
+
+function assertPromptStored(context, { key, text, position, depth, role }) {
+  const store = inspectablePromptStore(context);
+  if (!store) return;
+  const stored = asObject(store[key]);
+  const valid = stored.value === text
+    && Number.isFinite(stored.position)
+    && stored.position === position
+    && Number.isFinite(stored.depth)
+    && stored.depth === depth
+    && Number.isFinite(stored.role)
+    && stored.role === role;
+  if (valid) return;
+  const error = new Error(`SillyTavern prompt install rejected ${key}.`);
+  error.code = 'RECURSION_PROMPT_INSTALL_REJECTED';
+  throw error;
 }
 
 function generationResponseText(...values) {
@@ -723,14 +766,24 @@ export function createSillyTavernHost({
             });
           }
           attemptedPromptKeys.add(key);
+          const text = stringValue(block.text);
+          const position = promptPosition(context, block.placement);
+          const depth = Number(block.depth) || 0;
           context.setExtensionPrompt(
             key,
-            stringValue(block.text),
-            promptPosition(context, block.placement),
-            Number(block.depth) || 0,
+            text,
+            position,
+            depth,
             scanValue(block),
             roleResolution.value
           );
+          assertPromptStored(context, {
+            key,
+            text,
+            position,
+            depth,
+            role: roleResolution.value
+          });
           installedPromptKeys.add(key);
         }
       } catch (error) {

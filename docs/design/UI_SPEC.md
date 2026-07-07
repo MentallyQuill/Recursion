@@ -31,16 +31,16 @@ Recursion should use its own chat-attached top bar instead of adopting the Direc
 Default desktop shape:
 
 ```text
-[power] [pipeline icon] [mode icon] [cards] | [Hero Pixel Array] Selecting turn hand... [stop]    [reasoning] v | ...
+[power] [pipeline icon] [mode icon] [cards] [tense/PoV] | [Hero Pixel Array] Selecting turn hand... [stop]    [reasoning] v | ...
 ```
 
 Narrow/mobile shape:
 
 ```text
-[power] [pipeline] [mode] [cards] | [Hero Pixel Array] Selecting... [stop]     v | ...
+[power] [pipeline] [mode] [cards] [form] | [Hero Pixel Array] Selecting... [stop]     v | ...
 ```
 
-The desktop bar uses one compact row with distinct zones for power, pipeline, mode, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
+The desktop bar uses one compact row with distinct zones for power, pipeline, mode, card scope, story form, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
 
 The exact copyable HTML/CSS snapshot for this V1 bar lives in `docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md`. Treat that file as the implementation reference for reproducing the current mock in SillyTavern: it captures the final class names, inline SVG icons, Hero Pixel Array, progress menu, mode menu, Last Brief dropdown, Prompt Packet panel, metachips, and 12px active progress spinner treatment.
 
@@ -49,10 +49,10 @@ Recursion chrome should use explicit compact font sizing instead of inheriting S
 Canonical desktop layout:
 
 ```text
-[power] [pipeline] [mode arrows] [cards] | [blocks] Selecting turn hand... [stop] [reasoning] v | ...
-[power] [pipeline] [mode arrows] [cards] | [blocks] Installing prompt...   [stop] [reasoning] v | ...
-[power] [pipeline] [mode arrows] [cards] | [blocks] Manual scope active...  [reasoning] Cards v | ...
-[power-off] [pipeline] [mode arrows] [cards] |                              [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] [form] | [blocks] Selecting turn hand... [stop] [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] [form] | [blocks] Installing prompt...   [stop] [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] [form] | [blocks] Manual scope active...  [reasoning] Cards v | ...
+[power-off] [pipeline] [mode arrows] [cards] [form] |                              [reasoning] v | ...
 ```
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
@@ -157,6 +157,16 @@ Reference mode selector CSS:
 ```
 
 The card scope selector is an icon-only stacked-cards button in the left bar flow. It sits immediately to the right of Mode and to the left of the Hero Pixel Array separator. Its accessible label and tooltip carry the meaning; it must not render a visible `Cards` title or selected-count text in the compact bar.
+
+The Tense & PoV selector sits immediately to the right of Cards and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `Pr1`, `Pr2`, `Pr3L`, or `Pr3O` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, and equivalent options.
+
+The selector menu contains:
+
+- `Auto`: Arbiter infers tense and POV from the latest visible assistant narration.
+- `Past 1st`, `Past 2nd`, `Past 3rd Limited`, `Past 3rd Omni`.
+- `Present 1st`, `Present 2nd`, `Present 3rd Limited`, `Present 3rd Omni`.
+
+Selecting `Auto` stores no forced story form. Selecting a forced option stores a high-confidence user override that feeds card prompts, guidance composition, Rapid metadata, and Prompt Packet diagnostics. The UI must not present this as a style preset or prose rewrite feature. It is a correction control for the existing story-form prompt contract. The menu should close on selection, outside click, or `Esc`, and should follow the same compact SillyTavern-native treatment as the Pipeline and Mode menus.
 
 Inside the Cards dropdown, the header shows `Cards`, the selected focus summary, and a small neutral `All` command. In Auto, `All` restores the default card scope with every family and sub-item enabled. In Manual, the header uses selected-family copy such as `2/5 cards selected`, `All` selects up to the current `Max Cards` cap, and selecting one more family at the cap is blocked with `Max Cards is 5. Change it in Settings to select more.` Use `All`, not `Reset`, because the action selects card scope and must not be confused with Reset Scene Cache or other runtime reset commands.
 

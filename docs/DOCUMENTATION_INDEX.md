@@ -12,8 +12,8 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Root README](../README.md) - Public route map and fast start.
 - [Docs Folder Guide](README.md) - Folder-level guide for this documentation tree.
 - [User Guides](user/README.md) - Operator-facing table of contents.
-- [First Run Workflow](user/FIRST_RUN_WORKFLOW.md) - First-session path from install through Standard Auto, Manual, Rapid trial, inspection, and power-toggle cleanup.
-- [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for UI surfaces, Standard/Rapid/Fused pipelines, modes, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
+- [First Run Workflow](user/FIRST_RUN_WORKFLOW.md) - First-session path from install through Standard Auto, Tense & PoV Auto, Manual, Rapid trial, inspection, and power-toggle cleanup.
+- [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for UI surfaces, Standard/Rapid/Fused pipelines, modes, Tense & PoV, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
 
 ## Provider, Privacy, And Safety Docs
 

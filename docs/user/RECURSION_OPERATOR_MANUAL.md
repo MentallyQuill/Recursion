@@ -12,6 +12,8 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 ![Auto and Manual mode controls](../../assets/documentation/renders/recursion-operator-mode-controls.png)
 
+<Render Needed>: assets/documentation/renders/recursion-operator-story-form-controls.png - Tense & PoV selector in the compact Recursion Bar showing Auto plus forced past/present POV options.
+
 ![Recursion Bar states](../../assets/documentation/renders/recursion-operator-bar-states.png)
 
 ![Hero Pixel Array progress menu states](../../assets/documentation/renders/recursion-operator-progress-menu-states.png)
@@ -42,6 +44,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 - power toggle;
 - icon-only Pipeline control: Standard, Rapid, or Fused;
 - icon-only mode control: Auto or Manual;
+- compact Tense & PoV control;
 - Hero Pixel Array plus current-step text;
 - command slot: Stop generation while active, Regenerate icon while idle;
 - Reasoning Level chain;
@@ -51,6 +54,8 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 The bar should be stable. Status changes should not repeatedly resize the transcript or cover message input controls.
 
 The Pipeline control is a small icon-only dropdown immediately to the left of the Mode button. `Standard` uses the full foreground Arbiter, card, hand, compose, validate, and install path on send. `Rapid` warms a provider-generated card packet in the background and uses a short provider delta on send. `Fused` keeps the foreground Arbiter and shared deck/hand/compose/install path, but asks one provider call to generate all requested cards as a bundle. The selected icon updates on the bar, and the dropdown follows the compact Mode-menu pattern. Pipeline is not duplicated in Settings.
+
+The Tense & PoV control sits in the compact left-side control cluster after Cards. Leave it on `Auto` for normal play. In Auto, the Utility Arbiter infers the active story form from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. Use a forced option only when the Arbiter is clearly steering card evidence or guidance toward the wrong form. Forced options cover past or present tense in first person, second person, third-person limited, or third-person omniscient. A forced selection creates a high-confidence user story-form override for card prompts, guidance composition, Rapid artifacts, and Prompt Packet metadata; it does not rewrite the transcript, change SillyTavern character data, or add style coaching beyond the story-form contract.
 
 The command slot changes by state. Stop generation appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
 
@@ -78,6 +83,19 @@ Expected stages include:
 Fallback states should be equally direct, such as `Reasoner unavailable. Utility composed the packet.` or `Prompt install failed. Generation will continue without Recursion.`
 
 The progress menu must not show raw prompts, raw provider responses, stack traces, provider secrets, hidden reasoning, or private story plans.
+
+### Tense & PoV
+
+Recursion treats story form as a prompt-contract consistency signal. The active story form is the tense and point of view the next reply should preserve, such as past tense third-person limited or present tense second person.
+
+By default, `Auto` lets the Arbiter detect the form from the latest assistant narration. Runtime validates that result and runs a heuristic cross-check before it is used. If the Arbiter result conflicts with obvious narration cues, Recursion drops to unknown story form and tells the host model to match the active chat's established form.
+
+The Tense & PoV menu is an operator override for cases where automatic detection is wrong or where the current chat has unusual player-message style that could confuse the Arbiter. Forced choices are:
+
+- Past 1st, Past 2nd, Past 3rd Limited, Past 3rd Omni;
+- Present 1st, Present 2nd, Present 3rd Limited, Present 3rd Omni.
+
+Forced story form applies to the next Recursion prompt contract and persists as a setting until changed back to `Auto`. Use it sparingly: it should preserve an established narration form, not force a new writing style onto a scene.
 
 ### Options Menu
 
@@ -271,13 +289,14 @@ Use this first-run path:
 2. Configure Utility.
 3. Leave Reasoner disabled unless you need Medium/High/Ultra synthesis; if you enable it, run Test Provider.
 4. Confirm the power toggle is on.
-5. Set Pipeline to Standard, then set mode to Auto.
-6. Send a safe ordinary turn.
-7. Confirm progress reaches prompt ready or a clear fallback.
-8. Inspect Last Brief and Prompt Packet.
-9. Try Manual with a narrowed Cards scope and confirm selected families are covered while disabled families stay out.
-10. Try Rapid only when Utility provider work is intended, then confirm the progress text reports Rapid warm, delta, warm-miss Standard escalation, or clear fallback honestly.
-11. Use the power toggle to verify prompt cleanup.
+5. Leave Tense & PoV on Auto unless the active chat needs a forced story form.
+6. Set Pipeline to Standard, then set mode to Auto.
+7. Send a safe ordinary turn.
+8. Confirm progress reaches prompt ready or a clear fallback.
+9. Inspect Last Brief and Prompt Packet.
+10. Try Manual with a narrowed Cards scope and confirm selected families are covered while disabled families stay out.
+11. Try Rapid only when Utility provider work is intended, then confirm the progress text reports Rapid warm, delta, warm-miss Standard escalation, or clear fallback honestly.
+12. Use the power toggle to verify prompt cleanup.
 
 See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.
 
@@ -362,7 +381,7 @@ These controls must touch only Recursion-owned settings, scene caches, journals,
 
 On narrow viewports:
 
-- mode and hand count should remain visible;
+- mode, card scope, and story-form controls should remain visible in compact form;
 - provider and status details may collapse into a menu;
 - the viewer should use one-column sections;
 - controls should be touch-safe;
@@ -384,12 +403,13 @@ Use this checklist for a practical browser pass:
 9. Set Auto and confirm Recursion is ready to compile.
 10. Set Manual and confirm it applies as a distinct mode.
 11. Confirm the Pipeline icon dropdown sits immediately left of Mode and offers Standard, Rapid, and Fused.
-12. Run a safe Standard Auto pass only when provider and live mutation are intended.
-13. Run a safe Rapid Auto pass only when provider and live mutation are intended.
-14. Confirm Activity reaches ready, Rapid delta, warm-miss Standard escalation, or a clear fallback.
-15. Inspect Last Brief and the final Prompt Packet text.
-16. Turn power off and confirm cleanup.
-17. Clear session keys before screenshots or exports that might show provider setup.
+12. Confirm the Tense & PoV dropdown offers Auto and the forced past/present POV options, then return it to Auto unless the smoke intentionally tests an override.
+13. Run a safe Standard Auto pass only when provider and live mutation are intended.
+14. Run a safe Rapid Auto pass only when provider and live mutation are intended.
+15. Confirm Activity reaches ready, Rapid delta, warm-miss Standard escalation, or a clear fallback.
+16. Inspect Last Brief and the final Prompt Packet text.
+17. Turn power off and confirm cleanup.
+18. Clear session keys before screenshots or exports that might show provider setup.
 
 Automated live evidence must use dedicated `recursion-soak-*` users and must reject `default-user` before mutation. See [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md).
 

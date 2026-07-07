@@ -50,7 +50,7 @@ The 2026-07-03 render pass promotes 25 live UI screenshot assets. Explanatory pi
 
 State-set renders such as bar states, progress states, Last Brief states, and fail-soft states are contact sheets composed from fresh live-mounted source captures. Their raw source tiles stay in `.recursion-doc-renderer/` and are not promoted separately.
 
-The 2026-07-05 documentation audit found new or changed UI states after the promoted render pass: declarative fresh-next-generation arming, provider-test lane-local busy state, Advanced Retention controls, instruction-shaped Card Evidence inspection, and Fused targeted repair progress. These remain open render markers until live host captures are refreshed.
+The 2026-07-06 documentation audit found new or changed UI states after the promoted render pass: declarative fresh-next-generation arming, provider-test lane-local busy state, Advanced Retention controls, instruction-shaped Card Evidence inspection, Fused targeted repair progress, and the Tense & PoV story-form selector. These remain open render markers until live host captures are refreshed.
 
 Future live screenshots should be promoted only when all of these are true:
 
@@ -94,10 +94,10 @@ These assets are promoted live UI documentation renders and may be embedded dire
 
 | Asset | Source Type | Current Primary Doc | Visual Scope |
 | --- | --- | --- | --- |
-| `recursion-bar-desktop.png` | live host | `README.md` | Recursion Bar mounted in a real SillyTavern desktop viewport with power, Auto/Manual, Cards scope, Hero Pixel Array, Reasoning Level, Last Brief, and options visible. |
-| `recursion-progress-menu-auto-pass.png` | live host | `README.md` | Hero Pixel Array progress menu in a real Auto pass showing Utility planning, card work, prompt composition, prompt install, and ready or fallback rows. |
-| `recursion-full-viewer-overview.png` | live host | `README.md` | Full Viewer in real SillyTavern showing Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics access without redaction leaks. |
-| `recursion-bar-mobile.png` | live host | `README.md` | Recursion Bar in a phone-width real SillyTavern viewport showing touch-safe controls and collapsed menu access. |
+| `recursion-bar-desktop.png` | live host | not currently embedded | Recursion Bar mounted in a real SillyTavern desktop viewport with power, Auto/Manual, Cards scope, Hero Pixel Array, Reasoning Level, Last Brief, and options visible. Superseded in the root README by smaller feature renders. |
+| `recursion-progress-menu-auto-pass.png` | live host | not currently embedded | Hero Pixel Array progress menu in a real Auto pass showing Utility planning, card work, prompt composition, prompt install, and ready or fallback rows. Superseded in the root README by smaller feature renders. |
+| `recursion-full-viewer-overview.png` | live host | not currently embedded | Full Viewer in real SillyTavern showing Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics access without redaction leaks. Superseded in the root README by smaller feature renders. |
+| `recursion-bar-mobile.png` | live host | not currently embedded | Recursion Bar in a phone-width real SillyTavern viewport showing touch-safe controls and collapsed menu access. Superseded in the root README by smaller feature renders. |
 | `recursion-operator-install-enable.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Install and enable flow in real SillyTavern with Recursion enabled and the Recursion Bar mounted on the active chat. |
 | `recursion-operator-pipeline-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Standard/Rapid/Fused pipeline dropdown in the compact Recursion Bar, including visible Standard, Rapid, and Fused options. |
 | `recursion-operator-mode-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Auto and Manual mode controls in the compact Recursion Bar, including visible current mode and mode switch interaction. |
@@ -125,6 +125,7 @@ These assets are promoted live UI documentation renders and may be embedded dire
 | Asset | Source Type | Target Doc | Visual Scope |
 | --- | --- | --- | --- |
 | `recursion-operator-fresh-next-generation-armed.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Recursion Bar idle command slot with fresh-next-generation armed, pressed Regenerate icon, and Last Brief still showing the previous completed packet. |
+| `recursion-operator-story-form-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Tense & PoV selector in the compact Recursion Bar showing Auto plus forced past/present first-, second-, third-person limited, and third-person omniscient options. |
 | `recursion-operator-fused-repair-progress.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Hero Pixel Array progress menu showing accepted Fused bundle cards plus targeted Standard repair for a damaged or missing sibling. |
 | `recursion-operator-retention-settings.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Advanced Retention controls showing source-window, provider-message, scene-cache, source-variant, and run-journal caps. |
 | `recursion-provider-test-busy-state.png` | live host | `docs/user/PROVIDER_SETUP.md` | Reasoner Provider disclosure staying open while the clicked Test Provider button shows lane-local `Testing...` busy state. |

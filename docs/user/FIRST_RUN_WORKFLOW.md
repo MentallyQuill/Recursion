@@ -13,7 +13,7 @@ Recursion is a current-scene prompt compiler. It observes the active chat, build
 
 ![SillyTavern with Recursion enabled and the Recursion Bar mounted](../../assets/documentation/renders/recursion-first-run-install-enable.png)
 
-The bar should expose the power toggle, icon-only Pipeline control, icon-only mode control, Cards selector, Hero Pixel Array plus current-step text, active-only Stop generation button during a running turn, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, extra details may collapse into compact menus.
+The bar should expose the power toggle, icon-only Pipeline control, icon-only mode control, Cards selector, Tense & PoV control, Hero Pixel Array plus current-step text, active-only Stop generation button during a running turn, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, the Tense & PoV label compacts while the menu remains available.
 
 ![Recursion Bar mounted below the SillyTavern chat header](../../assets/documentation/renders/recursion-first-run-bar-mounted.png)
 
@@ -45,16 +45,19 @@ Auto prepares and installs the next Recursion prompt packet.
 
 1. Confirm the power toggle is on.
 2. Set Pipeline to `Standard`.
-3. Set mode to `Auto`.
-4. Send a safe, ordinary chat message.
-5. Watch the Hero Pixel Array progress menu for visible progress.
-6. Wait for `Recursion prompt ready.` or a clear fallback state.
-7. Confirm the Stop generation button is visible while the host turn remains active.
-8. Let SillyTavern generation continue normally.
+3. Leave Tense & PoV on `Auto` unless the chat has a known tense or point-of-view mismatch.
+4. Set mode to `Auto`.
+5. Send a safe, ordinary chat message.
+6. Watch the Hero Pixel Array progress menu for visible progress.
+7. Wait for `Recursion prompt ready.` or a clear fallback state.
+8. Confirm the Stop generation button is visible while the host turn remains active.
+9. Let SillyTavern generation continue normally.
 
 ![Hero Pixel Array progress menu during a first Auto pass](../../assets/documentation/renders/recursion-first-run-auto-pass.png)
 
 Use the Last Brief dropdown and Prompt Packet panel when you want to inspect exactly what Recursion installed.
+
+Tense & PoV controls the story-form contract used by card generation and guidance. `Auto` asks the Arbiter to infer the form from the latest visible assistant narration. Forced past/present first-, second-, and third-person options are available for correction, but they should not be needed for a normal first pass.
 
 ## 5. Try Manual
 
@@ -139,6 +142,7 @@ The first run is healthy when:
 - Recursion Bar is mounted and stable.
 - Utility provider can be configured and tested.
 - Standard Auto mode reaches prompt ready or a clear fail-soft fallback.
+- Tense & PoV defaults to Auto and can expose forced story-form options without disrupting the bar.
 - Manual mode respects the selected card scope and reaches prompt ready or a clear fallback.
 - Rapid mode reports warm, turn-delta, warm-miss Standard escalation, or clear fallback states without installing local substitute Rapid guidance.
 - Fused mode reports bundle generation, targeted Standard repair, or full Standard fallback, and accepted bundle cards appear as normal Card Evidence.

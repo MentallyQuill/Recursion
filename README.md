@@ -16,6 +16,7 @@ Recursion is a scene reasoning layer for the reply in front of you.
 - Selects a focused turn hand so the prompt gets what matters now, not every possible note.
 - Uses separate Utility and optional Reasoner lanes, so fast planning and deeper synthesis can be tuned independently.
 - Supports Auto mode for hands-off preparation and Manual mode for explicit operator control.
+- Lets you leave tense and point of view on Auto or force the active story form when the Arbiter needs correction.
 - Installs Recursion-owned SillyTavern prompt entries, then shows exactly what was prepared through Last Brief, progress states, and the Full Viewer.
 - Keeps provider secrets and raw model I/O out of saved settings, prompt packets, run journals, diagnostics, browser storage, and SillyTavern file storage.
 
@@ -62,7 +63,7 @@ Stepped Thinking gives a character a private pre-generation pass. It is useful w
 
 Recursion works at the scene level, building a card deck across the live situation, choosing the most relevant cards for this turn, and turning that into prompt evidence the next reply can use. Recursion addresses the problem of scene awareness: missed constraints, unresolved threads, hidden knowledge, social pressure, consequences, items, environment, and continuity that should affect the reply right now.
 
-To that effect, it's a structured scene-reasoning and prompt-packet tool. It doesn't delve into character thoughts like Stepped Thinking, but instead acts as a dedicated thinknig layer to ask: *What needs to be tracked and expanded upon to make the next generation feel like a rich continuation of the scene?*
+To that effect, it's a structured scene-reasoning and prompt-packet tool. It doesn't delve into character thoughts like Stepped Thinking, but instead acts as a dedicated thinking layer to ask: *What needs to be tracked and expanded upon to make the next generation feel like a rich continuation of the scene?*
 
 ## Pipelines
 
@@ -80,6 +81,7 @@ Pipeline controls decide how Recursion schedules scene work. Auto and Manual dec
 - Full Viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics.
 - Prompt Packet: guidance, card evidence, guardrails, references, omissions, fallbacks, and metadata.
 - Progress States: live pass status, fallback paths, repair work, install state, and readiness.
+- Tense & PoV: Auto story-form detection or a forced past/present first-, second-, or third-person form for the next prompt contract.
 - Provider Health: Utility and Reasoner tests, session-only direct keys, fallback visibility, and lane status.
 
 ## Fast Start

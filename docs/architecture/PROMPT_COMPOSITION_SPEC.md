@@ -131,7 +131,7 @@ Cards should provide structured fields plus safe `promptText`:
 
 The composer must treat cards as evidence. A high-emphasis card should usually survive into the selected hand, and selected card `promptText` survives into Card Evidence. The guidance composer controls the directional layer, not the raw evidence wording.
 
-The composer must also keep story form explicit. It receives the normalized `storyForm` from the Arbiter, passes it to `guidanceComposer` and optional `reasonerComposer`, and includes a direct Guidance instruction to write the next reply in that tense and point of view. If the story form is unknown, Guidance must tell the host model to match the active chat's established form.
+The composer must also keep story form explicit. It receives the effective normalized `storyForm` from runtime, passes it to `guidanceComposer` and optional `reasonerComposer`, and includes a direct Guidance instruction to write the next reply in that tense and point of view. The effective story form may be Arbiter-detected, lowered to `unknown` by heuristic validation, or forced by the operator through Tense & PoV. If the story form is unknown, Guidance must tell the host model to match the active chat's established form.
 
 ## Utility Composer vs Reasoner Composer
 

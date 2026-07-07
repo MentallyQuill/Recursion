@@ -198,7 +198,7 @@ Inputs:
 
 The Arbiter should return every auto decision it can in the initial call. Recursion should not spend a separate model call just to decide whether to use Reasoner unless a later version has a concrete, measured reason to do so.
 
-The Arbiter also owns story-form detection. It should infer the current tense and point of view from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. This keeps card generation and prompt composition aligned with the host model's established output form.
+The Arbiter also owns story-form detection when the user has not forced a story form. It should infer the current tense and point of view from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. This keeps card generation and prompt composition aligned with the host model's established output form. If the operator selects a Tense & PoV override, runtime bypasses Arbiter inference for the effective story form and uses a high-confidence `User override` story-form object instead.
 
 Required output shape:
 
@@ -241,7 +241,7 @@ The Utility Arbiter must echo the frozen request `snapshotHash`. Missing or mism
 
 The provider router only receives card jobs that can fit the effective hand budget. The Arbiter is instructed not to emit more `cardJobs` than `budgets.maxCards`, but runtime enforces this mechanically before provider calls because provider calls are the expensive boundary.
 
-Invalid or unsupported `storyForm` values normalize to `unknown` rather than failing the whole plan. Unknown story form produces conservative downstream prompt text that tells card and story models to match the active chat's established form.
+Invalid or unsupported `storyForm` values normalize to `unknown` rather than failing the whole plan. Runtime also runs a heuristic cross-check against the latest assistant narration; if obvious tense or POV cues disagree with a confident Arbiter result, runtime lowers story form to `unknown` and records the disagreement reason. Unknown story form produces conservative downstream prompt text that tells card and story models to match the active chat's established form.
 
 The Arbiter is allowed to choose `reasonerDecision.mode: "use"` only when Reasoner is enabled and healthy. If Reasoner is disabled, unhealthy, or missing a provider secret, the Arbiter must select `skip` and explain the reason compactly.
 

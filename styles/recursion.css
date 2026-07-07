@@ -43,6 +43,7 @@
 .recursion-fresh-next-generation,
 .recursion-pipeline-button,
 .recursion-mode-button,
+.recursion-story-form-button,
 .recursion-activity-trigger,
 .recursion-icon-button,
 .recursion-cards-button,
@@ -162,13 +163,15 @@
 }
 
 .recursion-pipeline-cluster,
-.recursion-mode-cluster {
+.recursion-mode-cluster,
+.recursion-story-form-cluster {
   flex: 0 0 auto;
   position: relative;
 }
 
 .recursion-pipeline-button,
 .recursion-mode-button,
+.recursion-story-form-button,
 .recursion-icon-button,
 .recursion-cards-button {
   align-items: center;
@@ -181,10 +184,18 @@
   padding: 0;
 }
 
+.recursion-story-form-button {
+  max-width: 88px;
+  min-width: 48px;
+  padding: 0 7px;
+}
+
 .recursion-pipeline-button:hover,
 .recursion-pipeline-button:focus-visible,
 .recursion-mode-button:hover,
 .recursion-mode-button:focus-visible,
+.recursion-story-form-button:hover,
+.recursion-story-form-button:focus-visible,
 .recursion-cards-button:hover,
 .recursion-cards-button:focus-visible,
 .recursion-icon-button:hover,
@@ -282,6 +293,7 @@
 }
 
 .recursion-mode-text,
+.recursion-story-form-text,
 .recursion-status-text,
 .recursion-legacy-hand-count,
 .recursion-legacy-composer,
@@ -300,6 +312,7 @@
 
 .recursion-pipeline-menu,
 .recursion-mode-menu,
+.recursion-story-form-menu,
 .recursion-status-popover,
 .recursion-hand-dropdown,
 .recursion-cards-panel,
@@ -312,7 +325,8 @@
 }
 
 .recursion-pipeline-menu,
-.recursion-mode-menu {
+.recursion-mode-menu,
+.recursion-story-form-menu {
   left: 0;
   position: absolute;
   top: 29px;
@@ -320,8 +334,13 @@
   z-index: 86;
 }
 
+.recursion-story-form-menu {
+  width: 222px;
+}
+
 .recursion-pipeline-choice,
-.recursion-mode-choice {
+.recursion-mode-choice,
+.recursion-story-form-choice {
   align-items: center;
   background: transparent;
   border: 0;
@@ -339,7 +358,8 @@
 }
 
 .recursion-pipeline-choice:first-child,
-.recursion-mode-choice:first-child {
+.recursion-mode-choice:first-child,
+.recursion-story-form-choice:first-child {
   border-top: 0;
 }
 
@@ -348,7 +368,10 @@
 .recursion-pipeline-choice.is-selected,
 .recursion-mode-choice:hover,
 .recursion-mode-choice:focus-visible,
-.recursion-mode-choice.is-selected {
+.recursion-mode-choice.is-selected,
+.recursion-story-form-choice:hover,
+.recursion-story-form-choice:focus-visible,
+.recursion-story-form-choice.is-selected {
   background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
   outline: none;
 }
@@ -363,15 +386,40 @@
 }
 
 .recursion-pipeline-choice-name,
-.recursion-mode-choice-name {
+.recursion-mode-choice-name,
+.recursion-story-form-choice-name {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 80%, transparent);
   display: block;
   font-size: 11.5px;
   line-height: 1.15;
 }
 
+.recursion-story-form-choice {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 33px;
+}
+
+.recursion-story-form-text {
+  border: 0;
+  clip: auto;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 76%, transparent);
+  display: inline-block;
+  font-size: 10.5px;
+  height: auto;
+  line-height: 1;
+  margin: 0;
+  max-width: 74px;
+  overflow: hidden;
+  padding: 0;
+  position: static;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: auto;
+}
+
 .recursion-pipeline-choice-tip,
-.recursion-mode-choice-tip {
+.recursion-mode-choice-tip,
+.recursion-story-form-choice-tip {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 46%, transparent);
   display: block;
   font-size: 10px;
@@ -2338,6 +2386,7 @@
 
   .recursion-pipeline-menu,
   .recursion-mode-menu,
+  .recursion-story-form-menu,
   .recursion-status-popover,
   .recursion-hand-dropdown,
   .recursion-cards-panel,

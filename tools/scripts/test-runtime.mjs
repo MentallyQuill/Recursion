@@ -5110,7 +5110,7 @@ for (const scenario of [
   const view = runtime.view();
   assertEqual(result.ok, true, 'pending user message merge run skips safely');
   assert(view.lastSnapshot.messages.some((message) => message.text === 'The pending user turn should be visible to Recursion.'), 'runtime snapshot includes pending user turn');
-  assert(arbiterPrompt.includes('The pending user turn should be visible to Recursion.'), 'arbiter prompt includes pending user turn text');
+  assert(!arbiterPrompt.includes('The pending user turn should be visible to Recursion.'), 'arbiter prompt excludes pending user turn text');
   assertEqual(view.lastSnapshot.latestMesId, 8, 'pending user turn advances latest message id');
 }
 
@@ -9806,12 +9806,14 @@ for (const scenario of [
     strength: 'strong',
     promptFootprint: 'rich',
     focus: 'character',
-    reasonerUse: 'always'
+    reasonerUse: 'always',
+    storyFormOverride: 'present-third-limited'
   });
   assertEqual(updated.ok, true, 'runtime exposes successful high-level settings update');
   assertEqual(updated.settings.mode, 'auto', 'runtime exposes high-level settings update');
   assertEqual(updated.settings.strength, 'strong', 'runtime settings update preserves strength');
   assertEqual(runtime.view().settings.focus, 'character', 'settings update is visible in runtime view');
+  assertEqual(runtime.view().settings.storyFormOverride, 'present-third-limited', 'settings update exposes story form override in runtime view');
 
   const utilityResult = await runtime.updateProvider('utility', {
     source: 'openai-compatible',
@@ -9852,6 +9854,78 @@ for (const scenario of [
   assertEqual(cleared.clear.ok, true, 'runtime provider key clear returns prompt clear result');
   assertEqual(cleared.provider.openAICompatible.sessionApiKeyPresent, false, 'runtime can clear provider session key');
   assertEqual(settingsStore.getApiKey('utility'), '', 'runtime provider key clear removes session secret');
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: {
+      mode: 'auto',
+      reasonerUse: 'off',
+      storyFormOverride: 'past-third-limited'
+    },
+    snapshot: {
+      chatId: 'story-form-override-chat',
+      chatKey: 'story-form-override-chat',
+      sceneKey: 'story-form-override-scene',
+      sceneFingerprint: 'story-form-override-scene-fp',
+      sourceRevisionHash: 'story-form-override-source',
+      turnFingerprint: 'story-form-override-turn',
+      latestMesId: 2,
+      messages: [
+        { mesid: 1, role: 'assistant', text: 'I walk to the door. I touch the knob. I feel it turn.', visible: true },
+        { mesid: 2, role: 'user', text: 'Keep going.', visible: true }
+      ]
+    },
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              sceneStatus: 'same-scene',
+              promptFootprint: 'normal',
+              cardJobs: [],
+              storyForm: {
+                schema: 'recursion.storyForm.v1',
+                tense: 'present',
+                pov: 'first-person',
+                confidence: 'high',
+                evidenceRefs: ['message:1'],
+                reason: 'Provider followed the visible first-person text.'
+              },
+              reasonerDecision: { mode: 'skip', reason: 'override regression', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 0 },
+              diagnostics: ['story-form-override-regression']
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Respect the selected story form.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['story-form-override-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected story-form override role ${roleId}`);
+      }
+    }
+  });
+
+  const result = await runtime.prepareForGeneration({ userMessage: 'Keep going.' });
+  assertEqual(result.ok, true, 'story form override run installs');
+  assertEqual(result.packet.storyForm.tense, 'past', 'story form override controls packet tense');
+  assertEqual(result.packet.storyForm.pov, 'third-person-limited', 'story form override controls packet pov');
+  assert(result.packet.sections.guidance.includes('past tense, third-person-limited POV'), 'story form override reaches guidance section');
 }
 
 {

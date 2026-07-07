@@ -1,8 +1,13 @@
 import {
   STORY_FORM_SCHEMA,
+  STORY_FORM_OVERRIDE_OPTIONS,
   UNKNOWN_STORY_FORM,
   arbiterStoryFormContractLine,
+  forcedStoryForm,
+  heuristicPov,
+  heuristicTense,
   normalizeStoryForm,
+  normalizeStoryFormWithHeuristic,
   storyFormInstruction,
   storyFormPromptBlock
 } from '../../src/story-form.mjs';
@@ -48,3 +53,25 @@ assert(storyFormPromptBlock(valid).includes('Target POV: third-person-limited.')
 assert(storyFormPromptBlock(valid).includes('Do not switch to first person'), 'prompt block forbids drift');
 assert(arbiterStoryFormContractLine().includes('latest visible assistant narration first'), 'Arbiter contract names assistant-first source rule');
 assert(arbiterStoryFormContractLine().includes(STORY_FORM_SCHEMA), 'Arbiter contract names schema');
+
+assert(STORY_FORM_OVERRIDE_OPTIONS.includes('present-third-limited'), 'override options include present third limited');
+assertEqual(heuristicTense('Mara walked to the door, looked back, and said nothing.'), 'past', 'heuristic detects past tense narration');
+assertEqual(heuristicPov('Mara looked back. She held the key because her hand shook and she hated the lock.'), 'third-person-limited', 'heuristic detects third-person narration');
+
+const forced = forcedStoryForm('present-third-limited');
+assertEqual(forced.tense, 'present', 'forced story form sets tense');
+assertEqual(forced.pov, 'third-person-limited', 'forced story form sets pov');
+assertEqual(forced.confidence, 'high', 'forced story form is high confidence');
+assertEqual(forcedStoryForm('auto'), null, 'auto override does not force story form');
+
+const corrected = normalizeStoryFormWithHeuristic({
+  schema: STORY_FORM_SCHEMA,
+  tense: 'present',
+  pov: 'first-person',
+  confidence: 'high',
+  evidenceRefs: ['message:7'],
+  reason: 'Arbiter followed the pending user message.'
+}, UNKNOWN_STORY_FORM, 'Mara walked to the door. She looked back and held the key. Her hand shook.');
+assertEqual(corrected.tense, 'unknown', 'heuristic conflict clears incorrect tense');
+assertEqual(corrected.pov, 'unknown', 'heuristic conflict clears incorrect pov');
+assertEqual(corrected.confidence, 'low', 'heuristic conflict lowers confidence');

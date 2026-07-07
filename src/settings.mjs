@@ -1,6 +1,7 @@
 import { cloneJson } from './core.mjs';
 import { defaultCardScope, normalizeCardScope } from './card-scope.mjs';
 import { DEFAULT_RETENTION_SETTINGS, normalizeRetentionSettings } from './retention-policy.mjs';
+import { STORY_FORM_OVERRIDE_OPTIONS } from './story-form.mjs';
 
 const MODES = new Set(['auto', 'manual']);
 const PIPELINE_MODES = new Set(['standard', 'rapid', 'fused']);
@@ -37,6 +38,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   promptFootprint: 'normal',
   focus: 'balanced',
   reasonerUse: 'auto',
+  storyFormOverride: 'auto',
   injection: {
     placement: 'in_prompt',
     role: 'system',
@@ -260,6 +262,7 @@ export function normalizeSettings(value = {}, secretStore = null) {
     promptFootprint: enumValue(source.promptFootprint, FOOTPRINTS, DEFAULT_RECURSION_SETTINGS.promptFootprint),
     focus: enumValue(source.focus, FOCUS, DEFAULT_RECURSION_SETTINGS.focus),
     reasonerUse: reasonerUseForReasoningLevel(reasoningLevel),
+    storyFormOverride: enumValue(source.storyFormOverride, new Set(STORY_FORM_OVERRIDE_OPTIONS), DEFAULT_RECURSION_SETTINGS.storyFormOverride),
     injection: normalizeInjectionSettings(source.injection),
     diagnostics: {
       includeExcerpts: source.diagnostics?.includeExcerpts === true

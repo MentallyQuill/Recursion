@@ -33,7 +33,7 @@ import {
 import { reasoningRequestMetadata } from './reasoning-policy.mjs';
 import { createSettingsStore, normalizeCardBudgetSettings, normalizeInjectionSettings, normalizeSettings } from './settings.mjs';
 import { behaviorPolicyPromptLines, influencePolicyForSettings, runPolicyForEffectivePlan } from './settings-policy.mjs';
-import { STORY_FORM_SCHEMA, UNKNOWN_STORY_FORM, arbiterStoryFormContractLine, normalizeStoryForm } from './story-form.mjs';
+import { STORY_FORM_SCHEMA, UNKNOWN_STORY_FORM, arbiterStoryFormContractLine, forcedStoryForm, normalizeStoryForm, normalizeStoryFormWithHeuristic } from './story-form.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { asObject } from './safe-values.mjs';
@@ -201,6 +201,7 @@ function cacheSettingsSignature(settings = {}) {
     promptFootprint: normalized.promptFootprint,
     focus: normalized.focus,
     reasonerUse: normalized.reasonerUse,
+    storyFormOverride: normalized.storyFormOverride,
     retention: normalized.retention,
     providers: {
       utility: cacheProviderSettingsSignature(normalized.providers?.utility),
@@ -222,6 +223,7 @@ function rapidWarmSettingsSignature(settings = {}) {
     reasoningLevel: normalized.reasoningLevel,
     promptFootprint: normalized.promptFootprint,
     focus: normalized.focus,
+    storyFormOverride: normalized.storyFormOverride,
     utilityProvider: cacheProviderSettingsSignature(normalized.providers?.utility)
   };
 }
@@ -1373,6 +1375,7 @@ function safeSettingsView(settings) {
     promptFootprint: safeText(source.promptFootprint || 'normal', 40),
     focus: safeText(source.focus || 'balanced', 80),
     reasonerUse: safeText(source.reasonerUse || 'auto', 40),
+    storyFormOverride: safeText(source.storyFormOverride || 'auto', 40),
     injection: {
       placement: safeText(injection.placement, 40),
       role: safeText(injection.role, 40),
@@ -3845,6 +3848,10 @@ export function createRecursionRuntime({
         userMessage: '',
         signal
       });
+      if (settings.storyFormOverride && settings.storyFormOverride !== 'auto') {
+        const forced = forcedStoryForm(settings.storyFormOverride);
+        if (forced) plan = { ...plan, storyForm: normalizeStoryForm(forced) };
+      }
       plan = enforceReasonerAvailability(plan, settings);
       plan = applyReasoningPolicyToPlan(plan, settings);
       plan = applyBehaviorPolicyToPlan(plan, settings);
@@ -4675,15 +4682,24 @@ export function createRecursionRuntime({
         userMessageHash: hashJson(pendingUserMessage.text),
         catalogHash: hashJson(CARD_CATALOG)
       };
+      const arbiterSnapshot = snapshotWithoutVisiblePendingUserMessage(snapshot, pendingUserMessage);
+      const latestAssistant = latestVisibleAssistantEntry(arbiterSnapshot);
+      const latestAssistantText = latestAssistant?.message?.text || '';
       let plan = await askUtilityArbiter({
         runId,
-        snapshot,
+        snapshot: arbiterSnapshot,
         settings,
         fallbackPlan,
         sceneCache: initialCache,
         userMessage: pendingUserMessage.text,
         signal
       });
+      if (settings.storyFormOverride && settings.storyFormOverride !== 'auto') {
+        const forced = forcedStoryForm(settings.storyFormOverride);
+        if (forced) plan = { ...plan, storyForm: normalizeStoryForm(forced) };
+      } else {
+        plan = { ...plan, storyForm: normalizeStoryFormWithHeuristic(plan.storyForm, UNKNOWN_STORY_FORM, latestAssistantText) };
+      }
       plan = enforceReasonerAvailability(plan, settings);
       plan = applyReasoningPolicyToPlan(plan, settings);
       plan = applyBehaviorPolicyToPlan(plan, settings);

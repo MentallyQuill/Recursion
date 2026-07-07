@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Add **Prose Enhancement** as a toggleable post-generation Utility pass for SillyTavern assistant output. The feature improves prose rhythm after the host model finishes a response, while preserving the original meaning, event order, dialogue, tense, and point of view.
+Add **Prose Enhancement** as a toggleable post-generation Utility pass for SillyTavern assistant output. The feature rewrites non-dialogue prose after the host model finishes a response, while preserving dialogue except for explicit banned-slop cleanup.
 
 This is not Recast's configurable multi-pass pipeline. Recursion should provide one focused V1 feature with three modes:
 
@@ -31,7 +31,7 @@ For every newly generated host swipe, the feature may create one matching enhanc
 
 When appending the enhanced sibling in SillyTavern, Recursion must keep `swipes` and `swipe_info` aligned and refresh the current chat view so the second swipe is visible immediately. A persisted enhanced swipe that only appears after page reload violates the `As Swipe` contract.
 
-If the Utility pass returns text that is byte-identical to the held original, Recursion treats the pass as unchanged: it reveals the original, creates no enhanced sibling, and keeps the original swipe selected. `As Swipe` must never append a duplicate swipe only to mark that a pass ran.
+If the Utility pass returns valid text, Recursion applies it even when the text is byte-identical or only minimally changed. `As Swipe` keeps the original and appends the provider output as the enhanced sibling.
 
 ### Replace
 
@@ -39,7 +39,7 @@ When an assistant generation, regeneration, continuation, or swipe lands, Recurs
 
 If enhancement fails validation, times out, is canceled, or Utility is unavailable, Recursion reveals the original output unchanged.
 
-If the Utility pass returns text that is byte-identical to the held original, Recursion treats the pass as unchanged and reveals the original without replacing the active text.
+If the Utility pass returns valid text, `Replace` applies it even when the text is byte-identical or only minimally changed.
 
 The capture path must not destructively blank the SillyTavern chat row. CSS owns the visual masking while the host adapter keeps the raw message text recoverable. If an older build or interrupted pass leaves a persisted `__recursionHeldText` marker with a blank active message, Recursion should restore the held original and clear the marker on bootstrap.
 
@@ -82,13 +82,12 @@ These statuses may appear in the existing compact status/progress surfaces. They
 Use the Prose Rhythm rules as the model-visible editing instruction, adapted to Recursion's structured response contract:
 
 ```text
-You are a prose editor. Your only job is to improve how <text_to_transform> reads without changing what it says.
+You are a prose editor. Your job is to rewrite <text_to_transform> into stronger prose while preserving all dialogue except explicitly banned slop.
 Rules:
 - Do not change any dialogue. Not a single word.
 - Exception: the banned AI slop list below can override this dialogue rule. If a dialogue span contains one of those exact banned phrases or an obvious direct variant, remove or neutralize only that phrase while preserving the character's intended meaning.
-- Do not change what happens, what characters do, or the order of events.
-- Do not add new actions, reactions, or details that were not there.
-- Do not remove actions, reactions, or details that were there.
+- You may rewrite non-dialogue prose freely for rhythm, clarity, diction, texture, pacing, and sentence structure.
+- You may change non-dialogue narration, action phrasing, descriptive framing, and transitions when it improves the prose.
 - Write in the verb tenses the original text is written, keeping the grammatical person as well.
 - Prioritize avoiding repetition of descriptive words by changing the phrase or removing it altogether.
 
@@ -447,9 +446,7 @@ Response shape:
 ```json
 {
   "schema": "recursion.proseEnhancer.v1",
-  "sourceMessageHash": "same source message hash",
-  "rewrittenText": "Enhanced assistant text.",
-  "diagnostics": []
+  "text": "Enhanced assistant text."
 }
 ```
 
@@ -474,12 +471,10 @@ The request must not include raw prompt packets, card inspector notes, API keys,
 Before applying provider output, runtime must validate:
 
 - top-level `schema` is `recursion.proseEnhancer.v1`;
-- `sourceMessageHash` matches the original source hash;
-- `rewrittenText` is non-empty;
-- output length is within a sane ratio of the original, default `0.55..1.75`;
+- `text` is non-empty;
+- output length is within the hard Prose Enhancement output cap;
 - every dialogue span is byte-identical and appears in the same order, except exact or obvious direct variants from the banned AI slop list may be removed or neutralized;
 - output has no known secret, prompt, hidden-reasoning, or provider-diagnostic markers;
-- current latest assistant message/swipe still matches the source identity captured before the call;
 - this source hash has not already produced an enhanced sibling for the same message/swipe.
 
 Dialogue-span validation is mandatory. If it cannot parse the text confidently, Recursion should skip rather than risk changing dialogue, except when the only detected dialogue change is removal or neutralization of listed banned slop.
@@ -510,7 +505,7 @@ Assistant message lands
   -> capture message id, active swipe id, source hash, raw text
   -> hold visible output
   -> call Utility proseEnhancer
-  -> validate output against source identity and dialogue invariants
+  -> validate output against schema, hard length cap, and dialogue invariants
   -> As Swipe: ensure original + enhanced sibling, select enhanced, reveal
   -> Replace: replace active text, reveal
   -> failure: reveal original unchanged
@@ -587,7 +582,7 @@ Implementation should update:
 - Dialogue spans must remain byte-identical before output is applied, except exact or obvious direct variants from the full banned AI slop list may be removed or neutralized.
 - Prompt includes the full banned AI slop and clichés list intact, not reduced or paraphrased.
 - Enabled mode hides or blanks raw host output before the player sees it.
-- `As Swipe` creates original and enhanced swipes, appends matching SillyTavern `swipe_info`, refreshes the current chat view, then selects the enhanced swipe.
+- `As Swipe` creates original and enhanced swipes, appends matching SillyTavern `swipe_info`, refreshes the current chat view, then selects the enhanced swipe, even when provider output is byte-identical.
 - `Replace` replaces the active assistant text with enhanced text.
 - Duplicate enhanced siblings are not created for the same original hash.
 - Failure or stale result reveals original output unchanged.

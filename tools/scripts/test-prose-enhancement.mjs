@@ -26,6 +26,7 @@ const request = buildProseEnhancementRequest({
 assertEqual(PROSE_ENHANCER_SCHEMA, 'recursion.proseEnhancer.v1', 'prose enhancer schema is stable');
 assert(request.prompt.includes('<text_to_transform>'), 'prose enhancement prompt marks transform text');
 assert(request.prompt.includes('Do not change any dialogue. Not a single word.'), 'prompt carries Recast dialogue protection');
+assert(request.prompt.includes('You may rewrite non-dialogue prose freely'), 'prompt allows freer non-dialogue prose rewriting');
 assert(request.prompt.includes('The dialogue-protection rule has one explicit exception'), 'prompt names banned-list dialogue exception');
 assert(request.prompt.includes('## Core banned AI slop and clichés'), 'prompt includes the full banned AI slop list heading');
 assert(request.prompt.includes('* felt it like a physical blow'), 'prompt includes the first banned-list bullet intact');
@@ -52,9 +53,16 @@ assertEqual(
 
 const accepted = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,
-  text: 'Mara staggered. "I felt it like a punch to the chest," she said.\nShe crossed the room.'
+  text: 'Mara staggered, steadied herself on the table, and crossed the room. "I felt it like a punch to the chest," she said.\nHer anger narrowed into motion.'
 }, { originalText: sourceText });
 assertEqual(accepted.ok, true, 'validator accepts prose-only edits with exact dialogue intact');
+
+const acceptedIdentical = validateProseEnhancementResult({
+  schema: PROSE_ENHANCER_SCHEMA,
+  text: sourceText
+}, { originalText: sourceText });
+assertEqual(acceptedIdentical.ok, true, 'validator accepts byte-identical prose output');
+assertEqual(acceptedIdentical.unchanged, undefined, 'validator no longer marks identical output as unchanged');
 
 const acceptedDialogueSlopCleanup = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,
@@ -75,10 +83,14 @@ const rejectedDialogueChange = validateProseEnhancementResult({
 assertEqual(rejectedDialogueChange.ok, false, 'validator rejects ordinary dialogue changes');
 assertEqual(rejectedDialogueChange.error.code, 'RECURSION_PROSE_DIALOGUE_CHANGED', 'dialogue rejection uses stable code');
 
-const rejectedExpansion = validateProseEnhancementResult({
+const acceptedExpansion = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,
-  text: `${sourceText}\nA new stranger entered with a lantern.`
+  text: [
+    'Mara reeled, caught herself, and crossed the room with her hands clenched at her sides.',
+    '"I felt it like a punch to the chest," she said.',
+    'Her anger stayed in her shoulders and in the sharp set of her pace.'
+  ].join('\n')
 }, { originalText: sourceText });
-assertEqual(rejectedExpansion.ok, false, 'validator rejects large new-detail expansion');
+assertEqual(acceptedExpansion.ok, true, 'validator allows freer non-dialogue expansion when dialogue is intact');
 
 console.log('[pass] prose enhancement');

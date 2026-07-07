@@ -3068,23 +3068,6 @@ export function createRecursionRuntime({
         return { ok: false, mode, error: validation.error };
       }
       const enhancedText = validation.text;
-      if (validation.unchanged) {
-        settleRuntimeActivity({
-          runId,
-          phase: 'settled',
-          severity: 'info',
-          label: 'Prose Enhancement unchanged. Original kept.',
-          chips: ['Prose']
-        });
-        return {
-          ok: true,
-          skipped: true,
-          reason: 'prose-enhancement-unchanged',
-          mode,
-          messageId,
-          originalHash
-        };
-      }
       if (mode === 'replace') {
         const replace = await messages.replaceAssistantMessageText?.(messageId, enhancedText, { marker });
         if (replace?.ok === false) return { ok: false, mode, error: replace.error };

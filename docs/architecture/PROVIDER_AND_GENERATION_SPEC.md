@@ -170,7 +170,7 @@ Generation roles describe why a model call exists. They are not the same thing a
 | `fusedCardBundle` | Utility by default, Reasoner when Fused routing selects it | Generate every requested card family together in one structured foreground bundle | Fused bundle validation reports accepted, invalid, rejected, omitted, and missing requested families. Runtime uses that structure to rerun only damaged or missing requested families when at least one fused item is trustworthy. |
 | `rapidTurnDelta` | Utility | Select warm raw cards and write provider-authored turn guidance for the Rapid foreground path | Escalate to Standard only when a missing card is mandatory |
 | `guidanceComposer` | Utility | Write provider-authored direction for using selected raw cards in the next generation | Fall back to raw-card-only packet when invalid or unavailable |
-| `proseEnhancer` | Utility | Polish the latest assistant prose after host generation while preserving events, tense, POV, and dialogue except banned slop cleanup | Reveal the original assistant output unchanged |
+| `proseEnhancer` | Utility | Rewrite the latest assistant non-dialogue prose after host generation while preserving dialogue except banned slop cleanup | Reveal the original assistant output unchanged |
 | `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility guidance plus raw selected Card Evidence |
 | `providerTest` | Selected lane | Validate lane connectivity and structured response capability | Mark lane test failed with compact error |
 

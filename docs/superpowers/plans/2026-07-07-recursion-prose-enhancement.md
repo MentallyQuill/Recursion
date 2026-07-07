@@ -21,14 +21,14 @@
 - Context message range is integer `0..35`.
 - Prose Enhancement uses Utility only; Reasoner is not part of V1 routing.
 - Provider schema is `recursion.proseEnhancer.v1`.
-- Dialogue spans must remain byte-identical before enhanced text can apply, except exact or obvious direct variants from the full banned AI slop list may be removed or neutralized inside dialogue.
+- Dialogue spans must remain byte-identical before enhanced text can apply, except exact or obvious direct variants from the full banned AI slop list may be removed or neutralized inside dialogue. Non-dialogue prose may be rewritten freely.
 - Prose Enhancement prompt must include the full banned AI slop and clichés list intact; do not reduce, summarize, or paraphrase it.
 - Raw original text, enhanced text, provider prompts, provider responses, full scene context, secrets, and hidden reasoning must not persist to journals or diagnostics.
 - Enabled Prose Enhancement should capture raw host output and mask it before the player sees it, without destructively blanking the SillyTavern chat row. If capture fails, skip enhancement and reveal original output.
 - `As Swipe` creates or selects one enhanced sibling for one original message/swipe hash, then selects the enhanced swipe.
 - `As Swipe` must keep SillyTavern `swipes` and `swipe_info` aligned and refresh the current chat view so the enhanced sibling appears without a page reload.
 - `Replace` replaces the active assistant text; failure reveals original unchanged.
-- If the Utility pass returns text byte-identical to the held original, treat the pass as unchanged: reveal the original, do not replace it, and do not append a duplicate `As Swipe` sibling.
+- If the Utility pass returns valid text, apply it even when byte-identical or minimally changed. `As Swipe` still appends the provider output as the enhanced sibling; `Replace` still writes it as the active text.
 - If an interrupted pass leaves a persisted held marker with a blank active assistant row, bootstrap recovery restores the held original and clears the marker.
 
 ---
@@ -813,13 +813,12 @@ export function buildProseEnhancementRequest(input = {}) {
   const textToTransform = truncate(String(source.textToTransform ?? ''), MAX_TARGET_TEXT);
   const scene = sceneContextBlock(source.sceneMessages, source.contextMessages);
   const systemPrompt = [
-    'You are a prose editor. Your only job is to improve how <text_to_transform> reads without changing what it says.',
+    'You are a prose editor. Your job is to rewrite <text_to_transform> into stronger prose while preserving all dialogue except explicitly banned slop.',
     'Rules:',
     '- Do not change any dialogue. Not a single word.',
     "- Exception: the banned AI slop list below can override this dialogue rule. If a dialogue span contains one of those exact banned phrases or an obvious direct variant, remove or neutralize only that phrase while preserving the character's intended meaning.",
-    '- Do not change what happens, what characters do, or the order of events.',
-    '- Do not add new actions, reactions, or details that were not there.',
-    '- Do not remove actions, reactions, or details that were there.',
+    '- You may rewrite non-dialogue prose freely for rhythm, clarity, diction, texture, pacing, and sentence structure.',
+    '- You may change non-dialogue narration, action phrasing, descriptive framing, and transitions when it improves the prose.',
     '- Write in the verb tenses the original text is written, keeping the grammatical person as well.',
     '- Prioritize avoiding repetition of descriptive words by changing the phrase or removing it altogether.',
     'Slop reduction:',
@@ -1600,7 +1599,7 @@ Prose Enhancement is an optional post-generation Utility pass. `Off` leaves Sill
 Add lifecycle:
 
 ```text
-Host generation starts -> arm hold when Prose Enhancement enabled -> assistant lands -> hold output -> Utility proseEnhancer -> validate dialogue/source invariants -> append enhanced swipe or replace active text -> reveal message -> Rapid warm may continue
+Host generation starts -> arm hold when Prose Enhancement enabled -> assistant lands -> hold output -> Utility proseEnhancer -> validate schema, hard length cap, and dialogue invariants -> append enhanced swipe or replace active text -> reveal message -> Rapid warm may continue
 ```
 
 - [ ] **Step 3: Update provider docs**
@@ -1608,13 +1607,13 @@ Host generation starts -> arm hold when Prose Enhancement enabled -> assistant l
 Add role row:
 
 ```markdown
-| `proseEnhancer` | Utility | Rewrite the latest assistant output for prose rhythm using bounded scene context. | Reveal original unchanged when Utility is unavailable, schema is invalid, dialogue changes, or source identity is stale. |
+| `proseEnhancer` | Utility | Rewrite the latest assistant non-dialogue prose using bounded scene context. | Reveal original unchanged when Utility is unavailable, schema is invalid, or dialogue changes. |
 ```
 
 Add schema:
 
 ```markdown
-`proseEnhancer` returns `recursion.proseEnhancer.v1` with `sourceMessageHash`, `rewrittenText`, and compact diagnostics. It is structured JSON even though the rewritten text itself is prose.
+`proseEnhancer` returns `recursion.proseEnhancer.v1` with `text`. It is structured JSON even though the rewritten text itself is prose.
 ```
 
 - [ ] **Step 4: Update UI docs**

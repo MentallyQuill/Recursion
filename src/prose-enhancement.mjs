@@ -347,12 +347,11 @@ export function buildProseEnhancementRequest({
     ? `Story form: ${safeText(JSON.stringify(storyForm), 600)}`
     : 'Story form: infer from source text.';
   const prompt = [
-    'You are a prose editor. Your only job is to improve how <text_to_transform> reads without changing what it says.',
+    'You are a prose editor. Your job is to rewrite <text_to_transform> into stronger prose while preserving all dialogue except explicitly banned slop.',
     'Rules:',
     '- Do not change any dialogue. Not a single word.',
-    '- Do not change what happens, what characters do, or the order of events',
-    "- Do not add new actions, reactions, or details that weren't there",
-    '- Do not remove actions, reactions, or details that were there',
+    '- You may rewrite non-dialogue prose freely for rhythm, clarity, diction, texture, pacing, and sentence structure.',
+    '- You may change non-dialogue narration, action phrasing, descriptive framing, and transitions when it improves the prose.',
     '- Write in the verb tenses the original text is written, keeping the grammatical person as well.',
     '- Prioritize avoiding repetition of descriptive words by changing the phrase or removing it altogether',
     '',
@@ -465,7 +464,7 @@ export function validateProseEnhancementResult(result = {}, { originalText = '' 
   }
   const text = String(data.text ?? '');
   if (!text.trim()) return validationError('RECURSION_PROSE_EMPTY', 'Prose enhancement returned empty text.');
-  if (text.length > MAX_TARGET_TEXT || text.length > String(originalText ?? '').length * 1.05 + 20) {
+  if (text.length > MAX_TARGET_TEXT) {
     return validationError('RECURSION_PROSE_EXPANDED', 'Prose enhancement expanded the message too much.');
   }
   const originalDialogue = dialogueSpans(originalText);
@@ -477,9 +476,6 @@ export function validateProseEnhancementResult(result = {}, { originalText = '' 
     if (originalDialogue[index].text === nextDialogue[index].text) continue;
     if (containsBannedPhrase(originalDialogue[index].text)) continue;
     return validationError('RECURSION_PROSE_DIALOGUE_CHANGED', 'Prose enhancement changed dialogue.');
-  }
-  if (hashJson(text) === hashJson(String(originalText ?? ''))) {
-    return { ok: true, text, unchanged: true };
   }
   return { ok: true, text };
 }

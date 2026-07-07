@@ -762,13 +762,12 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-as-swipe-unchanged' });
-  assertEqual(result.ok, true, 'unchanged As Swipe prose enhancement returns success');
-  assertEqual(result.skipped, true, 'unchanged As Swipe reports skipped instead of enhanced');
-  assertEqual(result.reason, 'prose-enhancement-unchanged', 'unchanged As Swipe reports unchanged reason');
-  assertEqual(proseHost.calls.some((call) => call.type === 'append'), false, 'unchanged As Swipe does not append duplicate swipe');
-  assertEqual(proseHost.calls.at(-1).type, 'reveal', 'unchanged As Swipe reveals the held original');
-  assertEqual(proseHost.message.swipes.length, 1, 'unchanged As Swipe keeps a single original swipe');
-  assertEqual(proseHost.message.swipeId, 0, 'unchanged As Swipe keeps original swipe selected');
+  assertEqual(result.ok, true, 'identical As Swipe prose enhancement returns success');
+  assertEqual(result.skipped, undefined, 'identical As Swipe is no longer skipped');
+  assertEqual(proseHost.calls.some((call) => call.type === 'append' && call.options.select === true), true, 'identical As Swipe still appends an enhanced swipe');
+  assertEqual(proseHost.message.swipes.length, 2, 'identical As Swipe keeps original and enhanced swipes');
+  assertEqual(proseHost.message.swipes[1], 'She was angry. "Keep the door shut," Mara said.', 'identical As Swipe stores provider output as enhanced swipe');
+  assertEqual(proseHost.message.swipeId, 1, 'identical As Swipe selects provider output');
 }
 
 {

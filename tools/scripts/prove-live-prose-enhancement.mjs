@@ -121,8 +121,8 @@ try {
     const pass = mode === 'off'
       ? proof.result?.skipped === true && proof.before.text === proof.after.text && proof.after.swipes.length === 1
       : mode === 'as-swipe'
-        ? proof.ok === true && proof.after.swipes.length === 2 && proof.after.swipeInfoLength === proof.after.swipes.length && proof.after.swipeId === 1 && proof.after.swipes[0] === proof.before.swipes[0] && proof.after.swipes[1] !== proof.before.swipes[0]
-        : proof.ok === true && proof.after.swipes.length === 1 && proof.after.text !== proof.before.text;
+        ? proof.ok === true && proof.after.swipes.length === 2 && proof.after.swipeInfoLength === proof.after.swipes.length && proof.after.swipeId === 1 && proof.after.swipes[0] === proof.before.swipes[0]
+        : proof.ok === true && proof.after.swipes.length === 1;
     report.checks.push({
       name: `prose-enhancement-${mode}`,
       status: pass ? 'pass' : 'fail',

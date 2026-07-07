@@ -250,8 +250,9 @@ assertEqual(activeIdentity.swipeId, 0, 'host active assistant identity includes 
 assertEqual(activeIdentity.text, 'Original assistant text.', 'host active assistant identity includes active swipe text');
 assertEqual(typeof activeIdentity.originalHash, 'string', 'host active assistant identity includes text hash');
 assertEqual((await mutationHost.messages.holdAssistantMessage(4)).ok, true, 'host can hold assistant text');
-assertEqual(mutationContext.chat[0].mes, '', 'hold hides active assistant text');
-assertEqual(mutationContext.chat[0].swipes[0], '', 'hold hides active swipe text');
+assertEqual(mutationContext.chat[0].mes, 'Original assistant text.', 'hold captures without destructively clearing assistant text');
+assertEqual(mutationContext.chat[0].swipes[0], 'Original assistant text.', 'hold captures without destructively clearing active swipe text');
+assertEqual(mutationContext.chat[0].__recursionHeldText, 'Original assistant text.', 'hold stores recoverable held assistant text');
 assertEqual((await mutationHost.messages.revealAssistantMessage(4)).ok, true, 'host can reveal held assistant text');
 assertEqual(mutationContext.chat[0].mes, 'Original assistant text.', 'reveal restores held assistant text');
 assertEqual((await mutationHost.messages.appendAssistantMessageSwipe(4, 'Polished assistant text.', { marker: { originalHash: 'hash-a' }, select: true })).ok, true, 'host appends and selects enhanced swipe');
@@ -280,12 +281,12 @@ const latestMutationContext = {
 const latestMutationHost = createSillyTavernHost({ contextFactory: () => latestMutationContext, settingsRoot: {} });
 assertEqual(latestMutationHost.messages.activeAssistantMessageIdentity().messageId, 8, 'host active assistant identity chooses latest assistant when no id is supplied');
 assertEqual((await latestMutationHost.messages.holdAssistantMessage(8)).ok, true, 'host can hold latest assistant by id');
-assertEqual(latestMutationContext.chat[2].mes, '', 'host hold hides latest assistant row rather than older assistant row');
+assertEqual(latestMutationContext.chat[2].mes, 'Latest assistant text.', 'host hold leaves latest assistant text recoverable in chat state');
 assertEqual(latestMutationContext.chat[0].mes, 'Older assistant text.', 'host hold leaves older assistant row unchanged');
 latestMutationContext.chat[2].mes = 'Latest assistant text after streaming update.';
 latestMutationContext.chat[2].swipes[0] = 'Latest assistant text after streaming update.';
 assertEqual((await latestMutationHost.messages.holdAssistantMessage(8)).ok, true, 'host can refresh held text after streaming updates');
-assertEqual(latestMutationContext.chat[2].mes, '', 'host repeated hold keeps latest assistant hidden during streaming');
+assertEqual(latestMutationContext.chat[2].mes, 'Latest assistant text after streaming update.', 'host repeated hold preserves streaming text in chat state');
 assertEqual(
   latestMutationHost.messages.activeAssistantMessageIdentity().text,
   'Latest assistant text after streaming update.',
@@ -305,8 +306,33 @@ const liveContextWithStaleMessages = {
 const liveContextHost = createSillyTavernHost({ contextFactory: () => liveContextWithStaleMessages, settingsRoot: {} });
 assertEqual(liveContextHost.messages.activeAssistantMessageIdentity().messageId, 2, 'host active assistant identity prefers live SillyTavern chat over stale context.messages');
 assertEqual((await liveContextHost.messages.holdAssistantMessage(2)).ok, true, 'host holds live generated assistant from context.chat');
-assertEqual(liveContextWithStaleMessages.chat[1].mes, '', 'host hides live chat assistant instead of stale messages assistant');
+assertEqual(liveContextWithStaleMessages.chat[1].mes, 'Live generated assistant in context.chat.', 'host leaves live chat assistant text intact during capture');
 assertEqual(liveContextWithStaleMessages.messages[0].mes, 'Stale assistant from context.messages.', 'host leaves stale context.messages untouched');
+
+const staleHeldContext = {
+  chatId: 'stale-held-prose-chat',
+  chat: [
+    {
+      mesid: 6,
+      is_user: false,
+      mes: '',
+      swipe_id: 0,
+      swipes: [''],
+      __recursionHeldText: 'Recovered assistant text.'
+    }
+  ],
+  saveChat() {
+    messageMutationCalls.push({ staleHeldSave: true });
+  }
+};
+const staleHeldHost = createSillyTavernHost({ contextFactory: () => staleHeldContext, settingsRoot: {} });
+const recoveredHeld = await staleHeldHost.messages.recoverHeldAssistantMessages({ reason: 'unit-stale-held' });
+assertEqual(recoveredHeld.ok, true, 'host recovers stale held assistant messages');
+assertEqual(recoveredHeld.recovered, 1, 'host reports one recovered held assistant message');
+assertEqual(staleHeldContext.chat[0].mes, 'Recovered assistant text.', 'host restores stale held assistant text');
+assertEqual(staleHeldContext.chat[0].swipes[0], 'Recovered assistant text.', 'host restores stale held active swipe');
+assertEqual(staleHeldContext.chat[0].__recursionHeldText, undefined, 'host clears stale held marker after recovery');
+assert(messageMutationCalls.some((entry) => entry.staleHeldSave === true), 'stale held recovery saves chat');
 
 const packet = {
   injectionPlan: { blocks: [{ id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 2, role: 'system' }] },

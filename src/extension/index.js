@@ -65,6 +65,13 @@ function refreshProseCaptureState(activeRuntime = runtime) {
   return active;
 }
 
+function scheduleHeldProseRecovery(activeRuntime = runtime, reason = 'bootstrap') {
+  if (typeof activeRuntime?.recoverHeldProseEnhancementMessages !== 'function') return;
+  Promise.resolve()
+    .then(() => activeRuntime.recoverHeldProseEnhancementMessages({ reason }))
+    .catch((error) => warn('Prose Enhancement stale hold recovery failed.', error));
+}
+
 function destroyUi() {
   try {
     ui?.destroy?.();
@@ -450,6 +457,7 @@ export function bootstrapRecursion() {
     ui = nextUi;
     publishLiveHarnessRuntime(nextRuntime);
     registerHostEvents(nextRuntime, nextHost);
+    scheduleHeldProseRecovery(nextRuntime, 'bootstrap');
     return runtime;
   } catch (error) {
     warn('Bootstrap failed.', error);

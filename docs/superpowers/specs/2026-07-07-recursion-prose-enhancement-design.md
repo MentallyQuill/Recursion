@@ -20,7 +20,7 @@ Recursion does no post-generation prose work. SillyTavern output appears normall
 
 ### As Swipe
 
-When an assistant generation, regeneration, continuation, or swipe lands, Recursion temporarily holds the visible output, runs Prose Enhancement, then releases the message with two swipes:
+When an assistant generation, regeneration, continuation, or swipe lands, Recursion captures the latest assistant text, masks the visible message while the pass runs, then releases the message with two swipes:
 
 1. Original SillyTavern output.
 2. Enhanced output.
@@ -33,11 +33,13 @@ If the Utility pass returns text that is byte-identical to the held original, Re
 
 ### Replace
 
-When an assistant generation, regeneration, continuation, or swipe lands, Recursion temporarily holds the visible output, runs Prose Enhancement, replaces the active assistant text with the enhanced text, then reveals the message.
+When an assistant generation, regeneration, continuation, or swipe lands, Recursion captures the latest assistant text, masks the visible message while the pass runs, replaces the active assistant text with the enhanced text, then reveals the message.
 
 If enhancement fails validation, times out, is canceled, or Utility is unavailable, Recursion reveals the original output unchanged.
 
 If the Utility pass returns text that is byte-identical to the held original, Recursion treats the pass as unchanged and reveals the original without replacing the active text.
+
+The capture path must not destructively blank the SillyTavern chat row. CSS owns the visual masking while the host adapter keeps the raw message text recoverable. If an older build or interrupted pass leaves a persisted `__recursionHeldText` marker with a blank active message, Recursion should restore the held original and clear the marker on bootstrap.
 
 ## User Experience
 

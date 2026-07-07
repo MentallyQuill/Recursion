@@ -2106,6 +2106,18 @@ export function createRecursionRuntime({
     return { ok: true, messageId: identity.messageId };
   }
 
+  async function recoverHeldProseEnhancementMessages(details = {}) {
+    if (proseEnhancementPending()) return { ok: true, skipped: true, reason: 'prose-enhancement-pending' };
+    const messages = asObject(host.messages);
+    if (typeof messages.recoverHeldAssistantMessages !== 'function') {
+      return { ok: true, skipped: true, reason: 'host-message-api-unavailable' };
+    }
+    return messages.recoverHeldAssistantMessages({
+      ...asObject(details),
+      reason: safeText(details.reason || 'prose-enhancement-recovery', 80)
+    });
+  }
+
   function clearPendingLatestAssistantSwipeRetry() {
     runState.clearLatestAssistantSwipeRetry();
   }
@@ -5284,6 +5296,7 @@ export function createRecursionRuntime({
     enhanceLatestAssistantMessage,
     proseEnhancementPending,
     holdPendingProseEnhancementMessage,
+    recoverHeldProseEnhancementMessages,
     stopGeneration,
     updateSettings,
     updateProvider,

@@ -502,6 +502,76 @@ if (lifecycleFailures.length) {
 }
 
 {
+  const context = {
+    chatId: 'prose-stale-held-recovery-chat',
+    chat: [
+      {
+        mesid: 0,
+        is_user: false,
+        mes: '',
+        swipe_id: 0,
+        swipes: [''],
+        __recursionHeldText: 'Recovered prose hold.'
+      }
+    ],
+    extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+    extension_prompt_roles: { SYSTEM: 'SYSTEM' },
+    eventSource: createFakeEventSource(),
+    event_types: {
+      CHAT_CHANGED: 'chat_changed',
+      GENERATION_ENDED: 'generation_ended',
+      MESSAGE_RECEIVED: 'message_received',
+      MESSAGE_UPDATED: 'message_updated',
+      STREAM_TOKEN_RECEIVED: 'stream_token_received'
+    },
+    setExtensionPrompt() {},
+    saveChat() {
+      context.saved = true;
+    },
+    async generateRaw() {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.utilityArbiter.v1',
+          action: 'skip',
+          sceneStatus: 'same-scene',
+          cardJobs: [],
+          reasonerDecision: { mode: 'skip', reason: 'stale held recovery smoke', signals: [] },
+          budgets: { targetBriefTokens: 500, maxCards: 6 },
+          diagnostics: ['stale-held-recovery']
+        })
+      };
+    }
+  };
+  globalThis.__recursionLiveHarness = true;
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      pipelineMode: 'standard',
+      reasonerUse: 'off',
+      proseEnhancement: { mode: 'as-swipe', contextMessages: 3 }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => context };
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionOnActivate(), true, 'stale held recovery setup activates');
+  await waitUntil(
+    () => context.chat[0].mes === 'Recovered prose hold.',
+    'bootstrap recovers stale held prose assistant text'
+  );
+  assertEqual(context.chat[0].swipes[0], 'Recovered prose hold.', 'bootstrap recovers stale held active swipe');
+  assertEqual(context.chat[0].__recursionHeldText, undefined, 'bootstrap clears stale held marker');
+  assertEqual(context.saved, true, 'bootstrap stale held recovery saves chat');
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const eventSource = createFakeEventSource();
   let resolveProse;
   let interceptorComplete = false;
@@ -578,17 +648,17 @@ if (lifecycleFailures.length) {
   await eventSource.emit('message_updated', { mesid: 2 });
   assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'streaming message update does not clear pending prose enhancement');
   assertEqual(fakeDocumentElement.classList.contains('recursion-prose-capture-active'), true, 'prose capture class stays active during streaming message updates');
-  assertEqual(context.chat[2].mes, '', 'streaming message update hides visible assistant text while prose enhancement is pending');
+  assertEqual(context.chat[2].mes, 'Mara was angry. "Keep the door shut," she said.', 'streaming message update preserves assistant text in chat state while CSS capture hides it');
   context.chat[2].mes = 'Mara was furious. "Keep the door shut," she said.';
   context.chat[2].swipes[0] = 'Mara was furious. "Keep the door shut," she said.';
   await eventSource.emit('stream_token_received', { mesid: 2 });
-  assertEqual(context.chat[2].mes, '', 'stream token event keeps visible assistant text hidden while prose enhancement is pending');
+  assertEqual(context.chat[2].mes, 'Mara was furious. "Keep the door shut," she said.', 'stream token event preserves streaming assistant text in chat state');
   await eventSource.emit('message_received', { mesid: 2 });
   assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'message received does not run prose enhancement before generation ended');
   const landed = eventSource.emit('generation_ended', { mesid: 2 });
   await waitUntil(
-    () => context.chat[2].mes === '',
-    'assistant-landed prose enhancement holds visible assistant message before provider resolves'
+    () => fakeDocumentElement.classList.contains('recursion-prose-capture-active'),
+    'assistant-landed prose enhancement keeps CSS capture active before provider resolves'
   );
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive, true, 'assistant-landed prose enhancement keeps host generation active while provider is pending');
   resolveProse();

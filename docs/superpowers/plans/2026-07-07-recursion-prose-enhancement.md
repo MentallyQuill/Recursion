@@ -24,10 +24,11 @@
 - Dialogue spans must remain byte-identical before enhanced text can apply, except exact or obvious direct variants from the full banned AI slop list may be removed or neutralized inside dialogue.
 - Prose Enhancement prompt must include the full banned AI slop and clichés list intact; do not reduce, summarize, or paraphrase it.
 - Raw original text, enhanced text, provider prompts, provider responses, full scene context, secrets, and hidden reasoning must not persist to journals or diagnostics.
-- Enabled Prose Enhancement should hold or blank raw host output before the player sees it. If the hold path fails, skip enhancement and reveal original output.
+- Enabled Prose Enhancement should capture raw host output and mask it before the player sees it, without destructively blanking the SillyTavern chat row. If capture fails, skip enhancement and reveal original output.
 - `As Swipe` creates or selects one enhanced sibling for one original message/swipe hash, then selects the enhanced swipe.
 - `Replace` replaces the active assistant text; failure reveals original unchanged.
 - If the Utility pass returns text byte-identical to the held original, treat the pass as unchanged: reveal the original, do not replace it, and do not append a duplicate `As Swipe` sibling.
+- If an interrupted pass leaves a persisted held marker with a blank active assistant row, bootstrap recovery restores the held original and clears the marker.
 
 ---
 

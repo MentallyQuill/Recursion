@@ -1052,7 +1052,6 @@ export function createSillyTavernHost({
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
       const activeText = activeRawAssistantText(found.raw);
       if (activeText) found.raw.__recursionHeldText = activeText;
-      setRawAssistantText(found.raw, '');
       updateMessageBlockBestEffort(context, found.index, found.raw);
       return { ok: true, messageId: found.normalized.mesId };
     },
@@ -1065,6 +1064,7 @@ export function createSillyTavernHost({
         delete found.raw.__recursionHeldText;
       }
       updateMessageBlockBestEffort(context, found.index, found.raw);
+      await saveChatBestEffort(context);
       return { ok: true, messageId: found.normalized.mesId };
     },
     async replaceAssistantMessageText(messageId, text, options = {}) {
@@ -1123,6 +1123,28 @@ export function createSillyTavernHost({
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
       return { ok: true, messageId: found.normalized.mesId, index, text };
+    },
+    async recoverHeldAssistantMessages(details = {}) {
+      const context = currentContext(contextFactory);
+      const messages = rawChatMessages(context);
+      let recovered = 0;
+      for (let index = 0; index < messages.length; index += 1) {
+        const raw = messages[index];
+        const normalized = normalizeMessage(raw, index);
+        if (normalized.visible === false || normalized.isUser || normalized.isSystem) continue;
+        if (!raw || typeof raw !== 'object' || !Object.prototype.hasOwnProperty.call(raw, '__recursionHeldText')) continue;
+        const heldText = stringValue(raw.__recursionHeldText);
+        if (!heldText) {
+          delete raw.__recursionHeldText;
+          continue;
+        }
+        setRawAssistantText(raw, heldText);
+        delete raw.__recursionHeldText;
+        updateMessageBlockBestEffort(context, index, raw);
+        recovered += 1;
+      }
+      if (recovered > 0) await saveChatBestEffort(context);
+      return { ok: true, recovered, reason: stringValue(details.reason || '') };
     }
   };
 

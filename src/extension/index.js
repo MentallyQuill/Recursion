@@ -157,6 +157,14 @@ function resolveAssistantLandedEvents(context) {
   ].filter(Boolean))];
 }
 
+function resolveAssistantStreamingEvents(context) {
+  const eventTypes = hostEventTypes(context);
+  return [...new Set([
+    eventTypes.STREAM_TOKEN_RECEIVED,
+    eventTypes.SMOOTH_STREAM_TOKEN_RECEIVED
+  ].filter(Boolean))];
+}
+
 function normalizeHostMessageEvent(currentHost, eventName, payload) {
   const normalized = currentHost?.normalizeMessageEvent?.(payload, { eventName });
   if (normalized && typeof normalized === 'object') return normalized;
@@ -210,14 +218,34 @@ function registerHostEvents(nextRuntime, currentHost = host) {
   for (const eventName of resolveSourceChangedEvents(context)) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
       const details = normalizeHostMessageEvent(currentHost, eventName, payload);
+      runtime ||= nextRuntime;
+      if (
+        typeof nextRuntime.proseEnhancementPending === 'function'
+        && nextRuntime.proseEnhancementPending()
+        && details.edited
+        && !details.deleted
+        && !details.swiped
+      ) {
+        return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Prose Enhancement streaming hold failed.', details)
+          .then(() => ({ ok: true, skipped: true, reason: 'prose-enhancement-streaming-update' }));
+      }
       if (details.swiped && details.latestAssistant) {
         refreshAssistantSignature();
-        runtime ||= nextRuntime;
         return invokeRuntimeCleanup('handleLatestAssistantSwipeRetry', 'Latest assistant swipe retry marker failed.', details);
       }
       refreshAssistantSignature();
-      runtime ||= nextRuntime;
       return invokeRuntimeCleanup('handleSourceChanged', 'Source change cleanup failed.', details);
+    });
+  }
+  for (const eventName of resolveAssistantStreamingEvents(context)) {
+    registerRuntimeHostEvent(eventSource, eventName, (payload) => {
+      runtime ||= nextRuntime;
+      if (typeof nextRuntime.proseEnhancementPending === 'function' && nextRuntime.proseEnhancementPending()) {
+        const details = normalizeHostMessageEvent(currentHost, eventName, payload);
+        return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Prose Enhancement streaming hold failed.', details)
+          .then(() => ({ ok: true, skipped: true, reason: 'prose-enhancement-stream-token' }));
+      }
+      return { ok: true, skipped: true, reason: 'prose-enhancement-not-pending' };
     });
   }
   for (const eventName of resolveGenerationStoppedEvents(context)) {
@@ -232,20 +260,30 @@ function registerHostEvents(nextRuntime, currentHost = host) {
       const nextAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
       runtime ||= nextRuntime;
       const details = normalizeHostMessageEvent(currentHost, eventName, payload);
+      const finalGenerationEvent = String(eventName || '').toLowerCase() === 'generation_ended'
+        || String(details.eventName || '').toLowerCase() === 'generation_ended';
       const generationEnded = () => invokeRuntimeCleanup(
         'handleHostGenerationEnded',
         'Generation end cleanup failed.',
         details
       );
+      if (typeof nextRuntime.proseEnhancementPending === 'function' && nextRuntime.proseEnhancementPending()) {
+        if (!finalGenerationEvent) {
+          return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Prose Enhancement assistant hold failed.', details)
+            .then(() => ({ ok: true, skipped: true, reason: 'prose-enhancement-awaiting-generation-ended' }));
+        }
+        return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Prose Enhancement assistant hold failed.', details)
+          .then(() => invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' }))
+          .then(() => generationEnded())
+          .then(() => {
+            lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
+            return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
+          });
+      }
       if (!nextAssistantIdentity || nextAssistantIdentity === lastAssistantIdentity) {
         return generationEnded().then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }));
       }
       lastAssistantIdentity = nextAssistantIdentity;
-      if (typeof nextRuntime.proseEnhancementPending === 'function' && nextRuntime.proseEnhancementPending()) {
-        return invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' })
-          .then(() => generationEnded())
-          .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }));
-      }
       return generationEnded()
         .then(() => invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' }))
         .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }));

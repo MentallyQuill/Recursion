@@ -134,7 +134,12 @@ function messageRole(message) {
 }
 
 function messageText(message) {
-  return stringValue(message?.mes ?? message?.text ?? message?.content);
+  const visible = stringValue(message?.mes ?? message?.text ?? message?.content);
+  if (visible) return visible;
+  if (message && typeof message === 'object' && Object.prototype.hasOwnProperty.call(message, '__recursionHeldText')) {
+    return stringValue(message.__recursionHeldText);
+  }
+  return '';
 }
 
 function finiteNonNegativeInteger(value) {
@@ -176,8 +181,8 @@ function normalizeMessage(message, index) {
 }
 
 function rawChatMessages(context = {}) {
-  if (Array.isArray(context?.messages)) return context.messages;
   if (Array.isArray(context?.chat)) return context.chat;
+  if (Array.isArray(context?.messages)) return context.messages;
   return [];
 }
 
@@ -216,7 +221,12 @@ function setRawAssistantText(message, text) {
 }
 
 function activeRawAssistantText(message) {
-  return activeSwipeText(message, messageText(message));
+  const active = activeSwipeText(message, messageText(message));
+  if (active) return active;
+  if (message && typeof message === 'object' && Object.prototype.hasOwnProperty.call(message, '__recursionHeldText')) {
+    return stringValue(message.__recursionHeldText);
+  }
+  return '';
 }
 
 function updateMessageBlockBestEffort(context = {}, index, message) {
@@ -1040,7 +1050,8 @@ export function createSillyTavernHost({
       const context = currentContext(contextFactory);
       const found = findRawAssistantMessage(context, messageId);
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
-      if (!found.raw.__recursionHeldText) found.raw.__recursionHeldText = activeRawAssistantText(found.raw);
+      const activeText = activeRawAssistantText(found.raw);
+      if (activeText) found.raw.__recursionHeldText = activeText;
       setRawAssistantText(found.raw, '');
       updateMessageBlockBestEffort(context, found.index, found.raw);
       return { ok: true, messageId: found.normalized.mesId };
@@ -1061,6 +1072,7 @@ export function createSillyTavernHost({
       const found = findRawAssistantMessage(context, messageId);
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
       setRawAssistantText(found.raw, text);
+      delete found.raw.__recursionHeldText;
       found.raw.__recursionProseEnhancement = asObject(options.marker);
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
@@ -1080,6 +1092,7 @@ export function createSillyTavernHost({
         found.raw.swipe_id = index;
         setRawAssistantText(found.raw, text);
       }
+      delete found.raw.__recursionHeldText;
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
       return { ok: true, messageId: found.normalized.mesId, index, text: stringValue(text) };
@@ -1105,6 +1118,7 @@ export function createSillyTavernHost({
       found.raw.swipe_id = index;
       const text = stringValue(found.raw.swipes[index]);
       setRawAssistantText(found.raw, text);
+      delete found.raw.__recursionHeldText;
       if (options.marker) found.raw.__recursionProseEnhancement = asObject(options.marker);
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);

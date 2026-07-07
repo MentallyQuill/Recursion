@@ -2091,6 +2091,21 @@ export function createRecursionRuntime({
     return Boolean(pendingProseEnhancement);
   }
 
+  async function holdPendingProseEnhancementMessage(details = {}) {
+    if (!proseEnhancementPending()) return { ok: true, skipped: true, reason: 'prose-enhancement-not-pending' };
+    if (!proseEnhancementEnabled()) return { ok: true, skipped: true, reason: 'prose-enhancement-disabled' };
+    const messages = asObject(host.messages);
+    if (typeof messages.activeAssistantMessageIdentity !== 'function' || typeof messages.holdAssistantMessage !== 'function') {
+      return { ok: true, skipped: true, reason: 'host-message-api-unavailable' };
+    }
+    const identity = messages.activeAssistantMessageIdentity();
+    if (!identity?.messageId && identity?.messageId !== 0) return { ok: true, skipped: true, reason: 'assistant-message-unavailable' };
+    if (!identity?.text) return { ok: true, skipped: true, reason: 'assistant-message-empty' };
+    const hold = await messages.holdAssistantMessage(identity.messageId, details);
+    if (hold?.ok === false) return { ok: false, error: hold.error };
+    return { ok: true, messageId: identity.messageId };
+  }
+
   function clearPendingLatestAssistantSwipeRetry() {
     runState.clearLatestAssistantSwipeRetry();
   }
@@ -5251,6 +5266,7 @@ export function createRecursionRuntime({
     handleHostGenerationEnded,
     enhanceLatestAssistantMessage,
     proseEnhancementPending,
+    holdPendingProseEnhancementMessage,
     stopGeneration,
     updateSettings,
     updateProvider,

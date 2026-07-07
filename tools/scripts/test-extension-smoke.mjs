@@ -498,7 +498,10 @@ if (lifecycleFailures.length) {
     eventSource,
     event_types: {
       CHAT_CHANGED: 'chat_changed',
-      GENERATION_ENDED: 'generation_ended'
+      GENERATION_ENDED: 'generation_ended',
+      MESSAGE_RECEIVED: 'message_received',
+      MESSAGE_UPDATED: 'message_updated',
+      STREAM_TOKEN_RECEIVED: 'stream_token_received'
     },
     setExtensionPrompt() {},
     async generateRaw(request = {}) {
@@ -549,6 +552,15 @@ if (lifecycleFailures.length) {
     swipes: ['Mara was angry. "Keep the door shut," she said.'],
     swipe_id: 0
   });
+  await eventSource.emit('message_updated', { mesid: 2 });
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'streaming message update does not clear pending prose enhancement');
+  assertEqual(context.chat[2].mes, '', 'streaming message update hides visible assistant text while prose enhancement is pending');
+  context.chat[2].mes = 'Mara was furious. "Keep the door shut," she said.';
+  context.chat[2].swipes[0] = 'Mara was furious. "Keep the door shut," she said.';
+  await eventSource.emit('stream_token_received', { mesid: 2 });
+  assertEqual(context.chat[2].mes, '', 'stream token event keeps visible assistant text hidden while prose enhancement is pending');
+  await eventSource.emit('message_received', { mesid: 2 });
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'message received does not run prose enhancement before generation ended');
   const landed = eventSource.emit('generation_ended', { mesid: 2 });
   await waitUntil(
     () => context.chat[2].mes === '',

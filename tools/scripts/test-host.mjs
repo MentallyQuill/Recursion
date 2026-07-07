@@ -282,6 +282,31 @@ assertEqual(latestMutationHost.messages.activeAssistantMessageIdentity().message
 assertEqual((await latestMutationHost.messages.holdAssistantMessage(8)).ok, true, 'host can hold latest assistant by id');
 assertEqual(latestMutationContext.chat[2].mes, '', 'host hold hides latest assistant row rather than older assistant row');
 assertEqual(latestMutationContext.chat[0].mes, 'Older assistant text.', 'host hold leaves older assistant row unchanged');
+latestMutationContext.chat[2].mes = 'Latest assistant text after streaming update.';
+latestMutationContext.chat[2].swipes[0] = 'Latest assistant text after streaming update.';
+assertEqual((await latestMutationHost.messages.holdAssistantMessage(8)).ok, true, 'host can refresh held text after streaming updates');
+assertEqual(latestMutationContext.chat[2].mes, '', 'host repeated hold keeps latest assistant hidden during streaming');
+assertEqual(
+  latestMutationHost.messages.activeAssistantMessageIdentity().text,
+  'Latest assistant text after streaming update.',
+  'host active assistant identity exposes captured held text for Prose Enhancement'
+);
+
+const liveContextWithStaleMessages = {
+  chatId: 'prose-live-stale-messages-chat',
+  messages: [
+    { mesid: 0, is_user: false, mes: 'Stale assistant from context.messages.' }
+  ],
+  chat: [
+    { mesid: 1, is_user: true, mes: 'User asks live ST.' },
+    { mesid: 2, is_user: false, mes: 'Live generated assistant in context.chat.', swipe_id: 0, swipes: ['Live generated assistant in context.chat.'] }
+  ]
+};
+const liveContextHost = createSillyTavernHost({ contextFactory: () => liveContextWithStaleMessages, settingsRoot: {} });
+assertEqual(liveContextHost.messages.activeAssistantMessageIdentity().messageId, 2, 'host active assistant identity prefers live SillyTavern chat over stale context.messages');
+assertEqual((await liveContextHost.messages.holdAssistantMessage(2)).ok, true, 'host holds live generated assistant from context.chat');
+assertEqual(liveContextWithStaleMessages.chat[1].mes, '', 'host hides live chat assistant instead of stale messages assistant');
+assertEqual(liveContextWithStaleMessages.messages[0].mes, 'Stale assistant from context.messages.', 'host leaves stale context.messages untouched');
 
 const packet = {
   injectionPlan: { blocks: [{ id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 2, role: 'system' }] },

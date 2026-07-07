@@ -845,6 +845,47 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 
 {
   const proseHost = createProseMessageHarness();
+  const roleCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { proseEnhancement: { mode: 'replace', contextMessages: 13 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'skip',
+              sceneStatus: 'same-scene',
+              cardJobs: [],
+              reasonerDecision: { mode: 'skip', reason: 'unit stopped prose setup', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['unit-stopped-prose-setup']
+            }
+          };
+        }
+        throw new Error(`stopped generation must not call ${roleId}`);
+      }
+    }
+  });
+  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare prose, then stop.', hostGeneration: true });
+  assertEqual(setup.ok, true, 'stopped prose setup prepares generation');
+  assertEqual(runtime.proseEnhancementPending(), true, 'stopped prose setup arms pending prose enhancement');
+  const stopped = await runtime.handleHostGenerationStopped({ eventName: 'generation_stopped' });
+  assertEqual(stopped.ok, true, 'stopped prose cleanup succeeds');
+  assertEqual(runtime.proseEnhancementPending(), false, 'generation stop clears pending prose enhancement');
+  const lateEnhance = await runtime.enhanceLatestAssistantMessage({ reason: 'assistant-message-landed' });
+  assertEqual(lateEnhance.skipped, true, 'late assistant-landed prose enhancement skips after generation stop');
+  assertEqual(lateEnhance.reason, 'prose-enhancement-canceled', 'late assistant-landed prose enhancement reports cancellation');
+  assertDeepEqual(roleCalls, ['utilityArbiter'], 'late assistant-landed prose enhancement does not call the prose provider after stop');
+  assertEqual(proseHost.calls.length, 0, 'late assistant-landed prose enhancement does not mutate host messages after stop');
+}
+
+{
+  const proseHost = createProseMessageHarness();
   const providerGate = deferred();
   const roleCalls = [];
   const { runtime } = createRuntimeHarness({

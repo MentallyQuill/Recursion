@@ -1896,6 +1896,7 @@ export function createRecursionRuntime({
   let storageSaveTail = Promise.resolve();
   let pendingProseEnhancement = null;
   let activeProseEnhancementPromise = null;
+  let canceledProseEnhancement = null;
 
   async function readSnapshot() {
     if (typeof host?.snapshot !== 'function') {
@@ -2073,6 +2074,7 @@ export function createRecursionRuntime({
   }
 
   function armProseEnhancementForHostGeneration(settings = settingsStore.get(), runId = '') {
+    canceledProseEnhancement = null;
     if (!proseEnhancementEnabled(settings)) {
       pendingProseEnhancement = null;
       return false;
@@ -2087,6 +2089,15 @@ export function createRecursionRuntime({
 
   function clearPendingProseEnhancement() {
     pendingProseEnhancement = null;
+  }
+
+  function cancelPendingProseEnhancement(reason = 'prose-enhancement-canceled') {
+    canceledProseEnhancement = {
+      reason: safeText(reason || 'prose-enhancement-canceled', 80),
+      canceledAt: nowIso(),
+      runId: safeText(pendingProseEnhancement?.runId || '', 120)
+    };
+    clearPendingProseEnhancement();
   }
 
   function proseEnhancementPending() {
@@ -2983,7 +2994,7 @@ export function createRecursionRuntime({
     if (hostStopCleanupPromise) return hostStopCleanupPromise;
     const source = asObject(details);
     const eventName = safeText(source.eventName || source.event || 'generation_stopped', 80);
-    clearPendingProseEnhancement();
+    cancelPendingProseEnhancement('prose-enhancement-canceled');
     setHostGenerationActive(false);
     hostStopCleanupPromise = clearForHostEvent({
       idPrefix: 'host-stop',
@@ -3027,6 +3038,14 @@ export function createRecursionRuntime({
     const settings = settingsStore.get();
     const proseSettings = asObject(settings.proseEnhancement);
     const mode = String(proseSettings.mode || 'off');
+    const reason = safeText(details.reason || '', 80);
+    if (reason === 'assistant-message-landed' && !pendingProseEnhancement && canceledProseEnhancement) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: canceledProseEnhancement.reason || 'prose-enhancement-canceled'
+      };
+    }
     if (mode === 'off') {
       clearPendingProseEnhancement();
       return { ok: true, skipped: true, reason: 'prose-enhancement-off' };
@@ -3153,7 +3172,7 @@ export function createRecursionRuntime({
   }
 
   async function stopGeneration(details = {}) {
-    clearPendingProseEnhancement();
+    cancelPendingProseEnhancement('prose-enhancement-canceled');
     setHostGenerationActive(false);
     const hostStop = await requestHostGenerationStop(details);
     const cleanup = await handleHostGenerationStopped({

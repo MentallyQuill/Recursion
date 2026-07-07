@@ -29,6 +29,11 @@
   box-sizing: border-box;
 }
 
+html.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_user="true"]) .mes_text,
+body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_user="true"]) .mes_text {
+  visibility: hidden;
+}
+
 .recursion-bar {
   align-items: center;
   display: flex;

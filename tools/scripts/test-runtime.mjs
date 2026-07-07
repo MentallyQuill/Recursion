@@ -747,6 +747,33 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 {
   const proseHost = createProseMessageHarness();
   const { runtime } = createRuntimeHarness({
+    settings: { proseEnhancement: { mode: 'as-swipe', contextMessages: 13 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.proseEnhancer.v1',
+            text: 'She was angry. "Keep the door shut," Mara said.'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-as-swipe-unchanged' });
+  assertEqual(result.ok, true, 'unchanged As Swipe prose enhancement returns success');
+  assertEqual(result.skipped, true, 'unchanged As Swipe reports skipped instead of enhanced');
+  assertEqual(result.reason, 'prose-enhancement-unchanged', 'unchanged As Swipe reports unchanged reason');
+  assertEqual(proseHost.calls.some((call) => call.type === 'append'), false, 'unchanged As Swipe does not append duplicate swipe');
+  assertEqual(proseHost.calls.at(-1).type, 'reveal', 'unchanged As Swipe reveals the held original');
+  assertEqual(proseHost.message.swipes.length, 1, 'unchanged As Swipe keeps a single original swipe');
+  assertEqual(proseHost.message.swipeId, 0, 'unchanged As Swipe keeps original swipe selected');
+}
+
+{
+  const proseHost = createProseMessageHarness();
+  const { runtime } = createRuntimeHarness({
     settings: { proseEnhancement: { mode: 'replace', contextMessages: 13 } },
     hostMessages: proseHost.messages,
     generationRouter: {

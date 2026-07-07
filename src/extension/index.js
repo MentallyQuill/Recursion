@@ -12,6 +12,8 @@ let hostEventUnsubscribers = [];
 let settingsBootstrapUnsubscribers = [];
 let settingsLoadEventObserved = false;
 
+const PROSE_CAPTURE_CLASS = 'recursion-prose-capture-active';
+
 function hasSillyTavernContext() {
   return typeof globalThis.SillyTavern?.getContext === 'function'
     || typeof globalThis.getContext === 'function';
@@ -36,6 +38,31 @@ function publishLiveHarnessRuntime(nextRuntime) {
   if (globalThis.__recursionLiveHarness === true) {
     globalThis.__recursionLiveHarnessRuntime = nextRuntime || null;
   }
+}
+
+function setProseCaptureActive(active) {
+  try {
+    const classListTargets = [
+      globalThis.document?.documentElement?.classList,
+      globalThis.document?.body?.classList
+    ].filter(Boolean);
+    for (const classList of classListTargets) {
+      classList.toggle?.(PROSE_CAPTURE_CLASS, Boolean(active));
+      if (typeof classList.toggle !== 'function') {
+        if (active) classList.add?.(PROSE_CAPTURE_CLASS);
+        else classList.remove?.(PROSE_CAPTURE_CLASS);
+      }
+    }
+  } catch {
+    // Visual capture is best-effort; chat state holding still protects data.
+  }
+}
+
+function refreshProseCaptureState(activeRuntime = runtime) {
+  const active = typeof activeRuntime?.proseEnhancementPending === 'function'
+    && activeRuntime.proseEnhancementPending();
+  setProseCaptureActive(active);
+  return active;
 }
 
 function destroyUi() {
@@ -213,6 +240,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
   registerRuntimeHostEvent(eventSource, chatChangedEvent, () => {
     refreshAssistantSignature();
     runtime ||= nextRuntime;
+    setProseCaptureActive(false);
     return invokeRuntimeCleanup('handleChatChanged', 'Chat change cleanup failed.');
   });
   for (const eventName of resolveSourceChangedEvents(context)) {
@@ -226,6 +254,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         && !details.deleted
         && !details.swiped
       ) {
+        setProseCaptureActive(true);
         return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Prose Enhancement streaming hold failed.', details)
           .then(() => ({ ok: true, skipped: true, reason: 'prose-enhancement-streaming-update' }));
       }
@@ -234,6 +263,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         return invokeRuntimeCleanup('handleLatestAssistantSwipeRetry', 'Latest assistant swipe retry marker failed.', details);
       }
       refreshAssistantSignature();
+      setProseCaptureActive(false);
       return invokeRuntimeCleanup('handleSourceChanged', 'Source change cleanup failed.', details);
     });
   }
@@ -241,6 +271,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
       runtime ||= nextRuntime;
       if (typeof nextRuntime.proseEnhancementPending === 'function' && nextRuntime.proseEnhancementPending()) {
+        setProseCaptureActive(true);
         const details = normalizeHostMessageEvent(currentHost, eventName, payload);
         return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Prose Enhancement streaming hold failed.', details)
           .then(() => ({ ok: true, skipped: true, reason: 'prose-enhancement-stream-token' }));
@@ -252,7 +283,8 @@ function registerHostEvents(nextRuntime, currentHost = host) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
       refreshAssistantSignature();
       runtime ||= nextRuntime;
-      return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', normalizeHostMessageEvent(currentHost, eventName, payload));
+      return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', normalizeHostMessageEvent(currentHost, eventName, payload))
+        .finally(() => setProseCaptureActive(false));
     });
   }
   for (const eventName of resolveAssistantLandedEvents(context)) {
@@ -268,6 +300,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         details
       );
       if (typeof nextRuntime.proseEnhancementPending === 'function' && nextRuntime.proseEnhancementPending()) {
+        setProseCaptureActive(true);
         if (!finalGenerationEvent) {
           return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Prose Enhancement assistant hold failed.', details)
             .then(() => ({ ok: true, skipped: true, reason: 'prose-enhancement-awaiting-generation-ended' }));
@@ -278,15 +311,19 @@ function registerHostEvents(nextRuntime, currentHost = host) {
           .then(() => {
             lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
             return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
-          });
+          })
+          .finally(() => setProseCaptureActive(false));
       }
       if (!nextAssistantIdentity || nextAssistantIdentity === lastAssistantIdentity) {
-        return generationEnded().then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }));
+        return generationEnded()
+          .then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }))
+          .finally(() => setProseCaptureActive(false));
       }
       lastAssistantIdentity = nextAssistantIdentity;
       return generationEnded()
         .then(() => invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' }))
-        .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }));
+        .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }))
+        .finally(() => setProseCaptureActive(false));
     });
   }
 }
@@ -438,6 +475,7 @@ async function teardownRecursion(label) {
   clearSettingsBootstrapSubscriptions();
   clearHostEventSubscriptions();
   settingsLoadEventObserved = false;
+  setProseCaptureActive(false);
   try {
     await runtime?.dispose?.();
   } catch (error) {
@@ -459,7 +497,9 @@ export async function recursionGenerationInterceptor(chat) {
       userMessage: latestPendingUserMessageFromPayload(chat),
       hostGeneration: true
     });
+    refreshProseCaptureState(activeRuntime);
   } catch (error) {
+    setProseCaptureActive(false);
     warn('Generation preparation failed.', error);
   }
   return chat;

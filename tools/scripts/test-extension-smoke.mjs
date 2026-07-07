@@ -98,6 +98,25 @@ function createFakeEventSource() {
   };
 }
 
+function createFakeClassList() {
+  const values = new Set();
+  return {
+    add(value) {
+      values.add(String(value));
+    },
+    remove(value) {
+      values.delete(String(value));
+    },
+    toggle(value, force) {
+      if (force) values.add(String(value));
+      else values.delete(String(value));
+    },
+    contains(value) {
+      return values.has(String(value));
+    }
+  };
+}
+
 async function assertLifecycleClearsInstalledPrompt(hookName) {
   const fake = createFakeSillyTavernContext(hookName);
   globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
@@ -487,6 +506,9 @@ if (lifecycleFailures.length) {
   let resolveProse;
   let interceptorComplete = false;
   const proseGate = new Promise((resolve) => { resolveProse = resolve; });
+  const previousDocument = globalThis.document;
+  const fakeDocumentElement = { classList: createFakeClassList() };
+  globalThis.document = { documentElement: fakeDocumentElement };
   const context = {
     chatId: 'prose-assistant-landed-chat',
     chat: [
@@ -545,6 +567,7 @@ if (lifecycleFailures.length) {
   assertEqual(await globalThis.recursionGenerationInterceptor('prose event order payload'), 'prose event order payload', 'prose event order interceptor arms generation');
   interceptorComplete = true;
   assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'prose event order interceptor arms pending prose enhancement');
+  assertEqual(fakeDocumentElement.classList.contains('recursion-prose-capture-active'), true, 'prose capture class is active immediately after generation is armed');
   context.chat.push({
     mesid: 2,
     is_user: false,
@@ -554,6 +577,7 @@ if (lifecycleFailures.length) {
   });
   await eventSource.emit('message_updated', { mesid: 2 });
   assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'streaming message update does not clear pending prose enhancement');
+  assertEqual(fakeDocumentElement.classList.contains('recursion-prose-capture-active'), true, 'prose capture class stays active during streaming message updates');
   assertEqual(context.chat[2].mes, '', 'streaming message update hides visible assistant text while prose enhancement is pending');
   context.chat[2].mes = 'Mara was furious. "Keep the door shut," she said.';
   context.chat[2].swipes[0] = 'Mara was furious. "Keep the door shut," she said.';
@@ -571,9 +595,12 @@ if (lifecycleFailures.length) {
   await landed;
   assertEqual(context.chat[2].mes, 'Mara crossed the room. "Keep the door shut," she said.', 'assistant-landed prose enhancement replaces held text');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive, false, 'assistant-landed prose enhancement clears host generation after provider settles');
+  assertEqual(fakeDocumentElement.classList.contains('recursion-prose-capture-active'), false, 'prose capture class clears after enhancement settles');
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;
   delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousDocument === undefined) delete globalThis.document;
+  else globalThis.document = previousDocument;
   if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
   else globalThis.SillyTavern = previousGlobals.SillyTavern;
   if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;

@@ -29,11 +29,15 @@ The enhanced swipe is selected automatically before the message becomes visible.
 
 For every newly generated host swipe, the feature may create one matching enhanced sibling. It must not recursively enhance its own enhanced swipe, and it must not duplicate an enhanced sibling for the same original text hash.
 
+If the Utility pass returns text that is byte-identical to the held original, Recursion treats the pass as unchanged: it reveals the original, creates no enhanced sibling, and keeps the original swipe selected. `As Swipe` must never append a duplicate swipe only to mark that a pass ran.
+
 ### Replace
 
 When an assistant generation, regeneration, continuation, or swipe lands, Recursion temporarily holds the visible output, runs Prose Enhancement, replaces the active assistant text with the enhanced text, then reveals the message.
 
 If enhancement fails validation, times out, is canceled, or Utility is unavailable, Recursion reveals the original output unchanged.
+
+If the Utility pass returns text that is byte-identical to the held original, Recursion treats the pass as unchanged and reveals the original without replacing the active text.
 
 ## User Experience
 

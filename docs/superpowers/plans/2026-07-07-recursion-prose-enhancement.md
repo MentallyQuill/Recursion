@@ -27,6 +27,7 @@
 - Enabled Prose Enhancement should hold or blank raw host output before the player sees it. If the hold path fails, skip enhancement and reveal original output.
 - `As Swipe` creates or selects one enhanced sibling for one original message/swipe hash, then selects the enhanced swipe.
 - `Replace` replaces the active assistant text; failure reveals original unchanged.
+- If the Utility pass returns text byte-identical to the held original, treat the pass as unchanged: reveal the original, do not replace it, and do not append a duplicate `As Swipe` sibling.
 
 ---
 

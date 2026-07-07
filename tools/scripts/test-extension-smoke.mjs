@@ -665,6 +665,11 @@ if (lifecycleFailures.length) {
   await landed;
   assertEqual(context.chat[2].mes, 'Mara crossed the room. "Keep the door shut," she said.', 'assistant-landed prose enhancement replaces held text');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive, false, 'assistant-landed prose enhancement clears host generation after provider settles');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.status, 'ready', 'assistant-landed prose enhancement leaves Last Brief ready');
+  const prosePacketId = globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId;
+  await eventSource.emit('message_updated', { mesid: 2 });
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.status, 'ready', 'late prose-owned message update does not clear Last Brief');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId, prosePacketId, 'late prose-owned message update preserves prompt packet id');
   assertEqual(fakeDocumentElement.classList.contains('recursion-prose-capture-active'), false, 'prose capture class clears after enhancement settles');
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;

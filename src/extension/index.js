@@ -13,6 +13,8 @@ let settingsBootstrapUnsubscribers = [];
 let settingsLoadEventObserved = false;
 
 const PROSE_CAPTURE_CLASS = 'recursion-prose-capture-active';
+const PROSE_OWNED_MUTATION_TAIL_MS = 3000;
+let proseOwnedMutationUntilMs = 0;
 
 function hasSillyTavernContext() {
   return typeof globalThis.SillyTavern?.getContext === 'function'
@@ -63,6 +65,30 @@ function refreshProseCaptureState(activeRuntime = runtime) {
     && activeRuntime.proseEnhancementPending();
   setProseCaptureActive(active);
   return active;
+}
+
+function markProseOwnedMutationWindow(durationMs = PROSE_OWNED_MUTATION_TAIL_MS) {
+  proseOwnedMutationUntilMs = Math.max(proseOwnedMutationUntilMs, Date.now() + Math.max(0, Number(durationMs) || 0));
+}
+
+function clearProseOwnedMutationWindow() {
+  proseOwnedMutationUntilMs = 0;
+}
+
+function runtimeProseEnhancementEnabled(activeRuntime = runtime) {
+  try {
+    const mode = String(activeRuntime?.view?.()?.settings?.proseEnhancement?.mode || 'off').toLowerCase();
+    return mode === 'as-swipe' || mode === 'replace';
+  } catch {
+    return false;
+  }
+}
+
+function proseOwnedSourceMutation(details = {}) {
+  if (Date.now() > proseOwnedMutationUntilMs) return false;
+  if (details?.deleted) return false;
+  if (!details?.latestAssistant) return false;
+  return Boolean(details.edited || details.swiped);
 }
 
 function scheduleHeldProseRecovery(activeRuntime = runtime, reason = 'bootstrap') {
@@ -247,6 +273,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
   registerRuntimeHostEvent(eventSource, chatChangedEvent, () => {
     refreshAssistantSignature();
     runtime ||= nextRuntime;
+    clearProseOwnedMutationWindow();
     setProseCaptureActive(false);
     return invokeRuntimeCleanup('handleChatChanged', 'Chat change cleanup failed.');
   });
@@ -264,6 +291,9 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         setProseCaptureActive(true);
         return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Prose Enhancement streaming hold failed.', details)
           .then(() => ({ ok: true, skipped: true, reason: 'prose-enhancement-streaming-update' }));
+      }
+      if (proseOwnedSourceMutation(details)) {
+        return { ok: true, skipped: true, reason: 'prose-enhancement-owned-source-mutation' };
       }
       if (details.swiped && details.latestAssistant) {
         refreshAssistantSignature();
@@ -290,6 +320,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
       refreshAssistantSignature();
       runtime ||= nextRuntime;
+      clearProseOwnedMutationWindow();
       return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', normalizeHostMessageEvent(currentHost, eventName, payload))
         .finally(() => setProseCaptureActive(false));
     });
@@ -313,13 +344,19 @@ function registerHostEvents(nextRuntime, currentHost = host) {
             .then(() => ({ ok: true, skipped: true, reason: 'prose-enhancement-awaiting-generation-ended' }));
         }
         return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Prose Enhancement assistant hold failed.', details)
-          .then(() => invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' }))
+          .then(() => {
+            markProseOwnedMutationWindow();
+            return invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' });
+          })
           .then(() => generationEnded())
           .then(() => {
             lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
             return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
           })
-          .finally(() => setProseCaptureActive(false));
+          .finally(() => {
+            markProseOwnedMutationWindow();
+            setProseCaptureActive(false);
+          });
       }
       if (!nextAssistantIdentity || nextAssistantIdentity === lastAssistantIdentity) {
         return generationEnded()
@@ -328,9 +365,15 @@ function registerHostEvents(nextRuntime, currentHost = host) {
       }
       lastAssistantIdentity = nextAssistantIdentity;
       return generationEnded()
-        .then(() => invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' }))
+        .then(() => {
+          if (runtimeProseEnhancementEnabled(nextRuntime)) markProseOwnedMutationWindow();
+          return invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' });
+        })
         .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }))
-        .finally(() => setProseCaptureActive(false));
+        .finally(() => {
+          if (runtimeProseEnhancementEnabled(nextRuntime)) markProseOwnedMutationWindow();
+          setProseCaptureActive(false);
+        });
     });
   }
 }
@@ -483,6 +526,7 @@ async function teardownRecursion(label) {
   clearSettingsBootstrapSubscriptions();
   clearHostEventSubscriptions();
   settingsLoadEventObserved = false;
+  clearProseOwnedMutationWindow();
   setProseCaptureActive(false);
   try {
     await runtime?.dispose?.();

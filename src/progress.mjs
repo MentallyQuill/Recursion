@@ -51,6 +51,7 @@ const STEP_ORDER = [
   'rapid-warm-failed',
   'reusing-scene-deck',
   'provider-test',
+  'prose-enhancement',
   'fused-card-bundle',
   'utility-card-batch',
   'validating-cards',
@@ -79,6 +80,7 @@ const STEP_DEFINITIONS = Object.freeze({
   'rapid-warm-failed': { label: 'Rapid warm', providerLane: 'utility' },
   'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
   'provider-test': { label: 'Provider test', providerLane: 'utility' },
+  'prose-enhancement': { label: 'Prose Enhancement', currentLabel: 'Enhancing prose', providerLane: 'utility' },
   'fused-card-bundle': { label: 'Fused card bundle', providerLane: 'utility' },
   'utility-card-batch': { label: 'Utility card batch', providerLane: 'utility' },
   'validating-cards': { label: 'Validating cards', providerLane: 'utility' },
@@ -122,6 +124,7 @@ const PHASE_STEP_IDS = Object.freeze({
   promptClearing: 'clearing-recursion-prompt',
   promptClearFailed: 'clearing-recursion-prompt',
   providerTestFailed: 'provider-test',
+  proseEnhancing: 'prose-enhancement',
   cacheWarning: 'checking-scene-cache',
   settled: 'recursion-prompt-ready'
 });
@@ -604,6 +607,7 @@ function normalizeStep(input, index = 0) {
   const step = {
     id,
     label: definitionLabel || safeDisplayText(source.label, fallbackLabel, 80),
+    currentLabel: safeDisplayText(source.currentLabel || definition.currentLabel, '', 80) || null,
     providerLane: normalizeProviderLane(source.providerLane, definition.providerLane || 'utility'),
     state,
     meta: metaForState(state, source.source || source.sourceType, reason, retryCount),
@@ -890,7 +894,7 @@ function deriveProgressRun(view) {
   }
   appendRapidWarmStatusStep(steps, source, order++);
   const beforePlanSteps = [...steps.values()];
-  if (!isControlOnlyProgress(runId, beforePlanSteps)) {
+  if (!isControlOnlyProgress(runId, beforePlanSteps) && !steps.has('prose-enhancement')) {
     appendPendingPlanSteps(steps, view, order);
     appendPendingChildSteps(steps, view, order);
   }
@@ -933,7 +937,7 @@ function progressTitle(steps) {
 function currentStepText(steps) {
   const running = steps.filter((step) => step.state === 'running');
   if (running.length > 1) return `${running.length} model calls running...`;
-  if (running.length === 1) return `${running[0].label.replace(/\.+$/g, '')}...`;
+  if (running.length === 1) return `${(running[0].currentLabel || running[0].label).replace(/\.+$/g, '')}...`;
   const warning = steps.find((step) => step.state === 'warning');
   if (warning) return `${warning.label.replace(/\.+$/g, '')} needs attention`;
   const failed = steps.find((step) => step.state === 'failed');

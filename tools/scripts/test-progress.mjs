@@ -533,6 +533,21 @@ assertEqual(controlOnlyWarningProgress.steps.length, 1, 'control-only prompt war
 assertEqual(controlOnlyWarningProgress.steps[0].state, 'warning', 'control-only prompt warning keeps warning state');
 assertEqual(createHeroPixelBlocks(controlOnlyWarningProgress).length, 0, 'control-only prompt warnings still do not create compact hero pixel blocks');
 
+const proseEnhancementProgress = createProgressRunModel({
+  activity: {
+    runId: 'prose-enhance-progress',
+    phase: 'proseEnhancing',
+    label: 'Enhancing prose...',
+    providerLane: 'utility',
+    recordedAt: '1'
+  }
+});
+assertEqual(proseEnhancementProgress.steps.length, 1, 'prose enhancement renders one top-level progress row');
+assertEqual(proseEnhancementProgress.steps[0].id, 'prose-enhancement', 'prose enhancement maps to its own progress row');
+assertEqual(proseEnhancementProgress.steps[0].label, 'Prose Enhancement', 'prose enhancement progress row uses product-facing label');
+assertEqual(proseEnhancementProgress.currentStepText, 'Enhancing prose...', 'prose enhancement gets compact current-step text');
+assertEqual(createHeroPixelBlocks(proseEnhancementProgress).length, 1, 'prose enhancement gets one Hero Pixel block');
+
 const hostStoppedProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'host-stopped-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },

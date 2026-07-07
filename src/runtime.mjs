@@ -63,6 +63,7 @@ const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
 const PROVIDER_TEST_RESPONSE_TOKENS = 256;
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
 const PROSE_ENHANCEMENT_TIMEOUT_MS = 120000;
+const PROSE_ENHANCEMENT_BARRIER_TIMEOUT_MS = PROSE_ENHANCEMENT_TIMEOUT_MS + 5000;
 const STORAGE_SCHEMA_VERSION = 1;
 const RUNTIME_CACHE_CONTRACT_VERSION = 1;
 const DEFAULT_CHAT_ID = 'chat';
@@ -1894,6 +1895,7 @@ export function createRecursionRuntime({
   let promptInstallTail = Promise.resolve();
   let storageSaveTail = Promise.resolve();
   let pendingProseEnhancement = null;
+  let activeProseEnhancementPromise = null;
 
   async function readSnapshot() {
     if (typeof host?.snapshot !== 'function') {
@@ -2089,6 +2091,28 @@ export function createRecursionRuntime({
 
   function proseEnhancementPending() {
     return Boolean(pendingProseEnhancement);
+  }
+
+  function proseEnhancementActive() {
+    return Boolean(pendingProseEnhancement || activeProseEnhancementPromise);
+  }
+
+  async function waitForProseEnhancementBarrier(timeoutMs = PROSE_ENHANCEMENT_BARRIER_TIMEOUT_MS) {
+    const startedAt = Date.now();
+    let waited = false;
+    while (proseEnhancementActive()) {
+      waited = true;
+      const remainingMs = Math.max(0, timeoutMs - (Date.now() - startedAt));
+      if (remainingMs <= 0) return { ok: false, timeout: true, waited };
+      const active = activeProseEnhancementPromise;
+      const tick = new Promise((resolve) => setTimeout(resolve, Math.min(50, remainingMs)));
+      if (active) {
+        await Promise.race([active.catch(() => null), tick]);
+      } else {
+        await tick;
+      }
+    }
+    return { ok: true, waited };
   }
 
   async function holdPendingProseEnhancementMessage(details = {}) {
@@ -2988,6 +3012,18 @@ export function createRecursionRuntime({
   }
 
   async function enhanceLatestAssistantMessage(details = {}) {
+    const run = enhanceLatestAssistantMessageImpl(details);
+    activeProseEnhancementPromise = run;
+    try {
+      return await run;
+    } finally {
+      if (activeProseEnhancementPromise === run) {
+        activeProseEnhancementPromise = null;
+      }
+    }
+  }
+
+  async function enhanceLatestAssistantMessageImpl(details = {}) {
     const settings = settingsStore.get();
     const proseSettings = asObject(settings.proseEnhancement);
     const mode = String(proseSettings.mode || 'off');
@@ -3982,6 +4018,10 @@ export function createRecursionRuntime({
     }
     if (!generationRouter || typeof generationRouter.generate !== 'function') {
       return { ok: true, skipped: true, reason: 'rapid-utility-unavailable' };
+    }
+    const proseBarrier = await waitForProseEnhancementBarrier();
+    if (proseBarrier?.timeout) {
+      return { ok: true, skipped: true, reason: 'prose-enhancement-pending' };
     }
     await waitForExternalMutations();
     const runId = makeId('rapid-warm');

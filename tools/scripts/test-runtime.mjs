@@ -844,6 +844,75 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const proseHost = createProseMessageHarness();
+  const providerGate = deferred();
+  const roleCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { pipelineMode: 'rapid', proseEnhancement: { mode: 'replace', contextMessages: 13 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        roleCalls.push(roleId);
+        if (roleId === 'proseEnhancer') {
+          await providerGate.promise;
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.proseEnhancer.v1',
+              text: 'Mara clenched her jaw. "Keep the door shut," Mara said.'
+            }
+          };
+        }
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'skip',
+              sceneStatus: 'same-scene',
+              cardJobs: [],
+              reasonerDecision: { mode: 'skip', reason: 'unit prose barrier', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['unit-prose-barrier']
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Rapid warm waits for the prose-enhanced source.',
+              sourceCardIds: request.sourceCardIds || [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['unit-prose-barrier-guidance']
+            }
+          };
+        }
+        throw new Error(`unexpected prose barrier role ${roleId}`);
+      }
+    }
+  });
+  const enhance = runtime.enhanceLatestAssistantMessage({ reason: 'assistant-message-landed' });
+  await waitUntil(
+    () => proseHost.calls.some((call) => call.type === 'hold'),
+    'barrier prose enhancement did not hold assistant message before provider wait'
+  );
+  const warm = runtime.warmRapidScene({ reason: 'unit-prose-barrier' });
+  await delay(5);
+  assertDeepEqual(roleCalls, ['proseEnhancer'], 'Rapid warm does not call Utility Arbiter while prose enhancement is active');
+  providerGate.resolve();
+  const enhanced = await enhance;
+  assertEqual(enhanced.ok, true, 'barrier prose enhancement completes');
+  const warmResult = await warm;
+  assertEqual(warmResult.ok, true, 'Rapid warm resumes after prose enhancement settles');
+  assert(roleCalls.includes('utilityArbiter'), 'Rapid warm calls Utility Arbiter after prose enhancement settles');
+}
+
+{
   const baseline = rapidWarmContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
   const unrelated = rapidWarmContractVersions({
     pipelineMode: 'rapid',

@@ -83,7 +83,7 @@ sequenceDiagram
 
 Background warm:
 
-1. After an assistant message lands, Prose Enhancement runs first when enabled. Only after that pass settles does `warmRapidScene()` capture the current source revision for Rapid.
+1. After an assistant message lands, Prose Enhancement runs first when enabled. Only after that pass settles does `warmRapidScene()` capture the current source revision for Rapid. The runtime-level Rapid warm entrypoint waits behind any active or pending Prose Enhancement barrier, so settings-triggered or event-triggered Rapid warm cannot snapshot the unenhanced assistant text.
 2. Runtime uses the provider Arbiter and provider card roles to build or refresh a scene deck for that exact revision.
 3. Runtime saves the active scene cache variant with `variant.rapid` metadata, including the warm artifact id, source revision hash, selected card ids, guidance metadata, contract hashes, and Rapid pipeline version.
 4. Background warm does not compose a final prompt packet, does not call the SillyTavern prompt adapter, and never installs Recursion prompt keys.
@@ -134,7 +134,7 @@ sequenceDiagram
 
 The hold path blanks the active assistant text before the player sees the unpolished host output. Hold state is transient and restored through `revealAssistantMessage()` on any failure. Runtime builds the Utility request from the original text, the latest bounded message context, the source-message hash, and normalized `proseEnhancement.contextMessages`. The prompt includes the full banned AI slop and cliches list intact and permits dialogue edits only for removing banned material already present inside dialogue.
 
-`As Swipe` uses a marker derived from the original text hash and enhancement schema so the same enhanced swipe can be found instead of duplicated. `Replace` writes the polished text into the active assistant message/swipe and asks the host adapter to save and update the visible message block best-effort. Both modes run before Rapid warm so future Rapid source revisions see the selected final text.
+`As Swipe` uses a marker derived from the original text hash and enhancement schema so the same enhanced swipe can be found instead of duplicated. `Replace` writes the polished text into the active assistant message/swipe and asks the host adapter to save and update the visible message block best-effort. Both modes run before Rapid warm so future Rapid source revisions see the selected final text. While this pass is active, progress shows a first-class `Prose Enhancement` row with compact text `Enhancing prose...`, not the card-batch progress label.
 
 ## Regenerate Fresh-Next Sequence
 

@@ -243,6 +243,8 @@ The Hero Pixel Array and progress menu must render from the same normalized `pro
 
 Fused progress treats `Fused card bundle` as the single parent row for the bundle provider call. The bundle provider role must not also appear as a child row. Fused child rows appear only after there is material card-family progress, such as accepted bundle items under `Fused card bundle` or repaired siblings under `Utility card batch`; the menu must not seed speculative pending children for every requested family while the bundle is still unresolved.
 
+Prose Enhancement is a post-generation Utility pass with its own top-level `Prose Enhancement` row. While it is running, the compact current-step text is `Enhancing prose...`; it must not reuse `Utility card batch`, seed prompt-install rows, or imply that a card batch is running.
+
 The compact bar, progress panel, and cards panel should consume stable presenter state derived from the shared Recursion view model. DOM rendering may remain in the main UI module while presenter modules stay pure and testable.
 
 The progress menu footer summarizes the visible provider lanes represented by the progress rows. If any visible top-level row or child row uses Reasoner and any row uses Utility, footer copy is `Auto - Utility and Reasoner lanes`; it must not collapse to the last prompt composer lane.

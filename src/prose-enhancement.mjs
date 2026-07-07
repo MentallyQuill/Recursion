@@ -396,10 +396,35 @@ export function buildProseEnhancementRequest({
 export function dialogueSpans(text = '') {
   const source = String(text ?? '');
   const spans = [];
-  const pattern = /"[^"\n]*(?:"|$)|'[^'\n]*(?:'|$)|“[^”\n]*(?:”|$)|‘[^’\n]*(?:’|$)/g;
-  let match;
-  while ((match = pattern.exec(source))) {
-    spans.push({ start: match.index, end: match.index + match[0].length, text: match[0] });
+  const quotePairs = new Map([
+    ['"', '"'],
+    ["'", "'"],
+    ['“', '”'],
+    ['‘', '’']
+  ]);
+  const isWord = (char = '') => /[A-Za-z0-9]/.test(char);
+  const isOpeningSingleQuote = (index, quote) => {
+    if (quote !== "'" && quote !== '‘') return true;
+    const prev = source[index - 1] || '';
+    const next = source[index + 1] || '';
+    return !isWord(prev) && next && !/\s/.test(next);
+  };
+  const isWordApostrophe = (index, quote) => {
+    if (quote !== "'" && quote !== '’') return false;
+    return isWord(source[index - 1] || '') && isWord(source[index + 1] || '');
+  };
+  for (let index = 0; index < source.length; index += 1) {
+    const quote = source[index];
+    const closeQuote = quotePairs.get(quote);
+    if (!closeQuote || !isOpeningSingleQuote(index, quote)) continue;
+    let end = source.length;
+    for (let cursor = index + 1; cursor < source.length; cursor += 1) {
+      if (source[cursor] !== closeQuote || isWordApostrophe(cursor, closeQuote)) continue;
+      end = cursor + 1;
+      break;
+    }
+    spans.push({ start: index, end, text: source.slice(index, end) });
+    index = end - 1;
   }
   return spans;
 }

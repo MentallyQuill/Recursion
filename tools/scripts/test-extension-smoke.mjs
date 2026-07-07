@@ -484,6 +484,92 @@ if (lifecycleFailures.length) {
 
 {
   const eventSource = createFakeEventSource();
+  let resolveProse;
+  let interceptorComplete = false;
+  const proseGate = new Promise((resolve) => { resolveProse = resolve; });
+  const context = {
+    chatId: 'prose-assistant-landed-chat',
+    chat: [
+      { mesid: 0, is_user: false, mes: 'Previous assistant message.' },
+      { mesid: 1, is_user: true, mes: 'Polish the next reply.' }
+    ],
+    extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+    extension_prompt_roles: { SYSTEM: 'SYSTEM' },
+    eventSource,
+    event_types: {
+      CHAT_CHANGED: 'chat_changed',
+      GENERATION_ENDED: 'generation_ended'
+    },
+    setExtensionPrompt() {},
+    async generateRaw(request = {}) {
+      if (interceptorComplete) {
+        await proseGate;
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.proseEnhancer.v1',
+            text: 'Mara crossed the room. "Keep the door shut," she said.'
+          })
+        };
+      }
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.utilityArbiter.v1',
+          snapshotHash: request.snapshotHash,
+          action: 'skip',
+          sceneStatus: 'same-scene',
+          promptFootprint: 'compact',
+          cardJobs: [],
+          reasonerDecision: { mode: 'skip', reason: 'prose event order smoke', signals: [] },
+          budgets: { targetBriefTokens: 500, maxCards: 6 },
+          diagnostics: ['prose-event-order-smoke']
+        })
+      };
+    }
+  };
+  globalThis.__recursionLiveHarness = true;
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      pipelineMode: 'standard',
+      reasonerUse: 'off',
+      proseEnhancement: { mode: 'replace', contextMessages: 3 }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => context };
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionOnActivate(), true, 'prose assistant-landed setup activates');
+  assertEqual(await globalThis.recursionGenerationInterceptor('prose event order payload'), 'prose event order payload', 'prose event order interceptor arms generation');
+  interceptorComplete = true;
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'prose event order interceptor arms pending prose enhancement');
+  context.chat.push({
+    mesid: 2,
+    is_user: false,
+    mes: 'Mara was angry. "Keep the door shut," she said.',
+    swipes: ['Mara was angry. "Keep the door shut," she said.'],
+    swipe_id: 0
+  });
+  const landed = eventSource.emit('generation_ended', { mesid: 2 });
+  await waitUntil(
+    () => context.chat[2].mes === '',
+    'assistant-landed prose enhancement holds visible assistant message before provider resolves'
+  );
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive, true, 'assistant-landed prose enhancement keeps host generation active while provider is pending');
+  resolveProse();
+  await landed;
+  assertEqual(context.chat[2].mes, 'Mara crossed the room. "Keep the door shut," she said.', 'assistant-landed prose enhancement replaces held text');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive, false, 'assistant-landed prose enhancement clears host generation after provider settles');
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const eventSource = createFakeEventSource();
   const prompts = [];
   const context = {
     chatId: 'rapid-assistant-landed-chat',

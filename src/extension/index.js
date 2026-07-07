@@ -231,16 +231,22 @@ function registerHostEvents(nextRuntime, currentHost = host) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
       const nextAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
       runtime ||= nextRuntime;
-      const ended = invokeRuntimeCleanup(
+      const details = normalizeHostMessageEvent(currentHost, eventName, payload);
+      const generationEnded = () => invokeRuntimeCleanup(
         'handleHostGenerationEnded',
         'Generation end cleanup failed.',
-        normalizeHostMessageEvent(currentHost, eventName, payload)
+        details
       );
       if (!nextAssistantIdentity || nextAssistantIdentity === lastAssistantIdentity) {
-        return ended.then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }));
+        return generationEnded().then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }));
       }
       lastAssistantIdentity = nextAssistantIdentity;
-      return ended
+      if (typeof nextRuntime.proseEnhancementPending === 'function' && nextRuntime.proseEnhancementPending()) {
+        return invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' })
+          .then(() => generationEnded())
+          .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }));
+      }
+      return generationEnded()
         .then(() => invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' }))
         .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }));
     });

@@ -62,6 +62,7 @@ const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
 const PROVIDER_TEST_RESPONSE_TOKENS = 256;
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
+const PROSE_ENHANCEMENT_TIMEOUT_MS = 120000;
 const STORAGE_SCHEMA_VERSION = 1;
 const RUNTIME_CACHE_CONTRACT_VERSION = 1;
 const DEFAULT_CHAT_ID = 'chat';
@@ -1887,6 +1888,7 @@ export function createRecursionRuntime({
   let lastSavedSceneCacheRef = null;
   let promptInstallTail = Promise.resolve();
   let storageSaveTail = Promise.resolve();
+  let pendingProseEnhancement = null;
 
   async function readSnapshot() {
     if (typeof host?.snapshot !== 'function') {
@@ -2052,6 +2054,36 @@ export function createRecursionRuntime({
 
   function setHostGenerationActive(value) {
     runState.setHostGenerationActive(value);
+  }
+
+  function proseEnhancementMode(settings = settingsStore.get()) {
+    return safeText(settings?.proseEnhancement?.mode || 'off', 40);
+  }
+
+  function proseEnhancementEnabled(settings = settingsStore.get()) {
+    const mode = proseEnhancementMode(settings);
+    return mode === 'as-swipe' || mode === 'replace';
+  }
+
+  function armProseEnhancementForHostGeneration(settings = settingsStore.get(), runId = '') {
+    if (!proseEnhancementEnabled(settings)) {
+      pendingProseEnhancement = null;
+      return false;
+    }
+    pendingProseEnhancement = {
+      mode: proseEnhancementMode(settings),
+      armedAt: nowIso(),
+      runId: safeText(runId || '', 120)
+    };
+    return true;
+  }
+
+  function clearPendingProseEnhancement() {
+    pendingProseEnhancement = null;
+  }
+
+  function proseEnhancementPending() {
+    return Boolean(pendingProseEnhancement);
   }
 
   function clearPendingLatestAssistantSwipeRetry() {
@@ -2260,6 +2292,7 @@ export function createRecursionRuntime({
 
   function clearVolatileSceneState() {
     abortActiveRapidWarmRun('stale');
+    clearPendingProseEnhancement();
     lastPacket = null;
     lastHand = { cards: [], omitted: [] };
     lastPlan = null;
@@ -2894,6 +2927,7 @@ export function createRecursionRuntime({
     if (hostStopCleanupPromise) return hostStopCleanupPromise;
     const source = asObject(details);
     const eventName = safeText(source.eventName || source.event || 'generation_stopped', 80);
+    clearPendingProseEnhancement();
     setHostGenerationActive(false);
     hostStopCleanupPromise = clearForHostEvent({
       idPrefix: 'host-stop',
@@ -2916,6 +2950,7 @@ export function createRecursionRuntime({
   }
 
   function handleHostGenerationEnded() {
+    clearPendingProseEnhancement();
     setHostGenerationActive(false);
     return { ok: true };
   }
@@ -2924,13 +2959,19 @@ export function createRecursionRuntime({
     const settings = settingsStore.get();
     const proseSettings = asObject(settings.proseEnhancement);
     const mode = String(proseSettings.mode || 'off');
-    if (mode === 'off') return { ok: true, skipped: true, reason: 'prose-enhancement-off' };
+    if (mode === 'off') {
+      clearPendingProseEnhancement();
+      return { ok: true, skipped: true, reason: 'prose-enhancement-off' };
+    }
     const messages = asObject(host.messages);
     if (typeof messages.activeAssistantMessageIdentity !== 'function') {
       return { ok: true, skipped: true, reason: 'host-message-api-unavailable' };
     }
     const identity = messages.activeAssistantMessageIdentity();
-    if (!identity?.text) return { ok: true, skipped: true, reason: 'assistant-message-unavailable' };
+    if (!identity?.text) {
+      clearPendingProseEnhancement();
+      return { ok: true, skipped: true, reason: 'assistant-message-unavailable' };
+    }
     const runId = makeId('prose-enhance');
     const messageId = identity.messageId;
     const originalText = String(identity.text || '');
@@ -2956,6 +2997,7 @@ export function createRecursionRuntime({
       chips: ['Prose']
     });
     let held = false;
+    let enhanced = false;
     try {
       if (typeof messages.holdAssistantMessage === 'function') {
         const hold = await messages.holdAssistantMessage(messageId);
@@ -2970,7 +3012,7 @@ export function createRecursionRuntime({
       });
       const result = await generationRouter.generate('proseEnhancer', request, {
         runId,
-        timeoutMs: 45000
+        timeoutMs: PROSE_ENHANCEMENT_TIMEOUT_MS
       });
       if (result?.ok !== true) {
         settleRuntimeActivity({
@@ -2997,13 +3039,22 @@ export function createRecursionRuntime({
       if (mode === 'replace') {
         const replace = await messages.replaceAssistantMessageText?.(messageId, enhancedText, { marker });
         if (replace?.ok === false) return { ok: false, mode, error: replace.error };
+        enhanced = true;
       } else if (mode === 'as-swipe') {
+        if (held && typeof messages.revealAssistantMessage === 'function') {
+          await messages.revealAssistantMessage(messageId);
+          held = false;
+        }
         const existing = await messages.findEnhancedSwipe?.(messageId, marker);
         if (existing && typeof messages.selectAssistantMessageSwipe === 'function') {
           await messages.selectAssistantMessageSwipe(messageId, existing.index, { marker });
+          enhanced = true;
         } else if (!existing) {
           const append = await messages.appendAssistantMessageSwipe?.(messageId, enhancedText, { marker, select: true });
           if (append?.ok === false) return { ok: false, mode, error: append.error };
+          enhanced = true;
+        } else {
+          enhanced = true;
         }
       } else {
         return { ok: true, skipped: true, reason: 'prose-enhancement-mode-invalid' };
@@ -3026,13 +3077,15 @@ export function createRecursionRuntime({
       });
       return { ok: false, mode, error: { code: 'RECURSION_PROSE_FAILED', message: String(error?.message || error || 'Prose Enhancement failed.') } };
     } finally {
-      if (held && typeof messages.revealAssistantMessage === 'function') {
+      clearPendingProseEnhancement();
+      if (held && !enhanced && typeof messages.revealAssistantMessage === 'function') {
         await messages.revealAssistantMessage(messageId);
       }
     }
   }
 
   async function stopGeneration(details = {}) {
+    clearPendingProseEnhancement();
     setHostGenerationActive(false);
     const hostStop = await requestHostGenerationStop(details);
     const cleanup = await handleHostGenerationStopped({
@@ -4675,6 +4728,7 @@ export function createRecursionRuntime({
     const settings = settingsStore.get();
     setHostGenerationActive(hostGeneration);
     if (settings.enabled === false) {
+      clearPendingProseEnhancement();
       clearPendingLatestAssistantSwipeRetry();
       clearPendingFreshNextGeneration();
       await waitForExternalMutations();
@@ -4700,6 +4754,8 @@ export function createRecursionRuntime({
     await waitForExternalMutations();
     let pendingUserMessage = normalizePendingUserMessage(userMessage);
     const runId = makeId('run');
+    if (hostGeneration === true) armProseEnhancementForHostGeneration(settings, runId);
+    else clearPendingProseEnhancement();
     const signal = startRun(runId);
     const freshContext = hostGeneration === true
       ? consumePendingFreshNextGeneration(runId)
@@ -5189,6 +5245,7 @@ export function createRecursionRuntime({
     handleHostGenerationStopped,
     handleHostGenerationEnded,
     enhanceLatestAssistantMessage,
+    proseEnhancementPending,
     stopGeneration,
     updateSettings,
     updateProvider,

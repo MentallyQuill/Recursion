@@ -2888,7 +2888,7 @@ function buildRoot() {
       }, [
         el('span', { className: 'recursion-prose-enhancement-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionProseEnhancementIcon: '' } })
       ]),
-      el('div', { className: 'recursion-prose-enhancement-menu', attrs: { 'aria-label': 'Prose Enhancement selector' }, dataset: { recursionProseEnhancementMenu: '' } },
+      el('div', { className: 'recursion-prose-enhancement-menu', attrs: { 'aria-label': 'Prose Enhancement selector', hidden: '' }, dataset: { recursionProseEnhancementMenu: '' } },
         PROSE_ENHANCEMENT_MENU_OPTIONS.map(proseEnhancementMenuChoice))
     ]),
     el('div', { className: 'recursion-story-form-cluster' }, [

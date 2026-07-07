@@ -263,6 +263,26 @@ assertEqual((await mutationHost.messages.replaceAssistantMessageText(4, 'Replace
 assertEqual(mutationContext.chat[0].swipes[1], 'Replacement text.', 'replace updates selected swipe text');
 assert(messageMutationCalls.some((entry) => entry.save === true), 'message mutation saves chat');
 
+const latestMutationContext = {
+  chatId: 'prose-latest-host-chat',
+  chat: [
+    { mesid: 0, is_user: false, mes: 'Older assistant text.' },
+    { mesid: 1, is_user: true, mes: 'User asks.' },
+    {
+      mesid: 8,
+      is_user: false,
+      mes: 'Latest assistant text.',
+      swipe_id: 0,
+      swipes: ['Latest assistant text.']
+    }
+  ]
+};
+const latestMutationHost = createSillyTavernHost({ contextFactory: () => latestMutationContext, settingsRoot: {} });
+assertEqual(latestMutationHost.messages.activeAssistantMessageIdentity().messageId, 8, 'host active assistant identity chooses latest assistant when no id is supplied');
+assertEqual((await latestMutationHost.messages.holdAssistantMessage(8)).ok, true, 'host can hold latest assistant by id');
+assertEqual(latestMutationContext.chat[2].mes, '', 'host hold hides latest assistant row rather than older assistant row');
+assertEqual(latestMutationContext.chat[0].mes, 'Older assistant text.', 'host hold leaves older assistant row unchanged');
+
 const packet = {
   injectionPlan: { blocks: [{ id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 2, role: 'system' }] },
   sections: { guidance: 'Use the alley scene.', cardEvidence: 'Card evidence:\n- [Scene Frame] Alley.', guardrails: 'Guardrails:\n- Honor facts.' }

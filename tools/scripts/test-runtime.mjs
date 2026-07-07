@@ -494,6 +494,8 @@ function createProseMessageHarness(initialText = 'She was angry. "Keep the door 
     messageId: 8,
     swipeId: 0,
     text: initialText,
+    heldText: null,
+    swipes: [initialText],
     originalHash: hashJson(initialText)
   };
   return {
@@ -505,21 +507,33 @@ function createProseMessageHarness(initialText = 'She was angry. "Keep the door 
       },
       async holdAssistantMessage(messageId) {
         calls.push({ type: 'hold', messageId });
+        message.heldText = message.text;
+        message.text = '';
+        message.swipes[message.swipeId] = '';
         return { ok: true };
       },
       async revealAssistantMessage(messageId) {
         calls.push({ type: 'reveal', messageId });
+        if (message.heldText !== null) {
+          message.text = message.heldText;
+          message.swipes[message.swipeId] = message.heldText;
+          message.heldText = null;
+        }
         return { ok: true };
       },
       async replaceAssistantMessageText(messageId, text, options = {}) {
         calls.push({ type: 'replace', messageId, text, options });
         message.text = text;
+        message.swipes[message.swipeId] = text;
+        message.heldText = null;
         return { ok: true, text };
       },
       async appendAssistantMessageSwipe(messageId, text, options = {}) {
         calls.push({ type: 'append', messageId, text, options });
+        message.swipes.push(text);
         message.text = text;
-        message.swipeId = 1;
+        message.swipeId = message.swipes.length - 1;
+        message.heldText = null;
         return { ok: true, index: 1, text };
       },
       async findEnhancedSwipe(messageId, marker = {}) {
@@ -685,9 +699,12 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assertEqual(result.mode, 'as-swipe', 'As Swipe result reports mode');
   assertEqual(routerCalls[0].roleId, 'proseEnhancer', 'As Swipe calls proseEnhancer role');
   assertEqual(routerCalls[0].request.contextMessages.length, 3, 'As Swipe request respects context message setting');
+  assertEqual(routerCalls[0].options.timeoutMs, 120000, 'As Swipe uses the long provider timeout for live Utility profiles');
   assertEqual(proseHost.calls[0].type, 'hold', 'As Swipe holds original message before provider pass');
   assertEqual(proseHost.calls.some((call) => call.type === 'append' && call.options.select === true), true, 'As Swipe appends and auto-selects enhanced swipe');
-  assertEqual(proseHost.calls.at(-1).type, 'reveal', 'As Swipe reveals after mutation');
+  assertEqual(proseHost.message.swipes[0], 'She was angry. "Keep the door shut," Mara said.', 'As Swipe preserves original text as first swipe after hold');
+  assertEqual(proseHost.message.swipes[1], 'Mara clenched her jaw. "Keep the door shut," Mara said.', 'As Swipe stores enhanced text as second swipe');
+  assertEqual(proseHost.message.swipeId, 1, 'As Swipe leaves enhanced swipe selected');
 }
 
 {
@@ -712,6 +729,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assertEqual(result.mode, 'replace', 'Replace result reports mode');
   assertEqual(proseHost.calls.some((call) => call.type === 'replace'), true, 'Replace mutates active assistant text');
   assertEqual(proseHost.calls.some((call) => call.type === 'append'), false, 'Replace does not append a swipe');
+  assertEqual(proseHost.calls.some((call) => call.type === 'reveal'), false, 'Replace success does not reveal original over enhanced text');
 }
 
 {
@@ -732,6 +750,59 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assertEqual(result.ok, false, 'failed prose enhancement returns failure');
   assertEqual(proseHost.calls.some((call) => call.type === 'replace' || call.type === 'append'), false, 'failed prose enhancement leaves original unmutated');
   assertEqual(proseHost.calls.at(-1).type, 'reveal', 'failed prose enhancement reveals original');
+}
+
+{
+  const proseHost = createProseMessageHarness();
+  const providerGate = deferred();
+  const { runtime } = createRuntimeHarness({
+    settings: { proseEnhancement: { mode: 'replace', contextMessages: 13 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'skip',
+              sceneStatus: 'same-scene',
+              cardJobs: [],
+              reasonerDecision: { mode: 'skip', reason: 'unit prose pending setup', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 4 },
+              diagnostics: ['unit-prose-pending-setup']
+            }
+          };
+        }
+        assertEqual(roleId, 'proseEnhancer', 'pending prose fixture only calls proseEnhancer after setup');
+        await providerGate.promise;
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.proseEnhancer.v1',
+            text: 'Mara clenched her jaw. "Keep the door shut," Mara said.'
+          }
+        };
+      }
+    }
+  });
+  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare prose hold.', hostGeneration: true });
+  assertEqual(setup.ok, true, 'prose hold setup prepares generation');
+  assertEqual(runtime.view().hostGenerationActive, true, 'host generation remains active after prompt preparation');
+  assertEqual(runtime.proseEnhancementPending(), true, 'prepareForGeneration arms pending prose enhancement when enabled');
+  const enhance = runtime.enhanceLatestAssistantMessage({ reason: 'assistant-message-landed' });
+  await waitUntil(
+    () => proseHost.calls.some((call) => call.type === 'hold'),
+    'pending prose enhancement holds assistant message before provider resolves'
+  );
+  assertEqual(runtime.view().hostGenerationActive, true, 'host generation remains active while prose enhancement is running');
+  providerGate.resolve();
+  const enhanced = await enhance;
+  assertEqual(enhanced.ok, true, 'pending prose enhancement completes');
+  assertEqual(runtime.proseEnhancementPending(), false, 'prose enhancement pending flag clears after enhancement completes');
+  runtime.handleHostGenerationEnded({ eventName: 'generation_ended' });
+  assertEqual(runtime.view().hostGenerationActive, false, 'host generation clears after prose enhancement completes');
 }
 
 {

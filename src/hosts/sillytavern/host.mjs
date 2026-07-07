@@ -193,7 +193,8 @@ function latestAssistantMessage(context = {}) {
 
 function findRawAssistantMessage(context = {}, messageId = null) {
   const messages = rawChatMessages(context);
-  const requested = Number(messageId);
+  const hasRequested = messageId !== undefined && messageId !== null && String(messageId).trim() !== '';
+  const requested = hasRequested ? Number(messageId) : NaN;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const raw = messages[index];
     const normalized = normalizeMessage(raw, index);
@@ -1094,6 +1095,20 @@ export function createSillyTavernHost({
         }
       }
       return null;
+    },
+    async selectAssistantMessageSwipe(messageId, swipeIndex, options = {}) {
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context, messageId);
+      if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
+      if (!Array.isArray(found.raw.swipes)) return { ok: false, error: { code: 'RECURSION_SWIPE_UNAVAILABLE', message: 'Swipes array not found.' } };
+      const index = Math.max(0, Math.min(Number(swipeIndex), found.raw.swipes.length - 1));
+      found.raw.swipe_id = index;
+      const text = stringValue(found.raw.swipes[index]);
+      setRawAssistantText(found.raw, text);
+      if (options.marker) found.raw.__recursionProseEnhancement = asObject(options.marker);
+      updateMessageBlockBestEffort(context, found.index, found.raw);
+      await saveChatBestEffort(context);
+      return { ok: true, messageId: found.normalized.mesId, index, text };
     }
   };
 

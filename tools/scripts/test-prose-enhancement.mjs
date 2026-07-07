@@ -39,6 +39,10 @@ assert(BANNED_AI_SLOP_LIST.includes('* controlled chaos'), 'exported banned list
 const dialogue = dialogueSpans('He nodded. "Do not change this." Then he left.');
 assertEqual(dialogue.length, 1, 'dialogue spans detects quoted dialogue');
 assertEqual(dialogue[0].text, '"Do not change this."', 'dialogue span includes quote delimiters');
+const singleQuotedDialogue = dialogueSpans("He nodded. 'Do not change this.' Then he left.");
+assertEqual(singleQuotedDialogue.length, 1, 'dialogue spans detects single-quoted dialogue');
+assertEqual(singleQuotedDialogue[0].text, "'Do not change this.'", 'single-quoted dialogue span includes quote delimiters');
+assertEqual(dialogueSpans("Mara's hand didn't move. The door's latch held.").length, 0, 'dialogue spans ignores prose apostrophes');
 
 assertEqual(
   proseEnhancementKey({ chatKey: 'chat-a', messageId: 4, swipeId: 0, originalHash: 'abc' }),
@@ -57,6 +61,12 @@ const acceptedDialogueSlopCleanup = validateProseEnhancementResult({
   text: 'Mara felt it like a punch to the chest. "It hit hard," she said.\nShe was angry. She walked across the room.'
 }, { originalText: sourceText });
 assertEqual(acceptedDialogueSlopCleanup.ok, true, 'validator allows dialogue edits limited to banned-list cleanup');
+
+const acceptedApostropheProse = validateProseEnhancementResult({
+  schema: PROSE_ENHANCER_SCHEMA,
+  text: "Mara's hand stayed on the latch. She didn't move."
+}, { originalText: 'Mara put her hand on the latch. She stayed still.' });
+assertEqual(acceptedApostropheProse.ok, true, 'validator does not mistake prose apostrophes for changed dialogue');
 
 const rejectedDialogueChange = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,

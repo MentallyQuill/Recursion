@@ -43,6 +43,7 @@
 .recursion-fresh-next-generation,
 .recursion-pipeline-button,
 .recursion-mode-button,
+.recursion-prose-enhancement-button,
 .recursion-story-form-button,
 .recursion-activity-trigger,
 .recursion-icon-button,
@@ -164,6 +165,7 @@
 
 .recursion-pipeline-cluster,
 .recursion-mode-cluster,
+.recursion-prose-enhancement-cluster,
 .recursion-story-form-cluster {
   flex: 0 0 auto;
   position: relative;
@@ -171,6 +173,7 @@
 
 .recursion-pipeline-button,
 .recursion-mode-button,
+.recursion-prose-enhancement-button,
 .recursion-story-form-button,
 .recursion-icon-button,
 .recursion-cards-button {
@@ -195,6 +198,8 @@
 .recursion-pipeline-button:focus-visible,
 .recursion-mode-button:hover,
 .recursion-mode-button:focus-visible,
+.recursion-prose-enhancement-button:hover,
+.recursion-prose-enhancement-button:focus-visible,
 .recursion-story-form-button:hover,
 .recursion-story-form-button:focus-visible,
 .recursion-cards-button:hover,
@@ -313,6 +318,7 @@
 
 .recursion-pipeline-menu,
 .recursion-mode-menu,
+.recursion-prose-enhancement-menu,
 .recursion-story-form-menu,
 .recursion-status-popover,
 .recursion-hand-dropdown,
@@ -327,6 +333,7 @@
 
 .recursion-pipeline-menu,
 .recursion-mode-menu,
+.recursion-prose-enhancement-menu,
 .recursion-story-form-menu {
   left: 0;
   position: absolute;
@@ -341,6 +348,7 @@
 
 .recursion-pipeline-choice,
 .recursion-mode-choice,
+.recursion-prose-enhancement-choice,
 .recursion-story-form-choice {
   align-items: center;
   background: transparent;
@@ -360,6 +368,7 @@
 
 .recursion-pipeline-choice:first-child,
 .recursion-mode-choice:first-child,
+.recursion-prose-enhancement-choice:first-child,
 .recursion-story-form-choice:first-child {
   border-top: 0;
 }
@@ -368,6 +377,9 @@
 .recursion-pipeline-choice:focus-visible,
 .recursion-pipeline-choice.is-selected,
 .recursion-mode-choice:hover,
+.recursion-prose-enhancement-choice:hover,
+.recursion-prose-enhancement-choice:focus-visible,
+.recursion-prose-enhancement-choice.is-selected,
 .recursion-mode-choice:focus-visible,
 .recursion-mode-choice.is-selected,
 .recursion-story-form-choice:hover,
@@ -378,7 +390,8 @@
 }
 
 .recursion-pipeline-choice-icon,
-.recursion-mode-choice-icon {
+.recursion-mode-choice-icon,
+.recursion-prose-enhancement-choice-icon {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 70%, transparent);
   display: inline-grid;
   height: 16px;
@@ -388,6 +401,7 @@
 
 .recursion-pipeline-choice-name,
 .recursion-mode-choice-name,
+.recursion-prose-enhancement-choice-name,
 .recursion-story-form-choice-name {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 80%, transparent);
   display: block;
@@ -420,6 +434,7 @@
 
 .recursion-pipeline-choice-tip,
 .recursion-mode-choice-tip,
+.recursion-prose-enhancement-choice-tip,
 .recursion-story-form-choice-tip {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 46%, transparent);
   display: block;
@@ -854,7 +869,23 @@
   width: 24px;
 }
 
+.recursion-prose-enhancement-button {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 74%, transparent);
+  flex: 0 0 24px;
+  min-width: 24px;
+  padding: 0;
+  width: 24px;
+}
+
+.recursion-prose-enhancement-button.is-off {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 34%, transparent);
+}
+
 .recursion-cards-button[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
+}
+
+.recursion-prose-enhancement-button[aria-expanded="true"] {
   background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
 }
 
@@ -869,6 +900,24 @@
 .recursion-cards-button-icon svg {
   height: 15px;
   width: 15px;
+}
+
+.recursion-prose-enhancement-icon {
+  background: currentColor;
+  display: inline-block;
+  height: 16px;
+  mask: url('../assets/icons/upgrade.svg') center / 15px 15px no-repeat;
+  -webkit-mask: url('../assets/icons/upgrade.svg') center / 15px 15px no-repeat;
+  width: 16px;
+}
+
+.recursion-prose-enhancement-choice-dot {
+  background: currentColor;
+  border-radius: 50%;
+  display: block;
+  height: 6px;
+  opacity: .72;
+  width: 6px;
 }
 
 .recursion-reasoning-chain {

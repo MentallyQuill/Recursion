@@ -44,6 +44,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 - power toggle;
 - icon-only Pipeline control: Standard, Rapid, or Fused;
 - icon-only mode control: Auto or Manual;
+- icon-only Prose Enhancement control: Off, As Swipe, or Replace;
 - compact Tense & PoV control;
 - Hero Pixel Array plus current-step text;
 - command slot: Stop generation while active, Regenerate icon while idle;
@@ -55,7 +56,9 @@ The bar should be stable. Status changes should not repeatedly resize the transc
 
 The Pipeline control is a small icon-only dropdown immediately to the left of the Mode button. `Standard` uses the full foreground Arbiter, card, hand, compose, validate, and install path on send. `Rapid` warms a provider-generated card packet in the background and uses a short provider delta on send. `Fused` keeps the foreground Arbiter and shared deck/hand/compose/install path, but asks one provider call to generate all requested cards as a bundle. The selected icon updates on the bar, and the dropdown follows the compact Mode-menu pattern. Pipeline is not duplicated in Settings.
 
-The Tense & PoV control sits in the compact left-side control cluster after Cards. Leave it on `Auto` for normal play. In Auto, the Utility Arbiter infers the active story form from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. Use a forced option only when the Arbiter is clearly steering card evidence or guidance toward the wrong form. Forced options cover past or present tense in first person, second person, third-person limited, or third-person omniscient. A forced selection creates a high-confidence user story-form override for card prompts, guidance composition, Rapid artifacts, and Prompt Packet metadata; it does not rewrite the transcript, change SillyTavern character data, or add style coaching beyond the story-form contract.
+The Prose Enhancement control sits immediately to the right of Cards and uses the upgrade icon. It is grey when `Off`. `As Swipe` hides the fresh SillyTavern assistant output until the Utility pass finishes, then keeps the original as one swipe and adds a polished swipe selected by default. `Replace` hides the fresh output until the Utility pass finishes, then replaces the active assistant text with the polished version. If the Utility pass fails validation or the provider is unavailable, Recursion reveals the original unchanged.
+
+The Tense & PoV control sits in the compact left-side control cluster after Prose Enhancement. Leave it on `Auto` for normal play. In Auto, the Utility Arbiter infers the active story form from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. Use a forced option only when the Arbiter is clearly steering card evidence or guidance toward the wrong form. Forced options cover past or present tense in first person, second person, third-person limited, or third-person omniscient. A forced selection creates a high-confidence user story-form override for card prompts, guidance composition, Rapid artifacts, and Prompt Packet metadata; it does not rewrite the transcript, change SillyTavern character data, or add style coaching beyond the story-form contract.
 
 The command slot changes by state. Stop generation appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
 
@@ -105,7 +108,7 @@ Main controls:
 
 - Play: a Behavior section containing Strength, Min Cards, Max Cards, Prompt Footprint, and Focus.
 - Providers: collapsible Utility and Reasoner provider setup, test controls, and session key controls.
-- Advanced: collapsible Injection, UI, Retention, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, Recursion-owned cap settings, safe excerpts, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point.
+- Advanced: collapsible Injection, UI, Prose Enhancement, Retention, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, Prose Enhancement context length, Recursion-owned cap settings, safe excerpts, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 
@@ -236,6 +239,7 @@ Operator settings should stay broad. Pipeline, Mode, and Reasoning Level live in
 - Providers: collapsible Utility and Reasoner setup in the settings panel.
 - Advanced / Injection: final-prompt injection compatibility controls: Placement `In Prompt | In Chat`, Role `System | User | Assistant`, and Depth `0..10`.
 - Advanced / UI: progress row limits.
+- Advanced / Prose Enhancement: context messages for the post-generation Utility polishing pass, default `13`, range `0..35`.
 - Advanced / Retention: Source Messages, Source Text Budget, Provider Messages, Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries.
 - Advanced / Diagnostics: safe excerpts, Reset Scene Cache, Clear Run Journal, and Export Diagnostics.
 

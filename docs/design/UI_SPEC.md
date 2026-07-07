@@ -31,16 +31,16 @@ Recursion should use its own chat-attached top bar instead of adopting the Direc
 Default desktop shape:
 
 ```text
-[power] [pipeline icon] [mode icon] [cards] [tense/PoV] | [Hero Pixel Array] Selecting turn hand... [stop]    [reasoning] v | ...
+[power] [pipeline icon] [mode icon] [cards] [prose] [tense/PoV] | [Hero Pixel Array] Selecting turn hand... [stop]    [reasoning] v | ...
 ```
 
 Narrow/mobile shape:
 
 ```text
-[power] [pipeline] [mode] [cards] [form] | [Hero Pixel Array] Selecting... [stop]     v | ...
+[power] [pipeline] [mode] [cards] [prose] [form] | [Hero Pixel Array] Selecting... [stop]     v | ...
 ```
 
-The desktop bar uses one compact row with distinct zones for power, pipeline, mode, card scope, story form, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
+The desktop bar uses one compact row with distinct zones for power, pipeline, mode, card scope, prose enhancement, story form, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
 
 The exact copyable HTML/CSS snapshot for this V1 bar lives in `docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md`. Treat that file as the implementation reference for reproducing the current mock in SillyTavern: it captures the final class names, inline SVG icons, Hero Pixel Array, progress menu, mode menu, Last Brief dropdown, Prompt Packet panel, metachips, and 12px active progress spinner treatment.
 
@@ -49,10 +49,10 @@ Recursion chrome should use explicit compact font sizing instead of inheriting S
 Canonical desktop layout:
 
 ```text
-[power] [pipeline] [mode arrows] [cards] [form] | [blocks] Selecting turn hand... [stop] [reasoning] v | ...
-[power] [pipeline] [mode arrows] [cards] [form] | [blocks] Installing prompt...   [stop] [reasoning] v | ...
-[power] [pipeline] [mode arrows] [cards] [form] | [blocks] Manual scope active...  [reasoning] Cards v | ...
-[power-off] [pipeline] [mode arrows] [cards] [form] |                              [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] [prose] [form] | [blocks] Selecting turn hand... [stop] [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] [prose] [form] | [blocks] Installing prompt...   [stop] [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] [prose] [form] | [blocks] Manual scope active...  [reasoning] Cards v | ...
+[power-off] [pipeline] [mode arrows] [cards] [prose-off] [form] |                         [reasoning] v | ...
 ```
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
@@ -156,9 +156,17 @@ Reference mode selector CSS:
 }
 ```
 
-The card scope selector is an icon-only stacked-cards button in the left bar flow. It sits immediately to the right of Mode and to the left of the Hero Pixel Array separator. Its accessible label and tooltip carry the meaning; it must not render a visible `Cards` title or selected-count text in the compact bar.
+The card scope selector is an icon-only stacked-cards button in the left bar flow. It sits immediately to the right of Mode and to the left of Prose Enhancement. Its accessible label and tooltip carry the meaning; it must not render a visible `Cards` title or selected-count text in the compact bar.
 
-The Tense & PoV selector sits immediately to the right of Cards and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `Pr1`, `Pr2`, `Pr3L`, or `Pr3O` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, and equivalent options.
+Prose Enhancement is an icon-only upgrade button immediately to the right of Cards and immediately to the left of Tense & PoV. It uses the repo-local `assets/icons/upgrade.svg` mask icon, opens a Mode-like compact dropdown, and exposes three rows with mini-descriptions:
+
+- `Off`: leave SillyTavern output unchanged.
+- `As Swipe`: keep the original output, add an enhanced sibling swipe, and select the enhanced swipe.
+- `Replace`: replace the active output with the enhanced text.
+
+When set to `Off`, the Prose Enhancement icon uses the same muted/grey disabled treatment as the off power toggle. The compact bar does not expose a Recast-style pass editor. The only numeric Prose Enhancement setting belongs in Advanced settings as context message count.
+
+The Tense & PoV selector sits immediately to the right of Prose Enhancement and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `Pr1`, `Pr2`, `Pr3L`, or `Pr3O` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, and equivalent options.
 
 The selector menu contains:
 

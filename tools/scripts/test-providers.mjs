@@ -42,6 +42,7 @@ function responseSchemaForRole(roleId) {
   if (roleId === 'utilityArbiter') return 'recursion.utilityArbiter.v1';
   if (roleId === 'rapidTurnDelta') return 'recursion.rapidTurnDelta.v2';
   if (roleId === 'guidanceComposer') return 'recursion.guidanceComposer.v1';
+  if (roleId === 'proseEnhancer') return 'recursion.proseEnhancer.v1';
   if (roleId === 'fusedCardBundle') return 'recursion.cardBundle.v1';
   if (roleId === 'providerTest') return 'recursion.providerTest.v1';
   return 'recursion.card.v1';
@@ -77,6 +78,7 @@ const expectedUtilityRoles = [
   'fusedCardBundle',
   'rapidTurnDelta',
   'guidanceComposer',
+  'proseEnhancer',
   'providerTest'
 ];
 assertDeepEqual(UTILITY_ROLE_IDS, expectedUtilityRoles, 'utility role catalog exactly matches Task 6 plan');
@@ -219,11 +221,31 @@ assertEqual(calls.at(-1).responseSchema, 'recursion.rapidTurnDelta.v2', 'rapidTu
 await router.generate('guidanceComposer', { prompt: 'Guidance composer' });
 assertEqual(calls.at(-1).lane, 'utility', 'guidanceComposer uses utility lane');
 assertEqual(calls.at(-1).responseSchema, 'recursion.guidanceComposer.v1', 'guidanceComposer request carries expected response schema');
+await router.generate('proseEnhancer', { prompt: 'Prose enhancement' });
+assertEqual(calls.at(-1).lane, 'utility', 'proseEnhancer uses utility lane');
+assertEqual(calls.at(-1).responseSchema, 'recursion.proseEnhancer.v1', 'proseEnhancer request carries expected response schema');
 await router.generate('fusedCardBundle', { prompt: 'Fused card bundle', snapshotHash: 'fused-provider-hash' });
 assertEqual(calls.at(-1).lane, 'utility', 'fusedCardBundle uses utility lane by default');
 assertEqual(calls.at(-1).responseSchema, 'recursion.cardBundle.v1', 'fusedCardBundle request carries card-bundle response schema');
 assertEqual(calls.at(-1).machineJson, true, 'fusedCardBundle request marks machine JSON calls');
 assertEqual(machineJsonSchemaForRequest(calls.at(-1)).schema.properties.schema.const, 'recursion.cardBundle.v1', 'fusedCardBundle machine schema constrains bundle schema');
+
+const proseTextRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: 'Mara crossed the room and stopped at the handle.',
+        providerId: 'fake-host',
+        model: 'fake-model'
+      };
+    }
+  }
+});
+const proseTextResult = await proseTextRouter.generate('proseEnhancer', { prompt: 'Return rewritten text.' });
+assertEqual(proseTextResult.ok, true, 'proseEnhancer accepts raw rewritten text when provider ignores JSON');
+assertEqual(proseTextResult.data.schema, 'recursion.proseEnhancer.v1', 'proseEnhancer raw text fallback wraps schema');
+assertEqual(proseTextResult.data.text, 'Mara crossed the room and stopped at the handle.', 'proseEnhancer raw text fallback preserves visible text');
+assertEqual(proseTextResult.diagnostics.textFallback, true, 'proseEnhancer raw text fallback is diagnostic');
 
 store.update({ reasonerUse: 'always' });
 store.updateProvider('reasoner', { enabled: true });

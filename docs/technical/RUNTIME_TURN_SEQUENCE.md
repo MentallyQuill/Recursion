@@ -14,6 +14,8 @@ This manual describes the turn lifecycle implemented by `src/runtime.mjs` and th
 
 Pipeline selection is separate from Auto/Manual. The compact bar owns the Pipeline selector as an icon-only dropdown immediately to the left of the Mode button. `Standard` runs the full foreground pipeline on send. `Rapid` warms a provider-generated card packet in the background and uses a short foreground Utility delta on send. `Fused` runs the foreground Arbiter and then generates all requested cards through one structured bundle call before the shared deck/hand/compose/install stages. Settings may persist `pipelineMode`, but Settings must not render a second Standard/Rapid/Fused toggle.
 
+Prose Enhancement is separate from Auto/Manual and Standard/Rapid/Fused. It runs only after SillyTavern has produced an assistant message and only when its mode is `as-swipe` or `replace`. `Off` leaves the host output untouched. `As Swipe` preserves the original host output, appends one enhanced sibling swipe, and selects the enhanced swipe. `Replace` replaces the active assistant text with the enhanced result. If the hold, Utility call, or validation fails, runtime reveals the original host output unchanged.
+
 ## Auto Sequence
 
 The Standard pipeline is the reference foreground path for Auto and Manual:
@@ -81,7 +83,7 @@ sequenceDiagram
 
 Background warm:
 
-1. After an assistant message lands, the source settles, or the chat is idle, `warmRapidScene()` captures the current source revision.
+1. After an assistant message lands, Prose Enhancement runs first when enabled. Only after that pass settles does `warmRapidScene()` capture the current source revision for Rapid.
 2. Runtime uses the provider Arbiter and provider card roles to build or refresh a scene deck for that exact revision.
 3. Runtime saves the active scene cache variant with `variant.rapid` metadata, including the warm artifact id, source revision hash, selected card ids, guidance metadata, contract hashes, and Rapid pipeline version.
 4. Background warm does not compose a final prompt packet, does not call the SillyTavern prompt adapter, and never installs Recursion prompt keys.
@@ -96,6 +98,43 @@ Foreground send:
 6. If the provider marks a mandatory missing card, requests Standard escalation, or returns Rapid structured output that fails schema or content validation, Rapid aborts the Rapid install path and continues through Standard for that same pending user message with a compact escalation diagnostic. Runtime stamps local revision hashes from the frozen request instead of trusting model-echoed hash strings.
 
 Rapid foreground roles are small Utility jobs. They may hedge by starting a primary call immediately and a backup after the configured short delay; the first valid structured output wins and diagnostics record the winning hedge source. Hedging is not used for Story generation.
+
+## Prose Enhancement Post-Generation Sequence
+
+Prose Enhancement is a post-generation Utility pass, not prompt-packet conditioning. It does not change the prompt installed before the host model writes. It mutates only the just-landed assistant message after validation.
+
+```mermaid
+sequenceDiagram
+    participant Host as SillyTavern Host
+    participant Runtime as Runtime
+    participant Utility as Utility proseEnhancer
+    participant UI as Activity UI
+
+    Host->>Runtime: assistant landed
+    Runtime->>Host: activeAssistantMessageIdentity()
+    alt mode is off or host API missing
+        Runtime-->>Host: leave output unchanged
+    else enabled
+        Runtime->>Host: holdAssistantMessage(messageId)
+        Runtime->>Runtime: snapshot bounded scene context
+        Runtime->>Utility: proseEnhancer(context, source text)
+        Utility-->>Runtime: rewritten text
+        Runtime->>Runtime: validate source hash, length, dialogue, banned-list exception
+        alt As Swipe and valid
+            Runtime->>Host: appendAssistantMessageSwipe(messageId, text, select)
+        else Replace and valid
+            Runtime->>Host: replaceAssistantMessageText(messageId, text)
+        else invalid or failed
+            Runtime->>Host: revealAssistantMessage(messageId)
+        end
+        Runtime->>Host: revealAssistantMessage(messageId)
+        Runtime->>UI: Prose enhanced or skipped
+    end
+```
+
+The hold path blanks the active assistant text before the player sees the unpolished host output. Hold state is transient and restored through `revealAssistantMessage()` on any failure. Runtime builds the Utility request from the original text, the latest bounded message context, the source-message hash, and normalized `proseEnhancement.contextMessages`. The prompt includes the full banned AI slop and cliches list intact and permits dialogue edits only for removing banned material already present inside dialogue.
+
+`As Swipe` uses a marker derived from the original text hash and enhancement schema so the same enhanced swipe can be found instead of duplicated. `Replace` writes the polished text into the active assistant message/swipe and asks the host adapter to save and update the visible message block best-effort. Both modes run before Rapid warm so future Rapid source revisions see the selected final text.
 
 ## Regenerate Fresh-Next Sequence
 

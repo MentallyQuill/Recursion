@@ -29,6 +29,7 @@ const PHASE_LABELS = Object.freeze({
   utilityComposing: 'Composing prompt packet with Utility...',
   reasonerComposing: 'Reasoner refining guidance...',
   promptInstalling: 'Installing Recursion prompt...',
+  proseEnhancing: 'Enhancing prose...',
   promptPacketBuilt: 'Recursion prompt ready.',
   storageSaving: 'Saving scene cache...',
   storageComplete: 'Scene cache saved.',
@@ -106,6 +107,20 @@ function pipelineLabel(value) {
   if (mode === 'rapid') return 'Rapid Pipeline';
   if (mode === 'fused') return 'Fused Pipeline';
   return 'Standard Pipeline';
+}
+
+function normalizeProseEnhancementMode(value) {
+  const mode = cleanText(value, 'off').toLowerCase();
+  if (mode === 'as-swipe') return 'as-swipe';
+  if (mode === 'replace') return 'replace';
+  return 'off';
+}
+
+function proseEnhancementLabel(value) {
+  const mode = normalizeProseEnhancementMode(value);
+  if (mode === 'as-swipe') return 'As Swipe';
+  if (mode === 'replace') return 'Replace';
+  return 'Off';
 }
 
 function normalizeLastBriefStatus(value, hasCards = false, hasPacket = false) {
@@ -217,6 +232,7 @@ export function createRecursionViewModel(view = {}) {
   const enabled = settings.enabled !== false;
   const mode = normalizeMode(settings.mode);
   const pipelineMode = normalizePipelineMode(settings.pipelineMode);
+  const proseEnhancementMode = normalizeProseEnhancementMode(settings.proseEnhancement?.mode);
   const cardScope = normalizeCardScope(settings.cardScope || defaultCardScope());
   const rawCards = Array.isArray(source.lastHand?.cards) ? source.lastHand.cards : [];
   const lastBriefStatus = normalizeLastBriefStatus(source.lastBrief?.status, rawCards.length > 0, Boolean(source.lastPacket));
@@ -245,11 +261,13 @@ export function createRecursionViewModel(view = {}) {
   return {
     mode,
     pipelineMode,
+    proseEnhancementMode,
     lastBriefStatus,
     lastBriefReason: cleanText(source.lastBrief?.reason || ''),
     enabled,
     modeLabel: modeLabel(mode),
     pipelineLabel: pipelineLabel(pipelineMode),
+    proseEnhancementLabel: proseEnhancementLabel(proseEnhancementMode),
     cardScope,
     cardScopeLabel: cardScopeLabel(cardScope),
     cardScopeCounts: cardScopeCounts(cardScope),

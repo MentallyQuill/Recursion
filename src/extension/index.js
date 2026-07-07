@@ -240,7 +240,9 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         return ended.then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }));
       }
       lastAssistantIdentity = nextAssistantIdentity;
-      return ended.then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }));
+      return ended
+        .then(() => invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Prose Enhancement failed.', { reason: 'assistant-message-landed' }))
+        .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }));
     });
   }
 }

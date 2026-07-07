@@ -37,6 +37,11 @@ import { STORY_FORM_SCHEMA, UNKNOWN_STORY_FORM, arbiterStoryFormContractLine, fo
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { asObject } from './safe-values.mjs';
+import {
+  buildProseEnhancementRequest,
+  proseEnhancementKey,
+  validateProseEnhancementResult
+} from './prose-enhancement.mjs';
 import { buildDiagnosticsPayload } from './runtime/diagnostics.mjs';
 import {
   clearJournalDetails,
@@ -2915,6 +2920,118 @@ export function createRecursionRuntime({
     return { ok: true };
   }
 
+  async function enhanceLatestAssistantMessage(details = {}) {
+    const settings = settingsStore.get();
+    const proseSettings = asObject(settings.proseEnhancement);
+    const mode = String(proseSettings.mode || 'off');
+    if (mode === 'off') return { ok: true, skipped: true, reason: 'prose-enhancement-off' };
+    const messages = asObject(host.messages);
+    if (typeof messages.activeAssistantMessageIdentity !== 'function') {
+      return { ok: true, skipped: true, reason: 'host-message-api-unavailable' };
+    }
+    const identity = messages.activeAssistantMessageIdentity();
+    if (!identity?.text) return { ok: true, skipped: true, reason: 'assistant-message-unavailable' };
+    const runId = makeId('prose-enhance');
+    const messageId = identity.messageId;
+    const originalText = String(identity.text || '');
+    const originalHash = identity.originalHash || hashJson(originalText);
+    const marker = {
+      chatKey: identity.chatKey,
+      messageId,
+      swipeId: identity.swipeId ?? 0,
+      originalHash,
+      key: proseEnhancementKey({
+        chatKey: identity.chatKey,
+        messageId,
+        swipeId: identity.swipeId ?? 0,
+        originalHash
+      })
+    };
+    stageRuntimeActivity({
+      runId,
+      phase: 'proseEnhancing',
+      label: 'Enhancing prose...',
+      providerLane: 'utility',
+      composerLane: 'utility',
+      chips: ['Prose']
+    });
+    let held = false;
+    try {
+      if (typeof messages.holdAssistantMessage === 'function') {
+        const hold = await messages.holdAssistantMessage(messageId);
+        held = hold?.ok !== false;
+      }
+      const snapshot = typeof host.snapshot === 'function' ? await host.snapshot() : null;
+      const request = buildProseEnhancementRequest({
+        text: originalText,
+        contextMessages: Array.isArray(snapshot?.messages) ? snapshot.messages : [],
+        contextMessageLimit: proseSettings.contextMessages,
+        storyForm: lastPacket?.storyForm || lastPlan?.storyForm || null
+      });
+      const result = await generationRouter.generate('proseEnhancer', request, {
+        runId,
+        timeoutMs: 45000
+      });
+      if (result?.ok !== true) {
+        settleRuntimeActivity({
+          runId,
+          phase: 'settled',
+          severity: 'warning',
+          label: 'Prose Enhancement failed. Original kept.',
+          chips: ['Prose']
+        });
+        return { ok: false, mode, error: result?.error || { code: 'RECURSION_PROSE_PROVIDER_FAILED' } };
+      }
+      const validation = validateProseEnhancementResult(result.data, { originalText });
+      if (validation.ok !== true) {
+        settleRuntimeActivity({
+          runId,
+          phase: 'settled',
+          severity: 'warning',
+          label: 'Prose Enhancement rejected. Original kept.',
+          chips: ['Prose']
+        });
+        return { ok: false, mode, error: validation.error };
+      }
+      const enhancedText = validation.text;
+      if (mode === 'replace') {
+        const replace = await messages.replaceAssistantMessageText?.(messageId, enhancedText, { marker });
+        if (replace?.ok === false) return { ok: false, mode, error: replace.error };
+      } else if (mode === 'as-swipe') {
+        const existing = await messages.findEnhancedSwipe?.(messageId, marker);
+        if (existing && typeof messages.selectAssistantMessageSwipe === 'function') {
+          await messages.selectAssistantMessageSwipe(messageId, existing.index, { marker });
+        } else if (!existing) {
+          const append = await messages.appendAssistantMessageSwipe?.(messageId, enhancedText, { marker, select: true });
+          if (append?.ok === false) return { ok: false, mode, error: append.error };
+        }
+      } else {
+        return { ok: true, skipped: true, reason: 'prose-enhancement-mode-invalid' };
+      }
+      settleRuntimeActivity({
+        runId,
+        phase: 'settled',
+        severity: 'success',
+        label: mode === 'replace' ? 'Prose enhanced.' : 'Prose enhanced as swipe.',
+        chips: ['Prose']
+      });
+      return { ok: true, mode, messageId, originalHash, enhancedHash: hashJson(enhancedText) };
+    } catch (error) {
+      settleRuntimeActivity({
+        runId,
+        phase: 'settled',
+        severity: 'warning',
+        label: 'Prose Enhancement failed. Original kept.',
+        chips: ['Prose']
+      });
+      return { ok: false, mode, error: { code: 'RECURSION_PROSE_FAILED', message: String(error?.message || error || 'Prose Enhancement failed.') } };
+    } finally {
+      if (held && typeof messages.revealAssistantMessage === 'function') {
+        await messages.revealAssistantMessage(messageId);
+      }
+    }
+  }
+
   async function stopGeneration(details = {}) {
     setHostGenerationActive(false);
     const hostStop = await requestHostGenerationStop(details);
@@ -5071,6 +5188,7 @@ export function createRecursionRuntime({
     handleLatestAssistantSwipeRetry: markLatestAssistantSwipeRetry,
     handleHostGenerationStopped,
     handleHostGenerationEnded,
+    enhanceLatestAssistantMessage,
     stopGeneration,
     updateSettings,
     updateProvider,

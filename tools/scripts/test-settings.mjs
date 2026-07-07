@@ -43,6 +43,10 @@ assertEqual(normalizeSettings({ pipelineMode: 'fused' }).pipelineMode, 'fused', 
 assertEqual(normalizeSettings({ pipelineMode: 'FUSED' }).pipelineMode, 'fused', 'Fused pipeline mode normalizes case-insensitively');
 assertEqual(normalizeSettings({ pipelineMode: 'standard' }).pipelineMode, 'standard', 'Standard pipeline mode is accepted');
 assertEqual(normalizeSettings({ pipelineMode: 'fast' }).pipelineMode, 'standard', 'invalid pipeline mode normalizes to Standard');
+assertDeepEqual(normalizeSettings({}).proseEnhancement, { mode: 'off', contextMessages: 13 }, 'prose enhancement defaults off with bounded context');
+assertDeepEqual(normalizeSettings({ proseEnhancement: { mode: 'as-swipe', contextMessages: '35' } }).proseEnhancement, { mode: 'as-swipe', contextMessages: 35 }, 'prose enhancement accepts As Swipe and clamps context high');
+assertDeepEqual(normalizeSettings({ proseEnhancement: { mode: 'replace', contextMessages: '-3' } }).proseEnhancement, { mode: 'replace', contextMessages: 0 }, 'prose enhancement accepts Replace and clamps context low');
+assertDeepEqual(normalizeSettings({ proseEnhancement: { mode: 'bad', contextMessages: '' } }).proseEnhancement, { mode: 'off', contextMessages: 13 }, 'invalid prose enhancement settings normalize to safe defaults');
 assertEqual(normalizeSettings({ mode: 'manual', pipelineMode: 'rapid' }).mode, 'manual', 'Rapid does not replace Auto/Manual mode');
 assertEqual(normalizeSettings({ mode: 'manual', pipelineMode: 'fused' }).mode, 'manual', 'Fused does not replace Auto/Manual mode');
 assertEqual(normalized.enabled, false, 'power toggle disabled state preserved');
@@ -272,6 +276,10 @@ store.update({ injection: { depth: 2 } });
 assertEqual(root.recursion.injection.placement, 'in_chat', 'partial injection update preserves placement');
 assertEqual(root.recursion.injection.role, 'assistant', 'partial injection update preserves role');
 assertEqual(root.recursion.injection.depth, 2, 'partial injection update changes depth');
+
+store.update({ proseEnhancement: { mode: 'as-swipe' } });
+store.update({ proseEnhancement: { contextMessages: 21 } });
+assertDeepEqual(root.recursion.proseEnhancement, { mode: 'as-swipe', contextMessages: 21 }, 'partial prose enhancement update preserves mode and changes context');
 
 assertThrows(
   () => store.updateProvider('bad-lane', { apiKey: 'x' }),

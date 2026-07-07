@@ -191,6 +191,64 @@ function latestAssistantMessage(context = {}) {
   return null;
 }
 
+function findRawAssistantMessage(context = {}, messageId = null) {
+  const messages = rawChatMessages(context);
+  const requested = Number(messageId);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const raw = messages[index];
+    const normalized = normalizeMessage(raw, index);
+    if (normalized.visible === false || normalized.isUser || normalized.isSystem) continue;
+    if (Number.isFinite(requested) && normalized.mesId !== requested && normalized.index !== requested) continue;
+    return { raw, normalized, index };
+  }
+  return null;
+}
+
+function setRawAssistantText(message, text) {
+  if (!message || typeof message !== 'object') return;
+  const next = stringValue(text);
+  message.mes = next;
+  if (Object.prototype.hasOwnProperty.call(message, 'text')) message.text = next;
+  if (Object.prototype.hasOwnProperty.call(message, 'content')) message.content = next;
+  const swipeId = finiteNonNegativeInteger(message.swipe_id);
+  if (Array.isArray(message.swipes) && swipeId !== null) message.swipes[swipeId] = next;
+}
+
+function activeRawAssistantText(message) {
+  return activeSwipeText(message, messageText(message));
+}
+
+function updateMessageBlockBestEffort(context = {}, index, message) {
+  const update = context.updateMessageBlock || globalThis.updateMessageBlock;
+  if (typeof update !== 'function') return;
+  try {
+    update(index, message);
+  } catch {
+    try {
+      update(message);
+    } catch {
+      // DOM refresh is best effort; chat state is already mutated.
+    }
+  }
+}
+
+async function saveChatBestEffort(context = {}) {
+  const save = context.saveChat || globalThis.saveChat || globalThis.saveChatDebounced;
+  if (typeof save !== 'function') return;
+  try {
+    await save();
+  } catch {
+    // Saving is best effort here; mutation result still reports local success.
+  }
+}
+
+function markerMatches(candidate = {}, marker = {}) {
+  const expected = asObject(marker);
+  if (!Object.keys(expected).length) return false;
+  const source = asObject(candidate);
+  return Object.entries(expected).every(([key, value]) => String(source[key] ?? '') === String(value ?? ''));
+}
+
 export function latestSillyTavernAssistantMessageIdentity(context = {}) {
   const latestAssistant = latestAssistantMessage(context);
   if (!latestAssistant) return '';
@@ -963,11 +1021,88 @@ export function createSillyTavernHost({
     }
   };
 
+  const messagesApi = {
+    activeAssistantMessageIdentity() {
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context);
+      if (!found) return null;
+      const text = activeRawAssistantText(found.raw);
+      return {
+        chatKey: stringValue(context?.chatId || context?.chat_id || context?.currentChatId || 'chat'),
+        messageId: found.normalized.mesId,
+        swipeId: found.normalized.swipeId ?? finiteNonNegativeInteger(found.raw?.swipe_id) ?? 0,
+        text,
+        originalHash: hashJson(text)
+      };
+    },
+    async holdAssistantMessage(messageId) {
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context, messageId);
+      if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
+      if (!found.raw.__recursionHeldText) found.raw.__recursionHeldText = activeRawAssistantText(found.raw);
+      setRawAssistantText(found.raw, '');
+      updateMessageBlockBestEffort(context, found.index, found.raw);
+      return { ok: true, messageId: found.normalized.mesId };
+    },
+    async revealAssistantMessage(messageId) {
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context, messageId);
+      if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
+      if (found.raw.__recursionHeldText !== undefined) {
+        setRawAssistantText(found.raw, found.raw.__recursionHeldText);
+        delete found.raw.__recursionHeldText;
+      }
+      updateMessageBlockBestEffort(context, found.index, found.raw);
+      return { ok: true, messageId: found.normalized.mesId };
+    },
+    async replaceAssistantMessageText(messageId, text, options = {}) {
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context, messageId);
+      if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
+      setRawAssistantText(found.raw, text);
+      found.raw.__recursionProseEnhancement = asObject(options.marker);
+      updateMessageBlockBestEffort(context, found.index, found.raw);
+      await saveChatBestEffort(context);
+      return { ok: true, messageId: found.normalized.mesId, text: stringValue(text) };
+    },
+    async appendAssistantMessageSwipe(messageId, text, options = {}) {
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context, messageId);
+      if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
+      if (!Array.isArray(found.raw.swipes)) found.raw.swipes = [activeRawAssistantText(found.raw)];
+      const marker = asObject(options.marker);
+      const index = found.raw.swipes.length;
+      found.raw.swipes.push(stringValue(text));
+      if (!Array.isArray(found.raw.__recursionProseEnhancementSwipes)) found.raw.__recursionProseEnhancementSwipes = [];
+      found.raw.__recursionProseEnhancementSwipes[index] = marker;
+      if (options.select !== false) {
+        found.raw.swipe_id = index;
+        setRawAssistantText(found.raw, text);
+      }
+      updateMessageBlockBestEffort(context, found.index, found.raw);
+      await saveChatBestEffort(context);
+      return { ok: true, messageId: found.normalized.mesId, index, text: stringValue(text) };
+    },
+    async findEnhancedSwipe(messageId, marker = {}) {
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context, messageId);
+      if (!found || !Array.isArray(found.raw?.__recursionProseEnhancementSwipes)) return null;
+      const markers = found.raw.__recursionProseEnhancementSwipes;
+      for (let index = 0; index < markers.length; index += 1) {
+        if (markerMatches(markers[index], marker)) {
+          return { index, text: Array.isArray(found.raw.swipes) ? stringValue(found.raw.swipes[index]) : '' };
+        }
+      }
+      return null;
+    }
+  };
+
   const host = {
     id: 'sillytavern',
     settingsStore,
     storageAdapter: storage,
     generation,
+    messages: messagesApi,
     providerProfiles: {
       list(options = {}) {
         return listSillyTavernConnectionProfiles({

@@ -1751,12 +1751,13 @@ try {
         if (child.querySelector?.('[data-recursion-pipeline-button]')) return 'pipeline';
         if (child.querySelector?.('[data-recursion-mode-button]')) return 'mode';
         if (child.dataset?.recursionCardsButton !== undefined || child.querySelector?.('[data-recursion-cards-button]')) return 'cards';
+        if (child.querySelector?.('[data-recursion-prose-enhancement-button]')) return 'proseEnhancement';
         if (child.querySelector?.('[data-recursion-story-form-button]')) return 'storyForm';
         return '';
       })
       .filter(Boolean),
-    ['pipeline', 'mode', 'cards', 'storyForm'],
-    'compact bar places Tense & PoV immediately after Cards'
+    ['pipeline', 'mode', 'cards', 'proseEnhancement', 'storyForm'],
+    'compact bar places Prose Enhancement immediately after Cards and before Tense & PoV'
   );
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('svg'), 'pipeline button renders an inline SVG icon');
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-standard]'), 'Standard pipeline button uses the standard pipeline icon');
@@ -1798,6 +1799,22 @@ try {
     'mode button exposes the current mode label'
   );
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('title'), 'Mode: Auto', 'mode button exposes compact hover tip');
+  assert(root.querySelector('[data-recursion-prose-enhancement-button]'), 'compact bar renders the Prose Enhancement button');
+  assert(root.querySelector('[data-recursion-prose-enhancement-menu]'), 'compact bar renders the Prose Enhancement selector menu');
+  assert(root.querySelector('[data-recursion-prose-enhancement-icon]'), 'Prose Enhancement button renders the upgrade.svg mask icon');
+  assertEqual(root.querySelector('[data-recursion-prose-enhancement-icon]').children.length, 0, 'Prose Enhancement icon uses the upgrade.svg asset mask instead of inline SVG');
+  assert(root.querySelector('[data-recursion-prose-enhancement-button]').className.includes('is-off'), 'Prose Enhancement button greys out when Off');
+  assertDeepEqual(
+    root.querySelectorAll('[data-recursion-prose-enhancement-choice]').map((choice) => choice.dataset.recursionProseEnhancementChoice),
+    ['off', 'as-swipe', 'replace'],
+    'Prose Enhancement selector uses Off/As Swipe/Replace order'
+  );
+  assertEqual(root.querySelectorAll('[data-recursion-prose-enhancement-choice-tip]').length, 3, 'Prose Enhancement selector renders mini descriptions for all options');
+  assertEqual(
+    root.querySelector('[data-recursion-prose-enhancement-button]').getAttribute('aria-label'),
+    'Prose Enhancement: Off',
+    'Prose Enhancement button exposes the current mode'
+  );
   assertEqual(root.querySelector('[data-recursion-story-form]').textContent, 'Pr3O', 'mobile story form button uses compact shorthand for long labels');
   globalThis.innerWidth = 920;
   globalThis.visualViewport.width = 920;
@@ -1871,12 +1888,16 @@ try {
   const pipelineCluster = root.querySelector('[data-recursion-pipeline-button]').parentNode;
   const modeCluster = root.querySelector('[data-recursion-mode-button]').parentNode;
   const cardsButton = root.querySelector('[data-recursion-cards-button]');
+  const proseCluster = root.querySelector('[data-recursion-prose-enhancement-button]').parentNode;
+  const storyFormCluster = root.querySelector('[data-recursion-story-form-button]').parentNode;
   const statusTrigger = root.querySelector('[data-recursion-status-trigger]');
   const rightTools = root.querySelector('[data-recursion-reasoning-chain]').parentNode;
   assertEqual(barChildren.indexOf(pipelineCluster), barChildren.indexOf(powerButton) + 1, 'Pipeline sits immediately to the right of Power');
   assertEqual(barChildren.indexOf(modeCluster), barChildren.indexOf(pipelineCluster) + 1, 'Mode sits immediately to the right of Pipeline');
   assertEqual(cardsButton.parentNode, root.querySelector('[data-recursion-bar]'), 'Cards button lives in the left bar flow');
   assert(barChildren.indexOf(modeCluster) < barChildren.indexOf(cardsButton), 'Cards button sits to the right of Mode');
+  assertEqual(barChildren.indexOf(proseCluster), barChildren.indexOf(cardsButton) + 1, 'Prose Enhancement sits immediately to the right of Cards');
+  assertEqual(barChildren.indexOf(storyFormCluster), barChildren.indexOf(proseCluster) + 1, 'Tense & PoV sits immediately to the right of Prose Enhancement');
   assert(barChildren.indexOf(cardsButton) < barChildren.indexOf(statusTrigger), 'Cards button sits to the left of the Hero Pixel Array progress trigger');
   assert(!rightTools.children.includes(cardsButton), 'Cards button is not part of the right tool cluster');
   assert(!root.querySelector('[data-recursion-cards-label]'), 'Cards button is icon-only with no visible label node');
@@ -1952,6 +1973,17 @@ try {
   ui.update();
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-fused]'), 'Fused pipeline button uses the fused pipeline icon after selection');
   assert(root.querySelector('[data-recursion-pipeline-button]').getAttribute('title').includes('Fused Pipeline'), 'Fused pipeline tooltip explains current pipeline');
+
+  root.querySelector('[data-recursion-prose-enhancement-button]').setBoundingClientRect({ left: 118, top: 3, width: 24, height: 24, right: 142, bottom: 27 });
+  root.querySelector('[data-recursion-prose-enhancement-button]').click();
+  assertEqual(root.querySelector('[data-recursion-prose-enhancement-menu]').hidden, false, 'Prose Enhancement button opens selector');
+  assertEqual(root.querySelector('[data-recursion-prose-enhancement-button]').getAttribute('aria-expanded'), 'true', 'Prose Enhancement button reflects open menu');
+  root.querySelector('[data-recursion-prose-enhancement-choice-as-swipe]').querySelector('[data-recursion-prose-enhancement-choice-tip]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { proseEnhancement: { mode: 'as-swipe' } }, 'Prose Enhancement menu switches to As Swipe from nested row content clicks');
+  assertEqual(root.querySelector('[data-recursion-prose-enhancement-button]').getAttribute('aria-expanded'), 'false', 'Prose Enhancement button reflects closed menu after selection');
+  view = { ...view, settings: { ...view.settings, proseEnhancement: { mode: 'as-swipe', contextMessages: 13 } } };
+  ui.update();
+  assert(!root.querySelector('[data-recursion-prose-enhancement-button]').className.includes('is-off'), 'Prose Enhancement button is no longer grey when enabled');
 
   root.querySelector('[data-recursion-mode-button]').setBoundingClientRect({ left: 63, top: 3, width: 24, height: 24, right: 87, bottom: 27 });
   let bubbledModeClicks = 0;
@@ -2669,6 +2701,7 @@ try {
   root.querySelector('[data-recursion-setting-focus]').value = 'character';
   root.querySelector('[data-recursion-setting-progress-child-limit]').value = '7';
   root.querySelector('[data-recursion-setting-progress-list-limit]').value = '22';
+  root.querySelector('[data-recursion-setting-prose-context-messages]').value = '21';
   root.querySelector('[data-recursion-setting-tooltips-enabled]').checked = false;
   root.querySelector('[data-recursion-setting-source-window-messages]').value = '64';
   root.querySelector('[data-recursion-setting-source-window-characters]').value = '36000';
@@ -2695,6 +2728,10 @@ try {
       progressChildVisibleLimit: 7,
       progressListVisibleLimit: 22,
       tooltipsEnabled: false
+    },
+    proseEnhancement: {
+      mode: 'as-swipe',
+      contextMessages: 21
     },
     diagnostics: {
       includeExcerpts: true

@@ -223,6 +223,46 @@ swipeContext.chat[0].swipes.push('Swipe C text.');
 const swipeSnapC = await swipeHost.snapshot();
 assert(swipeSnapC.sourceRevisionHash !== swipeSnapB.sourceRevisionHash, 'swipe count change affects source revision');
 
+const messageMutationCalls = [];
+const mutationContext = {
+  chatId: 'prose-host-chat',
+  chat: [
+    {
+      mesid: 4,
+      is_user: false,
+      mes: 'Original assistant text.',
+      swipe_id: 0,
+      swipes: ['Original assistant text.']
+    }
+  ],
+  updateMessageBlock(messageId, message) {
+    messageMutationCalls.push({ messageId, message });
+  },
+  saveChat() {
+    messageMutationCalls.push({ save: true });
+  }
+};
+const mutationHost = createSillyTavernHost({ contextFactory: () => mutationContext, settingsRoot: {} });
+const activeIdentity = mutationHost.messages.activeAssistantMessageIdentity();
+assertEqual(activeIdentity.chatKey, 'prose-host-chat', 'host active assistant identity includes chat key');
+assertEqual(activeIdentity.messageId, 4, 'host active assistant identity includes message id');
+assertEqual(activeIdentity.swipeId, 0, 'host active assistant identity includes active swipe id');
+assertEqual(activeIdentity.text, 'Original assistant text.', 'host active assistant identity includes active swipe text');
+assertEqual(typeof activeIdentity.originalHash, 'string', 'host active assistant identity includes text hash');
+assertEqual((await mutationHost.messages.holdAssistantMessage(4)).ok, true, 'host can hold assistant text');
+assertEqual(mutationContext.chat[0].mes, '', 'hold hides active assistant text');
+assertEqual(mutationContext.chat[0].swipes[0], '', 'hold hides active swipe text');
+assertEqual((await mutationHost.messages.revealAssistantMessage(4)).ok, true, 'host can reveal held assistant text');
+assertEqual(mutationContext.chat[0].mes, 'Original assistant text.', 'reveal restores held assistant text');
+assertEqual((await mutationHost.messages.appendAssistantMessageSwipe(4, 'Polished assistant text.', { marker: { originalHash: 'hash-a' }, select: true })).ok, true, 'host appends and selects enhanced swipe');
+assertEqual(mutationContext.chat[0].swipes.length, 2, 'enhanced swipe appended');
+assertEqual(mutationContext.chat[0].swipe_id, 1, 'enhanced swipe auto-selected');
+assertEqual(mutationContext.chat[0].mes, 'Polished assistant text.', 'active message text follows enhanced swipe');
+assertEqual((await mutationHost.messages.findEnhancedSwipe(4, { originalHash: 'hash-a' })).index, 1, 'host finds existing enhanced swipe marker');
+assertEqual((await mutationHost.messages.replaceAssistantMessageText(4, 'Replacement text.', { marker: { originalHash: 'hash-b' } })).ok, true, 'host replaces active assistant text');
+assertEqual(mutationContext.chat[0].swipes[1], 'Replacement text.', 'replace updates selected swipe text');
+assert(messageMutationCalls.some((entry) => entry.save === true), 'message mutation saves chat');
+
 const packet = {
   injectionPlan: { blocks: [{ id: 'guidance', promptKey: 'recursion.guidance', placement: 'in_prompt', depth: 2, role: 'system' }] },
   sections: { guidance: 'Use the alley scene.', cardEvidence: 'Card evidence:\n- [Scene Frame] Alley.', guardrails: 'Guardrails:\n- Honor facts.' }

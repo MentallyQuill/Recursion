@@ -57,6 +57,26 @@ const STORY_FORM_MENU_OPTIONS = Object.freeze([
   { value: 'present-third-limited', label: 'Present 3rd Limited', shortLabel: 'Pr3L', title: 'Present tense, third-person limited', tip: 'She walks to the door' },
   { value: 'present-third-omniscient', label: 'Present 3rd Omni', shortLabel: 'Pr3O', title: 'Present tense, third-person omniscient', tip: 'She walks to the door (omniscient)' }
 ]);
+const PROSE_ENHANCEMENT_MENU_OPTIONS = Object.freeze([
+  {
+    value: 'off',
+    label: 'Off',
+    title: 'Prose Enhancement off.',
+    tip: 'Shows the SillyTavern generation unchanged.'
+  },
+  {
+    value: 'as-swipe',
+    label: 'As Swipe',
+    title: 'Create original and polished swipes.',
+    tip: 'Keeps the original and adds a polished swipe, then selects the polished version.'
+  },
+  {
+    value: 'replace',
+    label: 'Replace',
+    title: 'Replace with polished prose.',
+    tip: 'Hides the raw generation, then replaces it with the polished version.'
+  }
+]);
 const PIPELINE_MENU_OPTIONS = Object.freeze([
   {
     value: 'standard',
@@ -131,6 +151,7 @@ const SETTINGS_AUTOSAVE_DATASETS = Object.freeze([
   'recursionSettingMaxCards',
   'recursionSettingFootprint',
   'recursionSettingFocus',
+  'recursionSettingProseContextMessages',
   'recursionSettingInjectionPlacement',
   'recursionSettingInjectionRole',
   'recursionSettingInjectionDepth',
@@ -165,6 +186,8 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   maxCards: 'Upper Manual card-selection cap and Ultra Reasoning Level card target. Medium and High use the average, so this also sets the upper range for busier scenes.',
   focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, constraints, scene, or plot without becoming a hard whitelist.',
   footprint: 'Prompt budget for the composed Recursion packet. Compact spends fewer tokens, Rich preserves more scene detail when the moment is complex.',
+  proseEnhancement: 'Optional post-generation Utility pass that improves prose rhythm while preserving events, dialogue, tense, and POV.',
+  proseContextMessages: 'Recent visible messages sent with the assistant output so the Utility pass can match local tone without reading the whole chat.',
   injection: 'Compatibility controls for where the final composed Recursion packet lands in SillyTavern. These do not create per-card prompt controls.',
   injectionPlacement: 'Choose the SillyTavern prompt lane for the composed Recursion packet. In Prompt is the recommended default; In Chat can help presets that weight recent chat harder.',
   injectionRole: 'Role SillyTavern assigns to Recursion prompt blocks. System is safest for instruction-like scene guidance; User or Assistant exist for preset compatibility.',
@@ -271,6 +294,20 @@ function modeLabel(value) {
   if (mode === 'manual') return 'Manual';
   if (mode === 'auto') return 'Auto';
   return 'Auto';
+}
+
+function normalizeProseEnhancementMode(value) {
+  const mode = cleanText(value, 'off').toLowerCase();
+  if (mode === 'as-swipe') return 'as-swipe';
+  if (mode === 'replace') return 'replace';
+  return 'off';
+}
+
+function proseEnhancementLabel(value) {
+  const mode = normalizeProseEnhancementMode(value);
+  if (mode === 'as-swipe') return 'As Swipe';
+  if (mode === 'replace') return 'Replace';
+  return 'Off';
 }
 
 function normalizePipelineMode(value) {
@@ -462,6 +499,40 @@ function storyFormLabel(value, { compact = false } = {}) {
   const option = STORY_FORM_MENU_OPTIONS.find((entry) => entry.value === override);
   if (!option) return 'Auto';
   return compact && option.shortLabel ? option.shortLabel : option.label;
+}
+
+function proseEnhancementMenuChoice(option) {
+  return el('button', {
+    className: 'recursion-prose-enhancement-choice',
+    attrs: {
+      type: 'button',
+      title: option.title,
+      'aria-current': 'false'
+    },
+    dataset: {
+      recursionProseEnhancementChoice: option.value,
+      [`recursionProseEnhancementChoice${datasetSuffix(option.value)}`]: ''
+    }
+  }, [
+    el('span', {
+      className: 'recursion-prose-enhancement-choice-icon',
+      attrs: { 'aria-hidden': 'true' }
+    }, [
+      el('span', { className: 'recursion-prose-enhancement-choice-dot' })
+    ]),
+    el('span', { className: 'recursion-prose-enhancement-choice-copy' }, [
+      el('span', {
+        className: 'recursion-prose-enhancement-choice-name',
+        text: option.label,
+        dataset: { recursionProseEnhancementChoiceName: '' }
+      }),
+      el('span', {
+        className: 'recursion-prose-enhancement-choice-tip',
+        text: option.tip,
+        dataset: { recursionProseEnhancementChoiceTip: '' }
+      })
+    ])
+  ]);
 }
 
 function compactStoryFormLabelViewport() {
@@ -1334,6 +1405,7 @@ function syncStaticTooltips(root, model) {
   root.dataset.recursionTooltips = 'on';
   setTooltip(root.querySelector('[data-recursion-pipeline-button]'), true, `Pipeline: ${model.pipelineLabel}`);
   setTooltip(root.querySelector('[data-recursion-mode-button]'), true, `Mode: ${model.modeLabel}`);
+  setTooltip(root.querySelector('[data-recursion-prose-enhancement-button]'), true, `Prose Enhancement: ${model.proseEnhancementLabel || 'Off'}`);
   setTooltip(root.querySelector('[data-recursion-story-form-button]'), true, `Tense & PoV: ${root.querySelector('[data-recursion-story-form]')?.textContent || 'Auto'}`);
   setTooltip(root.querySelector('[data-recursion-cards-button]'), true, 'Open card scope selector. Auto treats scope as preference; Manual uses scope as a strict whitelist.');
   setTooltip(root.querySelector('[data-recursion-status-trigger]'), true, 'Open generation progress');
@@ -1763,6 +1835,7 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
   const ui = asObject(settings.ui);
   const diagnostics = asObject(settings.diagnostics);
   const injection = asObject(settings.injection);
+  const proseEnhancement = asObject(settings.proseEnhancement);
   const retention = asObject(settings.retention);
   const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
   const defaultInjection = DEFAULT_RECURSION_SETTINGS.injection;
@@ -1832,6 +1905,18 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     controlRow('Sub-tier Rows', progressChildControl),
     controlRow('Progress Rows', progressListControl)
   ], { tooltip: SETTINGS_TOOLTIPS.ui, tooltipsEnabled }));
+  const proseContextControl = integerInputControl({
+    value: integerInRange(proseEnhancement.contextMessages, DEFAULT_RECURSION_SETTINGS.proseEnhancement.contextMessages, 0, 35),
+    min: 0,
+    max: 35,
+    step: 1,
+    dataset: { recursionSettingProseContextMessages: '' },
+    ariaLabel: 'Prose Enhancement context messages'
+  });
+  setTooltip(proseContextControl, tooltipsEnabled, SETTINGS_TOOLTIPS.proseContextMessages);
+  group.appendChild(settingsDisclosureSection('prose-enhancement', 'Prose Enhancement', [
+    controlRow('Context Messages', proseContextControl)
+  ], { tooltip: SETTINGS_TOOLTIPS.proseEnhancement, tooltipsEnabled }));
   const retentionNumberControl = (key, datasetKey, ariaLabel) => {
     const limits = RETENTION_LIMITS[key];
     return integerInputControl({
@@ -2795,6 +2880,17 @@ function buildRoot() {
     }, [
       el('span', { className: 'recursion-cards-button-icon', attrs: { 'aria-hidden': 'true' } }, [modeIconSvg('cards')])
     ]),
+    el('div', { className: 'recursion-prose-enhancement-cluster' }, [
+      el('button', {
+        className: 'recursion-prose-enhancement-button is-off',
+        attrs: { type: 'button', 'aria-label': 'Prose Enhancement: Off', 'aria-expanded': 'false' },
+        dataset: { recursionProseEnhancementButton: '' }
+      }, [
+        el('span', { className: 'recursion-prose-enhancement-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionProseEnhancementIcon: '' } })
+      ]),
+      el('div', { className: 'recursion-prose-enhancement-menu', attrs: { 'aria-label': 'Prose Enhancement selector' }, dataset: { recursionProseEnhancementMenu: '' } },
+        PROSE_ENHANCEMENT_MENU_OPTIONS.map(proseEnhancementMenuChoice))
+    ]),
     el('div', { className: 'recursion-story-form-cluster' }, [
       el('button', {
         className: 'recursion-story-form-button',
@@ -2950,6 +3046,7 @@ function buildRoot() {
   root.appendChild(viewer);
   root.querySelector('[data-recursion-pipeline-menu]').hidden = true;
   root.querySelector('[data-recursion-mode-menu]').hidden = true;
+  root.querySelector('[data-recursion-prose-enhancement-menu]').hidden = true;
   root.querySelector('[data-recursion-story-form-menu]').hidden = true;
   return root;
 }
@@ -3010,12 +3107,14 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const cardsButton = root.querySelector('[data-recursion-cards-button]');
   const pipelineButton = root.querySelector('[data-recursion-pipeline-button]');
   const modeButton = root.querySelector('[data-recursion-mode-button]');
+  const proseEnhancementButton = root.querySelector('[data-recursion-prose-enhancement-button]');
   const statusButton = root.querySelector('[data-recursion-status-trigger]');
   const stopGenerationButton = root.querySelector('[data-recursion-stop-generation]');
   const freshNextGenerationButton = root.querySelector('[data-recursion-fresh-next-generation]');
   const reasoningChain = root.querySelector('[data-recursion-reasoning-chain]');
   const pipelineMenu = root.querySelector('[data-recursion-pipeline-menu]');
   const modeMenu = root.querySelector('[data-recursion-mode-menu]');
+  const proseEnhancementMenu = root.querySelector('[data-recursion-prose-enhancement-menu]');
   const storyFormMenu = root.querySelector('[data-recursion-story-form-menu]');
   const storyFormButton = root.querySelector('[data-recursion-story-form-button]');
   const viewer = root.querySelector('[data-recursion-viewer]');
@@ -3174,7 +3273,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function mobileStatusPanelOpen() {
-    return [statusPopover, handPanel, cardsPanel, settingsPanel, pipelineMenu, modeMenu, storyFormMenu]
+    return [statusPopover, handPanel, cardsPanel, settingsPanel, pipelineMenu, modeMenu, proseEnhancementMenu, storyFormMenu]
       .some((panel) => panel?.hidden === false);
   }
 
@@ -3318,6 +3417,15 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         zIndex: 10018
       });
     }
+    if (proseEnhancementMenu?.style) {
+      const proseRect = root.querySelector('[data-recursion-prose-enhancement-button]')?.getBoundingClientRect?.();
+      if (proseRect) setFixedPanelGeometry(proseEnhancementMenu, {
+        left: Math.max(viewportLeft, Math.min(proseRect.left + 6, viewportRight - 222)),
+        top: progressTop,
+        width: Math.min(222, viewportWidth),
+        zIndex: 10018
+      });
+    }
     if (storyFormMenu?.style) {
       const storyFormRect = root.querySelector('[data-recursion-story-form-button]')?.getBoundingClientRect?.();
       if (storyFormRect) setFixedPanelGeometry(storyFormMenu, {
@@ -3335,6 +3443,15 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     modeButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) rememberPanelFocus(modeMenu, modeButton);
     else restorePanelFocus(modeMenu, modeButton);
+    syncMobileStatusDrawer();
+  }
+
+  function setProseEnhancementMenuOpen(open) {
+    if (!proseEnhancementMenu) return;
+    proseEnhancementMenu.hidden = !open;
+    proseEnhancementButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) rememberPanelFocus(proseEnhancementMenu, proseEnhancementButton);
+    else restorePanelFocus(proseEnhancementMenu, proseEnhancementButton);
     syncMobileStatusDrawer();
   }
 
@@ -3395,9 +3512,23 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
   }
 
+  function renderProseEnhancementState(view = currentView()) {
+    const mode = normalizeProseEnhancementMode(view.settings?.proseEnhancement?.mode);
+    const label = proseEnhancementLabel(mode);
+    proseEnhancementButton?.classList?.toggle?.('is-off', mode === 'off');
+    proseEnhancementButton?.setAttribute('aria-label', `Prose Enhancement: ${label}`);
+    setTooltip(proseEnhancementButton, view.settings?.ui?.tooltipsEnabled !== false, `Prose Enhancement: ${label}`);
+    for (const choice of root.querySelectorAll('[data-recursion-prose-enhancement-choice]')) {
+      const selected = cleanText(choice.dataset.recursionProseEnhancementChoice).toLowerCase() === mode;
+      choice.className = selected ? 'recursion-prose-enhancement-choice is-selected' : 'recursion-prose-enhancement-choice';
+      choice.setAttribute('aria-current', selected ? 'true' : 'false');
+    }
+  }
+
   function setProgressPopoverOpen(open) {
     if (open) setModeMenuOpen(false);
     if (open) setPipelineMenuOpen(false);
+    if (open) setProseEnhancementMenuOpen(false);
     if (open) setStoryFormMenuOpen(false);
     if (open && settingsPanel.hidden === false) setSettingsPanelOpen(false);
     if (open && cardsPanel.hidden === false) setCardsPanelOpen(false);
@@ -3414,6 +3545,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       if (cardsPanel.hidden === false) setCardsPanelOpen(false);
       setModeMenuOpen(false);
       setPipelineMenuOpen(false);
+      setProseEnhancementMenuOpen(false);
       setStoryFormMenuOpen(false);
     }
     handPanel.hidden = !open;
@@ -3433,6 +3565,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setHandPanelOpen(false);
       setModeMenuOpen(false);
       setPipelineMenuOpen(false);
+      setProseEnhancementMenuOpen(false);
       setStoryFormMenuOpen(false);
       settingsPanelRendered = false;
       update();
@@ -3451,6 +3584,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setSettingsPanelOpen(false);
       setModeMenuOpen(false);
       setPipelineMenuOpen(false);
+      setProseEnhancementMenuOpen(false);
       setStoryFormMenuOpen(false);
     }
     cardsPanel.hidden = !open;
@@ -3609,6 +3743,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setSettingsPanelOpen(false);
       setCardsPanelOpen(false);
       setModeMenuOpen(false);
+      setProseEnhancementMenuOpen(false);
       setStoryFormMenuOpen(false);
     }
     setPipelineMenuOpen(open);
@@ -3625,9 +3760,27 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setSettingsPanelOpen(false);
       setCardsPanelOpen(false);
       setPipelineMenuOpen(false);
+      setProseEnhancementMenuOpen(false);
       setStoryFormMenuOpen(false);
     }
     setModeMenuOpen(open);
+    syncFloatingPanelGeometry();
+  });
+  proseEnhancementButton?.addEventListener('click', (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    panelRerenderClickEvents?.add(event);
+    const open = proseEnhancementMenu?.hidden !== false;
+    if (open) {
+      setProgressPopoverOpen(false);
+      setHandPanelOpen(false);
+      setSettingsPanelOpen(false);
+      setCardsPanelOpen(false);
+      setModeMenuOpen(false);
+      setPipelineMenuOpen(false);
+      setStoryFormMenuOpen(false);
+    }
+    setProseEnhancementMenuOpen(open);
     syncFloatingPanelGeometry();
   });
   storyFormButton?.addEventListener('click', (event) => {
@@ -3642,6 +3795,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setCardsPanelOpen(false);
       setModeMenuOpen(false);
       setPipelineMenuOpen(false);
+      setProseEnhancementMenuOpen(false);
     }
     setStoryFormMenuOpen(open);
     syncFloatingPanelGeometry();
@@ -3717,6 +3871,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setSettingsPanelOpen(false);
       setModeMenuOpen(false);
       setPipelineMenuOpen(false);
+      setProseEnhancementMenuOpen(false);
       openViewer(viewerToggle);
     }
     if (control('recursionCopyPromptPacket')) {
@@ -3786,6 +3941,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (pipelineChoice) {
       runAction(runtime?.updateSettings?.({ pipelineMode: normalizePipelineMode(pipelineChoice.dataset.recursionPipelineChoice) }));
       setPipelineMenuOpen(false);
+    }
+    const proseEnhancementChoice = control('recursionProseEnhancementChoice');
+    if (proseEnhancementChoice) {
+      runAction(runtime?.updateSettings?.({ proseEnhancement: { mode: normalizeProseEnhancementMode(proseEnhancementChoice.dataset.recursionProseEnhancementChoice) } }));
+      setProseEnhancementMenuOpen(false);
     }
     const storyFormChoice = control('recursionStoryFormChoice');
     if (storyFormChoice) {
@@ -3898,6 +4058,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       powerButton,
       pipelineButton,
       pipelineMenu,
+      proseEnhancementButton,
+      proseEnhancementMenu,
       handButton,
       handPanel,
       cardsButton,
@@ -3912,6 +4074,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     if (pipelineMenu?.hidden === false && !eventWithin(event, [pipelineMenu, pipelineButton])) {
       setPipelineMenuOpen(false);
+    }
+    if (proseEnhancementMenu?.hidden === false && !eventWithin(event, [proseEnhancementMenu, proseEnhancementButton])) {
+      setProseEnhancementMenuOpen(false);
     }
     if (storyFormMenu?.hidden === false && !eventWithin(event, [storyFormMenu, storyFormButton])) {
       setStoryFormMenuOpen(false);
@@ -3939,6 +4104,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (event?.key !== 'Escape') return;
     setModeMenuOpen(false);
     setPipelineMenuOpen(false);
+    setProseEnhancementMenuOpen(false);
     setStoryFormMenuOpen(false);
     setProgressPopoverOpen(false);
     setHandPanelOpen(false);
@@ -4030,6 +4196,15 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
           defaultUi.progressListVisibleLimit,
           5,
           80
+        )
+      },
+      proseEnhancement: {
+        mode: normalizeProseEnhancementMode(currentView().settings?.proseEnhancement?.mode),
+        contextMessages: integerInRange(
+          controlNumber(sourceRoot, '[data-recursion-setting-prose-context-messages]', DEFAULT_RECURSION_SETTINGS.proseEnhancement.contextMessages),
+          DEFAULT_RECURSION_SETTINGS.proseEnhancement.contextMessages,
+          0,
+          35
         )
       },
       diagnostics: {
@@ -4164,6 +4339,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (storyFormButton) {
       renderStoryFormButtonLabel(view);
     }
+    renderProseEnhancementState(view);
     const powerButton = root.querySelector('[data-recursion-power-toggle]');
     if (powerButton) {
       const powerTip = model.enabled ? 'Turn Recursion off' : 'Turn Recursion on';
@@ -4193,6 +4369,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     renderPipelineMenuSelection(model.pipelineMode);
     renderModeMenuSelection(model.mode);
+    renderProseEnhancementState(view);
     renderStoryFormMenuSelection(view.settings?.storyFormOverride);
     setText(root, '[data-recursion-hand-count]', `Hand ${model.handCount}`);
     setText(root, '[data-recursion-composer]', model.composerLabel);

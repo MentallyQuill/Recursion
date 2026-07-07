@@ -487,6 +487,49 @@ function swipeSnapshot({ text, swipeId, label = 'swipe' }) {
   };
 }
 
+function createProseMessageHarness(initialText = 'She was angry. "Keep the door shut," Mara said.') {
+  const calls = [];
+  const message = {
+    chatKey: 'prose-runtime-chat',
+    messageId: 8,
+    swipeId: 0,
+    text: initialText,
+    originalHash: hashJson(initialText)
+  };
+  return {
+    message,
+    calls,
+    messages: {
+      activeAssistantMessageIdentity() {
+        return { ...message };
+      },
+      async holdAssistantMessage(messageId) {
+        calls.push({ type: 'hold', messageId });
+        return { ok: true };
+      },
+      async revealAssistantMessage(messageId) {
+        calls.push({ type: 'reveal', messageId });
+        return { ok: true };
+      },
+      async replaceAssistantMessageText(messageId, text, options = {}) {
+        calls.push({ type: 'replace', messageId, text, options });
+        message.text = text;
+        return { ok: true, text };
+      },
+      async appendAssistantMessageSwipe(messageId, text, options = {}) {
+        calls.push({ type: 'append', messageId, text, options });
+        message.text = text;
+        message.swipeId = 1;
+        return { ok: true, index: 1, text };
+      },
+      async findEnhancedSwipe(messageId, marker = {}) {
+        calls.push({ type: 'find', messageId, marker });
+        return null;
+      }
+    }
+  };
+}
+
 function isAbortSignal(value) {
   return Boolean(value)
     && typeof value.aborted === 'boolean'
@@ -499,6 +542,7 @@ function createRuntimeHarness({
   snapshot = null,
   hostPrompt = {},
   hostGeneration = {},
+  hostMessages = {},
   generationRouter = undefined,
   activity = createActivityReporter(),
   storage: providedStorage = null,
@@ -549,6 +593,7 @@ function createRuntimeHarness({
       },
       ...hostPrompt.methods
     },
+    messages: hostMessages,
     generation: hostGeneration
   };
   const runtime = createRecursionRuntime({ host, settingsStore, storage, activity, generationRouter: resolvedGenerationRouter, rapidHedgeDelayMs, rapidWarmJoinWaitMs });
@@ -573,6 +618,120 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
       };
     }
   };
+}
+
+{
+  const proseHost = createProseMessageHarness();
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { proseEnhancement: { mode: 'off', contextMessages: 13 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request, options) {
+        routerCalls.push({ roleId, request, options });
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.proseEnhancer.v1',
+            text: 'Mara clenched her jaw. "Keep the door shut," Mara said.'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-off' });
+  assertEqual(result.skipped, true, 'prose enhancement skips when off');
+  assertEqual(routerCalls.length, 0, 'prose enhancement off does not call Utility');
+  assertEqual(proseHost.calls.length, 0, 'prose enhancement off does not mutate host messages');
+}
+
+{
+  const proseHost = createProseMessageHarness();
+  const routerCalls = [];
+  const snapshotMessages = Array.from({ length: 20 }, (_, index) => ({
+    mesid: index,
+    role: index % 2 ? 'user' : 'assistant',
+    text: `Context message ${index}`,
+    visible: true
+  }));
+  snapshotMessages.push({ mesid: 30, role: 'assistant', text: proseHost.message.text, visible: true });
+  const { runtime } = createRuntimeHarness({
+    settings: { proseEnhancement: { mode: 'as-swipe', contextMessages: 3 } },
+    snapshot: {
+      chatId: 'prose-runtime-chat',
+      chatKey: 'prose-runtime-chat',
+      sceneKey: 'prose-runtime-scene',
+      sceneFingerprint: 'prose-runtime-scene-fp',
+      turnFingerprint: 'prose-runtime-turn',
+      latestMesId: 30,
+      messages: snapshotMessages
+    },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request, options) {
+        routerCalls.push({ roleId, request, options });
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.proseEnhancer.v1',
+            text: 'Mara clenched her jaw. "Keep the door shut," Mara said.'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-as-swipe' });
+  assertEqual(result.ok, true, 'As Swipe prose enhancement returns success');
+  assertEqual(result.mode, 'as-swipe', 'As Swipe result reports mode');
+  assertEqual(routerCalls[0].roleId, 'proseEnhancer', 'As Swipe calls proseEnhancer role');
+  assertEqual(routerCalls[0].request.contextMessages.length, 3, 'As Swipe request respects context message setting');
+  assertEqual(proseHost.calls[0].type, 'hold', 'As Swipe holds original message before provider pass');
+  assertEqual(proseHost.calls.some((call) => call.type === 'append' && call.options.select === true), true, 'As Swipe appends and auto-selects enhanced swipe');
+  assertEqual(proseHost.calls.at(-1).type, 'reveal', 'As Swipe reveals after mutation');
+}
+
+{
+  const proseHost = createProseMessageHarness();
+  const { runtime } = createRuntimeHarness({
+    settings: { proseEnhancement: { mode: 'replace', contextMessages: 13 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.proseEnhancer.v1',
+            text: 'Mara clenched her jaw. "Keep the door shut," Mara said.'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-replace' });
+  assertEqual(result.ok, true, 'Replace prose enhancement returns success');
+  assertEqual(result.mode, 'replace', 'Replace result reports mode');
+  assertEqual(proseHost.calls.some((call) => call.type === 'replace'), true, 'Replace mutates active assistant text');
+  assertEqual(proseHost.calls.some((call) => call.type === 'append'), false, 'Replace does not append a swipe');
+}
+
+{
+  const proseHost = createProseMessageHarness();
+  const { runtime } = createRuntimeHarness({
+    settings: { proseEnhancement: { mode: 'replace', contextMessages: 13 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate() {
+        return {
+          ok: false,
+          error: { code: 'RECURSION_TEST_PROVIDER_FAILED', message: 'provider failed' }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-failure' });
+  assertEqual(result.ok, false, 'failed prose enhancement returns failure');
+  assertEqual(proseHost.calls.some((call) => call.type === 'replace' || call.type === 'append'), false, 'failed prose enhancement leaves original unmutated');
+  assertEqual(proseHost.calls.at(-1).type, 'reveal', 'failed prose enhancement reveals original');
 }
 
 {

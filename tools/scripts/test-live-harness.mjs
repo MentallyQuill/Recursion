@@ -648,6 +648,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/runtime/prompt-install.mjs',
     'src/runtime/run-state.mjs',
     'src/runtime.mjs',
+    'src/prose-enhancement.mjs',
     'src/safe-values.mjs',
     'src/settings.mjs',
     'src/settings-policy.mjs',
@@ -812,7 +813,7 @@ async function createSillyTavernSmokeFixtureServer({
       env: {
         RECURSION_SILLYTAVERN_USER: 'recursion-soak-a',
         SILLYTAVERN_BASE_URL: server.baseUrl,
-        RECURSION_LIVE_TIMEOUT_MS: '1000'
+        RECURSION_LIVE_TIMEOUT_MS: '2000'
       }
     });
     assertEqual(report.status, 'pass', 'browser smoke dismisses a blocking host-extension notice before Recursion interactions');

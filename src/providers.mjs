@@ -45,6 +45,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'fusedCardBundle',
   'rapidTurnDelta',
   'guidanceComposer',
+  'proseEnhancer',
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
@@ -65,6 +66,7 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   fusedCardBundle: 'recursion.cardBundle.v1',
   rapidTurnDelta: 'recursion.rapidTurnDelta.v2',
   guidanceComposer: 'recursion.guidanceComposer.v1',
+  proseEnhancer: 'recursion.proseEnhancer.v1',
   reasonerComposer: 'recursion.reasonerComposer.v1',
   providerTest: 'recursion.providerTest.v1'
 });
@@ -1552,6 +1554,50 @@ export function createGenerationRouter({ client, activity = null, journal = null
             diagnostics
           };
         } catch (error) {
+          if (roleId === 'proseEnhancer' && structuredOutputRetryableError(error) && String(raw?.text || '').trim()) {
+            const text = truncate(String(raw.text || '').trim(), 12000);
+            const latencyMs = Date.now() - started;
+            const data = {
+              schema: 'recursion.proseEnhancer.v1',
+              text
+            };
+            const diagnostics = sanitize({
+              ...lastDiagnostics,
+              ...reasoningDiagnostics(raw),
+              providerSource: raw.providerSource,
+              providerId: raw.providerId,
+              model: raw.model,
+              responseId: raw.responseId,
+              responseHash: responseTextHash(raw.text),
+              schema: data.schema,
+              textFallback: true,
+              retryCount,
+              latencyMs,
+              completedAt: nowIso()
+            }, 300);
+            await queueJournalAppend({
+              ...diagnostics,
+              status: 'success',
+              recordedAt: nowIso()
+            });
+            activitySettle(activity, {
+              runId,
+              phase: 'settled',
+              outcome: 'success',
+              providerLane: lane,
+              composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
+              label: 'Provider call completed.',
+              detail: diagnostics
+            });
+            return {
+              ok: true,
+              roleId,
+              lane,
+              data,
+              text,
+              diagnostics
+            };
+          }
           const canRetry = attempt === 0 && (retryableError(error) || structuredOutputRetryableError(error));
           let retrySkippedReason = '';
           const latencyMs = Date.now() - started;

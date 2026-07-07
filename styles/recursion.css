@@ -185,9 +185,10 @@
 }
 
 .recursion-story-form-button {
-  max-width: 88px;
-  min-width: 48px;
+  max-width: none;
+  min-width: fit-content;
   padding: 0 7px;
+  white-space: nowrap;
 }
 
 .recursion-pipeline-button:hover,
@@ -408,7 +409,7 @@
   height: auto;
   line-height: 1;
   margin: 0;
-  max-width: 74px;
+  max-width: none;
   overflow: hidden;
   padding: 0;
   position: static;
@@ -2382,6 +2383,16 @@
     --chain-step: 12px;
     flex-basis: 44px;
     width: 44px;
+  }
+
+  .recursion-story-form-button {
+    min-width: 36px;
+    padding: 0 5px;
+  }
+
+  .recursion-story-form-text {
+    font-size: 10px;
+    max-width: 32px;
   }
 
   .recursion-pipeline-menu,

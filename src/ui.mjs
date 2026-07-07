@@ -48,14 +48,14 @@ const MODE_MENU_OPTIONS = Object.freeze([
 ]);
 const STORY_FORM_MENU_OPTIONS = Object.freeze([
   { value: 'auto', label: 'Auto', title: 'Detect tense and POV automatically', tip: 'Arbiter infers from assistant narration' },
-  { value: 'past-first-person', label: 'Past · 1st', title: 'Past tense, first person', tip: 'I walked to the door' },
-  { value: 'past-second-person', label: 'Past · 2nd', title: 'Past tense, second person', tip: 'You walked to the door' },
-  { value: 'past-third-limited', label: 'Past · 3rd Ltd', title: 'Past tense, third-person limited', tip: 'She walked to the door' },
-  { value: 'past-third-omniscient', label: 'Past · 3rd Omni', title: 'Past tense, third-person omniscient', tip: 'She walked to the door (omniscient)' },
-  { value: 'present-first-person', label: 'Present · 1st', title: 'Present tense, first person', tip: 'I walk to the door' },
-  { value: 'present-second-person', label: 'Present · 2nd', title: 'Present tense, second person', tip: 'You walk to the door' },
-  { value: 'present-third-limited', label: 'Present · 3rd Ltd', title: 'Present tense, third-person limited', tip: 'She walks to the door' },
-  { value: 'present-third-omniscient', label: 'Present · 3rd Omni', title: 'Present tense, third-person omniscient', tip: 'She walks to the door (omniscient)' }
+  { value: 'past-first-person', label: 'Past 1st', shortLabel: 'Pa1', title: 'Past tense, first person', tip: 'I walked to the door' },
+  { value: 'past-second-person', label: 'Past 2nd', shortLabel: 'Pa2', title: 'Past tense, second person', tip: 'You walked to the door' },
+  { value: 'past-third-limited', label: 'Past 3rd Limited', shortLabel: 'Pa3L', title: 'Past tense, third-person limited', tip: 'She walked to the door' },
+  { value: 'past-third-omniscient', label: 'Past 3rd Omni', shortLabel: 'Pa3O', title: 'Past tense, third-person omniscient', tip: 'She walked to the door (omniscient)' },
+  { value: 'present-first-person', label: 'Present 1st', shortLabel: 'Pr1', title: 'Present tense, first person', tip: 'I walk to the door' },
+  { value: 'present-second-person', label: 'Present 2nd', shortLabel: 'Pr2', title: 'Present tense, second person', tip: 'You walk to the door' },
+  { value: 'present-third-limited', label: 'Present 3rd Limited', shortLabel: 'Pr3L', title: 'Present tense, third-person limited', tip: 'She walks to the door' },
+  { value: 'present-third-omniscient', label: 'Present 3rd Omni', shortLabel: 'Pr3O', title: 'Present tense, third-person omniscient', tip: 'She walks to the door (omniscient)' }
 ]);
 const PIPELINE_MENU_OPTIONS = Object.freeze([
   {
@@ -457,10 +457,16 @@ function normalizeStoryFormOverride(value) {
   return STORY_FORM_MENU_OPTIONS.some((option) => option.value === text) ? text : 'auto';
 }
 
-function storyFormLabel(value) {
+function storyFormLabel(value, { compact = false } = {}) {
   const override = normalizeStoryFormOverride(value);
   const option = STORY_FORM_MENU_OPTIONS.find((entry) => entry.value === override);
-  return option ? option.label : 'Auto';
+  if (!option) return 'Auto';
+  return compact && option.shortLabel ? option.shortLabel : option.label;
+}
+
+function compactStoryFormLabelViewport() {
+  const width = Number(globalThis.visualViewport?.width || globalThis.innerWidth || document.documentElement?.clientWidth || 0);
+  return width > 0 && width <= 720;
 }
 
 function storyFormMenuChoice(option) {
@@ -2782,6 +2788,13 @@ function buildRoot() {
       el('div', { className: 'recursion-mode-menu', attrs: { 'aria-label': 'Recursion mode selector' }, dataset: { recursionModeMenu: '' } },
         MODE_MENU_OPTIONS.map(modeMenuChoice))
     ]),
+    el('button', {
+      className: 'recursion-cards-button',
+      attrs: { type: 'button', 'aria-label': 'Open card scope selector', 'aria-expanded': 'false', title: 'Open card scope selector' },
+      dataset: { recursionCardsButton: '' }
+    }, [
+      el('span', { className: 'recursion-cards-button-icon', attrs: { 'aria-hidden': 'true' } }, [modeIconSvg('cards')])
+    ]),
     el('div', { className: 'recursion-story-form-cluster' }, [
       el('button', {
         className: 'recursion-story-form-button',
@@ -2792,13 +2805,6 @@ function buildRoot() {
       ]),
       el('div', { className: 'recursion-story-form-menu', attrs: { 'aria-label': 'Tense and POV selector' }, dataset: { recursionStoryFormMenu: '' } },
         STORY_FORM_MENU_OPTIONS.map(storyFormMenuChoice))
-    ]),
-    el('button', {
-      className: 'recursion-cards-button',
-      attrs: { type: 'button', 'aria-label': 'Open card scope selector', 'aria-expanded': 'false', title: 'Open card scope selector' },
-      dataset: { recursionCardsButton: '' }
-    }, [
-      el('span', { className: 'recursion-cards-button-icon', attrs: { 'aria-hidden': 'true' } }, [modeIconSvg('cards')])
     ]),
     el('span', { className: 'recursion-bar-separator', attrs: { 'aria-hidden': 'true' } }),
     el('button', {
@@ -3357,6 +3363,18 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       choice.className = isSelected ? 'recursion-story-form-choice is-selected' : 'recursion-story-form-choice';
       choice.setAttribute('aria-current', isSelected ? 'true' : 'false');
     }
+  }
+
+  function renderStoryFormButtonLabel(view = currentView()) {
+    if (!storyFormButton) return;
+    const storyFormOverride = normalizeStoryFormOverride(view.settings?.storyFormOverride);
+    const fullStoryFormText = storyFormLabel(storyFormOverride);
+    const storyFormText = storyFormLabel(storyFormOverride, { compact: compactStoryFormLabelViewport() });
+    const storyFormTitle = `Tense & PoV: ${fullStoryFormText}`;
+    setText(root, '[data-recursion-story-form]', storyFormText);
+    storyFormButton.dataset.recursionStoryFormValue = storyFormOverride;
+    storyFormButton.setAttribute('aria-label', storyFormTitle);
+    setTooltip(storyFormButton, view.settings?.ui?.tooltipsEnabled !== false, storyFormTitle);
   }
 
   function renderPipelineMenuSelection(pipelineMode) {
@@ -3930,7 +3948,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   document.addEventListener?.('click', handleDocumentClick);
   document.addEventListener?.('keydown', handleDocumentKeydown);
-  const handleViewportChange = () => syncFloatingPanelGeometry();
+  const handleViewportChange = () => {
+    renderStoryFormButtonLabel(currentView());
+    syncFloatingPanelGeometry();
+  };
   globalThis.visualViewport?.addEventListener?.('resize', handleViewportChange);
   globalThis.visualViewport?.addEventListener?.('scroll', handleViewportChange);
   globalThis.addEventListener?.('resize', handleViewportChange);
@@ -4141,13 +4162,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     const storyFormButton = root.querySelector('[data-recursion-story-form-button]');
     if (storyFormButton) {
-      const storyFormOverride = normalizeStoryFormOverride(view.settings?.storyFormOverride);
-      const storyFormText = storyFormLabel(storyFormOverride);
-      const storyFormTitle = `Tense & PoV: ${storyFormText}`;
-      setText(root, '[data-recursion-story-form]', storyFormText);
-      storyFormButton.dataset.recursionStoryFormValue = storyFormOverride;
-      storyFormButton.setAttribute('aria-label', storyFormTitle);
-      setTooltip(storyFormButton, model.tooltipsEnabled, storyFormTitle);
+      renderStoryFormButtonLabel(view);
     }
     const powerButton = root.querySelector('[data-recursion-power-toggle]');
     if (powerButton) {

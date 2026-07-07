@@ -796,6 +796,10 @@ assert(/\.recursion-mobile-status-drawer\s*\{[\s\S]*?align-items:\s*center;/.tes
 assert(/\.recursion-mobile-status-drawer\[hidden\]\s*\{[\s\S]*?display:\s*none\s*!important;/.test(recursionCss), 'mobile status drawer hidden state wins over mobile display rules');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-bar\s*\{[\s\S]*?flex-wrap:\s*nowrap;/.test(recursionCss), 'mobile Recursion bar stays on one row');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-current-step\s*\{[\s\S]*?display:\s*none;/.test(recursionCss), 'mobile bar hides inline current-step text');
+assert(/\.recursion-story-form-button\s*\{[\s\S]*?min-width:\s*fit-content;/.test(recursionCss), 'desktop story form button expands to fit long selected labels');
+assert(!/\.recursion-story-form-button\s*\{[\s\S]*?max-width:\s*88px;/.test(recursionCss), 'desktop story form button does not cap long labels');
+assert(/\.recursion-story-form-text\s*\{[\s\S]*?max-width:\s*none;/.test(recursionCss), 'desktop story form text is not ellipsized');
+assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-story-form-button\s*\{[\s\S]*?min-width:\s*36px;/.test(recursionCss), 'mobile story form button uses a compact fixed shorthand width');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-mobile-status-drawer:not\(\[hidden\]\)\s*\{[\s\S]*?display:\s*flex;/.test(recursionCss), 'mobile status drawer displays below the bar when status text is active');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-card-scope-family\s*\{[\s\S]*?grid-template-columns:\s*1fr;/.test(recursionCss), 'mobile Cards panel uses one-column family rows');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-brief-card\s*\{[\s\S]*?grid-template-columns:\s*1fr;/.test(recursionCss), 'mobile Last Brief cards use one-column rows');
@@ -1471,6 +1475,7 @@ try {
       promptFootprint: 'normal',
       focus: 'balanced',
       reasonerUse: 'auto',
+      storyFormOverride: 'present-third-omniscient',
       ui: {
         viewerOpen: false,
         progressChildVisibleLimit: 5,
@@ -1740,6 +1745,19 @@ try {
   assert(root.querySelector('[data-recursion-mode-menu]'), 'compact bar renders the mode selector menu');
   assert(root.querySelector('[data-recursion-pipeline-button]'), 'compact bar renders an icon-only pipeline button');
   assert(root.querySelector('[data-recursion-pipeline-menu]'), 'compact bar renders the pipeline selector menu');
+  assertDeepEqual(
+    root.querySelector('[data-recursion-bar]').children
+      .map((child) => {
+        if (child.querySelector?.('[data-recursion-pipeline-button]')) return 'pipeline';
+        if (child.querySelector?.('[data-recursion-mode-button]')) return 'mode';
+        if (child.dataset?.recursionCardsButton !== undefined || child.querySelector?.('[data-recursion-cards-button]')) return 'cards';
+        if (child.querySelector?.('[data-recursion-story-form-button]')) return 'storyForm';
+        return '';
+      })
+      .filter(Boolean),
+    ['pipeline', 'mode', 'cards', 'storyForm'],
+    'compact bar places Tense & PoV immediately after Cards'
+  );
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('svg'), 'pipeline button renders an inline SVG icon');
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-standard]'), 'Standard pipeline button uses the standard pipeline icon');
   assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-icon]').length, 3, 'pipeline selector renders icons only for Standard, Rapid, and Fused');
@@ -1780,6 +1798,14 @@ try {
     'mode button exposes the current mode label'
   );
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('title'), 'Mode: Auto', 'mode button exposes compact hover tip');
+  assertEqual(root.querySelector('[data-recursion-story-form]').textContent, 'Pr3O', 'mobile story form button uses compact shorthand for long labels');
+  globalThis.innerWidth = 920;
+  globalThis.visualViewport.width = 920;
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-story-form]').textContent, 'Present 3rd Omni', 'desktop story form button uses the full selected label');
+  globalThis.innerWidth = 640;
+  globalThis.visualViewport.width = 640;
+  ui.update();
   const stableAutoModeSvg = root.querySelector('[data-recursion-mode-icon]').querySelector('svg');
   ui.update();
   assertEqual(

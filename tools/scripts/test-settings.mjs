@@ -112,8 +112,8 @@ const diagnosticsOnly = normalizeSettings({ diagnostics: { maxJournalEntries: 25
 assertDeepEqual(diagnosticsOnly.diagnostics, { includeExcerpts: true }, 'diagnostics only retains excerpt toggle');
 
 const retentionDefaults = normalizeSettings({ retention: {} }).retention;
-assertEqual(retentionDefaults.sourceWindowMessages, 48, 'retention source messages default');
-assertEqual(retentionDefaults.sourceWindowCharacters, 24000, 'retention character budget default');
+assertEqual(retentionDefaults.sourceWindowMessages, 20, 'retention source messages default');
+assertEqual(retentionDefaults.sourceWindowCharacters, 12000, 'retention character budget default');
 assertEqual(retentionDefaults.providerVisibleMessages, 12, 'retention provider messages default');
 assertEqual(retentionDefaults.sceneCachesPerChat, 3, 'retention per-chat scene cache default');
 assertEqual(retentionDefaults.sceneCachesTotal, 24, 'retention total scene cache default');
@@ -141,7 +141,8 @@ assertEqual(retentionClamped.runJournalEntries, 500, 'settings clamps journal en
 const defaultUi = normalizeSettings({});
 assertEqual(defaultUi.enabled, true, 'power toggle defaults on');
 assertEqual(defaultUi.mode, 'auto', 'mode defaults to auto');
-assertEqual(defaultUi.reasoningLevel, 'high', 'reasoning level defaults to high');
+assertEqual(defaultUi.reasoningLevel, 'medium', 'reasoning level defaults to medium');
+assertEqual(defaultUi.promptFootprint, 'compact', 'prompt footprint defaults to compact');
 assertEqual(defaultUi.providers.utility.maxTokens, 8192, 'utility provider max tokens default to 8192');
 assertEqual(defaultUi.providers.reasoner.maxTokens, 8192, 'reasoner provider max tokens default to 8192');
 assertEqual(defaultUi.minCards, 3, 'minimum cards defaults to low reasoning card budget');
@@ -166,7 +167,7 @@ const highMax = normalizeSettings({ mode: 'manual', maxCards: 50 });
 assertEqual(highMax.maxCards, 20, 'Max Cards remains capped at twenty');
 
 const invalidReasoning = normalizeSettings({ reasoningLevel: 'maximum' });
-assertEqual(invalidReasoning.reasoningLevel, 'high', 'invalid reasoning level falls back to high');
+assertEqual(invalidReasoning.reasoningLevel, 'medium', 'invalid reasoning level falls back to medium');
 assertEqual(normalizeSettings({ reasoningLevel: 'low', reasonerUse: 'always' }).reasonerUse, 'off', 'low reasoning disables reasoner routing even when stale reasonerUse differs');
 assertEqual(normalizeSettings({ reasoningLevel: 'medium', reasonerUse: 'off' }).reasonerUse, 'always', 'medium reasoning requires reasoner composition even when stale reasonerUse differs');
 assertEqual(normalizeSettings({ reasoningLevel: 'high', reasonerUse: 'off' }).reasonerUse, 'always', 'high reasoning requires mixed reasoner routing even when stale reasonerUse differs');

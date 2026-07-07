@@ -627,8 +627,8 @@ function enforceReasonerAvailability(plan, settings) {
 }
 
 function reasoningPolicyForSettings(settings = {}) {
-  const level = safeText(settings?.reasoningLevel || 'high', 40).toLowerCase();
-  const base = REASONING_LEVEL_POLICIES[level] || REASONING_LEVEL_POLICIES.high;
+  const level = safeText(settings?.reasoningLevel || 'medium', 40).toLowerCase();
+  const base = REASONING_LEVEL_POLICIES[level] || REASONING_LEVEL_POLICIES.medium;
   const cardBudget = normalizeCardBudgetSettings(settings);
   if (base.level === 'low') {
     return { ...base, maxCardsCap: cardBudget.minCards, maxCardsFloor: 0, cardBudget };
@@ -1227,8 +1227,8 @@ function sceneCachePayload(snapshot, deck, hand, plan, packet = null, settings =
 }
 
 function promptFootprintFromSettings(settings = {}) {
-  const footprint = safeText(settings.promptFootprint || 'normal', 40);
-  return PROMPT_FOOTPRINTS.has(footprint) ? footprint : 'normal';
+  const footprint = safeText(settings.promptFootprint || 'compact', 40);
+  return PROMPT_FOOTPRINTS.has(footprint) ? footprint : 'compact';
 }
 
 function lifecycleForDeck(cards, plan, defaultReason) {
@@ -1313,8 +1313,8 @@ function arbiterSafeSettings(settings) {
     strength: safeText(source.strength || 'balanced', 40),
     minCards: normalizeCardBudgetSettings(source).minCards,
     maxCards: normalizeCardBudgetSettings(source).maxCards,
-    reasoningLevel: safeText(source.reasoningLevel || 'high', 40),
-    promptFootprint: safeText(source.promptFootprint || 'normal', 40),
+    reasoningLevel: safeText(source.reasoningLevel || 'medium', 40),
+    promptFootprint: safeText(source.promptFootprint || 'compact', 40),
     focus: safeText(source.focus || 'balanced', 80),
     reasonerUse: safeText(source.reasonerUse || 'auto', 40),
     providers: {
@@ -1368,6 +1368,7 @@ function safeSettingsView(settings) {
   const cardScope = normalizeCardScope(source.cardScope);
   const cardBudget = normalizeCardBudgetSettings(source);
   const injection = normalizeInjectionSettings(source.injection);
+  const proseEnhancement = normalizeSettings(source).proseEnhancement;
   return {
     enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
@@ -1377,11 +1378,15 @@ function safeSettingsView(settings) {
     strength: safeText(source.strength || 'balanced', 40),
     minCards: cardBudget.minCards,
     maxCards: cardBudget.maxCards,
-    reasoningLevel: safeText(source.reasoningLevel || 'high', 40),
-    promptFootprint: safeText(source.promptFootprint || 'normal', 40),
+    reasoningLevel: safeText(source.reasoningLevel || 'medium', 40),
+    promptFootprint: safeText(source.promptFootprint || 'compact', 40),
     focus: safeText(source.focus || 'balanced', 80),
     reasonerUse: safeText(source.reasonerUse || 'auto', 40),
     storyFormOverride: safeText(source.storyFormOverride || 'auto', 40),
+    proseEnhancement: {
+      mode: safeText(proseEnhancement.mode, 40),
+      contextMessages: numberOr(proseEnhancement.contextMessages, 13)
+    },
     injection: {
       placement: safeText(injection.placement, 40),
       role: safeText(injection.role, 40),

@@ -7,11 +7,11 @@ function settingsReasoningLevel(value) {
   return value;
 }
 
-export function normalizeReasoningLevel(value, fallback = 'high') {
+export function normalizeReasoningLevel(value, fallback = 'medium') {
   const level = String(settingsReasoningLevel(value) || '').trim().toLowerCase();
   if (level === 'med') return 'medium';
   if (REASONING_LEVELS.has(level)) return level;
-  return REASONING_LEVELS.has(fallback) ? fallback : 'high';
+  return REASONING_LEVELS.has(fallback) ? fallback : 'medium';
 }
 
 export function normalizeReasoningIntent(value, fallback = '') {

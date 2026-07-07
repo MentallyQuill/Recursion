@@ -660,6 +660,18 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const { runtime } = createRuntimeHarness({
+    settings: { proseEnhancement: { mode: 'off', contextMessages: 13 } }
+  });
+  await runtime.updateSettings({ proseEnhancement: { mode: 'as-swipe' } });
+  assertDeepEqual(
+    runtime.view().settings.proseEnhancement,
+    { mode: 'as-swipe', contextMessages: 13 },
+    'runtime safe view preserves Prose Enhancement mode for the compact bar'
+  );
+}
+
+{
   const proseHost = createProseMessageHarness();
   const routerCalls = [];
   const snapshotMessages = Array.from({ length: 20 }, (_, index) => ({

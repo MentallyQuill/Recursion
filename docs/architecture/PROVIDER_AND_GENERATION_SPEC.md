@@ -64,7 +64,7 @@ type RecursionProviderSettings = {
 };
 ```
 
-The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `high`. V1 derives the internal Reasoner route preference from it: Low disables Reasoner use, while Medium, High, and Ultra require Reasoner composition when the lane is healthy. The companion card-budget settings are `minCards` and `maxCards`; runtime derives `normalCards = floor((minCards + maxCards) / 2)`.
+The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `medium`. V1 derives the internal Reasoner route preference from it: Low disables Reasoner use, while Medium, High, and Ultra require Reasoner composition when the lane is healthy. The companion card-budget settings are `minCards` and `maxCards`; runtime derives `normalCards = floor((minCards + maxCards) / 2)`.
 
 Reasoning Level also controls runtime lane preference and card pressure:
 

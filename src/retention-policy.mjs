@@ -1,6 +1,6 @@
 export const DEFAULT_RETENTION_SETTINGS = Object.freeze({
-  sourceWindowMessages: 48,
-  sourceWindowCharacters: 24000,
+  sourceWindowMessages: 20,
+  sourceWindowCharacters: 12000,
   providerVisibleMessages: 12,
   sceneCachesPerChat: 3,
   sceneCachesTotal: 24,

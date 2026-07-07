@@ -552,8 +552,8 @@ export function providerModelStatus(provider = {}, options = {}) {
 }
 
 export function providerRouteSummary(settings = {}) {
-  const level = String(settings?.reasoningLevel || 'high').toLowerCase();
-  const normalizedLevel = ['low', 'medium', 'high', 'ultra'].includes(level) ? level : 'high';
+  const level = String(settings?.reasoningLevel || 'medium').toLowerCase();
+  const normalizedLevel = ['low', 'medium', 'high', 'ultra'].includes(level) ? level : 'medium';
   const reasoner = settings?.providers?.reasoner || {};
   const reasonerHealthy = reasoner.enabled === true && reasoner.lastTest?.status === 'pass';
   const reasonerLabel = reasonerHealthy ? 'Reasoner' : 'Utility fallback';

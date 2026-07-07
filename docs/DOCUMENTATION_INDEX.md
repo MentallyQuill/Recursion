@@ -30,6 +30,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Card Deck And Hand](technical/CARD_DECK_AND_HAND.md) - Fixed V1 card families, card contract, lifecycle, Arbiter decisions, deck/hand separation, invalidation, Character Motivation safety, and inspector visibility.
 - [Prompt Packet And Injection](technical/PROMPT_PACKET_AND_INJECTION.md) - Packet sections, composer inputs, Utility and Reasoner composition, budgets, omissions, critical guardrail exception policy, SillyTavern injection lanes, cleanup, and privacy guardrails.
 - [Model Calls And Provider Routing](technical/MODEL_CALLS_AND_PROVIDER_ROUTING.md) - Utility and Reasoner lanes, provider sources, generation roles, structured output validation, retries, fallbacks, model-call journal, session secret boundary, abort handling, and provider states.
+- [Recursion Cost Research](technical/RECURSION_COST_RESEARCH.md) - Provider call counts, token-budget ranges, final prompt-packet size, example per-turn estimates, cost levers, and external multiplier caveats.
 - [Storage And Diagnostics Manual](technical/STORAGE_AND_DIAGNOSTICS.md) - Release-facing storage, scene cache, run journal, activity, redaction, invalidation, cleanup, artifact relationship, and tests.
 - [Host Integration Manual](technical/HOST_INTEGRATION_MANUAL.md) - SillyTavern adapter, entrypoint lifecycle, generation interceptor, prompt/storage/settings/generation adapters, UI mount, fake/contract tests, live smoke guardrails, and deferred host boundary.
 

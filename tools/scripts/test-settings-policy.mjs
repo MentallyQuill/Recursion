@@ -10,10 +10,10 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
 const defaultPolicy = influencePolicyForSettings({});
 assertEqual(defaultPolicy.strength.level, 'balanced', 'default policy uses balanced strength');
 assertEqual(defaultPolicy.focus.level, 'balanced', 'default policy uses balanced focus');
-assertEqual(defaultPolicy.footprint.level, 'normal', 'default policy uses normal footprint');
+assertEqual(defaultPolicy.footprint.level, 'compact', 'default policy uses compact footprint');
 assertDeepEqual(defaultPolicy.cardBudget, { minCards: 3, normalCards: 6, maxCards: 10 }, 'default policy exposes derived card budget range');
 assertDeepEqual(defaultPolicy.focus.boostedFamilies, [], 'balanced focus has no boosted families');
-assertDeepEqual(defaultPolicy.footprint.sectionBudgets, FOOTPRINT_SECTION_BUDGETS.normal, 'normal footprint exposes normal budgets');
+assertDeepEqual(defaultPolicy.footprint.sectionBudgets, FOOTPRINT_SECTION_BUDGETS.compact, 'compact footprint exposes compact budgets');
 
 const strongPolicy = influencePolicyForSettings({
   strength: 'strong',
@@ -99,7 +99,7 @@ assertEqual(
 );
 assertEqual(
   influencePolicyForSettings({ strength: 'secret-strong', focus: 'mindread', promptFootprint: 'huge' }).footprint.level,
-  'normal',
+  'compact',
   'invalid footprint falls back safely'
 );
 

@@ -19,7 +19,7 @@ const clamped = normalizeRetentionSettings({
 });
 
 assertEqual(clamped.sourceWindowMessages, 200, 'sourceWindowMessages clamps high');
-assertEqual(clamped.sourceWindowCharacters, 24000, 'invalid sourceWindowCharacters falls back');
+assertEqual(clamped.sourceWindowCharacters, 12000, 'invalid sourceWindowCharacters falls back');
 assertEqual(clamped.providerVisibleMessages, 4, 'providerVisibleMessages clamps low');
 assertEqual(clamped.sceneCachesPerChat, 9, 'sceneCachesPerChat keeps valid value');
 assertEqual(clamped.sceneCachesTotal, 9, 'sceneCachesTotal rises to per-chat cap');

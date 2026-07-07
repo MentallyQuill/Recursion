@@ -75,6 +75,12 @@ Pipeline controls decide how Recursion schedules scene work. Auto and Manual dec
 | Rapid | Stable scenes where you want a shorter send-time pass after Recursion has warmed exact-source card evidence in the background. | Lower latency when warm, but escalates to Standard if the warm artifact is missing, stale, invalid, empty, or marked with a mandatory gap. |
 | Fused | Lower-cost models with stronger structured reasoning, such as DeepSeek, MiniMax, MiMo, Nemotron, Qwen, and similar. | Fewer card calls through one larger bundle, but depends on the model returning trustworthy structured card output. |
 
+### Cost Shape
+
+Recursion adds provider work before the host model writes: Arbiter planning, card generation or a Fused bundle, Utility guidance composition, optional Reasoner synthesis, and optional post-generation Prose Enhancement. It also injects a bounded prompt packet into the normal SillyTavern generation, so Prompt Footprint affects the final host context size.
+
+Cost depends most on pipeline, Reasoning Level, card count, footprint, cache reuse, provider hidden reasoning, and any external model multiplier. For the detailed call breakdown and planning estimates, see [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md).
+
 ## What You Can Inspect
 
 - Last Brief: the latest selected card hand and prepared prompt packet.
@@ -104,6 +110,7 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 - [Provider Setup](docs/user/PROVIDER_SETUP.md) - Utility and Reasoner setup, provider tests, fallback behavior, and safe verification.
 - [Prompt Privacy And Safety](docs/user/PROMPT_PRIVACY_AND_SAFETY.md) - Prompt packet contents, injection boundary, storage limits, redaction, and coexistence with other SillyTavern context systems.
 - [Technical Manuals](docs/technical/README.md) - Runtime, card, prompt, provider, storage, diagnostics, and host integration manuals.
+- [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md) - Provider call counts, token-budget ranges, example estimates, and cost-tuning levers.
 - [Testing Strategy](docs/testing/TESTING_STRATEGY.md) - Deterministic gates, Playwright readiness, guarded live smoke, artifacts, and documentation render checks.
 
 ## Security And Privacy

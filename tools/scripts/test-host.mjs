@@ -232,7 +232,8 @@ const mutationContext = {
       is_user: false,
       mes: 'Original assistant text.',
       swipe_id: 0,
-      swipes: ['Original assistant text.']
+      swipes: ['Original assistant text.'],
+      swipe_info: [{ send_date: '2026-07-07T00:00:00.000Z', gen_started: '2026-07-07T00:00:00.000Z', gen_finished: '2026-07-07T00:00:01.000Z' }]
     }
   ],
   updateMessageBlock(messageId, message) {
@@ -240,6 +241,9 @@ const mutationContext = {
   },
   saveChat() {
     messageMutationCalls.push({ save: true });
+  },
+  reloadCurrentChat() {
+    messageMutationCalls.push({ reload: true });
   }
 };
 const mutationHost = createSillyTavernHost({ contextFactory: () => mutationContext, settingsRoot: {} });
@@ -257,12 +261,15 @@ assertEqual((await mutationHost.messages.revealAssistantMessage(4)).ok, true, 'h
 assertEqual(mutationContext.chat[0].mes, 'Original assistant text.', 'reveal restores held assistant text');
 assertEqual((await mutationHost.messages.appendAssistantMessageSwipe(4, 'Polished assistant text.', { marker: { originalHash: 'hash-a' }, select: true })).ok, true, 'host appends and selects enhanced swipe');
 assertEqual(mutationContext.chat[0].swipes.length, 2, 'enhanced swipe appended');
+assertEqual(mutationContext.chat[0].swipe_info.length, 2, 'enhanced swipe metadata appended for SillyTavern UI');
+assertEqual(typeof mutationContext.chat[0].swipe_info[1].send_date, 'string', 'enhanced swipe metadata includes send date');
 assertEqual(mutationContext.chat[0].swipe_id, 1, 'enhanced swipe auto-selected');
 assertEqual(mutationContext.chat[0].mes, 'Polished assistant text.', 'active message text follows enhanced swipe');
 assertEqual((await mutationHost.messages.findEnhancedSwipe(4, { originalHash: 'hash-a' })).index, 1, 'host finds existing enhanced swipe marker');
 assertEqual((await mutationHost.messages.replaceAssistantMessageText(4, 'Replacement text.', { marker: { originalHash: 'hash-b' } })).ok, true, 'host replaces active assistant text');
 assertEqual(mutationContext.chat[0].swipes[1], 'Replacement text.', 'replace updates selected swipe text');
 assert(messageMutationCalls.some((entry) => entry.save === true), 'message mutation saves chat');
+assert(messageMutationCalls.some((entry) => entry.reload === true), 'enhanced swipe refreshes current chat UI');
 
 const latestMutationContext = {
   chatId: 'prose-latest-host-chat',

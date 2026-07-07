@@ -26,6 +26,7 @@
 - Raw original text, enhanced text, provider prompts, provider responses, full scene context, secrets, and hidden reasoning must not persist to journals or diagnostics.
 - Enabled Prose Enhancement should capture raw host output and mask it before the player sees it, without destructively blanking the SillyTavern chat row. If capture fails, skip enhancement and reveal original output.
 - `As Swipe` creates or selects one enhanced sibling for one original message/swipe hash, then selects the enhanced swipe.
+- `As Swipe` must keep SillyTavern `swipes` and `swipe_info` aligned and refresh the current chat view so the enhanced sibling appears without a page reload.
 - `Replace` replaces the active assistant text; failure reveals original unchanged.
 - If the Utility pass returns text byte-identical to the held original, treat the pass as unchanged: reveal the original, do not replace it, and do not append a duplicate `As Swipe` sibling.
 - If an interrupted pass leaves a persisted held marker with a blank active assistant row, bootstrap recovery restores the held original and clears the marker.
@@ -1704,6 +1705,7 @@ Expected:
 
 - served extension copy is fresh;
 - As Swipe creates original + enhanced swipes;
+- As Swipe appends matching `swipe_info` metadata and shows the enhanced swipe without a page reload;
 - enhanced swipe is selected automatically;
 - Replace updates active assistant text or reveals original on validation failure;
 - status settles without blocking SillyTavern generation.
@@ -1731,6 +1733,7 @@ git commit -m "test: prove prose enhancement live"
 - [ ] Plan includes greyed-out icon treatment when mode is `off`.
 - [ ] Plan includes hold/reveal behavior so raw output is not shown first when enabled.
 - [ ] Plan keeps original output available in `As Swipe`.
+- [ ] Plan requires `As Swipe` to maintain SillyTavern `swipe_info` and refresh the current chat view.
 - [ ] Plan selects enhanced swipe automatically.
 - [ ] Plan prevents duplicate enhanced siblings.
 - [ ] Plan reveals original on validation/provider/hold/stale failures.

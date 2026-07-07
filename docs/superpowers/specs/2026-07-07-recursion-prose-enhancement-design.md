@@ -29,6 +29,8 @@ The enhanced swipe is selected automatically before the message becomes visible.
 
 For every newly generated host swipe, the feature may create one matching enhanced sibling. It must not recursively enhance its own enhanced swipe, and it must not duplicate an enhanced sibling for the same original text hash.
 
+When appending the enhanced sibling in SillyTavern, Recursion must keep `swipes` and `swipe_info` aligned and refresh the current chat view so the second swipe is visible immediately. A persisted enhanced swipe that only appears after page reload violates the `As Swipe` contract.
+
 If the Utility pass returns text that is byte-identical to the held original, Recursion treats the pass as unchanged: it reveals the original, creates no enhanced sibling, and keeps the original swipe selected. `As Swipe` must never append a duplicate swipe only to mark that a pass ran.
 
 ### Replace
@@ -585,7 +587,7 @@ Implementation should update:
 - Dialogue spans must remain byte-identical before output is applied, except exact or obvious direct variants from the full banned AI slop list may be removed or neutralized.
 - Prompt includes the full banned AI slop and clichés list intact, not reduced or paraphrased.
 - Enabled mode hides or blanks raw host output before the player sees it.
-- `As Swipe` creates original and enhanced swipes, then selects the enhanced swipe.
+- `As Swipe` creates original and enhanced swipes, appends matching SillyTavern `swipe_info`, refreshes the current chat view, then selects the enhanced swipe.
 - `Replace` replaces the active assistant text with enhanced text.
 - Duplicate enhanced siblings are not created for the same original hash.
 - Failure or stale result reveals original output unchanged.

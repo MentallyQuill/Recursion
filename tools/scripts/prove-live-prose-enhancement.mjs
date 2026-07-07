@@ -51,6 +51,7 @@ function proofScript() {
         text: String(msg?.mes || ''),
         swipeId: Number(msg?.swipe_id ?? 0),
         swipes: Array.isArray(msg?.swipes) ? msg.swipes.map((entry) => String(entry || '')) : [],
+        swipeInfoLength: Array.isArray(msg?.swipe_info) ? msg.swipe_info.length : 0,
         markerCount: Array.isArray(msg?.__recursionProseEnhancementSwipes) ? msg.__recursionProseEnhancementSwipes.filter(Boolean).length : 0
       };
     };
@@ -120,7 +121,7 @@ try {
     const pass = mode === 'off'
       ? proof.result?.skipped === true && proof.before.text === proof.after.text && proof.after.swipes.length === 1
       : mode === 'as-swipe'
-        ? proof.ok === true && proof.after.swipes.length === 2 && proof.after.swipeId === 1 && proof.after.swipes[0] === proof.before.swipes[0] && proof.after.swipes[1] !== proof.before.swipes[0]
+        ? proof.ok === true && proof.after.swipes.length === 2 && proof.after.swipeInfoLength === proof.after.swipes.length && proof.after.swipeId === 1 && proof.after.swipes[0] === proof.before.swipes[0] && proof.after.swipes[1] !== proof.before.swipes[0]
         : proof.ok === true && proof.after.swipes.length === 1 && proof.after.text !== proof.before.text;
     report.checks.push({
       name: `prose-enhancement-${mode}`,
@@ -132,6 +133,7 @@ try {
         resultMode: proof.result?.mode || '',
         beforeSwipeCount: proof.before.swipes.length,
         afterSwipeCount: proof.after.swipes.length,
+        afterSwipeInfoLength: proof.after.swipeInfoLength,
         afterSwipeId: proof.after.swipeId,
         changed: proof.before.text !== proof.after.text,
         markerCount: proof.after.markerCount,

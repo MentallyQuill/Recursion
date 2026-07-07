@@ -243,6 +243,56 @@ function updateMessageBlockBestEffort(context = {}, index, message) {
   }
 }
 
+function cloneJsonSafe(value) {
+  if (!value || typeof value !== 'object') return {};
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return {};
+  }
+}
+
+function swipeInfoFromMessage(message = {}) {
+  return {
+    send_date: stringValue(message.send_date || new Date().toISOString()),
+    gen_started: message.gen_started ?? null,
+    gen_finished: message.gen_finished ?? null,
+    extra: cloneJsonSafe(message.extra)
+  };
+}
+
+function enhancedSwipeInfo(marker = {}) {
+  return {
+    send_date: new Date().toISOString(),
+    gen_started: null,
+    gen_finished: null,
+    extra: {
+      api: 'recursion',
+      model: 'prose-enhancement',
+      recursion: {
+        proseEnhancement: cloneJsonSafe(marker)
+      }
+    }
+  };
+}
+
+function ensureSwipeInfoArray(message = {}) {
+  if (!Array.isArray(message.swipes)) return [];
+  if (!Array.isArray(message.swipe_info)) message.swipe_info = [];
+  while (message.swipe_info.length < message.swipes.length) {
+    message.swipe_info.push(swipeInfoFromMessage(message));
+  }
+  return message.swipe_info;
+}
+
+function alignRootExtraToSwipe(message = {}, swipeIndex = 0) {
+  const info = Array.isArray(message.swipe_info) ? message.swipe_info[swipeIndex] : null;
+  const extra = info && typeof info === 'object' ? info.extra : null;
+  if (extra && typeof extra === 'object') {
+    message.extra = cloneJsonSafe(extra);
+  }
+}
+
 async function saveChatBestEffort(context = {}) {
   const save = context.saveChat || globalThis.saveChat || globalThis.saveChatDebounced;
   if (typeof save !== 'function') return;
@@ -250,6 +300,16 @@ async function saveChatBestEffort(context = {}) {
     await save();
   } catch {
     // Saving is best effort here; mutation result still reports local success.
+  }
+}
+
+async function reloadCurrentChatBestEffort(context = {}) {
+  const reload = context.reloadCurrentChat || globalThis.reloadCurrentChat;
+  if (typeof reload !== 'function') return;
+  try {
+    await reload();
+  } catch {
+    // UI refresh is best effort; chat state was already saved.
   }
 }
 
@@ -1071,6 +1131,7 @@ export function createSillyTavernHost({
       const context = currentContext(contextFactory);
       const found = findRawAssistantMessage(context, messageId);
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
+      if (Array.isArray(found.raw.swipes)) ensureSwipeInfoArray(found.raw);
       setRawAssistantText(found.raw, text);
       delete found.raw.__recursionHeldText;
       found.raw.__recursionProseEnhancement = asObject(options.marker);
@@ -1083,18 +1144,23 @@ export function createSillyTavernHost({
       const found = findRawAssistantMessage(context, messageId);
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
       if (!Array.isArray(found.raw.swipes)) found.raw.swipes = [activeRawAssistantText(found.raw)];
+      ensureSwipeInfoArray(found.raw);
       const marker = asObject(options.marker);
       const index = found.raw.swipes.length;
+      const swipeInfo = enhancedSwipeInfo(marker);
       found.raw.swipes.push(stringValue(text));
+      found.raw.swipe_info.push(swipeInfo);
       if (!Array.isArray(found.raw.__recursionProseEnhancementSwipes)) found.raw.__recursionProseEnhancementSwipes = [];
       found.raw.__recursionProseEnhancementSwipes[index] = marker;
       if (options.select !== false) {
         found.raw.swipe_id = index;
         setRawAssistantText(found.raw, text);
+        found.raw.extra = cloneJsonSafe(swipeInfo.extra);
       }
       delete found.raw.__recursionHeldText;
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
+      await reloadCurrentChatBestEffort(context);
       return { ok: true, messageId: found.normalized.mesId, index, text: stringValue(text) };
     },
     async findEnhancedSwipe(messageId, marker = {}) {
@@ -1114,14 +1180,17 @@ export function createSillyTavernHost({
       const found = findRawAssistantMessage(context, messageId);
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
       if (!Array.isArray(found.raw.swipes)) return { ok: false, error: { code: 'RECURSION_SWIPE_UNAVAILABLE', message: 'Swipes array not found.' } };
+      ensureSwipeInfoArray(found.raw);
       const index = Math.max(0, Math.min(Number(swipeIndex), found.raw.swipes.length - 1));
       found.raw.swipe_id = index;
       const text = stringValue(found.raw.swipes[index]);
       setRawAssistantText(found.raw, text);
+      alignRootExtraToSwipe(found.raw, index);
       delete found.raw.__recursionHeldText;
       if (options.marker) found.raw.__recursionProseEnhancement = asObject(options.marker);
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
+      await reloadCurrentChatBestEffort(context);
       return { ok: true, messageId: found.normalized.mesId, index, text };
     },
     async recoverHeldAssistantMessages(details = {}) {

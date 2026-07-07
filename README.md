@@ -81,6 +81,8 @@ Recursion adds provider work before the host model writes: Arbiter planning, car
 
 Cost depends most on pipeline, Reasoning Level, card count, footprint, cache reuse, provider hidden reasoning, and any external model multiplier. For the detailed call breakdown and planning estimates, see [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md).
 
+Under the medium-reasoning Standard example in that research, Recursion adds roughly 1-1.5 cents per turn on top of normal SillyTavern generation.
+
 ## What You Can Inspect
 
 - Last Brief: the latest selected card hand and prepared prompt packet.

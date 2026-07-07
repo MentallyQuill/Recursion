@@ -48,7 +48,7 @@ If a provider bills a model at 2x, Recursion does not know that natively. Operat
 | `pipelineMode` | `standard` | Full foreground Arbiter, card, compose, and install path. |
 | `reasoningLevel` | `medium` | Utility handles Arbiter, cards, and Fused bundles by default; Reasoner may handle composition when enabled and healthy. |
 | `minCards` / `maxCards` | `3` / `10` | Shape card job pressure; Medium/High use the normalized midpoint as a cap. |
-| `promptFootprint` | `compact` | Controls final injected packet size budget. |
+| `promptFootprint` | `normal` | Controls final injected packet size budget. |
 | `providerVisibleMessages` | `12` | Recent visible messages sent to Recursion provider calls. |
 | `sourceWindowMessages` | `20` | Recent visible messages considered for source freshness and evidence windows. |
 | `sourceWindowCharacters` | `12000` | Character cap for the source freshness window. |
@@ -174,10 +174,12 @@ If a subscription supplies `60,000,000` monthly budget tokens for `$12`, then ea
 | Metric | Approx value |
 | --- | ---: |
 | Incremental Recursion cost per Standard turn | ~56,000 budget tokens |
-| Incremental dollar cost per Standard turn | ~$0.011 |
+| Incremental dollar cost per Standard turn | ~$0.011-$0.015, roughly 1-1.5 cents |
 | Full turn cost with Recursion | ~78,400 budget tokens |
 | Full dollar cost with Recursion | ~$0.016 |
 | Monthly turns if every token is spent on this pattern | ~765 turns |
+
+Bottom line: with the medium-reasoning Standard setup above, Recursion adds about 1-1.5 cents per turn on top of normal SillyTavern generation cost.
 
 Treat those values as order-of-magnitude planning numbers, not a guarantee. Hidden thinking tokens on reasoning models can materially increase billed usage even when visible output is small.
 

@@ -773,6 +773,90 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const proseHost = createProseMessageHarness('O\'Neill looked at Carter. "Options?"');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 3 } },
+    snapshot: {
+      chatId: 'enhancement-context-chat',
+      chatKey: 'enhancement-context-chat',
+      sceneKey: 'enhancement-context-scene',
+      sceneFingerprint: 'enhancement-context-fp',
+      turnFingerprint: 'enhancement-context-turn',
+      latestMesId: 3,
+      messages: [
+        { mesid: 1, role: 'assistant', sender: 'O\'Neill', text: '"Carter?"', visible: true },
+        { mesid: 2, role: 'assistant', sender: 'Carter', text: '"Working on it, sir."', visible: true },
+        { mesid: 3, role: 'assistant', sender: 'SG-1', text: proseHost.message.text, visible: true }
+      ]
+    },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request, options) {
+        routerCalls.push({ roleId, request, options });
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.dialogueEnhancer.v1',
+            text: 'O\'Neill looked at Carter. "Options?"'
+          }
+        };
+      }
+    }
+  });
+  await runtime.enhanceLatestAssistantMessage({ reason: 'unit-enhancement-sender-context' });
+  assert(routerCalls[0].request.contextMessages.some((message) => message.sender === 'Carter'), 'Enhancement request preserves sender labels from the snapshot window');
+  assertEqual(routerCalls[0].request.characterContext.name, 'SG-1', 'Dialogue Enhancement request receives active assistant sender as character context');
+  assert(routerCalls[0].request.characterContext.exampleDialogue.includes('"Working on it, sir."'), 'Dialogue Enhancement request receives recent dialogue examples');
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara set the cup down. "What do you want to do next?"');
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.dialogueEnhancer.v1',
+            text: 'Mara set the cup down. "What do you want to do next?"'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-noop-detected-slop' });
+  assertEqual(result.ok, false, 'detected dialogue slop no-op fails enhancement');
+  assertEqual(result.error.code, 'RECURSION_DIALOGUE_NOOP_WITH_DETECTED_SLOP', 'runtime preserves dialogue no-op validation error');
+  assertEqual(proseHost.message.swipes.length, 1, 'failed dialogue no-op does not append enhanced swipe');
+  assertEqual(proseHost.message.text, 'Mara set the cup down. "What do you want to do next?"', 'failed dialogue no-op keeps original text');
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara set the cup down. "Sit down before you fall over."');
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate() {
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.dialogueEnhancer.v1',
+            text: 'Mara set the cup down. "Sit down before you fall over."'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-clean-noop' });
+  assertEqual(result.ok, true, 'clean dialogue no-op remains valid');
+  assertEqual(proseHost.message.swipes.length, 2, 'clean dialogue no-op still appends provider output as enhanced swipe');
+}
+
+{
   const proseHost = createProseMessageHarness('Mara set the cup down. "What do you want to do next?"');
   const roleCalls = [];
   const { runtime } = createRuntimeHarness({

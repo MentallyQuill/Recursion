@@ -331,7 +331,15 @@ function contextLine(message = {}) {
   const role = ['assistant', 'user', 'system'].includes(String(message.role || '').toLowerCase())
     ? String(message.role).toLowerCase()
     : 'assistant';
-  return `${role}: ${safeText(message.text ?? message.mes ?? message.content, 1200)}`;
+  const sender = safeText(message.sender || message.name || '', 120);
+  return `${sender ? `${role}(${sender})` : role}: ${safeText(message.text ?? message.mes ?? message.content, 1200)}`;
+}
+
+function cardLines(cardContext = []) {
+  return (Array.isArray(cardContext) ? cardContext : [])
+    .slice(0, 8)
+    .map((card) => `- ${safeText(card.family || 'Context', 80)}: ${safeText(card.text || card.summary || '', 700)}`)
+    .join('\n');
 }
 
 export function buildProseEnhancementRequest({
@@ -339,6 +347,7 @@ export function buildProseEnhancementRequest({
   contextMessages = [],
   contextMessageLimit = 13,
   storyForm = null,
+  cardContext = [],
   lane = '',
   reasoningCategory = 'prose-enhancement',
   reasoningIntent = 'minimal'
@@ -371,10 +380,19 @@ export function buildProseEnhancementRequest({
     'Do not replace one banned pattern with a neighboring cliché. If a phrase is empty atmosphere or filler, cut it rather than swapping in a synonym.',
     'Do not rename existing characters or add new names to avoid a cliché.',
     '',
+    'Intervention policy:',
+    '- If the source contains a banned phrase or banned dialogue exception, do not return the original text unchanged.',
+    '- If a sentence is generic but not unsafe, improve it through concrete action, compression, or rhythm rather than decorative synonym swaps.',
+    '- If the prose is already clean, returning it unchanged is allowed.',
+    '- Optional diagnostics are allowed in changePlan, but the text field is the only applied output.',
+    '',
     BANNED_AI_SLOP_LIST,
     '',
     'Use the scene context only to match the established prose tone and style of the exchange. Do not drift from the register already set.',
     storyFormLine,
+    '<recursion_card_context>',
+    cardLines(cardContext),
+    '</recursion_card_context>',
     '<scene_context>',
     sceneContext,
     '</scene_context>',
@@ -382,7 +400,7 @@ export function buildProseEnhancementRequest({
     targetText,
     '</text_to_transform>',
     '',
-    `Return strict JSON only: {"schema":"${PROSE_ENHANCER_SCHEMA}","text":"rewritten text"}. No explanations, no notes, no commentary.`
+    `Return strict JSON only: {"schema":"${PROSE_ENHANCER_SCHEMA}","text":"rewritten text","changePlan":{"changed":true,"targets":["banned-phrase"],"noChangeReason":""}}. No explanations, no notes, no commentary.`
   ].join('\n');
   return {
     prompt,
@@ -392,6 +410,13 @@ export function buildProseEnhancementRequest({
     reasoningCategory,
     reasoningIntent,
     machineJson: true,
+    cardContext: (Array.isArray(cardContext) ? cardContext : [])
+      .slice(0, 8)
+      .map((card) => ({
+        family: safeText(card?.family || 'Context', 80),
+        text: safeText(card?.text || card?.summary || '', 700)
+      }))
+      .filter((card) => card.family && card.text),
     contextMessages: (Array.isArray(contextMessages) ? contextMessages : []).slice(-limit)
   };
 }
@@ -457,6 +482,19 @@ function containsBannedPhrase(text = '') {
   });
 }
 
+export function proseInterventionReasons(text = '') {
+  const source = String(text ?? '');
+  const spans = dialogueSpans(source).sort((a, b) => a.start - b.start);
+  let cursor = 0;
+  const chunks = [];
+  for (const span of spans) {
+    chunks.push(source.slice(cursor, span.start));
+    cursor = span.end;
+  }
+  chunks.push(source.slice(cursor));
+  return containsBannedPhrase(chunks.join(' ')) ? ['banned-phrase'] : [];
+}
+
 function validationError(code, message) {
   return { ok: false, error: { code, message } };
 }
@@ -480,6 +518,13 @@ export function validateProseEnhancementResult(result = {}, { originalText = '' 
     if (originalDialogue[index].text === nextDialogue[index].text) continue;
     if (containsBannedPhrase(originalDialogue[index].text)) continue;
     return validationError('RECURSION_PROSE_DIALOGUE_CHANGED', 'Prose enhancement changed dialogue.');
+  }
+  const interventionReasons = proseInterventionReasons(originalText);
+  if (text === String(originalText ?? '') && interventionReasons.length) {
+    return validationError(
+      'RECURSION_PROSE_NOOP_WITH_DETECTED_SLOP',
+      `Prose enhancement returned unchanged text despite detected slop: ${interventionReasons.join(', ')}.`
+    );
   }
   return { ok: true, text };
 }

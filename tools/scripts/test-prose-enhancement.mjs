@@ -4,9 +4,10 @@ import {
   buildProseEnhancementRequest,
   dialogueSpans,
   proseEnhancementKey,
+  proseInterventionReasons,
   validateProseEnhancementResult
 } from '../../src/prose-enhancement.mjs';
-import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
+import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const sourceText = [
   'Mara felt it like a punch to the chest. "I felt it like a punch to the chest," she said.',
@@ -16,8 +17,12 @@ const sourceText = [
 const request = buildProseEnhancementRequest({
   text: sourceText,
   contextMessages: [
-    { role: 'user', text: 'What happens next?' },
-    { role: 'assistant', text: sourceText }
+    { role: 'user', sender: 'Will', text: 'What happens next?' },
+    { role: 'assistant', sender: 'Mara', text: sourceText }
+  ],
+  cardContext: [
+    { family: 'Scene Constraints', text: 'Keep the action grounded and practical.' },
+    { family: 'Social Subtext', text: 'Mara hides concern behind motion.' }
   ],
   storyForm: { tense: 'past', pov: 'third-person-limited' },
   contextMessageLimit: 13
@@ -31,11 +36,18 @@ assert(request.prompt.includes('The dialogue-protection rule has one explicit ex
 assert(request.prompt.includes('## Core banned AI slop and clichés'), 'prompt includes the full banned AI slop list heading');
 assert(request.prompt.includes('* felt it like a physical blow'), 'prompt includes the first banned-list bullet intact');
 assert(request.prompt.includes('* controlled chaos'), 'prompt includes the final banned-list bullet intact');
+assert(request.prompt.includes('<recursion_card_context>'), 'prose prompt includes card context section');
+assert(request.prompt.includes('Mara hides concern behind motion.'), 'prose prompt includes safe card context text');
 assert(request.prompt.includes(sourceText), 'prompt includes source text');
 assertEqual(request.responseSchema, PROSE_ENHANCER_SCHEMA, 'request carries response schema');
 assertEqual(request.responseLength, 4096, 'request uses bounded response length');
 assert(BANNED_AI_SLOP_LIST.includes('## Core banned AI slop and clichés'), 'exported banned list keeps heading intact');
 assert(BANNED_AI_SLOP_LIST.includes('* controlled chaos'), 'exported banned list keeps final bullet intact');
+assertDeepEqual(
+  proseInterventionReasons(sourceText),
+  ['banned-phrase'],
+  'banned phrase requires prose intervention'
+);
 
 const dialogue = dialogueSpans('He nodded. "Do not change this." Then he left.');
 assertEqual(dialogue.length, 1, 'dialogue spans detects quoted dialogue');
@@ -57,12 +69,28 @@ const accepted = validateProseEnhancementResult({
 }, { originalText: sourceText });
 assertEqual(accepted.ok, true, 'validator accepts prose-only edits with exact dialogue intact');
 
-const acceptedIdentical = validateProseEnhancementResult({
+const rejectedNoopBannedPhrase = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,
   text: sourceText
 }, { originalText: sourceText });
-assertEqual(acceptedIdentical.ok, true, 'validator accepts byte-identical prose output');
-assertEqual(acceptedIdentical.unchanged, undefined, 'validator no longer marks identical output as unchanged');
+assertEqual(rejectedNoopBannedPhrase.ok, false, 'prose no-op is rejected when banned slop is detected');
+assertEqual(
+  rejectedNoopBannedPhrase.error.code,
+  'RECURSION_PROSE_NOOP_WITH_DETECTED_SLOP',
+  'prose no-op rejection uses stable code'
+);
+
+const cleanProseNoop = validateProseEnhancementResult({
+  schema: PROSE_ENHANCER_SCHEMA,
+  text: 'Mara crossed the room. "Keep the door shut," she said.'
+}, { originalText: 'Mara crossed the room. "Keep the door shut," she said.' });
+assertEqual(cleanProseNoop.ok, true, 'prose no-op remains valid when no deterministic slop is detected');
+
+const dialogueOnlySlopNoop = validateProseEnhancementResult({
+  schema: PROSE_ENHANCER_SCHEMA,
+  text: 'Mara kept her hand on the latch. "Do not get the wrong idea, this is purely tactical."'
+}, { originalText: 'Mara kept her hand on the latch. "Do not get the wrong idea, this is purely tactical."' });
+assertEqual(dialogueOnlySlopNoop.ok, true, 'prose no-op does not veto dialogue-only slop after Dialogue pass');
 
 const acceptedDialogueSlopCleanup = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,

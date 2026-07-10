@@ -1,6 +1,6 @@
 {
   "name": "recursion",
-  "version": "0.1.0-pre-alpha.3",
+  "version": "0.1.0-pre-alpha.4",
   "private": true,
   "description": "Recursion pre-alpha SillyTavern extension.",
   "type": "module",

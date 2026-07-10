@@ -16,6 +16,7 @@ import {
   scopePayloadForArbiter
 } from './card-scope.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
+import { enhancementContextFromSnapshot } from './enhancement-context.mjs';
 import { composeGuidanceForCards, composePromptPacket, GUIDANCE_SCHEMA as PROMPT_GUIDANCE_SCHEMA, PROMPT_PACKET_VERSION } from './prompt.mjs';
 import { PROVIDER_CONTRACT_HASH, fetchOpenAICompatibleModels } from './providers.mjs';
 import {
@@ -310,9 +311,11 @@ function normalizeMessage(message, index) {
     source.role ?? (source.is_user === true ? 'user' : (source.is_system === true ? 'system' : 'assistant')),
     'assistant'
   );
+  const sender = safeText(source.sender || source.name || '', 120);
   return {
     mesid,
     role,
+    ...(sender ? { sender } : {}),
     text: safeText(rawText, SNAPSHOT_MESSAGE_TEXT_LIMIT),
     textHash: hashJson(String(rawText ?? '')),
     ...(Number.isFinite(swipeId) ? { swipeId: Math.max(0, Math.round(swipeId)) } : {}),
@@ -3118,7 +3121,14 @@ export function createRecursionRuntime({
         held = hold?.ok !== false;
       }
       const snapshot = typeof host.snapshot === 'function' ? await host.snapshot() : null;
-      const contextMessages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+      const enhancementContext = enhancementContextFromSnapshot({
+        snapshot: snapshot || {},
+        hand: lastHand,
+        activeText: originalText,
+        activeSender: identity.sender || '',
+        contextMessageLimit: enhancementSettings.contextMessages
+      });
+      const contextMessages = enhancementContext.contextMessages;
       const storyForm = lastPacket?.storyForm || lastPlan?.storyForm || null;
       const passSequence = target === 'prose-dialogue' ? ['dialogue', 'prose'] : [target];
       let enhancedText = originalText;
@@ -3130,6 +3140,8 @@ export function createRecursionRuntime({
             contextMessages,
             contextMessageLimit: enhancementSettings.contextMessages,
             storyForm,
+            characterContext: enhancementContext.characterContext,
+            cardContext: enhancementContext.cardContext,
             lane: enhancementLane,
             ...enhancementReasoning
           });
@@ -3168,6 +3180,7 @@ export function createRecursionRuntime({
             contextMessages,
             contextMessageLimit: enhancementSettings.contextMessages,
             storyForm,
+            cardContext: enhancementContext.cardContext,
             lane: enhancementLane,
             ...enhancementReasoning
           });

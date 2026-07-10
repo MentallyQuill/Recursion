@@ -1,4 +1,5 @@
 import { compact, truncate } from './core.mjs';
+import { speakerLabel } from './enhancement-context.mjs';
 import { dialogueSpans } from './prose-enhancement.mjs';
 
 export const DIALOGUE_ENHANCER_SCHEMA = 'recursion.dialogueEnhancer.v1';
@@ -55,15 +56,42 @@ export const DIALOGUE_SLOP_RULES = String.raw`## Dialogue slop priorities
 * tell me what you want
 * last chance to back out`;
 
+const DIALOGUE_INTERVENTION_PATTERNS = Object.freeze([
+  {
+    id: 'forced-question',
+    pattern: /\b(what do you (say|want)|what now|your move|the choice is yours|where do we go from here|do you want to\b|would you prefer\b)/i
+  },
+  {
+    id: 'echoing',
+    pattern: /\b(so that'?s what we'?re calling it now|you really just said|you'?re either .+ or .+ probably both|no one ever .+ before)\b/i
+  },
+  {
+    id: 'unsupported-technical',
+    pattern: /\b(assessing variables|recalibrating|hypothesis|data point|optimal|inefficient|statistically|tactically|non-negotiable)\b/i
+  },
+  {
+    id: 'defensive-trope',
+    pattern: /\b(it'?s not like i care|don'?t get the wrong idea|i'?m only doing this because|you'?re impossible|i hate that you'?re right)\b/i
+  },
+  {
+    id: 'attraction-cliche',
+    pattern: /\b(you'?re mine|ruin you|claim you|devour you|worship you|you'?re going to be the death of me|last chance to back out)\b/i
+  }
+]);
+
+export function dialogueInterventionReasons(text = '') {
+  const source = String(text || '');
+  return DIALOGUE_INTERVENTION_PATTERNS
+    .filter((entry) => entry.pattern.test(source))
+    .map((entry) => entry.id);
+}
+
 function safeText(value, limit = MAX_CONTEXT_TEXT) {
   return truncate(compact(String(value ?? '').replace(SECRET_PATTERN, '[redacted]')), limit);
 }
 
 function contextLine(message = {}) {
-  const role = ['assistant', 'user', 'system'].includes(String(message.role || '').toLowerCase())
-    ? String(message.role).toLowerCase()
-    : 'assistant';
-  return `${role}: ${safeText(message.text ?? message.mes ?? message.content, 1200)}`;
+  return `${speakerLabel(message)}: ${safeText(message.text ?? message.mes ?? message.content, 1200)}`;
 }
 
 function characterLines(characterContext = {}) {
@@ -129,6 +157,12 @@ export function buildDialogueEnhancementRequest({
     '4. Tsundere tropes and defensive deflection unless established.',
     '5. Attraction cliches and lazy romance lines.',
     '',
+    'Intervention policy:',
+    '- If any intervention-required pattern appears, do not return the original text unchanged.',
+    '- Prefer one precise, character-consistent replacement over broad rewriting.',
+    '- If the dialogue is already clean, returning it unchanged is allowed.',
+    '- Optional diagnostics are allowed in changePlan, but the text field is the only applied output.',
+    '',
     'Subtext pass:',
     '- What does the character want right now?',
     '- What are they unwilling to say directly?',
@@ -155,7 +189,7 @@ export function buildDialogueEnhancementRequest({
     targetText,
     '</text_to_transform>',
     '',
-    `Return strict JSON only: {"schema":"${DIALOGUE_ENHANCER_SCHEMA}","text":"rewritten full assistant message"}. No explanations, no notes, no commentary.`
+    `Return strict JSON only: {"schema":"${DIALOGUE_ENHANCER_SCHEMA}","text":"rewritten full assistant message","changePlan":{"changed":true,"targets":["forced-question"],"noChangeReason":""}}. No explanations, no notes, no commentary.`
   ].join('\n');
   return {
     prompt,
@@ -165,6 +199,20 @@ export function buildDialogueEnhancementRequest({
     reasoningCategory,
     reasoningIntent,
     machineJson: true,
+    characterContext: {
+      name: safeText(characterContext?.name || 'unknown', 120),
+      description: safeText(characterContext?.description || '', 1600),
+      exampleDialogue: Array.isArray(characterContext?.exampleDialogue)
+        ? characterContext.exampleDialogue.slice(0, 8).map((line) => safeText(line, 500)).filter(Boolean)
+        : []
+    },
+    cardContext: (Array.isArray(cardContext) ? cardContext : [])
+      .slice(0, 8)
+      .map((card) => ({
+        family: safeText(card?.family || 'Context', 80),
+        text: safeText(card?.text || card?.summary || '', 700)
+      }))
+      .filter((card) => card.family && card.text),
     contextMessages: (Array.isArray(contextMessages) ? contextMessages : []).slice(-limit)
   };
 }
@@ -203,6 +251,13 @@ export function validateDialogueEnhancementResult(result = {}, { originalText = 
   }
   if (normalizeNarration(originalText) !== normalizeNarration(text)) {
     return validationError('RECURSION_DIALOGUE_NARRATION_CHANGED', 'Dialogue enhancement changed narration outside dialogue repair.');
+  }
+  const interventionReasons = dialogueInterventionReasons(originalText);
+  if (text === String(originalText ?? '') && interventionReasons.length) {
+    return validationError(
+      'RECURSION_DIALOGUE_NOOP_WITH_DETECTED_SLOP',
+      `Dialogue enhancement returned unchanged text despite detected slop: ${interventionReasons.join(', ')}.`
+    );
   }
   return { ok: true, text };
 }

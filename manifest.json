@@ -1,6 +1,6 @@
 {
   "display_name": "Recursion",
-  "version": "0.1.0-pre-alpha.3",
+  "version": "0.1.0-pre-alpha.4",
   "author": "MentallyQuill",
   "key": "recursion",
   "js": "src/extension/index.js",

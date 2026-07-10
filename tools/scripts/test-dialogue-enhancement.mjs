@@ -1,9 +1,14 @@
 import {
   DIALOGUE_ENHANCER_SCHEMA,
   buildDialogueEnhancementRequest,
+  dialogueInterventionReasons,
   validateDialogueEnhancementResult
 } from '../../src/dialogue-enhancement.mjs';
-import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
+import {
+  enhancementContextFromSnapshot,
+  speakerLabel
+} from '../../src/enhancement-context.mjs';
+import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const original = [
   'Mara set the cup down. "So that is what we are calling it now?"',
@@ -40,6 +45,55 @@ assert(request.prompt.includes('Mara hides concern behind practical commands.'),
 assertEqual(request.responseSchema, DIALOGUE_ENHANCER_SCHEMA, 'request carries response schema');
 assertEqual(request.machineJson, true, 'request requires machine JSON');
 assertEqual(request.contextMessages.length, 2, 'request respects bounded context');
+assert(request.prompt.includes('If any intervention-required pattern appears, do not return the original text unchanged.'), 'dialogue prompt explicitly forbids no-op when slop is detected');
+assert(request.prompt.includes('"changePlan"'), 'dialogue prompt requests optional change diagnostics');
+
+assertEqual(
+  speakerLabel({ role: 'assistant', sender: 'Carter' }),
+  'assistant(Carter)',
+  'speaker label includes assistant sender name'
+);
+
+const enhancementContext = enhancementContextFromSnapshot({
+  snapshot: {
+    messages: [
+      { role: 'assistant', sender: 'O\'Neill', text: 'O\'Neill folded his arms. "Carter?"', visible: true },
+      { role: 'assistant', sender: 'Carter', text: 'Carter did not look up. "Working on it, sir."', visible: true },
+      { role: 'user', sender: 'Will', text: 'Will waits.', visible: true }
+    ]
+  },
+  hand: {
+    cards: [
+      { family: 'Active Cast', promptText: 'O\'Neill presses with dry understatement. Carter answers with technical brevity.' },
+      { family: 'Social Subtext', promptText: 'SG-1 remains wary of Will but keeps the exchange professional.' },
+      { family: 'Possessions & Items', promptText: 'Coffee mug on the table.' }
+    ]
+  },
+  activeText: 'O\'Neill glanced over. "What do you want to do next?"',
+  activeSender: 'SG-1',
+  contextMessageLimit: 2
+});
+
+assertEqual(enhancementContext.contextMessages.length, 2, 'enhancement context respects context message limit');
+assertEqual(enhancementContext.characterContext.name, 'SG-1', 'active sender becomes character context name');
+assert(
+  enhancementContext.characterContext.exampleDialogue.includes('"Working on it, sir."'),
+  'recent dialogue examples are extracted from context messages'
+);
+assert(
+  enhancementContext.cardContext.some((card) => card.family === 'Active Cast'),
+  'enhancement card context keeps Active Cast'
+);
+assert(
+  !enhancementContext.cardContext.some((card) => card.family === 'Possessions & Items'),
+  'enhancement card context excludes low-voice item cards'
+);
+
+assertDeepEqual(
+  dialogueInterventionReasons('Mara set the cup down. "What do you want to do next?"'),
+  ['forced-question'],
+  'forced agency question requires dialogue intervention'
+);
 
 const accepted = validateDialogueEnhancementResult({
   schema: DIALOGUE_ENHANCER_SCHEMA,
@@ -49,6 +103,23 @@ const accepted = validateDialogueEnhancementResult({
   ].join('\n')
 }, { originalText: original });
 assertEqual(accepted.ok, true, 'validator accepts dialogue repair with stable narration shell');
+
+const rejectedNoopForcedQuestion = validateDialogueEnhancementResult({
+  schema: DIALOGUE_ENHANCER_SCHEMA,
+  text: 'Mara set the cup down. "What do you want to do next?"'
+}, { originalText: 'Mara set the cup down. "What do you want to do next?"' });
+assertEqual(rejectedNoopForcedQuestion.ok, false, 'dialogue no-op is rejected when forced-question slop is detected');
+assertEqual(
+  rejectedNoopForcedQuestion.error.code,
+  'RECURSION_DIALOGUE_NOOP_WITH_DETECTED_SLOP',
+  'dialogue no-op rejection uses stable code'
+);
+
+const cleanNoop = validateDialogueEnhancementResult({
+  schema: DIALOGUE_ENHANCER_SCHEMA,
+  text: 'Mara set the cup down. "Sit down before you fall over."'
+}, { originalText: 'Mara set the cup down. "Sit down before you fall over."' });
+assertEqual(cleanNoop.ok, true, 'dialogue no-op remains valid when no deterministic slop is detected');
 
 const rejectedNarrationDrift = validateDialogueEnhancementResult({
   schema: DIALOGUE_ENHANCER_SCHEMA,

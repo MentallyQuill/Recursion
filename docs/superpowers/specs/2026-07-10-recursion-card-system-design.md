@@ -624,6 +624,39 @@ Manual mode should display deck and card evidence truthfully:
 
 Manual mode should not synthesize card content to satisfy old minimum-card assumptions.
 
+## Testing And Validation Contract
+
+The Card System requires deterministic tests plus Playwright validation against the real SillyTavern extension surface.
+
+Validation lanes:
+
+- Deterministic unit and integration tests prove model, runtime, provider schema, settings, prompt composition, and UI state helpers.
+- No-generation Playwright UI validation proves layout, compactness, mobile behavior, editor contracts, deck/category/card operations, and visual states. This lane may capture screenshots and traces.
+- Generation-enabled Playwright validation proves Authoring Assist with real Utility provider calls. This lane must not capture screenshots or traces after model text can appear; it writes sanitized JSON/text evidence only.
+- Live validation must use a dedicated `recursion-soak-*` user, never `default-user`.
+- Live validation must verify the served SillyTavern extension copy matches the checkout before trusting UI evidence.
+
+Required Playwright validation:
+
+- Desktop and phone layouts show the Cards panel as compact, non-overlapping, viewport-clamped, and scrollable where needed.
+- Mobile interactions support tap, press-hold, visible action fallback, explicit move mode, and keyboard-accessible alternatives.
+- Editors uphold dirty state, Save, Close, Save/Discard/Cancel, save failure, and reorder failure contracts.
+- Category create/edit/delete/reorder works and persists.
+- Card create/edit/duplicate/delete/reorder/move works and persists.
+- Deck select/new/rename/duplicate/delete works and persists globally across reloads.
+- Default deck edit attempts show duplicate/new choices and do not mutate Default.
+- Authoring Assist preview checkboxes default on, Accept applies checked fields only, Close applies nothing, stale results are marked, retry uses current fields, and accepted fields remain unsaved until Save.
+- Authoring Assist uses real model calls in the live proof and converts rough card ideas into runnable, high-value Recursion cards.
+
+Additional validation that must not be skipped:
+
+- Persistence/reload: deck selection and saved custom deck edits survive a full page reload.
+- Prompt inspection: authored cards appear as Card Evidence only when runnable and selected by budget.
+- Diagnostics privacy: Export Diagnostics redacts custom deck text by default, including assist input/output.
+- Accessibility: keyboard navigation, focus trap, Escape/Enter behavior, and non-hover description access are proven.
+- Empty deck runtime: zero runnable cards skips card calls while non-card features such as Enhancements remain available.
+- Failure states: provider failure, assist failure, save failure, and invalid prompt states are visible and recoverable.
+
 ## Considered Alternatives
 
 ### Per-Chat Active Deck

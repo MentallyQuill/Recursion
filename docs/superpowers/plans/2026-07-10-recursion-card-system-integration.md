@@ -1684,6 +1684,465 @@ assert(!serialized.includes("private card prompt"), "default diagnostics redact 
 assert(serialized.includes("cardHashes"), "default diagnostics include card hashes");
 ```
 
+## Playwright Testing And Validation
+
+Card System implementation requires two Playwright lanes:
+
+- **No-generation UI proof**: drives visible controls, validates desktop/mobile layout and editor behavior, and may write screenshots/traces.
+- **Generation-enabled assist proof**: drives the wand recommender through a real Utility provider call and writes only sanitized JSON/text evidence.
+
+Do not merge Card System implementation without both lanes passing in addition to deterministic tests.
+
+### Script Targets
+
+Create two focused scripts:
+
+- `tools/scripts/prove-card-system-ui.mjs`
+- `tools/scripts/prove-card-system-assist.mjs`
+
+Both scripts should reuse the existing SillyTavern live harness helpers where possible and must write artifacts under:
+
+```text
+artifacts/live-smoke/card-system/<run-id>/
+```
+
+Commands:
+
+```powershell
+npm.cmd run check:playwright
+node tools/scripts/prove-card-system-ui.mjs --live --write-artifacts
+node tools/scripts/prove-card-system-assist.mjs --live --real-model --write-artifacts
+```
+
+Expected results:
+
+- `check:playwright`: `pass`.
+- `prove-card-system-ui`: `pass`, with `screenshots/desktop.png`, `screenshots/phone.png`, `playwright/trace.zip`, `report.json`, `summary.md`, and `diagnostics/redaction-check.json`.
+- `prove-card-system-assist`: `pass`, with `report.json`, `summary.md`, `live-log.jsonl`, `model-calls/card-authoring-assist.json`, `diagnostics/redaction-check.json`, and no screenshots or traces.
+
+Generation-enabled assist proof must fail if screenshots or traces are written after model text could appear.
+
+### Required Selectors
+
+Add stable selectors to the Card System UI. Tests should use these selectors instead of visible text when possible:
+
+```html
+<section data-recursion-card-system-panel>
+  <button data-recursion-card-deck-selector></button>
+  <button data-recursion-card-deck-actions></button>
+  <div data-recursion-card-category-id="category-id">
+    <button data-recursion-card-category-actions></button>
+  </div>
+  <button data-recursion-card-id="card-id"></button>
+  <button data-recursion-card-actions="card-id"></button>
+  <button data-recursion-card-move-mode></button>
+</section>
+
+<section data-recursion-card-editor>
+  <input data-recursion-card-editor-name>
+  <textarea data-recursion-card-editor-description></textarea>
+  <textarea data-recursion-card-editor-prompt></textarea>
+  <input data-recursion-card-editor-enabled type="checkbox">
+  <button data-recursion-card-editor-save></button>
+  <button data-recursion-card-editor-close></button>
+  <button data-recursion-card-editor-wand></button>
+</section>
+
+<section data-recursion-card-assist-preview>
+  <input data-recursion-card-assist-field="name" type="checkbox">
+  <input data-recursion-card-assist-field="description" type="checkbox">
+  <input data-recursion-card-assist-field="promptText" type="checkbox">
+  <button data-recursion-card-assist-accept></button>
+  <button data-recursion-card-assist-close></button>
+</section>
+```
+
+### UI Layout Proof
+
+`prove-card-system-ui.mjs` must validate desktop and phone viewports:
+
+```js
+const CARD_SYSTEM_VIEWPORTS = [
+  { name: "desktop", width: 1366, height: 900 },
+  { name: "phone", width: 390, height: 845 },
+];
+
+async function proveCardSystemLayout(page, artifacts) {
+  for (const viewport of CARD_SYSTEM_VIEWPORTS) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await openCardSystemPanel(page);
+    await assertCardSystemLayout(page, viewport);
+    await page.screenshot({
+      path: artifacts.screenshot(`${viewport.name}.png`),
+      fullPage: true,
+    });
+  }
+}
+
+async function assertCardSystemLayout(page, viewport) {
+  const result = await page.evaluate(() => {
+    const panel = document.querySelector("[data-recursion-card-system-panel]");
+    const rows = Array.from(document.querySelectorAll("[data-recursion-card-id]"));
+    const viewportWidth = window.visualViewport?.width || window.innerWidth;
+    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    const rect = panel?.getBoundingClientRect();
+    const rowRects = rows.map((row) => row.getBoundingClientRect());
+
+    return {
+      panelVisible: Boolean(panel && rect && rect.width > 0 && rect.height > 0),
+      panelInsideViewport: Boolean(rect && rect.left >= 0 && rect.right <= viewportWidth && rect.top >= 0 && rect.bottom <= viewportHeight + 1),
+      rowOverflowCount: rowRects.filter((row) => row.left < 0 || row.right > viewportWidth + 1).length,
+      narrowTextOverflowCount: rows.filter((row) => row.scrollWidth > row.clientWidth + 1).length,
+      touchTargetTooSmallCount: rows.filter((row) => {
+        const box = row.getBoundingClientRect();
+        return box.height < 30;
+      }).length,
+    };
+  });
+
+  assert.equal(result.panelVisible, true, `${viewport.name}: Card System panel visible`);
+  assert.equal(result.panelInsideViewport, true, `${viewport.name}: panel is viewport-clamped`);
+  assert.equal(result.rowOverflowCount, 0, `${viewport.name}: rows do not overflow horizontally`);
+  assert.equal(result.narrowTextOverflowCount, 0, `${viewport.name}: row text does not break layout`);
+  assert.equal(result.touchTargetTooSmallCount, 0, `${viewport.name}: touch targets remain usable`);
+}
+```
+
+Layout proof must fail on:
+
+- Horizontal overflow.
+- Panel clipped outside visual viewport.
+- Text overlapping controls.
+- Rows below compact usable height.
+- Missing mobile action fallback.
+- Move mode controls hidden on phone viewport.
+
+### Editor Contract Proof
+
+`prove-card-system-ui.mjs` must drive card, category, and deck editors through visible controls.
+
+Required card editor scenario:
+
+```js
+async function proveCardEditorContracts(page) {
+  await openCardSystemPanel(page);
+  await createEditableDeckFromDefault(page);
+  await createNewCard(page);
+
+  await page.locator("[data-recursion-card-editor-name]").fill("Scene Boundary");
+  await page.locator("[data-recursion-card-editor-prompt]").fill("Keep the next reply inside the current physical scene and avoid unearned time skips.");
+  await page.locator("[data-recursion-card-editor-close]").click();
+  await expectDirtyClosePrompt(page, ["save", "discard", "cancel"]);
+
+  await chooseDirtyCloseAction(page, "cancel");
+  await page.locator("[data-recursion-card-editor-save]").click();
+  await expectEditorSaved(page);
+  await reloadAndOpenCard(page, "Scene Boundary");
+  await assertEditorFieldValue(page, "promptText", "Keep the next reply inside the current physical scene and avoid unearned time skips.");
+}
+```
+
+Required category editor scenario:
+
+```js
+async function proveCategoryEditorContracts(page) {
+  await createCategory(page, {
+    name: "Scene Rules",
+    description: "Rules that constrain the immediate scene.",
+  });
+  await renameCategory(page, "Scene Rules", "Immediate Scene");
+  await moveCategory(page, "Immediate Scene", "up");
+  await reloadAndAssertCategory(page, "Immediate Scene");
+}
+```
+
+Required save-failure scenario:
+
+```js
+async function proveEditorSaveFailure(page) {
+  await page.evaluate(() => {
+    window.__recursionTestHooks.forceNextCardDeckSaveFailure = "forced-save-failure";
+  });
+  await page.locator("[data-recursion-card-editor-save]").click();
+  await page.waitForSelector("[data-recursion-card-editor-save-error]");
+  const draftStillVisible = await page.locator("[data-recursion-card-editor-prompt]").inputValue();
+  assert(draftStillVisible.length > 0, "save failure preserves local draft");
+}
+```
+
+### Deck Tool Proof
+
+`prove-card-system-ui.mjs` must prove:
+
+- Default deck is selectable and read-only.
+- Edit attempt on Default shows Duplicate to Edit and New Deck choices.
+- New Deck creates and selects a custom deck.
+- Rename Deck persists after reload.
+- Duplicate Deck creates `Name Copy` and preserves categories/cards.
+- Delete active custom deck falls back to Default.
+- Active deck selection persists globally after reload and chat switch.
+
+Scenario skeleton:
+
+```js
+async function proveDeckTools(page) {
+  await openCardSystemPanel(page);
+  await selectDeck(page, "Default");
+  await attemptDefaultDeckEdit(page);
+  await expectReadonlyGuard(page, ["Duplicate to edit", "New deck"]);
+
+  await createDeck(page, "Combat Focus");
+  await renameDeck(page, "Combat Focus", "Combat Pressure");
+  await duplicateDeck(page, "Combat Pressure");
+  await expectDeckExists(page, "Combat Pressure Copy");
+  await deleteDeck(page, "Combat Pressure Copy");
+  await expectDeckMissing(page, "Combat Pressure Copy");
+
+  await selectDeck(page, "Combat Pressure");
+  await page.reload();
+  await openCardSystemPanel(page);
+  await expectActiveDeck(page, "Combat Pressure");
+}
+```
+
+### Card Tool Proof
+
+`prove-card-system-ui.mjs` must prove:
+
+- New Card starts draft and does not run.
+- Rename plus valid prompt makes the card runnable.
+- Duplicate Card creates `Name Copy`.
+- Duplicate runnable card names show warning.
+- Disable card removes it from runnable count.
+- Move card to another category persists after reload.
+- Delete card removes it from deck and runtime candidates.
+
+Scenario skeleton:
+
+```js
+async function proveCardTools(page) {
+  await createNewCard(page);
+  await expectCardState(page, "New Card", "draft");
+  await saveCard(page, {
+    name: "Scene Boundary",
+    promptText: "Keep the next reply inside the current physical scene and avoid unearned time skips.",
+  });
+  await expectCardRunnable(page, "Scene Boundary");
+
+  await duplicateCard(page, "Scene Boundary");
+  await expectCardExists(page, "Scene Boundary Copy");
+  await renameCard(page, "Scene Boundary Copy", "Scene Boundary");
+  await expectCardWarning(page, "Scene Boundary", "duplicate-card-name");
+
+  await disableCard(page, "Scene Boundary");
+  await expectRunnableCount(page, 1);
+  await moveCardToCategory(page, "Scene Boundary", "Immediate Scene");
+  await page.reload();
+  await expectCardInCategory(page, "Scene Boundary", "Immediate Scene");
+}
+```
+
+### Assist Preview Proof
+
+`prove-card-system-ui.mjs` may use a deterministic fake assist result to validate preview mechanics without a real model call.
+
+Required preview assertions:
+
+- Field checkboxes are checked by default.
+- Unchecking a field preserves the original editor value.
+- Accept applies checked fields only.
+- Close applies no fields.
+- Accepted fields mark the editor dirty but do not save.
+- Save persists accepted fields.
+- Closing editor invalidates pending assist result.
+- Stale result indicator appears when editor text changed after request start.
+
+Scenario skeleton:
+
+```js
+async function proveAssistPreviewMechanics(page) {
+  await createNewCard(page);
+  await seedFakeAssistResult(page, {
+    name: "Immediate Scene Boundary",
+    description: "Prevents unearned scene jumps.",
+    promptText: "Keep the next reply within the established location, visible actors, and immediate beat.",
+  });
+
+  await page.locator("[data-recursion-card-editor-wand]").click();
+  await page.waitForSelector("[data-recursion-card-assist-preview]");
+  await assertAssistCheckboxesDefaultChecked(page);
+
+  await page.locator("[data-recursion-card-assist-field='description']").uncheck();
+  await page.locator("[data-recursion-card-assist-accept]").click();
+
+  await assertEditorFieldValue(page, "name", "Immediate Scene Boundary");
+  await assertEditorFieldValue(page, "description", "");
+  await assertEditorFieldValue(page, "promptText", "Keep the next reply within the established location, visible actors, and immediate beat.");
+  await expectEditorDirty(page);
+}
+```
+
+### Real Model Wand Proof
+
+`prove-card-system-assist.mjs` must use a real Utility provider route for `cardAuthoringAssist`.
+
+The script should run these seed cases:
+
+```js
+const ASSIST_SEED_CASES = [
+  {
+    id: "rough-intent",
+    name: "New Card",
+    description: "",
+    promptText: "keep the scene from jumping ahead too fast",
+  },
+  {
+    id: "prose-card",
+    name: "Mood",
+    description: "Too broad and vibe-heavy.",
+    promptText: "The story should feel tense and cinematic with rich prose.",
+  },
+  {
+    id: "recursion-specific",
+    name: "Open Thread",
+    description: "",
+    promptText: "Remember the unanswered accusation from the prior exchange and keep it active unless the reply directly resolves it.",
+  },
+  {
+    id: "unsafe-shape",
+    name: "Thoughts",
+    description: "",
+    promptText: "Reveal the character's hidden thoughts as truth and explain your reasoning.",
+  },
+];
+```
+
+For each seed case, the proof must assert:
+
+```js
+function assertHighValueAssistSuggestion(seed, suggestion) {
+  assert.notEqual(suggestion.name.trim(), "");
+  assert.notEqual(suggestion.name.trim(), "New Card");
+  assert(suggestion.name.length <= 80, "name stays compact");
+  assert(suggestion.description.length <= 240, "description stays compact");
+  assert(suggestion.promptText.length > 0, "prompt is non-empty");
+  assert(suggestion.promptText.length <= 2000, "prompt is bounded");
+  assert(!/author'?s note|preset|move this/i.test(JSON.stringify(suggestion)), "no Author's Note or preset move action");
+  assert(!/chain[- ]of[- ]thought|hidden reasoning|explain your reasoning/i.test(suggestion.promptText), "unsafe reasoning language removed");
+  assert(/keep|preserve|track|avoid|ensure|prefer|use|maintain/i.test(suggestion.promptText), "prompt is instruction-shaped");
+}
+```
+
+The live report should store only sanitized fields:
+
+```json
+{
+  "recordType": "recursion.cardSystemAssistProof",
+  "schemaVersion": 1,
+  "status": "pass",
+  "roleId": "cardAuthoringAssist",
+  "realModelCallCount": 4,
+  "cases": [
+    {
+      "id": "rough-intent",
+      "status": "pass",
+      "requestHash": "sha256-example",
+      "suggestionHash": "sha256-example",
+      "acceptedFields": ["name", "description", "promptText"],
+      "runnableAfterAcceptAndSave": true
+    }
+  ]
+}
+```
+
+The assist proof fails if:
+
+- The Utility provider is not actually called.
+- Any case returns malformed schema.
+- Suggestion keeps `New Card` as the name.
+- Suggestion produces broad vibe-only guidance.
+- Suggestion includes Author's Note or preset move text.
+- Suggestion includes unsafe hidden-reasoning language.
+- Accepted suggestion fails card prompt validation.
+- Export Diagnostics leaks the seed or suggestion text by default.
+
+### Persistence And Runtime Proof
+
+Playwright should verify persistence through a full page reload:
+
+```js
+async function provePersistenceAndRuntime(page) {
+  await selectDeck(page, "Combat Pressure");
+  await createAndSaveRunnableCard(page, {
+    name: "Scene Boundary",
+    promptText: "Keep the next reply inside the current physical scene and avoid unearned time skips.",
+  });
+  await page.reload();
+  await openCardSystemPanel(page);
+  await expectActiveDeck(page, "Combat Pressure");
+  await expectCardRunnable(page, "Scene Boundary");
+
+  const packet = await page.evaluate(() => window.__recursionLiveHarnessRuntime?.latestPromptPacket?.());
+  assert(packet.cardDeck.deckName === "Combat Pressure", "prompt packet records active deck");
+}
+```
+
+Runtime validation must cover:
+
+- Empty deck skips card provider roles.
+- Empty deck still allows Enhancements when enabled.
+- Runnable authored card appears as Card Evidence candidate.
+- Prompt budget may omit extra authored cards with explicit omission reason.
+- Prompt inspection displays card evidence locally.
+- Export Diagnostics redacts card text by default.
+
+### Accessibility Proof
+
+Playwright must use keyboard-only actions for at least one full card edit path:
+
+```js
+async function proveKeyboardAccessibility(page) {
+  await openCardSystemPanel(page);
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("[data-recursion-card-editor]");
+  await assertFocusInside(page, "[data-recursion-card-editor]");
+  await page.keyboard.press("Escape");
+  await assertTopLayerClosed(page, "[data-recursion-card-editor]");
+}
+```
+
+Accessibility proof must also assert:
+
+- Description popovers are reachable without hover.
+- Editor focus returns to the invoking card row after close.
+- Assist preview traps focus and closes with Escape.
+- Move Up and Move Down work without drag.
+- Visible action menus expose press-hold actions.
+
+### Visual Review Checklist
+
+The Playwright UI proof should write a checklist result into `report.json`:
+
+```json
+{
+  "visualReview": {
+    "desktopCompact": true,
+    "phoneCompact": true,
+    "noHorizontalOverflow": true,
+    "noTextOverlap": true,
+    "panelViewportClamped": true,
+    "touchTargetsUsable": true,
+    "moveModeDiscoverable": true,
+    "readonlyDefaultVisible": true,
+    "draftStateVisible": true,
+    "assistPreviewReadable": true
+  }
+}
+```
+
+Any `false` value fails the UI proof.
+
 ## Documentation Updates
 
 Update `docs/design/UI_SPEC.md`:
@@ -1709,6 +2168,17 @@ Update `docs/architecture/PROMPT_COMPOSITION_SPEC.md`:
 - Empty deck has no Card Evidence block.
 - Enhancements are independent of cards.
 
+Update `docs/testing/ARTIFACT_CONTRACT.md` if new Card System artifact files are introduced:
+
+- `card-system/report.json`.
+- `card-system/summary.md`.
+- `card-system/live-log.jsonl`.
+- `card-system/screenshots/desktop.png` for no-generation UI proof only.
+- `card-system/screenshots/phone.png` for no-generation UI proof only.
+- `card-system/playwright/trace.zip` for no-generation UI proof only.
+- `card-system/model-calls/card-authoring-assist.json` for sanitized real-model assist proof.
+- `card-system/diagnostics/redaction-check.json`.
+
 ## Verification Commands
 
 Run focused tests first:
@@ -1727,6 +2197,14 @@ Then run the broader repo gate used by Recursion:
 npm.cmd test
 ```
 
+Run Playwright readiness and Card System validation:
+
+```powershell
+npm.cmd run check:playwright
+node tools/scripts/prove-card-system-ui.mjs --live --write-artifacts
+node tools/scripts/prove-card-system-assist.mjs --live --real-model --write-artifacts
+```
+
 If PowerShell blocks npm shims, use `npm.cmd` rather than `npm`.
 
 For UI behavior that cannot be proven by unit tests, run the local SillyTavern extension and verify:
@@ -1738,6 +2216,9 @@ For UI behavior that cannot be proven by unit tests, run the local SillyTavern e
 - Move mode drag handles.
 - Assist preview accept/close behavior.
 - Empty deck generation with Enhancements enabled.
+- Real Utility-provider wand recommendation calls.
+- Screenshot-safe UI artifacts for desktop and phone.
+- Sanitized no-screenshot artifacts for generation-enabled assist proof.
 
 ## Implementation Order
 
@@ -1905,7 +2386,35 @@ node tools/scripts/test-storage.mjs
 node tools/scripts/test-ui.mjs
 ```
 
-### Step 7: Documentation And Full Verification
+### Step 7: Playwright Card System Validation
+
+Files:
+
+- `tools/scripts/prove-card-system-ui.mjs`
+- `tools/scripts/prove-card-system-assist.mjs`
+- `tools/scripts/lib/sillytavern-live-harness.mjs`
+- `docs/testing/ARTIFACT_CONTRACT.md`
+
+Work:
+
+- [ ] Add no-generation Card System UI proof script.
+- [ ] Add generation-enabled real-model Authoring Assist proof script.
+- [ ] Add desktop and phone screenshot capture for no-generation UI proof only.
+- [ ] Add visual review checklist to `report.json`.
+- [ ] Add editor, category, card, deck, assist preview, keyboard, persistence, and runtime proof scenarios.
+- [ ] Add real Utility-provider assist seed cases and high-value suggestion assertions.
+- [ ] Add redaction scan that fails on leaked seed or suggestion text.
+- [ ] Update artifact contract if new Card System artifact paths are added.
+
+Checkpoint:
+
+```powershell
+npm.cmd run check:playwright
+node tools/scripts/prove-card-system-ui.mjs --live --write-artifacts
+node tools/scripts/prove-card-system-assist.mjs --live --real-model --write-artifacts
+```
+
+### Step 8: Documentation And Full Verification
 
 Files:
 
@@ -1919,7 +2428,8 @@ Work:
 - [ ] Update card runtime contract.
 - [ ] Update prompt composition contract.
 - [ ] Run focused and broad verification.
-- [ ] Run live/mobile smoke if the UI changed in a way unit tests cannot cover.
+- [ ] Run Playwright UI proof and real-model assist proof.
+- [ ] Run live/mobile smoke for any behavior not covered by the focused Card System proof.
 
 Checkpoint:
 
@@ -1952,4 +2462,9 @@ The feature is complete when:
 - Authoring Assist cancellation, stale-result, failure, and retry behavior work.
 - Tests cover model, runtime, provider, and UI behavior.
 - Tests cover diagnostics redaction and custom-deck JSON portability.
+- Playwright no-generation UI proof passes on desktop and phone, with screenshots/traces.
+- Playwright real-model Authoring Assist proof passes without screenshots/traces after model text can appear.
+- Playwright validates editor contracts, deck tools, category tools, card tools, assist preview checkboxes, persistence after reload, keyboard accessibility, and compact mobile layout.
+- Real Utility-provider wand calls convert rough card ideas into runnable high-value cards and reject unsafe/low-value shapes.
+- Card System artifacts pass redaction checks.
 - Design docs and architecture docs match the implemented contract.

@@ -654,6 +654,7 @@ assert(/\.reasoning-node\.is-lit\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.62\)/.
 assert(/\.recursion-reasoning-line-fill\s*\{[\s\S]*?var\(--SmartThemeBodyColor/.test(recursionCss), 'production reasoning fill derives from SillyTavern body color');
 assert(/assets\/icons\/prose\.svg/.test(recursionCss), 'Enhancements target rows use the prose.svg mask icon');
 assert(/assets\/icons\/dialogue\.svg/.test(recursionCss), 'Enhancements target rows use the dialogue.svg mask icon');
+assert(/\.recursion-enhancements-choice\.is-combo \.recursion-enhancements-choice-icon\s*\{[\s\S]*?height:\s*42px;/.test(recursionCss), 'Prose + Dialogue row centers the full-height combo icon stack in its own slot');
 assert(!/recursion-settings-reasoning/.test(recursionCss), 'settings panel does not keep a duplicate reasoning chain stylesheet');
 assert(!/settingsReasoningLevelRow|recursionSettingReasoningChoice|MODE_OPTIONS/.test(recursionUi), 'settings panel does not keep duplicate mode or reasoning handlers');
 assert(/\.reasoning-chain::before/.test(barImplementationReference), 'reasoning nodes are connected by a chain line');
@@ -1845,9 +1846,11 @@ try {
   );
   const proseTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-prose]').querySelector('[data-recursion-enhancement-target-icon]');
   const dialogueTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-dialogue]').querySelector('[data-recursion-enhancement-target-icon]');
-  const combinedTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-prose-dialogue]').querySelector('[data-recursion-enhancement-target-icon]');
+  const combinedTargetChoice = root.querySelector('[data-recursion-enhancement-target-choice-prose-dialogue]');
+  const combinedTargetIcon = combinedTargetChoice.querySelector('[data-recursion-enhancement-target-icon]');
   assert(proseTargetIcon.className.includes('is-prose'), 'Prose target row uses prose icon');
   assert(dialogueTargetIcon.className.includes('is-dialogue'), 'Dialogue target row uses dialogue icon');
+  assert(combinedTargetChoice.className.includes('is-combo'), 'Prose + Dialogue target row owns combo icon slot layout');
   assert(combinedTargetIcon.className.includes('is-combo'), 'Prose + Dialogue target row uses stacked combo icon');
   assertEqual(combinedTargetIcon.children.length, 2, 'Prose + Dialogue target row stacks two compact icons');
   assert(combinedTargetIcon.children[0].className.includes('is-prose'), 'Prose + Dialogue target row places prose icon first');

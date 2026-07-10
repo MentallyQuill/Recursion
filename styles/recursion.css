@@ -451,6 +451,14 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   width: 16px;
 }
 
+.recursion-enhancements-choice-icon {
+  width: 22px;
+}
+
+.recursion-enhancements-choice.is-combo .recursion-enhancements-choice-icon {
+  height: 42px;
+}
+
 .recursion-pipeline-choice-name,
 .recursion-mode-choice-name,
 .recursion-enhancements-choice-name,

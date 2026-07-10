@@ -629,8 +629,9 @@ function enhancementApplyChoice(option) {
 }
 
 function enhancementTargetChoice(option) {
+  const isCombo = normalizeEnhancementTarget(option?.value) === 'prose-dialogue';
   return el('button', {
-    className: 'recursion-enhancements-choice',
+    className: isCombo ? 'recursion-enhancements-choice is-combo' : 'recursion-enhancements-choice',
     attrs: {
       type: 'button',
       title: option.title,
@@ -3702,8 +3703,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     enhancementsButton?.setAttribute('aria-label', `Enhancements: ${label}`);
     setTooltip(enhancementsButton, view.settings?.ui?.tooltipsEnabled !== false, `Enhancements: ${label}`);
     for (const choice of root.querySelectorAll('[data-recursion-enhancement-target-choice]')) {
-      const selected = cleanText(choice.dataset.recursionEnhancementTargetChoice).toLowerCase() === target;
-      choice.className = selected ? 'recursion-enhancements-choice is-selected' : 'recursion-enhancements-choice';
+      const choiceTarget = normalizeEnhancementTarget(choice.dataset.recursionEnhancementTargetChoice);
+      const selected = choiceTarget === target;
+      choice.className = [
+        'recursion-enhancements-choice',
+        choiceTarget === 'prose-dialogue' ? 'is-combo' : '',
+        selected ? 'is-selected' : ''
+      ].filter(Boolean).join(' ');
       choice.setAttribute('aria-current', selected ? 'true' : 'false');
     }
     for (const choice of root.querySelectorAll('[data-recursion-enhancement-apply-choice]')) {
@@ -3716,8 +3722,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function renderEnhancementsTargetSelection(target) {
     const selectedTarget = normalizeEnhancementTarget(target);
     for (const choice of root.querySelectorAll('[data-recursion-enhancement-target-choice]')) {
-      const selected = cleanText(choice.dataset.recursionEnhancementTargetChoice).toLowerCase() === selectedTarget;
-      choice.className = selected ? 'recursion-enhancements-choice is-selected' : 'recursion-enhancements-choice';
+      const choiceTarget = normalizeEnhancementTarget(choice.dataset.recursionEnhancementTargetChoice);
+      const selected = choiceTarget === selectedTarget;
+      choice.className = [
+        'recursion-enhancements-choice',
+        choiceTarget === 'prose-dialogue' ? 'is-combo' : '',
+        selected ? 'is-selected' : ''
+      ].filter(Boolean).join(' ');
       choice.setAttribute('aria-current', selected ? 'true' : 'false');
     }
   }

@@ -173,8 +173,10 @@ The Tense & PoV selector sits immediately to the right of Enhancements and befor
 The selector menu contains one `Auto` row and two forced axes:
 
 - `Auto`: Arbiter infers tense and POV from the latest visible assistant narration.
-- `Tense`: `Past` or `Present`.
-- `Point of View`: `1st`, `2nd`, `3rd Ltd`, `3rd Omni`, or `Mixed`.
+- `Tense`: `Past` and `Present` as two side-by-side segmented buttons.
+- `Point of View`: `1st`, `2nd`, `3rd Ltd`, `3rd Omni`, and `Mixed` as a vertical list.
+
+The layout is intentionally asymmetric. Tense has only two short choices, so a side-by-side row keeps the control compact and easy to compare. POV has five choices with longer labels, so it must render as stacked rows with left-aligned labels and tap-friendly height. This keeps `3rd Ltd`, `3rd Omni`, and `Mixed` readable on mobile without squeezing them into a multi-column grid.
 
 Selecting `Auto` stores no forced story form and closes the menu. Selecting a tense or POV stores a complete forced story form by combining that axis with the currently forced other axis. If the current value is `Auto`, the missing forced axis defaults to `past-third-limited`: choosing `Present` from `Auto` stores `present-third-limited`, and choosing `Mixed` from `Auto` stores `past-mixed`. Forced-axis clicks keep the menu open so the operator can adjust both axes. The UI must not present this as a style preset or prose rewrite feature. It is a correction control for the existing story-form prompt contract. The menu should close on outside click or `Esc`, and should follow the same compact SillyTavern-native treatment as the Pipeline and Mode menus.
 

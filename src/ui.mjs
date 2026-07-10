@@ -358,6 +358,32 @@ function enhancementApplyModeLabel(value) {
   return normalizeEnhancementApplyMode(value) === 'replace' ? 'Replace' : 'As Swipe';
 }
 
+function enhancementTargetIcon(option) {
+  const target = normalizeEnhancementTarget(option?.value);
+  if (target === 'prose-dialogue') {
+    return el('span', {
+      className: 'recursion-enhancements-choice-symbol is-combo',
+      attrs: { 'aria-hidden': 'true' },
+      dataset: { recursionEnhancementTargetIcon: target }
+    }, [
+      el('span', { className: 'recursion-enhancements-choice-symbol-part is-dialogue' }),
+      el('span', { className: 'recursion-enhancements-choice-symbol-part is-prose' })
+    ]);
+  }
+  if (target === 'prose' || target === 'dialogue') {
+    return el('span', {
+      className: `recursion-enhancements-choice-symbol is-${target}`,
+      attrs: { 'aria-hidden': 'true' },
+      dataset: { recursionEnhancementTargetIcon: target }
+    });
+  }
+  return el('span', {
+    className: 'recursion-enhancements-choice-symbol is-empty',
+    attrs: { 'aria-hidden': 'true' },
+    dataset: { recursionEnhancementTargetIcon: target }
+  });
+}
+
 function normalizePipelineMode(value) {
   const mode = cleanText(value, 'standard').toLowerCase();
   if (mode === 'rapid') return 'rapid';
@@ -619,7 +645,7 @@ function enhancementTargetChoice(option) {
       className: 'recursion-enhancements-choice-icon',
       attrs: { 'aria-hidden': 'true' }
     }, [
-      el('span', { className: 'recursion-enhancements-choice-dot' })
+      enhancementTargetIcon(option)
     ]),
     el('span', { className: 'recursion-enhancements-choice-copy' }, [
       el('span', {
@@ -675,7 +701,7 @@ function storyFormAxisChoice(option, axis) {
         [`recursionStoryFormPov${datasetSuffix(option.value)}`]: ''
       };
   return el('button', {
-    className: 'recursion-story-form-axis-choice',
+    className: axis === 'pov' ? 'recursion-story-form-pov-choice' : 'recursion-story-form-axis-choice',
     attrs: {
       type: 'button',
       title: option.title,
@@ -698,7 +724,7 @@ function storyFormMenu() {
     ]),
     el('div', { className: 'recursion-story-form-section' }, [
       el('div', { className: 'recursion-story-form-section-label', text: 'Point of View' }),
-      el('div', { className: 'recursion-story-form-axis-grid recursion-story-form-axis-grid-pov' },
+      el('div', { className: 'recursion-story-form-pov-list', dataset: { recursionStoryFormPovList: '' } },
         STORY_FORM_POV_OPTIONS.map((option) => storyFormAxisChoice(option, 'pov')))
     ])
   ];
@@ -3630,7 +3656,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     for (const choice of root.querySelectorAll('[data-recursion-story-form-pov]')) {
       const isSelected = !parsed.auto && choice.dataset.recursionStoryFormPov === parsed.pov;
-      choice.className = isSelected ? 'recursion-story-form-axis-choice is-selected' : 'recursion-story-form-axis-choice';
+      choice.className = isSelected ? 'recursion-story-form-pov-choice is-selected' : 'recursion-story-form-pov-choice';
       choice.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
     }
   }
@@ -3683,6 +3709,15 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     for (const choice of root.querySelectorAll('[data-recursion-enhancement-apply-choice]')) {
       const selected = cleanText(choice.dataset.recursionEnhancementApplyChoice).toLowerCase() === applyMode;
       choice.className = selected ? 'recursion-enhancements-apply-choice is-selected' : 'recursion-enhancements-apply-choice';
+      choice.setAttribute('aria-current', selected ? 'true' : 'false');
+    }
+  }
+
+  function renderEnhancementsTargetSelection(target) {
+    const selectedTarget = normalizeEnhancementTarget(target);
+    for (const choice of root.querySelectorAll('[data-recursion-enhancement-target-choice]')) {
+      const selected = cleanText(choice.dataset.recursionEnhancementTargetChoice).toLowerCase() === selectedTarget;
+      choice.className = selected ? 'recursion-enhancements-choice is-selected' : 'recursion-enhancements-choice';
       choice.setAttribute('aria-current', selected ? 'true' : 'false');
     }
   }
@@ -4106,12 +4141,17 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     const enhancementApplyChoice = control('recursionEnhancementApplyChoice');
     if (enhancementApplyChoice) {
+      panelRerenderClickEvents?.add(event);
+      event?.stopPropagation?.();
       runAction(runtime?.updateSettings?.({ enhancements: { applyMode: normalizeEnhancementApplyMode(enhancementApplyChoice.dataset.recursionEnhancementApplyChoice) } }));
     }
     const enhancementTargetChoice = control('recursionEnhancementTargetChoice');
     if (enhancementTargetChoice) {
-      runAction(runtime?.updateSettings?.({ enhancements: { target: normalizeEnhancementTarget(enhancementTargetChoice.dataset.recursionEnhancementTargetChoice) } }));
-      setEnhancementsMenuOpen(false);
+      panelRerenderClickEvents?.add(event);
+      event?.stopPropagation?.();
+      const target = normalizeEnhancementTarget(enhancementTargetChoice.dataset.recursionEnhancementTargetChoice);
+      renderEnhancementsTargetSelection(target);
+      runAction(runtime?.updateSettings?.({ enhancements: { target } }));
     }
     const storyFormAutoChoice = control('recursionStoryFormAutoChoice');
     if (storyFormAutoChoice) {

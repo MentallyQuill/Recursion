@@ -490,7 +490,8 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-story-form-auto-choice,
-.recursion-story-form-axis-choice {
+.recursion-story-form-axis-choice,
+.recursion-story-form-pov-choice {
   background: color-mix(in srgb, var(--recursion-panel) 72%, transparent);
   border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 9%, transparent);
   border-radius: 5px;
@@ -528,14 +529,23 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.recursion-story-form-axis-grid-pov {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.recursion-story-form-pov-list {
+  display: grid;
+  gap: 4px;
 }
 
 .recursion-story-form-axis-choice {
   min-height: 26px;
   padding: 4px 6px;
   text-align: center;
+}
+
+.recursion-story-form-pov-choice {
+  display: grid;
+  gap: 2px;
+  min-height: 30px;
+  padding: 5px 7px;
+  text-align: left;
 }
 
 .recursion-story-form-axis-label {
@@ -559,13 +569,17 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 .recursion-story-form-auto-choice.is-selected,
 .recursion-story-form-axis-choice:hover,
 .recursion-story-form-axis-choice:focus-visible,
-.recursion-story-form-axis-choice.is-selected {
+.recursion-story-form-axis-choice.is-selected,
+.recursion-story-form-pov-choice:hover,
+.recursion-story-form-pov-choice:focus-visible,
+.recursion-story-form-pov-choice.is-selected {
   background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
   outline: none;
 }
 
 .recursion-story-form-auto-choice[aria-pressed="true"],
-.recursion-story-form-axis-choice[aria-pressed="true"] {
+.recursion-story-form-axis-choice[aria-pressed="true"],
+.recursion-story-form-pov-choice[aria-pressed="true"] {
   border-color: color-mix(in srgb, var(--recursion-primary) 34%, transparent);
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--recursion-primary) 44%, transparent);
 }
@@ -1037,13 +1051,53 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   width: 16px;
 }
 
-.recursion-enhancements-choice-dot {
-  background: currentColor;
-  border-radius: 50%;
+.recursion-enhancements-choice-symbol {
+  color: currentColor;
   display: block;
-  height: 6px;
-  opacity: .72;
-  width: 6px;
+  height: 16px;
+  opacity: .78;
+  position: relative;
+  width: 16px;
+}
+
+.recursion-enhancements-choice-symbol.is-empty {
+  opacity: 0;
+}
+
+.recursion-enhancements-choice-symbol.is-prose,
+.recursion-enhancements-choice-symbol-part.is-prose {
+  background: currentColor;
+  mask: url('../assets/icons/prose.svg') center / contain no-repeat;
+  -webkit-mask: url('../assets/icons/prose.svg') center / contain no-repeat;
+}
+
+.recursion-enhancements-choice-symbol.is-dialogue,
+.recursion-enhancements-choice-symbol-part.is-dialogue {
+  background: currentColor;
+  mask: url('../assets/icons/dialogue.svg') center / contain no-repeat;
+  -webkit-mask: url('../assets/icons/dialogue.svg') center / contain no-repeat;
+}
+
+.recursion-enhancements-choice-symbol.is-combo {
+  opacity: .88;
+}
+
+.recursion-enhancements-choice-symbol-part {
+  display: block;
+  height: 13px;
+  position: absolute;
+  width: 13px;
+}
+
+.recursion-enhancements-choice-symbol-part.is-dialogue {
+  bottom: 0;
+  left: 0;
+  opacity: .62;
+}
+
+.recursion-enhancements-choice-symbol-part.is-prose {
+  right: 0;
+  top: 0;
 }
 
 .recursion-reasoning-chain {

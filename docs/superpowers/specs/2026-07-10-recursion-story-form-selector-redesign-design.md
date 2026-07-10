@@ -26,7 +26,11 @@ Tense
   Past    Present
 
 Point of View
-  1st     2nd     3rd Ltd     3rd Omni     Mixed
+  1st
+  2nd
+  3rd Ltd
+  3rd Omni
+  Mixed
 ```
 
 The menu uses compact SillyTavern-native chrome: no large cards, no nested cards, no marketing copy, no colorful dashboard styling. Section labels are quiet helper text. Choices are segmented button rows or tight button grids, not native `<select>` controls.
@@ -113,14 +117,17 @@ The menu should remain compact enough for the top bar:
 - No nested cards.
 - No broad cyan fills; selected state may use the same subtle cyan inset/fill treatment as other Recursion selectors.
 
-The Tense row has two choices. The POV row has five choices and may wrap into two compact rows on narrow popover width:
+The Tense row has two side-by-side choices. The POV section has five stacked list rows:
 
 ```text
-1st   2nd   3rd Ltd
-3rd Omni   Mixed
+1st
+2nd
+3rd Ltd
+3rd Omni
+Mixed
 ```
 
-Text must not clip. `3rd Omni` and `3rd Ltd` are the visible button labels; full copy lives in tooltips/accessible labels.
+This asymmetry is deliberate. Tense is a short binary choice and benefits from direct comparison. POV labels are longer and more numerous, so a vertical list gives each option stable tap area on mobile and prevents `3rd Ltd`, `3rd Omni`, and `Mixed` from being squeezed into a dense grid. Text must not clip. `3rd Omni` and `3rd Ltd` are the visible button labels; full copy lives in tooltips/accessible labels.
 
 ## Testing Strategy
 
@@ -128,6 +135,7 @@ Focused UI tests should prove:
 
 - The menu renders `Auto`, `Tense`, `Past`, `Present`, `Point of View`, `1st`, `2nd`, `3rd Ltd`, `3rd Omni`, and `Mixed`.
 - The old flat list is not rendered as eleven equal peer rows.
+- Tense renders as the two-button segmented row, while POV renders as a five-row vertical list.
 - Clicking `Present` from `past-third-limited` saves `present-third-limited`.
 - Clicking `Mixed` from `present-third-limited` saves `present-mixed`.
 - Clicking `Mixed` from `auto` saves `past-mixed`.

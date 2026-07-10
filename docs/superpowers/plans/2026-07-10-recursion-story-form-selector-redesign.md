@@ -261,7 +261,7 @@ function storyFormAutoChoice() {
 
 function storyFormAxisChoice(option, axis) {
   return el('button', {
-    className: 'recursion-story-form-axis-choice',
+    className: axis === 'pov' ? 'recursion-story-form-pov-choice' : 'recursion-story-form-axis-choice',
     attrs: {
       type: 'button',
       title: option.title,
@@ -286,7 +286,7 @@ function storyFormMenu() {
     ]),
     el('div', { className: 'recursion-story-form-section' }, [
       el('div', { className: 'recursion-story-form-section-label', text: 'Point of View' }),
-      el('div', { className: 'recursion-story-form-axis-grid recursion-story-form-axis-grid-pov' },
+      el('div', { className: 'recursion-story-form-pov-list', dataset: { recursionStoryFormPovList: '' } },
         STORY_FORM_POV_OPTIONS.map((option) => storyFormAxisChoice(option, 'pov')))
     ])
   ];
@@ -323,7 +323,8 @@ In `styles/recursion.css`, update the story-form menu block:
 }
 
 .recursion-story-form-auto-choice,
-.recursion-story-form-axis-choice {
+.recursion-story-form-axis-choice,
+.recursion-story-form-pov-choice {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, .08);
   border-radius: 5px;
@@ -360,14 +361,23 @@ In `styles/recursion.css`, update the story-form menu block:
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.recursion-story-form-axis-grid-pov {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.recursion-story-form-pov-list {
+  display: grid;
+  gap: 4px;
 }
 
 .recursion-story-form-axis-choice {
   min-height: 26px;
   padding: 4px 6px;
   text-align: center;
+}
+
+.recursion-story-form-pov-choice {
+  display: grid;
+  gap: 2px;
+  min-height: 30px;
+  padding: 5px 7px;
+  text-align: left;
 }
 
 .recursion-story-form-axis-label {
@@ -377,7 +387,8 @@ In `styles/recursion.css`, update the story-form menu block:
 }
 
 .recursion-story-form-auto-choice[aria-pressed="true"],
-.recursion-story-form-axis-choice[aria-pressed="true"] {
+.recursion-story-form-axis-choice[aria-pressed="true"],
+.recursion-story-form-pov-choice[aria-pressed="true"] {
   border-color: rgba(101, 216, 232, .34);
   background: rgba(101, 216, 232, .075);
   box-shadow: inset 2px 0 0 rgba(101, 216, 232, .44);
@@ -545,8 +556,10 @@ Replace the current flat menu paragraph with:
 The selector menu contains one `Auto` row and two forced axes:
 
 - `Auto`: Arbiter infers tense and POV from the latest visible assistant narration.
-- `Tense`: `Past` or `Present`.
-- `Point of View`: `1st`, `2nd`, `3rd Ltd`, `3rd Omni`, or `Mixed`.
+- `Tense`: `Past` and `Present` as two side-by-side segmented buttons.
+- `Point of View`: `1st`, `2nd`, `3rd Ltd`, `3rd Omni`, and `Mixed` as a vertical list.
+
+The layout is intentionally asymmetric. Tense has only two short choices, so a side-by-side row keeps the control compact and easy to compare. POV has five choices with longer labels, so it must render as stacked rows with left-aligned labels and tap-friendly height. This keeps `3rd Ltd`, `3rd Omni`, and `Mixed` readable on mobile without squeezing them into a multi-column grid.
 
 Selecting `Auto` stores no forced story form and closes the menu. Selecting a tense or POV stores a complete forced story form by combining that axis with the currently forced other axis. If the current value is `Auto`, the missing forced axis defaults to `past-third-limited`: choosing `Present` from `Auto` stores `present-third-limited`, and choosing `Mixed` from `Auto` stores `past-mixed`. Forced-axis clicks keep the menu open so the operator can adjust both axes.
 ```
@@ -639,7 +652,7 @@ If validating in SillyTavern, sync the served extension copy from `F:\git\Recurs
 ```text
 Auto row visible.
 Tense row visible with Past and Present.
-Point of View row visible with 1st, 2nd, 3rd Ltd, 3rd Omni, Mixed.
+Point of View list visible with stacked rows for 1st, 2nd, 3rd Ltd, 3rd Omni, Mixed.
 Forced-axis clicks update the compact bar label.
 Auto closes the popover.
 Esc and outside click close the popover.

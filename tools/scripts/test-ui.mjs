@@ -630,6 +630,8 @@ assert(!/rgba\(101,\s*216,\s*232/.test(reasoningLitNodeCss), 'lit reasoning node
 assert(/\.reasoning-line-fill\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.52\)/.test(barImplementationReference), 'reasoning chain fill uses SillyTavern grey-white theme color');
 assert(/\.reasoning-node\.is-lit\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.62\)/.test(barImplementationReference), 'lit reasoning nodes use muted SillyTavern grey-white fill');
 assert(/\.recursion-reasoning-line-fill\s*\{[\s\S]*?var\(--SmartThemeBodyColor/.test(recursionCss), 'production reasoning fill derives from SillyTavern body color');
+assert(/assets\/icons\/prose\.svg/.test(recursionCss), 'Enhancements target rows use the prose.svg mask icon');
+assert(/assets\/icons\/dialogue\.svg/.test(recursionCss), 'Enhancements target rows use the dialogue.svg mask icon');
 assert(!/recursion-settings-reasoning/.test(recursionCss), 'settings panel does not keep a duplicate reasoning chain stylesheet');
 assert(!/settingsReasoningLevelRow|recursionSettingReasoningChoice|MODE_OPTIONS/.test(recursionUi), 'settings panel does not keep duplicate mode or reasoning handlers');
 assert(/\.reasoning-chain::before/.test(barImplementationReference), 'reasoning nodes are connected by a chain line');
@@ -1814,6 +1816,18 @@ try {
     ['off', 'prose', 'dialogue', 'prose-dialogue'],
     'Enhancements selector uses Off/Prose/Dialogue/Prose + Dialogue target order'
   );
+  assertDeepEqual(
+    root.querySelectorAll('[data-recursion-enhancement-target-icon]').map((icon) => icon.dataset.recursionEnhancementTargetIcon),
+    ['off', 'prose', 'dialogue', 'prose-dialogue'],
+    'Enhancements selector renders one icon slot for each target option'
+  );
+  const proseTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-prose]').querySelector('[data-recursion-enhancement-target-icon]');
+  const dialogueTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-dialogue]').querySelector('[data-recursion-enhancement-target-icon]');
+  const combinedTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-prose-dialogue]').querySelector('[data-recursion-enhancement-target-icon]');
+  assert(proseTargetIcon.className.includes('is-prose'), 'Prose target row uses prose icon');
+  assert(dialogueTargetIcon.className.includes('is-dialogue'), 'Dialogue target row uses dialogue icon');
+  assert(combinedTargetIcon.className.includes('is-combo'), 'Prose + Dialogue target row uses stacked combo icon');
+  assertEqual(combinedTargetIcon.children.length, 2, 'Prose + Dialogue target row stacks two compact icons');
   assertEqual(root.querySelectorAll('[data-recursion-enhancement-target-choice-tip]').length, 4, 'Enhancements selector renders mini descriptions for all target options');
   assertEqual(
     root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-label'),
@@ -1831,6 +1845,10 @@ try {
   assert(storyFormMenuText.includes('3rd Ltd'), 'story form menu includes third-person limited POV');
   assert(storyFormMenuText.includes('3rd Omni'), 'story form menu includes third-person omniscient POV');
   assert(storyFormMenuText.includes('Mixed'), 'story form menu includes mixed POV');
+  const storyFormPovList = root.querySelector('[data-recursion-story-form-pov-list]');
+  assert(storyFormPovList, 'story form menu renders POV choices as a vertical list');
+  assertEqual(storyFormPovList.querySelectorAll('[data-recursion-story-form-pov]').length, 5, 'story form POV list contains all five POV choices');
+  assert(!/\.recursion-story-form-axis-grid-pov\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3/.test(recursionCss), 'story form POV choices are not laid out as a three-column grid');
   assertEqual(root.querySelectorAll('[data-recursion-story-form-choice]').length, 0, 'story form menu no longer renders flat combined choices');
   assertEqual(root.querySelector('[data-recursion-story-form-auto-choice]').getAttribute('aria-pressed'), 'false', 'Auto is not selected for forced story form');
   assertEqual(root.querySelector('[data-recursion-story-form-tense-present]').getAttribute('aria-pressed'), 'true', 'present tense is selected');
@@ -2030,7 +2048,9 @@ try {
   assertEqual(root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-expanded'), 'true', 'Enhancements menu stays open after apply mode selection');
   root.querySelector('[data-recursion-enhancement-target-choice-dialogue]').querySelector('[data-recursion-enhancement-target-choice-tip]').click();
   assertDeepEqual(settingsUpdates.at(-1), { enhancements: { target: 'dialogue' } }, 'Enhancements menu switches target from nested row content clicks');
-  assertEqual(root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-expanded'), 'false', 'Enhancements button reflects closed menu after target selection');
+  assertEqual(root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-expanded'), 'true', 'Enhancements button keeps menu open after target selection');
+  assertEqual(root.querySelector('[data-recursion-enhancements-menu]').hidden, false, 'Enhancements menu stays open after target selection');
+  assert(root.querySelector('[data-recursion-enhancement-target-choice-dialogue]').className.includes('is-selected'), 'Enhancements target selection highlights immediately');
   view = { ...view, settings: { ...view.settings, enhancements: { target: 'dialogue', applyMode: 'replace', contextMessages: 13 } } };
   ui.update();
   assert(!root.querySelector('[data-recursion-enhancements-button]').className.includes('is-off'), 'Enhancements button is no longer grey when enabled');

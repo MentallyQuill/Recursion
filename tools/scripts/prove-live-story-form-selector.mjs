@@ -68,12 +68,17 @@ try {
   const hasAxisUi = ['Auto', 'Tense', 'Past', 'Present', 'Point of View', '1st', '2nd', '3rd Ltd', '3rd Omni', 'Mixed']
     .every((text) => menuText.includes(text));
   const flatChoiceCount = await page.locator('[data-recursion-story-form-choice]').count();
+  const povList = page.locator('[data-recursion-story-form-pov-list]');
+  const povListVisible = await povList.isVisible();
+  const povListCount = await povList.locator('[data-recursion-story-form-pov]').count();
   report.checks.push({
     name: 'axis-menu-rendered',
-    status: hasAxisUi && flatChoiceCount === 0 ? 'pass' : 'fail',
-    details: { hasAxisUi, flatChoiceCount, menuText }
+    status: hasAxisUi && flatChoiceCount === 0 && povListVisible && povListCount === 5 ? 'pass' : 'fail',
+    details: { hasAxisUi, flatChoiceCount, povListVisible, povListCount, menuText }
   });
-  if (!hasAxisUi || flatChoiceCount !== 0) fail('axis-menu-render-failed', 'Story form menu did not render axis selector.', { hasAxisUi, flatChoiceCount, menuText });
+  if (!hasAxisUi || flatChoiceCount !== 0 || !povListVisible || povListCount !== 5) {
+    fail('axis-menu-render-failed', 'Story form menu did not render tense axis with vertical POV list.', { hasAxisUi, flatChoiceCount, povListVisible, povListCount, menuText });
+  }
 
   await page.locator('[data-recursion-story-form-pov-mixed]').click();
   const afterMixed = await page.evaluate(() => globalThis.__recursionLiveHarnessRuntime.view().settings.storyFormOverride);

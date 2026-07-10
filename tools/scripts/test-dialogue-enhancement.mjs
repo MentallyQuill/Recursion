@@ -46,7 +46,14 @@ assertEqual(request.responseSchema, DIALOGUE_ENHANCER_SCHEMA, 'request carries r
 assertEqual(request.machineJson, true, 'request requires machine JSON');
 assertEqual(request.contextMessages.length, 2, 'request respects bounded context');
 assert(request.prompt.includes('If any intervention-required pattern appears, do not return the original text unchanged.'), 'dialogue prompt explicitly forbids no-op when slop is detected');
+assert(request.prompt.includes('Minimum edit ratio: 10%'), 'dialogue prompt states minimum edit ratio');
+assert(request.prompt.includes('Target edit ratio: 10-20%'), 'dialogue prompt states target edit ratio band');
+assert(request.prompt.includes('Soft maximum edit ratio: 30%'), 'dialogue prompt states soft maximum edit ratio');
 assert(request.prompt.includes('"changePlan"'), 'dialogue prompt requests optional change diagnostics');
+assert(
+  buildDialogueEnhancementRequest({ text: '"We come back with authorization and a plan."' }).prompt.includes('authorization and a plan'),
+  'dialogue prompt preserves ordinary story use of authorization'
+);
 
 assertEqual(
   speakerLabel({ role: 'assistant', sender: 'Carter' }),
@@ -120,6 +127,7 @@ const cleanNoop = validateDialogueEnhancementResult({
   text: 'Mara set the cup down. "Sit down before you fall over."'
 }, { originalText: 'Mara set the cup down. "Sit down before you fall over."' });
 assertEqual(cleanNoop.ok, true, 'dialogue no-op remains valid when no deterministic slop is detected');
+assertEqual(cleanNoop.editRatio, 0, 'dialogue validation reports no-op edit ratio without rejecting it');
 
 const rejectedNarrationDrift = validateDialogueEnhancementResult({
   schema: DIALOGUE_ENHANCER_SCHEMA,

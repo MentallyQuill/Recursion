@@ -136,7 +136,7 @@ function qualityDelta(before = '', after = '') {
     distance,
     ratio,
     changed: source !== next,
-    significant: source !== next && ratio >= 0.12 && afterSlop < beforeSlop
+    significant: source !== next && ratio >= 0.1 && afterSlop < beforeSlop
   };
 }
 

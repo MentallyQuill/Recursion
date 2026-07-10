@@ -889,6 +889,10 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assertEqual(result.target, 'prose-dialogue', 'Prose + Dialogue result reports target');
   assertDeepEqual(roleCalls, ['dialogueEnhancer', 'proseEnhancer'], 'Prose + Dialogue runs Dialogue before Prose');
   assertEqual(proseHost.message.text, 'Mara placed the cup on the table. "Sit down before you fall over. We can argue after."', 'Replace applies one final output');
+  const replaceCall = proseHost.calls.find((call) => call.type === 'replace');
+  assertEqual(typeof result.editRatio, 'number', 'Prose + Dialogue result reports final edit ratio');
+  assertEqual(typeof replaceCall.options.marker.editRatio, 'number', 'Prose + Dialogue marker records final edit ratio');
+  assertEqual(replaceCall.options.marker.passHashes.every((entry) => typeof entry.editRatio === 'number'), true, 'Prose + Dialogue marker records per-pass edit ratios');
 }
 
 {

@@ -17,6 +17,7 @@ import {
 } from './card-scope.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { enhancementContextFromSnapshot } from './enhancement-context.mjs';
+import { roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
 import { composeGuidanceForCards, composePromptPacket, GUIDANCE_SCHEMA as PROMPT_GUIDANCE_SCHEMA, PROMPT_PACKET_VERSION } from './prompt.mjs';
 import { PROVIDER_CONTRACT_HASH, fetchOpenAICompatibleModels } from './providers.mjs';
 import {
@@ -3134,6 +3135,7 @@ export function createRecursionRuntime({
       let enhancedText = originalText;
       const passHashes = [];
       for (const pass of passSequence) {
+        const passOriginalText = enhancedText;
         if (pass === 'dialogue') {
           const request = buildDialogueEnhancementRequest({
             text: enhancedText,
@@ -3171,7 +3173,7 @@ export function createRecursionRuntime({
             return { ok: false, target, mode, error: validation.error };
           }
           enhancedText = validation.text;
-          passHashes.push({ pass, hash: hashJson(enhancedText) });
+          passHashes.push({ pass, hash: hashJson(enhancedText), editRatio: validation.editRatio ?? roundedEnhancementEditRatio(passOriginalText, enhancedText) });
           continue;
         }
         if (pass === 'prose') {
@@ -3210,12 +3212,13 @@ export function createRecursionRuntime({
             return { ok: false, target, mode, error: validation.error };
           }
           enhancedText = validation.text;
-          passHashes.push({ pass, hash: hashJson(enhancedText) });
+          passHashes.push({ pass, hash: hashJson(enhancedText), editRatio: validation.editRatio ?? roundedEnhancementEditRatio(passOriginalText, enhancedText) });
         }
       }
       marker.passSequence = passSequence;
       marker.passHashes = passHashes;
       marker.enhancedHash = hashJson(enhancedText);
+      marker.editRatio = roundedEnhancementEditRatio(originalText, enhancedText);
       if (mode === 'replace') {
         const replace = await messages.replaceAssistantMessageText?.(messageId, enhancedText, { marker });
         if (replace?.ok === false) return { ok: false, mode, error: replace.error };
@@ -3246,7 +3249,7 @@ export function createRecursionRuntime({
         label: target === 'dialogue' ? 'Dialogue enhanced.' : (target === 'prose-dialogue' ? 'Response enhanced.' : 'Prose enhanced.'),
         chips: target === 'dialogue' ? ['Dialogue'] : (target === 'prose-dialogue' ? ['Dialogue', 'Prose'] : ['Prose'])
       });
-      return { ok: true, target, mode, messageId, originalHash, enhancedHash: hashJson(enhancedText), passSequence, passHashes };
+      return { ok: true, target, mode, messageId, originalHash, enhancedHash: hashJson(enhancedText), editRatio: marker.editRatio, passSequence, passHashes };
     } catch (error) {
       settleRuntimeActivity({
         runId,

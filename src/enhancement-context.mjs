@@ -12,7 +12,7 @@ const ENHANCEMENT_CARD_FAMILIES = new Set([
   'Scene Constraints',
   'Open Threads'
 ]);
-const SECRET_PATTERN = /(raw[-_\s]*prompt|rawPrompt|provider[-_\s]*response|hidden[-_\s]*reasoning|api[-_\s]*key|authorization|bearer\s+[a-z0-9._-]+|sk-[a-z0-9_-]+)/ig;
+const SECRET_PATTERN = /(raw[-_\s]*prompt|rawPrompt|provider[-_\s]*response|hidden[-_\s]*reasoning|api[-_\s]*key|authorization\s*[:=]\s*(?:bearer\s+)?[a-z0-9._~+/=-]+|bearer\s+[a-z0-9._~+/=-]+|sk-[a-z0-9_-]+)/ig;
 
 function safeText(value, limit = CONTEXT_TEXT_LIMIT) {
   return truncate(compact(String(value ?? '').replace(SECRET_PATTERN, '[redacted]')), limit);

@@ -3,8 +3,10 @@ import { compact, hashJson, truncate } from './core.mjs';
 export const PROSE_ENHANCER_SCHEMA = 'recursion.proseEnhancer.v1';
 
 const MAX_CONTEXT_TEXT = 12000;
+import { roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
+
 const MAX_TARGET_TEXT = 12000;
-const SECRET_PATTERN = /(raw[-_\s]*prompt|rawPrompt|provider[-_\s]*response|hidden[-_\s]*reasoning|api[-_\s]*key|authorization|bearer\s+[a-z0-9._-]+|sk-[a-z0-9_-]+)/ig;
+const SECRET_PATTERN = /(raw[-_\s]*prompt|rawPrompt|provider[-_\s]*response|hidden[-_\s]*reasoning|api[-_\s]*key|authorization\s*[:=]\s*(?:bearer\s+)?[a-z0-9._~+/=-]+|bearer\s+[a-z0-9._~+/=-]+|sk-[a-z0-9_-]+)/ig;
 
 export const BANNED_AI_SLOP_LIST = String.raw`## Core banned AI slop and clichés
 
@@ -382,7 +384,11 @@ export function buildProseEnhancementRequest({
     '',
     'Intervention policy:',
     '- If the source contains a banned phrase or banned dialogue exception, do not return the original text unchanged.',
+    '- Minimum edit ratio: 10%.',
+    '- Target edit ratio: 10-20%.',
+    '- Soft maximum edit ratio: 30%.',
     '- If a sentence is generic but not unsafe, improve it through concrete action, compression, or rhythm rather than decorative synonym swaps.',
+    '- If the source is short or dialogue-heavy, come as close to the target band as possible without changing protected dialogue.',
     '- If the prose is already clean, returning it unchanged is allowed.',
     '- Optional diagnostics are allowed in changePlan, but the text field is the only applied output.',
     '',
@@ -526,5 +532,5 @@ export function validateProseEnhancementResult(result = {}, { originalText = '' 
       `Prose enhancement returned unchanged text despite detected slop: ${interventionReasons.join(', ')}.`
     );
   }
-  return { ok: true, text };
+  return { ok: true, text, editRatio: roundedEnhancementEditRatio(originalText, text) };
 }

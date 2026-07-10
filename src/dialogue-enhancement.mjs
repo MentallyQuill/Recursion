@@ -1,12 +1,13 @@
 import { compact, truncate } from './core.mjs';
 import { speakerLabel } from './enhancement-context.mjs';
+import { roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
 import { dialogueSpans } from './prose-enhancement.mjs';
 
 export const DIALOGUE_ENHANCER_SCHEMA = 'recursion.dialogueEnhancer.v1';
 
 const MAX_CONTEXT_TEXT = 12000;
 const MAX_TARGET_TEXT = 12000;
-const SECRET_PATTERN = /(raw[-_\s]*prompt|rawPrompt|provider[-_\s]*response|hidden[-_\s]*reasoning|api[-_\s]*key|authorization|bearer\s+[a-z0-9._-]+|sk-[a-z0-9_-]+)/ig;
+const SECRET_PATTERN = /(raw[-_\s]*prompt|rawPrompt|provider[-_\s]*response|hidden[-_\s]*reasoning|api[-_\s]*key|authorization\s*[:=]\s*(?:bearer\s+)?[a-z0-9._~+/=-]+|bearer\s+[a-z0-9._~+/=-]+|sk-[a-z0-9_-]+)/ig;
 
 export const DIALOGUE_SLOP_RULES = String.raw`## Dialogue slop priorities
 
@@ -159,7 +160,11 @@ export function buildDialogueEnhancementRequest({
     '',
     'Intervention policy:',
     '- If any intervention-required pattern appears, do not return the original text unchanged.',
-    '- Prefer one precise, character-consistent replacement over broad rewriting.',
+    '- Minimum edit ratio: 10%.',
+    '- Target edit ratio: 10-20%.',
+    '- Soft maximum edit ratio: 30%.',
+    '- Prefer precise, character-consistent revision over decorative rewriting.',
+    '- If the source is short or structurally constrained, come as close to the target band as possible without breaking the hard rules.',
     '- If the dialogue is already clean, returning it unchanged is allowed.',
     '- Optional diagnostics are allowed in changePlan, but the text field is the only applied output.',
     '',
@@ -259,5 +264,5 @@ export function validateDialogueEnhancementResult(result = {}, { originalText = 
       `Dialogue enhancement returned unchanged text despite detected slop: ${interventionReasons.join(', ')}.`
     );
   }
-  return { ok: true, text };
+  return { ok: true, text, editRatio: roundedEnhancementEditRatio(originalText, text) };
 }

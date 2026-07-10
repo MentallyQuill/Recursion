@@ -39,6 +39,13 @@ assert(request.prompt.includes('* controlled chaos'), 'prompt includes the final
 assert(request.prompt.includes('<recursion_card_context>'), 'prose prompt includes card context section');
 assert(request.prompt.includes('Mara hides concern behind motion.'), 'prose prompt includes safe card context text');
 assert(request.prompt.includes(sourceText), 'prompt includes source text');
+assert(request.prompt.includes('Minimum edit ratio: 10%'), 'prose prompt states minimum edit ratio');
+assert(request.prompt.includes('Target edit ratio: 10-20%'), 'prose prompt states target edit ratio band');
+assert(request.prompt.includes('Soft maximum edit ratio: 30%'), 'prose prompt states soft maximum edit ratio');
+assert(
+  buildProseEnhancementRequest({ text: 'O\'Neill said, "We come back with authorization and a plan."' }).prompt.includes('authorization and a plan'),
+  'prose prompt preserves ordinary story use of authorization'
+);
 assertEqual(request.responseSchema, PROSE_ENHANCER_SCHEMA, 'request carries response schema');
 assertEqual(request.responseLength, 4096, 'request uses bounded response length');
 assert(BANNED_AI_SLOP_LIST.includes('## Core banned AI slop and clichés'), 'exported banned list keeps heading intact');
@@ -85,6 +92,7 @@ const cleanProseNoop = validateProseEnhancementResult({
   text: 'Mara crossed the room. "Keep the door shut," she said.'
 }, { originalText: 'Mara crossed the room. "Keep the door shut," she said.' });
 assertEqual(cleanProseNoop.ok, true, 'prose no-op remains valid when no deterministic slop is detected');
+assertEqual(cleanProseNoop.editRatio, 0, 'prose validation reports no-op edit ratio without rejecting it');
 
 const dialogueOnlySlopNoop = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,

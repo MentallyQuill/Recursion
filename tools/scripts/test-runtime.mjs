@@ -638,7 +638,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   const proseHost = createProseMessageHarness();
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { proseEnhancement: { mode: 'off', contextMessages: 13 } },
+    settings: { enhancements: { target: 'off', applyMode: 'as-swipe', contextMessages: 13 } },
     hostMessages: proseHost.messages,
     generationRouter: {
       async generate(roleId, request, options) {
@@ -661,13 +661,13 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: { proseEnhancement: { mode: 'off', contextMessages: 13 } }
+    settings: { enhancements: { target: 'off', applyMode: 'as-swipe', contextMessages: 13 } }
   });
-  await runtime.updateSettings({ proseEnhancement: { mode: 'as-swipe' } });
+  await runtime.updateSettings({ enhancements: { target: 'prose', applyMode: 'as-swipe' } });
   assertDeepEqual(
-    runtime.view().settings.proseEnhancement,
-    { mode: 'as-swipe', contextMessages: 13 },
-    'runtime safe view preserves Prose Enhancement mode for the compact bar'
+    runtime.view().settings.enhancements,
+    { target: 'prose', applyMode: 'as-swipe', contextMessages: 13 },
+    'runtime safe view preserves Enhancements target for the compact bar'
   );
 }
 
@@ -682,7 +682,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   }));
   snapshotMessages.push({ mesid: 30, role: 'assistant', text: proseHost.message.text, visible: true });
   const { runtime } = createRuntimeHarness({
-    settings: { proseEnhancement: { mode: 'as-swipe', contextMessages: 3 } },
+    settings: { enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: 3 } },
     snapshot: {
       chatId: 'prose-runtime-chat',
       chatKey: 'prose-runtime-chat',
@@ -722,7 +722,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 {
   const proseHost = createProseMessageHarness();
   const { runtime } = createRuntimeHarness({
-    settings: { proseEnhancement: { mode: 'replace', contextMessages: 13 } },
+    settings: { enhancements: { target: 'prose', applyMode: 'replace', contextMessages: 13 } },
     hostMessages: proseHost.messages,
     generationRouter: {
       async generate() {
@@ -745,9 +745,72 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const proseHost = createProseMessageHarness('Mara set the cup down. "So that is what we are calling it now?"');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request, options) {
+        routerCalls.push({ roleId, request, options });
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.dialogueEnhancer.v1',
+            text: 'Mara set the cup down. "Call it whatever lets you sleep."'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-as-swipe' });
+  assertEqual(result.ok, true, 'Dialogue Enhancement returns success');
+  assertEqual(result.target, 'dialogue', 'Dialogue result reports target');
+  assertEqual(result.mode, 'as-swipe', 'Dialogue As Swipe result reports apply mode');
+  assertDeepEqual(routerCalls.map((call) => call.roleId), ['dialogueEnhancer'], 'Dialogue target calls only dialogueEnhancer');
+  assertEqual(proseHost.message.swipes[1], 'Mara set the cup down. "Call it whatever lets you sleep."', 'Dialogue target appends repaired dialogue swipe');
+  assertEqual(proseHost.message.swipeId, 1, 'Dialogue target selects enhanced swipe');
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara set the cup down. "What do you want to do next?"');
+  const roleCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'prose-dialogue', applyMode: 'replace', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId) {
+        roleCalls.push(roleId);
+        if (roleId === 'dialogueEnhancer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.dialogueEnhancer.v1',
+              text: 'Mara set the cup down. "Sit down before you fall over. We can argue after."'
+            }
+          };
+        }
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.proseEnhancer.v1',
+            text: 'Mara placed the cup on the table. "Sit down before you fall over. We can argue after."'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-prose-dialogue-replace' });
+  assertEqual(result.ok, true, 'Prose + Dialogue enhancement succeeds');
+  assertEqual(result.target, 'prose-dialogue', 'Prose + Dialogue result reports target');
+  assertDeepEqual(roleCalls, ['dialogueEnhancer', 'proseEnhancer'], 'Prose + Dialogue runs Dialogue before Prose');
+  assertEqual(proseHost.message.text, 'Mara placed the cup on the table. "Sit down before you fall over. We can argue after."', 'Replace applies one final output');
+}
+
+{
   const proseHost = createProseMessageHarness();
   const { runtime } = createRuntimeHarness({
-    settings: { proseEnhancement: { mode: 'as-swipe', contextMessages: 13 } },
+    settings: { enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: 13 } },
     hostMessages: proseHost.messages,
     generationRouter: {
       async generate() {
@@ -773,7 +836,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 {
   const proseHost = createProseMessageHarness();
   const { runtime } = createRuntimeHarness({
-    settings: { proseEnhancement: { mode: 'replace', contextMessages: 13 } },
+    settings: { enhancements: { target: 'prose', applyMode: 'replace', contextMessages: 13 } },
     hostMessages: proseHost.messages,
     generationRouter: {
       async generate() {
@@ -794,7 +857,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   const proseHost = createProseMessageHarness();
   const providerGate = deferred();
   const { runtime } = createRuntimeHarness({
-    settings: { proseEnhancement: { mode: 'replace', contextMessages: 13 } },
+    settings: { enhancements: { target: 'prose', applyMode: 'replace', contextMessages: 13 } },
     hostMessages: proseHost.messages,
     generationRouter: {
       async generate(roleId, request = {}) {
@@ -847,7 +910,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   const proseHost = createProseMessageHarness();
   const roleCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { proseEnhancement: { mode: 'replace', contextMessages: 13 } },
+    settings: { enhancements: { target: 'prose', applyMode: 'replace', contextMessages: 13 } },
     hostMessages: proseHost.messages,
     generationRouter: {
       async generate(roleId, request = {}) {
@@ -889,7 +952,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   const providerGate = deferred();
   const roleCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { pipelineMode: 'rapid', proseEnhancement: { mode: 'replace', contextMessages: 13 } },
+    settings: { pipelineMode: 'rapid', enhancements: { target: 'prose', applyMode: 'replace', contextMessages: 13 } },
     hostMessages: proseHost.messages,
     generationRouter: {
       async generate(roleId, request = {}) {

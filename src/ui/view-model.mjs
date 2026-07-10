@@ -29,6 +29,8 @@ const PHASE_LABELS = Object.freeze({
   utilityComposing: 'Composing prompt packet with Utility...',
   reasonerComposing: 'Reasoner refining guidance...',
   promptInstalling: 'Installing Recursion prompt...',
+  dialogueEnhancing: 'Enhancing dialogue...',
+  enhancementResponse: 'Enhancing response...',
   proseEnhancing: 'Enhancing prose...',
   promptPacketBuilt: 'Recursion prompt ready.',
   storageSaving: 'Saving scene cache...',
@@ -109,18 +111,26 @@ function pipelineLabel(value) {
   return 'Standard Pipeline';
 }
 
-function normalizeProseEnhancementMode(value) {
-  const mode = cleanText(value, 'off').toLowerCase();
-  if (mode === 'as-swipe') return 'as-swipe';
-  if (mode === 'replace') return 'replace';
+function normalizeEnhancementTarget(value) {
+  const target = cleanText(value, 'off').toLowerCase();
+  if (target === 'prose' || target === 'dialogue' || target === 'prose-dialogue') return target;
   return 'off';
 }
 
-function proseEnhancementLabel(value) {
-  const mode = normalizeProseEnhancementMode(value);
-  if (mode === 'as-swipe') return 'As Swipe';
-  if (mode === 'replace') return 'Replace';
+function normalizeEnhancementApplyMode(value) {
+  return cleanText(value, 'as-swipe').toLowerCase() === 'replace' ? 'replace' : 'as-swipe';
+}
+
+function enhancementTargetLabel(value) {
+  const target = normalizeEnhancementTarget(value);
+  if (target === 'prose') return 'Prose';
+  if (target === 'dialogue') return 'Dialogue';
+  if (target === 'prose-dialogue') return 'Prose + Dialogue';
   return 'Off';
+}
+
+function enhancementApplyModeLabel(value) {
+  return normalizeEnhancementApplyMode(value) === 'replace' ? 'Replace' : 'As Swipe';
 }
 
 function normalizeLastBriefStatus(value, hasCards = false, hasPacket = false) {
@@ -232,7 +242,8 @@ export function createRecursionViewModel(view = {}) {
   const enabled = settings.enabled !== false;
   const mode = normalizeMode(settings.mode);
   const pipelineMode = normalizePipelineMode(settings.pipelineMode);
-  const proseEnhancementMode = normalizeProseEnhancementMode(settings.proseEnhancement?.mode);
+  const enhancementTarget = normalizeEnhancementTarget(settings.enhancements?.target);
+  const enhancementApplyMode = normalizeEnhancementApplyMode(settings.enhancements?.applyMode);
   const cardScope = normalizeCardScope(settings.cardScope || defaultCardScope());
   const rawCards = Array.isArray(source.lastHand?.cards) ? source.lastHand.cards : [];
   const lastBriefStatus = normalizeLastBriefStatus(source.lastBrief?.status, rawCards.length > 0, Boolean(source.lastPacket));
@@ -261,13 +272,16 @@ export function createRecursionViewModel(view = {}) {
   return {
     mode,
     pipelineMode,
-    proseEnhancementMode,
+    enhancementTarget,
+    enhancementApplyMode,
     lastBriefStatus,
     lastBriefReason: cleanText(source.lastBrief?.reason || ''),
     enabled,
     modeLabel: modeLabel(mode),
     pipelineLabel: pipelineLabel(pipelineMode),
-    proseEnhancementLabel: proseEnhancementLabel(proseEnhancementMode),
+    enhancementsLabel: enhancementTarget === 'off'
+      ? 'Off'
+      : `${enhancementTargetLabel(enhancementTarget)}, ${enhancementApplyModeLabel(enhancementApplyMode)}`,
     cardScope,
     cardScopeLabel: cardScopeLabel(cardScope),
     cardScopeCounts: cardScopeCounts(cardScope),

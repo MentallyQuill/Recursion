@@ -45,6 +45,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'fusedCardBundle',
   'rapidTurnDelta',
   'guidanceComposer',
+  'dialogueEnhancer',
   'proseEnhancer',
   'providerTest'
 ]);
@@ -66,6 +67,7 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   fusedCardBundle: 'recursion.cardBundle.v1',
   rapidTurnDelta: 'recursion.rapidTurnDelta.v2',
   guidanceComposer: 'recursion.guidanceComposer.v1',
+  dialogueEnhancer: 'recursion.dialogueEnhancer.v1',
   proseEnhancer: 'recursion.proseEnhancer.v1',
   reasonerComposer: 'recursion.reasonerComposer.v1',
   providerTest: 'recursion.providerTest.v1'
@@ -804,6 +806,12 @@ function structuredOutputRetryableError(error) {
   return code === 'RECURSION_JSON_PARSE_FAILED'
     || code === 'RECURSION_JSON_OBJECT_REQUIRED'
     || code === 'RECURSION_PROVIDER_SCHEMA_MISMATCH';
+}
+
+function enhancementTextFallbackSchema(roleId = '') {
+  if (roleId === 'dialogueEnhancer') return 'recursion.dialogueEnhancer.v1';
+  if (roleId === 'proseEnhancer') return 'recursion.proseEnhancer.v1';
+  return '';
 }
 
 function structuredOutputFieldHint(roleId, request = {}) {
@@ -1554,11 +1562,12 @@ export function createGenerationRouter({ client, activity = null, journal = null
             diagnostics
           };
         } catch (error) {
-          if (roleId === 'proseEnhancer' && structuredOutputRetryableError(error) && String(raw?.text || '').trim()) {
+          const textFallbackSchema = enhancementTextFallbackSchema(roleId);
+          if (textFallbackSchema && structuredOutputRetryableError(error) && String(raw?.text || '').trim()) {
             const text = truncate(String(raw.text || '').trim(), 12000);
             const latencyMs = Date.now() - started;
             const data = {
-              schema: 'recursion.proseEnhancer.v1',
+              schema: textFallbackSchema,
               text
             };
             const diagnostics = sanitize({

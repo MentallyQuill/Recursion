@@ -268,9 +268,9 @@ function enhancedSwipeInfo(marker = {}) {
     gen_finished: null,
     extra: {
       api: 'recursion',
-      model: 'prose-enhancement',
+      model: 'enhancement',
       recursion: {
-        proseEnhancement: cloneJsonSafe(marker)
+        enhancement: cloneJsonSafe(marker)
       }
     }
   };

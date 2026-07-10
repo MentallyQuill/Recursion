@@ -7,4 +7,5 @@ Development scripts for deterministic verification and guarded live smoke checks
 - `scripts/check-playwright-readiness.mjs` - Offline Playwright/Chromium readiness probe with optional artifacts.
 - `scripts/check-sillytavern-soak-users.mjs` - Dedicated `recursion-soak-*` user storage preflight.
 - `scripts/smoke-sillytavern-live.mjs` - Guarded live SillyTavern smoke for served-extension freshness, storage, UI, and opt-in generation bridge prompt evidence.
+- `scripts/prove-live-enhancements.mjs` - Guarded Playwright proof for Dialogue and Prose + Dialogue Enhancements with real Utility calls.
 - `scripts/lib/sillytavern-live-harness.mjs` - Shared live-harness helpers for auth, artifacts, redaction, storage probes, browser control, and report status.

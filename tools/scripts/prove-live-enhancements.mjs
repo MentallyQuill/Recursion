@@ -17,7 +17,7 @@ function envValue(name, fallback = '') {
 }
 
 function proofScript() {
-  return async ({ mode }) => {
+  return async ({ target, applyMode }) => {
     const rawContext = () => globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
     const decorateContext = (ctx = {}) => {
       ctx.saveChat = async () => {};
@@ -39,36 +39,31 @@ function proofScript() {
       globalThis.reloadCurrentChat = async () => {};
     }
     const context = () => decorateContext(rawContext());
-    const assistantText = (inputMode) => [
-      `Prose Enhancement live ${inputMode} proof.`,
-      'Mara was angry. Mara walked across the room. Mara looked at the door.',
-      'The silence settled over them for a long moment. The words hung in the air.',
-      'She drew in a breath and let out a breath. Her jaw clenched.',
-      'She reached the handle, stopped, and waited.'
+    const assistantText = [
+      'Mara kept her hand on the latch.',
+      '"So you are saying you are worried. Are you okay? I can provide support if you want. Do not get the wrong idea, this is purely tactical."'
     ].join(' ');
-    const seedAssistant = (inputMode) => {
+    const seedAssistant = () => {
       const ctx = context();
       if (!Array.isArray(ctx.chat)) ctx.chat = [];
       ctx.chat.length = 0;
-      const text = assistantText(inputMode);
       ctx.chat.push({
         mesid: 0,
         is_user: true,
-        name: 'Recursion Prose Proof User',
-        mes: `Please continue the proof for ${inputMode}.`
+        name: 'Recursion Enhancement Proof User',
+        mes: 'Mara is guarded and dislikes being managed. She just saw the other person flinch.'
       });
       const mesid = 1;
       const message = {
         mesid,
         is_user: false,
-        name: 'Recursion Prose Proof',
-        mes: text,
+        name: 'Mara',
+        mes: assistantText,
         swipe_id: 0,
-        swipes: [text]
+        swipes: [assistantText]
       };
       ctx.chat.push(message);
-      globalThis.__recursionProseProofMessage = message;
-      return { mesid, text };
+      return { mesid, text: assistantText };
     };
     const messageState = (mesid) => {
       const msg = (context().chat || []).find((entry, index) => Number(entry?.mesid ?? index) === Number(mesid));
@@ -85,17 +80,13 @@ function proofScript() {
     if (!activeRuntime) return { ok: false, reason: 'runtime-unavailable' };
     await activeRuntime.updateSettings({
       enabled: true,
-      enhancements: {
-        target: mode === 'off' ? 'off' : 'prose',
-        applyMode: mode === 'replace' ? 'replace' : 'as-swipe',
-        contextMessages: 3
-      }
+      enhancements: { target, applyMode, contextMessages: 3 }
     });
-    const seed = seedAssistant(mode);
+    const seed = seedAssistant();
     const before = messageState(seed.mesid);
-    const result = await activeRuntime.enhanceLatestAssistantMessage({ reason: `live-${mode}` });
+    const result = await activeRuntime.enhanceLatestAssistantMessage({ reason: `live-${target}-${applyMode}` });
     const after = messageState(seed.mesid);
-    return { ok: result?.ok !== false, mode, seed, result, before, after };
+    return { ok: result?.ok !== false, target, applyMode, seed, result, before, after };
   };
 }
 
@@ -105,9 +96,9 @@ const password = envValue('SILLYTAVERN_PASSWORD', '');
 const userValidation = validateSoakUserHandle(user);
 if (!userValidation.ok) fail('unsafe-user', 'RECURSION_SILLYTAVERN_USER must be a dedicated recursion-soak-* user.', { user, reason: userValidation.reason });
 
-const runId = createRunId('prove-live-prose-enhancement');
+const runId = createRunId('prove-live-enhancements');
 const report = {
-  recordType: 'recursion.liveProseEnhancementProof',
+  recordType: 'recursion.liveEnhancementsProof',
   schemaVersion: 1,
   runId,
   baseUrl,
@@ -149,22 +140,37 @@ try {
   });
   if (providerTest?.ok !== true) fail('utility-provider-failed', 'Utility provider live test failed.', providerTest);
 
-  for (const mode of ['off', 'as-swipe', 'replace']) {
-    const proof = await page.evaluate(proofScript(), { mode });
-    const pass = mode === 'off'
-      ? proof.result?.skipped === true && proof.before.text === proof.after.text && proof.after.swipes.length === 1
-      : mode === 'as-swipe'
-        ? proof.ok === true && proof.after.swipes.length === 2 && proof.after.swipeInfoLength === proof.after.swipes.length && proof.after.swipeId === 1 && proof.after.swipes[0] === proof.before.swipes[0]
-        : proof.ok === true && proof.after.swipes.length === 1;
+  for (const testCase of [
+    { target: 'dialogue', applyMode: 'as-swipe' },
+    { target: 'prose-dialogue', applyMode: 'replace' }
+  ]) {
+    const proof = await page.evaluate(proofScript(), testCase);
+    const expectedPasses = testCase.target === 'prose-dialogue' ? ['dialogue', 'prose'] : ['dialogue'];
+    const pass = testCase.applyMode === 'as-swipe'
+      ? proof.ok === true
+        && proof.result?.target === testCase.target
+        && proof.result?.mode === testCase.applyMode
+        && JSON.stringify(proof.result?.passSequence || []) === JSON.stringify(expectedPasses)
+        && proof.after.swipes.length === 2
+        && proof.after.swipeInfoLength === proof.after.swipes.length
+        && proof.after.swipeId === 1
+        && proof.after.swipes[0] === proof.before.swipes[0]
+      : proof.ok === true
+        && proof.result?.target === testCase.target
+        && proof.result?.mode === testCase.applyMode
+        && JSON.stringify(proof.result?.passSequence || []) === JSON.stringify(expectedPasses)
+        && proof.after.swipes.length === 1
+        && proof.before.text !== proof.after.text;
     report.checks.push({
-      name: `prose-enhancement-${mode}`,
+      name: `enhancement-${testCase.target}-${testCase.applyMode}`,
       status: pass ? 'pass' : 'fail',
       details: {
         ok: proof.ok,
         resultOk: proof.result?.ok,
         skipped: proof.result?.skipped === true,
-        resultMode: proof.result?.mode || '',
         resultTarget: proof.result?.target || '',
+        resultMode: proof.result?.mode || '',
+        passSequence: proof.result?.passSequence || [],
         beforeSwipeCount: proof.before.swipes.length,
         afterSwipeCount: proof.after.swipes.length,
         afterSwipeInfoLength: proof.after.swipeInfoLength,
@@ -174,14 +180,14 @@ try {
         errorCode: proof.result?.error?.code || ''
       }
     });
-    if (!pass) fail(`prose-${mode}-failed`, `Prose Enhancement ${mode} proof failed.`, proof);
+    if (!pass) fail(`enhancement-${testCase.target}-${testCase.applyMode}-failed`, `Enhancement ${testCase.target}/${testCase.applyMode} proof failed.`, proof);
   }
 
   report.status = 'pass';
-  report.result = 'prose-enhancement-live-pass';
+  report.result = 'enhancements-live-pass';
 } catch (error) {
   report.status = error?.result ? 'fail' : 'environment-fail';
-  report.result = error?.result || 'prose-enhancement-live-error';
+  report.result = error?.result || 'enhancements-live-error';
   report.error = {
     message: String(error?.message || error),
     details: error?.details || null

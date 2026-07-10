@@ -14,7 +14,7 @@ This manual describes the turn lifecycle implemented by `src/runtime.mjs` and th
 
 Pipeline selection is separate from Auto/Manual. The compact bar owns the Pipeline selector as an icon-only dropdown immediately to the left of the Mode button. `Standard` runs the full foreground pipeline on send. `Rapid` warms a provider-generated card packet in the background and uses a short foreground Utility delta on send. `Fused` runs the foreground Arbiter and then generates all requested cards through one structured bundle call before the shared deck/hand/compose/install stages. Settings may persist `pipelineMode`, but Settings must not render a second Standard/Rapid/Fused toggle.
 
-Prose Enhancement is separate from Auto/Manual and Standard/Rapid/Fused. It runs only after SillyTavern has produced an assistant message and only when its mode is `as-swipe` or `replace`. `Off` leaves the host output untouched. `As Swipe` preserves the original host output, appends one enhanced sibling swipe, and selects the enhanced swipe even if the provider output is minimally changed or byte-identical. `Replace` replaces the active assistant text with the enhanced result. If the hold, Utility call, or validation fails, runtime reveals the original host output unchanged.
+Enhancements are separate from Auto/Manual and Standard/Rapid/Fused. They run only after SillyTavern has produced an assistant message and only when `settings.enhancements.target` is `prose`, `dialogue`, or `prose-dialogue`. `Off` leaves the host output untouched. `As Swipe` preserves the original host output, appends one enhanced sibling swipe, and selects the enhanced swipe even if provider output is minimally changed or byte-identical. `Replace` replaces the active assistant text with the enhanced result. If the hold, Utility call, or validation fails, runtime reveals the original host output unchanged.
 
 ## Auto Sequence
 
@@ -83,7 +83,7 @@ sequenceDiagram
 
 Background warm:
 
-1. After an assistant message lands, Prose Enhancement runs first when enabled. Only after that pass settles does `warmRapidScene()` capture the current source revision for Rapid. The runtime-level Rapid warm entrypoint waits behind any active or pending Prose Enhancement barrier, so settings-triggered or event-triggered Rapid warm cannot snapshot the unenhanced assistant text.
+1. After an assistant message lands, Enhancements run first when enabled. Only after those passes settle does `warmRapidScene()` capture the current source revision for Rapid. The runtime-level Rapid warm entrypoint waits behind any active or pending enhancement barrier, so settings-triggered or event-triggered Rapid warm cannot snapshot the unenhanced assistant text.
 2. Runtime uses the provider Arbiter and provider card roles to build or refresh a scene deck for that exact revision.
 3. Runtime saves the active scene cache variant with `variant.rapid` metadata, including the warm artifact id, source revision hash, selected card ids, guidance metadata, contract hashes, and Rapid pipeline version.
 4. Background warm does not compose a final prompt packet, does not call the SillyTavern prompt adapter, and never installs Recursion prompt keys.
@@ -99,27 +99,34 @@ Foreground send:
 
 Rapid foreground roles are small Utility jobs. They may hedge by starting a primary call immediately and a backup after the configured short delay; the first valid structured output wins and diagnostics record the winning hedge source. Hedging is not used for Story generation.
 
-## Prose Enhancement Post-Generation Sequence
+## Enhancements Post-Generation Sequence
 
-Prose Enhancement is a post-generation Utility pass, not prompt-packet conditioning. It does not change the prompt installed before the host model writes. It mutates only the just-landed assistant message after validation.
+Enhancements are post-generation Utility passes, not prompt-packet conditioning. They do not change the prompt installed before the host model writes. They mutate only the just-landed assistant message after validation.
 
 ```mermaid
 sequenceDiagram
     participant Host as SillyTavern Host
     participant Runtime as Runtime
-    participant Utility as Utility proseEnhancer
+    participant Utility as Utility Enhancer
     participant UI as Activity UI
 
     Host->>Runtime: assistant landed
     Runtime->>Host: activeAssistantMessageIdentity()
-    alt mode is off or host API missing
+    alt target is off or host API missing
         Runtime-->>Host: leave output unchanged
     else enabled
         Runtime->>Host: holdAssistantMessage(messageId)
         Runtime->>Runtime: snapshot bounded scene context
-        Runtime->>Utility: proseEnhancer(context, source text)
-        Utility-->>Runtime: rewritten text
-        Runtime->>Runtime: validate source hash, length, dialogue, banned-list exception
+        alt target includes Dialogue
+            Runtime->>Utility: dialogueEnhancer(context, source text)
+            Utility-->>Runtime: dialogue-enhanced text
+            Runtime->>Runtime: validate dialogue/narration shell
+        end
+        alt target includes Prose
+            Runtime->>Utility: proseEnhancer(context, current text)
+            Utility-->>Runtime: prose-enhanced text
+            Runtime->>Runtime: validate source hash, length, dialogue, banned-list exception
+        end
         alt As Swipe and valid
             Runtime->>Host: appendAssistantMessageSwipe(messageId, text, select)
         else Replace and valid
@@ -128,17 +135,17 @@ sequenceDiagram
             Runtime->>Host: revealAssistantMessage(messageId)
         end
         Runtime->>Host: revealAssistantMessage(messageId)
-        Runtime->>UI: Prose enhanced or skipped
+        Runtime->>UI: Enhanced or skipped
     end
 ```
 
-The hold path blanks the active assistant text before the player sees the unpolished host output. Hold state is transient and restored through `revealAssistantMessage()` on any failure. Runtime builds the Utility request from the original text, the latest bounded message context, the source-message hash, and normalized `proseEnhancement.contextMessages`. The prompt includes the full banned AI slop and cliches list intact and permits dialogue edits only for removing banned material already present inside dialogue.
+The hold path blanks the active assistant text before the player sees the unenhanced host output. Hold state is transient and restored through `revealAssistantMessage()` on any failure. Runtime builds Utility requests from the original text, the latest bounded message context, the source-message hash, and normalized `enhancements.contextMessages`. Dialogue Enhancement uses character/card/context evidence to remove echoing, forced questions, over-technical "smart" speech, unearned tsundere deflection, attraction cliches, and other dialogue slop before improving naturalness and subtext. Prose Enhancement then polishes the current text when target is `prose` or `prose-dialogue`.
 
-`As Swipe` uses a marker derived from the original text hash and enhancement schema so the same enhanced swipe can be found instead of duplicated. `Replace` writes the polished text into the active assistant message/swipe and asks the host adapter to save and update the visible message block best-effort. Both modes run before Rapid warm so future Rapid source revisions see the selected final text. While this pass is active, progress shows a first-class `Prose Enhancement` row with compact text `Enhancing prose...`, not the card-batch progress label.
+`As Swipe` uses a marker derived from the original text hash, target, apply mode, and enhancement schema so the same enhanced swipe can be found instead of duplicated. `Replace` writes the enhanced text into the active assistant message/swipe and asks the host adapter to save and update the visible message block best-effort. Both modes run before Rapid warm so future Rapid source revisions see the selected final text. While active, progress shows a first-class `Prose Enhancement`, `Dialogue Enhancement`, or `Enhancement` row with compact text `Enhancing prose...`, `Enhancing dialogue...`, or `Enhancing response...`, not the card-batch progress label.
 
-If the player stops SillyTavern generation before Prose Enhancement starts, runtime cancels the armed prose pass. Any delayed assistant-landed or generation-ended event for that canceled generation must skip Prose Enhancement, must not call the Utility `proseEnhancer`, and must not hold, replace, reveal, or append assistant message text. The next fresh host generation clears that cancellation marker when it arms a new Prose Enhancement pass.
+If the player stops SillyTavern generation before Enhancements start, runtime cancels the armed pass. Any delayed assistant-landed or generation-ended event for that canceled generation must skip Enhancements, must not call Utility enhancer roles, and must not hold, replace, reveal, or append assistant message text. The next fresh host generation clears that cancellation marker when it arms a new enhancement pass.
 
-The message mutation caused by Prose Enhancement is Recursion-owned. Late SillyTavern `MESSAGE_UPDATED` or `MESSAGE_SWIPED` events for the latest assistant that arrive from the enhancement save/reload window must not be routed through generic `source-changed` cleanup, must not clear Last Brief cards, and must not clear the current prompt packet. User edits outside that short owned-mutation window still use the normal source-change cleanup path.
+The message mutation caused by Enhancements is Recursion-owned. Late SillyTavern `MESSAGE_UPDATED` or `MESSAGE_SWIPED` events for the latest assistant that arrive from the enhancement save/reload window must not be routed through generic `source-changed` cleanup, must not clear Last Brief cards, and must not clear the current prompt packet. User edits outside that short owned-mutation window still use the normal source-change cleanup path.
 
 ## Regenerate Fresh-Next Sequence
 
@@ -240,9 +247,9 @@ Runtime keeps one active run id and an abort controller. Settings changes, provi
 
 When the SillyTavern entrypoint receives `event_types.CHAT_CHANGED`, runtime aborts active provider work, clears volatile packet/hand/plan/snapshot state, best-effort marks the previously active scene cache stale with reason `chat-changed`, clears Recursion prompt keys, and journals the prompt-clear result against the previous chat when known. It does not call Utility or Reasoner for the newly selected chat until the next generation or explicit refresh.
 
-When the entrypoint receives source mutation events such as `MESSAGE_DELETED`, `MESSAGE_UPDATED`, or older-message `MESSAGE_SWIPED`, runtime follows the same prompt-safe cleanup path with reason `source-changed`. It clears the stale prompt immediately and stores only compact event metadata such as event name and message id; it does not persist changed message text. Recursion-owned Prose Enhancement mutations are the exception: latest-assistant update/swipe events inside the owned enhancement window are ignored because the runtime already knows about the final selected text and Last Brief should remain ready. A `MESSAGE_SWIPED` event for the latest visible assistant message outside that owned window is different: it is treated as a same-turn swipe retry, so Recursion keeps the existing prompt and Rapid does not prewarm again. If SillyTavern invokes the generation interceptor again for that same pending user turn, runtime reinstalls the previous packet without running Standard, Rapid, Utility, or Reasoner work unless a fresh-next-generation token is armed. With fresh-next-generation armed, runtime clears the retry marker, uses the current post-swipe snapshot, and runs fresh provider work once. The next distinct user message reads the current active source revision and starts fresh progress. If the user swiped back to an earlier revision and that exact variant still exists and validates, runtime can reuse it with cached/purple progress; otherwise it regenerates or skips according to the Arbiter plan.
+When the entrypoint receives source mutation events such as `MESSAGE_DELETED`, `MESSAGE_UPDATED`, or older-message `MESSAGE_SWIPED`, runtime follows the same prompt-safe cleanup path with reason `source-changed`. It clears the stale prompt immediately and stores only compact event metadata such as event name and message id; it does not persist changed message text. Recursion-owned enhancement mutations are the exception: latest-assistant update/swipe events inside the owned enhancement window are ignored because the runtime already knows about the final selected text and Last Brief should remain ready. A `MESSAGE_SWIPED` event for the latest visible assistant message outside that owned window is different: it is treated as a same-turn swipe retry, so Recursion keeps the existing prompt and Rapid does not prewarm again. If SillyTavern invokes the generation interceptor again for that same pending user turn, runtime reinstalls the previous packet without running Standard, Rapid, Utility, or Reasoner work unless a fresh-next-generation token is armed. With fresh-next-generation armed, runtime clears the retry marker, uses the current post-swipe snapshot, and runs fresh provider work once. The next distinct user message reads the current active source revision and starts fresh progress. If the user swiped back to an earlier revision and that exact variant still exists and validates, runtime can reuse it with cached/purple progress; otherwise it regenerates or skips according to the Arbiter plan.
 
-When the player cancels SillyTavern generation, the entrypoint receives `event_types.GENERATION_STOPPED` (`generation_stopped`). Runtime treats that as `host-generation-stopped`: it aborts the active run controller so in-flight Utility/Reasoner calls receive an abort signal, cancels any armed but not-yet-started Prose Enhancement pass, clears volatile packet/hand/plan/snapshot state, clears Recursion prompt keys, and refuses to install any late packet from the canceled run. If a scene cache had already been written for that canceled attempt, runtime marks it stale with reason `host-generation-stopped`. The progress outcome is `skipped`/neutral so user cancellation is not displayed as a provider warning or failure.
+When the player cancels SillyTavern generation, the entrypoint receives `event_types.GENERATION_STOPPED` (`generation_stopped`). Runtime treats that as `host-generation-stopped`: it aborts the active run controller so in-flight Utility/Reasoner calls receive an abort signal, cancels any armed but not-yet-started enhancement pass, clears volatile packet/hand/plan/snapshot state, clears Recursion prompt keys, and refuses to install any late packet from the canceled run. If a scene cache had already been written for that canceled attempt, runtime marks it stale with reason `host-generation-stopped`. The progress outcome is `skipped`/neutral so user cancellation is not displayed as a provider warning or failure.
 
 The Recursion Bar Stop generation button calls `runtime.stopGeneration()`. Runtime first asks `host.generation.stop()` to run SillyTavern's own generation stop path, then runs the same host-stop cleanup path used by the host event. Duplicate stop notifications collapse onto the in-flight cleanup promise so a button click plus SillyTavern `GENERATION_STOPPED` event clears Recursion prompt lanes once. Assistant-landed events call `handleHostGenerationEnded()` to hide the stop affordance after a normal generation completes. SillyTavern `GENERATION_AFTER_COMMANDS` is intentionally not treated as assistant-landed because it fires near generation startup and must not hide Stop while the host model is still running.
 

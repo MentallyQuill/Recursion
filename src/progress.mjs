@@ -51,6 +51,8 @@ const STEP_ORDER = [
   'rapid-warm-failed',
   'reusing-scene-deck',
   'provider-test',
+  'dialogue-enhancement',
+  'enhancement-response',
   'prose-enhancement',
   'fused-card-bundle',
   'utility-card-batch',
@@ -80,6 +82,8 @@ const STEP_DEFINITIONS = Object.freeze({
   'rapid-warm-failed': { label: 'Rapid warm', providerLane: 'utility' },
   'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
   'provider-test': { label: 'Provider test', providerLane: 'utility' },
+  'dialogue-enhancement': { label: 'Dialogue Enhancement', currentLabel: 'Enhancing dialogue', providerLane: 'utility' },
+  'enhancement-response': { label: 'Enhancement', currentLabel: 'Enhancing response', providerLane: 'utility' },
   'prose-enhancement': { label: 'Prose Enhancement', currentLabel: 'Enhancing prose', providerLane: 'utility' },
   'fused-card-bundle': { label: 'Fused card bundle', providerLane: 'utility' },
   'utility-card-batch': { label: 'Utility card batch', providerLane: 'utility' },
@@ -124,6 +128,8 @@ const PHASE_STEP_IDS = Object.freeze({
   promptClearing: 'clearing-recursion-prompt',
   promptClearFailed: 'clearing-recursion-prompt',
   providerTestFailed: 'provider-test',
+  dialogueEnhancing: 'dialogue-enhancement',
+  enhancementResponse: 'enhancement-response',
   proseEnhancing: 'prose-enhancement',
   cacheWarning: 'checking-scene-cache',
   settled: 'recursion-prompt-ready'
@@ -894,7 +900,8 @@ function deriveProgressRun(view) {
   }
   appendRapidWarmStatusStep(steps, source, order++);
   const beforePlanSteps = [...steps.values()];
-  if (!isControlOnlyProgress(runId, beforePlanSteps) && !steps.has('prose-enhancement')) {
+  const hasEnhancementStep = steps.has('prose-enhancement') || steps.has('dialogue-enhancement') || steps.has('enhancement-response');
+  if (!isControlOnlyProgress(runId, beforePlanSteps) && !hasEnhancementStep) {
     appendPendingPlanSteps(steps, view, order);
     appendPendingChildSteps(steps, view, order);
   }

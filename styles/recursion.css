@@ -48,7 +48,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 .recursion-fresh-next-generation,
 .recursion-pipeline-button,
 .recursion-mode-button,
-.recursion-prose-enhancement-button,
+.recursion-enhancements-button,
 .recursion-story-form-button,
 .recursion-activity-trigger,
 .recursion-icon-button,
@@ -170,7 +170,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 
 .recursion-pipeline-cluster,
 .recursion-mode-cluster,
-.recursion-prose-enhancement-cluster,
+.recursion-enhancements-cluster,
 .recursion-story-form-cluster {
   flex: 0 0 auto;
   position: relative;
@@ -178,7 +178,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 
 .recursion-pipeline-button,
 .recursion-mode-button,
-.recursion-prose-enhancement-button,
+.recursion-enhancements-button,
 .recursion-story-form-button,
 .recursion-icon-button,
 .recursion-cards-button {
@@ -203,8 +203,8 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 .recursion-pipeline-button:focus-visible,
 .recursion-mode-button:hover,
 .recursion-mode-button:focus-visible,
-.recursion-prose-enhancement-button:hover,
-.recursion-prose-enhancement-button:focus-visible,
+.recursion-enhancements-button:hover,
+.recursion-enhancements-button:focus-visible,
 .recursion-story-form-button:hover,
 .recursion-story-form-button:focus-visible,
 .recursion-cards-button:hover,
@@ -323,7 +323,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 
 .recursion-pipeline-menu,
 .recursion-mode-menu,
-.recursion-prose-enhancement-menu,
+.recursion-enhancements-menu,
 .recursion-story-form-menu,
 .recursion-status-popover,
 .recursion-hand-dropdown,
@@ -338,7 +338,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 
 .recursion-pipeline-menu,
 .recursion-mode-menu,
-.recursion-prose-enhancement-menu,
+.recursion-enhancements-menu,
 .recursion-story-form-menu {
   left: 0;
   position: absolute;
@@ -348,13 +348,62 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-story-form-menu {
-  width: 222px;
+  padding: 6px;
+  width: 248px;
+}
+
+.recursion-enhancements-menu {
+  width: 280px;
+}
+
+.recursion-enhancements-apply-row {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 7px;
+}
+
+.recursion-enhancements-apply-choice {
+  appearance: none;
+  background: color-mix(in srgb, var(--recursion-panel) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 10%, transparent);
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 72%, transparent);
+  cursor: pointer;
+  font: inherit;
+  min-height: 28px;
+  padding: 6px 7px;
+  text-align: center;
+}
+
+.recursion-enhancements-apply-choice:first-child {
+  border-radius: 5px 0 0 5px;
+}
+
+.recursion-enhancements-apply-choice:last-child {
+  border-radius: 0 5px 5px 0;
+}
+
+.recursion-enhancements-apply-choice:hover,
+.recursion-enhancements-apply-choice:focus-visible,
+.recursion-enhancements-apply-choice.is-selected {
+  background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 88%, transparent);
+  outline: none;
+}
+
+.recursion-enhancements-apply-choice-name {
+  display: block;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.recursion-enhancements-target-list {
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
 }
 
 .recursion-pipeline-choice,
 .recursion-mode-choice,
-.recursion-prose-enhancement-choice,
-.recursion-story-form-choice {
+.recursion-enhancements-choice {
   align-items: center;
   background: transparent;
   border: 0;
@@ -373,8 +422,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 
 .recursion-pipeline-choice:first-child,
 .recursion-mode-choice:first-child,
-.recursion-prose-enhancement-choice:first-child,
-.recursion-story-form-choice:first-child {
+.recursion-enhancements-choice:first-child {
   border-top: 0;
 }
 
@@ -382,21 +430,18 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 .recursion-pipeline-choice:focus-visible,
 .recursion-pipeline-choice.is-selected,
 .recursion-mode-choice:hover,
-.recursion-prose-enhancement-choice:hover,
-.recursion-prose-enhancement-choice:focus-visible,
-.recursion-prose-enhancement-choice.is-selected,
+.recursion-enhancements-choice:hover,
+.recursion-enhancements-choice:focus-visible,
+.recursion-enhancements-choice.is-selected,
 .recursion-mode-choice:focus-visible,
-.recursion-mode-choice.is-selected,
-.recursion-story-form-choice:hover,
-.recursion-story-form-choice:focus-visible,
-.recursion-story-form-choice.is-selected {
+.recursion-mode-choice.is-selected {
   background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
   outline: none;
 }
 
 .recursion-pipeline-choice-icon,
 .recursion-mode-choice-icon,
-.recursion-prose-enhancement-choice-icon {
+.recursion-enhancements-choice-icon {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 70%, transparent);
   display: inline-grid;
   height: 16px;
@@ -406,17 +451,12 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 
 .recursion-pipeline-choice-name,
 .recursion-mode-choice-name,
-.recursion-prose-enhancement-choice-name,
+.recursion-enhancements-choice-name,
 .recursion-story-form-choice-name {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 80%, transparent);
   display: block;
   font-size: 11.5px;
   line-height: 1.15;
-}
-
-.recursion-story-form-choice {
-  grid-template-columns: minmax(0, 1fr);
-  min-height: 33px;
 }
 
 .recursion-story-form-text {
@@ -439,7 +479,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 
 .recursion-pipeline-choice-tip,
 .recursion-mode-choice-tip,
-.recursion-prose-enhancement-choice-tip,
+.recursion-enhancements-choice-tip,
 .recursion-story-form-choice-tip {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 46%, transparent);
   display: block;
@@ -447,6 +487,87 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   line-height: 1.25;
   margin-top: 2px;
   white-space: normal;
+}
+
+.recursion-story-form-auto-choice,
+.recursion-story-form-axis-choice {
+  background: color-mix(in srgb, var(--recursion-panel) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 9%, transparent);
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  width: 100%;
+}
+
+.recursion-story-form-auto-choice {
+  display: grid;
+  gap: 2px;
+  min-height: 36px;
+  padding: 6px 7px;
+  text-align: left;
+}
+
+.recursion-story-form-section {
+  margin-top: 7px;
+}
+
+.recursion-story-form-section-label {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 52%, transparent);
+  font-size: 10px;
+  line-height: 1.2;
+  margin: 0 1px 4px;
+}
+
+.recursion-story-form-axis-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.recursion-story-form-axis-grid-tense {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.recursion-story-form-axis-grid-pov {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.recursion-story-form-axis-choice {
+  min-height: 26px;
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.recursion-story-form-axis-label {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 80%, transparent);
+  display: block;
+  font-size: 11px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.recursion-story-form-axis-tip {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 46%, transparent);
+  display: block;
+  font-size: 9.5px;
+  line-height: 1.15;
+  margin-top: 2px;
+}
+
+.recursion-story-form-auto-choice:hover,
+.recursion-story-form-auto-choice:focus-visible,
+.recursion-story-form-auto-choice.is-selected,
+.recursion-story-form-axis-choice:hover,
+.recursion-story-form-axis-choice:focus-visible,
+.recursion-story-form-axis-choice.is-selected {
+  background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
+  outline: none;
+}
+
+.recursion-story-form-auto-choice[aria-pressed="true"],
+.recursion-story-form-axis-choice[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--recursion-primary) 34%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--recursion-primary) 44%, transparent);
 }
 
 .recursion-activity-trigger {
@@ -874,7 +995,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   width: 24px;
 }
 
-.recursion-prose-enhancement-button {
+.recursion-enhancements-button {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 74%, transparent);
   flex: 0 0 24px;
   min-width: 24px;
@@ -882,7 +1003,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   width: 24px;
 }
 
-.recursion-prose-enhancement-button.is-off {
+.recursion-enhancements-button.is-off {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 34%, transparent);
 }
 
@@ -890,7 +1011,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
 }
 
-.recursion-prose-enhancement-button[aria-expanded="true"] {
+.recursion-enhancements-button[aria-expanded="true"] {
   background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
 }
 
@@ -907,7 +1028,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   width: 15px;
 }
 
-.recursion-prose-enhancement-icon {
+.recursion-enhancements-icon {
   background: currentColor;
   display: inline-block;
   height: 16px;
@@ -916,7 +1037,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   width: 16px;
 }
 
-.recursion-prose-enhancement-choice-dot {
+.recursion-enhancements-choice-dot {
   background: currentColor;
   border-radius: 50%;
   display: block;

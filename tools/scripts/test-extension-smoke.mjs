@@ -548,7 +548,7 @@ if (lifecycleFailures.length) {
       mode: 'auto',
       pipelineMode: 'standard',
       reasonerUse: 'off',
-      proseEnhancement: { mode: 'as-swipe', contextMessages: 3 }
+      enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: 3 }
     }
   };
   globalThis.SillyTavern = { getContext: () => context };
@@ -627,7 +627,7 @@ if (lifecycleFailures.length) {
       mode: 'auto',
       pipelineMode: 'standard',
       reasonerUse: 'off',
-      proseEnhancement: { mode: 'replace', contextMessages: 3 }
+      enhancements: { target: 'prose', applyMode: 'replace', contextMessages: 3 }
     }
   };
   globalThis.SillyTavern = { getContext: () => context };
@@ -637,7 +637,7 @@ if (lifecycleFailures.length) {
   assertEqual(await globalThis.recursionGenerationInterceptor('prose event order payload'), 'prose event order payload', 'prose event order interceptor arms generation');
   interceptorComplete = true;
   assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'prose event order interceptor arms pending prose enhancement');
-  assertEqual(fakeDocumentElement.classList.contains('recursion-prose-capture-active'), true, 'prose capture class is active immediately after generation is armed');
+  assertEqual(fakeDocumentElement.classList.contains('recursion-enhancement-capture-active'), true, 'enhancement capture class is active immediately after generation is armed');
   context.chat.push({
     mesid: 2,
     is_user: false,
@@ -647,7 +647,7 @@ if (lifecycleFailures.length) {
   });
   await eventSource.emit('message_updated', { mesid: 2 });
   assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'streaming message update does not clear pending prose enhancement');
-  assertEqual(fakeDocumentElement.classList.contains('recursion-prose-capture-active'), true, 'prose capture class stays active during streaming message updates');
+  assertEqual(fakeDocumentElement.classList.contains('recursion-enhancement-capture-active'), true, 'enhancement capture class stays active during streaming message updates');
   assertEqual(context.chat[2].mes, 'Mara was angry. "Keep the door shut," she said.', 'streaming message update preserves assistant text in chat state while CSS capture hides it');
   context.chat[2].mes = 'Mara was furious. "Keep the door shut," she said.';
   context.chat[2].swipes[0] = 'Mara was furious. "Keep the door shut," she said.';
@@ -657,7 +657,7 @@ if (lifecycleFailures.length) {
   assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'message received does not run prose enhancement before generation ended');
   const landed = eventSource.emit('generation_ended', { mesid: 2 });
   await waitUntil(
-    () => fakeDocumentElement.classList.contains('recursion-prose-capture-active'),
+    () => fakeDocumentElement.classList.contains('recursion-enhancement-capture-active'),
     'assistant-landed prose enhancement keeps CSS capture active before provider resolves'
   );
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive, true, 'assistant-landed prose enhancement keeps host generation active while provider is pending');
@@ -670,7 +670,7 @@ if (lifecycleFailures.length) {
   await eventSource.emit('message_updated', { mesid: 2 });
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.status, 'ready', 'late prose-owned message update does not clear Last Brief');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId, prosePacketId, 'late prose-owned message update preserves prompt packet id');
-  assertEqual(fakeDocumentElement.classList.contains('recursion-prose-capture-active'), false, 'prose capture class clears after enhancement settles');
+  assertEqual(fakeDocumentElement.classList.contains('recursion-enhancement-capture-active'), false, 'enhancement capture class clears after enhancement settles');
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;
   delete globalThis.__recursionLiveHarnessRuntime;

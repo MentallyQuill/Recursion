@@ -5,7 +5,8 @@ import { STORY_FORM_OVERRIDE_OPTIONS } from './story-form.mjs';
 
 const MODES = new Set(['auto', 'manual']);
 const PIPELINE_MODES = new Set(['standard', 'rapid', 'fused']);
-const PROSE_ENHANCEMENT_MODES = new Set(['off', 'as-swipe', 'replace']);
+const ENHANCEMENT_TARGETS = new Set(['off', 'prose', 'dialogue', 'prose-dialogue']);
+const ENHANCEMENT_APPLY_MODES = new Set(['as-swipe', 'replace']);
 const STRENGTHS = new Set(['light', 'balanced', 'strong']);
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
 const FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
@@ -20,8 +21,8 @@ const UI_PROGRESS_LIST_MIN = 5;
 const UI_PROGRESS_LIST_MAX = 80;
 const CARD_BUDGET_MIN = 0;
 const CARD_BUDGET_MAX = 20;
-const PROSE_CONTEXT_MIN = 0;
-const PROSE_CONTEXT_MAX = 35;
+const ENHANCEMENT_CONTEXT_MIN = 0;
+const ENHANCEMENT_CONTEXT_MAX = 35;
 
 function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -42,8 +43,9 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   focus: 'balanced',
   reasonerUse: 'auto',
   storyFormOverride: 'auto',
-  proseEnhancement: {
-    mode: 'off',
+  enhancements: {
+    target: 'off',
+    applyMode: 'as-swipe',
     contextMessages: 13
   },
   injection: {
@@ -160,15 +162,16 @@ export function normalizeInjectionSettings(value = {}) {
   };
 }
 
-export function normalizeProseEnhancementSettings(value = {}) {
+export function normalizeEnhancementsSettings(value = {}) {
   const source = value && typeof value === 'object' ? value : {};
   return {
-    mode: enumValue(source.mode, PROSE_ENHANCEMENT_MODES, DEFAULT_RECURSION_SETTINGS.proseEnhancement.mode),
+    target: enumValue(source.target, ENHANCEMENT_TARGETS, DEFAULT_RECURSION_SETTINGS.enhancements.target),
+    applyMode: enumValue(source.applyMode, ENHANCEMENT_APPLY_MODES, DEFAULT_RECURSION_SETTINGS.enhancements.applyMode),
     contextMessages: Math.round(numberInRange(
       source.contextMessages,
-      DEFAULT_RECURSION_SETTINGS.proseEnhancement.contextMessages,
-      PROSE_CONTEXT_MIN,
-      PROSE_CONTEXT_MAX
+      DEFAULT_RECURSION_SETTINGS.enhancements.contextMessages,
+      ENHANCEMENT_CONTEXT_MIN,
+      ENHANCEMENT_CONTEXT_MAX
     ))
   };
 }
@@ -283,7 +286,7 @@ export function normalizeSettings(value = {}, secretStore = null) {
     focus: enumValue(source.focus, FOCUS, DEFAULT_RECURSION_SETTINGS.focus),
     reasonerUse: reasonerUseForReasoningLevel(reasoningLevel),
     storyFormOverride: enumValue(source.storyFormOverride, new Set(STORY_FORM_OVERRIDE_OPTIONS), DEFAULT_RECURSION_SETTINGS.storyFormOverride),
-    proseEnhancement: normalizeProseEnhancementSettings(source.proseEnhancement),
+    enhancements: normalizeEnhancementsSettings(source.enhancements),
     injection: normalizeInjectionSettings(source.injection),
     diagnostics: {
       includeExcerpts: source.diagnostics?.includeExcerpts === true

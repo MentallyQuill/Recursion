@@ -548,6 +548,32 @@ assertEqual(proseEnhancementProgress.steps[0].label, 'Prose Enhancement', 'prose
 assertEqual(proseEnhancementProgress.currentStepText, 'Enhancing prose...', 'prose enhancement gets compact current-step text');
 assertEqual(createHeroPixelBlocks(proseEnhancementProgress).length, 1, 'prose enhancement gets one Hero Pixel block');
 
+const dialogueEnhancementProgress = createProgressRunModel({
+  activity: {
+    runId: 'dialogue-enhance-progress',
+    phase: 'dialogueEnhancing',
+    label: 'Enhancing dialogue...',
+    providerLane: 'utility',
+    recordedAt: '1'
+  }
+});
+assertEqual(dialogueEnhancementProgress.steps.length, 1, 'dialogue enhancement renders one top-level progress row');
+assertEqual(dialogueEnhancementProgress.steps[0].id, 'dialogue-enhancement', 'dialogue enhancement maps to its own progress row');
+assertEqual(dialogueEnhancementProgress.steps[0].label, 'Dialogue Enhancement', 'dialogue enhancement progress row uses product-facing label');
+assertEqual(dialogueEnhancementProgress.currentStepText, 'Enhancing dialogue...', 'dialogue enhancement gets compact current-step text');
+
+const responseEnhancementProgress = createProgressRunModel({
+  activity: {
+    runId: 'response-enhance-progress',
+    phase: 'enhancementResponse',
+    label: 'Enhancing response...',
+    providerLane: 'utility',
+    recordedAt: '1'
+  }
+});
+assertEqual(responseEnhancementProgress.steps[0].id, 'enhancement-response', 'combined enhancement maps to response progress row');
+assertEqual(responseEnhancementProgress.currentStepText, 'Enhancing response...', 'combined enhancement gets compact current-step text');
+
 const hostStoppedProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'host-stopped-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },

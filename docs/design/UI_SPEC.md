@@ -156,25 +156,27 @@ Reference mode selector CSS:
 }
 ```
 
-The card scope selector is an icon-only stacked-cards button in the left bar flow. It sits immediately to the right of Mode and to the left of Prose Enhancement. Its accessible label and tooltip carry the meaning; it must not render a visible `Cards` title or selected-count text in the compact bar.
+The card scope selector is an icon-only stacked-cards button in the left bar flow. It sits immediately to the right of Mode and to the left of Enhancements. Its accessible label and tooltip carry the meaning; it must not render a visible `Cards` title or selected-count text in the compact bar.
 
-Prose Enhancement is an icon-only upgrade button immediately to the right of Cards and immediately to the left of Tense & PoV. It uses the repo-local `assets/icons/upgrade.svg` mask icon, opens a Mode-like compact dropdown, and exposes three rows with mini-descriptions:
+Enhancements is an icon-only upgrade button immediately to the right of Cards and immediately to the left of Tense & PoV. It uses the repo-local `assets/icons/upgrade.svg` mask icon, opens a compact dropdown, and exposes an apply segmented control followed by target rows with mini-descriptions:
 
+- Apply: `As Swipe` keeps the original output, adds an enhanced sibling swipe, and selects it; `Replace` replaces the active output with the enhanced text.
 - `Off`: leave SillyTavern output unchanged.
-- `As Swipe`: keep the original output, add an enhanced sibling swipe, and select the enhanced swipe.
-- `Replace`: replace the active output with the enhanced text.
+- `Prose`: run the prose polish pass.
+- `Dialogue`: run the dialogue anti-slop and natural-subtext pass.
+- `Prose + Dialogue`: run Dialogue first, then Prose on the resulting text.
 
-When set to `Off`, the Prose Enhancement icon uses the same muted/grey disabled treatment as the off power toggle. The compact bar does not expose a Recast-style pass editor. The only numeric Prose Enhancement setting belongs in Advanced settings as context message count.
+When set to `Off`, the Enhancements icon uses the same muted/grey disabled treatment as the off power toggle. The compact bar does not expose a Recast-style pass editor. The only numeric Enhancements setting belongs in Advanced settings as context message count.
 
-The Tense & PoV selector sits immediately to the right of Prose Enhancement and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `PaM`, `Pr1`, `Pr2`, `Pr3L`, `Pr3O`, or `PrM` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, `Tense & PoV: Present Mixed`, and equivalent options.
+The Tense & PoV selector sits immediately to the right of Enhancements and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `PaM`, `Pr1`, `Pr2`, `Pr3L`, `Pr3O`, or `PrM` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, `Tense & PoV: Present Mixed`, and equivalent options.
 
-The selector menu contains:
+The selector menu contains one `Auto` row and two forced axes:
 
 - `Auto`: Arbiter infers tense and POV from the latest visible assistant narration.
-- `Past 1st`, `Past 2nd`, `Past 3rd Limited`, `Past 3rd Omni`, `Past Mixed`.
-- `Present 1st`, `Present 2nd`, `Present 3rd Limited`, `Present 3rd Omni`, `Present Mixed`.
+- `Tense`: `Past` or `Present`.
+- `Point of View`: `1st`, `2nd`, `3rd Ltd`, `3rd Omni`, or `Mixed`.
 
-Selecting `Auto` stores no forced story form. Selecting a forced option stores a high-confidence user override that feeds card prompts, guidance composition, Rapid metadata, and Prompt Packet diagnostics. The UI must not present this as a style preset or prose rewrite feature. It is a correction control for the existing story-form prompt contract. The menu should close on selection, outside click, or `Esc`, and should follow the same compact SillyTavern-native treatment as the Pipeline and Mode menus.
+Selecting `Auto` stores no forced story form and closes the menu. Selecting a tense or POV stores a complete forced story form by combining that axis with the currently forced other axis. If the current value is `Auto`, the missing forced axis defaults to `past-third-limited`: choosing `Present` from `Auto` stores `present-third-limited`, and choosing `Mixed` from `Auto` stores `past-mixed`. Forced-axis clicks keep the menu open so the operator can adjust both axes. The UI must not present this as a style preset or prose rewrite feature. It is a correction control for the existing story-form prompt contract. The menu should close on outside click or `Esc`, and should follow the same compact SillyTavern-native treatment as the Pipeline and Mode menus.
 
 Inside the Cards dropdown, the header shows `Cards`, the selected focus summary, and a small neutral `All` command. In Auto, `All` restores the default card scope with every family and sub-item enabled. In Manual, the header uses selected-family copy such as `2/5 cards selected`, `All` selects up to the current `Max Cards` cap, and selecting one more family at the cap is blocked with `Max Cards is 5. Change it in Settings to select more.` Use `All`, not `Reset`, because the action selects card scope and must not be confused with Reset Scene Cache or other runtime reset commands.
 
@@ -243,7 +245,7 @@ The Hero Pixel Array and progress menu must render from the same normalized `pro
 
 Fused progress treats `Fused card bundle` as the single parent row for the bundle provider call. The bundle provider role must not also appear as a child row. Fused child rows appear only after there is material card-family progress, such as accepted bundle items under `Fused card bundle` or repaired siblings under `Utility card batch`; the menu must not seed speculative pending children for every requested family while the bundle is still unresolved.
 
-Prose Enhancement is a post-generation Utility pass with its own top-level `Prose Enhancement` row. While it is running, the compact current-step text is `Enhancing prose...`; it must not reuse `Utility card batch`, seed prompt-install rows, or imply that a card batch is running.
+Enhancements are post-generation Utility passes with their own top-level rows: `Prose Enhancement`, `Dialogue Enhancement`, or `Enhancement` for combined Prose + Dialogue. While running, compact current-step text is `Enhancing prose...`, `Enhancing dialogue...`, or `Enhancing response...`; it must not reuse `Utility card batch`, seed prompt-install rows, or imply that a card batch is running.
 
 The compact bar, progress panel, and cards panel should consume stable presenter state derived from the shared Recursion view model. DOM rendering may remain in the main UI module while presenter modules stay pure and testable.
 

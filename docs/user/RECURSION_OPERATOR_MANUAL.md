@@ -58,7 +58,7 @@ The Pipeline control is a small icon-only dropdown immediately to the left of th
 
 The Prose Enhancement control sits immediately to the right of Cards and uses the upgrade icon. It is grey when `Off`. `As Swipe` hides the fresh SillyTavern assistant output until the Utility pass finishes, then keeps the original as one swipe and adds a polished swipe selected by default. `Replace` hides the fresh output until the Utility pass finishes, then replaces the active assistant text with the polished version. If the Utility pass fails validation or the provider is unavailable, Recursion reveals the original unchanged. Valid Utility output is applied even when the edit is minimal or byte-identical.
 
-The Tense & PoV control sits in the compact left-side control cluster after Prose Enhancement. Leave it on `Auto` for normal play. In Auto, the Utility Arbiter infers the active story form from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. Use a forced option only when the Arbiter is clearly steering card evidence or guidance toward the wrong form. Forced options cover past or present tense in first person, second person, third-person limited, or third-person omniscient. A forced selection creates a high-confidence user story-form override for card prompts, guidance composition, Rapid artifacts, and Prompt Packet metadata; it does not rewrite the transcript, change SillyTavern character data, or add style coaching beyond the story-form contract.
+The Tense & PoV control sits in the compact left-side control cluster after Prose Enhancement. Leave it on `Auto` for normal play. In Auto, the Utility Arbiter infers the active story form from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. Use a forced option only when the Arbiter is clearly steering card evidence or guidance toward the wrong form. Forced options cover past or present tense in first person, second person, third-person limited, third-person omniscient, or mixed POV. A forced selection creates a high-confidence user story-form override for card prompts, guidance composition, Rapid artifacts, and Prompt Packet metadata; it does not rewrite the transcript, change SillyTavern character data, or add style coaching beyond the story-form contract.
 
 The command slot changes by state. Stop generation appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
 
@@ -91,12 +91,12 @@ The progress menu must not show raw prompts, raw provider responses, stack trace
 
 Recursion treats story form as a prompt-contract consistency signal. The active story form is the tense and point of view the next reply should preserve, such as past tense third-person limited or present tense second person.
 
-By default, `Auto` lets the Arbiter detect the form from the latest assistant narration. Runtime validates that result and runs a heuristic cross-check before it is used. If the Arbiter result conflicts with obvious narration cues, Recursion drops to unknown story form and tells the host model to match the active chat's established form.
+By default, `Auto` lets the Arbiter detect the form from the latest assistant narration. Runtime validates that result and runs a heuristic cross-check before it is used. If obvious narration cues show stable-tense mixed POV, Recursion preserves that as `Past Mixed` or `Present Mixed`; if cues conflict without strong mixed evidence, Recursion drops to unknown story form and tells the host model to match the active chat's established form.
 
 The Tense & PoV menu is an operator override for cases where automatic detection is wrong or where the current chat has unusual player-message style that could confuse the Arbiter. Forced choices are:
 
-- Past 1st, Past 2nd, Past 3rd Limited, Past 3rd Omni;
-- Present 1st, Present 2nd, Present 3rd Limited, Present 3rd Omni.
+- Past 1st, Past 2nd, Past 3rd Limited, Past 3rd Omni, Past Mixed;
+- Present 1st, Present 2nd, Present 3rd Limited, Present 3rd Omni, Present Mixed.
 
 Forced story form applies to the next Recursion prompt contract and persists as a setting until changed back to `Auto`. Use it sparingly: it should preserve an established narration form, not force a new writing style onto a scene.
 
@@ -407,7 +407,7 @@ Use this checklist for a practical browser pass:
 9. Set Auto and confirm Recursion is ready to compile.
 10. Set Manual and confirm it applies as a distinct mode.
 11. Confirm the Pipeline icon dropdown sits immediately left of Mode and offers Standard, Rapid, and Fused.
-12. Confirm the Tense & PoV dropdown offers Auto and the forced past/present POV options, then return it to Auto unless the smoke intentionally tests an override.
+12. Confirm the Tense & PoV dropdown offers Auto and the forced past/present POV options, including Past Mixed and Present Mixed, then return it to Auto unless the smoke intentionally tests an override.
 13. Run a safe Standard Auto pass only when provider and live mutation are intended.
 14. Run a safe Rapid Auto pass only when provider and live mutation are intended.
 15. Confirm Activity reaches ready, Rapid delta, warm-miss Standard escalation, or a clear fallback.

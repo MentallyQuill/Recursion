@@ -52,10 +52,12 @@ const STORY_FORM_MENU_OPTIONS = Object.freeze([
   { value: 'past-second-person', label: 'Past 2nd', shortLabel: 'Pa2', title: 'Past tense, second person', tip: 'You walked to the door' },
   { value: 'past-third-limited', label: 'Past 3rd Limited', shortLabel: 'Pa3L', title: 'Past tense, third-person limited', tip: 'She walked to the door' },
   { value: 'past-third-omniscient', label: 'Past 3rd Omni', shortLabel: 'Pa3O', title: 'Past tense, third-person omniscient', tip: 'She walked to the door (omniscient)' },
+  { value: 'past-mixed', label: 'Past Mixed', shortLabel: 'PaM', title: 'Past tense, mixed POV', tip: 'Preserve hybrid past-tense viewpoint' },
   { value: 'present-first-person', label: 'Present 1st', shortLabel: 'Pr1', title: 'Present tense, first person', tip: 'I walk to the door' },
   { value: 'present-second-person', label: 'Present 2nd', shortLabel: 'Pr2', title: 'Present tense, second person', tip: 'You walk to the door' },
   { value: 'present-third-limited', label: 'Present 3rd Limited', shortLabel: 'Pr3L', title: 'Present tense, third-person limited', tip: 'She walks to the door' },
-  { value: 'present-third-omniscient', label: 'Present 3rd Omni', shortLabel: 'Pr3O', title: 'Present tense, third-person omniscient', tip: 'She walks to the door (omniscient)' }
+  { value: 'present-third-omniscient', label: 'Present 3rd Omni', shortLabel: 'Pr3O', title: 'Present tense, third-person omniscient', tip: 'She walks to the door (omniscient)' },
+  { value: 'present-mixed', label: 'Present Mixed', shortLabel: 'PrM', title: 'Present tense, mixed POV', tip: 'Preserve hybrid present-tense viewpoint' }
 ]);
 const PROSE_ENHANCEMENT_MENU_OPTIONS = Object.freeze([
   {

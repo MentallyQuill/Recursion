@@ -89,7 +89,7 @@ Under the medium-reasoning Standard example in that research, Recursion adds rou
 - Full Viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics.
 - Prompt Packet: guidance, card evidence, guardrails, references, omissions, fallbacks, and metadata.
 - Progress States: live pass status, fallback paths, repair work, install state, and readiness.
-- Tense & PoV: Auto story-form detection or a forced past/present first-, second-, or third-person form for the next prompt contract.
+- Tense & PoV: Auto story-form detection or a forced past/present first-, second-, third-person, or mixed POV form for the next prompt contract.
 - Provider Health: Utility and Reasoner tests, session-only direct keys, fallback visibility, and lane status.
 
 ## Fast Start

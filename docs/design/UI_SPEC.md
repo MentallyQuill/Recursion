@@ -166,13 +166,13 @@ Prose Enhancement is an icon-only upgrade button immediately to the right of Car
 
 When set to `Off`, the Prose Enhancement icon uses the same muted/grey disabled treatment as the off power toggle. The compact bar does not expose a Recast-style pass editor. The only numeric Prose Enhancement setting belongs in Advanced settings as context message count.
 
-The Tense & PoV selector sits immediately to the right of Prose Enhancement and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `Pr1`, `Pr2`, `Pr3L`, or `Pr3O` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, and equivalent options.
+The Tense & PoV selector sits immediately to the right of Prose Enhancement and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `PaM`, `Pr1`, `Pr2`, `Pr3L`, `Pr3O`, or `PrM` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, `Tense & PoV: Present Mixed`, and equivalent options.
 
 The selector menu contains:
 
 - `Auto`: Arbiter infers tense and POV from the latest visible assistant narration.
-- `Past 1st`, `Past 2nd`, `Past 3rd Limited`, `Past 3rd Omni`.
-- `Present 1st`, `Present 2nd`, `Present 3rd Limited`, `Present 3rd Omni`.
+- `Past 1st`, `Past 2nd`, `Past 3rd Limited`, `Past 3rd Omni`, `Past Mixed`.
+- `Present 1st`, `Present 2nd`, `Present 3rd Limited`, `Present 3rd Omni`, `Present Mixed`.
 
 Selecting `Auto` stores no forced story form. Selecting a forced option stores a high-confidence user override that feeds card prompts, guidance composition, Rapid metadata, and Prompt Packet diagnostics. The UI must not present this as a style preset or prose rewrite feature. It is a correction control for the existing story-form prompt contract. The menu should close on selection, outside click, or `Esc`, and should follow the same compact SillyTavern-native treatment as the Pipeline and Mode menus.
 

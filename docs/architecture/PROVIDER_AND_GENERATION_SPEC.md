@@ -242,7 +242,7 @@ The Utility Arbiter must echo the frozen request `snapshotHash`. Missing or mism
 
 The provider router only receives card jobs that can fit the effective hand budget. The Arbiter is instructed not to emit more `cardJobs` than `budgets.maxCards`, but runtime enforces this mechanically before provider calls because provider calls are the expensive boundary.
 
-Invalid or unsupported `storyForm` values normalize to `unknown` rather than failing the whole plan. Runtime also runs a heuristic cross-check against the latest assistant narration; if obvious tense or POV cues disagree with a confident Arbiter result, runtime lowers story form to `unknown` and records the disagreement reason. Unknown story form produces conservative downstream prompt text that tells card and story models to match the active chat's established form.
+Invalid or unsupported `storyForm` values normalize to `unknown` rather than failing the whole plan. Runtime also runs a heuristic cross-check against the latest assistant narration. If obvious tense cues disagree with a confident Arbiter result, runtime lowers story form to `unknown` and records the disagreement reason. If stable-tense assistant narration has strong mixed POV evidence, runtime preserves that as mixed POV even when the Arbiter chose a single viewpoint family. Unknown story form produces conservative downstream prompt text that tells card and story models to match the active chat's established form.
 
 The Arbiter is allowed to choose `reasonerDecision.mode: "use"` only when Reasoner is enabled and healthy. If Reasoner is disabled, unhealthy, or missing a provider secret, the Arbiter must select `skip` and explain the reason compactly.
 

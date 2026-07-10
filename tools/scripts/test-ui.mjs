@@ -1815,7 +1815,34 @@ try {
     'Prose Enhancement: Off',
     'Prose Enhancement button exposes the current mode'
   );
+  assertDeepEqual(
+    root.querySelectorAll('[data-recursion-story-form-choice]').map((choice) => choice.dataset.recursionStoryFormChoice),
+    [
+      'auto',
+      'past-first-person',
+      'past-second-person',
+      'past-third-limited',
+      'past-third-omniscient',
+      'past-mixed',
+      'present-first-person',
+      'present-second-person',
+      'present-third-limited',
+      'present-third-omniscient',
+      'present-mixed'
+    ],
+    'story form selector includes mixed options in canonical order'
+  );
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-story-form-menu]')).includes('Past Mixed'), 'story form menu includes Past Mixed');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-story-form-menu]')).includes('Present Mixed'), 'story form menu includes Present Mixed');
   assertEqual(root.querySelector('[data-recursion-story-form]').textContent, 'Pr3O', 'mobile story form button uses compact shorthand for long labels');
+  view = { ...view, settings: { ...view.settings, storyFormOverride: 'past-mixed' } };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-story-form]').textContent, 'PaM', 'mobile story form button uses compact shorthand for Past Mixed');
+  view = { ...view, settings: { ...view.settings, storyFormOverride: 'present-mixed' } };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-story-form]').textContent, 'PrM', 'mobile story form button uses compact shorthand for Present Mixed');
+  view = { ...view, settings: { ...view.settings, storyFormOverride: 'present-third-omniscient' } };
+  ui.update();
   globalThis.innerWidth = 920;
   globalThis.visualViewport.width = 920;
   ui.update();

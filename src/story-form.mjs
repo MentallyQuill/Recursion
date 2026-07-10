@@ -83,7 +83,7 @@ export function storyFormInstruction(storyForm = UNKNOWN_STORY_FORM) {
 
 export function storyFormPromptBlock(storyForm = UNKNOWN_STORY_FORM) {
   const form = normalizeStoryForm(storyForm);
-  return [
+  const lines = [
     'Story form contract for card promptText:',
     `- Target tense: ${form.tense}.`,
     `- Target POV: ${form.pov}.`,
@@ -91,7 +91,13 @@ export function storyFormPromptBlock(storyForm = UNKNOWN_STORY_FORM) {
     '- Write promptText in this same tense and POV when describing scene actions, narration, response posture, or likely next-beat implications.',
     '- Prefer neutral constraint wording when the family is not narrative prose.',
     '- Do not switch to first person, second person, or present tense unless storyForm requires it.'
-  ].join('\n');
+  ];
+  if (form.pov === 'mixed') {
+    lines.push('- Preserve the established mixed POV pattern.');
+    lines.push('- Do not collapse the reply into a single viewpoint family unless the chat itself has shifted.');
+    lines.push('- Do not infer hidden thoughts unless the established mixed viewpoint already permits them.');
+  }
+  return lines.join('\n');
 }
 
 const PAST_TENSE_MARKERS = /\b(walked|said|was|were|had|went|looked|turned|smiled|spoke|asked|thought|knew|felt|saw|heard|stood|sat|ran|gave|took|came|made|told|began|seemed|became|showed|found|held|opened|closed|stopped|started|tried|wanted|needed|liked|loved|hated|hoped|feared|wondered|remembered|forgot|understood|realized|noticed|watched|listened|felt|seemed|appeared)\b/gi;
@@ -104,18 +110,69 @@ function countMatches(text, pattern) {
   return (String(text || '').match(new RegExp(pattern.source, 'gi')) || []).length;
 }
 
+function stripCodeBlocks(text) {
+  return String(text || '').replace(/```[\s\S]*?```/g, ' ');
+}
+
+function stripQuotedDialogue(text) {
+  return String(text || '')
+    .replace(/"[^"\n]*(?:\n[^"\n]*)?"/g, ' ')
+    .replace(/'[^'\n]{2,}'/g, ' ');
+}
+
+function narrativeText(text) {
+  return stripQuotedDialogue(stripCodeBlocks(text));
+}
+
+function narrativeSegments(text) {
+  return narrativeText(text)
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length >= 16)
+    .slice(-12);
+}
+
+function classifyPovSegment(segment) {
+  const firstCount = countMatches(segment, FIRST_PERSON_MARKERS);
+  const secondCount = countMatches(segment, SECOND_PERSON_MARKERS);
+  const thirdCount = countMatches(segment, THIRD_PERSON_MARKERS);
+  if (firstCount > 0 && secondCount === 0 && thirdCount === 0) return 'first-person';
+  if (secondCount > 0 && firstCount === 0 && thirdCount === 0) return 'second-person';
+  if (thirdCount > 0 && firstCount === 0 && secondCount === 0) return 'third-person-limited';
+  if (firstCount > 0 && firstCount >= secondCount && firstCount >= thirdCount) return 'first-person';
+  if (secondCount > 0 && secondCount >= firstCount && secondCount >= thirdCount) return 'second-person';
+  if (thirdCount > 0) return 'third-person-limited';
+  return null;
+}
+
 export function heuristicTense(text) {
-  const pastCount = countMatches(text, PAST_TENSE_MARKERS);
-  const presentCount = countMatches(text, PRESENT_TENSE_MARKERS);
+  const prose = narrativeText(text);
+  const pastCount = countMatches(prose, PAST_TENSE_MARKERS);
+  const presentCount = countMatches(prose, PRESENT_TENSE_MARKERS);
   if (pastCount > presentCount * 1.5 && pastCount >= 2) return 'past';
   if (presentCount > pastCount * 1.5 && presentCount >= 2) return 'present';
   return null;
 }
 
 export function heuristicPov(text) {
-  const firstCount = countMatches(text, FIRST_PERSON_MARKERS);
-  const secondCount = countMatches(text, SECOND_PERSON_MARKERS);
-  const thirdCount = countMatches(text, THIRD_PERSON_MARKERS);
+  const counts = new Map();
+  for (const segment of narrativeSegments(text)) {
+    const pov = classifyPovSegment(segment);
+    if (!pov) continue;
+    counts.set(pov, (counts.get(pov) || 0) + 1);
+  }
+  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+  if (entries.length >= 2) {
+    const dominant = entries[0][1];
+    const secondary = entries[1][1];
+    if (total >= 3 && (secondary >= 2 || secondary / total >= 0.25) && dominant / total <= 0.85) return 'mixed';
+  }
+  if (entries[0]?.[1] >= 2) return entries[0][0];
+  const prose = narrativeText(text);
+  const firstCount = countMatches(prose, FIRST_PERSON_MARKERS);
+  const secondCount = countMatches(prose, SECOND_PERSON_MARKERS);
+  const thirdCount = countMatches(prose, THIRD_PERSON_MARKERS);
   if (thirdCount > firstCount * 2 && thirdCount > secondCount * 2 && thirdCount >= 3) return 'third-person-limited';
   if (firstCount > thirdCount * 2 && firstCount > secondCount * 2 && firstCount >= 3) return 'first-person';
   if (secondCount > thirdCount * 2 && secondCount > firstCount * 2 && secondCount >= 3) return 'second-person';
@@ -139,7 +196,11 @@ export function normalizeStoryFormWithHeuristic(value = {}, fallback = UNKNOWN_S
     confidence = 'low';
     reason = 'Heuristic cross-check disagreed with Arbiter tense detection';
   }
-  if (heuristicPovResult && heuristicPovResult !== normalized.pov && normalized.pov !== 'mixed' && normalized.pov !== 'unknown') {
+  if (heuristicPovResult === 'mixed' && normalized.pov !== 'mixed') {
+    pov = 'mixed';
+    confidence = normalized.confidence === 'low' ? 'low' : 'medium';
+    reason = `${normalized.reason} Local narrative heuristic found mixed POV evidence.`;
+  } else if (heuristicPovResult && heuristicPovResult !== normalized.pov && normalized.pov !== 'mixed' && normalized.pov !== 'unknown') {
     tense = 'unknown';
     pov = 'unknown';
     confidence = 'low';
@@ -162,17 +223,20 @@ export const STORY_FORM_OVERRIDE_OPTIONS = Object.freeze([
   'past-second-person',
   'past-third-limited',
   'past-third-omniscient',
+  'past-mixed',
   'present-first-person',
   'present-second-person',
   'present-third-limited',
-  'present-third-omniscient'
+  'present-third-omniscient',
+  'present-mixed'
 ]);
 
 const OVERRIDE_POV_MAP = {
   'first-person': 'first-person',
   'second-person': 'second-person',
   'third-limited': 'third-person-limited',
-  'third-omniscient': 'third-person-omniscient'
+  'third-omniscient': 'third-person-omniscient',
+  mixed: 'mixed'
 };
 
 export function forcedStoryForm(override) {
@@ -189,7 +253,7 @@ export function forcedStoryForm(override) {
     pov,
     confidence: 'high',
     evidenceRefs: [],
-    reason: 'User override'
+    reason: `User forced ${tense} tense, ${pov} POV.`
   };
 }
 
@@ -201,6 +265,9 @@ export function arbiterStoryFormContractLine() {
     '- User messages are often first-person present ("I walk to the door") — this is player input, not narrator form.',
     '- Past-tense narration uses verbs like "walked", "said", "was" with third-person pronouns (he/she/they).',
     '- Present-tense narration uses verbs like "walks", "says", "is".',
+    '- Treat mixed POV as intentional alternation between narrative viewpoint families in assistant prose.',
+    '- Do not infer mixed POV from dialogue pronouns, user instructions, or one-off wording.',
+    '- Prefer present+mixed or past+mixed when tense is stable but viewpoint family alternates.',
     '- Use "mixed" only when recent assistant narration truly alternates forms.',
     '- Use "unknown" with low confidence when the snapshot has no usable story prose.',
     `- Return storyForm using schema "${STORY_FORM_SCHEMA}".`,

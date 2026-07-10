@@ -4112,6 +4112,10 @@ export function createRecursionRuntime({
       if (settings.storyFormOverride && settings.storyFormOverride !== 'auto') {
         const forced = forcedStoryForm(settings.storyFormOverride);
         if (forced) plan = { ...plan, storyForm: normalizeStoryForm(forced) };
+      } else {
+        const latestAssistant = latestVisibleAssistantEntry(snapshot);
+        const latestAssistantText = latestAssistant?.message?.text || '';
+        plan = { ...plan, storyForm: normalizeStoryFormWithHeuristic(plan.storyForm, UNKNOWN_STORY_FORM, latestAssistantText) };
       }
       plan = enforceReasonerAvailability(plan, settings);
       plan = applyReasoningPolicyToPlan(plan, settings);

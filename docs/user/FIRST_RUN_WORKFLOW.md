@@ -57,7 +57,7 @@ Auto prepares and installs the next Recursion prompt packet.
 
 Use the Last Brief dropdown and Prompt Packet panel when you want to inspect exactly what Recursion installed.
 
-Tense & PoV controls the story-form contract used by card generation and guidance. `Auto` asks the Arbiter to infer the form from the latest visible assistant narration. Forced past/present first-, second-, and third-person options are available for correction, but they should not be needed for a normal first pass.
+Tense & PoV controls the story-form contract used by card generation and guidance. `Auto` asks the Arbiter to infer the form from the latest visible assistant narration. Forced past/present first-, second-, third-person, and mixed POV options are available for correction, but they should not be needed for a normal first pass.
 
 ## 5. Try Manual
 

@@ -990,8 +990,30 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 
 {
   const roleCalls = [];
+  const assistantText = [
+    'You stand beside the humming archive door as the ward-lines brighten.',
+    'Mara watches from the stairwell and thinks the lock is waking too quickly.',
+    'You hear the brass pins shift under your hand.',
+    'Her fingers tighten around the lamp as she studies the shadow under the frame.'
+  ].join(' ');
+  const mixedWarmMessages = [
+    { mesid: 1, role: 'user', text: 'I ask in first person.', textHash: hashJson('I ask in first person.'), visible: true },
+    { mesid: 4, role: 'assistant', text: assistantText, textHash: hashJson(assistantText), visible: true }
+  ];
+  const mixedWarmSourceRevisionHash = sourceFingerprintForMessages(mixedWarmMessages, 1, 4);
+  const mixedWarmSnapshot = {
+    chatId: 'rapid-mixed-auto-chat',
+    chatKey: 'rapid-mixed-auto-chat',
+    sceneKey: 'rapid-mixed-auto-scene',
+    sceneFingerprint: 'rapid-mixed-auto-scene-fp',
+    turnFingerprint: hashJson({ latestMesId: 4, sourceRevisionHash: mixedWarmSourceRevisionHash }),
+    sourceRevisionHash: mixedWarmSourceRevisionHash,
+    latestMesId: 4,
+    messages: mixedWarmMessages
+  };
   const harness = createRuntimeHarness({
     settings: { pipelineMode: 'rapid', mode: 'auto' },
+    snapshot: mixedWarmSnapshot,
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
@@ -1006,11 +1028,11 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
               promptFootprint: 'normal',
               storyForm: {
                 schema: 'recursion.storyForm.v1',
-                tense: 'past',
-                pov: 'third-person-limited',
+                tense: 'present',
+                pov: 'second-person',
                 confidence: 'high',
-                evidenceRefs: ['message:2'],
-                reason: 'Warm assistant narration establishes form.'
+                evidenceRefs: ['message:4'],
+                reason: 'Warm Arbiter saw second person only.'
               },
               cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Warm scene frame.' }],
               reasonerDecision: { mode: 'skip', reason: 'background warm', signals: [] },
@@ -1043,13 +1065,13 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assertEqual(warm.ok, true, 'Rapid background warm succeeds');
   assert(roleCalls.includes('utilityArbiter'), 'Rapid warm uses provider Arbiter');
   assert(roleCalls.includes('sceneFrameCard'), 'Rapid warm generates provider card');
-  const cache = await harness.storage.loadSceneCache('chat-1', 'scene-1');
+  const cache = await harness.storage.loadSceneCache(mixedWarmSnapshot.chatKey, mixedWarmSnapshot.sceneKey);
   const variant = cache.variants[cache.activeSourceRevisionHash];
   assertEqual(variant.rapid.status, 'ready', 'Rapid warm artifact is ready');
   assertEqual(variant.rapid.pipelineVersion, 2, 'Rapid warm artifact uses v2');
   assert(variant.rapid.guidance.text.includes('GUIDANCE_MARKER'), 'Rapid warm stores provider guidance');
-  assertEqual(variant.rapid.storyForm.tense, 'past', 'Rapid warm stores story tense');
-  assertEqual(variant.rapid.storyForm.pov, 'third-person-limited', 'Rapid warm stores story pov');
+  assertEqual(variant.rapid.storyForm.tense, 'present', 'Rapid warm stores story tense');
+  assertEqual(variant.rapid.storyForm.pov, 'mixed', 'Rapid warm Auto stores heuristic-corrected mixed story pov');
   assertDeepEqual(variant.rapid.selectedCardIds, variant.latestHand.cardIds, 'Rapid warm stores selected card ids');
   assert(!Object.prototype.hasOwnProperty.call(variant.rapid, 'conditionedSceneBrief'), 'Rapid warm no longer stores conditionedSceneBrief');
   assertEqual(harness.installed.length, 0, 'Rapid warm does not install prompt');
@@ -10185,13 +10207,13 @@ for (const scenario of [
     promptFootprint: 'rich',
     focus: 'character',
     reasonerUse: 'always',
-    storyFormOverride: 'present-third-limited'
+    storyFormOverride: 'present-mixed'
   });
   assertEqual(updated.ok, true, 'runtime exposes successful high-level settings update');
   assertEqual(updated.settings.mode, 'auto', 'runtime exposes high-level settings update');
   assertEqual(updated.settings.strength, 'strong', 'runtime settings update preserves strength');
   assertEqual(runtime.view().settings.focus, 'character', 'settings update is visible in runtime view');
-  assertEqual(runtime.view().settings.storyFormOverride, 'present-third-limited', 'settings update exposes story form override in runtime view');
+  assertEqual(runtime.view().settings.storyFormOverride, 'present-mixed', 'settings update exposes mixed story form override in runtime view');
 
   const utilityResult = await runtime.updateProvider('utility', {
     source: 'openai-compatible',
@@ -10239,7 +10261,7 @@ for (const scenario of [
     settings: {
       mode: 'auto',
       reasonerUse: 'off',
-      storyFormOverride: 'past-third-limited'
+      storyFormOverride: 'present-mixed'
     },
     snapshot: {
       chatId: 'story-form-override-chat',
@@ -10301,9 +10323,15 @@ for (const scenario of [
 
   const result = await runtime.prepareForGeneration({ userMessage: 'Keep going.' });
   assertEqual(result.ok, true, 'story form override run installs');
-  assertEqual(result.packet.storyForm.tense, 'past', 'story form override controls packet tense');
-  assertEqual(result.packet.storyForm.pov, 'third-person-limited', 'story form override controls packet pov');
-  assert(result.packet.sections.guidance.includes('past tense, third-person-limited POV'), 'story form override reaches guidance section');
+  assertEqual(result.packet.storyForm.tense, 'present', 'story form override controls packet tense');
+  assertEqual(result.packet.storyForm.pov, 'mixed', 'story form override controls packet pov');
+  assertEqual(result.packet.diagnostics.storyFormPov, 'mixed', 'packet diagnostics expose mixed POV');
+  assert(result.packet.sections.guidance.includes('present tense, mixed POV'), 'story form override reaches guidance section');
+  assertNotEqual(
+    rapidWarmContractVersions({ storyFormOverride: 'auto' }).settingsHash,
+    rapidWarmContractVersions({ storyFormOverride: 'present-mixed' }).settingsHash,
+    'Rapid warm signature changes for present mixed override'
+  );
 }
 
 {

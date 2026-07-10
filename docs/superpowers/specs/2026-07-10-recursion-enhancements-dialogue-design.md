@@ -46,7 +46,7 @@ Recursion captures the latest assistant output, masks it while enhancement runs,
 
 Recursion captures the latest assistant output, masks it while enhancement runs, replaces the active assistant text with the final enhanced output, then reveals the message.
 
-If enhancement fails validation, times out, is canceled, is stale, or Utility is unavailable, Recursion reveals the original output unchanged.
+If enhancement fails validation, times out, is canceled, is stale, or the selected provider lane is unavailable, Recursion reveals the original output unchanged. Low and Medium use Utility. High and Ultra use Reasoner directly instead of falling back to Utility.
 
 ## User Experience
 

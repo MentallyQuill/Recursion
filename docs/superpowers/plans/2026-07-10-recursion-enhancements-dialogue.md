@@ -1320,7 +1320,7 @@ In `docs/user/RECURSION_OPERATOR_MANUAL.md`, replace the Prose Enhancement secti
 ```markdown
 The Enhancements control sits immediately to the right of Cards and uses the upgrade icon. It is grey when `Off`. Choose what Recursion enhances with `Off`, `Prose`, `Dialogue`, or `Prose + Dialogue`, then choose how it applies the result with `As Swipe` or `Replace`.
 
-`As Swipe` hides the fresh SillyTavern assistant output until the Utility pass finishes, keeps the original as one swipe, and adds the enhanced swipe selected by default. `Replace` hides the fresh output until the Utility pass finishes, then replaces the active assistant text with the enhanced version. If validation fails or Utility is unavailable, Recursion reveals the original unchanged.
+`As Swipe` hides the fresh SillyTavern assistant output until the selected provider pass finishes, keeps the original as one swipe, and adds the enhanced swipe selected by default. `Replace` hides the fresh output until the selected provider pass finishes, then replaces the active assistant text with the enhanced version. Low and Medium use Utility. High and Ultra use Reasoner directly. If validation fails or the selected provider lane is unavailable, Recursion reveals the original unchanged.
 
 `Dialogue` repairs echoing, fake agency, unsupported smart-character jargon, unsupported defensive tropes, lazy attraction lines, and weak subtext. It is a correction pass, not a style preset, and should not make characters warmer or more emotionally direct unless established character evidence supports that.
 ```

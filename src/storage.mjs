@@ -2,7 +2,7 @@ import { cloneJson, makeId, nowIso, redact, safeId } from './core.mjs';
 import { UNKNOWN_STORY_FORM, normalizeStoryForm } from './story-form.mjs';
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 
-const RECURSION_VERSION = '0.1.0-pre-alpha.2';
+const RECURSION_VERSION = '0.1.0-pre-alpha.3';
 const MAX_JOURNAL_ENTRIES = 500;
 const DEFAULT_MAX_SCENE_CACHES_PER_CHAT = 3;
 const DEFAULT_MAX_SCENE_CACHES_TOTAL = 24;

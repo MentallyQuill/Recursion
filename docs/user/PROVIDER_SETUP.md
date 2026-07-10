@@ -53,8 +53,10 @@ Reasoning Level also sets the amount of provider-side reasoning Recursion reques
 | --- | --- | --- |
 | Low | minimal | minimal |
 | Medium | medium | minimal |
-| High | medium | Arbiter medium, Enhancements medium, cards and Fused bundles minimal |
+| High | medium | Enhancements medium, Arbiter medium, cards and Fused bundles minimal |
 | Ultra | high | Enhancements high, Arbiter medium, cards and Fused bundles medium |
+
+Enhancements are stricter than normal prompt-packet routing: Low and Medium use Utility, while High and Ultra request the Reasoner lane directly. If Reasoner is disabled or unhealthy, Recursion keeps the original assistant output instead of silently running the enhancement through Utility.
 
 Provider tests always use minimal reasoning. Direct OpenAI-compatible endpoints receive native reasoning fields only when Recursion knows the dialect. OpenRouter and OpenAI use an effort field, GLM/Z.AI uses thinking plus `reasoning_effort`, MiniMax M3 uses its thinking mode, and unsupported/unknown endpoints are left alone. SillyTavern connection profiles receive compact reasoning metadata so profile-backed Claude, Gemini, OpenRouter, and other integrations can apply their own native controls.
 

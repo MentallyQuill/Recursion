@@ -786,7 +786,7 @@ function fusedCardBundleLaneForSettings(settings) {
 
 function enhancementLaneForSettings(settings) {
   const policy = reasoningPolicyForSettings(settings);
-  if ((policy.level === 'high' || policy.level === 'ultra') && reasonerLaneAvailable(settings)) return 'reasoner';
+  if (policy.level === 'high' || policy.level === 'ultra') return 'reasoner';
   return 'utility';
 }
 

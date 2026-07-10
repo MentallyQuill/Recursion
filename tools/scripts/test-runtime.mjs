@@ -838,6 +838,33 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
+  const proseHost = createProseMessageHarness();
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: {
+      reasoningLevel: 'high',
+      providers: { reasoner: { enabled: false, lastTest: { status: 'pass' } } },
+      enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 13 }
+    },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
+        return {
+          ok: false,
+          error: { code: 'RECURSION_REASONER_DISABLED', message: 'Reasoner is disabled.' }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-high-disabled-reasoner-enhancement' });
+  assertEqual(result.ok, false, 'High reasoning enhancement surfaces disabled Reasoner instead of silently using Utility');
+  assertEqual(result.error.code, 'RECURSION_REASONER_DISABLED', 'disabled Reasoner error is preserved');
+  assertEqual(routerCalls[0].roleId, 'dialogueEnhancer', 'High reasoning disabled Reasoner still calls selected enhancer role');
+  assertEqual(routerCalls[0].request.lane, 'reasoner', 'High reasoning enhancement requests Reasoner even when the lane is disabled');
+}
+
+{
   const proseHost = createProseMessageHarness('Mara set the cup down. "What do you want to do next?"');
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({

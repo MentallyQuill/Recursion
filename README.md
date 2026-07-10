@@ -106,7 +106,8 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 ## Documentation
 
 - [Documentation Index](docs/DOCUMENTATION_INDEX.md) - Canonical map for user, technical, design, testing, release, and planning docs.
-- [Release Notes](docs/release/0.1.0-pre-alpha.1.md) - Current pre-alpha scope, verification, and known constraints.
+- [Post-alpha.1 Feature Highlights](docs/release/post-alpha.1-feature-highlights.md) - Postable summary of the Enhancements work added after the first pre-alpha checkpoint.
+- [Release Notes](docs/release/README.md) - Current pre-alpha checkpoints, verification, and known constraints.
 - [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md) - First-session path from installation through Manual, Auto, inspection, and cleanup.
 - [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md) - Complete guide for UI surfaces, modes, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
 - [Provider Setup](docs/user/PROVIDER_SETUP.md) - Utility and Reasoner setup, provider tests, fallback behavior, and safe verification.

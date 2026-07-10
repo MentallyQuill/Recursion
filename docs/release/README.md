@@ -4,6 +4,7 @@ Release notes capture the current pre-alpha scope, verification posture, live-sm
 
 ## Releases
 
+- [Post-alpha.1 Feature Highlights](post-alpha.1-feature-highlights.md)
 - [0.1.0-pre-alpha.5](0.1.0-pre-alpha.5.md)
 - [0.1.0-pre-alpha.4](0.1.0-pre-alpha.4.md)
 - [0.1.0-pre-alpha.3](0.1.0-pre-alpha.3.md)

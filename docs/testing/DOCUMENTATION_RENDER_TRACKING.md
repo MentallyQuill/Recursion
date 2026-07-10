@@ -46,11 +46,11 @@ That path is ignored because it is tooling output. Promotion means copying only 
 
 ## Current Pass Status
 
-The 2026-07-03 render pass promotes 25 live UI screenshot assets. Explanatory pipeline, storage, provider, redaction, testing, and behavior-policy diagrams now live directly in Markdown as Mermaid graphs or tables instead of promoted PNG assets. UI renders were captured through the local `.recursion-doc-renderer/` harness against the `recursion-soak-ui` SillyTavern render profile. Screenshots use the live-served Recursion UI module plus redaction-safe documentation fixture state, so final assets show the actual mounted UI without provider secrets, raw provider payloads, or private transcripts.
+The 2026-07-10 render refresh promotes 32 live UI screenshot assets. Explanatory pipeline, storage, provider, redaction, testing, and behavior-policy diagrams now live directly in Markdown as Mermaid graphs or tables instead of promoted PNG assets. UI renders were captured through the local `.recursion-doc-renderer/` harness against the `recursion-soak-ui` SillyTavern render profile. Screenshots use the live-served Recursion UI module plus redaction-safe documentation fixture state, so final assets show the actual mounted UI without provider secrets, raw provider payloads, or private transcripts.
 
 State-set renders such as bar states, progress states, Last Brief states, and fail-soft states are contact sheets composed from fresh live-mounted source captures. Their raw source tiles stay in `.recursion-doc-renderer/` and are not promoted separately.
 
-The 2026-07-06 documentation audit found new or changed UI states after the promoted render pass: declarative fresh-next-generation arming, provider-test lane-local busy state, Advanced Retention controls, instruction-shaped Card Evidence inspection, Fused targeted repair progress, and the Tense & PoV story-form selector. These remain open render markers until live host captures are refreshed.
+The 2026-07-10 UI refresh found two post-alpha.1 bar changes that needed dedicated renders: the icon-only Enhancements menu with apply mode plus target rows, and the redesigned Tense & PoV two-axis selector. Both are now promoted live UI renders.
 
 Future live screenshots should be promoted only when all of these are true:
 
@@ -101,6 +101,8 @@ These assets are promoted live UI documentation renders and may be embedded dire
 | `recursion-operator-install-enable.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Install and enable flow in real SillyTavern with Recursion enabled and the Recursion Bar mounted on the active chat. |
 | `recursion-operator-pipeline-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Standard/Rapid/Fused pipeline dropdown in the compact Recursion Bar, including visible Standard, Rapid, and Fused options. |
 | `recursion-operator-mode-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Auto and Manual mode controls in the compact Recursion Bar, including visible current mode and mode switch interaction. |
+| `recursion-operator-enhancements-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Enhancements menu with As Swipe/Replace apply control and Off, Prose, Dialogue, and Prose + Dialogue target rows. |
+| `recursion-operator-story-form-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Tense & PoV two-axis selector in the compact Recursion Bar showing Auto, Past/Present tense, and first-, second-, third-person, omniscient, and mixed POV choices. |
 | `recursion-operator-bar-states.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Real Recursion Bar state set for Ready, Working, Paused, Issue, Off, provider warning, and prompt-ready behavior. |
 | `recursion-operator-progress-menu-states.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Hero Pixel Array progress menu state set showing top-level rows, child rows, pass, fallback, and ready states from live UI. |
 | `recursion-operator-options-menu.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Options/settings menu in real SillyTavern showing Play, Providers, Advanced, diagnostics controls, and Full Viewer entry point. |
@@ -119,17 +121,15 @@ These assets are promoted live UI documentation renders and may be embedded dire
 | `recursion-provider-controls-utility-reasoner.png` | live host | `docs/user/PROVIDER_SETUP.md` | Utility and Reasoner provider controls in the live extension with source selection, model fields, session-only key state, Test Provider, and Clear Session Key affordances. |
 | `recursion-prompt-packet-viewer.png` | live host | `docs/user/PROMPT_PRIVACY_AND_SAFETY.md` | Prompt Packet viewer in the live extension with selected card refs, omissions, injection metadata, sanitized diagnostics, and no raw provider or private transcript leakage. |
 | `recursion-release-smoke-overview.png` | live host | `docs/release/0.1.0-pre-alpha.1.md` | Sanitized release smoke overview from a real SillyTavern render profile showing Recursion Bar ready state and progress completion without private chat or provider data. |
-
-## Open Render Inventory
-
-| Asset | Source Type | Target Doc | Visual Scope |
-| --- | --- | --- | --- |
 | `recursion-operator-fresh-next-generation-armed.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Recursion Bar idle command slot with fresh-next-generation armed, pressed Regenerate icon, and Last Brief still showing the previous completed packet. |
-| `recursion-operator-story-form-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Tense & PoV selector in the compact Recursion Bar showing Auto plus forced past/present first-, second-, third-person limited, and third-person omniscient options. |
 | `recursion-operator-fused-repair-progress.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Hero Pixel Array progress menu showing accepted Fused bundle cards plus targeted Standard repair for a damaged or missing sibling. |
 | `recursion-operator-retention-settings.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Advanced Retention controls showing source-window, provider-message, scene-cache, source-variant, and run-journal caps. |
 | `recursion-provider-test-busy-state.png` | live host | `docs/user/PROVIDER_SETUP.md` | Reasoner Provider disclosure staying open while the clicked Test Provider button shows lane-local `Testing...` busy state. |
 | `recursion-prompt-packet-instruction-card-evidence.png` | live host | `docs/user/PROMPT_PRIVACY_AND_SAFETY.md` | Prompt Packet viewer showing instruction-shaped Card Evidence, Guidance status, selected refs, and sanitized route metadata. |
+
+## Open Render Inventory
+
+There are no current open render slots. New screenshot needs should be added here and marked in the target document with a visible `<Render Needed>` line until promoted.
 
 ## Verification Commands
 

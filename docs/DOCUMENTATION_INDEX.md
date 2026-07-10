@@ -5,6 +5,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 ## Release Notes
 
 - [Release Notes Directory](release/README.md)
+- [Post-alpha.1 Feature Highlights](release/post-alpha.1-feature-highlights.md)
 - [0.1.0-pre-alpha.5](release/0.1.0-pre-alpha.5.md)
 - [0.1.0-pre-alpha.4](release/0.1.0-pre-alpha.4.md)
 - [0.1.0-pre-alpha.3](release/0.1.0-pre-alpha.3.md)

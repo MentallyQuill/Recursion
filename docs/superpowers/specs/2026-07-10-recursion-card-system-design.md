@@ -410,6 +410,123 @@ Required states:
 
 Use compact chips, icons, disabled states, aria labels, and short inline messages. Avoid large cards, marketing-style panels, and instructional copy inside the app.
 
+## Additional Contracts
+
+### Prompt Budget And Selection
+
+Authored cards do not bypass the existing hand-selection and prompt-budget policy. Runnable authored and generated cards form one candidate pool for the final Card Evidence hand.
+
+Rules:
+
+- `maxCards` remains the hard cap for final Card Evidence.
+- The old hard "at least one active card" rule is removed.
+- `minCards` must not synthesize cards when the deck has zero runnable cards.
+- Authored cards estimate tokens from `promptText`.
+- Generated cards estimate tokens from their generated card output.
+- Authored cards receive a mild selection priority because the user wrote them intentionally.
+- Authored cards still lose to hard token caps and `maxCards`.
+- Omitted runnable cards are recorded with reasons such as `max-cards` or `token-budget`.
+
+The final prompt should never grow without bound just because a deck contains many active authored cards.
+
+### Save Model
+
+Editors use explicit save. Structural reorder uses save-on-exit from move mode.
+
+Rules:
+
+- Deck selection saves immediately because the active deck is a global setting.
+- Card, category, and deck editors expose `Save` and `Close`.
+- Closing a dirty editor prompts for Save, Discard, or Cancel.
+- Authoring Assist preview changes only the local editor draft.
+- Accepted assist fields do not persist until the editor is saved.
+- Reorder and move operations save when the user exits move mode.
+- Save failure keeps local edits visible and marks the affected surface `Save failed`.
+- Failed reorder restores the previous persisted order and shows a compact error.
+
+### Import And Export
+
+Card Deck import/export is not part of the first implementation. The V1 data model must still remain portable JSON so import/export can be added cleanly later.
+
+Rules:
+
+- No import/export UI ships in the first Card System pass.
+- Deck, category, and card ids must remain stable.
+- Default is not exported as user-owned data unless duplicated first.
+- Future import must validate schema version, ids, card prompt safety, and name collisions.
+- Future import conflict actions should be Keep Both, Replace, or Cancel.
+
+### Accessibility And Keyboard
+
+Mobile press-hold is an enhancement, not the only path to actions.
+
+Rules:
+
+- Every press-hold action must also be available through a visible action button or menu.
+- Deck selector, deck actions, category actions, card actions, editor, and assist preview are keyboard reachable.
+- `Enter` activates the focused row or menu item.
+- `Escape` closes the topmost layer first: menu, assist preview, editor, then panel.
+- Editor and assist preview trap focus while open and restore focus on close.
+- Description indicators are keyboard reachable and expose description text through a popover or `aria-describedby`.
+- Move mode provides keyboard commands: Move Up, Move Down, and Move To Category.
+
+### Diagnostics And Privacy
+
+Diagnostics default to structure, counts, hashes, and reasons. User-authored deck text is redacted by default.
+
+Rules:
+
+- Default diagnostics include active deck id/name, deck counts, runnable counts, skipped reasons, save state, and assist state.
+- Card `promptText`, card descriptions, category descriptions, and assist input/output are redacted by default.
+- Excerpt mode may include truncated prompt excerpts only through the existing diagnostics redaction policy.
+- Prompt inspection can show full prompt-facing Card Evidence locally because it is an intentional inspection surface.
+- Export Diagnostics must not leak raw custom card prompts unless the user explicitly enables excerpt mode.
+
+### Storage Versioning And Migration
+
+Card Deck settings use an explicit version.
+
+Rules:
+
+- `cardDecks.version` starts at `1`.
+- New settings default to active deck `default` and no custom decks.
+- If old `cardScope` data exists, normalization may read it once to seed enabled states for the Default deck view.
+- Saved settings write only `cardDecks`; `cardScope` is removed.
+- Invalid custom deck data is repaired or dropped deterministically.
+- Missing active deck falls back to Default.
+- Default deck data is bundled and never persisted as a custom deck.
+
+### Name Collisions
+
+Ids are identity. Names are user-facing labels.
+
+Rules:
+
+- Deck names must be unique after trimming.
+- Duplicating a deck creates `Name Copy`, then `Name Copy 2`, and so on.
+- Category names may repeat across different decks.
+- Category names should be unique within one deck.
+- Card names may repeat, but duplicate runnable card names in the same deck show a compact warning.
+- Duplicating a card creates `Name Copy`, then `Name Copy 2`, and so on.
+- Empty or whitespace-only names are invalid.
+- A card named `New Card` remains draft regardless of prompt contents.
+
+### Assist Cancellation And Failure
+
+Authoring Assist is side-effect-free until the user accepts a preview, and even then it mutates only the unsaved editor draft.
+
+Rules:
+
+- The wand request uses editor fields as they exist when clicked.
+- The user may keep editing while the request is running.
+- If editor fields change before the result returns, the preview marks itself as based on older input.
+- Closing the editor aborts or ignores the assist result.
+- Failed assist preserves editor state and shows Retry.
+- Retry uses current editor fields.
+- Accept applies checked fields to editor state only.
+- Close preview applies nothing.
+- Save persists accepted assist fields.
+
 ## Delete Rules
 
 Deck delete:

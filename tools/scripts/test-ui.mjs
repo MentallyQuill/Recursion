@@ -1828,6 +1828,8 @@ try {
   assert(dialogueTargetIcon.className.includes('is-dialogue'), 'Dialogue target row uses dialogue icon');
   assert(combinedTargetIcon.className.includes('is-combo'), 'Prose + Dialogue target row uses stacked combo icon');
   assertEqual(combinedTargetIcon.children.length, 2, 'Prose + Dialogue target row stacks two compact icons');
+  assert(combinedTargetIcon.children[0].className.includes('is-prose'), 'Prose + Dialogue target row places prose icon first');
+  assert(combinedTargetIcon.children[1].className.includes('is-dialogue'), 'Prose + Dialogue target row places dialogue icon second');
   assertEqual(root.querySelectorAll('[data-recursion-enhancement-target-choice-tip]').length, 4, 'Enhancements selector renders mini descriptions for all target options');
   assertEqual(
     root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-label'),

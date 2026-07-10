@@ -1079,25 +1079,27 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-enhancements-choice-symbol.is-combo {
+  display: grid;
+  grid-template-rows: 9px 9px;
+  height: 18px;
   opacity: .88;
+  row-gap: 0;
 }
 
 .recursion-enhancements-choice-symbol-part {
   display: block;
-  height: 13px;
-  position: absolute;
-  width: 13px;
+  height: 9px;
+  justify-self: center;
+  position: static;
+  width: 16px;
 }
 
 .recursion-enhancements-choice-symbol-part.is-dialogue {
-  bottom: 0;
-  left: 0;
-  opacity: .62;
+  opacity: .68;
 }
 
 .recursion-enhancements-choice-symbol-part.is-prose {
-  right: 0;
-  top: 0;
+  opacity: .95;
 }
 
 .recursion-reasoning-chain {

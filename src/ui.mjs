@@ -366,8 +366,8 @@ function enhancementTargetIcon(option) {
       attrs: { 'aria-hidden': 'true' },
       dataset: { recursionEnhancementTargetIcon: target }
     }, [
-      el('span', { className: 'recursion-enhancements-choice-symbol-part is-dialogue' }),
-      el('span', { className: 'recursion-enhancements-choice-symbol-part is-prose' })
+      el('span', { className: 'recursion-enhancements-choice-symbol-part is-prose' }),
+      el('span', { className: 'recursion-enhancements-choice-symbol-part is-dialogue' })
     ]);
   }
   if (target === 'prose' || target === 'dialogue') {

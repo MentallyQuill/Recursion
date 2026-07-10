@@ -443,6 +443,27 @@ assertDeepEqual(
 );
 assertEqual(concurrentDerivedProgress.currentStepText, '2 model calls running...', 'derived concurrent progress gets compact bar text');
 
+const enhancementProviderProgress = createProgressRunModel({
+  settings: { mode: 'auto' },
+  activityHistory: [
+    { runId: 'run-enhance', phase: 'enhancementResponse', label: 'Enhancing response...', providerLane: 'reasoner' },
+    { runId: 'run-enhance', phase: 'providerCallRunning', label: 'Provider call running.', providerLane: 'reasoner', detail: { roleId: 'dialogueEnhancer' } },
+    { runId: 'run-enhance', phase: 'providerCallRunning', label: 'Provider call running.', providerLane: 'reasoner', detail: { roleId: 'proseEnhancer' } }
+  ],
+  activity: { runId: 'run-enhance', phase: 'providerCallRunning', label: 'Provider call running.', providerLane: 'reasoner', detail: { roleId: 'proseEnhancer' } }
+});
+assertDeepEqual(
+  enhancementProviderProgress.steps
+    .filter((step) => ['dialogue-enhancement', 'prose-enhancement'].includes(step.id))
+    .map((step) => [step.id, step.label, step.providerLane, step.sourceRoleId]),
+  [
+    ['dialogue-enhancement', 'Dialogue Enhancement', 'reasoner', 'dialogueEnhancer'],
+    ['prose-enhancement', 'Prose Enhancement', 'reasoner', 'proseEnhancer']
+  ],
+  'derived progress labels enhancement provider calls as first-class enhancement rows'
+);
+assertEqual(enhancementProviderProgress.steps.some((step) => step.id === 'utility-card-batch'), false, 'enhancement provider calls do not create a Utility card batch row');
+
 const derivedCachedProgress = createProgressRunModel({
   settings: { mode: 'auto' },
   activityHistory: [
@@ -553,6 +574,7 @@ assertEqual(customProgressCapsViewModel.progressListVisibleLimit, 24, 'view mode
 const barImplementationReference = readFileSync(new URL('../../docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md', import.meta.url), 'utf8');
 const uiSpec = readFileSync(new URL('../../docs/design/UI_SPEC.md', import.meta.url), 'utf8');
 const recursionCss = readFileSync(new URL('../../styles/recursion.css', import.meta.url), 'utf8');
+assert(recursionCss.includes('recursion-enhancement-capture-active'), 'enhancement capture CSS hides the class toggled by the extension');
 const recursionUi = readFileSync(new URL('../../src/ui.mjs', import.meta.url), 'utf8');
 const regenerateIconPath = new URL('../../assets/icons/regenerate.svg', import.meta.url);
 for (const section of [

@@ -29,6 +29,8 @@
   box-sizing: border-box;
 }
 
+html.recursion-enhancement-capture-active #chat .mes.last_mes:not(.user_mes):not([is_user="true"]) .mes_text,
+body.recursion-enhancement-capture-active #chat .mes.last_mes:not(.user_mes):not([is_user="true"]) .mes_text,
 html.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_user="true"]) .mes_text,
 body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_user="true"]) .mes_text {
   visibility: hidden;
@@ -1080,15 +1082,15 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 
 .recursion-enhancements-choice-symbol.is-combo {
   display: grid;
-  grid-template-rows: 9px 9px;
-  height: 18px;
+  grid-template-rows: 16px 16px;
+  height: 42px;
   opacity: .88;
-  row-gap: 0;
+  row-gap: 10px;
 }
 
 .recursion-enhancements-choice-symbol-part {
   display: block;
-  height: 9px;
+  height: 16px;
   justify-self: center;
   position: static;
   width: 16px;

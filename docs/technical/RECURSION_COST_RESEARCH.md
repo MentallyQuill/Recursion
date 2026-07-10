@@ -52,7 +52,7 @@ If a provider bills a model at 2x, Recursion does not know that natively. Operat
 | `providerVisibleMessages` | `12` | Recent visible messages sent to Recursion provider calls. |
 | `sourceWindowMessages` | `20` | Recent visible messages considered for source freshness and evidence windows. |
 | `sourceWindowCharacters` | `12000` | Character cap for the source freshness window. |
-| `enhancements.target` / `enhancements.applyMode` | `off` / `as-swipe` | Adds post-generation Utility rewrite calls when target is `prose`, `dialogue`, or `prose-dialogue`; combined target runs two calls. |
+| `enhancements.target` / `enhancements.applyMode` | `off` / `as-swipe` | Adds post-generation rewrite calls when target is `prose`, `dialogue`, or `prose-dialogue`; combined target runs two calls. Low/Medium use Utility; High/Ultra use Reasoner when available. |
 | Utility `maxTokens` | `8192` | Response cap for Utility calls. |
 | Reasoner `maxTokens` | `8192` | Response cap for Reasoner calls. |
 
@@ -68,7 +68,7 @@ Standard is the reference foreground path.
 | Card generation | 0 to selected budget | Utility at Low/Medium; mixed or Reasoner-heavy at High/Ultra when healthy. |
 | Guidance Composer | 1 when composing a packet | Utility. |
 | Reasoner Composer | 0 or 1 | Reasoner when Medium+ policy and provider health allow it. |
-| Enhancements | 0 to 2 after host generation | Utility, only when enabled. |
+| Enhancements | 0 to 2 after host generation | Utility at Low/Medium, Reasoner at High/Ultra when available, only when enabled. |
 
 Card generation can be one router batch when batching is available, or multiple individual role calls. Cache reuse and `skip` plans reduce or remove downstream calls.
 
@@ -83,7 +83,7 @@ Fused keeps the normal foreground lifecycle, but replaces many card calls with o
 | Fused repair | 0 to missing/invalid family count | Standard card calls for damaged siblings only. |
 | Guidance Composer | 1 when composing a packet | Utility. |
 | Reasoner Composer | 0 or 1 | Reasoner when Medium+ policy and provider health allow it. |
-| Enhancements | 0 to 2 after host generation | Utility, only when enabled. |
+| Enhancements | 0 to 2 after host generation | Utility at Low/Medium, Reasoner at High/Ultra when available, only when enabled. |
 
 Fused is usually cheaper than Standard when the model returns trustworthy multi-card JSON because it collapses card setup overhead into one larger structured request.
 
@@ -99,7 +99,7 @@ Rapid moves most scene work into a background warm pass and keeps the foreground
 | Foreground Rapid Turn Delta | 1, with optional hedge | Utility. |
 | Foreground packet install | 0 model calls | Uses warm guidance plus delta. |
 | Escalation to Standard | Standard call shape | Happens when warm artifact is missing, stale, invalid, empty, or declares a mandatory gap. |
-| Enhancements | 0 to 2 after host generation | Utility, only when enabled. |
+| Enhancements | 0 to 2 after host generation | Utility at Low/Medium, Reasoner at High/Ultra when available, only when enabled. |
 
 Rapid can reduce send-time cost and latency on warm hits, but warm work still consumes provider calls. A warm miss or mandatory gap can add the Rapid delta attempt plus a full Standard path for that same pending user message.
 
@@ -195,7 +195,7 @@ Use these controls first when tuning cost:
 | Lower `maxCards` and `minCards` | Reduces card generation and selected evidence. |
 | Use Compact Prompt Footprint | Reduces final host prompt injection size. |
 | Lower provider-visible and source-window limits | Reduces provider input tokens for long chats. |
-| Keep Enhancements off | Avoids large post-generation Utility rewrite calls. |
+| Keep Enhancements off | Avoids large post-generation rewrite calls. |
 | Prefer cache reuse for stable scenes | Lets the Arbiter skip new card generation when safe. |
 
 ## Caveats

@@ -784,6 +784,12 @@ function fusedCardBundleLaneForSettings(settings) {
   return 'utility';
 }
 
+function enhancementLaneForSettings(settings) {
+  const policy = reasoningPolicyForSettings(settings);
+  if ((policy.level === 'high' || policy.level === 'ultra') && reasonerLaneAvailable(settings)) return 'reasoner';
+  return 'utility';
+}
+
 function applyReasoningLaneToFusedCardBundleRequest(request, settings) {
   const routedRequest = {
     ...request,
@@ -3094,12 +3100,14 @@ export function createRecursionRuntime({
         originalHash: `${target}:${mode}:${originalHash}`
       })
     };
+    const enhancementLane = enhancementLaneForSettings(settings);
+    const enhancementReasoning = reasonerRequestMetadata(settings, 'enhancement', enhancementLane);
     stageRuntimeActivity({
       runId,
       phase: target === 'dialogue' ? 'dialogueEnhancing' : (target === 'prose-dialogue' ? 'enhancementResponse' : 'proseEnhancing'),
       label: target === 'dialogue' ? 'Enhancing dialogue...' : (target === 'prose-dialogue' ? 'Enhancing response...' : 'Enhancing prose...'),
-      providerLane: 'utility',
-      composerLane: 'utility',
+      providerLane: enhancementLane,
+      composerLane: enhancementLane,
       chips: target === 'dialogue' ? ['Dialogue'] : (target === 'prose-dialogue' ? ['Dialogue', 'Prose'] : ['Prose'])
     });
     let held = false;
@@ -3121,7 +3129,9 @@ export function createRecursionRuntime({
             text: enhancedText,
             contextMessages,
             contextMessageLimit: enhancementSettings.contextMessages,
-            storyForm
+            storyForm,
+            lane: enhancementLane,
+            ...enhancementReasoning
           });
           const result = await generationRouter.generate('dialogueEnhancer', request, {
             runId,
@@ -3157,7 +3167,9 @@ export function createRecursionRuntime({
             text: enhancedText,
             contextMessages,
             contextMessageLimit: enhancementSettings.contextMessages,
-            storyForm
+            storyForm,
+            lane: enhancementLane,
+            ...enhancementReasoning
           });
           const result = await generationRouter.generate('proseEnhancer', request, {
             runId,

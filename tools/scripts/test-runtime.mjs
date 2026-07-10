@@ -809,6 +809,75 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 
 {
   const proseHost = createProseMessageHarness();
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({
+      reasoningLevel: 'high',
+      enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: 13 }
+    }),
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request, options) {
+        routerCalls.push({ roleId, request, options });
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.proseEnhancer.v1',
+            text: 'Mara clenched her jaw. "Keep the door shut," Mara said.'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-high-reasoner-enhancement' });
+  assertEqual(result.ok, true, 'High reasoning prose enhancement succeeds');
+  assertEqual(routerCalls[0].roleId, 'proseEnhancer', 'High reasoning still uses proseEnhancer role');
+  assertEqual(routerCalls[0].request.lane, 'reasoner', 'High reasoning routes prose enhancement through Reasoner lane');
+  assertEqual(routerCalls[0].request.reasoningCategory, 'enhancement', 'High reasoning labels enhancement provider work');
+  assertEqual(routerCalls[0].request.reasoningIntent, 'medium', 'High reasoning asks enhancement Reasoner calls for medium provider reasoning');
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara set the cup down. "What do you want to do next?"');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({
+      reasoningLevel: 'ultra',
+      enhancements: { target: 'prose-dialogue', applyMode: 'replace', contextMessages: 3 }
+    }),
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request, options) {
+        routerCalls.push({ roleId, request, options });
+        if (roleId === 'dialogueEnhancer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.dialogueEnhancer.v1',
+              text: 'Mara set the cup down. "Sit down before you fall over. We can argue after."'
+            }
+          };
+        }
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.proseEnhancer.v1',
+            text: 'Mara placed the cup on the table. "Sit down before you fall over. We can argue after."'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-ultra-reasoner-enhancement' });
+  assertEqual(result.ok, true, 'Ultra reasoning Prose + Dialogue enhancement succeeds');
+  assertDeepEqual(routerCalls.map((call) => call.roleId), ['dialogueEnhancer', 'proseEnhancer'], 'Ultra reasoning keeps Prose + Dialogue pass order');
+  assert(routerCalls.every((call) => call.request.lane === 'reasoner'), 'Ultra reasoning routes every enhancement pass through Reasoner lane');
+  assert(routerCalls.every((call) => call.request.reasoningCategory === 'enhancement'), 'Ultra reasoning labels every enhancement pass as enhancement work');
+  assert(routerCalls.every((call) => call.request.reasoningIntent === 'high'), 'Ultra reasoning asks enhancement Reasoner calls for high provider reasoning');
+}
+
+{
+  const proseHost = createProseMessageHarness();
   const { runtime } = createRuntimeHarness({
     settings: { enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: 13 } },
     hostMessages: proseHost.messages,

@@ -77,7 +77,7 @@ Pipeline controls decide how Recursion schedules scene work. Auto and Manual dec
 
 ### Cost Shape
 
-Recursion adds provider work before the host model writes: Arbiter planning, card generation or a Fused bundle, Utility guidance composition, optional Reasoner synthesis, and optional post-generation Prose Enhancement. It also injects a bounded prompt packet into the normal SillyTavern generation, so Prompt Footprint affects the final host context size.
+Recursion adds provider work before the host model writes: Arbiter planning, card generation or a Fused bundle, Utility guidance composition, optional Reasoner synthesis, and optional post-generation Enhancements for prose, dialogue, or both. It also injects a bounded prompt packet into the normal SillyTavern generation, so Prompt Footprint affects the final host context size.
 
 Cost depends most on pipeline, Reasoning Level, card count, footprint, cache reuse, provider hidden reasoning, and any external model multiplier. For the detailed call breakdown and planning estimates, see [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md).
 

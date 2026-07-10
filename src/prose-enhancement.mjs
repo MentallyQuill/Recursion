@@ -338,7 +338,10 @@ export function buildProseEnhancementRequest({
   text = '',
   contextMessages = [],
   contextMessageLimit = 13,
-  storyForm = null
+  storyForm = null,
+  lane = '',
+  reasoningCategory = 'prose-enhancement',
+  reasoningIntent = 'minimal'
 } = {}) {
   const targetText = truncate(String(text ?? '').replace(SECRET_PATTERN, '[redacted]'), MAX_TARGET_TEXT);
   const limit = Math.max(0, Math.min(35, Math.round(Number(contextMessageLimit) || 0)));
@@ -385,8 +388,9 @@ export function buildProseEnhancementRequest({
     prompt,
     responseSchema: PROSE_ENHANCER_SCHEMA,
     responseLength: 4096,
-    reasoningCategory: 'prose-enhancement',
-    reasoningIntent: 'minimal',
+    ...(lane ? { lane } : {}),
+    reasoningCategory,
+    reasoningIntent,
     machineJson: true,
     contextMessages: (Array.isArray(contextMessages) ? contextMessages : []).slice(-limit)
   };

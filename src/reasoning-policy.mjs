@@ -1,6 +1,6 @@
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
 const REASONING_INTENTS = new Set(['minimal', 'medium', 'high']);
-const REASONING_CATEGORIES = new Set(['final-brief', 'arbiter', 'card', 'provider-test']);
+const REASONING_CATEGORIES = new Set(['final-brief', 'arbiter', 'card', 'enhancement', 'provider-test']);
 
 function settingsReasoningLevel(value) {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value.reasoningLevel;
@@ -43,6 +43,11 @@ export function reasoningIntentForLevel(settingsOrLevel = {}, category = 'final-
   }
   if (resolvedCategory === 'card') {
     if (level === 'ultra') return 'medium';
+    return 'minimal';
+  }
+  if (resolvedCategory === 'enhancement') {
+    if (level === 'ultra') return 'high';
+    if (level === 'high') return 'medium';
     return 'minimal';
   }
   return 'minimal';

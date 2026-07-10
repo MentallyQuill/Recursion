@@ -92,7 +92,10 @@ export function buildDialogueEnhancementRequest({
   contextMessageLimit = 13,
   storyForm = null,
   characterContext = {},
-  cardContext = []
+  cardContext = [],
+  lane = '',
+  reasoningCategory = 'dialogue-enhancement',
+  reasoningIntent = 'minimal'
 } = {}) {
   const targetText = truncate(String(text ?? '').replace(SECRET_PATTERN, '[redacted]'), MAX_TARGET_TEXT);
   const limit = Math.max(0, Math.min(35, Math.round(Number(contextMessageLimit) || 0)));
@@ -158,8 +161,9 @@ export function buildDialogueEnhancementRequest({
     prompt,
     responseSchema: DIALOGUE_ENHANCER_SCHEMA,
     responseLength: 4096,
-    reasoningCategory: 'dialogue-enhancement',
-    reasoningIntent: 'minimal',
+    ...(lane ? { lane } : {}),
+    reasoningCategory,
+    reasoningIntent,
     machineJson: true,
     contextMessages: (Array.isArray(contextMessages) ? contextMessages : []).slice(-limit)
   };

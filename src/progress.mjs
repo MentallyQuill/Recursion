@@ -317,6 +317,8 @@ function roleStepId(event) {
   if (roleId === 'utilityArbiter') return 'planning-card-pass';
   if (roleId === 'reasonerComposer') return 'reasoner-guidance';
   if (roleId === 'guidanceComposer') return 'composing-prompt-packet';
+  if (roleId === 'dialogueEnhancer') return 'dialogue-enhancement';
+  if (roleId === 'proseEnhancer') return 'prose-enhancement';
   if (roleId === 'fusedCardBundle') return 'fused-card-bundle';
   if (MODEL_CALL_ROLE_IDS.has(roleId)) return 'utility-card-batch';
   return null;
@@ -328,6 +330,8 @@ function roleLabel(roleId, fallback = '') {
   if (id === 'reasonerComposer') return 'Reasoner synthesis';
   if (id === 'utilityArbiter') return 'Utility Arbiter';
   if (id === 'guidanceComposer') return 'Guidance composer';
+  if (id === 'dialogueEnhancer') return 'Dialogue Enhancement';
+  if (id === 'proseEnhancer') return 'Prose Enhancement';
   if (id === 'fusedCardBundle') return 'Fused card bundle';
   if (id === 'providerTest') return 'Provider test';
   return fallback;

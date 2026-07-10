@@ -1,6 +1,6 @@
 import { compact, truncate } from './core.mjs';
 import { speakerLabel } from './enhancement-context.mjs';
-import { roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
+import { enhancementEditRatio, roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
 import { dialogueSpans } from './prose-enhancement.mjs';
 
 export const DIALOGUE_ENHANCER_SCHEMA = 'recursion.dialogueEnhancer.v1';
@@ -57,34 +57,135 @@ export const DIALOGUE_SLOP_RULES = String.raw`## Dialogue slop priorities
 * tell me what you want
 * last chance to back out`;
 
-const DIALOGUE_INTERVENTION_PATTERNS = Object.freeze([
+const STRONG_DIALOGUE_INTERVENTION_PATTERNS = Object.freeze([
   {
     id: 'forced-question',
-    pattern: /\b(what do you (say|want)|what now|your move|the choice is yours|where do we go from here|do you want to\b|would you prefer\b)/i
+    pattern: /\b(what do you say\??|what do you want\??|what now\??|your move\.?|the choice is yours\.?|or something else entirely|shall we continue\??|where do we go from here\??)\b/i
+  },
+  {
+    id: 'menu-question',
+    pattern: /\b(do you want to .+?,\s*or .+?\?|are you going to .+?,\s*or will you .+?\?|will you .+?,\s*or will you .+?\?|would you prefer .+?,\s*or .+?\?)\b/i
   },
   {
     id: 'echoing',
-    pattern: /\b(so that'?s what we'?re calling it now|you really just said|you'?re either .+ or .+ probably both|no one ever .+ before)\b/i
+    pattern: /\b(so that'?s what we'?re calling it now|you really just said|you'?re either .+ or .+ probably both|no one ever .+ before|let'?s not get ahead of ourselves|you have no idea what you'?re doing to me)\b/i
   },
   {
     id: 'unsupported-technical',
-    pattern: /\b(assessing variables|recalibrating|hypothesis|data point|optimal|inefficient|statistically|tactically|non-negotiable)\b/i
+    pattern: /\b(assessing variables|recalibrating|hypothesis|data point|acceptable risk|optimal|inefficient|logical conclusion|statistically|tactically|non-negotiable)\b/i
   },
   {
     id: 'defensive-trope',
     pattern: /\b(it'?s not like i care|don'?t get the wrong idea|i'?m only doing this because|you'?re impossible|i hate that you'?re right)\b/i
   },
   {
-    id: 'attraction-cliche',
-    pattern: /\b(you'?re mine|ruin you|claim you|devour you|worship you|you'?re going to be the death of me|last chance to back out)\b/i
+    id: 'romance-cliche',
+    pattern: /\b(you'?re mine|ruin you(?: for anyone else)?|mark you|claim you|devour you|worship you|make you forget your own name|you'?re going to be the death of me|last chance to back out|once i start, i won'?t stop)\b/i
+  },
+  {
+    id: 'romance-body-cliche',
+    pattern: /\b(hungry gaze|predatory gaze|possessive growl|feral need|primal need|kiss-swollen lips|kissed hard enough to bruise|bruising kiss)\b/i
   }
 ]);
 
-export function dialogueInterventionReasons(text = '') {
+const SOFT_DIALOGUE_SUSPICION_PATTERNS = Object.freeze([
+  {
+    id: 'generic-romance-heat',
+    pattern: /\b(tell me what you want|dangerous game|playing with fire|you menace|be gentle|i'?ve never done anything like this before)\b/i
+  },
+  {
+    id: 'generic-comfort',
+    pattern: /\b(are you okay\??|talk to me\.?|i'?m here\.?|you don'?t have to do this|tell me what you need|i can explain)\b/i
+  },
+  {
+    id: 'generic-smalltalk',
+    pattern: /\b(what brings you here\??|what do you do for fun\??|what are your hobbies\??|what makes you tick\??)\b/i
+  },
+  {
+    id: 'stock-deflection',
+    pattern: /\b(don'?t look at me like that|say that again|try not to .+ too much|don'?t .+ too hard|you'?re enjoying this, aren'?t you)\b/i
+  },
+  {
+    id: 'unsupported-smart-talk',
+    pattern: /\b(assessing variables|recalibrating|hypothesis|data point|probability|variables|acceptable risk|optimal|efficient|inefficient|logical conclusion|statistically|tactically|non-negotiable)\b/i
+  }
+]);
+
+const COMMON_DIALOGUE_STOP_WORDS = new Set([
+  'about',
+  'after',
+  'again',
+  'because',
+  'before',
+  'could',
+  'from',
+  'have',
+  'into',
+  'just',
+  'like',
+  'more',
+  'that',
+  'their',
+  'them',
+  'then',
+  'there',
+  'they',
+  'this',
+  'what',
+  'when',
+  'where',
+  'which',
+  'with',
+  'would',
+  'your'
+]);
+
+function patternReasons(patterns, text = '') {
   const source = String(text || '');
-  return DIALOGUE_INTERVENTION_PATTERNS
+  return patterns
     .filter((entry) => entry.pattern.test(source))
     .map((entry) => entry.id);
+}
+
+export function dialogueInterventionReasons(text = '') {
+  return patternReasons(STRONG_DIALOGUE_INTERVENTION_PATTERNS, text);
+}
+
+export function dialogueSuspicionReasons(text = '') {
+  return patternReasons(SOFT_DIALOGUE_SUSPICION_PATTERNS, text);
+}
+
+function significantWords(text = '') {
+  return String(text ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9'\s]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length >= 4 && !COMMON_DIALOGUE_STOP_WORDS.has(word));
+}
+
+export function echoedUserPhraseReasons({ sourceText = '', contextMessages = [] } = {}) {
+  const latestUser = [...(Array.isArray(contextMessages) ? contextMessages : [])]
+    .reverse()
+    .find((message) => String(message?.role || '').toLowerCase() === 'user');
+  if (!latestUser) return [];
+  const userWords = significantWords(latestUser.text ?? latestUser.mes ?? latestUser.content);
+  const assistantWords = significantWords(sourceText);
+  const assistant = ` ${assistantWords.join(' ')} `;
+  for (let index = 0; index <= userWords.length - 4; index += 1) {
+    const phrase = userWords.slice(index, index + 4).join(' ');
+    if (assistant.includes(` ${phrase} `)) return ['echoed-user-phrase'];
+  }
+  return [];
+}
+
+export function joinedDialogueText(text = '') {
+  return dialogueSpans(text)
+    .map((span) => span.text)
+    .join('\n');
+}
+
+export function roundedDialogueEditRatio(originalText = '', enhancedText = '') {
+  return Number(enhancementEditRatio(joinedDialogueText(originalText), joinedDialogueText(enhancedText)).toFixed(4));
 }
 
 function safeText(value, limit = MAX_CONTEXT_TEXT) {
@@ -124,7 +225,8 @@ export function buildDialogueEnhancementRequest({
   cardContext = [],
   lane = '',
   reasoningCategory = 'dialogue-enhancement',
-  reasoningIntent = 'minimal'
+  reasoningIntent = 'minimal',
+  retryReason = ''
 } = {}) {
   const targetText = truncate(String(text ?? '').replace(SECRET_PATTERN, '[redacted]'), MAX_TARGET_TEXT);
   const limit = Math.max(0, Math.min(35, Math.round(Number(contextMessageLimit) || 0)));
@@ -132,6 +234,13 @@ export function buildDialogueEnhancementRequest({
   const storyFormLine = storyForm && typeof storyForm === 'object'
     ? `Story form: ${safeText(JSON.stringify(storyForm), 600)}`
     : 'Story form: infer from source text.';
+  const retryLines = retryReason ? [
+    '',
+    'Retry instruction:',
+    retryReason === 'low-dialogue-edit-ratio'
+      ? '- Your previous revision stayed too close to the source. Revise the dialogue more decisively while preserving structure, speaker intent, and character voice.'
+      : '- Your previous revision returned the original text. Produce a real dialogue revision candidate while preserving all hard rules.'
+  ] : [];
   const prompt = [
     'You are a dialogue consistency editor.',
     'Your job is to repair dialogue in <text_to_transform> without improving general prose.',
@@ -165,8 +274,17 @@ export function buildDialogueEnhancementRequest({
     '- Soft maximum edit ratio: 30%.',
     '- Prefer precise, character-consistent revision over decorative rewriting.',
     '- If the source is short or structurally constrained, come as close to the target band as possible without breaking the hard rules.',
-    '- If the dialogue is already clean, returning it unchanged is allowed.',
+    '- Always produce the best dialogue-focused revision candidate.',
+    '- If the dialogue is already strong, make subtle improvements through compression, rhythm, subtext, implication, character-specific word choice, or sharper response to the emotional pressure.',
+    '- Do not return the original text unchanged unless every safe revision would violate the hard rules.',
     '- Optional diagnostics are allowed in changePlan, but the text field is the only applied output.',
+    '',
+    'Allowed dialogue edit levers:',
+    '- Replace fake open-ended questions with character action, pressure, refusal, narrowed options, consequences, or specific grounded questions.',
+    "- Replace parroting with a response to the motive, fear, pressure, or implication underneath the other character's line.",
+    '- Make intelligent characters precise and situation-aware instead of generically technical.',
+    '- Replace stock defensive deflection with character-specific avoidance, minimization, practicality, silence, or misdirection.',
+    '- Replace generic attraction heat with restraint, specificity, interruption, evasion, awkwardness, directness, or grounded tension.',
     '',
     'Subtext pass:',
     '- What does the character want right now?',
@@ -190,6 +308,7 @@ export function buildDialogueEnhancementRequest({
     '<scene_context>',
     sceneContext,
     '</scene_context>',
+    ...retryLines,
     '<text_to_transform>',
     targetText,
     '</text_to_transform>',
@@ -264,5 +383,10 @@ export function validateDialogueEnhancementResult(result = {}, { originalText = 
       `Dialogue enhancement returned unchanged text despite detected slop: ${interventionReasons.join(', ')}.`
     );
   }
-  return { ok: true, text, editRatio: roundedEnhancementEditRatio(originalText, text) };
+  return {
+    ok: true,
+    text,
+    editRatio: roundedEnhancementEditRatio(originalText, text),
+    dialogueEditRatio: roundedDialogueEditRatio(originalText, text)
+  };
 }

@@ -2,6 +2,7 @@ import {
   DIALOGUE_ENHANCER_SCHEMA,
   buildDialogueEnhancementRequest,
   dialogueInterventionReasons,
+  dialogueSuspicionReasons,
   validateDialogueEnhancementResult
 } from '../../src/dialogue-enhancement.mjs';
 import {
@@ -49,6 +50,9 @@ assert(request.prompt.includes('If any intervention-required pattern appears, do
 assert(request.prompt.includes('Minimum edit ratio: 10%'), 'dialogue prompt states minimum edit ratio');
 assert(request.prompt.includes('Target edit ratio: 10-20%'), 'dialogue prompt states target edit ratio band');
 assert(request.prompt.includes('Soft maximum edit ratio: 30%'), 'dialogue prompt states soft maximum edit ratio');
+assert(!request.prompt.includes('returning it unchanged is allowed'), 'dialogue prompt no longer allows clean no-op');
+assert(request.prompt.includes('Always produce the best dialogue-focused revision candidate'), 'dialogue prompt requires a candidate');
+assert(request.prompt.includes('Allowed dialogue edit levers'), 'dialogue prompt explains safe revision levers');
 assert(request.prompt.includes('"changePlan"'), 'dialogue prompt requests optional change diagnostics');
 assert(
   buildDialogueEnhancementRequest({ text: '"We come back with authorization and a plan."' }).prompt.includes('authorization and a plan'),
@@ -128,6 +132,25 @@ const cleanNoop = validateDialogueEnhancementResult({
 }, { originalText: 'Mara set the cup down. "Sit down before you fall over."' });
 assertEqual(cleanNoop.ok, true, 'dialogue no-op remains valid when no deterministic slop is detected');
 assertEqual(cleanNoop.editRatio, 0, 'dialogue validation reports no-op edit ratio without rejecting it');
+assertEqual(cleanNoop.dialogueEditRatio, 0, 'dialogue validation reports no-op dialogue edit ratio without rejecting it');
+
+const dialogueOnlyChange = validateDialogueEnhancementResult({
+  schema: DIALOGUE_ENHANCER_SCHEMA,
+  text: 'Mara stayed beside the door. "Sit. We can argue after."'
+}, { originalText: 'Mara stayed beside the door. "Sit down before you fall over."' });
+assertEqual(dialogueOnlyChange.ok, true, 'dialogue validator accepts dialogue-only revision');
+assert(dialogueOnlyChange.dialogueEditRatio > dialogueOnlyChange.editRatio, 'dialogue ratio is not diluted by narration');
+
+assertDeepEqual(
+  dialogueInterventionReasons('"Once I start, I won\'t stop."'),
+  ['romance-cliche'],
+  'strong romance cliche requires no-op intervention'
+);
+assertDeepEqual(
+  dialogueSuspicionReasons('"Tell me what you want."'),
+  ['generic-romance-heat'],
+  'soft romance line is suspicion, not a hard ban'
+);
 
 const rejectedNarrationDrift = validateDialogueEnhancementResult({
   schema: DIALOGUE_ENHANCER_SCHEMA,

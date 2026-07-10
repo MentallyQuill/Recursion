@@ -510,6 +510,27 @@ assertDeepEqual(
   'derived card batch has pending/running/generated/cached/fallback child rows'
 );
 
+const fusedMixedSourceProgress = createProgressRunModel({
+  settings: { mode: 'auto', pipelineMode: 'fused' },
+  activityHistory: [
+    { runId: 'run-fused-mixed-source', phase: 'providerCallRunning', label: 'Fused card bundle running.', providerLane: 'utility', detail: { roleId: 'fusedCardBundle' } },
+    { runId: 'run-fused-mixed-source', phase: 'providerCallSettled', label: 'Fused card bundle complete.', providerLane: 'utility', outcome: 'success', detail: { roleId: 'fusedCardBundle' } },
+    { runId: 'run-fused-mixed-source', phase: 'cardProgress', label: 'Scene Frame generated.', providerLane: 'utility', severity: 'success', detail: { parentStepId: 'fused-card-bundle', roleId: 'sceneFrameCard', family: 'Scene Frame', source: 'generated', state: 'done' } },
+    { runId: 'run-fused-mixed-source', phase: 'cardProgress', label: 'Scene Constraints reused from cache.', providerLane: 'utility', severity: 'success', detail: { parentStepId: 'fused-card-bundle', roleId: 'sceneConstraintsCard', family: 'Scene Constraints', source: 'cache', state: 'cached' } }
+  ],
+  activity: { runId: 'run-fused-mixed-source', phase: 'providerCallSettled', label: 'Fused card bundle complete.', providerLane: 'utility', outcome: 'success', detail: { roleId: 'fusedCardBundle' } }
+});
+const fusedMixedSourceBundle = fusedMixedSourceProgress.steps.find((step) => step.id === 'fused-card-bundle');
+assertEqual(fusedMixedSourceProgress.steps.some((step) => step.id === 'utility-card-batch'), false, 'Fused mixed cache/generated progress does not create a duplicate Utility card batch');
+assertDeepEqual(
+  fusedMixedSourceBundle.children.map((child) => [child.label, child.state, child.meta]),
+  [
+    ['Scene Frame', 'done', 'generated'],
+    ['Scene Constraints', 'cached', 'cached']
+  ],
+  'Fused mixed source progress keeps cached child rows purple inside the Fused bundle'
+);
+
 const unsafeExplicitProgress = createProgressRunModel({
   progressRun: {
     runId: 'unsafe-progress',

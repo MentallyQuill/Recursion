@@ -17,7 +17,7 @@ import {
 } from './card-scope.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { enhancementContextFromSnapshot } from './enhancement-context.mjs';
-import { roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
+import { ENHANCEMENT_EDIT_RATIO_MINIMUM, roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
 import { composeGuidanceForCards, composePromptPacket, GUIDANCE_SCHEMA as PROMPT_GUIDANCE_SCHEMA, PROMPT_PACKET_VERSION } from './prompt.mjs';
 import { PROVIDER_CONTRACT_HASH, fetchOpenAICompatibleModels } from './providers.mjs';
 import {
@@ -46,6 +46,10 @@ import {
 } from './prose-enhancement.mjs';
 import {
   buildDialogueEnhancementRequest,
+  dialogueInterventionReasons,
+  dialogueSuspicionReasons,
+  echoedUserPhraseReasons,
+  roundedDialogueEditRatio,
   validateDialogueEnhancementResult
 } from './dialogue-enhancement.mjs';
 import { buildDiagnosticsPayload } from './runtime/diagnostics.mjs';
@@ -790,7 +794,7 @@ function fusedCardBundleLaneForSettings(settings) {
 
 function enhancementLaneForSettings(settings) {
   const policy = reasoningPolicyForSettings(settings);
-  if (policy.level === 'high' || policy.level === 'ultra') return 'reasoner';
+  if ((policy.level === 'high' || policy.level === 'ultra') && reasonerLaneAvailable(settings)) return 'reasoner';
   return 'utility';
 }
 
@@ -1749,7 +1753,7 @@ function progressRetryCount(value) {
   return Math.min(99, Math.floor(count));
 }
 
-function cardProgressDetail(card, source, state) {
+function cardProgressDetail(card, source, state, options = {}) {
   const catalog = catalogForCard(card);
   const roleId = safeText(catalog?.role || card?.role || card?.roleId || '', 120);
   const family = safeText(catalog?.family || card?.family || '', 120);
@@ -1757,10 +1761,11 @@ function cardProgressDetail(card, source, state) {
   const retryCount = progressRetryCount(card?.providerRetryCount || card?.retryCount);
   const reason = safeText(card?.providerProgressReason || card?.progressReason || '', 180);
   const progressSource = card?.providerProgressSource === 'fused-repair' ? 'fused-repair' : source;
+  const explicitParentStepId = safeText(options.parentStepId || '', 120);
   return {
-    parentStepId: progressSource === 'fused-repair'
+    parentStepId: explicitParentStepId || (progressSource === 'fused-repair'
       ? 'utility-card-batch'
-      : (card?.providerRole === 'fusedCardBundle' ? 'fused-card-bundle' : 'utility-card-batch'),
+      : (card?.providerRole === 'fusedCardBundle' ? 'fused-card-bundle' : 'utility-card-batch')),
     roleId,
     family,
     source: progressSource,
@@ -2412,13 +2417,13 @@ export function createRecursionRuntime({
     return result;
   }
 
-  function stageCardProgress(runId, cards, { source, state }) {
+  function stageCardProgress(runId, cards, { source, state, parentStepId } = {}) {
     const list = Array.isArray(cards) ? cards : [];
     for (const card of list) {
       const retryCount = progressRetryCount(card?.providerRetryCount);
       const cardState = source === 'generated' && state === 'done' && retryCount > 0 ? 'warning' : state;
       const severity = cardState === 'failed' ? 'error' : (cardState === 'warning' ? 'warning' : 'success');
-      const detail = cardProgressDetail(card, source, cardState);
+      const detail = cardProgressDetail(card, source, cardState, { parentStepId });
       if (!detail.roleId && !detail.family) continue;
       const providerLane = source === 'generated' ? detail.providerLane : 'utility';
       const progressSource = detail.source || source;
@@ -3134,23 +3139,63 @@ export function createRecursionRuntime({
       const passSequence = target === 'prose-dialogue' ? ['dialogue', 'prose'] : [target];
       let enhancedText = originalText;
       const passHashes = [];
+      async function generateEnhancementPass(roleId, request) {
+        const primaryLane = safeText(request?.lane || 'utility', 40) === 'reasoner' ? 'reasoner' : 'utility';
+        const primary = await generationRouter.generate(roleId, request, {
+          runId,
+          timeoutMs: PROSE_ENHANCEMENT_TIMEOUT_MS
+        });
+        if (primary?.ok === true || primaryLane !== 'reasoner') {
+          return { result: primary, lane: primaryLane, fallbackFrom: '' };
+        }
+        const fallbackRequest = { ...request, lane: 'utility' };
+        delete fallbackRequest.reasoningCategory;
+        delete fallbackRequest.reasoningIntent;
+        const fallback = await generationRouter.generate(roleId, fallbackRequest, {
+          runId,
+          timeoutMs: PROSE_ENHANCEMENT_TIMEOUT_MS
+        });
+        return {
+          result: fallback,
+          lane: fallback?.ok === true ? 'utility' : primaryLane,
+          fallbackFrom: fallback?.ok === true ? 'reasoner' : '',
+          primaryError: primary?.error || null
+        };
+      }
+      async function runDialogueEnhancementAttempt({ text, retryReason = '', attempt = 1 } = {}) {
+        const request = buildDialogueEnhancementRequest({
+          text,
+          contextMessages,
+          contextMessageLimit: enhancementSettings.contextMessages,
+          storyForm,
+          characterContext: enhancementContext.characterContext,
+          cardContext: enhancementContext.cardContext,
+          lane: enhancementLane,
+          retryReason,
+          ...enhancementReasoning
+        });
+        const generation = await generateEnhancementPass('dialogueEnhancer', request);
+        const result = generation.result;
+        if (result?.ok !== true) {
+          return { ok: false, generation, result, attempt, retryReason };
+        }
+        const validation = validateDialogueEnhancementResult(result.data, { originalText: text, contextMessages });
+        return { ok: validation.ok === true, validation, generation, result, attempt, retryReason };
+      }
+      function dialogueRetryReason({ originalText: retryOriginalText = '', validation = {} } = {}) {
+        if (validation.ok !== true) return '';
+        if (validation.text === String(retryOriginalText ?? '')) return 'exact-noop';
+        if ((validation.dialogueEditRatio ?? 0) >= ENHANCEMENT_EDIT_RATIO_MINIMUM) return '';
+        const strongReasons = dialogueInterventionReasons(retryOriginalText);
+        const softReasons = dialogueSuspicionReasons(retryOriginalText);
+        const echoReasons = echoedUserPhraseReasons({ sourceText: retryOriginalText, contextMessages });
+        return strongReasons.length || softReasons.length || echoReasons.length ? 'low-dialogue-edit-ratio' : '';
+      }
       for (const pass of passSequence) {
         const passOriginalText = enhancedText;
         if (pass === 'dialogue') {
-          const request = buildDialogueEnhancementRequest({
-            text: enhancedText,
-            contextMessages,
-            contextMessageLimit: enhancementSettings.contextMessages,
-            storyForm,
-            characterContext: enhancementContext.characterContext,
-            cardContext: enhancementContext.cardContext,
-            lane: enhancementLane,
-            ...enhancementReasoning
-          });
-          const result = await generationRouter.generate('dialogueEnhancer', request, {
-            runId,
-            timeoutMs: PROSE_ENHANCEMENT_TIMEOUT_MS
-          });
+          let dialogueAttempt = await runDialogueEnhancementAttempt({ text: enhancedText, attempt: 1 });
+          const result = dialogueAttempt.result;
           if (result?.ok !== true) {
             settleRuntimeActivity({
               runId,
@@ -3161,7 +3206,47 @@ export function createRecursionRuntime({
             });
             return { ok: false, target, mode, error: result?.error || { code: 'RECURSION_DIALOGUE_PROVIDER_FAILED' } };
           }
-          const validation = validateDialogueEnhancementResult(result.data, { originalText: enhancedText });
+          const firstValidation = dialogueAttempt.validation;
+          let retryReason = '';
+          if (firstValidation?.ok === true) {
+            retryReason = dialogueRetryReason({ originalText: enhancedText, validation: firstValidation });
+          } else if (firstValidation?.error?.code === 'RECURSION_DIALOGUE_NOOP_WITH_DETECTED_SLOP') {
+            retryReason = 'exact-noop';
+          }
+          if (retryReason) {
+            const retry = await runDialogueEnhancementAttempt({ text: enhancedText, retryReason, attempt: 2 });
+            if (retry.result?.ok !== true && firstValidation?.ok !== true) {
+              settleRuntimeActivity({
+                runId,
+                phase: 'settled',
+                severity: 'warning',
+                label: 'Enhancement failed. Original kept.',
+                chips: ['Dialogue']
+              });
+              return { ok: false, target, mode, error: retry.result?.error || { code: 'RECURSION_DIALOGUE_PROVIDER_FAILED' } };
+            }
+            if (retry.validation?.ok === true) dialogueAttempt = retry;
+            else if (firstValidation?.ok !== true) dialogueAttempt = retry;
+          }
+          const validation = dialogueAttempt.validation;
+          if (validation?.error?.code === 'RECURSION_DIALOGUE_NOOP_WITH_DETECTED_SLOP') {
+            settleRuntimeActivity({
+              runId,
+              phase: 'settled',
+              severity: 'warning',
+              label: 'Dialogue unchanged. Original kept.',
+              chips: ['Dialogue']
+            });
+            return {
+              ok: false,
+              target,
+              mode,
+              error: {
+                code: 'RECURSION_DIALOGUE_EXACT_NOOP',
+                message: 'Dialogue Enhancement returned unchanged text after retry.'
+              }
+            };
+          }
           if (validation.ok !== true) {
             settleRuntimeActivity({
               runId,
@@ -3172,8 +3257,35 @@ export function createRecursionRuntime({
             });
             return { ok: false, target, mode, error: validation.error };
           }
+          if (validation.text === String(enhancedText ?? '')) {
+            settleRuntimeActivity({
+              runId,
+              phase: 'settled',
+              severity: 'warning',
+              label: 'Dialogue unchanged. Original kept.',
+              chips: ['Dialogue']
+            });
+            return {
+              ok: false,
+              target,
+              mode,
+              error: {
+                code: 'RECURSION_DIALOGUE_EXACT_NOOP',
+                message: 'Dialogue Enhancement returned unchanged text after retry.'
+              }
+            };
+          }
           enhancedText = validation.text;
-          passHashes.push({ pass, hash: hashJson(enhancedText), editRatio: validation.editRatio ?? roundedEnhancementEditRatio(passOriginalText, enhancedText) });
+          passHashes.push({
+            pass,
+            hash: hashJson(enhancedText),
+            editRatio: validation.editRatio ?? roundedEnhancementEditRatio(passOriginalText, enhancedText),
+            dialogueEditRatio: validation.dialogueEditRatio ?? roundedDialogueEditRatio(passOriginalText, enhancedText),
+            lane: dialogueAttempt.generation.lane,
+            attempt: dialogueAttempt.attempt,
+            ...(dialogueAttempt.retryReason ? { retryReason: dialogueAttempt.retryReason } : {}),
+            ...(dialogueAttempt.generation.fallbackFrom ? { fallbackFrom: dialogueAttempt.generation.fallbackFrom } : {})
+          });
           continue;
         }
         if (pass === 'prose') {
@@ -3186,10 +3298,8 @@ export function createRecursionRuntime({
             lane: enhancementLane,
             ...enhancementReasoning
           });
-          const result = await generationRouter.generate('proseEnhancer', request, {
-            runId,
-            timeoutMs: PROSE_ENHANCEMENT_TIMEOUT_MS
-          });
+          const generation = await generateEnhancementPass('proseEnhancer', request);
+          const result = generation.result;
           if (result?.ok !== true) {
             settleRuntimeActivity({
               runId,
@@ -3212,13 +3322,22 @@ export function createRecursionRuntime({
             return { ok: false, target, mode, error: validation.error };
           }
           enhancedText = validation.text;
-          passHashes.push({ pass, hash: hashJson(enhancedText), editRatio: validation.editRatio ?? roundedEnhancementEditRatio(passOriginalText, enhancedText) });
+          passHashes.push({
+            pass,
+            hash: hashJson(enhancedText),
+            editRatio: validation.editRatio ?? roundedEnhancementEditRatio(passOriginalText, enhancedText),
+            lane: generation.lane,
+            ...(generation.fallbackFrom ? { fallbackFrom: generation.fallbackFrom } : {})
+          });
         }
       }
       marker.passSequence = passSequence;
       marker.passHashes = passHashes;
       marker.enhancedHash = hashJson(enhancedText);
       marker.editRatio = roundedEnhancementEditRatio(originalText, enhancedText);
+      if (passSequence.includes('dialogue')) {
+        marker.dialogueEditRatio = roundedDialogueEditRatio(originalText, enhancedText);
+      }
       if (mode === 'replace') {
         const replace = await messages.replaceAssistantMessageText?.(messageId, enhancedText, { marker });
         if (replace?.ok === false) return { ok: false, mode, error: replace.error };
@@ -5186,7 +5305,11 @@ export function createRecursionRuntime({
         };
         lastPlan = plan;
       }
-      stageCardProgress(runId, cacheCards, { source: 'cache', state: 'cached' });
+      stageCardProgress(runId, cacheCards, {
+        source: 'cache',
+        state: 'cached',
+        parentStepId: settings.pipelineMode === 'fused' && !reuseCacheOnly ? 'fused-card-bundle' : undefined
+      });
       stageCardProgress(runId, providerCards, { source: 'generated', state: 'done' });
       stageCardProgress(runId, generatedCards, { source: 'fallback', state: 'warning' });
       if (action === 'reuse-cache' && !cacheCards.length) {

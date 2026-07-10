@@ -812,11 +812,13 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 
 {
   const proseHost = createProseMessageHarness('Mara set the cup down. "What do you want to do next?"');
+  const routerCalls = [];
   const { runtime } = createRuntimeHarness({
     settings: { enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 3 } },
     hostMessages: proseHost.messages,
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
         return {
           ok: true,
           data: {
@@ -828,19 +830,22 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-noop-detected-slop' });
-  assertEqual(result.ok, false, 'detected dialogue slop no-op fails enhancement');
-  assertEqual(result.error.code, 'RECURSION_DIALOGUE_NOOP_WITH_DETECTED_SLOP', 'runtime preserves dialogue no-op validation error');
+  assertEqual(result.ok, false, 'detected dialogue slop exact no-op skips after retry');
+  assertEqual(result.error.code, 'RECURSION_DIALOGUE_EXACT_NOOP', 'dialogue exact no-op skip uses stable code');
+  assertEqual(routerCalls.length, 2, 'detected dialogue slop exact no-op retries once');
   assertEqual(proseHost.message.swipes.length, 1, 'failed dialogue no-op does not append enhanced swipe');
   assertEqual(proseHost.message.text, 'Mara set the cup down. "What do you want to do next?"', 'failed dialogue no-op keeps original text');
 }
 
 {
   const proseHost = createProseMessageHarness('Mara set the cup down. "Sit down before you fall over."');
+  const routerCalls = [];
   const { runtime } = createRuntimeHarness({
     settings: { enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 3 } },
     hostMessages: proseHost.messages,
     generationRouter: {
-      async generate() {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
         return {
           ok: true,
           data: {
@@ -852,8 +857,97 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-clean-noop' });
-  assertEqual(result.ok, true, 'clean dialogue no-op remains valid');
-  assertEqual(proseHost.message.swipes.length, 2, 'clean dialogue no-op still appends provider output as enhanced swipe');
+  assertEqual(result.ok, false, 'clean dialogue exact no-op skips after retry');
+  assertEqual(result.error.code, 'RECURSION_DIALOGUE_EXACT_NOOP', 'clean dialogue exact no-op uses stable skip code');
+  assertEqual(routerCalls.length, 2, 'clean dialogue exact no-op retries once');
+  assertEqual(proseHost.message.swipes.length, 1, 'clean dialogue exact no-op does not append duplicate swipe');
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara set the cup down. "Sit down before you fall over."');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.dialogueEnhancer.v1',
+            text: routerCalls.length === 1
+              ? 'Mara set the cup down. "Sit down before you fall over."'
+              : 'Mara set the cup down. "Sit. We can argue after."'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-clean-noop-retries' });
+  assertEqual(result.ok, true, 'Dialogue exact no-op retries and accepts revised candidate');
+  assertEqual(routerCalls.length, 2, 'Dialogue exact no-op performs one retry');
+  assert(routerCalls[1].request.prompt.includes('previous revision returned the original text'), 'retry prompt explains exact no-op problem');
+  assertEqual(proseHost.message.swipes[1], 'Mara set the cup down. "Sit. We can argue after."', 'retry candidate is appended');
+  assertEqual(result.passHashes[0].attempt, 2, 'retry candidate records attempt number');
+  assertEqual(result.passHashes[0].retryReason, 'exact-noop', 'retry candidate records retry reason');
+  assertEqual(typeof result.passHashes[0].dialogueEditRatio, 'number', 'retry candidate records dialogue edit ratio');
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara set the cup down. "Sit down before you fall over."');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.dialogueEnhancer.v1',
+            text: 'Mara set the cup down. "Sit down before you fall over."'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-exact-noop-skips-after-retry' });
+  assertEqual(result.ok, false, 'Dialogue exact no-op skips after retry');
+  assertEqual(result.error.code, 'RECURSION_DIALOGUE_EXACT_NOOP', 'exact no-op uses stable error code');
+  assertEqual(routerCalls.length, 2, 'Dialogue exact no-op retries only once');
+  assertEqual(proseHost.message.swipes.length, 1, 'exact duplicate enhanced swipe is not appended');
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara set the cup down. "Tell me what you want."');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'dialogue', applyMode: 'replace', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.dialogueEnhancer.v1',
+            text: routerCalls.length === 1
+              ? 'Mara set the cup down. "Tell me what you want?"'
+              : 'Mara set the cup down. "Start with the part you keep dodging."'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-soft-suspicion-low-ratio-retry' });
+  assertEqual(result.ok, true, 'soft-suspicion low-ratio output gets a stronger retry');
+  assertEqual(routerCalls.length, 2, 'soft suspicion low-ratio retry runs once');
+  assert(routerCalls[1].request.prompt.includes('previous revision stayed too close'), 'low-ratio retry prompt asks for stronger revision');
+  assertEqual(proseHost.message.text, 'Mara set the cup down. "Start with the part you keep dodging."', 'low-ratio retry replacement is applied');
+  assertEqual(result.passHashes[0].retryReason, 'low-dialogue-edit-ratio', 'low-ratio retry reason is recorded');
+  assertEqual(typeof result.passHashes[0].dialogueEditRatio, 'number', 'low-ratio retry marker records dialogue edit ratio');
 }
 
 {
@@ -926,7 +1020,7 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 }
 
 {
-  const proseHost = createProseMessageHarness();
+  const proseHost = createProseMessageHarness('Mara set the cup down. "So that is what we are calling it now?"');
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
     settings: {
@@ -939,17 +1033,58 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
       async generate(roleId, request) {
         routerCalls.push({ roleId, request });
         return {
-          ok: false,
-          error: { code: 'RECURSION_REASONER_DISABLED', message: 'Reasoner is disabled.' }
+          ok: true,
+          data: {
+            schema: 'recursion.dialogueEnhancer.v1',
+            text: 'Mara set the cup down. "Call it whatever lets you sleep."'
+          }
         };
       }
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-high-disabled-reasoner-enhancement' });
-  assertEqual(result.ok, false, 'High reasoning enhancement surfaces disabled Reasoner instead of silently using Utility');
-  assertEqual(result.error.code, 'RECURSION_REASONER_DISABLED', 'disabled Reasoner error is preserved');
-  assertEqual(routerCalls[0].roleId, 'dialogueEnhancer', 'High reasoning disabled Reasoner still calls selected enhancer role');
-  assertEqual(routerCalls[0].request.lane, 'reasoner', 'High reasoning enhancement requests Reasoner even when the lane is disabled');
+  assertEqual(result.ok, true, 'High reasoning enhancement falls back to Utility when Reasoner is unavailable');
+  assertEqual(routerCalls[0].roleId, 'dialogueEnhancer', 'High reasoning unavailable Reasoner still calls selected enhancer role');
+  assertEqual(routerCalls[0].request.lane, 'utility', 'High reasoning unavailable Reasoner routes enhancement through Utility');
+  assertEqual(proseHost.message.swipes[1], 'Mara set the cup down. "Call it whatever lets you sleep."', 'Utility fallback enhancement appends repaired dialogue swipe');
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara set the cup down. "So that is what we are calling it now?"');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: healthyReasonerSettings({
+      reasoningLevel: 'high',
+      enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 13 }
+    }),
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
+        if (request.lane === 'reasoner') {
+          return {
+            ok: false,
+            lane: 'reasoner',
+            error: { code: 'RECURSION_PROVIDER_FAILED', message: 'Reasoner failed after retry.' },
+            diagnostics: { retryCount: 1 }
+          };
+        }
+        return {
+          ok: true,
+          lane: 'utility',
+          data: {
+            schema: 'recursion.dialogueEnhancer.v1',
+            text: 'Mara set the cup down. "Call it whatever lets you sleep."'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-reasoner-failed-utility-fallback-enhancement' });
+  assertEqual(result.ok, true, 'High reasoning enhancement falls back to Utility after Reasoner failure');
+  assertDeepEqual(routerCalls.map((call) => call.request.lane), ['reasoner', 'utility'], 'Reasoner enhancement failure retries the pass through Utility');
+  assertEqual(result.passHashes[0].lane, 'utility', 'fallback pass records Utility as applied lane');
+  assertEqual(result.passHashes[0].fallbackFrom, 'reasoner', 'fallback pass records Reasoner fallback source');
 }
 
 {

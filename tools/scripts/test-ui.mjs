@@ -463,6 +463,7 @@ assertDeepEqual(
   'derived progress labels enhancement provider calls as first-class enhancement rows'
 );
 assertEqual(enhancementProviderProgress.steps.some((step) => step.id === 'utility-card-batch'), false, 'enhancement provider calls do not create a Utility card batch row');
+assertEqual(enhancementProviderProgress.steps.some((step) => step.id === 'enhancement-response'), false, 'derived progress hides generic Enhancement row once concrete enhancement pass rows exist');
 
 const derivedCachedProgress = createProgressRunModel({
   settings: { mode: 'auto' },

@@ -2695,6 +2695,33 @@ async function runBrowserUiSmoke({
     }
   }
 
+  async function dismissBlockingHostNotices() {
+    await page.evaluate(() => {
+      const isVisible = (element) => {
+        if (!element) return false;
+        const style = globalThis.getComputedStyle?.(element);
+        if (style && (style.visibility === 'hidden' || style.display === 'none')) return false;
+        const rect = element.getBoundingClientRect?.();
+        return Boolean(rect && rect.width > 0 && rect.height > 0);
+      };
+      const dismiss = [...document.querySelectorAll('[data-host-overlay-dismiss], button')].find((button) => (
+        isVisible(button)
+        && (/^\s*not now\s*$/i.test(String(button.textContent || '')) || button.hasAttribute('data-host-overlay-dismiss'))
+      ));
+      dismiss?.click();
+    });
+    await page.waitForFunction(() => {
+      const isVisible = (element) => {
+        if (!element) return false;
+        const style = globalThis.getComputedStyle?.(element);
+        if (style && (style.visibility === 'hidden' || style.display === 'none')) return false;
+        const rect = element.getBoundingClientRect?.();
+        return Boolean(rect && rect.width > 0 && rect.height > 0);
+      };
+      return ![...document.querySelectorAll('[data-host-blocking-modal]')].some(isVisible);
+    }, null, { timeout: Math.min(timeoutMs, 5000) });
+  }
+
   try {
     const { chromium } = await import('playwright');
     browser = await chromium.launch({
@@ -2736,13 +2763,7 @@ async function runBrowserUiSmoke({
         && typeof globalThis.recursionOnEnable === 'function'
         && typeof globalThis.recursionOnDisable === 'function';
     }, null, { timeout: timeoutMs });
-    await page.evaluate(() => {
-      const dismiss = [...document.querySelectorAll('button')].find((button) => (
-        /^\s*not now\s*$/i.test(String(button.textContent || ''))
-        && button.offsetParent !== null
-      ));
-      dismiss?.click();
-    });
+    await dismissBlockingHostNotices();
 
     const actionsButton = page.locator('[data-recursion-actions]').first();
     await actionsButton.click({ timeout: timeoutMs });

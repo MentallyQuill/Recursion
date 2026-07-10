@@ -903,6 +903,9 @@ function deriveProgressRun(view) {
     }, eventOrder));
   }
   appendRapidWarmStatusStep(steps, source, order++);
+  if (steps.has('enhancement-response') && (steps.has('dialogue-enhancement') || steps.has('prose-enhancement'))) {
+    steps.delete('enhancement-response');
+  }
   const beforePlanSteps = [...steps.values()];
   const hasEnhancementStep = steps.has('prose-enhancement') || steps.has('dialogue-enhancement') || steps.has('enhancement-response');
   if (!isControlOnlyProgress(runId, beforePlanSteps) && !hasEnhancementStep) {

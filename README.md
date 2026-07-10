@@ -37,6 +37,18 @@ Recursion is a scene reasoning layer for the reply in front of you.
   </tr>
   <tr>
     <td width="50%">
+      <img src="assets/documentation/renders/recursion-operator-enhancements-controls.png" alt="Recursion enhancements controls" width="100%"><br>
+      <strong>Enhancements</strong><br>
+      Clean up the reply that just landed by improving prose, dialogue, or both, then keep the improved version as a swipe or replace the original.
+    </td>
+    <td width="50%">
+      <img src="assets/documentation/renders/recursion-operator-story-form-controls.png" alt="Recursion tense and point of view controls" width="100%"><br>
+      <strong>Tense &amp; PoV</strong><br>
+      Let Recursion match the chat automatically, or force a past/present tense and point of view when the scene needs a steadier form.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
       <img src="assets/documentation/renders/recursion-operator-progress-menu-states.png" alt="Recursion progress dropdown states" width="100%"><br>
       <strong>Progress Dropdown</strong><br>
       Watch snapshot, planning, card work, prompt composition, install, fallback, and ready states without leaving the chat.

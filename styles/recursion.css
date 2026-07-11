@@ -1238,6 +1238,111 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   font: inherit;
 }
 
+.recursion-mini-button {
+  align-items: center;
+  appearance: none;
+  background: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 5%, var(--recursion-panel));
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 12%, transparent);
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 72%, transparent);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 24px;
+  font: inherit;
+  height: 24px;
+  justify-content: center;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0;
+  vertical-align: middle;
+  width: 24px;
+}
+
+.recursion-mini-button svg {
+  display: block;
+  flex: 0 0 15px;
+  height: 15px;
+  width: 15px;
+}
+
+.recursion-mini-button:hover,
+.recursion-mini-button:focus-visible {
+  background: color-mix(in srgb, var(--recursion-panel) 78%, var(--recursion-hover));
+  border-color: color-mix(in srgb, var(--recursion-accent) 34%, var(--recursion-border));
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 90%, var(--recursion-accent));
+  outline: 1px solid color-mix(in srgb, var(--recursion-accent) 58%, transparent);
+  outline-offset: 1px;
+}
+
+.recursion-mini-button.danger {
+  border-color: color-mix(in srgb, var(--recursion-error) 26%, transparent);
+  color: color-mix(in srgb, var(--recursion-error) 72%, var(--SmartThemeBodyColor, #d8d8d8));
+}
+
+.recursion-mini-button.danger:hover,
+.recursion-mini-button.danger:focus-visible {
+  background: color-mix(in srgb, var(--recursion-error) 10%, var(--recursion-panel));
+  border-color: color-mix(in srgb, var(--recursion-error) 44%, transparent);
+  outline-color: color-mix(in srgb, var(--recursion-error) 46%, transparent);
+}
+
+.recursion-mini-button.is-active,
+.recursion-mini-button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--recursion-accent) 12%, var(--recursion-panel));
+  border-color: color-mix(in srgb, var(--recursion-accent) 38%, transparent);
+  color: color-mix(in srgb, var(--recursion-accent) 82%, var(--SmartThemeBodyColor, #d8d8d8));
+}
+
+.recursion-mini-button:disabled,
+.recursion-mini-button[disabled] {
+  cursor: default;
+  opacity: .38;
+  pointer-events: none;
+}
+
+.recursion-mini-button.is-slot-hidden {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.recursion-card-action-slot {
+  display: inline-block;
+  flex: 0 0 24px;
+  height: 24px;
+  position: relative;
+  width: 24px;
+}
+
+.recursion-card-action-slot .recursion-mini-button {
+  left: 0;
+  position: absolute;
+  top: 0;
+}
+
+.recursion-card-delete-slot {
+  flex-basis: 52px;
+  width: 52px;
+}
+
+.recursion-card-delete-slot .recursion-card-slot-primary {
+  left: 14px;
+}
+
+.recursion-card-delete-slot .recursion-card-slot-confirm {
+  left: 0;
+}
+
+.recursion-card-delete-slot .recursion-card-slot-cancel {
+  left: 28px;
+}
+
+.recursion-card-move-target-slot,
+.recursion-card-move-cancel-slot {
+  flex-basis: 24px;
+  width: 24px;
+}
+
 .recursion-button:hover,
 .recursion-button:focus-visible,
 .recursion-hand-row:hover,
@@ -1405,6 +1510,233 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   opacity: .42;
 }
 
+.recursion-card-deck-bar,
+.recursion-card-deck-tools {
+  align-items: center;
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 9px;
+}
+
+.recursion-card-deck-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.recursion-card-deck-list {
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
+  display: grid;
+}
+
+.recursion-card-deck-category {
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 6%, transparent);
+  display: grid;
+  gap: 4px;
+  padding: 7px 9px;
+}
+
+.recursion-card-deck-category-head {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.recursion-card-deck-category-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.recursion-card-deck-category-copy strong {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 76%, transparent);
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recursion-card-deck-category-copy span {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 42%, transparent);
+  font-size: 10px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recursion-card-deck-category-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 4px;
+  justify-content: end;
+}
+
+.recursion-card-deck-card {
+  align-items: center;
+  background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 3%, transparent);
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 8%, transparent);
+  border-radius: 5px;
+  color: inherit;
+  display: grid;
+  font: inherit;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 26px;
+  padding: 3px 4px;
+  text-align: left;
+}
+
+.recursion-card-deck-card-main {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 1px 2px;
+  text-align: left;
+}
+
+.recursion-card-deck-card-main:hover,
+.recursion-card-deck-card-main:focus-visible {
+  background: color-mix(in srgb, var(--recursion-panel) 80%, var(--recursion-hover));
+  outline: none;
+}
+
+.recursion-card-deck-card-actions {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  justify-content: end;
+}
+
+.recursion-card-deck-card-name {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 72%, transparent);
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recursion-card-deck-card-status {
+  align-items: center;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 44%, transparent);
+  display: inline-flex;
+  flex: 0 0 16px;
+  height: 16px;
+  justify-content: center;
+  width: 16px;
+}
+
+.recursion-card-deck-card-status svg {
+  display: block;
+  height: 14px;
+  width: 14px;
+}
+
+.recursion-card-deck-card.is-draft .recursion-card-deck-card-status {
+  color: color-mix(in srgb, var(--recursion-warning) 74%, var(--SmartThemeBodyColor, #ddd));
+}
+
+.recursion-card-deck-card.is-active {
+  border-color: color-mix(in srgb, var(--recursion-accent) 28%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--recursion-accent) 68%, transparent);
+}
+
+.recursion-card-deck-card.is-inactive {
+  opacity: 0.58;
+}
+
+.recursion-card-deck-card.is-inactive .recursion-card-deck-card-name {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 34%, transparent);
+}
+
+.recursion-card-deck-card.is-delete-pending,
+.recursion-card-deck-category.is-delete-pending > .recursion-card-deck-category-head {
+  background: color-mix(in srgb, var(--recursion-danger) 10%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--recursion-danger) 32%, transparent);
+  outline-offset: -1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recursion-card-deck-card,
+  .recursion-card-deck-category-head {
+    transition: none !important;
+  }
+}
+
+.recursion-card-editor {
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
+  display: grid;
+  gap: 6px;
+  padding: 7px 9px;
+}
+
+.recursion-card-editor-inline,
+.recursion-category-editor-inline {
+  background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 3%, transparent);
+}
+
+.recursion-category-editor-inline {
+  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.recursion-card-editor-head,
+.recursion-card-editor-actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.recursion-card-editor-head strong {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 76%, transparent);
+  font-size: 11px;
+}
+
+.recursion-card-editor-prompt {
+  min-height: 70px;
+  resize: vertical;
+}
+
+.recursion-card-editor-preview {
+  border: 1px solid color-mix(in srgb, var(--recursion-primary) 20%, transparent);
+  border-radius: 5px;
+  display: grid;
+  gap: 5px;
+  padding: 6px;
+}
+
+.recursion-card-editor-preview label {
+  align-items: start;
+  display: grid;
+  gap: 5px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.recursion-card-editor-preview span {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 68%, transparent);
+  font-size: 10.5px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .recursion-cards-foot {
   border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
   justify-content: space-between;
@@ -1423,121 +1755,11 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   display: none;
 }
 
-.recursion-card-scope-list {
-  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
-  display: grid;
-}
-
-.recursion-card-scope-family {
-  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 6%, transparent);
-  display: grid;
-  grid-template-columns: 188px minmax(0, 1fr);
-  min-height: 35px;
-}
-
-.recursion-card-scope-family:first-child {
-  border-top: 0;
-}
-
-.recursion-card-scope-family-toggle,
-.recursion-card-scope-subitem {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-}
-
-.recursion-card-scope-family-toggle {
+.recursion-card-scope-notice[data-recursion-card-move-mode] {
   align-items: center;
-  border-right: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
-  display: grid;
-  gap: 7px;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  min-width: 0;
-  padding: 7px 9px;
-  text-align: left;
-}
-
-.recursion-card-scope-family-name {
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 74%, transparent);
-  font-size: 11px;
-  font-weight: 600;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recursion-card-scope-icon {
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
-  display: inline-flex;
-  height: 15px;
-  width: 15px;
-}
-
-.recursion-card-scope-family-count {
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 46%, transparent);
-  font-size: 10px;
-}
-
-.recursion-card-scope-family.is-on .recursion-card-scope-family-toggle,
-.recursion-card-scope-family.is-mixed .recursion-card-scope-family-toggle {
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 42%, transparent);
-}
-
-.recursion-card-scope-family-toggle:hover,
-.recursion-card-scope-family-toggle:focus-visible,
-.recursion-card-scope-subitem:hover,
-.recursion-card-scope-subitem:focus-visible {
-  background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 4%, transparent);
-  outline: none;
-}
-
-.recursion-card-scope-subitems {
-  align-content: center;
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  min-width: 0;
-  padding: 6px 8px;
-}
-
-.recursion-card-scope-subitem {
-  align-items: center;
-  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 10%, transparent);
-  border-radius: 5px;
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 50%, transparent);
-  display: inline-flex;
-  font-size: 10.5px;
-  gap: 4px;
-  line-height: 1;
-  min-height: 20px;
-  padding: 3px 6px;
-}
-
-.recursion-card-scope-subitem.is-on {
-  background: color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 8%, transparent);
-  border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 28%, transparent);
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 78%, transparent);
-}
-
-.recursion-card-scope-subitem.is-required {
-  border-color: color-mix(in srgb, var(--recursion-warning) 34%, transparent);
-}
-
-.recursion-card-scope-check {
-  border: 1px solid currentColor;
-  border-radius: 2px;
-  display: inline-block;
-  height: 7px;
-  opacity: .7;
-  width: 7px;
-}
-
-.recursion-card-scope-subitem.is-on .recursion-card-scope-check {
-  background: currentColor;
+  gap: 6px;
+  justify-content: space-between;
 }
 
 .recursion-dropdown-title {
@@ -2664,28 +2886,18 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
     flex-wrap: wrap;
   }
 
-  .recursion-card-scope-family {
-    grid-template-columns: 1fr;
+  .recursion-card-deck-bar,
+  .recursion-card-deck-tools {
+    flex-wrap: wrap;
   }
 
-  .recursion-card-scope-family-toggle {
-    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
-    border-right: 0;
+  .recursion-card-deck-category-head {
+    align-items: start;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .recursion-card-scope-family-name,
   .recursion-kind-label {
     white-space: normal;
-  }
-
-  .recursion-card-scope-subitems {
-    align-content: start;
-    padding: 6px 8px 8px;
-  }
-
-  .recursion-card-scope-subitem {
-    line-height: 1.15;
-    min-height: 24px;
   }
 
   .recursion-brief-card {

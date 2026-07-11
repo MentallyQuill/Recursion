@@ -15,6 +15,11 @@ import {
   normalizeCardScope,
   scopePayloadForArbiter
 } from './card-scope.mjs';
+import {
+  activeCardDeckRuntimeScope,
+  getActiveCardDeck,
+  normalizeCardDeckSettings
+} from './card-decks.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { enhancementContextFromSnapshot } from './enhancement-context.mjs';
 import { ENHANCEMENT_EDIT_RATIO_MINIMUM, roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
@@ -204,8 +209,33 @@ function cacheProviderSettingsSignature(provider = {}) {
   };
 }
 
+function settingsWithRuntimeCardScope(settings = {}, options = {}) {
+  const source = options.normalize === true ? normalizeSettings(settings) : asObject(settings);
+  const cardDecks = normalizeCardDeckSettings(source.cardDecks);
+  const normalized = {
+    ...source,
+    cardDecks
+  };
+  return {
+    ...normalized,
+    cardScope: source.cardDecks ? activeCardDeckRuntimeScope(normalized) : normalizeCardScope(source.cardScope)
+  };
+}
+
+function runtimeScopePayload(settings = {}) {
+  return scopePayloadForArbiter(settingsWithRuntimeCardScope(settings));
+}
+
+function filterCardJobsForRuntimeScope(cardJobs, settings = {}) {
+  return filterCardJobsForScope(cardJobs, settingsWithRuntimeCardScope(settings));
+}
+
+function filterCardsForRuntimeScope(cards, settings = {}) {
+  return filterCardsForScope(cards, settingsWithRuntimeCardScope(settings));
+}
+
 function cacheSettingsSignature(settings = {}) {
-  const normalized = normalizeSettings(settings);
+  const normalized = settingsWithRuntimeCardScope(settings, { normalize: true });
   return {
     enabled: normalized.enabled,
     mode: normalized.mode,
@@ -228,7 +258,7 @@ function cacheSettingsSignature(settings = {}) {
 }
 
 function rapidWarmSettingsSignature(settings = {}) {
-  const normalized = normalizeSettings(settings);
+  const normalized = settingsWithRuntimeCardScope(settings, { normalize: true });
   return {
     enabled: normalized.enabled,
     mode: normalized.mode,
@@ -1324,10 +1354,14 @@ function cardEvidenceTokenBudget(settings, plan, behaviorPolicy = null) {
 }
 
 function arbiterSafeSettings(settings) {
-  const source = asObject(settings);
+  const source = settingsWithRuntimeCardScope(settings);
   return {
     enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
+    cardDeck: {
+      activeCardDeckId: safeText(source.cardDecks?.activeCardDeckId || '', 120),
+      activeDeckName: safeText(getActiveCardDeck(source).name || '', 120)
+    },
     cardScope: cardScopeSummary(source.cardScope),
     strength: safeText(source.strength || 'balanced', 40),
     minCards: normalizeCardBudgetSettings(source).minCards,
@@ -1383,16 +1417,17 @@ function safeProviderSettingsView(provider) {
 }
 
 function safeSettingsView(settings) {
-  const source = asObject(settings);
+  const source = settingsWithRuntimeCardScope(settings);
   const cardScope = normalizeCardScope(source.cardScope);
   const cardBudget = normalizeCardBudgetSettings(source);
   const injection = normalizeInjectionSettings(source.injection);
   const enhancements = normalizeSettings(source).enhancements;
+  const cardDecks = normalizeCardDeckSettings(source.cardDecks);
   return {
     enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
     pipelineMode: safeText(source.pipelineMode || 'standard', 40),
-    cardScope,
+    cardDecks,
     cardScopeSummary: cardScopeSummary(cardScope),
     strength: safeText(source.strength || 'balanced', 40),
     minCards: cardBudget.minCards,
@@ -1637,7 +1672,7 @@ function scopeOmissionReasons(omissions) {
 }
 
 function autoScopeExceptionReasons(entries, settings) {
-  const scope = scopePayloadForArbiter(settings);
+  const scope = runtimeScopePayload(settings);
   if (scope.strictWhitelist) return [];
   const selected = new Set(scope.selectedFamilies);
   const exceptions = new Set(scope.autoExceptionFamilies);
@@ -1658,7 +1693,7 @@ function activeCardFamilies(cards = []) {
 }
 
 function reconcileManualForcedCardJobs({ plan, settings, cacheCards = [], forceContext = null } = {}) {
-  const scope = scopePayloadForArbiter(settings);
+  const scope = runtimeScopePayload(settings);
   const entries = Array.isArray(plan?.cardJobs) ? plan.cardJobs : [];
   if (!scope.strictWhitelist) {
     return {
@@ -2529,7 +2564,7 @@ export function createRecursionRuntime({
     const currentSettings = settingsStore.get();
     let next = settingsStore.update(cleanPatch);
     if (shouldEnforceManualSelectionCapForPatch(currentSettings, next, cleanPatch)) {
-      const manualScoped = enforceManualSelectionCap(next.cardScope, next, {
+      const manualScoped = enforceManualSelectionCap(activeCardDeckRuntimeScope(next), next, {
         preferredFamilies: manualTrimPreferenceFamiliesForRuntime(next)
       });
       if (manualScoped.trimmed) {
@@ -4158,7 +4193,7 @@ export function createRecursionRuntime({
     });
     try {
       const cacheView = compactSceneCacheForArbiter(sceneCache, snapshot);
-      const cardScope = scopePayloadForArbiter(settings);
+      const cardScope = runtimeScopePayload(settings);
       const catalog = cardScope.strictWhitelist ? cardScope.allowedCatalog : cardScope.availableCatalog;
       const result = await generationRouter.generate('utilityArbiter', {
         lane: arbiterLane,
@@ -4202,7 +4237,7 @@ export function createRecursionRuntime({
   async function generatePlanCards({ runId, plan, snapshot, settings, signal }) {
     const empty = { cards: [], diagnostics: [] };
     if (!generationRouter) return empty;
-    const cardScope = scopePayloadForArbiter(settings);
+    const cardScope = runtimeScopePayload(settings);
     const requestContext = {
       runId,
       snapshotHash: plan.snapshotHash || hashJson(snapshot),
@@ -4338,7 +4373,7 @@ export function createRecursionRuntime({
       if (plan.utilityUnavailable) {
         throw new Error(plan.utilityUnavailableReason || 'Utility provider unavailable.');
       }
-      const scopedCardJobs = filterCardJobsForScope(plan.cardJobs, settings);
+      const scopedCardJobs = filterCardJobsForRuntimeScope(plan.cardJobs, settings);
       const activeCacheForManual = activeSceneCacheVariant(cache, snapshot);
       const manualReconciled = reconcileManualForcedCardJobs({
         plan: { ...plan, cardJobs: scopedCardJobs.cardJobs },
@@ -5186,7 +5221,7 @@ export function createRecursionRuntime({
       plan = enforceReasonerAvailability(plan, settings);
       plan = applyReasoningPolicyToPlan(plan, settings);
       plan = applyBehaviorPolicyToPlan(plan, settings);
-      const scopedCardJobs = filterCardJobsForScope(plan.cardJobs, settings);
+      const scopedCardJobs = filterCardJobsForRuntimeScope(plan.cardJobs, settings);
       const activeCacheForManual = activeSceneCacheVariant(initialCache, snapshot);
       const manualReconciled = reconcileManualForcedCardJobs({
         plan: { ...plan, cardJobs: scopedCardJobs.cardJobs },
@@ -5270,7 +5305,7 @@ export function createRecursionRuntime({
       if (!isActiveRun(runId)) return supersededResult(runId);
       const scopedCardOmissionDiagnostics = [];
       const filterScopedCards = (cards) => {
-        const scoped = filterCardsForScope(cards, settings);
+        const scoped = filterCardsForRuntimeScope(cards, settings);
         scopedCardOmissionDiagnostics.push(
           ...scopeOmissionReasons(scoped.omitted),
           ...autoScopeExceptionReasons(scoped.cards, settings)
@@ -5538,6 +5573,60 @@ export function createRecursionRuntime({
     }
   }
 
+  async function recommendCardDraft(draft = {}) {
+    const source = asObject(draft);
+    const fallback = {
+      name: safeText(source.name || 'Scene Rule', 80),
+      description: safeText(source.description || 'Focused Recursion rule for the current scene.', 200),
+      promptText: safeText(source.promptText || source.description || source.name || 'Keep the current scene coherent.', 1200)
+    };
+    if (!generationRouter || typeof generationRouter.generate !== 'function') {
+      return { ok: true, suggestion: fallback, diagnostics: ['card-authoring-local-fallback'] };
+    }
+    const settings = settingsStore.get();
+    const runId = makeId('card-author');
+    const prompt = [
+      'Return strict JSON for a Recursion card authoring suggestion.',
+      'Schema: {"schema":"recursion.cardAuthoringAssist.v1","name":"short specific card name","description":"hover description","promptText":"high-value Recursion card prompt"}',
+      'Improve the user intent as a compact scene-continuity, pressure, constraint, or guidance card.',
+      'Do not move content to Author Note or presets. Do not write generic prose style advice.',
+      'Make the card useful only when it can affect the next response.',
+      `Draft: ${JSON.stringify({
+        name: fallback.name,
+        description: fallback.description,
+        promptText: fallback.promptText
+      })}`
+    ].join('\n\n');
+    try {
+      const result = await generationRouter.generate('cardAuthoringAssist', {
+        lane: 'utility',
+        runId,
+        ...reasonerRequestMetadata(settings, 'card-authoring-assist', 'utility'),
+        prompt,
+        responseLength: 900
+      }, { runId, isCurrent: () => true });
+      const data = asObject(result?.data);
+      const suggestion = {
+        name: safeText(data.name || fallback.name, 80),
+        description: safeText(data.description || fallback.description, 240),
+        promptText: safeText(data.promptText || data.prompt || fallback.promptText, 1400)
+      };
+      return {
+        ok: result?.ok !== false,
+        suggestion,
+        diagnostics: result?.ok === false
+          ? ['card-authoring-provider-fallback', ...(Array.isArray(result?.diagnostics) ? result.diagnostics.map((entry) => safeText(entry, 160)).slice(0, 8) : [])]
+          : []
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        suggestion: fallback,
+        diagnostics: ['card-authoring-error-fallback', safeText(error?.message || error, 240)]
+      };
+    }
+  }
+
   return {
     storage,
     prepareForGeneration,
@@ -5568,6 +5657,7 @@ export function createRecursionRuntime({
     clearProviderKey,
     fetchProviderModels,
     testProvider,
+    recommendCardDraft,
     listProviderConnectionProfiles: listProviderConnectionProfilesForUi,
     resetSceneCache,
     clearRunJournal,

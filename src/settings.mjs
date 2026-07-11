@@ -1,5 +1,6 @@
 import { cloneJson } from './core.mjs';
 import { defaultCardScope, normalizeCardScope } from './card-scope.mjs';
+import { CARD_DECK_SETTINGS_VERSION, DEFAULT_CARD_DECK_ID, normalizeCardDeckSettings } from './card-decks.mjs';
 import { DEFAULT_RETENTION_SETTINGS, normalizeRetentionSettings } from './retention-policy.mjs';
 import { STORY_FORM_OVERRIDE_OPTIONS } from './story-form.mjs';
 
@@ -34,7 +35,11 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   enabled: true,
   mode: 'auto',
   pipelineMode: 'standard',
-  cardScope: defaultCardScope(),
+  cardDecks: {
+    version: CARD_DECK_SETTINGS_VERSION,
+    activeCardDeckId: DEFAULT_CARD_DECK_ID,
+    customCardDecks: {}
+  },
   strength: 'balanced',
   minCards: 3,
   maxCards: 10,
@@ -194,6 +199,17 @@ function mergePlainObjects(base, patch) {
 function mergeSettingsPatch(base, patch) {
   const result = mergePlainObjects(base, patch);
   if (!isPlainObject(patch)) return result;
+  if (Object.prototype.hasOwnProperty.call(patch, 'cardDecks')) {
+    result.cardDecks = normalizeCardDeckSettings(patch.cardDecks);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'cardScope')) {
+    result.cardDecks = {
+      ...(isPlainObject(result.cardDecks) ? result.cardDecks : {}),
+      activeCardDeckId: DEFAULT_CARD_DECK_ID,
+      defaultEnabledState: normalizeCardScope(patch.cardScope).families
+    };
+    delete result.cardScope;
+  }
   const hasMinCards = Object.prototype.hasOwnProperty.call(patch, 'minCards');
   const hasMaxCards = Object.prototype.hasOwnProperty.call(patch, 'maxCards');
   if (hasMaxCards && !hasMinCards) {
@@ -273,11 +289,14 @@ export function normalizeSettings(value = {}, secretStore = null) {
   const source = value && typeof value === 'object' ? value : {};
   const reasoningLevel = enumValue(source.reasoningLevel, REASONING_LEVELS, DEFAULT_RECURSION_SETTINGS.reasoningLevel);
   const cardBudget = normalizeCardBudgetSettings(source);
+  const cardDecks = normalizeCardDeckSettings(
+    source.cardDecks || migrateLegacyCardScopeToDeckSettings(source.cardScope)
+  );
   return {
     enabled: source.enabled !== false,
     mode: enumValue(source.mode, MODES, DEFAULT_RECURSION_SETTINGS.mode),
     pipelineMode: enumValue(source.pipelineMode, PIPELINE_MODES, DEFAULT_RECURSION_SETTINGS.pipelineMode),
-    cardScope: normalizeCardScope(source.cardScope),
+    cardDecks,
     strength: enumValue(source.strength, STRENGTHS, DEFAULT_RECURSION_SETTINGS.strength),
     minCards: cardBudget.minCards,
     maxCards: cardBudget.maxCards,
@@ -312,6 +331,16 @@ export function normalizeSettings(value = {}, secretStore = null) {
         UI_PROGRESS_LIST_MAX
       ))
     }
+  };
+}
+
+function migrateLegacyCardScopeToDeckSettings(cardScope) {
+  const normalizedScope = normalizeCardScope(cardScope);
+  return {
+    version: CARD_DECK_SETTINGS_VERSION,
+    activeCardDeckId: DEFAULT_CARD_DECK_ID,
+    customCardDecks: {},
+    defaultEnabledState: normalizedScope.families
   };
 }
 

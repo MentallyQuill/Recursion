@@ -23,7 +23,9 @@
     "test:model-eval": "node tools/scripts/test-model-eval-harness.mjs",
     "check:playwright": "node tools/scripts/check-playwright-readiness.mjs",
     "check:soak-users": "node tools/scripts/check-sillytavern-soak-users.mjs",
-    "smoke:sillytavern": "node tools/scripts/smoke-sillytavern-live.mjs"
+    "smoke:sillytavern": "node tools/scripts/smoke-sillytavern-live.mjs",
+    "prove:card-system-ui": "node tools/scripts/prove-card-system-ui.mjs",
+    "prove:card-system-assist": "node tools/scripts/prove-card-system-assist.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1"

@@ -17,6 +17,7 @@ import {
   setFamilyEnabled,
   setSubItemEnabled
 } from '../../src/card-scope.mjs';
+import { activeCardDeckRuntimeScope } from '../../src/card-decks.mjs';
 import { packetToPromptBlocks } from '../../src/prompt.mjs';
 import { hashJson } from '../../src/core.mjs';
 import { safeDiagnosticText, safeIdentifier, safeText, unsafeObjectString } from '../../src/safe-values.mjs';
@@ -4651,7 +4652,8 @@ for (const pipelineMode of ['standard', 'rapid']) {
     settings: { cardScope: disabledSceneScope }
   });
   const view = runtime.view();
-  assertEqual(view.settings.cardScope.families['Scene Frame'].enabled, false, 'runtime view exposes raw disabled card family scope');
+  assertEqual(view.settings.cardScope, undefined, 'runtime view omits legacy raw card scope');
+  assertEqual(view.settings.cardDecks.defaultEnabledState['Scene Frame'].enabled, false, 'runtime view exposes migrated default deck enabled state');
   assertEqual(view.settings.cardScopeSummary.counts.selectedSubItems, 31, 'runtime view exposes separate card scope summary');
 }
 
@@ -4670,8 +4672,8 @@ for (const pipelineMode of ['standard', 'rapid']) {
   });
   const update = await runtime.updateSettings({ mode: 'manual' });
   const expected = CARD_SCOPE_CATALOG.slice(0, 2).map((entry) => entry.family);
-  assertDeepEqual(manualSelectedFamilies(update.settings.cardScope), expected, 'Auto-to-Manual over cap trims by catalog priority without randomness');
-  assertDeepEqual(manualSelectedFamilies(runtime.view().settings.cardScope), expected, 'trimmed Manual scope is visible in runtime view');
+  assertDeepEqual(manualSelectedFamilies(activeCardDeckRuntimeScope(update.settings)), expected, 'Auto-to-Manual over cap trims by catalog priority without randomness');
+  assertDeepEqual(manualSelectedFamilies(activeCardDeckRuntimeScope(runtime.view().settings)), expected, 'trimmed Manual scope is visible in runtime view');
 }
 
 {
@@ -4683,8 +4685,9 @@ for (const pipelineMode of ['standard', 'rapid']) {
     settings: { mode: 'auto', maxCards: 5, cardScope: focused, reasonerUse: 'off' }
   });
   const update = await runtime.updateSettings({ mode: 'manual' });
-  assertEqual(update.settings.cardScope.families['Scene Frame'].subItems[firstSceneFacet], false, 'under-cap Auto-to-Manual preserves selected facets');
-  assertDeepEqual(update.settings.cardScope, normalizeCardScope(focused), 'under-cap Auto-to-Manual preserves selected families and facets exactly');
+  const updatedScope = activeCardDeckRuntimeScope(update.settings);
+  assertEqual(updatedScope.families['Scene Frame'].subItems[firstSceneFacet], false, 'under-cap Auto-to-Manual preserves selected facets');
+  assertDeepEqual(normalizeCardScope(updatedScope), normalizeCardScope(focused), 'under-cap Auto-to-Manual preserves selected families and facets exactly');
 }
 
 {

@@ -355,6 +355,7 @@ export function normalizeCardScope(value = {}) {
     selectedTotal += selectedFamily;
   }
 
+  if (selectedTotal === 0 && source.allowEmpty === true) return { version: CARD_SCOPE_VERSION, families, allowEmpty: true };
   if (selectedTotal === 0) return defaultCardScope();
   return { version: CARD_SCOPE_VERSION, families };
 }

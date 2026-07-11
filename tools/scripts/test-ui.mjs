@@ -787,8 +787,51 @@ assert(/<button class="icon-button cards-button"[\s\S]*?<span class="sep" aria-h
 assert(/\.recursion-power-toggle\s*\{[\s\S]*?flex:\s*0 0 24px;[\s\S]*?height:\s*24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production power toggle uses the same compact geometry as the reference');
 assert(/\.recursion-cards-button\s*\{[\s\S]*?flex:\s*0 0 24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production Cards scope button stays icon-only in the compact bar');
 assert(!/recursion-cards-button-label/.test(recursionUi), 'production Cards scope button has no visible label node');
-assert(/recursionCardScopeAll:\s*''/.test(recursionUi), 'production Cards dropdown renders an All card-scope action');
-assert(/applyCardScopeResult\(\{\s*scope:\s*defaultCardScope\(\),\s*blocked:\s*false\s*\}\)/.test(recursionUi), 'production Cards All action restores the default full card scope');
+assert(/recursionCardDeckAll:\s*''/.test(recursionUi), 'production Cards dropdown renders an All deck action');
+assert(!/recursionCardScopeFamilyToggle/.test(recursionUi), 'production Cards dropdown removes legacy Card Scope family controls');
+assert(!/recursionCardScopeSubItemToggle/.test(recursionUi), 'production Cards dropdown removes legacy Card Scope sub-item controls');
+assert(/function enableAllRunnableDeckCards/.test(recursionUi), 'production Cards All action enables runnable cards in the active deck');
+assert(/recursionCardCategoryNew/.test(recursionUi), 'production Card System exposes add-category control');
+assert(/recursionCardCategoryMoveUp/.test(recursionUi) && /recursionCardCategoryMoveDown/.test(recursionUi), 'production Card System exposes category reorder controls');
+assert(/recursionCardDuplicate/.test(recursionUi) && /recursionCardDeleteArm/.test(recursionUi), 'production Card System exposes card duplicate/delete-arm controls');
+assert(/recursionCardMove/.test(recursionUi) && /moveCard\(/.test(recursionUi), 'production Card System exposes card move control');
+assert(/recursionCardMoveTarget/.test(recursionUi) && /recursionCardMoveCancel/.test(recursionUi), 'production Card System exposes explicit move-mode target and cancel controls');
+assert(/Object\.hasOwn\(target\.dataset,\s*'recursionCardDeckSelect'\)/.test(recursionUi), 'production Card System deck selector handles empty-string data marker values');
+assert(/value === undefined \|\| value === null \|\| value === false/.test(recursionUi), 'production element helper omits undefined attrs so select options do not all become selected');
+assert(/function cardSystemIconButton/.test(recursionUi), 'production Card System uses a dedicated icon-only button helper');
+assert(!/className: 'recursion-mini-button'[^)\n]*text:/.test(recursionUi), 'production Card System mini buttons do not render visible command text');
+assert(/title:\s*label/.test(recursionUi) && /'aria-label':\s*label/.test(recursionUi), 'production Card System icon buttons expose hover text and accessible labels');
+assert(/\.recursion-mini-button\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?background:\s*color-mix\(in srgb, var\(--SmartThemeBodyColor/.test(recursionCss), 'production Card System mini buttons use graphite Recursion skin instead of native white buttons');
+assert(/CARD_LONG_PRESS_MS/.test(recursionUi), 'production Card System defines explicit long-press threshold');
+assert(/pointermove/.test(recursionUi) && /CARD_LONG_PRESS_MOVE_PX/.test(recursionUi), 'production Card System cancels long-press when mobile scroll movement starts');
+assert(/recursionCardToggleRow/.test(recursionUi), 'production Card row tap toggles active state instead of opening edit');
+assert(/status\.runnable \|\| status\.reason === 'disabled'/.test(recursionUi), 'production Card row tap can re-enable inactive runnable cards');
+assert(!/dataset:\s*\{\s*recursionCardEdit:\s*card\.id\s*\}/.test(recursionUi), 'production Card row main button no longer opens edit on tap');
+assert(/function renderCardEditorInline/.test(recursionUi), 'production Card System renders card editor inline at the card row');
+assert(/function renderCategoryEditorInline/.test(recursionUi), 'production Card System renders category editor inline under the category header');
+assert(/recursionCategoryEditorSave/.test(recursionUi), 'production Category editor has icon-only save action');
+assert(/recursion-category-editor-inline/.test(recursionCss), 'production Category inline editor has compact graphite styling');
+assert(/recursion-card-deck-category-actions/.test(recursionCss), 'production Category actions are grouped to prevent mobile arrow wrapping');
+assert(/recursion-card-deck-category-copy/.test(recursionCss), 'production Category copy and actions use separate layout areas');
+assert(/edit-\[#1479\]/.test(recursionUi), 'production Card System uses the supplied SVG Repo edit icon path for edit actions');
+assert(/recursion-card-action-slot/.test(recursionCss), 'production Card System reserves fixed action slots for transient move/delete states');
+assert(/recursion-card-delete-slot/.test(recursionCss) && /recursion-card-move-target-slot/.test(recursionCss), 'production Card System has stable delete and move target action slots');
+assert(!/dataset:\s*\{\s*recursionCardMoveMode:\s*''\s*\}/.test(recursionUi), 'production Card move mode does not insert a notice row above the deck list');
+assert(!/cardScopeNotice = 'Confirm card delete\.'/.test(recursionUi), 'production Card delete arm does not reveal a notice row that shifts the panel');
+assert(!/cardScopeNotice = 'Move mode active\. Choose a target category\.'/.test(recursionUi), 'production Card move arm does not reveal a notice row that shifts the panel');
+assert(/let cardsPanelRenderKey = ''/.test(recursionUi), 'production Cards panel tracks render keys so heartbeat refreshes do not close the deck selector');
+assert(/function cardsPanelViewKey/.test(recursionUi), 'production Cards panel computes a focused render key for card/deck state');
+assert(/if \(cardsPanelRenderKey === nextRenderKey\) return/.test(recursionUi), 'production Cards panel skips unchanged heartbeat renders while the deck selector is open');
+assert(/recursionCardDeleteConfirm/.test(recursionUi) && /recursionCardDeleteCancel/.test(recursionUi), 'production Card delete uses explicit confirm and cancel icon actions');
+assert(/recursionCardCategoryDeleteArm/.test(recursionUi) && /recursionCardCategoryDeleteConfirm/.test(recursionUi), 'production Category delete uses explicit confirm action');
+assert(/is-delete-pending/.test(recursionCss), 'production Card System styles pending delete state');
+assert(/cardsPanel\.addEventListener\?\.\('pointerdown'/.test(recursionUi), 'production Card System listens for press-hold pointer starts');
+assert(/function cardHaptic/.test(recursionUi), 'production Card System centralizes mobile haptic feedback');
+assert(/navigator\?\.vibrate/.test(recursionUi), 'production Card System can trigger mobile vibration feedback');
+assert(/prefers-reduced-motion:\s*reduce/.test(recursionUi) || /prefers-reduced-motion:\s*reduce/.test(recursionCss), 'production Card System respects reduced-motion for haptics or motion styling');
+assert(!/recursionCardToggle:\s*card\.id/.test(recursionUi), 'production Card System does not render a separate eye visibility toggle');
+assert(/is-active/.test(recursionCss) && /is-inactive/.test(recursionCss), 'production Card System visually distinguishes active and inactive cards');
+assert(/cardEditorState \|\| categoryEditorState \|\| cardMoveState \|\| cardDeleteConfirmState/.test(recursionUi), 'production Escape handling clears Card System editor, move, or pending delete state before closing the panel');
 assert(/\.recursion-cards-all-button\s*\{[\s\S]*?font-size:\s*10px;[\s\S]*?min-height:\s*20px;/.test(recursionCss), 'production Cards All action uses compact SillyTavern-native button sizing');
 assert(/\.recursion-activity-trigger\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production activity trigger keeps reference spacing around pixel blocks');
 assert(/\.recursion-hero-pixel-array\s*\{[\s\S]*?width:\s*max\(0px,/.test(recursionCss), 'production Hero Pixel Array uses column-based width animation');
@@ -848,7 +891,7 @@ assert(!/\.recursion-story-form-button\s*\{[\s\S]*?max-width:\s*88px;/.test(recu
 assert(/\.recursion-story-form-text\s*\{[\s\S]*?max-width:\s*none;/.test(recursionCss), 'desktop story form text is not ellipsized');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-story-form-button\s*\{[\s\S]*?min-width:\s*36px;/.test(recursionCss), 'mobile story form button uses a compact fixed shorthand width');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-mobile-status-drawer:not\(\[hidden\]\)\s*\{[\s\S]*?display:\s*flex;/.test(recursionCss), 'mobile status drawer displays below the bar when status text is active');
-assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-card-scope-family\s*\{[\s\S]*?grid-template-columns:\s*1fr;/.test(recursionCss), 'mobile Cards panel uses one-column family rows');
+assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-card-deck-category-head\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/.test(recursionCss), 'mobile Cards panel keeps category action clusters attached to category headers');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-brief-card\s*\{[\s\S]*?grid-template-columns:\s*1fr;/.test(recursionCss), 'mobile Last Brief cards use one-column rows');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-provider-openai-fields\s*\{[\s\S]*?grid-template-columns:\s*1fr;/.test(recursionCss), 'mobile provider endpoint fields collapse to one column');
 assert(/mobile status drawer/.test(uiSpec), 'UI spec documents the mobile status drawer');
@@ -2217,7 +2260,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.maxHeight, '471px', 'Cards dropdown clamps to mobile visual viewport height with bottom gutter');
   assertEqual(
     fakeDocument.activeElement,
-    root.querySelectorAll('[data-recursion-card-scope-family-toggle]')[0],
+    root.querySelector('[data-recursion-card-deck-select]'),
     'opening Cards moves focus to the first enabled dropdown control'
   );
   globalThis.visualViewport.height = 360;
@@ -2238,133 +2281,58 @@ try {
   globalThis.visualViewport.width = 640;
   globalThis.visualViewport.height = 520;
   globalThis.visualViewport.emit('resize');
-  assert(root.querySelector('[data-recursion-card-scope-all]'), 'Cards dropdown renders an All scope action');
-  assertEqual(root.querySelector('[data-recursion-card-scope-all]').disabled, true, 'All action is disabled when every card focus item is already selected');
-  assertEqual(root.querySelector('[data-recursion-card-scope-all]').textContent, 'All', 'Cards full-scope action uses concise All copy');
-  assertEqual(root.querySelector('[data-recursion-card-scope-all]').getAttribute('title'), 'All card focus items are already selected.', 'disabled All action explains current full selection');
-  assertEqual(root.querySelectorAll('[data-recursion-card-scope-family]').length, CARD_SCOPE_CATALOG.length, 'Cards dropdown renders every fixed V1 family');
-  assertEqual(root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]').length, CARD_SCOPE_TOTAL_SUB_ITEMS, 'Cards dropdown renders every fixed V1 sub-item');
-  const cardScopeText = fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]'));
-  for (const familyName of ['Scene Frame', 'Active Cast', 'Character Motivation', 'Relationship', 'Social Subtext', 'Scene Constraints', 'Knowledge', 'Consequences', 'Environment', 'Items', 'Open Threads']) {
-    assert(cardScopeText.includes(familyName), `Cards dropdown renders ${familyName}`);
-  }
-  for (const removed of ['den' + 'sity', 'specificity/shape', 'present participants']) {
-    assert(!cardScopeText.includes(removed), `Cards dropdown omits removed label ${removed}`);
-  }
-  assert(cardScopeText.includes('beat constraint'), 'Cards dropdown renders rehomed beat constraint');
-  assert(cardScopeText.includes('hard limits'), 'Cards dropdown renders hard limits facet');
-  const beatConstraint = root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
-    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame'
-      && node.dataset.recursionCardScopeSubItem === 'beatConstraint');
-  assert(beatConstraint, 'Scene Frame beatConstraint sub-item exists');
-  assert(
-    beatConstraint.getAttribute('title').includes('avoid time skip'),
-    'beatConstraint tooltip explains hard beat boundary'
-  );
-  const sceneFamilyToggle = root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
-    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame');
-  assert(sceneFamilyToggle, 'Cards dropdown exposes Scene Frame family toggle');
-  sceneFamilyToggle.click();
-  assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].enabled, false, 'family toggle disables the selected family scope');
-  assertEqual(root.querySelector('[data-recursion-card-scope-all]').disabled, false, 'All action enables after any card focus item is disabled');
-  assertEqual(root.querySelector('[data-recursion-card-scope-all]').getAttribute('title'), 'Select all card focus items.', 'enabled All action explains restoration');
-  root.querySelector('[data-recursion-card-scope-all]').click();
-  assertDeepEqual(settingsUpdates.at(-1).cardScope, defaultCardScope(), 'All action restores the full default card scope');
-  assertEqual(root.querySelector('[data-recursion-card-scope-all]').disabled, true, 'All action disables again immediately after restoring full scope');
-  root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
-    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame')
-    .click();
-  assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].enabled, false, 'family toggle can still disable the selected family after using All');
-  assertEqual(
-    root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
-      .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame')
-      .getAttribute('aria-pressed'),
-    'false',
-    'family toggle visibly updates immediately without waiting for a host rerender'
-  );
-  view = { ...view, settings: { ...view.settings, cardScope: defaultCardScope() } };
-  ui.update();
-  assertEqual(
-    root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
-      .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame')
-      .getAttribute('aria-pressed'),
-    'false',
-    'family toggle stays visually disabled across one stale runtime poll'
-  );
-  view = { ...view, settings: { ...view.settings, cardScope: settingsUpdates.at(-1).cardScope } };
-  ui.update();
-  assert(!root.querySelector('[data-recursion-cards-label]'), 'Cards button stays icon-only after partial scope change');
-  root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
-    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame')
-    .click();
-  ui.update();
-  const locationToggle = root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
-    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame' && node.dataset.recursionCardScopeSubItem === 'locationSituation');
-  assert(locationToggle, 'Cards dropdown exposes Scene Frame location/situation sub-item toggle');
-  locationToggle.click();
-  assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].subItems.locationSituation, false, 'sub-item toggle disables one selected focus item');
-  assertEqual(
-    root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
-      .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame' && node.dataset.recursionCardScopeSubItem === 'locationSituation')
-      .getAttribute('aria-pressed'),
-    'false',
-    'sub-item toggle visibly updates immediately without waiting for a host rerender'
-  );
-  ui.update();
-  assert(!root.querySelector('[data-recursion-cards-label]'), 'Cards button stays icon-only after sub-item scope change');
-  let singleScope = defaultCardScope();
-  for (const family of CARD_SCOPE_CATALOG.filter((entry) => entry.family !== 'Scene Frame')) {
-    singleScope = setFamilyEnabled(singleScope, family.family, false).scope;
-  }
-  singleScope = setSubItemEnabled(singleScope, 'Scene Frame', 'beatConstraint', false).scope;
-  singleScope = setSubItemEnabled(singleScope, 'Scene Frame', 'immediateDirection', false).scope;
-  view = { ...view, settings: { ...view.settings, cardScope: singleScope } };
-  ui.update();
-  assertEqual(
-    root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
-      .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame' && node.dataset.recursionCardScopeSubItem === 'locationSituation')
-      .getAttribute('aria-pressed'),
-    'true',
-    'single-item guard setup renders the final selected sub-item as on'
-  );
-  const updatesBeforeZeroGuard = settingsUpdates.length;
-  root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
-    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame' && node.dataset.recursionCardScopeSubItem === 'locationSituation')
-    .click();
-  assertEqual(settingsUpdates.length, updatesBeforeZeroGuard, 'card scope zero-selection guard blocks the final sub-item disable');
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('Keep at least one card focus enabled.'), 'Cards dropdown renders zero-selection guard copy');
+  assert(root.querySelector('[data-recursion-card-deck-all]'), 'Cards dropdown renders an All deck action');
+  assertEqual(root.querySelector('[data-recursion-card-deck-all]').disabled, true, 'All deck action is disabled when every runnable deck card is active');
+  assertEqual(root.querySelector('[data-recursion-card-deck-all]').textContent, '', 'Cards deck All action is icon-only');
+  assertEqual(root.querySelector('[data-recursion-card-deck-all]').getAttribute('aria-label'), 'All runnable cards in this deck are already active.', 'Cards deck All action keeps accessible icon label');
+  assertEqual(root.querySelector('[data-recursion-card-deck-all]').getAttribute('title'), 'All runnable cards in this deck are already active.', 'disabled deck All action explains current deck state');
+  assertEqual(root.querySelectorAll('[data-recursion-card-scope-family]').length, 0, 'Cards dropdown removes legacy Card Scope family rows');
+  assertEqual(root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]').length, 0, 'Cards dropdown removes legacy Card Scope sub-item rows');
+  assertEqual(root.querySelectorAll('[data-recursion-card-deck-category]').length, CARD_SCOPE_CATALOG.length, 'Cards dropdown renders Default deck categories as the primary surface');
+  assertEqual(root.querySelectorAll('[data-recursion-card-id]').length, CARD_SCOPE_TOTAL_SUB_ITEMS, 'Cards dropdown renders Default deck cards instead of legacy scope chips');
+  const defaultDeckText = fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]'));
+  assert(defaultDeckText.includes('34/34 active'), 'Cards header summarizes active cards in the active deck');
+  assert(defaultDeckText.includes('Default is read-only'), 'Default deck read-only state remains visible');
+  assert(defaultDeckText.includes('beat constraint'), 'Cards dropdown renders Default deck card names');
 
-  let manualOne = defaultCardScope();
-  for (const family of CARD_SCOPE_CATALOG.filter((entry) => entry.family !== 'Scene Frame')) {
-    manualOne = setFamilyEnabled(manualOne, family.family, false).scope;
-  }
-  view = { ...view, settings: { ...view.settings, mode: 'manual', maxCards: 2, cardScope: manualOne } };
+  root.querySelector('[data-recursion-card-deck-duplicate]').click();
+  const duplicatedDeckId = settingsUpdates.at(-1).cardDecks.activeCardDeckId;
+  let duplicatedDeck = settingsUpdates.at(-1).cardDecks.customCardDecks[duplicatedDeckId];
+  const disableCardId = Object.keys(duplicatedDeck.cards)[0];
+  duplicatedDeck = {
+    ...duplicatedDeck,
+    cards: {
+      ...duplicatedDeck.cards,
+      [disableCardId]: {
+        ...duplicatedDeck.cards[disableCardId],
+        enabled: false
+      }
+    }
+  };
+  view = {
+    ...view,
+    settings: {
+      ...view.settings,
+      cardDecks: {
+        ...settingsUpdates.at(-1).cardDecks,
+        customCardDecks: {
+          ...settingsUpdates.at(-1).cardDecks.customCardDecks,
+          [duplicatedDeckId]: duplicatedDeck
+        }
+      }
+    }
+  };
   ui.update();
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('1/2 cards selected'), 'Manual Cards header shows selected card cap');
-  assertEqual(root.querySelector('[data-recursion-card-scope-all]').disabled, false, 'Manual All action enables below cap');
-  assertEqual(root.querySelector('[data-recursion-card-scope-all]').getAttribute('title'), 'Select up to 2 Manual cards.', 'Manual All action explains cap');
-  root.querySelector('[data-recursion-card-scope-all]').click();
-  assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Frame'].enabled, true, 'Manual All keeps current hand Scene Frame selected');
-  assertEqual(settingsUpdates.at(-1).cardScope.families['Scene Constraints'].enabled, true, 'Manual All prefers current hand Scene Constraints before catalog fallback');
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('Selected 2 cards. Max Cards limits Manual selection.'), 'Manual All notice names Max Cards limit');
-
-  let manualTwo = defaultCardScope();
-  for (const family of CARD_SCOPE_CATALOG.slice(2)) {
-    manualTwo = setFamilyEnabled(manualTwo, family.family, false).scope;
-  }
-  view = { ...view, settings: { ...view.settings, mode: 'manual', maxCards: 2, cardScope: manualTwo } };
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('33/34 active'), 'Cards header reflects inactive cards in the active deck');
+  assertEqual(root.querySelector('[data-recursion-card-deck-all]').disabled, false, 'Deck All action enables when any runnable deck card is inactive');
+  assertEqual(root.querySelector('[data-recursion-card-deck-all]').getAttribute('title'), 'Enable all runnable cards in this deck.', 'enabled deck All action explains active deck restoration');
+  root.querySelector('[data-recursion-card-deck-all]').click();
+  const allDeckUpdate = settingsUpdates.at(-1).cardDecks;
+  assertEqual(allDeckUpdate.customCardDecks[duplicatedDeckId].cards[disableCardId].enabled, true, 'Deck All action enables inactive runnable cards');
+  assert(!settingsUpdates.at(-1).cardScope, 'Deck All action does not write legacy cardScope');
+  view = { ...view, settings: { ...view.settings, cardDecks: allDeckUpdate } };
   ui.update();
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('2/2 cards selected'), 'Manual Cards header shows full selected card cap');
-  const previousSettingsUpdateCount = settingsUpdates.length;
-  root.querySelectorAll('[data-recursion-card-scope-family-toggle]')
-    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Character Motivation')
-    .click();
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('Max Cards is 2. Change it in Settings to select more.'), 'Manual cap block notice appears');
-  assertEqual(settingsUpdates.length, previousSettingsUpdateCount, 'blocked Manual cap does not write settings');
-  root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]')
-    .find((node) => node.dataset.recursionCardScopeFamilyName === 'Scene Frame' && node.dataset.recursionCardScopeSubItem === 'locationSituation')
-    .click();
-  assert(settingsUpdates.at(-1).cardScope, 'Manual sub-item focus change writes settings under cap');
+  assertEqual(root.querySelector('[data-recursion-card-deck-all]').disabled, true, 'Deck All action disables again after enabling all runnable cards');
 
   root.querySelector('[data-recursion-reasoning-level-high]').keydown({ key: 'ArrowRight' });
   assertEqual(settingsUpdates.at(-1).reasoningLevel, 'ultra', 'ArrowRight advances reasoning roving selection');

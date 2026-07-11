@@ -224,7 +224,8 @@ if (lifecycleFailures.length) {
     await eventSource.emit('extension_settings_loaded');
     assertEqual(eventSource.listenerCount('extension_settings_loaded'), 0, 'settings-load bootstrap unsubscribes retry listener');
     assertEqual(delayedContext.extensionSettings.recursion.mode, 'manual', 'deferred bootstrap uses loaded SillyTavern settings');
-    assert(delayedContext.extensionSettings.recursion.cardScope, 'deferred bootstrap normalizes loaded settings in place');
+    assert(delayedContext.extensionSettings.recursion.cardDecks, 'deferred bootstrap normalizes loaded Card Deck settings in place');
+    assertEqual(delayedContext.extensionSettings.recursion.cardScope, undefined, 'deferred bootstrap removes legacy cardScope');
     await globalThis.recursionOnDelete();
     assertEqual(warnings.length, 0, 'deferred settings bootstrap does not emit harness warnings');
   } finally {

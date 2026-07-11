@@ -9,6 +9,7 @@ Default roots:
 ```text
 artifacts/playwright-readiness/<run-id>/
 artifacts/live-smoke/sillytavern/<run-id>/
+artifacts/live-smoke/card-system/<run-id>/
 artifacts/alpha-gate/<run-id>/
 ```
 
@@ -32,6 +33,8 @@ Every live smoke run should write text and JSON evidence. No-generation UI smoke
 | `diagnostics/redaction-check.json` | Redaction scan result for generated artifacts. |
 
 Readiness-only runs should write `report.json`, `summary.md`, screenshots, and trace when enabled. They do not write live prompt, storage, or activity artifacts.
+
+Card System no-generation UI proof writes `report.json`, `summary.md`, `screenshots/desktop.png`, `screenshots/phone.png`, and `playwright/trace.zip` under `artifacts/live-smoke/card-system/<run-id>/`. Card System Authoring Assist proof writes `report.json`, `summary.md`, `live-log.jsonl`, `model-calls/card-authoring-assist.json`, and `diagnostics/redaction-check.json`; it must not write screenshots or Playwright traces because it performs a real Utility model call.
 
 ## Report Shape
 

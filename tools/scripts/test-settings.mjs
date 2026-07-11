@@ -7,6 +7,15 @@ import {
   normalizeSettings
 } from '../../src/settings.mjs';
 import {
+  CARD_DECK_SETTINGS_VERSION,
+  DEFAULT_CARD_DECK_ID,
+  createDraftCard,
+  createCustomCardDeck,
+  deleteCard,
+  getActiveCardDeck,
+  upsertCustomCardDeck
+} from '../../src/card-decks.mjs';
+import {
   CARD_SCOPE_TOTAL_SUB_ITEMS,
   cardScopeCounts,
   defaultCardScope
@@ -57,8 +66,19 @@ assertEqual(normalizeSettings({ focus: 'constraints' }).focus, 'constraints', 'c
 assertEqual(normalizeSettings({ focus: 'scene' }).focus, 'scene', 'scene focus is accepted');
 assertEqual(normalizeSettings({ focus: 'continuity' }).focus, 'balanced', 'removed continuity focus normalizes to balanced');
 assertEqual(normalizeSettings({ focus: 'pr' + 'ose' }).focus, 'balanced', 'removed craft focus normalizes to balanced');
-const normalizedDefaultScope = normalizeSettings({}).cardScope;
-assertEqual(cardScopeCounts(normalizedDefaultScope).selectedSubItems, CARD_SCOPE_TOTAL_SUB_ITEMS, 'settings default enables all card scope');
+const normalizedDefaultDecks = normalizeSettings({}).cardDecks;
+assertEqual(normalizedDefaultDecks.version, CARD_DECK_SETTINGS_VERSION, 'settings default card decks version is current');
+assertEqual(normalizedDefaultDecks.activeCardDeckId, DEFAULT_CARD_DECK_ID, 'settings default active deck is Default');
+
+const cardDeckStoreRoot = { recursion: { cardDecks: createCustomCardDeck({}, { name: 'Delete Merge Test' }) } };
+const cardDeckStore = createSettingsStore({ root: cardDeckStoreRoot, save: () => {} });
+const seededDeck = createDraftCard(getActiveCardDeck(cardDeckStore.get()), '');
+const seededCardId = Object.keys(seededDeck.cards).find((id) => seededDeck.cards[id].name === 'New Card');
+cardDeckStore.update({ cardDecks: upsertCustomCardDeck(cardDeckStore.get(), seededDeck) });
+assert(cardDeckStore.get().cardDecks.customCardDecks[seededDeck.id].cards[seededCardId], 'settings store card deck update can add draft card');
+const deletedDeck = deleteCard(getActiveCardDeck(cardDeckStore.get()), seededCardId);
+cardDeckStore.update({ cardDecks: upsertCustomCardDeck(cardDeckStore.get(), deletedDeck) });
+assertEqual(cardDeckStore.get().cardDecks.customCardDecks[deletedDeck.id].cards[seededCardId], undefined, 'settings store replaces cardDecks so deleted cards do not survive deep merge');
 
 const partialScope = defaultCardScope();
 partialScope.families['Open Threads'].enabled = false;
@@ -67,7 +87,8 @@ for (const key of Object.keys(partialScope.families['Open Threads'].subItems)) {
 }
 const normalizedPartial = normalizeSettings({ mode: 'manual', cardScope: partialScope });
 assertEqual(normalizedPartial.mode, 'manual', 'manual mode survives card-scope normalization');
-assertEqual(normalizedPartial.cardScope.families['Open Threads'].enabled, false, 'disabled current family persists');
+assertEqual(normalizedPartial.cardScope, undefined, 'legacy cardScope is removed from normalized settings');
+assertEqual(normalizedPartial.cardDecks.defaultEnabledState['Open Threads'].enabled, false, 'disabled legacy current family persists in card deck migration state');
 assertDeepEqual(
   normalizeSettings({}).injection,
   { placement: 'in_prompt', role: 'system', depth: 1 },
@@ -165,7 +186,7 @@ assertEqual(normalizeSettings({ minCards: -20, maxCards: 99 }).minCards, 0, 'min
 assertEqual(normalizeSettings({ minCards: -20, maxCards: 99 }).maxCards, 20, 'maximum cards clamps high');
 const zeroMaxManual = normalizeSettings({ mode: 'manual', maxCards: 0 });
 assertEqual(zeroMaxManual.maxCards, 0, 'stored Max Cards can remain zero for existing card budget semantics');
-assert(zeroMaxManual.cardScope, 'manual settings still normalize card scope');
+assert(zeroMaxManual.cardDecks, 'manual settings still normalize card decks');
 const highMax = normalizeSettings({ mode: 'manual', maxCards: 50 });
 assertEqual(highMax.maxCards, 20, 'Max Cards remains capped at twenty');
 

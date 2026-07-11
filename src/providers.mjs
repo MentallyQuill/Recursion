@@ -45,6 +45,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'fusedCardBundle',
   'rapidTurnDelta',
   'guidanceComposer',
+  'cardAuthoringAssist',
   'dialogueEnhancer',
   'proseEnhancer',
   'providerTest'
@@ -67,6 +68,7 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   fusedCardBundle: 'recursion.cardBundle.v1',
   rapidTurnDelta: 'recursion.rapidTurnDelta.v2',
   guidanceComposer: 'recursion.guidanceComposer.v1',
+  cardAuthoringAssist: 'recursion.cardAuthoringAssist.v1',
   dialogueEnhancer: 'recursion.dialogueEnhancer.v1',
   proseEnhancer: 'recursion.proseEnhancer.v1',
   reasonerComposer: 'recursion.reasonerComposer.v1',

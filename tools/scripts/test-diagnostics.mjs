@@ -3,7 +3,34 @@ import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const payload = buildDiagnosticsPayload({
   createdAt: '2026-07-04T00:00:00.000Z',
-  settings: { provider: { utility: { openAICompatible: { apiKey: 'sk-live-secret' } } } },
+  settings: {
+    provider: { utility: { openAICompatible: { apiKey: 'sk-live-secret' } } },
+    cardDecks: {
+      version: 1,
+      activeCardDeckId: 'custom',
+      customCardDecks: {
+        custom: {
+          id: 'custom',
+          name: 'Custom Deck',
+          categories: {
+            cat: { id: 'cat', name: 'Secrets', description: 'category description leak' }
+          },
+          categoryOrder: ['cat'],
+          cardOrderByCategory: { cat: ['card'] },
+          cards: {
+            card: {
+              id: 'card',
+              categoryId: 'cat',
+              name: 'Secret Card',
+              description: 'card description leak',
+              promptText: 'card prompt leak',
+              enabled: true
+            }
+          }
+        }
+      }
+    }
+  },
   view: {
     activeRunId: 'run-1',
     hostGenerationActive: true,
@@ -38,6 +65,11 @@ assert(!serialized.includes('visible excerpt'), 'default diagnostics omit raw ex
 assert(!serialized.includes('diagnostic excerpt leak'), 'default diagnostics allowlist packet diagnostic fields');
 assert(serialized.includes('fused'), 'default diagnostics keep safe packet pipeline diagnostics');
 assert(!serialized.includes('sk-live-secret'), 'settings secrets are redacted');
+assert(serialized.includes('Custom Deck'), 'card deck diagnostics keep safe deck name');
+assert(serialized.includes('runnableCardCount'), 'card deck diagnostics include structural runnable count');
+assert(!serialized.includes('category description leak'), 'card deck diagnostics omit category descriptions');
+assert(!serialized.includes('card description leak'), 'card deck diagnostics omit card descriptions');
+assert(!serialized.includes('card prompt leak'), 'card deck diagnostics omit card prompt text');
 assert(!serialized.includes('Bearer private-token'), 'journal secrets are redacted');
 assert(!serialized.includes('should not be copied'), 'raw prompt fields are not copied by default');
 assert(serialized.includes('visible'), 'safe diagnostic details are preserved');

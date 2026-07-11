@@ -1,9 +1,9 @@
 import {
   cardScopeCounts,
   cardScopeLabel,
-  defaultCardScope,
   normalizeCardScope
 } from '../card-scope.mjs';
+import { activeCardDeckRuntimeScope, getActiveCardDeck, getAllCardDecks, normalizeCardDeckSettings } from '../card-decks.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from '../settings.mjs';
 
@@ -244,7 +244,11 @@ export function createRecursionViewModel(view = {}) {
   const pipelineMode = normalizePipelineMode(settings.pipelineMode);
   const enhancementTarget = normalizeEnhancementTarget(settings.enhancements?.target);
   const enhancementApplyMode = normalizeEnhancementApplyMode(settings.enhancements?.applyMode);
-  const cardScope = normalizeCardScope(settings.cardScope || defaultCardScope());
+  const cardDecks = normalizeCardDeckSettings(settings.cardDecks);
+  const deckSettings = settings.cardDecks ? { ...settings, cardDecks } : settings;
+  const cardScope = normalizeCardScope(activeCardDeckRuntimeScope(deckSettings));
+  const activeCardDeck = getActiveCardDeck({ ...settings, cardDecks });
+  const cardDeckList = Object.values(getAllCardDecks({ ...settings, cardDecks }));
   const rawCards = Array.isArray(source.lastHand?.cards) ? source.lastHand.cards : [];
   const lastBriefStatus = normalizeLastBriefStatus(source.lastBrief?.status, rawCards.length > 0, Boolean(source.lastPacket));
   const cards = lastBriefStatus === 'ready' ? rawCards : [];
@@ -283,6 +287,9 @@ export function createRecursionViewModel(view = {}) {
       ? 'Off'
       : `${enhancementTargetLabel(enhancementTarget)}, ${enhancementApplyModeLabel(enhancementApplyMode)}`,
     cardScope,
+    cardDecks,
+    activeCardDeck,
+    cardDeckList,
     cardScopeLabel: cardScopeLabel(cardScope),
     cardScopeCounts: cardScopeCounts(cardScope),
     runtimeHealthLabel: enabled ? runtimeHealthLabel(activity, progressRun) : 'Off',

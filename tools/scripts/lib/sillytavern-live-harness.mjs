@@ -1215,9 +1215,13 @@ function manualForcedProofScript() {
         context?.extensionSettings?.recursion,
         context?.extension_settings?.recursion
       ].filter((entry) => entry && typeof entry === 'object');
+      const settingsFamiliesFor = (entry) => {
+        if (entry?.cardScope?.families && typeof entry.cardScope.families === 'object') return entry.cardScope.families;
+        if (entry?.cardDecks?.defaultEnabledState && typeof entry.cardDecks.defaultEnabledState === 'object') return entry.cardDecks.defaultEnabledState;
+        return null;
+      };
       const settingsSelectedFamilies = () => {
-        const root = settingsRoots.find((entry) => entry?.cardScope?.families && typeof entry.cardScope.families === 'object');
-        const families = root?.cardScope?.families || {};
+        const families = settingsFamiliesFor(settingsRoots.find((entry) => settingsFamiliesFor(entry))) || {};
         return Object.entries(families)
           .filter(([, state]) => {
             if (!state || typeof state !== 'object') return false;
@@ -1228,7 +1232,7 @@ function manualForcedProofScript() {
           .map(([family]) => String(family || '').trim())
           .filter(Boolean);
       };
-      const hasSettingsCardScope = () => settingsRoots.some((entry) => entry?.cardScope?.families && typeof entry.cardScope.families === 'object');
+      const hasSettingsCardConfig = () => settingsRoots.some((entry) => settingsFamiliesFor(entry));
       for (const settings of settingsRoots) {
         settings.mode = 'manual';
         settings.maxCards = proof.cap;
@@ -1315,7 +1319,7 @@ function manualForcedProofScript() {
         }
         await waitForCondition(() => selectedFamilies.every((family) => selectedFamiliesNow().includes(family)), 3000);
         await waitForCondition(() => cardsLabel().includes(`/${proof.cap}`), 3000);
-        if (hasSettingsCardScope()) {
+        if (hasSettingsCardConfig()) {
           await waitForCondition(() => {
             const persisted = settingsSelectedFamilies();
             return persisted.length === selectedFamilies.length

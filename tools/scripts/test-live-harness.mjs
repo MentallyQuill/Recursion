@@ -626,6 +626,7 @@ async function createSillyTavernSmokeFixtureServer({
   const moduleFiles = [
     'src/extension/index.js',
     'src/activity.mjs',
+    'src/card-decks.mjs',
     'src/card-scope.mjs',
     'src/cards.mjs',
     'src/core.mjs',
@@ -819,7 +820,11 @@ async function createSillyTavernSmokeFixtureServer({
         RECURSION_LIVE_TIMEOUT_MS: '2000'
       }
     });
-    assertEqual(report.status, 'pass', 'browser smoke dismisses a blocking host-extension notice before Recursion interactions');
+    assertEqual(
+      report.status,
+      'pass',
+      `browser smoke dismisses a blocking host-extension notice before Recursion interactions (${JSON.stringify({ result: report.result, failures: report.failures, checks: report.checks?.slice?.(-4) })})`
+    );
   } finally {
     await server.close();
   }

@@ -42,6 +42,7 @@ function responseSchemaForRole(roleId) {
   if (roleId === 'utilityArbiter') return 'recursion.utilityArbiter.v1';
   if (roleId === 'rapidTurnDelta') return 'recursion.rapidTurnDelta.v2';
   if (roleId === 'guidanceComposer') return 'recursion.guidanceComposer.v1';
+  if (roleId === 'cardAuthoringAssist') return 'recursion.cardAuthoringAssist.v1';
   if (roleId === 'dialogueEnhancer') return 'recursion.dialogueEnhancer.v1';
   if (roleId === 'proseEnhancer') return 'recursion.proseEnhancer.v1';
   if (roleId === 'fusedCardBundle') return 'recursion.cardBundle.v1';
@@ -79,6 +80,7 @@ const expectedUtilityRoles = [
   'fusedCardBundle',
   'rapidTurnDelta',
   'guidanceComposer',
+  'cardAuthoringAssist',
   'dialogueEnhancer',
   'proseEnhancer',
   'providerTest'
@@ -223,6 +225,9 @@ assertEqual(calls.at(-1).responseSchema, 'recursion.rapidTurnDelta.v2', 'rapidTu
 await router.generate('guidanceComposer', { prompt: 'Guidance composer' });
 assertEqual(calls.at(-1).lane, 'utility', 'guidanceComposer uses utility lane');
 assertEqual(calls.at(-1).responseSchema, 'recursion.guidanceComposer.v1', 'guidanceComposer request carries expected response schema');
+await router.generate('cardAuthoringAssist', { prompt: 'Card authoring assist' });
+assertEqual(calls.at(-1).lane, 'utility', 'cardAuthoringAssist uses utility lane');
+assertEqual(calls.at(-1).responseSchema, 'recursion.cardAuthoringAssist.v1', 'cardAuthoringAssist request carries expected response schema');
 await router.generate('dialogueEnhancer', { prompt: 'Dialogue enhancement' });
 assertEqual(calls.at(-1).lane, 'utility', 'dialogueEnhancer uses utility lane');
 assertEqual(calls.at(-1).responseSchema, 'recursion.dialogueEnhancer.v1', 'dialogueEnhancer request carries expected response schema');

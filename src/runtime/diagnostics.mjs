@@ -109,6 +109,61 @@ function mapPlanSummary(plan) {
   }, 500);
 }
 
+function mapCardDeckSettings(settings) {
+  const cardDecks = asObject(settings?.cardDecks);
+  const customDecks = asObject(cardDecks.customCardDecks);
+  return safeDiagnosticValue({
+    version: numberOr(cardDecks.version, 0),
+    activeCardDeckId: safeText(cardDecks.activeCardDeckId, 120),
+    defaultEnabledFamilyCount: Object.keys(asObject(cardDecks.defaultEnabledState)).length,
+    customDeckCount: Object.keys(customDecks).length,
+    customDecks: Object.fromEntries(Object.entries(customDecks).slice(0, 24).map(([deckId, deck]) => {
+      const source = asObject(deck);
+      const cards = asObject(source.cards);
+      const categories = asObject(source.categories);
+      const runnableCount = Object.values(cards).filter((card) => {
+        const cardSource = asObject(card);
+        return cardSource.enabled !== false
+          && safeText(cardSource.name, 120)
+          && safeText(cardSource.name, 120) !== 'New Card'
+          && safeText(cardSource.promptText, 1);
+      }).length;
+      return [safeText(deckId, 120), {
+        id: safeText(source.id, 120),
+        name: safeText(source.name, 120),
+        readonly: source.readonly === true,
+        bundled: source.bundled === true,
+        categoryCount: Object.keys(categories).length,
+        cardCount: Object.keys(cards).length,
+        runnableCardCount: runnableCount,
+        categoryOrderHash: hashJson(source.categoryOrder || []),
+        cardOrderHash: hashJson(source.cardOrderByCategory || {})
+      }];
+    }))
+  }, 500);
+}
+
+function mapSettingsSummary(settings) {
+  const source = asObject(settings);
+  return safeDiagnosticValue({
+    enabled: source.enabled !== false,
+    mode: safeText(source.mode, 40),
+    pipelineMode: safeText(source.pipelineMode, 40),
+    strength: safeText(source.strength, 40),
+    minCards: numberOr(source.minCards, 0),
+    maxCards: numberOr(source.maxCards, 0),
+    reasoningLevel: safeText(source.reasoningLevel, 40),
+    promptFootprint: safeText(source.promptFootprint, 40),
+    focus: safeText(source.focus, 80),
+    reasonerUse: safeText(source.reasonerUse, 40),
+    storyFormOverride: safeText(source.storyFormOverride, 80),
+    enhancements: source.enhancements || null,
+    injection: source.injection || null,
+    retention: source.retention || null,
+    cardDecks: mapCardDeckSettings(source)
+  }, 500);
+}
+
 function mapJournalEntry(entry) {
   const source = asObject(entry);
   return safeDiagnosticValue({
@@ -139,7 +194,7 @@ export function buildDiagnosticsPayload({
   const payload = {
     schema: 'recursion.diagnostics.v1',
     createdAt,
-    settings,
+    settings: mapSettingsSummary(settings),
     runtime: {
       activeRunId: runtime.activeRunId || null,
       hostGenerationActive: Boolean(runtime.hostGenerationActive),

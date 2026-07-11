@@ -257,24 +257,62 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   const priorityStatus = await page.evaluate((cardId) => {
     const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
     const status = row?.querySelector('.recursion-card-deck-card-status');
+    const icon = status?.querySelector('[data-recursion-card-state-icon]');
     return {
       rowClass: row?.className || '',
+      iconKind: icon?.getAttribute('data-recursion-card-state-icon') || '',
       statusTitle: status?.getAttribute('title') || '',
       statusLabel: status?.getAttribute('aria-label') || '',
       barStatus: document.querySelector('[data-recursion-current-step]')?.textContent || ''
     };
   }, createdCardId);
-  if (!priorityStatus.rowClass.includes('is-priority') || priorityStatus.statusTitle !== 'Priority: forced into Auto hand before backfill.' || priorityStatus.statusLabel !== 'Priority card' || priorityStatus.barStatus !== 'Card prioritized.') {
+  if (!priorityStatus.rowClass.includes('is-priority') || priorityStatus.iconKind !== 'eye-priority' || priorityStatus.statusTitle !== 'Priority: forced into Auto hand before backfill.' || priorityStatus.statusLabel !== 'Priority card' || priorityStatus.barStatus !== 'Card prioritized.') {
     fail(report, 'card-priority-status', 'Priority cards did not render with the expected icon state, tooltip, and main-bar status.', priorityStatus);
   }
-  await page.locator(`${rowSelector} [data-recursion-card-toggle-row]`).click({ timeout: timeoutMs });
+  await page.locator('[data-recursion-card-deck-activate-all]').click({ timeout: timeoutMs });
+  await page.waitForFunction((cardId) => {
+    const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    return row?.classList?.contains('is-active') && deck?.cards?.[cardId]?.selectionState === 'active';
+  }, createdCardId, { timeout: timeoutMs });
+  const activateAllState = await page.evaluate((cardId) => {
+    const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
+    const status = row?.querySelector('.recursion-card-deck-card-status');
+    return {
+      iconKind: status?.querySelector('[data-recursion-card-state-icon]')?.getAttribute('data-recursion-card-state-icon') || '',
+      barStatus: document.querySelector('[data-recursion-current-step]')?.textContent || ''
+    };
+  }, createdCardId);
+  if (activateAllState.iconKind !== 'eye-active' || activateAllState.barStatus !== 'All cards set Active.') {
+    fail(report, 'deck-activate-all', 'Deck activate-all did not clear Priority back to normal Active.', activateAllState);
+  }
+  await page.locator('[data-recursion-card-deck-deactivate-all]').click({ timeout: timeoutMs });
   await page.waitForFunction((cardId) => {
     const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
     const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
     return row?.classList?.contains('is-inactive') && deck?.cards?.[cardId]?.selectionState === 'off';
   }, createdCardId, { timeout: timeoutMs });
-  addCheck(report, 'card-row-state', 'pass', 'Card row tap cycled Active to Priority to Inactive without an extra button.', await cardSystemState(page));
+  const deactivateAllState = await page.evaluate((cardId) => {
+    const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
+    const status = row?.querySelector('.recursion-card-deck-card-status');
+    return {
+      iconKind: status?.querySelector('[data-recursion-card-state-icon]')?.getAttribute('data-recursion-card-state-icon') || '',
+      barStatus: document.querySelector('[data-recursion-current-step]')?.textContent || ''
+    };
+  }, createdCardId);
+  if (deactivateAllState.iconKind !== 'eye-inactive' || deactivateAllState.barStatus !== 'All cards disabled.') {
+    fail(report, 'deck-deactivate-all', 'Deck deactivate-all did not set runnable cards Inactive.', deactivateAllState);
+  }
+  await page.locator(`${rowSelector} [data-recursion-card-toggle-row]`).click({ timeout: timeoutMs });
+  await page.waitForFunction((cardId) => {
+    const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    return row?.classList?.contains('is-active') && deck?.cards?.[cardId]?.selectionState === 'active';
+  }, createdCardId, { timeout: timeoutMs });
+  addCheck(report, 'card-row-state', 'pass', 'Card row and deck bulk actions use eye-state icons for Active, Priority, and Inactive.', await cardSystemState(page));
 
   await page.locator(`${rowSelector} [data-recursion-card-move]`).click({ timeout: timeoutMs });
   const moveTargetState = await page.evaluate((cardId) => {

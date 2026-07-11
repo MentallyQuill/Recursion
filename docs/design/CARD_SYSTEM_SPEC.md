@@ -284,7 +284,16 @@ type CardSelectionState = "off" | "active" | "priority";
 - `active`: the card is eligible for normal Auto backfill or Manual forcing.
 - `priority`: in Auto, the card is forced ahead of normal Active cards; in Manual, it is treated as Active because Manual already forces selected cards directly.
 
-Auto row clicks cycle `off -> active -> priority -> off`. Manual row clicks cycle `off -> active -> off`. The `All` deck action sets runnable cards to `active`; it never mass-prioritizes cards.
+Auto row clicks cycle `off -> active -> priority -> off`. Manual row clicks cycle `off -> active -> off`.
+
+The Card Deck header exposes two bulk state actions for editable decks:
+
+- open eye: set every runnable card to normal `active`, clearing all `priority` states;
+- slashed eye: set every runnable card to `off`.
+
+Draft cards are unchanged by both actions. The bundled Default deck is read-only, so these controls are disabled until the user duplicates it.
+
+Card state icons use the supplied eye family: slashed eye for Inactive, open eye for Active, and eye-plus for Priority. Check and X remain confirm/cancel/delete-confirm language and must not be used as card-state icons.
 
 Priority overflow is allowed. If the user marks more Priority cards than the effective `Max Cards` budget, Recursion uses deck category/card order, selects the top cards, records `priority-card-cap`, and omits the rest with `priority-over-max-cards`.
 

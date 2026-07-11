@@ -518,9 +518,21 @@ function renderPipelineIcon(container, kind) {
   container.replaceChildren(pipelineIconSvg(kind));
 }
 
+const CARD_STATE_ICON_PATHS = {
+  'eye-active': 'M2.062,12.346C3.773,17,7.675,20,12,20s8.227-3,9.938-7.654a.993.993,0,0,0,0-.692C20.227,7,16.325,4,12,4S3.773,7,2.062,11.654A.993.993,0,0,0,2.062,12.346ZM12,6c3.373,0,6.451,2.343,7.929,6-1.478,3.657-4.556,6-7.929,6s-6.451-2.343-7.929-6C5.549,8.343,8.627,6,12,6Zm0,10a4,4,0,1,0-4-4A4,4,0,0,0,12,16Zm0-6a2,2,0,1,1-2,2A2,2,0,0,1,12,10Z',
+  'eye-inactive': 'M2.293,21.707a1,1,0,0,0,1.414,0l3.2-3.2A9.581,9.581,0,0,0,12,20c4.325,0,8.227-3,9.938-7.654a.993.993,0,0,0,0-.692A12.6,12.6,0,0,0,18.7,6.719l3.012-3.012a1,1,0,1,0-1.414-1.414l-3.2,3.2A9.581,9.581,0,0,0,12,4C7.675,4,3.773,7,2.062,11.654a.993.993,0,0,0,0,.692,12.6,12.6,0,0,0,3.243,4.935L2.293,20.293A1,1,0,0,0,2.293,21.707ZM17.266,8.148A10.454,10.454,0,0,1,19.929,12c-1.478,3.657-4.556,6-7.929,6a7.52,7.52,0,0,1-3.632-.954l1.613-1.613A3.947,3.947,0,0,0,12,16a4,4,0,0,0,4-4,3.947,3.947,0,0,0-.567-2.019Zm-7.191,4.363A1.96,1.96,0,0,1,10,12a2,2,0,0,1,2-2,1.96,1.96,0,0,1,.511.075Zm3.85-1.022A1.96,1.96,0,0,1,14,12a2,2,0,0,1-2,2,1.96,1.96,0,0,1-.511-.075ZM4.071,12C5.549,8.343,8.627,6,12,6a7.52,7.52,0,0,1,3.632.954L14.019,8.567A3.947,3.947,0,0,0,12,8a4,4,0,0,0-4,4,3.947,3.947,0,0,0,.567,2.019L6.734,15.852A10.454,10.454,0,0,1,4.071,12Z',
+  'eye-priority': 'M12,7a4,4,0,1,0,4,4A4,4,0,0,0,12,7Zm0,6a2,2,0,1,1,2-2A2,2,0,0,1,12,13Zm6.5,2v1.5H20a1,1,0,0,1,0,2H18.5V20a1,1,0,0,1-2,0V18.5H15a1,1,0,0,1,0-2h1.5V15a1,1,0,0,1,2,0Zm3.438-4.345a.987.987,0,0,1,0,.69,13.339,13.339,0,0,1-1.08,2.264,1,1,0,1,1-1.715-1.028A11.3,11.3,0,0,0,19.928,11C18.451,7.343,15.373,5,12,5S5.549,7.343,4.072,11a9.315,9.315,0,0,0,6.167,5.787,1,1,0,1,1-.478,1.942,11.393,11.393,0,0,1-7.7-7.383.99.99,0,0,1,0-.691C3.773,6,7.674,3,12,3S20.227,6,21.938,10.655Z'
+};
+
 function cardSystemIconSvg(kind) {
   const attrs = { width: '15', height: '15', viewBox: '0 0 16 16', 'aria-hidden': 'true', focusable: 'false' };
   const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.35', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+  if (CARD_STATE_ICON_PATHS[kind]) return el('svg', {
+    attrs: { ...attrs, viewBox: '0 0 24 24' },
+    dataset: { recursionCardStateIcon: kind }
+  }, [
+    el('path', { attrs: { fill: 'currentColor', d: CARD_STATE_ICON_PATHS[kind] } })
+  ]);
   if (kind === 'plus') return el('svg', { attrs }, [
     el('path', { attrs: { d: 'M8 3.2v9.6M3.2 8h9.6', ...stroke } })
   ]);
@@ -1995,12 +2007,14 @@ function deckCardCounts(deck) {
   let active = 0;
   let eligible = 0;
   let draft = 0;
+  let priority = 0;
   for (const card of cards) {
     const status = getDeckCardStatus(card);
     const selected = cardSelectionState(card);
     if (status.runnable && selected !== 'off') {
       active += 1;
       eligible += 1;
+      if (selected === 'priority') priority += 1;
     } else if (status.reason === 'disabled') {
       eligible += 1;
     } else {
@@ -2012,24 +2026,38 @@ function deckCardCounts(deck) {
     active,
     eligible,
     draft,
+    priority,
     inactive: Math.max(0, eligible - active),
-    allActive: eligible === active
+    allActive: eligible === active,
+    allNormalActive: eligible > 0 && eligible === active && priority === 0
   };
 }
 
 function deckCardSummary(deck) {
   const counts = deckCardCounts(deck);
   const base = counts.total ? `${counts.active}/${counts.eligible} active` : '0 cards';
-  return counts.draft ? `${base}, ${counts.draft} draft` : base;
+  return `${base}${counts.priority ? `, ${counts.priority} priority` : ''}${counts.draft ? `, ${counts.draft} draft` : ''}`;
 }
 
-function enableAllRunnableDeckCards(deck) {
+function activateAllRunnableDeckCards(deck) {
   if (deck?.readonly) return deck;
   let nextDeck = deck;
   for (const card of Object.values(asObject(deck?.cards))) {
     const status = getDeckCardStatus(card);
     if (status.runnable || status.reason === 'disabled') {
       nextDeck = updateCardSelectionState(nextDeck, card.id, 'active');
+    }
+  }
+  return nextDeck;
+}
+
+function deactivateAllRunnableDeckCards(deck) {
+  if (deck?.readonly) return deck;
+  let nextDeck = deck;
+  for (const card of Object.values(asObject(deck?.cards))) {
+    const status = getDeckCardStatus(card);
+    if (status.runnable || status.reason === 'disabled') {
+      nextDeck = updateCardSelectionState(nextDeck, card.id, 'off');
     }
   }
   return nextDeck;
@@ -2052,7 +2080,7 @@ function cardDeckCardStatePresentation(card, mode = 'auto') {
     return {
       state,
       className: 'is-priority',
-      icon: 'arrow-up',
+      icon: 'eye-priority',
       title: 'Priority: forced into Auto hand before backfill.',
       label: 'Priority card',
       nextStatus: 'Card disabled.'
@@ -2062,7 +2090,7 @@ function cardDeckCardStatePresentation(card, mode = 'auto') {
     return {
       state,
       className: 'is-inactive',
-      icon: 'x',
+      icon: 'eye-inactive',
       title: 'Inactive. Tap to enable.',
       label: 'Inactive card',
       nextStatus: 'Card enabled.'
@@ -2071,7 +2099,7 @@ function cardDeckCardStatePresentation(card, mode = 'auto') {
   return {
     state: 'active',
     className: 'is-active',
-    icon: 'check',
+    icon: 'eye-active',
     title: mode === 'manual' ? 'Active. Tap to disable.' : 'Active. Tap to prioritize.',
     label: 'Active card',
     nextStatus: mode === 'manual' ? 'Card disabled.' : 'Card prioritized.'
@@ -2229,20 +2257,27 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
   const decks = Object.values(getAllCardDecks(deckView));
   const counts = deckCardCounts(activeDeck);
   const summary = deckCardSummary(activeDeck);
-  const allSelected = counts.allActive;
+  const activateAllDisabled = activeDeck.readonly || counts.eligible === 0 || counts.allNormalActive;
+  const deactivateAllDisabled = activeDeck.readonly || counts.eligible === 0 || counts.active === 0;
+  const readonlyBulkTitle = 'Duplicate this read-only Card Deck to edit cards.';
   const deckDeletePending = deckDeleteState?.deckId === activeDeck.id && !activeDeck.readonly;
-  const allButtonAttrs = {
-    type: 'button',
-    'aria-label': allSelected ? 'All runnable cards in this deck are already active.' : 'Enable all runnable cards in this deck.',
-    title: allSelected ? 'All runnable cards in this deck are already active.' : 'Enable all runnable cards in this deck.'
-  };
-  if (allSelected) allButtonAttrs.disabled = 'disabled';
+  const activateAllTitle = activeDeck.readonly
+    ? readonlyBulkTitle
+    : activateAllDisabled
+      ? 'All runnable cards are already Active.'
+      : 'Set all runnable cards to Active.';
+  const deactivateAllTitle = activeDeck.readonly
+    ? readonlyBulkTitle
+    : deactivateAllDisabled
+      ? 'All runnable cards are already Inactive.'
+      : 'Set all runnable cards to Inactive.';
 
   panel.appendChild(el('div', { className: 'recursion-cards-head' }, [
     el('span', { className: 'recursion-dropdown-title', text: 'Cards' }),
     el('span', { className: 'recursion-cards-head-actions' }, [
       el('span', { className: 'recursion-cards-summary', text: summary }),
-      cardSystemIconButton('check', allButtonAttrs.title || 'Enable all runnable cards in this deck.', { recursionCardDeckAll: '' }, { disabled: allButtonAttrs.disabled === 'disabled' })
+      cardSystemIconButton('eye-active', activateAllTitle, { recursionCardDeckActivateAll: '' }, { disabled: activateAllDisabled }),
+      cardSystemIconButton('eye-inactive', deactivateAllTitle, { recursionCardDeckDeactivateAll: '' }, { disabled: deactivateAllDisabled })
     ])
   ]));
   const deckBarChildren = [
@@ -4921,13 +4956,21 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         })
       }));
     }
-    const cardDeckAll = control('recursionCardDeckAll');
-    if (cardDeckAll && cardDeckAll.disabled !== true) {
+    const cardDeckActivateAll = control('recursionCardDeckActivateAll');
+    if (cardDeckActivateAll && cardDeckActivateAll.disabled !== true) {
       panelRerenderClickEvents?.add(event);
       consumeClickEvent(event);
       const view = currentView();
       const deck = getActiveCardDeck(view.settings);
-      if (!deck.readonly) applyCardDeckSettings(upsertCustomCardDeck(view.settings, enableAllRunnableDeckCards(deck)), 'All runnable cards enabled.');
+      if (!deck.readonly) applyCardDeckSettings(upsertCustomCardDeck(view.settings, activateAllRunnableDeckCards(deck)), 'All cards set Active.');
+    }
+    const cardDeckDeactivateAll = control('recursionCardDeckDeactivateAll');
+    if (cardDeckDeactivateAll && cardDeckDeactivateAll.disabled !== true) {
+      panelRerenderClickEvents?.add(event);
+      consumeClickEvent(event);
+      const view = currentView();
+      const deck = getActiveCardDeck(view.settings);
+      if (!deck.readonly) applyCardDeckSettings(upsertCustomCardDeck(view.settings, deactivateAllRunnableDeckCards(deck)), 'All cards disabled.');
     }
     const categoryToggle = control('recursionCardCategoryToggle');
     const categoryAction = control('recursionCardCategoryAction');

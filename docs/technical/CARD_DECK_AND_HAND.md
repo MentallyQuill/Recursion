@@ -116,6 +116,8 @@ Card Deck selection state adds a user-steering layer above normal Auto sorting:
 - `active` cards remain normal candidates.
 - `priority` cards are Auto-first. Runtime derives ordered Priority card ids and, for current built-in deck cards, ordered Priority families. `selectHand(...)` accepts `forcedCardIds` for exact hand-card forcing and `forcedFamilies` for generated family-card forcing.
 
+The Cards dropdown represents those states with the supplied eye icons: slashed eye for `off`, open eye for `active`, and eye-plus for `priority`. The deck header has two bulk actions for editable decks: open eye sets all runnable cards to normal `active` and clears Priority, while slashed eye sets all runnable cards to `off`. Draft cards are left untouched, and the read-only Default deck requires duplication before either bulk action can run.
+
 If Priority exceeds `Max Cards`, runtime keeps the top ordered Priority cards, does not backfill with lower Active cards, records `priority-card-cap`, and marks over-cap omissions as `priority-over-max-cards`.
 
 ```mermaid

@@ -602,6 +602,8 @@ const recursionCss = readFileSync(new URL('../../styles/recursion.css', import.m
 assert(recursionCss.includes('recursion-enhancement-capture-active'), 'enhancement capture CSS hides the class toggled by the extension');
 const recursionUi = readFileSync(new URL('../../src/ui.mjs', import.meta.url), 'utf8');
 const cardSystemUiProof = readFileSync(new URL('./prove-card-system-ui.mjs', import.meta.url), 'utf8');
+assert(existsSync(new URL('../../assets/icons/card-system/handle-category.svg', import.meta.url)), 'production Card System includes the supplied category handle asset');
+assert(existsSync(new URL('../../assets/icons/card-system/handle-card.svg', import.meta.url)), 'production Card System includes the supplied card handle asset');
 const regenerateIconPath = new URL('../../assets/icons/regenerate.svg', import.meta.url);
 for (const section of [
   '/* Recursion root and compact bar */',
@@ -854,8 +856,17 @@ assert(/recursionCategoryEditorSave/.test(recursionUi), 'production Category edi
 assert(/recursion-category-editor-inline/.test(recursionCss), 'production Category inline editor has compact graphite styling');
 assert(/recursion-card-deck-category-actions/.test(recursionCss), 'production Category actions are grouped to prevent mobile arrow wrapping');
 assert(/recursion-card-deck-category-copy/.test(recursionCss), 'production Category copy and actions use separate layout areas');
-assert(/--recursion-card-action-rail-width:\s*116px;/.test(recursionCss), 'production Card System defines a shared action rail width for card and category rows');
-assert(/\.recursion-card-delete-slot \+ \.recursion-card-drag-handle\s*\{[\s\S]*?margin-left:\s*8px;/.test(recursionCss), 'production Card System separates delete buttons from drag handles');
+assert(/--recursion-card-action-rail-width:\s*124px;/.test(recursionCss), 'production Card System defines a shared action rail width for card and category rows');
+assert(!/cardSystemIconButton\('grip'/.test(recursionUi), 'production Card System drag handles do not use mini-button grip controls');
+assert(!/kind === 'grip'/.test(recursionUi), 'production Card System removes the old inline grip icon branch');
+assert(/recursion-card-drag-region/.test(recursionUi), 'production Card System renders drag handles as naked grab regions');
+assert(/recursion-card-drag-icon-\$\{kind\}/.test(recursionUi) && /cardDragHandle\('category'/.test(recursionUi) && /cardDragHandle\('card'/.test(recursionUi), 'production Card System renders distinct category and card handle icon spans');
+assert(/\.recursion-card-delete-slot \+ \.recursion-card-drag-region\s*\{[\s\S]*?margin-left:\s*8px;/.test(recursionCss), 'production Card System separates delete buttons from drag regions');
+assert(/\.recursion-card-drag-region\s*\{[\s\S]*?background:\s*transparent;[\s\S]*?border:\s*0;/.test(recursionCss), 'production Card System drag regions rest without button chrome');
+assert(/\.recursion-card-drag-icon-category\s*\{[\s\S]*?height:\s*22px;[\s\S]*?mask-image:\s*url\("\.\.\/assets\/icons\/card-system\/handle-category\.svg"\);[\s\S]*?width:\s*22px;/.test(recursionCss), 'production Card System category drag region uses the supplied large handle asset');
+assert(/\.recursion-card-drag-icon-card\s*\{[\s\S]*?height:\s*16px;[\s\S]*?mask-image:\s*url\("\.\.\/assets\/icons\/card-system\/handle-card\.svg"\);[\s\S]*?width:\s*16px;/.test(recursionCss), 'production Card System card drag region uses the supplied small handle asset');
+assert(/function cardDragReducedMotion/.test(recursionUi), 'production Card System exposes a reduced-motion guard for drag animations');
+assert(/const eased = ratio \* ratio/.test(recursionUi), 'production Card System auto-scroll ramps drag velocity quadratically near panel edges');
 assert(/\.recursion-card-deck-category-head\s*\{[\s\S]*?cursor:\s*pointer;[\s\S]*?grid-template-columns:\s*24px minmax\(0,\s*1fr\) var\(--recursion-card-action-rail-width\);/.test(recursionCss), 'production Category headers expose a full-row disclosure target with a left arrow column');
 assert(/\.recursion-card-deck-category-arrow\s*\{[\s\S]*?height:\s*22px;[\s\S]*?width:\s*22px;/.test(recursionCss), 'production Category disclosure arrows are larger than mini row actions');
 assert(/\.recursion-card-deck-card\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) var\(--recursion-card-action-rail-width\);/.test(recursionCss), 'production Card rows align actions to the same rail as category rows');
@@ -863,7 +874,7 @@ assert(/viewBox:\s*'0 0 24 24'[\s\S]*recursionEditIcon:\s*''[\s\S]*M21\.2799 6\.
 assert(/svg\[data-recursion-edit-icon\],[\s\S]*?svg\[data-recursion-wand-icon\]\s*\{[\s\S]*?height:\s*13px;[\s\S]*?opacity:\s*\.82;[\s\S]*?width:\s*13px;/.test(recursionCss), 'production Card System normalizes supplied edit and wand SVG size and color weight');
 assert(/viewBox:\s*'0 0 24 24'[\s\S]*recursionWandIcon:\s*''[\s\S]*M4\.9996 7V11M9\.9996 2V6/.test(recursionUi), 'production Card System uses the supplied SVG Repo wand icon for card suggestions');
 assert(/recursion-card-action-slot/.test(recursionCss), 'production Card System reserves fixed action slots for transient delete states');
-assert(/recursion-card-delete-slot/.test(recursionCss) && /recursion-card-drag-handle/.test(recursionCss), 'production Card System has stable delete slots and drag handles');
+assert(/recursion-card-delete-slot/.test(recursionCss) && /recursion-card-drag-region/.test(recursionCss), 'production Card System has stable delete slots and drag regions');
 assert(/actionSlot\(`recursion-card-delete-slot \$\{pending \? 'is-delete-pending' : ''\}`/.test(recursionUi), 'production Card System marks delete slots as pending only during delete confirmation');
 assert(/\.recursion-card-delete-slot\s*\{[\s\S]*?flex-basis:\s*24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production Card System delete slot is compact when it only shows the trash action');
 assert(/\.recursion-card-delete-slot\.is-delete-pending\s*\{[\s\S]*?flex-basis:\s*52px;[\s\S]*?width:\s*52px;/.test(recursionCss), 'production Card System delete slot expands only for confirm/cancel actions');

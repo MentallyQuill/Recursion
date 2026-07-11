@@ -385,6 +385,39 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   if (!dragSetup.sourceCategoryId || !dragSetup.targetCategoryId || dragSetup.hasOldMoveControls) {
     fail(report, 'card-drag-handles', 'Card drag handles did not replace old move-mode controls.', dragSetup);
   }
+  const handleVisuals = await page.evaluate((cardId) => {
+    const category = document.querySelector('[data-recursion-card-drag-handle="category"]');
+    const card = document.querySelector(`[data-recursion-card-id="${cardId}"] [data-recursion-card-drag-handle="card"]`)
+      || document.querySelector('[data-recursion-card-drag-handle="card"]');
+    const categoryIcon = category?.querySelector('.recursion-card-drag-icon-category');
+    const cardIcon = card?.querySelector('.recursion-card-drag-icon-card');
+    const categoryStyle = category ? getComputedStyle(category) : null;
+    const cardStyle = card ? getComputedStyle(card) : null;
+    const categoryIconRect = categoryIcon?.getBoundingClientRect();
+    const cardIconRect = cardIcon?.getBoundingClientRect();
+    return {
+      categoryClass: category?.className || '',
+      cardClass: card?.className || '',
+      categoryBackground: categoryStyle?.backgroundColor || '',
+      cardBackground: cardStyle?.backgroundColor || '',
+      categoryBorderWidth: categoryStyle?.borderWidth || '',
+      cardBorderWidth: cardStyle?.borderWidth || '',
+      categoryIconHeight: categoryIconRect?.height || 0,
+      categoryIconWidth: categoryIconRect?.width || 0,
+      cardIconHeight: cardIconRect?.height || 0,
+      cardIconWidth: cardIconRect?.width || 0
+    };
+  }, createdCardId);
+  if (!handleVisuals.categoryClass.includes('recursion-card-drag-region')
+    || !handleVisuals.cardClass.includes('recursion-card-drag-region')
+    || handleVisuals.categoryIconHeight <= handleVisuals.cardIconHeight
+    || handleVisuals.categoryIconWidth <= handleVisuals.cardIconWidth
+    || !/^rgba?\(0,\s*0,\s*0,\s*0\)$|^transparent$/i.test(handleVisuals.categoryBackground)
+    || !/^rgba?\(0,\s*0,\s*0,\s*0\)$|^transparent$/i.test(handleVisuals.cardBackground)
+    || parseFloat(handleVisuals.categoryBorderWidth) > 0
+    || parseFloat(handleVisuals.cardBorderWidth) > 0) {
+    fail(report, 'card-drag-handle-visuals', 'Card drag handles did not render as naked large/small grab regions.', handleVisuals);
+  }
   await dragCenterToCenter(
     page,
     `[data-recursion-card-id="${createdCardId}"] [data-recursion-card-drag-handle="card"]`,
@@ -408,6 +441,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
     const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
     return deck?.categoryOrder?.[0] === categoryId;
   }, dragSetup.secondCategoryId, { timeout: timeoutMs });
+  addCheck(report, 'card-drag-handle-visuals', 'pass', 'Card and category drag handles render as naked large/small grab regions.', handleVisuals);
   addCheck(report, 'card-drag-handles', 'pass', 'Card and category drag handles replaced move mode and persisted deck order changes.', await cardSystemState(page));
   const cardCategoryAfterDrag = await page.evaluate((cardId) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};

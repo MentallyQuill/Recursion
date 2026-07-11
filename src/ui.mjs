@@ -16,13 +16,16 @@ import {
   deleteCustomCardDeck,
   duplicateCard,
   duplicateCardDeck,
+  cardSelectionState,
   getActiveCardDeck,
   getAllCardDecks,
   getDeckCardStatus,
   moveCard,
+  nextCardSelectionState,
   normalizeCardDeckSettings,
   reorderCategories,
   updateCard,
+  updateCardSelectionState,
   updateCategory,
   upsertCustomCardDeck
 } from './card-decks.mjs';
@@ -540,6 +543,9 @@ function cardSystemIconSvg(kind) {
   ]);
   if (kind === 'check') return el('svg', { attrs }, [
     el('path', { attrs: { d: 'm3.2 8.4 3 3.1 6.6-7', ...stroke } })
+  ]);
+  if (kind === 'arrow-up') return el('svg', { attrs }, [
+    el('path', { attrs: { d: 'M8 12.8V3.4M4.5 6.9 8 3.4l3.5 3.5', ...stroke } })
   ]);
   if (kind === 'x') return el('svg', { attrs }, [
     el('path', { attrs: { d: 'M4.2 4.2 11.8 11.8M11.8 4.2 4.2 11.8', ...stroke } })
@@ -1991,7 +1997,8 @@ function deckCardCounts(deck) {
   let draft = 0;
   for (const card of cards) {
     const status = getDeckCardStatus(card);
-    if (status.runnable) {
+    const selected = cardSelectionState(card);
+    if (status.runnable && selected !== 'off') {
       active += 1;
       eligible += 1;
     } else if (status.reason === 'disabled') {
@@ -2022,10 +2029,59 @@ function enableAllRunnableDeckCards(deck) {
   for (const card of Object.values(asObject(deck?.cards))) {
     const status = getDeckCardStatus(card);
     if (status.runnable || status.reason === 'disabled') {
-      nextDeck = updateCard(nextDeck, card.id, { enabled: true });
+      nextDeck = updateCardSelectionState(nextDeck, card.id, 'active');
     }
   }
   return nextDeck;
+}
+
+function cardDeckCardStatePresentation(card, mode = 'auto') {
+  const status = getDeckCardStatus(card);
+  if (!status.runnable && status.reason !== 'disabled') {
+    return {
+      state: 'draft',
+      className: 'is-draft',
+      icon: 'draft',
+      title: 'Draft card needs editing before it will run.',
+      label: 'Draft card needs editing',
+      nextStatus: 'Draft card needs editing before it can run.'
+    };
+  }
+  const state = cardSelectionState(card);
+  if (state === 'priority' && mode === 'auto') {
+    return {
+      state,
+      className: 'is-priority',
+      icon: 'arrow-up',
+      title: 'Priority: forced into Auto hand before backfill.',
+      label: 'Priority card',
+      nextStatus: 'Card disabled.'
+    };
+  }
+  if (state === 'off') {
+    return {
+      state,
+      className: 'is-inactive',
+      icon: 'x',
+      title: 'Inactive. Tap to enable.',
+      label: 'Inactive card',
+      nextStatus: 'Card enabled.'
+    };
+  }
+  return {
+    state: 'active',
+    className: 'is-active',
+    icon: 'check',
+    title: mode === 'manual' ? 'Active. Tap to disable.' : 'Active. Tap to prioritize.',
+    label: 'Active card',
+    nextStatus: mode === 'manual' ? 'Card disabled.' : 'Card prioritized.'
+  };
+}
+
+function cardSelectionResultStatus(selectionState) {
+  if (selectionState === 'priority') return 'Card prioritized.';
+  if (selectionState === 'off') return 'Card disabled.';
+  return 'Card enabled.';
 }
 
 function localCardSuggestion(draft = {}) {
@@ -2213,21 +2269,6 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
     );
   }
   panel.appendChild(el('div', { className: 'recursion-card-deck-bar', dataset: { recursionCardDeckBar: '' } }, deckBarChildren));
-  const noticeNode = el('div', {
-    className: 'recursion-card-scope-notice',
-    text: notice,
-    attrs: { role: 'status' },
-    dataset: { recursionCardScopeError: '' }
-  });
-  noticeNode.hidden = !notice;
-  panel.appendChild(noticeNode);
-  panel.appendChild(el('div', {
-    className: 'recursion-card-scope-notice',
-    text: activeDeck.readonly
-      ? 'Default is read-only. Duplicate it or create a new deck to edit cards.'
-      : `${activeDeck.name} is editable.`,
-    dataset: { recursionCardDeckReadOnlyNotice: activeDeck.readonly ? '' : undefined }
-  }));
   if (!activeDeck.readonly) {
     panel.appendChild(el('div', { className: 'recursion-card-deck-tools' }, [
       cardSystemIconButton('plus', 'Create a new Card', { recursionCardNew: activeDeck.id }),
@@ -2268,13 +2309,8 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
     if (categoryEditor) section.appendChild(categoryEditor);
     if (categoryExpanded) {
       for (const card of categoryCards) {
-        const status = getDeckCardStatus(card);
         const cardDeletePending = deleteConfirmFor(deleteState, 'card', activeDeck.id, card.id);
-        const activeClass = card.enabled === false ? 'is-inactive' : 'is-active';
-        const statusClass = card.enabled === false ? 'is-hidden' : status.runnable ? 'is-runnable' : 'is-draft';
-        const statusIconKind = card.enabled === false ? 'x' : status.runnable ? 'check' : 'draft';
-        const statusTitle = card.enabled === false ? 'Card is hidden.' : status.runnable ? 'Card is runnable.' : 'Draft card needs editing before it will run.';
-        const statusLabel = card.enabled === false ? 'Card is hidden' : status.runnable ? 'Card is runnable' : 'Draft card needs editing';
+        const presentation = cardDeckCardStatePresentation(card, normalizeMode(view.settings?.mode));
         const cardActions = !activeDeck.readonly ? [
           cardSystemIconButton('pencil', 'Edit card', { recursionCardEdit: card.id }),
           cardSystemIconButton('copy', 'Duplicate card', { recursionCardDuplicate: card.id }),
@@ -2282,20 +2318,20 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
           deleteActionSlot('card', card.id, cardDeletePending)
         ] : [];
         const cardRow = el('div', {
-          className: `recursion-card-deck-card ${statusClass} ${activeClass} ${cardDeletePending ? 'is-delete-pending' : ''}`,
-          attrs: { title: card.description || (status.runnable ? 'Card will run when selected.' : 'Draft cards do not run.') },
+          className: `recursion-card-deck-card ${presentation.className} ${cardDeletePending ? 'is-delete-pending' : ''}`,
+          attrs: { title: card.description || presentation.title },
           dataset: { recursionCardId: card.id }
         }, [
           el('button', {
             className: 'recursion-card-deck-card-main',
-            attrs: { type: 'button' },
+            attrs: { type: 'button', title: presentation.title, 'aria-label': `${presentation.label}. ${presentation.title}` },
             dataset: { recursionCardToggleRow: card.id }
           }, [
             el('span', { className: 'recursion-card-deck-card-name', text: card.name || NEW_CARD_NAME }),
             el('span', {
               className: 'recursion-card-deck-card-status',
-              attrs: { title: statusTitle, 'aria-label': statusLabel }
-            }, [cardSystemIconSvg(statusIconKind)])
+              attrs: { title: presentation.title, 'aria-label': presentation.label }
+            }, [cardSystemIconSvg(presentation.icon)])
           ]),
           el('span', { className: 'recursion-card-deck-card-actions' }, cardActions)
         ]);
@@ -3781,14 +3817,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function currentStepTextForRender(view, model) {
-    const actionFailure = uiActionStatus.current();
-    if (actionFailure?.label) return cleanText(actionFailure.label);
-    if (!transientCurrentStepText) return model.currentStepText || standbyStatusTextForRender(view, model);
-    if (statusFingerprint(view, model) !== transientCurrentStepStatusKey) {
-      clearTransientCurrentStepText();
-      return model.currentStepText || standbyStatusTextForRender(view, model);
-    }
-    return transientCurrentStepText;
+    if (transientCurrentStepText) return transientCurrentStepText;
+    if (model.currentStepText) return model.currentStepText;
+    const actionStatus = uiActionStatus.current();
+    if (actionStatus?.label) return cleanText(actionStatus.label);
+    return standbyStatusTextForRender(view, model);
   }
 
   function showTransientCurrentStepText(text) {
@@ -3802,6 +3835,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         clearTransientCurrentStepText({ updateView: true });
       }, 2000);
     }
+    update();
+  }
+
+  function showCardSystemStatus(text, severity = 'info') {
+    const label = cleanText(text);
+    if (!label) return;
+    uiActionStatus.set(label, severity);
     update();
   }
 
@@ -4243,11 +4283,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function applyCardScopeResult(result) {
     if (result?.blocked) {
       const mode = normalizeMode(currentView().settings?.mode);
-      cardScopeNotice = cleanText(result.notice, mode === 'manual' ? 'Keep at least one Manual card selected.' : 'Keep at least one card focus enabled.');
+      cardScopeNotice = '';
+      showCardSystemStatus(cleanText(result.notice, mode === 'manual' ? 'Keep at least one Manual card selected.' : 'Keep at least one card focus enabled.'), 'warning');
       renderCardsPanelForView(currentView());
       return;
     }
-    cardScopeNotice = cleanText(result?.notice);
+    cardScopeNotice = '';
+    if (cleanText(result?.notice)) showCardSystemStatus(result.notice);
     const nextScope = normalizeCardScope(result?.scope || defaultCardScope());
     pendingCardScope = nextScope;
     renderCardsPanelForView(currentView());
@@ -4261,18 +4303,23 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function applyCardDeckSettings(cardDecks, notice = '') {
     pendingCardScope = null;
-    cardScopeNotice = notice;
+    cardScopeNotice = '';
+    const statusLabel = cleanText(notice);
     const action = runtime?.updateSettings?.({ cardDecks: normalizeCardDeckSettings(cardDecks) });
-    if (!action) return;
+    if (!action) {
+      if (statusLabel) showCardSystemStatus(statusLabel);
+      return;
+    }
     runAction(action, () => {
       renderCardsPanelForView(currentView());
+      if (statusLabel) uiActionStatus.set(statusLabel);
       update();
     });
   }
 
   function editActiveDeckName(deck) {
     if (deck?.readonly) {
-      cardScopeNotice = 'Default is read-only. Duplicate it or create a new deck to edit.';
+      showCardSystemStatus('Default Card Deck is read-only. Duplicate it to edit.', 'warning');
       renderCardsPanelForView(currentView());
       return;
     }
@@ -4283,7 +4330,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function editCard(deck, cardId) {
     if (deck?.readonly) {
-      cardScopeNotice = 'Default is read-only. Duplicate it or create a new deck to edit cards.';
+      showCardSystemStatus('Default Card Deck is read-only. Duplicate it to edit.', 'warning');
       renderCardsPanelForView(currentView());
       return;
     }
@@ -4406,7 +4453,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         cardEditorState = { deckId: deck.id, cardId: card.id, draft: card, accept: { name: true, description: true, promptText: true } };
         categoryEditorState = null;
         cardMoveState = null;
-        cardScopeNotice = 'Card editor opened from press-hold.';
+        cardScopeNotice = '';
+        showCardSystemStatus('Card editor opened.');
         renderCardsPanelForView(view);
       }
       return;
@@ -4419,7 +4467,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         cardEditorState = null;
         categoryEditorState = { deckId: deck.id, categoryId: category.id, draft: category };
         cardMoveState = null;
-        cardScopeNotice = 'Category editor opened from press-hold.';
+        cardScopeNotice = '';
+        showCardSystemStatus('Category editor opened.');
         renderCardsPanelForView(view);
       }
     }
@@ -4817,7 +4866,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         if (scoped.trimmed) {
           patch.cardScope = scoped.scope;
           pendingCardScope = scoped.scope;
-          cardScopeNotice = scoped.notice;
+          cardScopeNotice = '';
+          showCardSystemStatus(scoped.notice, 'warning');
           renderCardsPanelForView(currentView());
         }
       } else {
@@ -4904,7 +4954,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       panelRerenderClickEvents?.add(event);
       consumeClickEvent(event);
       deckDeleteConfirmState = { deckId: deckDelete.dataset.recursionCardDeckDelete, value: '' };
-      cardScopeNotice = 'Type delete to confirm Card Deck deletion.';
+      cardScopeNotice = '';
+      showCardSystemStatus('Type delete to confirm Card Deck deletion.', 'warning');
       renderCardsPanelForView(currentView());
     }
     const deckDeleteConfirm = control('recursionCardDeckDeleteConfirm');
@@ -4939,7 +4990,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const view = currentView();
       const deck = getActiveCardDeck(view.settings);
       if (deck.readonly) {
-        cardScopeNotice = 'Default is read-only. Duplicate it or create a new deck to add cards.';
+        showCardSystemStatus('Default Card Deck is read-only. Duplicate it to edit.', 'warning');
         renderCardsPanelForView(view);
       } else {
         const nextDeck = createDraftCard(deck, deck.categoryOrder?.[0]);
@@ -5031,9 +5082,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const status = getDeckCardStatus(card);
       if (card && !deck.readonly && (status.runnable || status.reason === 'disabled')) {
         cardHaptic(6);
-        applyCardDeckSettings(upsertCustomCardDeck(view.settings, updateCard(deck, card.id, { enabled: card.enabled === false })), 'Card state updated.');
+        const nextState = nextCardSelectionState(card, normalizeMode(view.settings?.mode));
+        applyCardDeckSettings(
+          upsertCustomCardDeck(view.settings, updateCardSelectionState(deck, card.id, nextState)),
+          cardSelectionResultStatus(nextState)
+        );
       } else if (card && !status.runnable) {
-        cardScopeNotice = 'Draft cards need a name and prompt before they can run.';
+        showCardSystemStatus('Draft card needs editing before it can run.', 'warning');
         renderCardsPanelForView(view);
       }
     }

@@ -111,20 +111,19 @@ async function runCardSystemScenario(page, report, timeoutMs) {
     select.dispatchEvent(new Event('change', { bubbles: true }));
   });
   await page.waitForFunction(() => {
-    const panel = document.querySelector('[data-recursion-cards-panel]');
     const select = document.querySelector('[data-recursion-card-deck-select]');
-    return select?.value === 'default' && /Default is read-only/.test(String(panel?.textContent || ''));
+    return select?.value === 'default';
   }, null, { timeout: timeoutMs });
   const initial = await page.evaluate(() => ({
     panelVisible: document.querySelector('[data-recursion-cards-panel]')?.hidden === false,
     deckSelect: Boolean(document.querySelector('[data-recursion-card-deck-select]')),
-    defaultReadonlyNotice: /Default is read-only/.test(String(document.querySelector('[data-recursion-cards-panel]')?.textContent || '')),
+    localNoticeRows: document.querySelectorAll('.recursion-card-scope-notice').length,
     categoryRows: document.querySelectorAll('[data-recursion-card-deck-category]').length,
     visibleCardRows: document.querySelectorAll('[data-recursion-card-id]').length,
     firstCategoryExpanded: document.querySelector('[data-recursion-card-category-toggle]')?.getAttribute('aria-expanded') || '',
     legacyScopeRows: document.querySelectorAll('[data-recursion-card-scope-family]').length
   }));
-  if (!initial.panelVisible || !initial.deckSelect || !initial.defaultReadonlyNotice || initial.categoryRows < 1 || initial.visibleCardRows !== 0 || initial.firstCategoryExpanded !== 'false' || initial.legacyScopeRows !== 0) {
+  if (!initial.panelVisible || !initial.deckSelect || initial.localNoticeRows !== 0 || initial.categoryRows < 1 || initial.visibleCardRows !== 0 || initial.firstCategoryExpanded !== 'false' || initial.legacyScopeRows !== 0) {
     fail(report, 'default-deck-ui', 'Default Card System panel did not render expected controls.', initial);
   }
   addCheck(report, 'default-deck-ui', 'pass', 'Default read-only Card System panel rendered.', initial);
@@ -163,8 +162,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
     const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
     return Object.keys(deck?.cards || {}).length > previousCount;
   }, categorizedState.cardCount, { timeout: timeoutMs });
-  await page.waitForFunction(() => /Draft card created/.test(String(document.querySelector('[data-recursion-cards-panel]')?.textContent || ''))
-    && Boolean(document.querySelector('[data-recursion-card-editor-name]')), null, { timeout: timeoutMs });
+  await page.waitForFunction(() => Boolean(document.querySelector('[data-recursion-card-editor-name]')), null, { timeout: timeoutMs });
   await page.evaluate((draft) => {
     const name = document.querySelector('[data-recursion-card-editor-name]');
     const description = document.querySelector('[data-recursion-card-editor-description]');
@@ -254,28 +252,29 @@ async function runCardSystemScenario(page, report, timeoutMs) {
     const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
     const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
-    return row?.classList?.contains('is-inactive') && deck?.cards?.[cardId]?.enabled === false;
+    return row?.classList?.contains('is-priority') && deck?.cards?.[cardId]?.selectionState === 'priority';
   }, createdCardId, { timeout: timeoutMs });
-  const inactiveStatus = await page.evaluate((cardId) => {
+  const priorityStatus = await page.evaluate((cardId) => {
     const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
     const status = row?.querySelector('.recursion-card-deck-card-status');
     return {
       rowClass: row?.className || '',
       statusTitle: status?.getAttribute('title') || '',
-      statusLabel: status?.getAttribute('aria-label') || ''
+      statusLabel: status?.getAttribute('aria-label') || '',
+      barStatus: document.querySelector('[data-recursion-current-step]')?.textContent || ''
     };
   }, createdCardId);
-  if (!inactiveStatus.rowClass.includes('is-hidden') || inactiveStatus.rowClass.includes('is-draft') || inactiveStatus.statusTitle !== 'Card is hidden.' || inactiveStatus.statusLabel !== 'Card is hidden') {
-    fail(report, 'card-hidden-status', 'Inactive cards did not render as hidden instead of draft.', inactiveStatus);
+  if (!priorityStatus.rowClass.includes('is-priority') || priorityStatus.statusTitle !== 'Priority: forced into Auto hand before backfill.' || priorityStatus.statusLabel !== 'Priority card' || priorityStatus.barStatus !== 'Card prioritized.') {
+    fail(report, 'card-priority-status', 'Priority cards did not render with the expected icon state, tooltip, and main-bar status.', priorityStatus);
   }
   await page.locator(`${rowSelector} [data-recursion-card-toggle-row]`).click({ timeout: timeoutMs });
   await page.waitForFunction((cardId) => {
     const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
     const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
-    return row?.classList?.contains('is-active') && deck?.cards?.[cardId]?.enabled !== false;
+    return row?.classList?.contains('is-inactive') && deck?.cards?.[cardId]?.selectionState === 'off';
   }, createdCardId, { timeout: timeoutMs });
-  addCheck(report, 'card-row-state', 'pass', 'Card row tap toggled inactive and active states without an eye button.', await cardSystemState(page));
+  addCheck(report, 'card-row-state', 'pass', 'Card row tap cycled Active to Priority to Inactive without an extra button.', await cardSystemState(page));
 
   await page.locator(`${rowSelector} [data-recursion-card-move]`).click({ timeout: timeoutMs });
   const moveTargetState = await page.evaluate((cardId) => {

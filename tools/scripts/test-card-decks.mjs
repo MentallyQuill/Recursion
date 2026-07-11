@@ -16,9 +16,13 @@ import {
   duplicateCardDeck,
   duplicateDeckName,
   getDeckCardStatus,
+  cardSelectionState,
+  deckPriorityCardIds,
+  deckPriorityFamilies,
   moveCard,
   normalizeCardDeckSettings,
   normalizeCustomDeck,
+  nextCardSelectionState,
   reorderCategories,
   reorderCards,
   serializeCustomCardDecksForExport
@@ -104,6 +108,22 @@ assertDeepEqual(customDeck.categoryOrder, ['cata'], 'custom deck category order 
 assertEqual(customDeck.cards.carda.categoryId, 'cata', 'card category id normalized');
 assertEqual(customDeck.cards.carddangling.categoryId, 'cata', 'dangling card moves to fallback category');
 assertDeepEqual(customDeck.cardOrderByCategory.cata, ['carda', 'carddangling'], 'card order drops dangling cards and appends missing real cards');
+assertEqual(customDeck.cards.carda.selectionState, 'active', 'legacy enabled true normalizes to active selection state');
+assertEqual(normalizeCustomDeck({
+  id: 'Legacy Off',
+  name: 'Legacy Off',
+  categories: { general: { id: 'general', name: 'General' } },
+  cards: {
+    off: { id: 'off', categoryId: 'general', name: 'Off', promptText: 'Do not run.', enabled: false }
+  }
+}).cards.off.selectionState, 'off', 'legacy enabled false normalizes to off selection state');
+
+assertEqual(cardSelectionState({ selectionState: 'priority', enabled: false }), 'priority', 'selectionState wins over legacy enabled');
+assertEqual(nextCardSelectionState({ selectionState: 'off' }, 'auto'), 'active', 'auto card cycle enables inactive card');
+assertEqual(nextCardSelectionState({ selectionState: 'active' }, 'auto'), 'priority', 'auto card cycle prioritizes active card');
+assertEqual(nextCardSelectionState({ selectionState: 'priority' }, 'auto'), 'off', 'auto card cycle disables priority card');
+assertEqual(nextCardSelectionState({ selectionState: 'active' }, 'manual'), 'off', 'manual card cycle disables active card');
+assertEqual(nextCardSelectionState({ selectionState: 'priority' }, 'manual'), 'off', 'manual card cycle treats priority as active then disables');
 
 const normalizedDecks = normalizeCardDeckSettings({
   activeCardDeckId: customDeck.id,
@@ -176,6 +196,41 @@ assertEqual(movedCardDeck.cardOrderByCategory[pressureCategory.id][0], duplicate
 
 const reorderedCardsDeck = reorderCards(movedCardDeck, draftCard.categoryId, [draftCard.id]);
 assertEqual(reorderedCardsDeck.cardOrderByCategory[draftCard.categoryId][0], draftCard.id, 'card reorder moves explicit card first');
+
+const priorityOrderedDeck = normalizeCustomDeck({
+  id: 'Priority Deck',
+  name: 'Priority Deck',
+  categories: {
+    first: { id: 'first', name: 'First' },
+    second: { id: 'second', name: 'Second' }
+  },
+  categoryOrder: ['second', 'first'],
+  cards: {
+    a: { id: 'a', categoryId: 'first', name: 'A', promptText: 'A', selectionState: 'priority' },
+    b: { id: 'b', categoryId: 'second', name: 'B', promptText: 'B', selectionState: 'priority' },
+    c: { id: 'c', categoryId: 'second', name: 'C', promptText: 'C', selectionState: 'active' },
+    d: { id: 'd', categoryId: 'first', name: NEW_CARD_NAME, promptText: 'Draft', selectionState: 'priority' }
+  },
+  cardOrderByCategory: {
+    second: ['c', 'b'],
+    first: ['d', 'a']
+  }
+});
+assertDeepEqual(deckPriorityCardIds(priorityOrderedDeck, { mode: 'auto' }), ['b', 'a'], 'priority card ids follow category and card order and skip drafts');
+assertDeepEqual(deckPriorityCardIds(priorityOrderedDeck, { mode: 'manual' }), [], 'priority card ids are Auto-only');
+
+const priorityFamilyDeck = normalizeCustomDeck({
+  id: 'Priority Families',
+  name: 'Priority Families',
+  categories: { general: { id: 'general', name: 'General' } },
+  cards: {
+    scene1: { id: 'scene1', categoryId: 'general', name: 'Scene 1', promptText: 'Scene 1', selectionState: 'priority', builtinFamily: 'Scene Frame' },
+    scene2: { id: 'scene2', categoryId: 'general', name: 'Scene 2', promptText: 'Scene 2', selectionState: 'priority', builtinFamily: 'Scene Frame' },
+    cast: { id: 'cast', categoryId: 'general', name: 'Cast', promptText: 'Cast', selectionState: 'priority', builtinFamily: 'Active Cast' }
+  },
+  cardOrderByCategory: { general: ['scene1', 'scene2', 'cast'] }
+});
+assertDeepEqual(deckPriorityFamilies(priorityFamilyDeck, { mode: 'auto' }), ['Scene Frame', 'Active Cast'], 'priority families collapse duplicate built-in family rows in deck order');
 
 const withoutCard = deleteCard(reorderedCardsDeck, draftCard.id);
 assertEqual(withoutCard.cards[draftCard.id], undefined, 'deleteCard removes card');

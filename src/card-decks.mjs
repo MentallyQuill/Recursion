@@ -3,6 +3,7 @@ import { CARD_SCOPE_CATALOG, CARD_SCOPE_VERSION } from './card-scope.mjs';
 export const DEFAULT_CARD_DECK_ID = 'default';
 export const CARD_DECK_SETTINGS_VERSION = 1;
 export const NEW_CARD_NAME = 'New Card';
+export const CARD_SELECTION_STATES = Object.freeze(['off', 'active', 'priority']);
 
 function nowIso() {
   return new Date().toISOString();
@@ -41,7 +42,7 @@ function generatedCard({
     name,
     description,
     promptText,
-    enabled: true,
+    selectionState: 'active',
     kind: 'generated',
     builtinFamily,
     builtinRoleId,
@@ -49,6 +50,24 @@ function generatedCard({
     createdAt: now,
     updatedAt: now
   };
+}
+
+export function cardSelectionState(card) {
+  const state = String(card?.selectionState || '').trim().toLowerCase();
+  if (CARD_SELECTION_STATES.includes(state)) return state;
+  return card?.enabled === false ? 'off' : 'active';
+}
+
+export function nextCardSelectionState(card, mode = 'auto') {
+  const current = cardSelectionState(card);
+  if (mode === 'manual') return current === 'off' ? 'active' : 'off';
+  if (current === 'off') return 'active';
+  if (current === 'active') return 'priority';
+  return 'off';
+}
+
+function normalizedCardSelectionState(raw) {
+  return cardSelectionState(raw);
 }
 
 export function createDefaultCardDeck({ now = nowIso() } = {}) {
@@ -161,7 +180,7 @@ function normalizeCards(value, categories, now) {
       name: normalizeDeckName(raw?.name || NEW_CARD_NAME),
       description: String(raw?.description || '').trim(),
       promptText: String(raw?.promptText || '').trim(),
-      enabled: raw?.enabled !== false,
+      selectionState: normalizedCardSelectionState(raw),
       kind: raw?.kind === 'generated' ? 'generated' : 'authored',
       builtinFamily: String(raw?.builtinFamily || '').trim() || undefined,
       builtinRoleId: String(raw?.builtinRoleId || '').trim() || undefined,
@@ -434,7 +453,7 @@ export function createDraftCard(deck, categoryId = '') {
       name: NEW_CARD_NAME,
       description: '',
       promptText: '',
-      enabled: true,
+      selectionState: 'active',
       kind: 'authored',
       selectedSubItems: [],
       createdAt: now,
@@ -543,12 +562,18 @@ export function updateCard(deck, cardId, patch = {}) {
         name: normalizeDeckName(patch.name ?? current.name) || current.name,
         description: String(patch.description ?? current.description ?? '').trim(),
         promptText: String(patch.promptText ?? current.promptText ?? '').trim(),
-        enabled: patch.enabled === undefined ? current.enabled !== false : patch.enabled !== false,
+        selectionState: patch.selectionState === undefined
+          ? cardSelectionState(current)
+          : normalizedCardSelectionState({ selectionState: patch.selectionState }),
         updatedAt: now
       }
     },
     updatedAt: now
   }, normalized.id);
+}
+
+export function updateCardSelectionState(deck, cardId, selectionState) {
+  return updateCard(deck, cardId, { selectionState });
 }
 
 export function duplicateCard(deck, cardId) {
@@ -681,8 +706,61 @@ export function getDeckCardStatus(card) {
   if (!name) return { runnable: false, reason: 'needs-name' };
   if (name === NEW_CARD_NAME) return { runnable: false, reason: 'draft-name' };
   if (!promptText) return { runnable: false, reason: 'needs-prompt' };
-  if (card?.enabled === false) return { runnable: false, reason: 'disabled' };
+  if (cardSelectionState(card) === 'off') return { runnable: false, reason: 'disabled' };
   return { runnable: true, reason: 'runnable' };
+}
+
+export function orderedDeckCategories(deck) {
+  const categories = isObject(deck?.categories) ? deck.categories : {};
+  const order = Array.isArray(deck?.categoryOrder) ? deck.categoryOrder : Object.keys(categories);
+  return order.map((id) => categories[id]).filter(Boolean);
+}
+
+export function orderedDeckCards(deck, categoryId = '') {
+  const cards = isObject(deck?.cards) ? deck.cards : {};
+  const id = normalizeId(categoryId);
+  const order = Array.isArray(deck?.cardOrderByCategory?.[id]) ? deck.cardOrderByCategory[id] : [];
+  const seen = new Set();
+  const result = [];
+  for (const cardId of order) {
+    if (cards[cardId]?.categoryId === id && !seen.has(cardId)) {
+      result.push(cards[cardId]);
+      seen.add(cardId);
+    }
+  }
+  for (const card of Object.values(cards)) {
+    if (card.categoryId === id && !seen.has(card.id)) result.push(card);
+  }
+  return result;
+}
+
+export function orderedDeckCardsAcrossCategories(deck) {
+  return orderedDeckCategories(deck).flatMap((category) => orderedDeckCards(deck, category.id));
+}
+
+export function deckPriorityCardIds(deck, settings = {}) {
+  const mode = settings?.mode === 'manual' ? 'manual' : 'auto';
+  if (mode !== 'auto') return [];
+  return orderedDeckCardsAcrossCategories(deck)
+    .filter((card) => cardSelectionState(card) === 'priority')
+    .filter((card) => getDeckCardStatus(card).runnable)
+    .map((card) => card.id);
+}
+
+export function deckPriorityFamilies(deck, settings = {}) {
+  const mode = settings?.mode === 'manual' ? 'manual' : 'auto';
+  if (mode !== 'auto') return [];
+  const seen = new Set();
+  const families = [];
+  for (const card of orderedDeckCardsAcrossCategories(deck)) {
+    if (cardSelectionState(card) !== 'priority') continue;
+    if (!getDeckCardStatus(card).runnable) continue;
+    const family = String(card.builtinFamily || '').trim();
+    if (!family || seen.has(family)) continue;
+    seen.add(family);
+    families.push(family);
+  }
+  return families;
 }
 
 function emptyCardScope() {

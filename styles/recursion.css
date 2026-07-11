@@ -1721,12 +1721,24 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-card-deck-card.is-inactive {
-  opacity: 0.58;
+  border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 7%, transparent);
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
 }
 
-.recursion-card-deck-card.is-inactive .recursion-card-deck-card-name {
-  text-decoration: line-through;
-  text-decoration-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 34%, transparent);
+.recursion-card-deck-card.is-inactive .recursion-card-deck-card-status {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 38%, transparent);
+}
+
+.recursion-card-deck-card.is-priority {
+  border-color: color-mix(in srgb, #8eefff 46%, transparent);
+  box-shadow:
+    inset 3px 0 0 #8eefff,
+    inset 0 0 0 1px color-mix(in srgb, #8eefff 22%, transparent);
+}
+
+.recursion-card-deck-card.is-priority .recursion-card-deck-card-name,
+.recursion-card-deck-card.is-priority .recursion-card-deck-card-status {
+  color: #8eefff;
 }
 
 .recursion-card-deck-card.is-delete-pending,

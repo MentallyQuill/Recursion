@@ -795,6 +795,15 @@ function forcedFamilyOrder(values = []) {
   return order;
 }
 
+function forcedCardOrder(values = []) {
+  const order = new Map();
+  for (const value of Array.isArray(values) ? values : []) {
+    const id = String(value || '').trim();
+    if (id && !order.has(id)) order.set(id, order.size);
+  }
+  return order;
+}
+
 function forcedFamilyOmission(family) {
   const cleanFamily = String(family || '').trim();
   if (!cleanFamily) return null;
@@ -1277,10 +1286,11 @@ export function applyCardPlan(existingCards = [], plan = {}) {
   };
 }
 
-export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behaviorPolicy = null, forcedFamilies = [] } = {}) {
+export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behaviorPolicy = null, forcedFamilies = [], forcedCardIds = [] } = {}) {
   const policy = behaviorPolicyForHand(behaviorPolicy);
   const requestedCardLimit = numberInRange(maxCards, 6, 0, 64);
   const forcedOrder = forcedFamilyOrder(forcedFamilies);
+  const forcedCardOrderMap = forcedCardOrder(forcedCardIds);
   const cardLimit = Math.max(effectiveMaxCardsForPolicy(requestedCardLimit, policy), forcedOrder.size);
   const tokenLimit = numberInRange(maxTokens, 700, 0, 20000);
   const active = [];
@@ -1302,6 +1312,10 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
   const selected = [];
   let tokenEstimate = 0;
   const sortedCards = active.slice().sort((a, b) => {
+    const aForcedCard = forcedCardOrderMap.has(a.id);
+    const bForcedCard = forcedCardOrderMap.has(b.id);
+    if (aForcedCard !== bForcedCard) return aForcedCard ? -1 : 1;
+    if (aForcedCard && bForcedCard) return forcedCardOrderMap.get(a.id) - forcedCardOrderMap.get(b.id);
     const aForced = forcedOrder.has(a.family);
     const bForced = forcedOrder.has(b.family);
     if (aForced !== bForced) return aForced ? -1 : 1;
@@ -1311,10 +1325,11 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
   for (const card of sortedCards) {
     const cardTokens = numberInRange(card.tokenEstimate, estimateTokens(card.promptText), 1, MAX_TOKEN_ESTIMATE);
     if (selected.length >= cardLimit) {
+      const overPriority = forcedCardOrderMap.has(card.id) && forcedCardOrderMap.size > cardLimit;
       omitted.push({
         cardId: card.id,
         family: card.family || '',
-        reason: 'max-cards',
+        reason: overPriority ? 'priority-over-max-cards' : 'max-cards',
         tokenEstimate: cardTokens
       });
       continue;
@@ -1361,7 +1376,10 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
       selectedCount: selected.length,
       omittedCount: omitted.length,
       forcedFamilies: [...forcedOrder.keys()],
+      forcedCardIds: [...forcedCardOrderMap.keys()],
       selectedForcedFamilies: selected.map((card) => card.family).filter((family) => forcedOrder.has(family)),
+      selectedForcedCardIds: selected.map((card) => card.id).filter((id) => forcedCardOrderMap.has(id)),
+      diagnostics: forcedCardOrderMap.size > cardLimit ? ['priority-card-cap'] : [],
       tokenBudgetExceeded: tokenLimit > 0 && tokenEstimate > tokenLimit,
       sourceCardCount: Array.isArray(cards) ? cards.length : 0,
       ...(behaviorPolicyMetadata ? { behaviorPolicy: behaviorPolicyMetadata } : {})

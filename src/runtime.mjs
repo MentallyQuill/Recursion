@@ -17,6 +17,8 @@ import {
 } from './card-scope.mjs';
 import {
   activeCardDeckRuntimeScope,
+  deckPriorityCardIds,
+  deckPriorityFamilies,
   getActiveCardDeck,
   normalizeCardDeckSettings
 } from './card-decks.mjs';
@@ -1314,6 +1316,32 @@ function lifecycleForDeck(cards, plan, defaultReason) {
 function budgetOr(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function prioritySelectionForSettings(settings = {}) {
+  if (settings?.mode === 'manual') return { forcedCardIds: [], forcedFamilies: [], diagnostics: [] };
+  const activeDeck = getActiveCardDeck(settings);
+  const forcedCardIds = deckPriorityCardIds(activeDeck, settings);
+  const forcedFamilies = deckPriorityFamilies(activeDeck, settings);
+  return {
+    forcedCardIds,
+    forcedFamilies,
+    diagnostics: forcedCardIds.length > 0 ? ['priority-cards-active'] : []
+  };
+}
+
+function mergeForcedFamilies(...groups) {
+  const result = [];
+  const seen = new Set();
+  for (const group of groups) {
+    for (const family of Array.isArray(group) ? group : []) {
+      const clean = String(family || '').trim();
+      if (!clean || seen.has(clean)) continue;
+      seen.add(clean);
+      result.push(clean);
+    }
+  }
+  return result;
 }
 
 function budgetCardJobsForGeneration(plan, behaviorPolicy, forcedFamilies = []) {
@@ -4382,6 +4410,8 @@ export function createRecursionRuntime({
         snapshot
       });
       const manualForcedFamilies = manualReconciled.forcedFamilies;
+      const prioritySelection = prioritySelectionForSettings(settings);
+      const forcedFamiliesForSelection = mergeForcedFamilies(prioritySelection.forcedFamilies, manualForcedFamilies);
       plan = {
         ...plan,
         cardJobs: manualReconciled.cardJobs,
@@ -4396,13 +4426,14 @@ export function createRecursionRuntime({
           plan.diagnostics,
           scopeOmissionReasons(scopedCardJobs.omitted),
           autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings),
+          prioritySelection.diagnostics,
           manualReconciled.diagnostics
         )
       };
       plan = budgetCardJobsForGeneration(
         plan,
         runPolicyForEffectivePlan(settings, plan),
-        manualForcedFamilies
+        forcedFamiliesForSelection
       ).plan;
       lastPlan = plan;
       const warmGeneratedCardResult = await generatePlanCards({ runId, plan, snapshot, settings, signal });
@@ -4478,7 +4509,8 @@ export function createRecursionRuntime({
         maxCards: budgetOr(plan.budgets?.maxCards, 6),
         maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
         behaviorPolicy,
-        forcedFamilies: manualForcedFamilies
+        forcedFamilies: forcedFamiliesForSelection,
+        forcedCardIds: prioritySelection.forcedCardIds
       });
       const guidance = await composeGuidanceForCards({
         hand,
@@ -5231,6 +5263,8 @@ export function createRecursionRuntime({
         snapshot
       });
       const manualForcedFamilies = manualReconciled.forcedFamilies;
+      const prioritySelection = prioritySelectionForSettings(settings);
+      const forcedFamiliesForSelection = mergeForcedFamilies(prioritySelection.forcedFamilies, manualForcedFamilies);
       plan = {
         ...plan,
         cardJobs: manualReconciled.cardJobs,
@@ -5247,13 +5281,14 @@ export function createRecursionRuntime({
           freshDiagnostics,
           scopeOmissionReasons(scopedCardJobs.omitted),
           autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings),
+          prioritySelection.diagnostics,
           manualReconciled.diagnostics
         )
       };
       plan = budgetCardJobsForGeneration(
         plan,
         runPolicyForEffectivePlan(settings, plan),
-        manualForcedFamilies
+        forcedFamiliesForSelection
       ).plan;
       if (!isActiveRun(runId)) return supersededResult(runId);
       lastPlan = plan;
@@ -5399,7 +5434,8 @@ export function createRecursionRuntime({
         maxCards: budgetOr(plan.budgets?.maxCards, 6),
         maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
         behaviorPolicy,
-        forcedFamilies: manualForcedFamilies
+        forcedFamilies: forcedFamiliesForSelection,
+        forcedCardIds: prioritySelection.forcedCardIds
       });
 
       const freshness = await recheckPromptInstallSnapshot(runId, sceneSnapshot, plan, pendingUserMessage);
@@ -5425,7 +5461,8 @@ export function createRecursionRuntime({
           maxCards: budgetOr(plan.budgets?.maxCards, 6),
           maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
           behaviorPolicy,
-          forcedFamilies: manualForcedFamilies
+          forcedFamilies: forcedFamiliesForSelection,
+          forcedCardIds: prioritySelection.forcedCardIds
         });
       }
       lastSnapshot = promptSnapshot;
@@ -5500,7 +5537,8 @@ export function createRecursionRuntime({
             maxCards: budgetOr(plan.budgets?.maxCards, 6),
             maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
             behaviorPolicy,
-            forcedFamilies: manualForcedFamilies
+            forcedFamilies: forcedFamiliesForSelection,
+            forcedCardIds: prioritySelection.forcedCardIds
           });
           await runStorageSaveSection(runId, () => saveSceneCacheSafe(
             runId,

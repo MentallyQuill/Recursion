@@ -77,6 +77,9 @@ assertEqual(normalizedUiFailure.label, 'Clipboard denied', 'UI action failure pr
 const uiActionStatus = createUiActionStatus();
 uiActionStatus.setFailure('', 'Copy failed.');
 assertEqual(uiActionStatus.current().label, 'Copy failed.', 'UI action status uses fallback for empty failures');
+uiActionStatus.set('Card prioritized.', 'success');
+assertEqual(uiActionStatus.current().label, 'Card prioritized.', 'UI action status supports non-failure card feedback');
+assertEqual(uiActionStatus.current().severity, 'success', 'UI action status preserves safe non-failure severity');
 uiActionStatus.clear();
 assertEqual(uiActionStatus.current(), null, 'UI action status clears transient state');
 const model = createRecursionViewModel({
@@ -822,11 +825,11 @@ assert(/recursion-card-deck-tools'[\s\S]*?recursionCardNew:[\s\S]*?recursionCard
 assert(/CARD_LONG_PRESS_MS/.test(recursionUi), 'production Card System defines explicit long-press threshold');
 assert(/pointermove/.test(recursionUi) && /CARD_LONG_PRESS_MOVE_PX/.test(recursionUi), 'production Card System cancels long-press when mobile scroll movement starts');
 assert(/recursionCardToggleRow/.test(recursionUi), 'production Card row tap toggles active state instead of opening edit');
-assert(/status\.runnable \|\| status\.reason === 'disabled'/.test(recursionUi), 'production Card row tap can re-enable inactive runnable cards');
+assert(/nextCardSelectionState\(card,\s*normalizeMode\(view\.settings\?\.mode\)\)/.test(recursionUi), 'production Card row tap uses mode-specific three-state selection cycle');
 assert(!/dataset:\s*\{\s*recursionCardEdit:\s*card\.id\s*\}/.test(recursionUi), 'production Card row main button no longer opens edit on tap');
-assert(/const statusIconKind = card\.enabled === false \? 'x' : status\.runnable \? 'check' : 'draft';/.test(recursionUi), 'production Card System shows hidden cards with x status icons instead of draft warnings');
-assert(/const statusTitle = card\.enabled === false \? 'Card is hidden\.'/.test(recursionUi), 'production Card System gives hidden cards a specific hover title');
-assert(/const statusClass = card\.enabled === false \? 'is-hidden' : status\.runnable \? 'is-runnable' : 'is-draft';/.test(recursionUi), 'production Card System does not classify disabled cards as draft cards');
+assert(/function cardDeckCardStatePresentation\(card,\s*mode = 'auto'\)/.test(recursionUi), 'production Card System centralizes card state presentation');
+assert(/state === 'priority'[\s\S]*?icon:\s*'arrow-up'/.test(recursionUi), 'production Card System shows priority cards with up-arrow status icons');
+assert(/state === 'off'[\s\S]*?icon:\s*'x'/.test(recursionUi), 'production Card System shows inactive cards with x status icons');
 assert(/cardSystemIconButton\('pencil',\s*'Edit category'[\s\S]*recursionCardCategoryEdit:\s*category\.id/.test(recursionUi), 'production Card System renders visible category edit icons');
 assert(/cardSystemIconButton\('pencil',\s*'Edit card'[\s\S]*recursionCardEdit:\s*card\.id/.test(recursionUi), 'production Card System renders visible card edit icons');
 assert(/const cardEdit = control\('recursionCardEdit'\)[\s\S]*editCard\(/.test(recursionUi), 'production Card System wires visible card edit icons to the inline card editor');
@@ -869,7 +872,9 @@ assert(/function cardHaptic/.test(recursionUi), 'production Card System centrali
 assert(/navigator\?\.vibrate/.test(recursionUi), 'production Card System can trigger mobile vibration feedback');
 assert(/prefers-reduced-motion:\s*reduce/.test(recursionUi) || /prefers-reduced-motion:\s*reduce/.test(recursionCss), 'production Card System respects reduced-motion for haptics or motion styling');
 assert(!/recursionCardToggle:\s*card\.id/.test(recursionUi), 'production Card System does not render a separate eye visibility toggle');
-assert(/is-active/.test(recursionCss) && /is-inactive/.test(recursionCss), 'production Card System visually distinguishes active and inactive cards');
+assert(/is-active/.test(recursionCss) && /is-inactive/.test(recursionCss) && /is-priority/.test(recursionCss), 'production Card System visually distinguishes active, inactive, and priority cards');
+assert(!/className:\s*'recursion-card-scope-notice'/.test(recursionUi), 'production Cards dropdown does not render transient local notice rows');
+assert(/showCardSystemStatus/.test(recursionUi), 'production Card System routes action feedback through the main bar status area');
 assert(/cardEditorState \|\| categoryEditorState \|\| cardMoveState \|\| cardDeleteConfirmState/.test(recursionUi), 'production Escape handling clears Card System editor, move, or pending delete state before closing the panel');
 assert(/\.recursion-cards-all-button\s*\{[\s\S]*?font-size:\s*10px;[\s\S]*?min-height:\s*20px;/.test(recursionCss), 'production Cards All action uses compact SillyTavern-native button sizing');
 assert(/\.recursion-activity-trigger\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production activity trigger keeps reference spacing around pixel blocks');
@@ -2333,7 +2338,7 @@ try {
   assert(root.querySelector('[data-recursion-card-category-toggle]').children[0]?.className.includes('recursion-card-deck-category-arrow'), 'collapsed category headers render a disclosure arrow');
   const defaultDeckText = fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]'));
   assert(defaultDeckText.includes('34/34 active'), 'Cards header summarizes active cards in the active deck');
-  assert(defaultDeckText.includes('Default is read-only'), 'Default deck read-only state remains visible');
+  assert(!defaultDeckText.includes('Default is read-only'), 'Cards dropdown removes read-only status notice rows');
   root.querySelector('[data-recursion-card-category-toggle]').click();
   assertEqual(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('aria-expanded'), 'true', 'clicking the category header expands the category');
   assert(root.querySelectorAll('[data-recursion-card-id]').length > 0, 'expanded category renders its cards');
@@ -2349,7 +2354,7 @@ try {
       ...duplicatedDeck.cards,
       [disableCardId]: {
         ...duplicatedDeck.cards[disableCardId],
-        enabled: false
+        selectionState: 'off'
       }
     }
   };
@@ -2372,11 +2377,18 @@ try {
   assertEqual(root.querySelector('[data-recursion-card-deck-all]').getAttribute('title'), 'Enable all runnable cards in this deck.', 'enabled deck All action explains active deck restoration');
   root.querySelector('[data-recursion-card-deck-all]').click();
   const allDeckUpdate = settingsUpdates.at(-1).cardDecks;
-  assertEqual(allDeckUpdate.customCardDecks[duplicatedDeckId].cards[disableCardId].enabled, true, 'Deck All action enables inactive runnable cards');
+  assertEqual(allDeckUpdate.customCardDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Deck All action enables inactive runnable cards');
   assert(!settingsUpdates.at(-1).cardScope, 'Deck All action does not write legacy cardScope');
-  view = { ...view, settings: { ...view.settings, cardDecks: allDeckUpdate } };
+  view = { ...view, settings: { ...view.settings, cardDecks: allDeckUpdate }, activity: { phase: 'idle' }, progressRun: null };
   ui.update();
   assertEqual(root.querySelector('[data-recursion-card-deck-all]').disabled, true, 'Deck All action disables again after enabling all runnable cards');
+  root.querySelector('[data-recursion-card-category-toggle]').click();
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  const priorityUpdate = settingsUpdates.at(-1).cardDecks;
+  assertEqual(priorityUpdate.customCardDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'priority', 'Auto row tap promotes active card to Priority');
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Card prioritized.', 'Card System action feedback routes through main bar status');
+  view = { ...view, activity: originalActivity, progressRun: originalProgressRun };
+  ui.update();
 
   root.querySelector('[data-recursion-reasoning-level-high]').keydown({ key: 'ArrowRight' });
   assertEqual(settingsUpdates.at(-1).reasoningLevel, 'ultra', 'ArrowRight advances reasoning roving selection');

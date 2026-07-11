@@ -182,6 +182,10 @@ Selecting `Auto` stores no forced story form and closes the menu. Selecting a te
 
 Inside the Cards dropdown, the header shows `Cards`, the selected focus summary, and a small neutral `All` command. In Auto, `All` restores the default card scope with every family and sub-item enabled. In Manual, the header uses selected-family copy such as `2/5 cards selected`, `All` selects up to the current `Max Cards` cap, and selecting one more family at the cap is blocked with `Max Cards is 5. Change it in Settings to select more.` Use `All`, not `Reset`, because the action selects card scope and must not be confused with Reset Scene Cache or other runtime reset commands.
 
+For Card Deck rows, the visible state marker has three compact states. Inactive uses a muted x mark and no cyan rail. Active uses a cyan check and the standard cyan left rail/card highlight. Priority uses a bright cyan up-arrow with a stronger cyan rail/highlight; it means `forced into Auto hand before backfill`. Priority is only a runtime force signal in Auto. Manual treats Priority cards as Active because Manual already forces selected cards directly.
+
+The Cards dropdown must not render transient yellow notice rows for action feedback. Committed Card System actions such as card enabled, card disabled, card prioritized, deck duplicated, card deleted, category moved, or typed deck-delete confirmation route through the main Recursion bar status text and the mobile status drawer. Category expand/collapse is navigation and should not emit status.
+
 The Hero Pixel Array sits to the right of the card scope selector separator and immediately before the compact current-step text. It shows runtime state at a glance and mirrors the visible top-level rows in the progress menu:
 
 - Empty muted blocks: queued or not-yet-started progress items.

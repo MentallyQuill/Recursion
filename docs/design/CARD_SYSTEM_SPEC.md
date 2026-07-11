@@ -272,6 +272,22 @@ Expected flow:
 
 A card can exist in the deck without appearing in the hand. A hand can omit a valid card because the current turn does not need it or the prompt budget is better spent elsewhere.
 
+## Card Deck Selection State
+
+Editable Card Deck cards use one explicit selection field:
+
+```ts
+type CardSelectionState = "off" | "active" | "priority";
+```
+
+- `off`: the card is inactive and does not contribute to runtime scope or hand selection.
+- `active`: the card is eligible for normal Auto backfill or Manual forcing.
+- `priority`: in Auto, the card is forced ahead of normal Active cards; in Manual, it is treated as Active because Manual already forces selected cards directly.
+
+Auto row clicks cycle `off -> active -> priority -> off`. Manual row clicks cycle `off -> active -> off`. The `All` deck action sets runnable cards to `active`; it never mass-prioritizes cards.
+
+Priority overflow is allowed. If the user marks more Priority cards than the effective `Max Cards` budget, Recursion uses deck category/card order, selects the top cards, records `priority-card-cap`, and omits the rest with `priority-over-max-cards`.
+
 ## Invalidation/Refresh Rules
 
 Runtime should distinguish hard invalidation from refresh requests.

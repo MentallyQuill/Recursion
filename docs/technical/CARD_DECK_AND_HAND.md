@@ -110,6 +110,14 @@ The scene deck is the cached set of cards for one scene. It can contain active, 
 
 The turn hand is a compact selection for one prompt packet. It is rebuilt each generation attempt and sorted by emphasis, catalog priority, and id. It is capped by max-card and token budgets. Runtime also applies the effective max-card budget before provider generation, so fresh provider calls are not made for card jobs that cannot reach the hand.
 
+Card Deck selection state adds a user-steering layer above normal Auto sorting:
+
+- `off` cards are omitted from runtime scope.
+- `active` cards remain normal candidates.
+- `priority` cards are Auto-first. Runtime derives ordered Priority card ids and, for current built-in deck cards, ordered Priority families. `selectHand(...)` accepts `forcedCardIds` for exact hand-card forcing and `forcedFamilies` for generated family-card forcing.
+
+If Priority exceeds `Max Cards`, runtime keeps the top ordered Priority cards, does not backfill with lower Active cards, records `priority-card-cap`, and marks over-cap omissions as `priority-over-max-cards`.
+
 ```mermaid
 flowchart LR
     Snapshot["Turn snapshot"] --> Arbiter["Utility Arbiter"]

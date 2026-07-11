@@ -1327,6 +1327,25 @@ const missingForcedHand = selectHand(selectedDeck, {
 assert(missingForcedHand.cards.some((entry) => entry.family === 'Open Threads'), 'available forced family is still selected');
 assert(missingForcedHand.omitted.some((entry) => entry.family === 'Environment' && entry.reason === 'manual-forced-provider-failed'), 'missing forced family records explicit omission');
 
+const priorityHand = selectHand(selectedDeck, {
+  maxCards: 2,
+  maxTokens: 300,
+  forcedCardIds: ['low', 'risk']
+});
+assertDeepEqual(priorityHand.cards.map((entry) => entry.id), ['low', 'risk'], 'forced card ids select before normal emphasis and catalog priority');
+assertDeepEqual(priorityHand.metadata.forcedCardIds, ['low', 'risk'], 'hand metadata records forced card ids');
+assertDeepEqual(priorityHand.metadata.selectedForcedCardIds, ['low', 'risk'], 'hand metadata records selected forced card ids');
+
+const priorityOverflowHand = selectHand(selectedDeck, {
+  maxCards: 1,
+  maxTokens: 300,
+  forcedCardIds: ['low', 'risk', 'emph']
+});
+assertDeepEqual(priorityOverflowHand.cards.map((entry) => entry.id), ['low'], 'over-cap forced card ids keep deck order winner first');
+assert(priorityOverflowHand.metadata.diagnostics.includes('priority-card-cap'), 'priority overflow records diagnostic');
+assert(priorityOverflowHand.omitted.some((entry) => entry.cardId === 'risk' && entry.reason === 'priority-over-max-cards'), 'priority overflow uses priority omission reason');
+assert(priorityOverflowHand.omitted.some((entry) => entry.cardId === 'emph' && entry.reason === 'priority-over-max-cards'), 'every overflow priority card records priority omission reason');
+
 const characterFocusHand = selectHand([
   deckCard('Character Motivation', 'Mara seems guarded.', { id: 'motivation-tie', tokenEstimate: 20 }),
   deckCard('Scene Frame', 'The room stays sealed.', { id: 'scene-tie', tokenEstimate: 20 }),

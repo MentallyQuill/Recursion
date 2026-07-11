@@ -1726,7 +1726,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-card-deck-card.is-active .recursion-card-deck-card-status {
-  color: var(--recursion-accent);
+  color: color-mix(in srgb, var(--recursion-accent) 68%, transparent);
 }
 
 .recursion-card-deck-card.is-inactive {

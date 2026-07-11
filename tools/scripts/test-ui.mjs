@@ -878,6 +878,7 @@ assert(/navigator\?\.vibrate/.test(recursionUi), 'production Card System can tri
 assert(/prefers-reduced-motion:\s*reduce/.test(recursionUi) || /prefers-reduced-motion:\s*reduce/.test(recursionCss), 'production Card System respects reduced-motion for haptics or motion styling');
 assert(!/recursionCardToggle:\s*card\.id/.test(recursionUi), 'production Card System does not render a separate eye visibility toggle');
 assert(/is-active/.test(recursionCss) && /is-inactive/.test(recursionCss) && /is-priority/.test(recursionCss), 'production Card System visually distinguishes active, inactive, and priority cards');
+assert(/\.recursion-card-deck-card\.is-active \.recursion-card-deck-card-status\s*\{[\s\S]*?color:\s*color-mix\(in srgb, var\(--recursion-accent\) 68%, transparent\);/.test(recursionCss), 'production Card System active eye uses the same toned cyan as the active card rail');
 assert(!/className:\s*'recursion-card-scope-notice'/.test(recursionUi), 'production Cards dropdown does not render transient local notice rows');
 assert(/showCardSystemStatus/.test(recursionUi), 'production Card System routes action feedback through the main bar status area');
 assert(/cardEditorState \|\| categoryEditorState \|\| cardMoveState \|\| cardDeleteConfirmState/.test(recursionUi), 'production Escape handling clears Card System editor, move, or pending delete state before closing the panel');

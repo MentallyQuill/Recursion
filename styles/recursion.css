@@ -1716,6 +1716,10 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   flex: 0 0 15px;
 }
 
+.recursion-card-deck-card-status svg[data-recursion-card-state-icon="eye-priority"] {
+  transform: translateY(1px);
+}
+
 .recursion-card-deck-card.is-draft .recursion-card-deck-card-status {
   color: color-mix(in srgb, var(--recursion-warning) 74%, var(--SmartThemeBodyColor, #ddd));
 }

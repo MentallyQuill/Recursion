@@ -550,6 +550,22 @@ function generationResponseText(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === 'string') return value;
     if (typeof value === 'object') {
+      const choice = Array.isArray(value.choices) ? value.choices[0] : null;
+      const candidate = Array.isArray(value.candidates) ? value.candidates[0] : null;
+      const output = Array.isArray(value.outputs) ? value.outputs[0] : (Array.isArray(value.output) ? value.output[0] : null);
+      const visible = generationResponseText(
+        choice?.message?.content,
+        choice?.delta?.content,
+        choice?.text,
+        candidate?.content,
+        candidate?.text,
+        output?.content,
+        output?.text,
+        value.content,
+        value.text,
+        value.value
+      );
+      if (visible) return visible;
       try {
         return JSON.stringify(value);
       } catch {
@@ -563,7 +579,7 @@ function generationResponseText(...values) {
 
 function normalizeGenerationResponse(response) {
   if (response && typeof response === 'object') {
-    return { ...response, text: generationResponseText(response.text, response.content, response.message) };
+    return { ...response, text: generationResponseText(response.text, response.content, response.message, response) };
   }
   return { text: stringValue(response) };
 }

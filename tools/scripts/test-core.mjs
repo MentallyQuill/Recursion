@@ -66,6 +66,9 @@ const redacted = redact({
   providerPrompt: 'provider prompt body',
   providerResponse: 'provider response body',
   hiddenReasoning: 'hidden reasoning body',
+  reasoning: 'provider-native reasoning body',
+  reasoning_details: [{ text: 'provider-native reasoning details' }],
+  reasoningIntent: 'high',
   privateStoryPlan: 'private story plan',
   privatePlan: 'private plan',
   privatePlanPayload: 'future branch plan payload must not persist',
@@ -105,6 +108,9 @@ assertEqual(redacted.rawResponse, '[redacted]', 'rawResponse redacted');
 assertEqual(redacted.providerPrompt, '[redacted]', 'providerPrompt redacted');
 assertEqual(redacted.providerResponse, '[redacted]', 'providerResponse redacted');
 assertEqual(redacted.hiddenReasoning, '[redacted]', 'hiddenReasoning redacted');
+assertEqual(redacted.reasoning, '[redacted]', 'provider-native reasoning key redacted');
+assertEqual(redacted.reasoning_details, '[redacted]', 'provider-native reasoning details key redacted');
+assertEqual(redacted.reasoningIntent, 'high', 'safe reasoning intent metadata is preserved');
 assertEqual(redacted.privateStoryPlan, '[redacted]', 'privateStoryPlan redacted');
 assertEqual(redacted.privatePlan, '[redacted]', 'privatePlan redacted');
 assertEqual(redacted.privatePlanPayload, '[redacted]', 'privatePlan payload key redacted');

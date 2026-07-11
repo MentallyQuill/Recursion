@@ -1234,6 +1234,20 @@ assertEqual(
   JSON.stringify(structuredContent),
   'object-shaped host generation content is preserved as parseable JSON text'
 );
+context.generateRaw = async () => ({
+  message: {
+    role: 'assistant',
+    content: JSON.stringify(structuredContent),
+    reasoning: 'hidden provider reasoning must not become visible text',
+    reasoning_details: [{ text: 'hidden provider reasoning detail' }]
+  }
+});
+const chatMessageEnvelopeResponse = await host.generation.generate({ prompt: 'Return extracted chat message JSON content' });
+assertEqual(
+  chatMessageEnvelopeResponse.text,
+  JSON.stringify(structuredContent),
+  'host generation message envelopes use visible content without serializing reasoning fields'
+);
 context.generateRaw = async (request) => {
   rawCalls.push(request);
   return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };

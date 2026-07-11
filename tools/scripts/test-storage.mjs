@@ -102,6 +102,9 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
       rawPrompt: 'raw prompt body',
       providerResponse: 'provider response body',
       hiddenReasoning: 'hidden reasoning body',
+      reasoning: 'provider-native reasoning body',
+      reasoning_details: [{ text: 'provider-native reasoning detail' }],
+      reasoningIntent: 'high',
       privatePlan: 'private plan body',
       sessionId: 'session-id-value',
       sessionCount: 2
@@ -116,6 +119,9 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertEqual(journal.entries[0].details.rawPrompt, '[redacted]', 'journal redacts raw prompt fields');
   assertEqual(journal.entries[0].details.providerResponse, '[redacted]', 'journal redacts provider response fields');
   assertEqual(journal.entries[0].details.hiddenReasoning, '[redacted]', 'journal redacts hidden reasoning fields');
+  assertEqual(journal.entries[0].details.reasoning, '[redacted]', 'journal redacts provider-native reasoning fields');
+  assertEqual(journal.entries[0].details.reasoning_details, '[redacted]', 'journal redacts provider-native reasoning details fields');
+  assertEqual(journal.entries[0].details.reasoningIntent, 'high', 'journal preserves safe reasoning intent metadata');
   assertEqual(journal.entries[0].details.privatePlan, '[redacted]', 'journal redacts private plan fields');
   assertEqual(journal.entries[0].details.sessionId, '[redacted]', 'journal redacts session id fields');
   assertEqual(journal.entries[0].details.sessionCount, 2, 'journal preserves safe session count');
@@ -1164,7 +1170,8 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
       apiKeyValue: 'plain api key value',
       selectedTokenEstimate: 42,
       nested: `${'visible detail '.repeat(60)} rawPrompt: credentials: live session token; Cookie: sid=abc`,
-      variants: 'raw_prompt provider_response hidden_reasoning private_plan api_key session_key Cookie=sid Set-Cookie=sid',
+      variants: 'raw_prompt provider_response hidden_reasoning reasoning_details reasoning_content private_plan api_key session_key Cookie=sid Set-Cookie=sid',
+      nativeReasoningMarkers: 'reasoning_details reasoning_content',
       prefixedPath: 'path=F:\\SillyTavern\\secret\\cache.json',
       prefixedUrl: 'url=https://provider-change.test/v1/raw.json',
       path: 'F:\\SillyTavern\\secret\\cache.json',
@@ -1186,6 +1193,8 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assert(!JSON.stringify(journal).includes('raw_prompt'), 'journal details redact raw_prompt variant');
   assert(!JSON.stringify(journal).includes('provider_response'), 'journal details redact provider_response variant');
   assert(!JSON.stringify(journal).includes('hidden_reasoning'), 'journal details redact hidden_reasoning variant');
+  assert(!JSON.stringify(journal).includes('reasoning_details'), 'journal details redact reasoning_details variant');
+  assert(!JSON.stringify(journal).includes('reasoning_content'), 'journal details redact reasoning_content variant');
   assert(!JSON.stringify(journal).includes('private_plan'), 'journal details redact private_plan variant');
   assert(!JSON.stringify(journal).includes('api_key'), 'journal details redact api_key variant');
   assert(!JSON.stringify(journal).includes('session_key'), 'journal details redact session_key variant');
@@ -1203,6 +1212,7 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assertEqual(journal.entries[0].details.selectedTokenEstimate, 42, 'safe token estimate counter survives key screening');
   assertEqual(journal.entries[0].details.nested, '[redacted]', 'unsafe nested string journal details redact whole value');
   assertEqual(journal.entries[0].details.variants, '[redacted]', 'unsafe variant string journal details redact whole value');
+  assertEqual(journal.entries[0].details.nativeReasoningMarkers, '[redacted]', 'unsafe native reasoning marker string journal details redact whole value');
   assertEqual(journal.entries[0].details.prefixedPath, '[redacted]', 'prefixed path-like journal details redact whole value');
   assertEqual(journal.entries[0].details.prefixedUrl, '[redacted]', 'prefixed URL-like journal details redact whole value');
   assertEqual(journal.entries[0].details.path, '[redacted]', 'path-like journal details redact whole value');

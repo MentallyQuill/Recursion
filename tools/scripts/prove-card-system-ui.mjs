@@ -120,12 +120,23 @@ async function runCardSystemScenario(page, report, timeoutMs) {
     deckSelect: Boolean(document.querySelector('[data-recursion-card-deck-select]')),
     defaultReadonlyNotice: /Default is read-only/.test(String(document.querySelector('[data-recursion-cards-panel]')?.textContent || '')),
     categoryRows: document.querySelectorAll('[data-recursion-card-deck-category]').length,
+    visibleCardRows: document.querySelectorAll('[data-recursion-card-id]').length,
+    firstCategoryExpanded: document.querySelector('[data-recursion-card-category-toggle]')?.getAttribute('aria-expanded') || '',
     legacyScopeRows: document.querySelectorAll('[data-recursion-card-scope-family]').length
   }));
-  if (!initial.panelVisible || !initial.deckSelect || !initial.defaultReadonlyNotice || initial.categoryRows < 1 || initial.legacyScopeRows !== 0) {
+  if (!initial.panelVisible || !initial.deckSelect || !initial.defaultReadonlyNotice || initial.categoryRows < 1 || initial.visibleCardRows !== 0 || initial.firstCategoryExpanded !== 'false' || initial.legacyScopeRows !== 0) {
     fail(report, 'default-deck-ui', 'Default Card System panel did not render expected controls.', initial);
   }
   addCheck(report, 'default-deck-ui', 'pass', 'Default read-only Card System panel rendered.', initial);
+  await page.locator('[data-recursion-card-category-toggle]').first().click({ timeout: timeoutMs });
+  const expandedDefault = await page.evaluate(() => ({
+    firstCategoryExpanded: document.querySelector('[data-recursion-card-category-toggle]')?.getAttribute('aria-expanded') || '',
+    visibleCardRows: document.querySelectorAll('[data-recursion-card-id]').length
+  }));
+  if (expandedDefault.firstCategoryExpanded !== 'true' || expandedDefault.visibleCardRows < 1) {
+    fail(report, 'category-disclosure', 'Category header click did not expand collapsed category cards.', expandedDefault);
+  }
+  addCheck(report, 'category-disclosure', 'pass', 'Categories default collapsed and expand from the full header row.', expandedDefault);
 
   await page.locator('[data-recursion-card-deck-duplicate]').first().click({ timeout: timeoutMs });
   try {
@@ -170,6 +181,33 @@ async function runCardSystemScenario(page, report, timeoutMs) {
     promptText: 'Keep the current room boundary and pending interruption visible only when it affects the next beat.'
   });
   await page.waitForFunction((expectedName) => document.querySelector('[data-recursion-card-editor-name]')?.value === expectedName, cardName, { timeout: timeoutMs });
+  await page.locator('[data-recursion-card-wand]').click({ timeout: timeoutMs });
+  await page.waitForSelector('[data-recursion-card-editor-preview]', { timeout: timeoutMs });
+  const wandPreview = await page.evaluate(() => {
+    const preview = document.querySelector('[data-recursion-card-editor-preview]');
+    const checkboxes = [
+      document.querySelector('[data-recursion-card-preview-name]'),
+      document.querySelector('[data-recursion-card-preview-description]'),
+      document.querySelector('[data-recursion-card-preview-prompt]')
+    ].filter(Boolean);
+    const accept = document.querySelector('[data-recursion-card-preview-accept]');
+    const close = document.querySelector('[data-recursion-card-preview-close]');
+    const acceptRect = accept?.getBoundingClientRect?.() || {};
+    const closeRect = close?.getBoundingClientRect?.() || {};
+    const checkboxStyle = checkboxes[0] ? getComputedStyle(checkboxes[0]) : null;
+    return {
+      hasInstruction: /Checked fields replace the current card\./.test(String(preview?.textContent || '')),
+      checkedCount: checkboxes.filter((checkbox) => checkbox.checked === true).length,
+      checkboxCount: checkboxes.length,
+      sameActionRow: Math.abs(Number(acceptRect.top || 0) - Number(closeRect.top || 0)) < 3,
+      checkboxBackground: checkboxStyle?.backgroundColor || ''
+    };
+  });
+  if (!wandPreview.hasInstruction || wandPreview.checkboxCount !== 3 || wandPreview.checkedCount !== 3 || !wandPreview.sameActionRow || /255,\s*255,\s*255/.test(wandPreview.checkboxBackground)) {
+    fail(report, 'card-wand-preview-ui', 'Card wand preview did not render checked themed fields with side-by-side actions.', wandPreview);
+  }
+  await page.locator('[data-recursion-card-preview-close]').click({ timeout: timeoutMs });
+  await page.waitForFunction(() => !document.querySelector('[data-recursion-card-editor-preview]'), null, { timeout: timeoutMs });
   await page.locator('[data-recursion-card-editor-save]').click({ timeout: timeoutMs });
   try {
     await page.waitForFunction((expectedName) => {
@@ -218,6 +256,18 @@ async function runCardSystemScenario(page, report, timeoutMs) {
     const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
     return row?.classList?.contains('is-inactive') && deck?.cards?.[cardId]?.enabled === false;
   }, createdCardId, { timeout: timeoutMs });
+  const inactiveStatus = await page.evaluate((cardId) => {
+    const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
+    const status = row?.querySelector('.recursion-card-deck-card-status');
+    return {
+      rowClass: row?.className || '',
+      statusTitle: status?.getAttribute('title') || '',
+      statusLabel: status?.getAttribute('aria-label') || ''
+    };
+  }, createdCardId);
+  if (!inactiveStatus.rowClass.includes('is-hidden') || inactiveStatus.rowClass.includes('is-draft') || inactiveStatus.statusTitle !== 'Card is hidden.' || inactiveStatus.statusLabel !== 'Card is hidden') {
+    fail(report, 'card-hidden-status', 'Inactive cards did not render as hidden instead of draft.', inactiveStatus);
+  }
   await page.locator(`${rowSelector} [data-recursion-card-toggle-row]`).click({ timeout: timeoutMs });
   await page.waitForFunction((cardId) => {
     const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
@@ -226,6 +276,22 @@ async function runCardSystemScenario(page, report, timeoutMs) {
     return row?.classList?.contains('is-active') && deck?.cards?.[cardId]?.enabled !== false;
   }, createdCardId, { timeout: timeoutMs });
   addCheck(report, 'card-row-state', 'pass', 'Card row tap toggled inactive and active states without an eye button.', await cardSystemState(page));
+
+  await page.locator(`${rowSelector} [data-recursion-card-move]`).click({ timeout: timeoutMs });
+  const moveTargetState = await page.evaluate((cardId) => {
+    const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
+    const currentCategory = row?.closest('[data-recursion-card-deck-category]');
+    return {
+      sameCategoryHasMoveTarget: Boolean(currentCategory?.querySelector('[data-recursion-card-move-target]:not([disabled])')),
+      otherCategoryMoveTargets: Array.from(document.querySelectorAll('[data-recursion-card-deck-category]'))
+        .filter((category) => category !== currentCategory)
+        .filter((category) => category.querySelector('[data-recursion-card-move-target]:not([disabled])')).length
+    };
+  }, createdCardId);
+  if (moveTargetState.sameCategoryHasMoveTarget || moveTargetState.otherCategoryMoveTargets < 1) {
+    fail(report, 'card-move-targets', 'Card move targets included the current category or omitted other categories.', moveTargetState);
+  }
+  await page.locator(`${rowSelector} [data-recursion-card-move]`).click({ timeout: timeoutMs });
 
   await page.locator(`${rowSelector} [data-recursion-card-delete-arm]`).click({ timeout: timeoutMs });
   await page.waitForSelector(`${rowSelector}.is-delete-pending [data-recursion-card-delete-confirm]`, { timeout: timeoutMs });
@@ -239,6 +305,46 @@ async function runCardSystemScenario(page, report, timeoutMs) {
     return !deck?.cards?.[cardId] && !document.querySelector(`[data-recursion-card-id="${cardId}"]`);
   }, createdCardId, { timeout: timeoutMs });
   addCheck(report, 'card-delete-confirm', 'pass', 'Card delete cancel preserved the card and confirm removed it.', await cardSystemState(page));
+
+  const deckBeforeDelete = await cardSystemState(page);
+  await page.locator('[data-recursion-card-deck-delete]').first().click({ timeout: timeoutMs });
+  await page.waitForSelector('[data-recursion-card-deck-delete-text]', { timeout: timeoutMs });
+  const armedDeckDelete = await page.evaluate((deckId) => {
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    return {
+      deckStillExists: Boolean(view.settings?.cardDecks?.customCardDecks?.[deckId]),
+      confirmDisabled: document.querySelector('[data-recursion-card-deck-delete-confirm]')?.disabled === true,
+      hasTypedInput: Boolean(document.querySelector('[data-recursion-card-deck-delete-text]')),
+      hintText: String(document.querySelector('.recursion-card-deck-delete-hint')?.textContent || '')
+    };
+  }, deckBeforeDelete.activeDeckId);
+  if (!armedDeckDelete.deckStillExists || !armedDeckDelete.confirmDisabled || !armedDeckDelete.hasTypedInput || !/type delete/i.test(armedDeckDelete.hintText)) {
+    fail(report, 'deck-delete-confirm-arm', 'Deck delete did not arm a disabled typed confirmation before deleting.', armedDeckDelete);
+  }
+  await page.locator('[data-recursion-card-deck-delete-text]').click({ timeout: timeoutMs });
+  await page.locator('[data-recursion-card-deck-delete-text]').pressSequentially('DeLeTe', { delay: 40, timeout: timeoutMs });
+  await page.waitForTimeout(250);
+  const typedDeckDelete = await page.evaluate(() => {
+    const input = document.querySelector('[data-recursion-card-deck-delete-text]');
+    return {
+      value: input?.value || '',
+      inputStillFocused: document.activeElement === input
+    };
+  });
+  if (typedDeckDelete.value !== 'DeLeTe' || typedDeckDelete.inputStillFocused !== true) {
+    fail(report, 'deck-delete-confirm-typing', 'Deck delete typed confirmation lost focus or failed to retain typed text.', typedDeckDelete);
+  }
+  await page.waitForFunction(() => document.querySelector('[data-recursion-card-deck-delete-confirm]')?.disabled === false, null, { timeout: timeoutMs });
+  await page.locator('[data-recursion-card-deck-delete-confirm]').click({ timeout: timeoutMs });
+  await page.waitForFunction((deckId) => {
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    return !view.settings?.cardDecks?.customCardDecks?.[deckId]
+      && view.settings?.cardDecks?.activeCardDeckId !== deckId;
+  }, deckBeforeDelete.activeDeckId, { timeout: timeoutMs });
+  addCheck(report, 'deck-delete-confirm', 'pass', 'Card Deck delete required typed delete confirmation and accepted mixed case.', {
+    deletedDeckId: deckBeforeDelete.activeDeckId,
+    typed: 'DeLeTe'
+  });
 }
 
 async function screenshotCards(page, artifactDir, name, timeoutMs) {

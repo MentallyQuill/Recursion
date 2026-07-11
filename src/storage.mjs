@@ -10,7 +10,7 @@ const SCENE_CACHE_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]
 const RUN_JOURNAL_KEY_PATTERN = /^recursion-run-journal-[A-Za-z0-9_.-]+\.v1\.json$/;
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
 const RAPID_WARM_STATUSES = new Set(['queued', 'warming', 'ready', 'stale', 'failed']);
-const UNSAFE_JOURNAL_TEXT_PATTERN = /\b(raw[-_\s]*prompt|rawPrompt|raw[-_\s]*response|rawResponse|provider[-_\s]*prompt|providerPrompt|provider[-_\s]*response|providerResponse|hidden[-_\s]*reasoning|hiddenReasoning|private[-_\s]*story[-_\s]*plan|privateStoryPlan|private[-_\s]*plan|privatePlan|session[-_\s]*id|sessionId|session[-_\s]*key\s*[:=]|sessionKey\s*[:=]|session[-_\s]*token|credentials?|password\s*[:=]|token\s*[:=]|api[-_\s]*key\s*[:=]|apiKey\s*[:=]|authorization\s*[:=]|set-cookie\s*[:=]|cookie\s*[:=]|bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/i;
+const UNSAFE_JOURNAL_TEXT_PATTERN = /\b(raw[-_\s]*prompt|rawPrompt|raw[-_\s]*response|rawResponse|provider[-_\s]*prompt|providerPrompt|provider[-_\s]*response|providerResponse|hidden[-_\s]*reasoning|hiddenReasoning|reasoning[-_\s]*(?:content|details)|reasoningContent|reasoningDetails|private[-_\s]*story[-_\s]*plan|privateStoryPlan|private[-_\s]*plan|privatePlan|session[-_\s]*id|sessionId|session[-_\s]*key\s*[:=]|sessionKey\s*[:=]|session[-_\s]*token|credentials?|password\s*[:=]|token\s*[:=]|api[-_\s]*key\s*[:=]|apiKey\s*[:=]|authorization\s*[:=]|set-cookie\s*[:=]|cookie\s*[:=]|bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/i;
 const OBJECT_COERCION_TEXT_PATTERN = /\[object Object\]|object-Object/i;
 const PATH_LIKE_TEXT_PATTERN = /(^|[\s"'`=:(\[])(?:[A-Za-z]:[\\/]|\\\\|\/\/|\.{1,2}[\\/]|\/[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)+|[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.\\/-]*|[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.\\/-]*\.(?:jsonl?|mjs|js|css|md|txt|png|jpe?g|webp|db|sqlite)\b)/i;
 const FORBIDDEN_STORAGE_KEY_PARTS = [
@@ -22,6 +22,11 @@ const FORBIDDEN_STORAGE_KEY_PARTS = [
   'privatestoryplan',
   'privateplan',
   'sessionid'
+];
+const PROVIDER_REASONING_STORAGE_KEYS = [
+  'reasoning',
+  'reasoningcontent',
+  'reasoningdetails'
 ];
 const SECRET_STORAGE_KEY_PARTS = [
   'apikey',
@@ -142,6 +147,7 @@ function isUnsafeStorageText(value, { pathLike = true } = {}) {
 function isUnsafeStorageKey(value) {
   const key = String(value ?? '').replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
   if (!key || key.endsWith('count')) return false;
+  if (PROVIDER_REASONING_STORAGE_KEYS.includes(key)) return true;
   if (FORBIDDEN_STORAGE_KEY_PARTS.some((part) => key.includes(part))) return true;
   if (SECRET_STORAGE_KEY_PARTS.some((part) => key.includes(part))) return true;
   return key === 'token' || key.endsWith('tokenvalue') || key.endsWith('tokenheader');

@@ -1265,6 +1265,13 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   width: 15px;
 }
 
+.recursion-mini-button svg[data-recursion-edit-icon] {
+  flex-basis: 13px;
+  height: 13px;
+  opacity: .82;
+  width: 13px;
+}
+
 .recursion-mini-button:hover,
 .recursion-mini-button:focus-visible {
   background: color-mix(in srgb, var(--recursion-panel) 78%, var(--recursion-hover));

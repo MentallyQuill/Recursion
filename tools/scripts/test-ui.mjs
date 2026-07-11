@@ -802,6 +802,8 @@ assert(/function cardSystemIconButton/.test(recursionUi), 'production Card Syste
 assert(!/className: 'recursion-mini-button'[^)\n]*text:/.test(recursionUi), 'production Card System mini buttons do not render visible command text');
 assert(/title:\s*label/.test(recursionUi) && /'aria-label':\s*label/.test(recursionUi), 'production Card System icon buttons expose hover text and accessible labels');
 assert(/\.recursion-mini-button\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?background:\s*color-mix\(in srgb, var\(--SmartThemeBodyColor/.test(recursionCss), 'production Card System mini buttons use graphite Recursion skin instead of native white buttons');
+assert(/recursionCardDeckDuplicate:[\s\S]*recursionCardDeckEdit:[\s\S]*recursionCardDeckDelete:/.test(recursionUi), 'production Card Deck edit action sits with duplicate and delete deck controls');
+assert(!/recursion-card-deck-tools'[\s\S]*?cardSystemIconButton\('pencil'/.test(recursionUi), 'production Card Deck edit action is not duplicated into card/category tools');
 assert(/CARD_LONG_PRESS_MS/.test(recursionUi), 'production Card System defines explicit long-press threshold');
 assert(/pointermove/.test(recursionUi) && /CARD_LONG_PRESS_MOVE_PX/.test(recursionUi), 'production Card System cancels long-press when mobile scroll movement starts');
 assert(/recursionCardToggleRow/.test(recursionUi), 'production Card row tap toggles active state instead of opening edit');
@@ -813,7 +815,8 @@ assert(/recursionCategoryEditorSave/.test(recursionUi), 'production Category edi
 assert(/recursion-category-editor-inline/.test(recursionCss), 'production Category inline editor has compact graphite styling');
 assert(/recursion-card-deck-category-actions/.test(recursionCss), 'production Category actions are grouped to prevent mobile arrow wrapping');
 assert(/recursion-card-deck-category-copy/.test(recursionCss), 'production Category copy and actions use separate layout areas');
-assert(/edit-\[#1479\]/.test(recursionUi), 'production Card System uses the supplied SVG Repo edit icon path for edit actions');
+assert(/viewBox:\s*'0 0 24 24'[\s\S]*recursionEditIcon:\s*''[\s\S]*M21\.2799 6\.40005L11\.7399 15\.94/.test(recursionUi), 'production Card System uses the supplied stroked SVG Repo edit icon for edit actions');
+assert(/svg\[data-recursion-edit-icon\]\s*\{[\s\S]*?height:\s*13px;[\s\S]*?opacity:\s*\.82;[\s\S]*?width:\s*13px;/.test(recursionCss), 'production Card System normalizes the supplied edit SVG size and color weight');
 assert(/recursion-card-action-slot/.test(recursionCss), 'production Card System reserves fixed action slots for transient move/delete states');
 assert(/recursion-card-delete-slot/.test(recursionCss) && /recursion-card-move-target-slot/.test(recursionCss), 'production Card System has stable delete and move target action slots');
 assert(!/dataset:\s*\{\s*recursionCardMoveMode:\s*''\s*\}/.test(recursionUi), 'production Card move mode does not insert a notice row above the deck list');

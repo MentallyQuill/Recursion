@@ -130,8 +130,44 @@ async function dragCenterToCenter(page, sourceSelector, targetSelector, timeoutM
   if (!sourceBox || !targetBox) throw new Error(`Could not measure drag boxes for ${sourceSelector} -> ${targetSelector}`);
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 12 });
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2 + 3, sourceBox.y + sourceBox.height / 2 + 3, { steps: 2 });
+  const shiftedTargetBox = await target.boundingBox();
+  if (!shiftedTargetBox) throw new Error(`Could not remeasure drag target for ${targetSelector}`);
+  await page.mouse.move(shiftedTargetBox.x + shiftedTargetBox.width / 2, shiftedTargetBox.y + shiftedTargetBox.height / 2, { steps: 12 });
   await page.mouse.up();
+}
+
+async function dragCenterToCenterAndInspect(page, sourceSelector, targetSelector, timeoutMs) {
+  const source = page.locator(sourceSelector).first();
+  const target = page.locator(targetSelector).first();
+  await source.waitFor({ timeout: timeoutMs });
+  await target.waitFor({ timeout: timeoutMs });
+  await source.scrollIntoViewIfNeeded({ timeout: timeoutMs });
+  await target.scrollIntoViewIfNeeded({ timeout: timeoutMs });
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error(`Could not measure drag boxes for ${sourceSelector} -> ${targetSelector}`);
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2 + 3, sourceBox.y + sourceBox.height / 2 + 3, { steps: 2 });
+  const shiftedTargetBox = await target.boundingBox();
+  if (!shiftedTargetBox) throw new Error(`Could not remeasure drag target for ${targetSelector}`);
+  await page.mouse.move(shiftedTargetBox.x + shiftedTargetBox.width / 2, shiftedTargetBox.y + shiftedTargetBox.height / 2, { steps: 12 });
+  const inspection = await page.evaluate((sourceHeight) => {
+    const placeholder = document.querySelector('.recursion-card-drag-placeholder');
+    const rect = placeholder?.getBoundingClientRect();
+    return {
+      sourceHeight,
+      placeholderClass: placeholder?.className || '',
+      placeholderHeight: rect?.height || 0,
+      placeholderVisible: placeholder?.classList?.contains('is-visible') === true,
+      placeholderConnected: placeholder?.isConnected === true
+    };
+  }, sourceBox.height);
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForFunction(() => !document.querySelector('.recursion-card-drag-placeholder'), null, { timeout: timeoutMs }).catch(() => {});
+  return inspection;
 }
 
 async function dragCenterToTopEdge(page, sourceSelector, targetSelector, timeoutMs) {
@@ -146,7 +182,10 @@ async function dragCenterToTopEdge(page, sourceSelector, targetSelector, timeout
   if (!sourceBox || !targetBox) throw new Error(`Could not measure drag boxes for ${sourceSelector} -> ${targetSelector}`);
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 4, { steps: 12 });
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2 + 3, sourceBox.y + sourceBox.height / 2 + 3, { steps: 2 });
+  const shiftedTargetBox = await target.boundingBox();
+  if (!shiftedTargetBox) throw new Error(`Could not remeasure drag target for ${targetSelector}`);
+  await page.mouse.move(shiftedTargetBox.x + shiftedTargetBox.width / 2, shiftedTargetBox.y + 4, { steps: 12 });
   await page.mouse.up();
 }
 
@@ -410,38 +449,84 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   }, createdCardId);
   if (!handleVisuals.categoryClass.includes('recursion-card-drag-region')
     || !handleVisuals.cardClass.includes('recursion-card-drag-region')
-    || handleVisuals.categoryIconHeight <= handleVisuals.cardIconHeight
-    || handleVisuals.categoryIconWidth <= handleVisuals.cardIconWidth
+    || handleVisuals.categoryIconHeight < 20
+    || handleVisuals.cardIconHeight < 23
+    || handleVisuals.cardIconWidth < 23
     || !/^rgba?\(0,\s*0,\s*0,\s*0\)$|^transparent$/i.test(handleVisuals.categoryBackground)
     || !/^rgba?\(0,\s*0,\s*0,\s*0\)$|^transparent$/i.test(handleVisuals.cardBackground)
     || parseFloat(handleVisuals.categoryBorderWidth) > 0
     || parseFloat(handleVisuals.cardBorderWidth) > 0) {
-    fail(report, 'card-drag-handle-visuals', 'Card drag handles did not render as naked large/small grab regions.', handleVisuals);
+    fail(report, 'card-drag-handle-visuals', 'Card drag handles did not render as naked grab regions with the larger card icon.', handleVisuals);
   }
+  let placeholderProof = null;
   await dragCenterToCenter(
     page,
     `[data-recursion-card-id="${createdCardId}"] [data-recursion-card-drag-handle="card"]`,
     `[data-recursion-card-deck-category="${dragSetup.targetCategoryId}"]`,
     timeoutMs
   );
-  await page.waitForFunction(({ cardId, targetCategoryId }) => {
-    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
-    return deck?.cards?.[cardId]?.categoryId === targetCategoryId
-      && deck?.cardOrderByCategory?.[targetCategoryId]?.includes(cardId);
-  }, { cardId: createdCardId, targetCategoryId: dragSetup.targetCategoryId }, { timeout: timeoutMs });
+  try {
+    await page.waitForFunction(({ cardId, targetCategoryId }) => {
+      const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+      const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+      return deck?.cards?.[cardId]?.categoryId === targetCategoryId
+        && deck?.cardOrderByCategory?.[targetCategoryId]?.includes(cardId);
+    }, { cardId: createdCardId, targetCategoryId: dragSetup.targetCategoryId }, { timeout: timeoutMs });
+  } catch (error) {
+    fail(report, 'card-drag-commit', 'Card drag placeholder did not commit the card to the target category.', {
+      error: error?.message || String(error),
+      dragSetup,
+      placeholderProof,
+      state: await cardSystemState(page),
+      cardCategory: await page.evaluate((cardId) => {
+        const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+        const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+        return deck?.cards?.[cardId]?.categoryId || '';
+      }, createdCardId)
+    });
+  }
+  const targetToggle = page.locator(`[data-recursion-card-deck-category="${dragSetup.targetCategoryId}"] [data-recursion-card-category-toggle]`).first();
+  const targetExpanded = await targetToggle.getAttribute('aria-expanded', { timeout: timeoutMs }).catch(() => '');
+  if (targetExpanded !== 'true') await targetToggle.click({ timeout: timeoutMs });
+  await page.waitForSelector(`[data-recursion-card-id="${createdCardId}"]`, { timeout: timeoutMs });
+  placeholderProof = await dragCenterToCenterAndInspect(
+    page,
+    `[data-recursion-card-id="${createdCardId}"] [data-recursion-card-drag-handle="card"]`,
+    `[data-recursion-card-deck-category="${dragSetup.sourceCategoryId}"]`,
+    timeoutMs
+  );
+  if (!placeholderProof.placeholderConnected
+    || !placeholderProof.placeholderVisible
+    || !placeholderProof.placeholderClass.includes('recursion-card-drag-placeholder-card')
+    || placeholderProof.placeholderHeight < Math.max(12, placeholderProof.sourceHeight * 0.75)) {
+    fail(report, 'card-drag-placeholder', 'Card drag did not reserve a visible same-row-height placeholder while held.', placeholderProof);
+  }
   await dragCenterToTopEdge(
     page,
     `[data-recursion-card-deck-category="${dragSetup.secondCategoryId}"] [data-recursion-card-drag-handle="category"]`,
     `[data-recursion-card-deck-category="${dragSetup.firstCategoryId}"] .recursion-card-deck-category-head`,
     timeoutMs
   );
-  await page.waitForFunction((categoryId) => {
-    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
-    return deck?.categoryOrder?.[0] === categoryId;
-  }, dragSetup.secondCategoryId, { timeout: timeoutMs });
-  addCheck(report, 'card-drag-handle-visuals', 'pass', 'Card and category drag handles render as naked large/small grab regions.', handleVisuals);
+  try {
+    await page.waitForFunction((categoryId) => {
+      const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+      const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+      return deck?.categoryOrder?.[0] === categoryId;
+    }, dragSetup.secondCategoryId, { timeout: timeoutMs });
+  } catch (error) {
+    fail(report, 'category-drag-commit', 'Category drag placeholder did not commit the category reorder.', {
+      error: error?.message || String(error),
+      dragSetup,
+      state: await cardSystemState(page),
+      categoryOrder: await page.evaluate(() => {
+        const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+        const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+        return deck?.categoryOrder || [];
+      })
+    });
+  }
+  addCheck(report, 'card-drag-handle-visuals', 'pass', 'Card and category drag handles render as naked grab regions with the larger card icon.', handleVisuals);
+  addCheck(report, 'card-drag-placeholder', 'pass', 'Card drag reserves visible list space before drop commit.', placeholderProof);
   addCheck(report, 'card-drag-handles', 'pass', 'Card and category drag handles replaced move mode and persisted deck order changes.', await cardSystemState(page));
   const cardCategoryAfterDrag = await page.evaluate((cardId) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};

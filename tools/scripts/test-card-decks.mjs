@@ -36,7 +36,7 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
 const now = '2026-07-10T00:00:00.000Z';
 const defaultDeck = createDefaultCardDeck({ now });
 assertEqual(defaultDeck.id, DEFAULT_CARD_DECK_ID, 'Default deck id stable');
-assertEqual(defaultDeck.name, 'Default', 'Default deck name stable');
+assertEqual(defaultDeck.name, 'Default Deck', 'Default deck name stable');
 assertEqual(defaultDeck.readonly, true, 'Default deck read-only');
 assertEqual(defaultDeck.bundled, true, 'Default deck bundled');
 assertEqual(defaultDeck.categoryOrder.length, CARD_SCOPE_CATALOG.length, 'Default deck mirrors Card Scope families');
@@ -170,7 +170,7 @@ assertEqual(Object.values(createdDecks.customCardDecks)[0].categoryOrder[0], 'ge
 
 const duplicatedDefault = duplicateCardDeck({ cardDecks: createdDecks }, DEFAULT_CARD_DECK_ID);
 const duplicatedDeck = duplicatedDefault.customCardDecks[duplicatedDefault.activeCardDeckId];
-assertEqual(duplicatedDeck.name, 'Default Copy', 'duplicating Default creates an editable copy');
+assertEqual(duplicatedDeck.name, 'Default Deck Copy', 'duplicating Default Deck creates an editable copy');
 assertEqual(duplicatedDeck.readonly, false, 'duplicated bundled deck is editable');
 assertEqual(Object.keys(duplicatedDeck.cards).length, CARD_SCOPE_CATALOG.reduce((sum, entry) => sum + entry.subItems.length, 0), 'duplicated Default retains bundled cards');
 

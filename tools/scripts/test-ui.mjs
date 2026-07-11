@@ -807,6 +807,7 @@ assert(/deckDeleteConfirmState = \{ deckId:[\s\S]*?value: '' \}/.test(recursionU
 assert(!/applyCardDeckSettings\(deleteCustomCardDeck\(currentView\(\)\.settings, deckDelete\.dataset\.recursionCardDeckDelete\), 'Card Deck deleted\.'\);/.test(recursionUi), 'production Card Deck delete trash does not immediately delete the deck');
 assert(/\.recursion-card-deck-delete-confirm\s*\{[\s\S]*?display:\s*flex;/.test(recursionCss), 'production Card Deck delete confirmation has compact inline styling');
 assert(/recursionCardCategoryNew/.test(recursionUi), 'production Card System exposes add-category control');
+assert(/'aria-label':\s*'Active Card Deck'/.test(recursionUi) && !/recursion-card-deck-label', text: 'Deck'/.test(recursionUi), 'production Card System keeps the deck selector accessible without adding a visible deck label');
 assert(!/recursionCardCategoryMoveUp/.test(recursionUi) && !/recursionCardCategoryMoveDown/.test(recursionUi), 'production Card System removes category up/down reorder buttons');
 assert(/recursionCardDuplicate/.test(recursionUi) && /recursionCardDeleteArm/.test(recursionUi), 'production Card System exposes card duplicate/delete-arm controls');
 assert(/recursionCardDragHandle/.test(recursionUi) && /recursionCardDragId/.test(recursionUi), 'production Card System renders drag handles for deck organization');
@@ -826,7 +827,18 @@ assert(!/className: 'recursion-mini-button'[^)\n]*text:/.test(recursionUi), 'pro
 assert(/title:\s*label/.test(recursionUi) && /'aria-label':\s*label/.test(recursionUi), 'production Card System icon buttons expose hover text and accessible labels');
 assert(/\.recursion-mini-button\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?background:\s*color-mix\(in srgb, var\(--SmartThemeBodyColor/.test(recursionCss), 'production Card System mini buttons use graphite Recursion skin instead of native white buttons');
 assert(/recursionCardDeckDuplicate:[\s\S]*recursionCardDeckEdit:[\s\S]*recursionCardDeckDelete:/.test(recursionUi), 'production Card Deck edit action sits with duplicate and delete deck controls');
-assert(/recursion-card-deck-tools'[\s\S]*?recursionCardNew:[\s\S]*?recursionCardCategoryNew:/.test(recursionUi), 'production card/category tools row contains add-card and add-category controls');
+assert(/recursion-card-deck-actions/.test(recursionUi) && /recursion-card-deck-bar'/.test(recursionUi), 'production Card Deck controls use a dedicated right-side action rail');
+assert(/recursionCardCategoryNew:[\s\S]*?recursion-card-deck-tool-label', text: 'Categories'/.test(recursionUi), 'production Card System keeps the labeled add-category tool row');
+assert(!/recursion-card-deck-tool-label', text: 'Cards'/.test(recursionUi), 'production Card System removes the global add-card tool row');
+assert(/recursionCardNew:\s*category\.id/.test(recursionUi) && /Create a new Card in category/.test(recursionUi), 'production Card System adds cards from the owning category action rail');
+assert(/\.recursion-card-deck-bar\s*\{[\s\S]*?flex-wrap:\s*nowrap;/.test(recursionCss)
+  && /\.recursion-card-deck-actions\s*\{[\s\S]*?margin-left:\s*auto;/.test(recursionCss), 'production Card Deck controls remain on one line with actions aligned right');
+assert(/\.recursion-card-deck-tools\s*\{[\s\S]*?justify-content:\s*flex-end;/.test(recursionCss)
+  && /\.recursion-card-deck-tool-label\s*\{[\s\S]*?font-weight:\s*600;/.test(recursionCss), 'production Categories add control stays right-biased with a prominent label');
+assert(/\.recursion-card-deck-tools\s*\{[\s\S]*?grid-template-columns:\s*24px minmax\(0, 1fr\) var\(--recursion-card-action-rail-width\);/.test(recursionCss)
+  && /recursion-card-deck-tool-add/.test(recursionUi), 'production Categories toolbar aligns its plus with category arrows and its label with category titles');
+assert(/\.recursion-card-deck-category-arrow\s*\{[\s\S]*?justify-self:\s*center;/.test(recursionCss)
+  && !/\.recursion-card-deck-tool-add\s*\{[^}]*?(?:height:\s*22px|min-width:\s*22px|width:\s*22px)/.test(recursionCss), 'production Categories add button keeps standard size while its icon aligns with the category arrow');
 assert(!/recursion-card-move-cancel-slot/.test(recursionUi), 'production card/category tools row removes move-cancel controls');
 assert(/CARD_LONG_PRESS_MS/.test(recursionUi), 'production Card System defines explicit long-press threshold');
 assert(/pointermove/.test(recursionUi) && /CARD_LONG_PRESS_MOVE_PX/.test(recursionUi), 'production Card System cancels long-press when mobile scroll movement starts');
@@ -843,6 +855,9 @@ assert(/cardSystemIconButton\('pencil',\s*'Edit category'[\s\S]*recursionCardCat
 assert(/cardSystemIconButton\('pencil',\s*'Edit card'[\s\S]*recursionCardEdit:\s*card\.id/.test(recursionUi), 'production Card System renders visible card edit icons');
 assert(/const cardEdit = control\('recursionCardEdit'\)[\s\S]*editCard\(/.test(recursionUi), 'production Card System wires visible card edit icons to the inline card editor');
 assert(/function renderCardEditorInline/.test(recursionUi), 'production Card System renders card editor inline at the card row');
+assert(/recursion-card-editor-prompt-wrap/.test(recursionUi) && /recursionCardEditorResize/.test(recursionUi), 'production Card editor wraps the prompt with a dedicated resize hit region');
+assert(/function beginCardPromptResize/.test(recursionUi) && /cardPromptResizeState/.test(recursionUi), 'production Card editor implements pointer-based prompt resizing');
+assert(/\.recursion-card-editor-prompt-resize\s*\{[\s\S]*?height:\s*32px;[\s\S]*?width:\s*32px;/.test(recursionCss), 'production Card editor exposes a finger-sized mobile prompt resize target');
 assert(/function renderCategoryEditorInline/.test(recursionUi), 'production Card System renders category editor inline under the category header');
 assert(/recursion-card-editor-preview-instruction[\s\S]*?Checked fields replace the current card/.test(recursionUi), 'production Card wand preview explains that checked fields will replace current card content');
 assert(/installCardSystemUiProofStubs/.test(cardSystemUiProof) && /recommendCardDraft\s*=\s*async/.test(cardSystemUiProof), 'Card System UI live proof stubs card authoring assist instead of making real provider calls');
@@ -864,7 +879,26 @@ assert(/recursion-card-drag-icon-\$\{kind\}/.test(recursionUi) && /cardDragHandl
 assert(/\.recursion-card-delete-slot \+ \.recursion-card-drag-region\s*\{[\s\S]*?margin-left:\s*8px;/.test(recursionCss), 'production Card System separates delete buttons from drag regions');
 assert(/\.recursion-card-drag-region\s*\{[\s\S]*?background:\s*transparent;[\s\S]*?border:\s*0;/.test(recursionCss), 'production Card System drag regions rest without button chrome');
 assert(/\.recursion-card-drag-icon-category\s*\{[\s\S]*?height:\s*22px;[\s\S]*?mask-image:\s*url\("\.\.\/assets\/icons\/card-system\/handle-category\.svg"\);[\s\S]*?width:\s*22px;/.test(recursionCss), 'production Card System category drag region uses the supplied large handle asset');
-assert(/\.recursion-card-drag-icon-card\s*\{[\s\S]*?height:\s*16px;[\s\S]*?mask-image:\s*url\("\.\.\/assets\/icons\/card-system\/handle-card\.svg"\);[\s\S]*?width:\s*16px;/.test(recursionCss), 'production Card System card drag region uses the supplied small handle asset');
+assert(/viewBox="0 0 24 24"[\s\S]*?<path d="M4 10h16M4 14h16"/.test(readFileSync(new URL('../../assets/icons/card-system/handle-category.svg', import.meta.url), 'utf8')), 'production Card System uses the supplied two-line category handle asset');
+assert(/\.recursion-card-drag-icon-card\s*\{[\s\S]*?height:\s*24px;[\s\S]*?mask-image:\s*url\("\.\.\/assets\/icons\/card-system\/handle-card\.svg"\);[\s\S]*?width:\s*24px;/.test(recursionCss), 'production Card System card drag region uses a larger supplied card handle asset');
+assert(/recursion-card-drag-placeholder/.test(recursionUi) && /ensureCardDragPlaceholder/.test(recursionUi), 'production Card System uses a real drag placeholder that reserves list space');
+assert(/function cardDragHitTestElement/.test(recursionUi), 'production Card System uses a drag hit-test helper that filters transient drag visuals');
+assert(/\.closest\?\.\('\.recursion-card-drag-placeholder, \.is-dragging'\)/.test(recursionUi), 'production Card System excludes placeholders and dragged sources from drag hit testing');
+assert(/function captureCardDragDropZones/.test(recursionUi) && /dropZones/.test(recursionUi), 'production Card System freezes drag drop-zone geometry at drag start');
+assert(/function cardDragPointerContentY/.test(recursionUi), 'production Card System compares drag pointer movement in scroll-content coordinates');
+assert(/function categoryZoneFromPointer\(state, contentY, target = null\)[\s\S]*?closestDatasetElement\(target, 'recursionCardDeckCategory'/.test(recursionUi)
+  && /cardPlaceholderFromZones\(state, y, target\)/.test(recursionUi), 'production Card System prefers the category under the pointer when source removal shifts layout');
+assert(/function scheduleCardDragUpdate/.test(recursionUi) && /pendingCardDragEvent/.test(recursionUi), 'production Card System batches drag pointer updates through requestAnimationFrame');
+assert(/state\.grabOffset = cardDragGrabOffset/.test(recursionUi) && /state\.current\?\.x \|\| 0\) - Number\(state\.grabOffset\?\.x/.test(recursionUi), 'production Card System anchors the drag ghost to the original grab point');
+assert(/ghost\.style\.width\s*=\s*`\$\{Math\.max\(0, Number\(sourceNode\.getBoundingClientRect\?\.\(\)\.width \|\| 0\)\)\}px`/.test(recursionUi), 'production Card System preserves the source row width on the drag ghost');
+assert(/\.recursion-card-drag-ghost\s*\{[\s\S]*?max-width:\s*none;/.test(recursionCss)
+  && /\.recursion-card-drag-ghost\.is-visible\s*\{[\s\S]*?opacity:\s*\.85;/.test(recursionCss), 'production Card System keeps the ghost width stable and uses 85 percent opacity');
+assert(/cardDragGhost = createCardDragGhost\(sourceNode\)[\s\S]*?sourceNode\.classList\?\.add\('is-dragging'\)/.test(recursionUi), 'production Card System clones the drag ghost before hiding the source row');
+assert(/ghost\.classList\?\.remove\('is-dragging'\)/.test(recursionUi), 'production Card System strips source drag state from the ghost clone');
+assert(/\.recursion-card-deck-card\.is-dragging,[\s\S]*?\.recursion-card-deck-category\.is-dragging\s*\{[\s\S]*?display:\s*none;/.test(recursionCss), 'production Card System removes the source row from layout while dragging');
+assert(/function cardDragAnimatedRows\(\)[\s\S]*?!node\.classList\?\.contains\('is-dragging'\)[\s\S]*?!node\.classList\?\.contains\('recursion-card-drag-placeholder'\)/.test(recursionUi), 'production Card System excludes transient drag nodes from reflow measurement');
+assert(!/recursion-card-drop-line/.test(recursionCss), 'production Card System no longer uses a thin drop-line as the primary drag insertion affordance');
+assert(/document\.addEventListener\?\.\('pointerup',\s*commitCardDrag,\s*true\)/.test(recursionUi), 'production Card System commits active drags from the document pointerup path');
 assert(/function cardDragReducedMotion/.test(recursionUi), 'production Card System exposes a reduced-motion guard for drag animations');
 assert(/const eased = ratio \* ratio/.test(recursionUi), 'production Card System auto-scroll ramps drag velocity quadratically near panel edges');
 assert(/\.recursion-card-deck-category-head\s*\{[\s\S]*?cursor:\s*pointer;[\s\S]*?grid-template-columns:\s*24px minmax\(0,\s*1fr\) var\(--recursion-card-action-rail-width\);/.test(recursionCss), 'production Category headers expose a full-row disclosure target with a left arrow column');

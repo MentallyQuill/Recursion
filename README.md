@@ -13,6 +13,8 @@ Recursion is a scene reasoning layer for the reply in front of you.
 ## At A Glance
 
 - Builds scene cards for motivations, social subtext, consequences, knowledge, environment, items, and open threads.
+- Lets you use the bundled card catalog or build custom decks with categories, authored cards, ordering, and card Assist.
+- Gives every editable card `off`, `active`, and `priority` states so you can control focus without rewriting the scene.
 - Selects a focused turn hand so the prompt gets what matters now, not every possible note.
 - Uses separate Utility and optional Reasoner lanes, so fast planning and deeper synthesis can be tuned independently.
 - Supports Auto mode for hands-off preparation and Manual mode for explicit operator control.
@@ -33,6 +35,18 @@ Recursion is a scene reasoning layer for the reply in front of you.
       <img src="assets/documentation/renders/recursion-operator-mode-controls.png" alt="Recursion mode controls" width="100%"><br>
       <strong>Modes</strong><br>
       Use Auto when Recursion should prepare the next reply on its own, or Manual when you want to choose when scene work runs.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="assets/documentation/renders/recursion-card-deck-editor.jpg" alt="Recursion card deck editor with categories and card states" width="100%"><br>
+      <strong>Cards &amp; Decks</strong><br>
+      Start with the fixed scene-card catalog, then duplicate it into an editable deck with categories, authored cards, drag ordering, priority states, and card Assist.
+    </td>
+    <td width="50%">
+      <Render Needed>: assets/documentation/renders/recursion-card-hand-inspection.png - Live Last Brief or Full Viewer showing the selected card hand and omissions.<br>
+      <strong>Card Hand</strong><br>
+      Recursion selects a bounded hand for the next reply. Last Brief and the Full Viewer show the selected cards, omissions, evidence, and packet metadata.
     </td>
   </tr>
   <tr>

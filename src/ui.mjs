@@ -2189,7 +2189,10 @@ function renderCardEditorInline(activeDeck, card, editorState = null) {
     ]),
     el('input', { className: 'recursion-input', attrs: { type: 'text', value: draft.name || NEW_CARD_NAME, placeholder: 'Card name', 'aria-label': 'Card name' }, dataset: { recursionCardEditorName: '' } }),
     el('input', { className: 'recursion-input', attrs: { type: 'text', value: draft.description || '', placeholder: 'Description', 'aria-label': 'Card description' }, dataset: { recursionCardEditorDescription: '' } }),
-    el('textarea', { className: 'recursion-input recursion-card-editor-prompt', text: draft.promptText || '', attrs: { placeholder: 'Prompt', 'aria-label': 'Card prompt' }, dataset: { recursionCardEditorPrompt: '' } }),
+    el('div', { className: 'recursion-card-editor-prompt-wrap' }, [
+      el('textarea', { className: 'recursion-input recursion-card-editor-prompt', text: draft.promptText || '', attrs: { placeholder: 'Prompt', 'aria-label': 'Card prompt' }, dataset: { recursionCardEditorPrompt: '' } }),
+      el('span', { className: 'recursion-card-editor-prompt-resize', attrs: { role: 'button', tabindex: '0', title: 'Resize prompt', 'aria-label': 'Resize card prompt' }, dataset: { recursionCardEditorResize: '' } })
+    ]),
     ...renderCardSuggestionPreview(editorState),
     el('div', { className: 'recursion-card-editor-actions' }, [
       cardSystemIconButton('check', 'Save card', { recursionCardEditorSave: '' }),
@@ -2321,34 +2324,35 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
       cardSystemIconButton('eye-inactive', deactivateAllTitle, { recursionCardDeckDeactivateAll: '' }, { disabled: deactivateAllDisabled })
     ])
   ]));
-  const deckBarChildren = [
-    el('select', {
-      className: 'recursion-input recursion-select recursion-card-deck-select',
-      attrs: { 'aria-label': 'Card Deck' },
-      dataset: { recursionCardDeckSelect: '' }
-    }, decks.map((deck) => el('option', {
-      text: deck.name,
-      attrs: {
-        value: deck.id,
-        selected: deck.id === activeDeck.id ? 'selected' : undefined
-      }
-    }))),
-  ];
-  if (deckDeletePending) {
-    deckBarChildren.push(renderDeckDeleteConfirm(activeDeck, deckDeleteState));
-  } else {
-    deckBarChildren.push(
+  const deckActions = deckDeletePending
+    ? [renderDeckDeleteConfirm(activeDeck, deckDeleteState)]
+    : [
       cardSystemIconButton('plus', 'Create a new Card Deck', { recursionCardDeckNew: '' }),
       cardSystemIconButton('copy', 'Duplicate active Card Deck', { recursionCardDeckDuplicate: activeDeck.id }),
       cardSystemIconButton('pencil', activeDeck.readonly ? 'Default cannot be renamed.' : 'Edit Card Deck name', { recursionCardDeckEdit: activeDeck.id }, { disabled: activeDeck.readonly }),
       cardSystemIconButton('trash', activeDeck.readonly ? 'Default cannot be deleted.' : 'Delete active Card Deck', { recursionCardDeckDelete: activeDeck.id }, { danger: true, disabled: activeDeck.readonly })
-    );
-  }
+    ];
+  const deckBarChildren = [
+    el('span', { className: 'recursion-card-deck-selector' }, [
+      el('select', {
+        className: 'recursion-input recursion-select recursion-card-deck-select',
+        attrs: { 'aria-label': 'Active Card Deck' },
+        dataset: { recursionCardDeckSelect: '' }
+      }, decks.map((deck) => el('option', {
+        text: deck.name,
+        attrs: {
+          value: deck.id,
+          selected: deck.id === activeDeck.id ? 'selected' : undefined
+        }
+      })))
+    ]),
+    el('span', { className: 'recursion-card-deck-actions' }, deckActions)
+  ];
   panel.appendChild(el('div', { className: 'recursion-card-deck-bar', dataset: { recursionCardDeckBar: '' } }, deckBarChildren));
   if (!activeDeck.readonly) {
     panel.appendChild(el('div', { className: 'recursion-card-deck-tools' }, [
-      cardSystemIconButton('plus', 'Create a new Card', { recursionCardNew: activeDeck.id }),
-      cardSystemIconButton('cards', 'Create a new Category', { recursionCardCategoryNew: activeDeck.id })
+      cardSystemIconButton('plus', 'Create a new Category', { recursionCardCategoryNew: activeDeck.id, recursionCardDeckToolAdd: '' }, { className: 'recursion-card-deck-tool-add' }),
+      el('span', { className: 'recursion-card-deck-tool-label', text: 'Categories' })
     ]));
   }
 
@@ -2359,6 +2363,7 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
     const categoryExpanded = expandedCategoryKeys?.has?.(categoryKey) === true;
     const categoryDeletePending = deleteConfirmFor(deleteState, 'category', activeDeck.id, category.id);
     const categoryActions = !activeDeck.readonly ? [
+      cardSystemIconButton('plus', 'Create a new Card in category', { recursionCardNew: category.id }),
       cardSystemIconButton('pencil', 'Edit category', { recursionCardCategoryEdit: category.id }),
       deleteActionSlot('category', category.id, categoryDeletePending),
       cardDragHandle('category', category.id, 'Drag to reorder category', { disabled: categoryDeletePending })
@@ -3771,7 +3776,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let cardDragState = null;
   let cardDragHoldTimer = null;
   let cardDragGhost = null;
-  let cardDragDropLine = null;
+  let cardDragPlaceholder = null;
+  let cardDragUpdateFrame = 0;
+  let pendingCardDragEvent = null;
+  let cardPromptResizeState = null;
   let expandedCardCategoryKeys = new Set();
   let cardsPanelRenderKey = '';
   let cardLongPressTimer = null;
@@ -4560,6 +4568,44 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     cardLongPressPointer = null;
   }
 
+  function beginCardPromptResize(event, handle) {
+    const textarea = handle?.parentElement?.querySelector?.('[data-recursion-card-editor-prompt]');
+    if (!textarea) return false;
+    cardPromptResizeState = {
+      pointerId: event.pointerId,
+      originY: Number(event.clientY || 0),
+      startHeight: Math.max(70, Math.ceil(textarea.getBoundingClientRect?.().height || textarea.offsetHeight || 70)),
+      textarea,
+      handle
+    };
+    handle.setPointerCapture?.(event.pointerId);
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    return true;
+  }
+
+  function updateCardPromptResize(event) {
+    const state = cardPromptResizeState;
+    if (!state || state.pointerId !== event.pointerId) return false;
+    const nextHeight = Math.max(70, state.startHeight + Number(event.clientY || 0) - state.originY);
+    state.textarea.style.height = `${nextHeight}px`;
+    state.textarea.style.minHeight = `${nextHeight}px`;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    return true;
+  }
+
+  function endCardPromptResize(event = null) {
+    const state = cardPromptResizeState;
+    if (!state) return false;
+    if (event?.pointerId !== undefined && state.pointerId !== event.pointerId) return false;
+    state.handle?.releasePointerCapture?.(state.pointerId);
+    cardPromptResizeState = null;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    return true;
+  }
+
   function isCoarsePointerEvent(event) {
     return event?.pointerType === 'touch' || event?.pointerType === 'pen' || globalThis.matchMedia?.('(pointer: coarse)')?.matches === true;
   }
@@ -4586,28 +4632,85 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     return cardsPanel.querySelector?.(selector) || null;
   }
 
+  function cardDragNodeZone(node, scrollHost) {
+    const nodeRect = node?.getBoundingClientRect?.();
+    const hostRect = scrollHost?.getBoundingClientRect?.();
+    if (!nodeRect || !hostRect) return null;
+    const scrollTop = Number(scrollHost?.scrollTop || 0);
+    const top = nodeRect.top - hostRect.top + scrollTop;
+    const bottom = nodeRect.bottom - hostRect.top + scrollTop;
+    return {
+      top,
+      bottom,
+      mid: top + Math.max(0, bottom - top) / 2,
+      height: Math.max(0, bottom - top)
+    };
+  }
+
+  function captureCardDragDropZones(state) {
+    const scrollHost = cardDragScrollHost();
+    const categories = [...cardsPanel.querySelectorAll?.('[data-recursion-card-deck-category]') || []]
+      .filter((node) => node?.isConnected && !(state.kind === 'category' && node.dataset.recursionCardDeckCategory === state.id))
+      .map((node) => ({
+        ...cardDragNodeZone(node, scrollHost),
+        id: node.dataset.recursionCardDeckCategory || node.dataset.recursionCardCategory || ''
+      }))
+      .filter((zone) => zone.id && Number.isFinite(zone.top) && Number.isFinite(zone.bottom));
+    const cards = [];
+    for (const category of categories) {
+      const categoryNode = cardsPanel.querySelector?.(`[data-recursion-card-deck-category="${cssEscape(category.id)}"]`);
+      for (const node of [...categoryNode?.querySelectorAll?.('[data-recursion-card-id]') || []]) {
+        const id = node.dataset.recursionCardId || '';
+        if (!id || (state.kind === 'card' && id === state.id)) continue;
+        const zone = cardDragNodeZone(node, scrollHost);
+        if (!zone || !Number.isFinite(zone.top) || !Number.isFinite(zone.bottom)) continue;
+        cards.push({ ...zone, id, categoryId: category.id });
+      }
+    }
+    return { categories, cards };
+  }
+
+  function cardDragPointerContentY(y) {
+    const scrollHost = cardDragScrollHost();
+    const hostRect = scrollHost?.getBoundingClientRect?.();
+    if (!hostRect) return Number(y || 0);
+    return Number(y || 0) - hostRect.top + Number(scrollHost?.scrollTop || 0);
+  }
+
+  function cardDragGrabOffset(sourceNode, state) {
+    const rect = sourceNode?.getBoundingClientRect?.();
+    if (!rect) return { x: 10, y: 10 };
+    return {
+      x: Math.max(0, Number(state.current?.x || 0) - rect.left),
+      y: Math.max(0, Number(state.current?.y || 0) - rect.top)
+    };
+  }
+
   function createCardDragGhost(sourceNode) {
     if (!sourceNode?.cloneNode || !canUseDocument()) return null;
     const ghost = sourceNode.cloneNode(true);
+    ghost.classList?.remove('is-dragging');
     ghost.classList?.add('recursion-card-drag-ghost');
     ghost.removeAttribute?.('id');
+    ghost.style.width = `${Math.max(0, Number(sourceNode.getBoundingClientRect?.().width || 0))}px`;
     document.body?.appendChild?.(ghost);
     requestDragFrame(() => ghost.classList?.add('is-visible'));
     return ghost;
   }
 
-  function ensureCardDragDropLine() {
-    if (cardDragDropLine?.isConnected) return cardDragDropLine;
+  function ensureCardDragPlaceholder(kind = 'card') {
+    if (cardDragPlaceholder) return cardDragPlaceholder;
     if (!canUseDocument()) return null;
-    cardDragDropLine = document.createElement('div');
-    cardDragDropLine.className = 'recursion-card-drop-line';
-    return cardDragDropLine;
+    cardDragPlaceholder = document.createElement('div');
+    cardDragPlaceholder.className = `recursion-card-drag-placeholder recursion-card-drag-placeholder-${kind}`;
+    cardDragPlaceholder.setAttribute('aria-hidden', 'true');
+    return cardDragPlaceholder;
   }
 
   function setCardDragGhostPosition(state) {
     if (!cardDragGhost) return;
-    const x = Number(state.current?.x || 0) + 10;
-    const y = Number(state.current?.y || 0) + 10;
+    const x = Number(state.current?.x || 0) - Number(state.grabOffset?.x ?? 10);
+    const y = Number(state.current?.y || 0) - Number(state.grabOffset?.y ?? 10);
     cardDragGhost.style.left = `${x}px`;
     cardDragGhost.style.top = `${y}px`;
   }
@@ -4619,8 +4722,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     });
     cardDragGhost?.remove?.();
     cardDragGhost = null;
-    cardDragDropLine?.remove?.();
-    cardDragDropLine = null;
+    cardDragPlaceholder?.remove?.();
+    cardDragPlaceholder = null;
   }
 
   function cardDragReducedMotion() {
@@ -4630,7 +4733,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function cardDragAnimatedRows() {
     return [
       ...cardsPanel.querySelectorAll?.('[data-recursion-card-deck-category], [data-recursion-card-id]') || []
-    ].filter((node) => node?.isConnected && typeof node.getBoundingClientRect === 'function');
+    ].filter((node) => node?.isConnected
+      && !node.classList?.contains('is-dragging')
+      && !node.classList?.contains('recursion-card-drag-placeholder')
+      && typeof node.getBoundingClientRect === 'function');
   }
 
   function animateCardDragReflow(mutator) {
@@ -4687,10 +4793,75 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     return target;
   }
 
+  function cardDragHitTestElement(x, y) {
+    const elements = typeof document.elementsFromPoint === 'function'
+      ? [...document.elementsFromPoint(x, y)]
+      : [cardDragElementFromPoint(x, y)];
+    return elements.find((node) => {
+      if (!node || !cardsPanel.contains?.(node)) return false;
+      if (node.closest?.('.recursion-card-drag-placeholder, .is-dragging')) return false;
+      if (node.closest?.('.recursion-card-drag-ghost')) return false;
+      return true;
+    }) || null;
+  }
+
   function nextCategoryIdAfter(categoryNode) {
     const categories = [...cardsPanel.querySelectorAll?.('[data-recursion-card-deck-category]') || []];
     const index = categories.indexOf(categoryNode);
     return index >= 0 && index + 1 < categories.length ? categories[index + 1].dataset.recursionCardDeckCategory : '';
+  }
+
+  function categoryPlaceholderFromListPosition(y) {
+    const categories = [...cardsPanel.querySelectorAll?.('[data-recursion-card-deck-category]') || []]
+      .filter((node) => node?.isConnected && !node.classList?.contains('is-dragging'));
+    if (!categories.length) return null;
+    const first = categories[0];
+    const last = categories.at(-1);
+    const firstRect = first.getBoundingClientRect?.();
+    const lastRect = last.getBoundingClientRect?.();
+    if (firstRect && y <= firstRect.top + firstRect.height / 2) {
+      return { beforeCategoryId: first.dataset.recursionCardDeckCategory || first.dataset.recursionCardCategory || '' };
+    }
+    if (lastRect && y >= lastRect.top + lastRect.height / 2) {
+      return { beforeCategoryId: nextCategoryIdAfter(last) };
+    }
+    return null;
+  }
+
+  function categoryZoneFromPointer(state, contentY, target = null) {
+    const categories = state.dropZones?.categories || [];
+    if (!categories.length) return null;
+    const targetCategory = closestDatasetElement(target, 'recursionCardDeckCategory', cardsPanel)
+      || closestDatasetElement(target, 'recursionCardCategory', cardsPanel);
+    const targetId = targetCategory?.dataset?.recursionCardDeckCategory
+      || targetCategory?.dataset?.recursionCardCategory
+      || '';
+    if (targetId) {
+      const targetZone = categories.find((zone) => zone.id === targetId);
+      if (targetZone) return targetZone;
+    }
+    return categories.find((zone) => contentY >= zone.top && contentY <= zone.bottom)
+      || (contentY < categories[0].mid ? categories[0] : categories.at(-1));
+  }
+
+  function categoryPlaceholderFromZones(state, y) {
+    const categories = state.dropZones?.categories || [];
+    if (!categories.length) return null;
+    const contentY = cardDragPointerContentY(y);
+    const before = categories.find((zone) => contentY < zone.mid);
+    return { beforeCategoryId: before?.id || '' };
+  }
+
+  function cardPlaceholderFromZones(state, y, target = null) {
+    const contentY = cardDragPointerContentY(y);
+    const category = categoryZoneFromPointer(state, contentY, target);
+    if (!category?.id) return null;
+    const cards = (state.dropZones?.cards || []).filter((zone) => zone.categoryId === category.id);
+    const before = cards.find((zone) => contentY < zone.mid);
+    return {
+      categoryId: category.id,
+      beforeCardId: before?.id || ''
+    };
   }
 
   function nextCardIdAfter(cardNode, categoryNode) {
@@ -4699,26 +4870,80 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     return index >= 0 && index + 1 < cards.length ? cards[index + 1].dataset.recursionCardId : '';
   }
 
-  function placeCardDragDropLine(referenceNode, before = true, fallbackParent = null) {
-    const line = ensureCardDragDropLine();
-    if (!line) return;
-    line.classList.remove('is-visible');
-    if (referenceNode?.parentNode) {
-      referenceNode.parentNode.insertBefore(line, before ? referenceNode : referenceNode.nextSibling);
-    } else {
-      fallbackParent?.appendChild?.(line);
+  function placeCardDragPlaceholder(state, referenceNode, before = true, fallbackParent = null) {
+    const placeholder = ensureCardDragPlaceholder(state.kind);
+    if (!placeholder) return;
+    placeholder.className = `recursion-card-drag-placeholder recursion-card-drag-placeholder-${state.kind}`;
+    delete placeholder.dataset.recursionCardDeckCategory;
+    delete placeholder.dataset.recursionCardCategory;
+    if (state.kind === 'card' && state.placeholder?.categoryId) {
+      placeholder.dataset.recursionCardDeckCategory = state.placeholder.categoryId;
+      placeholder.dataset.recursionCardCategory = state.placeholder.categoryId;
     }
-    requestDragFrame(() => line.classList?.add('is-visible'));
+    placeholder.style.setProperty('--recursion-card-drag-placeholder-height', `${Math.max(8, Number(state.placeholderHeight || 0))}px`);
+    const wasConnected = placeholder.isConnected;
+    if (referenceNode?.parentNode) {
+      referenceNode.parentNode.insertBefore(placeholder, before ? referenceNode : referenceNode.nextSibling);
+    } else {
+      fallbackParent?.appendChild?.(placeholder);
+    }
+    if (!wasConnected) {
+      placeholder.classList.remove('is-visible');
+      requestDragFrame(() => placeholder.classList?.add('is-visible'));
+    } else {
+      placeholder.classList.add('is-visible');
+    }
   }
 
   function updateCardDragDropTarget(state, x, y) {
-    const target = cardDragElementFromPoint(x, y);
+    const target = cardDragHitTestElement(x, y);
     cardsPanel.querySelectorAll?.('.is-drop-target').forEach((node) => node.classList?.remove('is-drop-target'));
+    if (state.dropZones) {
+      if (state.kind === 'category') {
+        const placeholder = categoryPlaceholderFromZones(state, y);
+        if (placeholder) {
+          setCardDragPlaceholder(state, placeholder, () => {
+            const reference = placeholder.beforeCategoryId
+              ? cardsPanel.querySelector?.(`[data-recursion-card-deck-category="${cssEscape(placeholder.beforeCategoryId)}"]`)
+              : null;
+            placeCardDragPlaceholder(state, reference, true, cardsPanel.querySelector?.('[data-recursion-card-deck-list]'));
+          });
+          return;
+        }
+      } else {
+        const placeholder = cardPlaceholderFromZones(state, y, target);
+        if (placeholder) {
+          const categoryNode = cardsPanel.querySelector?.(`[data-recursion-card-deck-category="${cssEscape(placeholder.categoryId)}"]`);
+          categoryNode?.classList?.add('is-drop-target');
+          setCardDragPlaceholder(state, placeholder, () => {
+            const reference = placeholder.beforeCardId
+              ? categoryNode?.querySelector?.(`[data-recursion-card-id="${cssEscape(placeholder.beforeCardId)}"]`)
+              : null;
+            placeCardDragPlaceholder(state, reference, true, categoryNode);
+          });
+          return;
+        }
+      }
+    }
     const categoryNode = closestDatasetElement(target, 'recursionCardDeckCategory', cardsPanel)
       || closestDatasetElement(target, 'recursionCardCategory', cardsPanel);
     if (!categoryNode) {
+      if (state.kind === 'category') {
+        const fallback = categoryPlaceholderFromListPosition(y) || (
+          state.placeholder?.beforeCategoryId !== undefined ? state.placeholder : null
+        );
+        if (fallback) {
+          setCardDragPlaceholder(state, fallback, () => {
+            const reference = fallback.beforeCategoryId
+              ? cardsPanel.querySelector?.(`[data-recursion-card-deck-category="${cssEscape(fallback.beforeCategoryId)}"]`)
+              : null;
+            placeCardDragPlaceholder(state, reference, true, cardsPanel.querySelector?.('[data-recursion-card-deck-list]'));
+          });
+          return;
+        }
+      }
       setCardDragPlaceholder(state, {}, () => {
-        cardDragDropLine?.remove?.();
+        cardDragPlaceholder?.remove?.();
       });
       return;
     }
@@ -4731,7 +4956,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         beforeCategoryId: before ? categoryId : nextCategoryIdAfter(categoryNode)
       };
       setCardDragPlaceholder(state, placeholder, () => {
-        placeCardDragDropLine(categoryNode, before, cardsPanel.querySelector?.('[data-recursion-card-deck-list]'));
+        placeCardDragPlaceholder(state, categoryNode, before, cardsPanel.querySelector?.('[data-recursion-card-deck-list]'));
       });
       return;
     }
@@ -4744,12 +4969,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         beforeCardId: before ? cardNode.dataset.recursionCardId : nextCardIdAfter(cardNode, categoryNode)
       };
       setCardDragPlaceholder(state, placeholder, () => {
-        placeCardDragDropLine(cardNode, before, categoryNode);
+        placeCardDragPlaceholder(state, cardNode, before, categoryNode);
       });
       return;
     }
     setCardDragPlaceholder(state, { categoryId, beforeCardId: '' }, () => {
-      placeCardDragDropLine(null, false, categoryNode);
+      placeCardDragPlaceholder(state, null, false, categoryNode);
     });
   }
 
@@ -4792,9 +5017,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     state.started = true;
     state.sourceNode = sourceNode;
-    sourceNode.classList?.add('is-dragging');
-    state.handle?.setAttribute?.('aria-pressed', 'true');
+    state.placeholderHeight = Math.ceil(sourceNode.getBoundingClientRect?.().height || 0);
+    state.grabOffset = cardDragGrabOffset(sourceNode, state);
     cardDragGhost = createCardDragGhost(sourceNode);
+    sourceNode.classList?.add('is-dragging');
+    state.dropZones = captureCardDragDropZones(state);
+    state.handle?.setAttribute?.('aria-pressed', 'true');
     setCardDragGhostPosition(state);
     cardHaptic(10);
   }
@@ -4821,6 +5049,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       current: { x: Number(event.clientX || 0), y: Number(event.clientY || 0) },
       sourceCategoryId: card?.categoryId || '',
       placeholder: {},
+      placeholderHeight: 0,
+      dropZones: null,
+      grabOffset: { x: 10, y: 10 },
       autoScroll: { frameId: 0, velocityY: 0 },
       handle
     };
@@ -4835,7 +5066,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function updateCardDrag(event) {
     const state = cardDragState;
-    if (!state || state.pointerId !== event.pointerId) return;
+    if (!state) return;
+    if (state.pointerId !== undefined && event.pointerId !== undefined && state.pointerId !== event.pointerId) return;
     const x = Number(event.clientX || 0);
     const y = Number(event.clientY || 0);
     const dx = Math.abs(x - state.origin.x);
@@ -4853,9 +5085,32 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     event.stopPropagation?.();
   }
 
-  function commitCardDrag(event) {
+  function flushCardDragUpdate() {
+    cardDragUpdateFrame = 0;
+    const event = pendingCardDragEvent;
+    pendingCardDragEvent = null;
+    if (event) updateCardDrag(event);
+  }
+
+  function scheduleCardDragUpdate(event) {
     const state = cardDragState;
-    if (!state || state.pointerId !== event.pointerId) return;
+    if (!state) return;
+    if (state.pointerId !== undefined && event?.pointerId !== undefined && state.pointerId !== event.pointerId) return;
+    pendingCardDragEvent = {
+      pointerId: event?.pointerId,
+      clientX: Number(event?.clientX || 0),
+      clientY: Number(event?.clientY || 0)
+    };
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!cardDragUpdateFrame) cardDragUpdateFrame = requestDragFrame(flushCardDragUpdate);
+  }
+
+  function commitCardDrag(event) {
+    if (pendingCardDragEvent) flushCardDragUpdate();
+    const state = cardDragState;
+    if (!state) return;
+    if (state.pointerId !== undefined && event.pointerId !== undefined && state.pointerId !== event.pointerId) return;
     if (!state.started) {
       cancelCardDrag();
       return;
@@ -4888,6 +5143,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       clearTimeout(cardDragHoldTimer);
       cardDragHoldTimer = null;
     }
+    if (cardDragUpdateFrame) cancelDragFrame(cardDragUpdateFrame);
+    cardDragUpdateFrame = 0;
+    pendingCardDragEvent = null;
     if (cardDragState?.autoScroll?.frameId) cancelDragFrame(cardDragState.autoScroll.frameId);
     cardDragState?.handle?.releasePointerCapture?.(cardDragState.pointerId);
     cardDragState = null;
@@ -5156,6 +5414,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   });
   cardsPanel.addEventListener?.('pointerdown', (event) => {
     const target = event?.target;
+    const promptResize = closestDatasetElement(target, 'recursionCardEditorResize', cardsPanel);
+    if (promptResize) {
+      beginCardPromptResize(event, promptResize);
+      return;
+    }
     const dragHandle = closestDatasetElement(target, 'recursionCardDragHandle', cardsPanel);
     if (dragHandle) {
       beginCardDrag(event, dragHandle);
@@ -5166,17 +5429,23 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     beginCardLongPress(event, target);
   });
   cardsPanel.addEventListener?.('pointermove', (event) => {
-    updateCardDrag(event);
+    if (updateCardPromptResize(event)) return;
+    scheduleCardDragUpdate(event);
     updateCardLongPress(event);
   });
   cardsPanel.addEventListener?.('pointerup', (event) => {
+    if (endCardPromptResize(event)) return;
     commitCardDrag(event);
     clearCardSystemLongPress();
   });
   cardsPanel.addEventListener?.('pointercancel', () => {
+    endCardPromptResize();
     cancelCardDrag();
     clearCardSystemLongPress();
   });
+  document.addEventListener?.('pointermove', scheduleCardDragUpdate, true);
+  document.addEventListener?.('pointerup', commitCardDrag, true);
+  document.addEventListener?.('pointercancel', cancelCardDrag, true);
   cardsPanel.addEventListener?.('pointerleave', (event) => {
     if (cardDragState?.started) return;
     if (cardDragState) cancelCardDrag();
@@ -5411,7 +5680,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         showCardSystemStatus('Default Card Deck is read-only. Duplicate it to edit.', 'warning');
         renderCardsPanelForView(view);
       } else {
-        const nextDeck = createDraftCard(deck, deck.categoryOrder?.[0]);
+        const categoryId = cardNew.dataset.recursionCardNew || '';
+        const category = asObject(deck.categories)[categoryId];
+        if (!category) return;
+        const nextDeck = createDraftCard(deck, category.id);
         const newCard = Object.values(nextDeck.cards || {}).find((card) => !deck.cards?.[card.id]);
         if (newCard?.categoryId) expandCardCategory(nextDeck.id, newCard.categoryId);
         cardEditorState = newCard ? { deckId: nextDeck.id, cardId: newCard.id, draft: newCard, accept: { name: true, description: true, promptText: true } } : null;
@@ -6031,8 +6303,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       clearRibbonSuccessTimer();
       clearTransientCurrentStepText();
       clearStandbyStatusTimer();
+      endCardPromptResize();
+      cancelCardDrag({ render: false });
       document.removeEventListener?.('click', handleDocumentClick);
       document.removeEventListener?.('keydown', handleDocumentKeydown);
+      document.removeEventListener?.('pointermove', scheduleCardDragUpdate, true);
+      document.removeEventListener?.('pointerup', commitCardDrag, true);
+      document.removeEventListener?.('pointercancel', cancelCardDrag, true);
       globalThis.visualViewport?.removeEventListener?.('resize', handleViewportChange);
       globalThis.visualViewport?.removeEventListener?.('scroll', handleViewportChange);
       globalThis.removeEventListener?.('resize', handleViewportChange);

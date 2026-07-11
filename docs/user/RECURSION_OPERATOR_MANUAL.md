@@ -120,7 +120,7 @@ Last Brief is the compact inspection surface for what Recursion used last. It op
 
 Cards expand in place to show the full card text. The Prompt Packet button opens the final injected packet text plus route metadata, omitted items, source card refs, and copy control.
 
-Rows are read-only. Recursion V1 is not a card editor.
+Rows are read-only inspection output. Card authoring happens in the Cards deck editor, not inside Last Brief.
 
 Cards shown in Last Brief are operational instructions, not draft prose. They should read like private constraints and anchors for the next response. If a card reads like a mini-scene, that is a provider-contract failure rather than the intended card format.
 
@@ -136,6 +136,40 @@ The Full Viewer is the complete observatory. It should include:
 - `Prompt Packet`: Guidance, Card Evidence, Guardrails, selected refs, omissions, and injection metadata.
 - `Settings`: broad behavior controls.
 - `Providers`: Utility and Reasoner setup and test controls.
+
+## Cards, Decks, And Focus
+
+The Cards control is the operator surface for deciding which scene questions Recursion may prepare. The bundled Default Deck contains the fixed V1 catalog. Duplicate it when you want to edit categories, author cards, change order, or use bulk state actions.
+
+### Card states
+
+Editable cards use one eye-state cycle:
+
+- `off`: excluded from scope and hand selection;
+- `active`: a normal candidate;
+- `priority`: selected ahead of normal active cards in Auto.
+
+Auto cycles `off → active → priority → off`. Manual cycles `off → active → off`, because selected Manual families are already forced. The deck header can set all runnable cards active or off; draft cards are left unchanged and the Default Deck must be duplicated before editing.
+
+### Decks and authored cards
+
+Custom decks can be created, renamed, duplicated, and deleted. Within an editable deck, create categories and authored cards, edit their names and content, duplicate or delete them, and drag category/card handles to reorder or move cards between categories. Card Assist can propose bounded authored-card content; review it before committing it to the deck.
+
+The deck is configuration and authoring state. It is separate from the disposable scene-local generated card cache and from the turn hand selected for one prompt.
+
+### Scope and caps
+
+Auto lets the Arbiter choose relevant cards from the active deck. Manual lets you select family rows directly and use sub-items as focus facets. `Min Cards` and `Max Cards` constrain the resulting hand; when priority cards exceed the effective maximum, deck order determines which priority cards survive and the omitted remainder is shown in diagnostics. Strict whitelist settings keep unselected families out of planning and reuse.
+
+### Inspecting the result
+
+Last Brief shows the latest selected hand, card families, state/emphasis, concise evidence, omissions, and packet metadata. The Full Viewer expands the deck/hand relationship and shows why cards were omitted. Use Regenerate when the current hand is stale; do not treat the hand as durable memory.
+
+![Editable card deck with categories, authored cards, eye-state controls, and drag handles](../../assets/documentation/renders/recursion-card-deck-editor.jpg)
+
+![Authored card edit box with Card Assist and save/cancel controls](../../assets/documentation/renders/recursion-card-authored-card-editor.jpg)
+
+<Render Needed>: assets/documentation/renders/recursion-card-hand-inspection.png - Live Last Brief or Full Viewer showing selected cards, omissions, and packet metadata.
 
 ## Modes
 

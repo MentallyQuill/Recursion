@@ -106,7 +106,7 @@ export function createDefaultCardDeck({ now = nowIso() } = {}) {
 
   return {
     id: DEFAULT_CARD_DECK_ID,
-    name: 'Default',
+    name: 'Default Deck',
     description: 'Bundled Recursion card deck.',
     bundled: true,
     readonly: true,

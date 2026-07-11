@@ -2,7 +2,7 @@
 
 This guide walks through the first useful Recursion session in SillyTavern. It assumes Recursion is installed or served as an extension and that you are using the current V1 pre-alpha contract.
 
-Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Manual mode is active. Pipeline selection is separate from Auto and Manual: Standard runs the full foreground pass on send, Rapid warms a provider-generated card packet in the background and uses a shorter foreground delta, and Fused generates all requested foreground cards in one structured bundle call. Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing workflow.
+Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Manual mode is active. Pipeline selection is separate from Auto and Manual: Standard runs the full foreground pass on send, Rapid warms a provider-generated card packet in the background and uses a shorter foreground delta, and Fused generates all requested foreground cards in one structured bundle call. Recursion is not a memory manager, lore database, summary engine, vector recall layer, or campaign save system; its editable card decks are local operator configuration, not durable lore.
 
 ## 1. Install And Enable
 
@@ -71,7 +71,20 @@ Manual uses the Cards selector as a strict whitelist. Disabled families stay out
 
 A normal Auto pass may show stages such as reading the current turn, planning the card pass, generating or reusing scene cards, selecting the turn hand, composing the prompt packet, installing the Recursion prompt, saving cache, and ready state.
 
-## 6. Try Rapid
+## 6. Try The Card Deck
+
+After the first pass, open the Cards surface and inspect the bundled Default Deck.
+
+1. Review the fixed card families and their focus sub-items.
+2. Duplicate the Default Deck so it becomes editable.
+3. Create or rename a category and add an authored card.
+4. Cycle one card through `off`, `active`, and `priority` in Auto mode.
+5. Drag a category or card handle to change its order.
+6. Run another pass and inspect which cards entered the turn hand and which were omitted.
+
+Card Assist may suggest authored content, but the suggestion is not committed until you review and save it. The deck is separate from the scene-local generated cache and the one-turn hand.
+
+## 7. Try Rapid
 
 Rapid is useful after Standard is already working. It does not skip provider-authored guidance; instead, it moves card-packet work into a background warm step and uses a short Utility foreground delta on the next send.
 
@@ -90,7 +103,7 @@ flowchart LR
     Send --> Outcome["Rapid delta, Standard escalation, or clear fallback"]
 ```
 
-## 7. Try Fused
+## 8. Try Fused
 
 Fused is optional for a first session, but it is useful to verify once Standard works and you have a stronger provider model configured.
 
@@ -109,7 +122,7 @@ flowchart LR
     Bundle -. "zero trustworthy cards" .-> Fallback["Full Standard fallback"]
 ```
 
-## 8. Inspect Last Brief And Viewer
+## 9. Inspect Last Brief And Viewer
 
 After Auto or Manual has produced a hand:
 
@@ -124,7 +137,7 @@ After Auto or Manual has produced a hand:
 
 The prompt packet should be bounded and inspectable. It should contain current-scene guidance, not raw provider output, hidden reasoning, broad lore, or transcript-scale summaries.
 
-## 9. Clear Or Disable Safely
+## 10. Clear Or Disable Safely
 
 Use these controls when you want Recursion out of the next generation:
 

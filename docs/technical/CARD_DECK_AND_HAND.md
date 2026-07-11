@@ -1,5 +1,59 @@
 # Card Deck And Hand
 
+## Operator Deck Layer
+
+The active deck is the operator-controlled catalog layer above the scene-local generated cache. Recursion ships a read-only Default Deck and supports normalized custom decks with categories, authored cards, category/card order, and an active-deck id. Custom decks can be created, duplicated, edited, and deleted; deleting the active deck falls back to Default Deck.
+
+Authored cards are explicit operator content. Generated cards are provider-produced scene evidence. Both can be visible in the active deck, but neither distinction changes the hand contract: only eligible, validated cards can enter the bounded turn hand.
+
+```mermaid
+flowchart LR
+    Default[Read-only Default Deck] --> Duplicate[Duplicate or create custom deck]
+    Duplicate --> Categories[Categories and order]
+    Categories --> Authored[Authored cards]
+    Categories --> Generated[Generated scene cards]
+    Authored --> Eligible[Eligible deck cards]
+    Generated --> Eligible
+    Eligible --> Hand[Bounded turn hand]
+    Hand --> Packet[Prompt packet and Last Brief]
+```
+
+## Selection State Contract
+
+Editable cards expose `off`, `active`, and `priority`. Auto cycles `off -> active -> priority -> off`; Manual cycles `off -> active -> off`. `off` excludes a card from scope, `active` makes it a normal candidate, and `priority` moves it ahead of normal active cards in Auto. Priority overflow is resolved by deck category/card order and recorded as an omission rather than backfilled with lower-priority cards.
+
+```mermaid
+stateDiagram-v2
+    [*] --> off
+    off --> active: Auto or Manual click
+    active --> priority: Auto click
+    priority --> off: Auto click
+    active --> off: Manual click
+    note right of priority
+      Auto-first candidate
+      subject to Max Cards
+    end note
+```
+
+## Scope And Cap Resolution
+
+The runtime resolves the active deck, card state, Manual selection, strict whitelist, priority order, and Min/Max Cards before provider jobs are budgeted. This prevents provider work from being requested for cards that cannot reach the hand.
+
+```mermaid
+flowchart TD
+    Settings[Auto or Manual + focus + caps] --> Deck[Resolve active deck]
+    Deck --> State[Filter off / active / priority]
+    State --> Mode{Manual?}
+    Mode -->|yes| Forced[Force selected family rows]
+    Mode -->|no| Auto[Arbiter chooses relevant candidates]
+    Forced --> Cap[Apply Min/Max Cards]
+    Auto --> Cap
+    Cap --> Jobs[Budget card jobs]
+    Jobs --> Hand[Select and order turn hand]
+```
+
+![Card deck dropdown showing categories, cards, and off/active/priority eye states](../../assets/documentation/renders/recursion-card-deck-editor.jpg)
+
 The card system is Recursion's scene-local reasoning cache. It is implemented by `src/cards.mjs`, coordinated by `src/runtime.mjs`, persisted by `src/storage.mjs`, and inspected through `src/ui.mjs`.
 
 Cards are disposable cache artifacts. They are not memories, lore, canon, continuity records, or user-authored prompt fragments. Their job is to expand what the current scene implies for the next response, not to preserve facts for their own sake.

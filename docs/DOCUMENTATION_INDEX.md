@@ -5,6 +5,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 ## Release Notes
 
 - [Release Notes Directory](release/README.md)
+- [0.1.0-pre-alpha.6](release/0.1.0-pre-alpha.6.md)
 - [Post-alpha.1 Feature Highlights](release/post-alpha.1-feature-highlights.md)
 - [0.1.0-pre-alpha.5](release/0.1.0-pre-alpha.5.md)
 - [0.1.0-pre-alpha.4](release/0.1.0-pre-alpha.4.md)
@@ -72,6 +73,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 ## Planning Docs
 
 - [Documentation Expansion Plan](planning/DOCUMENTATION_EXPANSION_PLAN.md)
+- [0.1.0-pre-alpha.6 Documentation Update Brief](planning/2026-07-11-documentation-update-pre-alpha-6.md)
 - [Provider JSON Robustness Pass](planning/PROVIDER_JSON_ROBUSTNESS_PASS.md)
 - [Planning Folder Guide](planning/README.md)
 - [Internal Superpowers Execution Plan](superpowers/plans/2026-06-30-recursion-v1.md)

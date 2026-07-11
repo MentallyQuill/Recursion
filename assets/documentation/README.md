@@ -4,11 +4,13 @@ This folder holds reviewed documentation assets that are safe to reference from 
 
 ## Renders
 
-Promoted PNGs live in [renders/](renders/). These files are documentation assets, not runtime artifacts.
+Promoted PNG and JPG images live in [renders/](renders/). These files are documentation assets, not runtime artifacts.
 
 Current asset classes:
 
 - `live host`: reviewed, redaction-safe screenshots from live-served Recursion UI in SillyTavern.
+
+The `.6` card-system render family covers the Cards control, Auto/Manual scope, eye-state priority, custom deck/category/card editing, Card Assist, hand inspection, fail-soft behavior, and mobile interaction. Standalone screenshots document a specific contract; contact sheets document related state families. Pending captures stay visible in their target docs with `<Render Needed>` markers.
 
 Raw captures, Playwright traces, temporary screenshots, browser profiles, and renderer scratch output must stay under `artifacts/` or `.recursion-doc-renderer/`. Only reviewed, redacted, final PNGs move into this folder.
 

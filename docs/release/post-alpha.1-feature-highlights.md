@@ -1,10 +1,12 @@
 # Recursion Post-Alpha.1 Feature Highlights
 
-This is the short update post for the work added after `0.1.0-pre-alpha.1`, through `0.1.0-pre-alpha.5`.
+This is the cumulative update post for the work added after `0.1.0-pre-alpha.1`, through `0.1.0-pre-alpha.6`.
 
 Recursion started alpha.1 as a current-scene prompt compiler: it reads the active SillyTavern chat, builds scene cards, selects a compact hand, and installs an inspectable prompt packet before the host model writes. The post-alpha.1 work keeps that core scope and adds a dedicated post-generation Enhancements surface for improving the assistant message that just landed.
 
 ## Headline Features
+
+The current `.6` release also promotes the card system into a complete operator surface: custom decks, authored cards, card states, priority, hand inspection, and mobile-aware editing are documented in the [`.6` release notes](0.1.0-pre-alpha.6.md).
 
 - Added an `Enhancements` control to the compact Recursion Bar.
 - Added enhancement targets: `Off`, `Prose`, `Dialogue`, and `Prose + Dialogue`.

@@ -1527,9 +1527,68 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   padding: 6px 9px;
 }
 
+.recursion-card-deck-bar {
+  flex-wrap: nowrap;
+}
+
+.recursion-card-deck-tools {
+  --recursion-card-action-rail-width: 124px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 24px minmax(0, 1fr) var(--recursion-card-action-rail-width);
+  justify-content: initial;
+}
+
+.recursion-card-deck-tool-add {
+  grid-column: 1;
+}
+
+.recursion-card-deck-tools > .recursion-card-deck-tool-label {
+  grid-column: 2;
+}
+
 .recursion-card-deck-select {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.recursion-card-deck-selector {
+  align-items: center;
+  display: inline-flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.recursion-card-deck-label {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.recursion-card-deck-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  justify-content: end;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.recursion-card-deck-tool-group {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.recursion-card-deck-tool-label {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .recursion-card-deck-delete-confirm {
@@ -1595,6 +1654,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   display: inline-flex;
   height: 22px;
   justify-content: center;
+  justify-self: center;
   width: 22px;
 }
 
@@ -1714,7 +1774,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-card-drag-region-card {
-  width: 28px;
+  width: 32px;
 }
 
 .recursion-card-drag-icon {
@@ -1737,10 +1797,10 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-card-drag-icon-card {
-  height: 16px;
+  height: 24px;
   mask-image: url("../assets/icons/card-system/handle-card.svg");
   -webkit-mask-image: url("../assets/icons/card-system/handle-card.svg");
-  width: 16px;
+  width: 24px;
 }
 
 .recursion-card-drag-region:hover,
@@ -1763,8 +1823,9 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   border: 1px solid color-mix(in srgb, var(--recursion-accent) 42%, transparent);
   border-radius: 5px;
   box-shadow: 0 8px 18px rgba(0, 0, 0, .34);
+  box-sizing: border-box;
   left: 0;
-  max-width: min(360px, 82vw);
+  max-width: none;
   opacity: 0;
   pointer-events: none;
   position: fixed;
@@ -1778,7 +1839,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-card-drag-ghost.is-visible {
-  opacity: .92;
+  opacity: .85;
   transform: translateY(0) scale(1);
 }
 
@@ -1791,27 +1852,48 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-card-deck-card.is-dragging,
-.recursion-card-deck-category.is-dragging > .recursion-card-deck-category-head {
-  opacity: .48;
+.recursion-card-deck-category.is-dragging {
+  display: none;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
 }
 
-.recursion-card-drop-line {
-  background: color-mix(in srgb, var(--recursion-accent) 72%, transparent);
-  border-radius: 999px;
+.recursion-card-drag-placeholder {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--recursion-accent) 16%, transparent),
+      color-mix(in srgb, var(--recursion-accent) 6%, transparent)
+    );
+  border: 1px dashed color-mix(in srgb, var(--recursion-accent) 42%, transparent);
+  border-radius: 5px;
+  box-sizing: border-box;
   display: block;
-  height: 2px;
-  margin: 2px 0;
+  height: var(--recursion-card-drag-placeholder-height, 28px);
+  margin: 3px 0;
   opacity: 0;
-  transform: scaleX(.68);
+  pointer-events: none;
+  transform: scaleY(.72);
   transform-origin: center;
   transition:
+    height var(--recursion-card-drag-settle-ms, 150ms) var(--recursion-card-drag-settle),
     opacity 90ms var(--recursion-card-drag-ease),
     transform 120ms var(--recursion-card-drag-settle);
 }
 
-.recursion-card-drop-line.is-visible {
+.recursion-card-drag-placeholder-category {
+  margin: 5px 9px;
+}
+
+.recursion-card-drag-placeholder-card {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.recursion-card-drag-placeholder.is-visible {
   opacity: 1;
-  transform: scaleX(1);
+  transform: scaleY(1);
 }
 
 .recursion-card-deck-category.is-drop-target {
@@ -1935,6 +2017,15 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 .recursion-card-editor-prompt {
   min-height: 70px;
   resize: vertical;
+}
+
+.recursion-card-editor-prompt-wrap {
+  min-width: 0;
+  position: relative;
+}
+
+.recursion-card-editor-prompt-resize {
+  display: none;
 }
 
 .recursion-card-editor-preview {
@@ -3131,14 +3222,39 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
     flex-wrap: wrap;
   }
 
-  .recursion-card-deck-bar,
-  .recursion-card-deck-tools {
-    flex-wrap: wrap;
-  }
-
   .recursion-card-deck-category-head {
     align-items: start;
     grid-template-columns: 24px minmax(0, 1fr) auto;
+  }
+
+  .recursion-card-editor-prompt {
+    padding-bottom: 24px !important;
+    padding-right: 30px !important;
+    resize: none;
+  }
+
+  .recursion-card-editor-prompt-resize {
+    align-items: end;
+    bottom: 0;
+    cursor: ns-resize;
+    display: flex;
+    height: 32px;
+    justify-content: end;
+    position: absolute;
+    right: 0;
+    touch-action: none;
+    width: 32px;
+    z-index: 1;
+  }
+
+  .recursion-card-editor-prompt-resize::before {
+    background: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 54%, transparent) 3px 4px);
+    content: '';
+    display: block;
+    height: 14px;
+    margin: 0 5px 5px 0;
+    opacity: .76;
+    width: 14px;
   }
 
   .recursion-kind-label {

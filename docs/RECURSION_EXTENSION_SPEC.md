@@ -118,7 +118,7 @@ V1 uses a fixed internal catalog:
 - Items
 - Open Threads
 
-The catalog is visible only as high-level Cards scope, where users can focus or whitelist fixed families and sub-items. It is not a user-authored card system, not a card editor, and not a prompt-injection checklist. The Arbiter receives the fixed catalog plus the current scope and decides which cards need to exist for the current scene within Auto or Manual rules.
+The catalog is visible through the Cards surface, where users can focus or whitelist fixed families and sub-items. Recursion also supports local operator-authored cards inside duplicated custom decks; those decks are configuration and authoring state, not durable memory or a prompt-injection checklist. The Arbiter receives the fixed catalog, active deck, and current scope and decides which cards need to exist for the current scene within Auto or Manual rules.
 
 Cards must expand current scene implications rather than simply restate remembered facts. For example, a location card should not merely say that a character is near a library, and it should not dump broad library lore. It should derive what that location means for the next beat: nearby routes, visibility, plausible interruptions, social exposure, usable details, and what is outside the current scene's relevance.
 

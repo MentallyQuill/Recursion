@@ -204,7 +204,7 @@ Tests:
 - Quick operations do not flicker the progress surface.
 - Warning/error states persist until dismissed or superseded.
 - Last Brief shows used cards from the prior run.
-- Cards scope selector prevents zero selected focus items and updates Manual/Auto behavior without exposing card-editing workflows.
+- Cards scope and deck surfaces prevent invalid empty focus, update Manual/Auto behavior, and keep custom deck/card editing bounded to normalized local operator configuration.
 - Viewer handles empty/corrupt diagnostics gracefully.
 - Settings save persists conditioned final-prompt injection placement, role, and depth without exposing card-level micromanagement.
 - Mobile/narrow layout does not overlap chat controls.

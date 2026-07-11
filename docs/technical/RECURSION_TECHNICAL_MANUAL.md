@@ -163,7 +163,7 @@ Additional host integrations are reserved behind the adapter boundary and are no
 
 The Recursion Bar shows the wordmark, power toggle, icon-only mode, Cards scope button, Hero Pixel Array, current-step text, Reasoning Level chain, Last Brief dropdown arrow, and options entry. The progress menu shows user-safe stages such as reading the turn, planning card work, generating cards, selecting the hand, installing prompt entries, storage warnings, and ready or fallback states. The Full Viewer exposes Now, Deck, Activity, Prompt Packet, Settings, and Providers.
 
-The UI is an observatory, not a card editor. It shows what Recursion did without turning the card system into a user-managed memory product.
+The Last Brief and Full Viewer are observatories, while the Cards surface is the bounded deck editor. Together they expose deck configuration, authored cards, generated scene evidence, selected hand contents, and omissions without turning the card system into a user-managed memory product.
 
 ## Fail-Soft Invariants
 

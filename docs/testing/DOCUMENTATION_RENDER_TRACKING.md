@@ -126,10 +126,18 @@ These assets are promoted live UI documentation renders and may be embedded dire
 | `recursion-operator-retention-settings.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Advanced Retention controls showing source-window, provider-message, scene-cache, source-variant, and run-journal caps. |
 | `recursion-provider-test-busy-state.png` | live host | `docs/user/PROVIDER_SETUP.md` | Reasoner Provider disclosure staying open while the clicked Test Provider button shows lane-local `Testing...` busy state. |
 | `recursion-prompt-packet-instruction-card-evidence.png` | live host | `docs/user/PROMPT_PRIVACY_AND_SAFETY.md` | Prompt Packet viewer showing instruction-shaped Card Evidence, Guidance status, selected refs, and sanitized route metadata. |
+| `recursion-card-deck-editor.jpg` | supplied screenshot | `README.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md`, `docs/technical/CARD_DECK_AND_HAND.md` | Card-system dropdown showing a custom deck, categories, card rows, drag handles, and off/active/priority states. |
+| `recursion-card-authored-card-editor.jpg` | supplied screenshot | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Authored-card edit box showing name, description, full card text, Card Assist, and save/cancel controls. |
 
 ## Open Render Inventory
 
-There are no current open render slots. New screenshot needs should be added here and marked in the target document with a visible `<Render Needed>` line until promoted.
+The `.6` card-system pass has these open live-host slots:
+
+- `recursion-card-deck-editor.png` — live host — `docs/user/RECURSION_OPERATOR_MANUAL.md` and `README.md` — editable custom deck with categories, authored cards, eye-state controls, and drag handles.
+- `recursion-card-hand-inspection.png` — live host — `docs/user/RECURSION_OPERATOR_MANUAL.md` and `README.md` — Last Brief or Full Viewer showing selected cards, omissions, and packet metadata.
+- `recursion-card-priority-states.png` — live host — `docs/technical/CARD_DECK_AND_HAND.md` — card rows showing off, active, and priority eye-state controls.
+
+Additional `.6` captures planned by the update brief include Auto/Manual scope, deck overview, category editor, authored-card editor, Card Assist, mobile editor, and fail-soft state. Add each row here when its target document receives the corresponding visible marker.
 
 ## Verification Commands
 
@@ -166,5 +174,5 @@ node .recursion-doc-renderer/check-doc-images.mjs
 Render inventory check:
 
 ```powershell
-node -e "const fs=require('fs');const tracking=fs.readFileSync('docs/testing/DOCUMENTATION_RENDER_TRACKING.md','utf8');const rows=tracking.split(/\r?\n/).filter(line=>line.startsWith('| `')&&line.includes('| live host |')).length;const files=fs.readdirSync('assets/documentation/renders').filter(f=>f.endsWith('.png')).length;if(rows!==files){console.error(JSON.stringify({liveRows:rows,renderPngs:files},null,2));process.exit(1);}console.log('render inventory ok ('+files+' live PNGs)');"
+node -e "const fs=require('fs');const tracking=fs.readFileSync('docs/testing/DOCUMENTATION_RENDER_TRACKING.md','utf8');const rows=tracking.split(/\r?\n/).filter(line=>line.startsWith('| `')&&(line.includes('| live host |')||line.includes('| supplied screenshot |'))).length;const files=fs.readdirSync('assets/documentation/renders').filter(f=>/\.(png|jpg)$/i.test(f)).length;if(rows!==files){console.error(JSON.stringify({trackedRows:rows,renderImages:files},null,2));process.exit(1);}console.log('render inventory ok ('+files+' promoted images)');"
 ```

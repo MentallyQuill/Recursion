@@ -6,6 +6,8 @@ The card system is Recursion's scene-local reasoning cache. Sidecar model calls 
 
 Cards are cache artifacts, not memories. They are disposable, scene-local, and allowed to be regenerated, stowed, discarded, or replaced whenever the current scene, prompt budget, or turn need changes. They must not become durable lore, canon, hidden memory, continuity ledgers, or a replacement for extensions that own long-term recall.
 
+The implemented operator layer now includes a read-only bundled Default Deck plus normalized custom decks. Custom decks contain ordered categories and authored or generated cards, while the runtime still maintains a separate disposable scene-local cache and rebuilds a bounded turn hand for each prompt event. Deck editing, card state, priority, and ordering are configuration controls; they do not turn the hand into durable memory.
+
 Recursion is not a continuity extension. A card should not merely remember that a fact exists. It should use current scene evidence to derive useful next-turn implications: affordances, constraints, tensions, likely interruptions, reveal boundaries, access, social pressure, and relevance limits. The canonical card shape is:
 
 ```text

@@ -803,12 +803,15 @@ assert(!/className: 'recursion-mini-button'[^)\n]*text:/.test(recursionUi), 'pro
 assert(/title:\s*label/.test(recursionUi) && /'aria-label':\s*label/.test(recursionUi), 'production Card System icon buttons expose hover text and accessible labels');
 assert(/\.recursion-mini-button\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?background:\s*color-mix\(in srgb, var\(--SmartThemeBodyColor/.test(recursionCss), 'production Card System mini buttons use graphite Recursion skin instead of native white buttons');
 assert(/recursionCardDeckDuplicate:[\s\S]*recursionCardDeckEdit:[\s\S]*recursionCardDeckDelete:/.test(recursionUi), 'production Card Deck edit action sits with duplicate and delete deck controls');
-assert(!/recursion-card-deck-tools'[\s\S]*?cardSystemIconButton\('pencil'/.test(recursionUi), 'production Card Deck edit action is not duplicated into card/category tools');
+assert(/recursion-card-deck-tools'[\s\S]*?recursionCardNew:[\s\S]*?recursionCardCategoryNew:[\s\S]*?recursion-card-move-cancel-slot/.test(recursionUi), 'production card/category tools row contains add-card, add-category, and move-cancel controls');
 assert(/CARD_LONG_PRESS_MS/.test(recursionUi), 'production Card System defines explicit long-press threshold');
 assert(/pointermove/.test(recursionUi) && /CARD_LONG_PRESS_MOVE_PX/.test(recursionUi), 'production Card System cancels long-press when mobile scroll movement starts');
 assert(/recursionCardToggleRow/.test(recursionUi), 'production Card row tap toggles active state instead of opening edit');
 assert(/status\.runnable \|\| status\.reason === 'disabled'/.test(recursionUi), 'production Card row tap can re-enable inactive runnable cards');
 assert(!/dataset:\s*\{\s*recursionCardEdit:\s*card\.id\s*\}/.test(recursionUi), 'production Card row main button no longer opens edit on tap');
+assert(/cardSystemIconButton\('pencil',\s*'Edit category'[\s\S]*recursionCardCategoryEdit:\s*category\.id/.test(recursionUi), 'production Card System renders visible category edit icons');
+assert(/cardSystemIconButton\('pencil',\s*'Edit card'[\s\S]*recursionCardEdit:\s*card\.id/.test(recursionUi), 'production Card System renders visible card edit icons');
+assert(/const cardEdit = control\('recursionCardEdit'\)[\s\S]*editCard\(/.test(recursionUi), 'production Card System wires visible card edit icons to the inline card editor');
 assert(/function renderCardEditorInline/.test(recursionUi), 'production Card System renders card editor inline at the card row');
 assert(/function renderCategoryEditorInline/.test(recursionUi), 'production Card System renders category editor inline under the category header');
 assert(/recursionCategoryEditorSave/.test(recursionUi), 'production Category editor has icon-only save action');

@@ -2201,6 +2201,7 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
       actionSlot('recursion-card-move-target-slot', [
         slotButton('move-here', 'Move selected card here', { recursionCardMoveTarget: category.id }, { visible: moveState?.deckId === activeDeck.id && Boolean(moveState.cardId) })
       ]),
+      cardSystemIconButton('pencil', 'Edit category', { recursionCardCategoryEdit: category.id }),
       cardSystemIconButton('chevron-up', 'Move category up', { recursionCardCategoryMoveUp: category.id }),
       cardSystemIconButton('chevron-down', 'Move category down', { recursionCardCategoryMoveDown: category.id }),
       deleteActionSlot('category', category.id, categoryDeletePending)
@@ -2221,6 +2222,7 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
       const cardDeletePending = deleteConfirmFor(deleteState, 'card', activeDeck.id, card.id);
       const activeClass = card.enabled === false ? 'is-inactive' : 'is-active';
       const cardActions = !activeDeck.readonly ? [
+        cardSystemIconButton('pencil', 'Edit card', { recursionCardEdit: card.id }),
         cardSystemIconButton('copy', 'Duplicate card', { recursionCardDuplicate: card.id }),
         cardSystemIconButton('move', moveState?.cardId === card.id ? 'Moving card' : 'Move card', { recursionCardMove: card.id }, { active: moveState?.cardId === card.id, pressed: moveState?.cardId === card.id }),
         deleteActionSlot('card', card.id, cardDeletePending)
@@ -4218,7 +4220,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     applyCardDeckSettings(upsertCustomCardDeck(currentView().settings, { ...deck, name: nextName, updatedAt: nowIso() }));
   }
 
-  function editCardPrompt(deck, cardId) {
+  function editCard(deck, cardId) {
     if (deck?.readonly) {
       cardScopeNotice = 'Default is read-only. Duplicate it or create a new deck to edit cards.';
       renderCardsPanelForView(currentView());
@@ -4226,24 +4228,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     const card = asObject(deck.cards)[cardId];
     if (!card) return;
-    const nextName = cleanText(globalThis.prompt?.('Card name', card.name), card.name || NEW_CARD_NAME);
-    const nextPrompt = cleanText(globalThis.prompt?.('Card prompt', card.promptText), card.promptText || '');
-    const nextDescription = cleanText(globalThis.prompt?.('Card description', card.description), card.description || '');
-    const nextDeck = {
-      ...deck,
-      cards: {
-        ...deck.cards,
-        [card.id]: {
-          ...card,
-          name: nextName,
-          promptText: nextPrompt,
-          description: nextDescription,
-          updatedAt: nowIso()
-        }
-      },
-      updatedAt: nowIso()
-    };
-    applyCardDeckSettings(upsertCustomCardDeck(currentView().settings, nextDeck));
+    cardEditorState = { deckId: deck.id, cardId: card.id, draft: card, accept: { name: true, description: true, promptText: true } };
+    categoryEditorState = null;
+    cardMoveState = null;
+    cardScopeNotice = '';
+    renderCardsPanelForView(currentView());
   }
 
   function readCardEditorDraft() {
@@ -4304,12 +4293,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (deck?.readonly) return;
     const category = asObject(deck.categories)[categoryId];
     if (!category) return;
-    const nextName = cleanText(globalThis.prompt?.('Category name', category.name), category.name);
-    const nextDescription = cleanText(globalThis.prompt?.('Category description', category.description), category.description || '');
-    applyCardDeckSettings(upsertCustomCardDeck(currentView().settings, updateCategory(deck, categoryId, {
-      name: nextName,
-      description: nextDescription
-    })), 'Category saved.');
+    cardEditorState = null;
+    categoryEditorState = { deckId: deck.id, categoryId: category.id, draft: category };
+    cardMoveState = null;
+    cardScopeNotice = '';
+    renderCardsPanelForView(currentView());
   }
 
   function moveCategoryByOffset(deck, categoryId, offset) {
@@ -4814,6 +4802,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       panelRerenderClickEvents?.add(event);
       consumeClickEvent(event);
       editCategory(getActiveCardDeck(currentView().settings), categoryEdit.dataset.recursionCardCategoryEdit);
+    }
+    const cardEdit = control('recursionCardEdit');
+    if (cardEdit) {
+      panelRerenderClickEvents?.add(event);
+      consumeClickEvent(event);
+      editCard(getActiveCardDeck(currentView().settings), cardEdit.dataset.recursionCardEdit);
     }
     const categoryDeleteArm = control('recursionCardCategoryDeleteArm');
     if (categoryDeleteArm) {

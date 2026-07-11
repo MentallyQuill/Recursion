@@ -601,6 +601,7 @@ const uiSpec = readFileSync(new URL('../../docs/design/UI_SPEC.md', import.meta.
 const recursionCss = readFileSync(new URL('../../styles/recursion.css', import.meta.url), 'utf8');
 assert(recursionCss.includes('recursion-enhancement-capture-active'), 'enhancement capture CSS hides the class toggled by the extension');
 const recursionUi = readFileSync(new URL('../../src/ui.mjs', import.meta.url), 'utf8');
+const cardSystemUiProof = readFileSync(new URL('./prove-card-system-ui.mjs', import.meta.url), 'utf8');
 const regenerateIconPath = new URL('../../assets/icons/regenerate.svg', import.meta.url);
 for (const section of [
   '/* Recursion root and compact bar */',
@@ -804,12 +805,12 @@ assert(/deckDeleteConfirmState = \{ deckId:[\s\S]*?value: '' \}/.test(recursionU
 assert(!/applyCardDeckSettings\(deleteCustomCardDeck\(currentView\(\)\.settings, deckDelete\.dataset\.recursionCardDeckDelete\), 'Card Deck deleted\.'\);/.test(recursionUi), 'production Card Deck delete trash does not immediately delete the deck');
 assert(/\.recursion-card-deck-delete-confirm\s*\{[\s\S]*?display:\s*flex;/.test(recursionCss), 'production Card Deck delete confirmation has compact inline styling');
 assert(/recursionCardCategoryNew/.test(recursionUi), 'production Card System exposes add-category control');
-assert(/recursionCardCategoryMoveUp/.test(recursionUi) && /recursionCardCategoryMoveDown/.test(recursionUi), 'production Card System exposes category reorder controls');
+assert(!/recursionCardCategoryMoveUp/.test(recursionUi) && !/recursionCardCategoryMoveDown/.test(recursionUi), 'production Card System removes category up/down reorder buttons');
 assert(/recursionCardDuplicate/.test(recursionUi) && /recursionCardDeleteArm/.test(recursionUi), 'production Card System exposes card duplicate/delete-arm controls');
-assert(/recursionCardMove/.test(recursionUi) && /moveCard\(/.test(recursionUi), 'production Card System exposes card move control');
-assert(/recursionCardMoveTarget/.test(recursionUi) && /recursionCardMoveCancel/.test(recursionUi), 'production Card System exposes explicit move-mode target and cancel controls');
-assert(/const movingCard = moveState\?\.cardId \? asObject\(activeDeck\.cards\)\[moveState\.cardId\] : null;/.test(recursionUi), 'production Card System resolves the currently moving card before rendering move targets');
-assert(/visible:\s*moveState\?\.deckId === activeDeck\.id && Boolean\(moveState\.cardId\) && movingCard\?\.categoryId !== category\.id/.test(recursionUi), 'production Card System hides move target for the card current category');
+assert(/recursionCardDragHandle/.test(recursionUi) && /recursionCardDragId/.test(recursionUi), 'production Card System renders drag handles for deck organization');
+assert(!/recursionCardMove/.test(recursionUi), 'production Card System removes explicit card move-mode controls');
+assert(!/recursionCardMoveTarget/.test(recursionUi) && !/recursionCardMoveCancel/.test(recursionUi), 'production Card System removes explicit move-mode target and cancel controls');
+assert(/moveCardToPosition/.test(recursionUi) && /moveCategoryToPosition/.test(recursionUi), 'production Card System commits drag drops through exact position helpers');
 assert(/let expandedCardCategoryKeys = new Set\(\)/.test(recursionUi), 'production Card System tracks category expansion as local UI state');
 assert(/function cardCategoryExpansionKey\(deckId, categoryId\)/.test(recursionUi), 'production Card System keys category expansion by deck and category');
 assert(/recursionCardCategoryToggle/.test(recursionUi) && /aria-expanded/.test(recursionUi), 'production Card System category headers are full-row disclosure toggles');
@@ -823,7 +824,8 @@ assert(!/className: 'recursion-mini-button'[^)\n]*text:/.test(recursionUi), 'pro
 assert(/title:\s*label/.test(recursionUi) && /'aria-label':\s*label/.test(recursionUi), 'production Card System icon buttons expose hover text and accessible labels');
 assert(/\.recursion-mini-button\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?background:\s*color-mix\(in srgb, var\(--SmartThemeBodyColor/.test(recursionCss), 'production Card System mini buttons use graphite Recursion skin instead of native white buttons');
 assert(/recursionCardDeckDuplicate:[\s\S]*recursionCardDeckEdit:[\s\S]*recursionCardDeckDelete:/.test(recursionUi), 'production Card Deck edit action sits with duplicate and delete deck controls');
-assert(/recursion-card-deck-tools'[\s\S]*?recursionCardNew:[\s\S]*?recursionCardCategoryNew:[\s\S]*?recursion-card-move-cancel-slot/.test(recursionUi), 'production card/category tools row contains add-card, add-category, and move-cancel controls');
+assert(/recursion-card-deck-tools'[\s\S]*?recursionCardNew:[\s\S]*?recursionCardCategoryNew:/.test(recursionUi), 'production card/category tools row contains add-card and add-category controls');
+assert(!/recursion-card-move-cancel-slot/.test(recursionUi), 'production card/category tools row removes move-cancel controls');
 assert(/CARD_LONG_PRESS_MS/.test(recursionUi), 'production Card System defines explicit long-press threshold');
 assert(/pointermove/.test(recursionUi) && /CARD_LONG_PRESS_MOVE_PX/.test(recursionUi), 'production Card System cancels long-press when mobile scroll movement starts');
 assert(/recursionCardToggleRow/.test(recursionUi), 'production Card row tap toggles active state instead of opening edit');
@@ -841,6 +843,7 @@ assert(/const cardEdit = control\('recursionCardEdit'\)[\s\S]*editCard\(/.test(r
 assert(/function renderCardEditorInline/.test(recursionUi), 'production Card System renders card editor inline at the card row');
 assert(/function renderCategoryEditorInline/.test(recursionUi), 'production Card System renders category editor inline under the category header');
 assert(/recursion-card-editor-preview-instruction[\s\S]*?Checked fields replace the current card/.test(recursionUi), 'production Card wand preview explains that checked fields will replace current card content');
+assert(/installCardSystemUiProofStubs/.test(cardSystemUiProof) && /recommendCardDraft\s*=\s*async/.test(cardSystemUiProof), 'Card System UI live proof stubs card authoring assist instead of making real provider calls');
 assert(/className:\s*'recursion-card-preview-checkbox'[\s\S]*recursionCardPreviewName/.test(recursionUi), 'production Card wand preview uses Recursion-styled checkboxes for name suggestions');
 assert(/className:\s*'recursion-card-preview-checkbox'[\s\S]*recursionCardPreviewDescription/.test(recursionUi), 'production Card wand preview uses Recursion-styled checkboxes for description suggestions');
 assert(/className:\s*'recursion-card-preview-checkbox'[\s\S]*recursionCardPreviewPrompt/.test(recursionUi), 'production Card wand preview uses Recursion-styled checkboxes for prompt suggestions');
@@ -851,15 +854,16 @@ assert(/recursionCategoryEditorSave/.test(recursionUi), 'production Category edi
 assert(/recursion-category-editor-inline/.test(recursionCss), 'production Category inline editor has compact graphite styling');
 assert(/recursion-card-deck-category-actions/.test(recursionCss), 'production Category actions are grouped to prevent mobile arrow wrapping');
 assert(/recursion-card-deck-category-copy/.test(recursionCss), 'production Category copy and actions use separate layout areas');
-assert(/--recursion-card-action-rail-width:\s*108px;/.test(recursionCss), 'production Card System defines a shared action rail width for card and category rows');
+assert(/--recursion-card-action-rail-width:\s*116px;/.test(recursionCss), 'production Card System defines a shared action rail width for card and category rows');
+assert(/\.recursion-card-delete-slot \+ \.recursion-card-drag-handle\s*\{[\s\S]*?margin-left:\s*8px;/.test(recursionCss), 'production Card System separates delete buttons from drag handles');
 assert(/\.recursion-card-deck-category-head\s*\{[\s\S]*?cursor:\s*pointer;[\s\S]*?grid-template-columns:\s*24px minmax\(0,\s*1fr\) var\(--recursion-card-action-rail-width\);/.test(recursionCss), 'production Category headers expose a full-row disclosure target with a left arrow column');
 assert(/\.recursion-card-deck-category-arrow\s*\{[\s\S]*?height:\s*22px;[\s\S]*?width:\s*22px;/.test(recursionCss), 'production Category disclosure arrows are larger than mini row actions');
 assert(/\.recursion-card-deck-card\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) var\(--recursion-card-action-rail-width\);/.test(recursionCss), 'production Card rows align actions to the same rail as category rows');
 assert(/viewBox:\s*'0 0 24 24'[\s\S]*recursionEditIcon:\s*''[\s\S]*M21\.2799 6\.40005L11\.7399 15\.94/.test(recursionUi), 'production Card System uses the supplied stroked SVG Repo edit icon for edit actions');
 assert(/svg\[data-recursion-edit-icon\],[\s\S]*?svg\[data-recursion-wand-icon\]\s*\{[\s\S]*?height:\s*13px;[\s\S]*?opacity:\s*\.82;[\s\S]*?width:\s*13px;/.test(recursionCss), 'production Card System normalizes supplied edit and wand SVG size and color weight');
 assert(/viewBox:\s*'0 0 24 24'[\s\S]*recursionWandIcon:\s*''[\s\S]*M4\.9996 7V11M9\.9996 2V6/.test(recursionUi), 'production Card System uses the supplied SVG Repo wand icon for card suggestions');
-assert(/recursion-card-action-slot/.test(recursionCss), 'production Card System reserves fixed action slots for transient move/delete states');
-assert(/recursion-card-delete-slot/.test(recursionCss) && /recursion-card-move-target-slot/.test(recursionCss), 'production Card System has stable delete and move target action slots');
+assert(/recursion-card-action-slot/.test(recursionCss), 'production Card System reserves fixed action slots for transient delete states');
+assert(/recursion-card-delete-slot/.test(recursionCss) && /recursion-card-drag-handle/.test(recursionCss), 'production Card System has stable delete slots and drag handles');
 assert(/actionSlot\(`recursion-card-delete-slot \$\{pending \? 'is-delete-pending' : ''\}`/.test(recursionUi), 'production Card System marks delete slots as pending only during delete confirmation');
 assert(/\.recursion-card-delete-slot\s*\{[\s\S]*?flex-basis:\s*24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production Card System delete slot is compact when it only shows the trash action');
 assert(/\.recursion-card-delete-slot\.is-delete-pending\s*\{[\s\S]*?flex-basis:\s*52px;[\s\S]*?width:\s*52px;/.test(recursionCss), 'production Card System delete slot expands only for confirm/cancel actions');
@@ -882,7 +886,8 @@ assert(/\.recursion-card-deck-card\.is-active \.recursion-card-deck-card-status\
 assert(/svg\[data-recursion-card-state-icon="eye-priority"\]\s*\{[\s\S]*?transform:\s*translateY\(1px\);/.test(recursionCss), 'production Card System nudges the priority eye down to align with active and inactive eyes');
 assert(!/className:\s*'recursion-card-scope-notice'/.test(recursionUi), 'production Cards dropdown does not render transient local notice rows');
 assert(/showCardSystemStatus/.test(recursionUi), 'production Card System routes action feedback through the main bar status area');
-assert(/cardEditorState \|\| categoryEditorState \|\| cardMoveState \|\| cardDeleteConfirmState/.test(recursionUi), 'production Escape handling clears Card System editor, move, or pending delete state before closing the panel');
+assert(/if \(cardDragState\) \{[\s\S]*?cancelCardDrag\(\)/.test(recursionUi), 'production Escape handling cancels active Card System drags before closing the panel');
+assert(/cardEditorState \|\| categoryEditorState \|\| cardDeleteConfirmState \|\| deckDeleteConfirmState/.test(recursionUi), 'production Escape handling clears Card System editor or pending delete state before closing the panel');
 assert(/\.recursion-cards-all-button\s*\{[\s\S]*?font-size:\s*10px;[\s\S]*?min-height:\s*20px;/.test(recursionCss), 'production Cards All action uses compact SillyTavern-native button sizing');
 assert(/\.recursion-activity-trigger\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0;/.test(recursionCss), 'production activity trigger keeps reference spacing around pixel blocks');
 assert(/\.recursion-hero-pixel-array\s*\{[\s\S]*?width:\s*max\(0px,/.test(recursionCss), 'production Hero Pixel Array uses column-based width animation');

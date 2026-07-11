@@ -297,6 +297,18 @@ Card state icons use the supplied eye family: slashed eye for Inactive, open eye
 
 Priority overflow is allowed. If the user marks more Priority cards than the effective `Max Cards` budget, Recursion uses deck category/card order, selects the top cards, records `priority-card-cap`, and omits the rest with `priority-over-max-cards`.
 
+## Card Deck Organization
+
+Editable Card Deck organization is direct manipulation. Category rows and card rows use compact grip handles instead of up/down buttons or a separate move mode.
+
+- Category handles reorder categories by writing `categoryOrder`.
+- Card handles reorder within a category or move a card to another category by writing `cardOrderByCategory` and the card's `categoryId`.
+- Dropping a card onto a category header appends it to that category.
+- The bundled Default deck is read-only and does not render organization handles.
+- Category expand/collapse and card state cycling remain row interactions; dragging starts only from the grip handle.
+
+Organization changes affect deck order and runtime selection priority, but they do not create a second visible runtime scope selector. Runtime scope derives from the active deck's card states and order.
+
 ## Invalidation/Refresh Rules
 
 Runtime should distinguish hard invalidation from refresh requests.
@@ -353,7 +365,7 @@ V1 should explicitly exclude:
 - large prompt-chain authoring UI;
 - card marketplaces, plugins, or family packs;
 - automatic permanent pinning;
-- complex manual deck management;
+- complex deck marketplaces or external pack management;
 - broad character database extraction.
 
 The first version should prove the core loop: generate small scene-local cards, let the Utility Arbiter manage utility decisions from a fixed catalog, select a compact turn hand, and feed prompt composition without turning cards into memories.

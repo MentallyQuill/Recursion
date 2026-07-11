@@ -20,6 +20,8 @@ import {
   deckPriorityCardIds,
   deckPriorityFamilies,
   moveCard,
+  moveCardToPosition,
+  moveCategoryToPosition,
   normalizeCardDeckSettings,
   normalizeCustomDeck,
   nextCardSelectionState,
@@ -184,6 +186,8 @@ assertEqual(withCategory.categoryOrder.at(-1), pressureCategory.id, 'created cat
 const firstExistingCategoryId = withCategory.categoryOrder.find((id) => id !== pressureCategory.id);
 const reorderedCategories = reorderCategories(withCategory, pressureCategory.id, firstExistingCategoryId);
 assertEqual(reorderedCategories.categoryOrder[0], pressureCategory.id, 'category reorder moves category before target');
+const positionedCategoryDeck = moveCategoryToPosition(reorderedCategories, firstExistingCategoryId, '');
+assertEqual(positionedCategoryDeck.categoryOrder.at(-1), firstExistingCategoryId, 'category drag helper appends when no before target is supplied');
 
 const duplicatedCardDeck = duplicateCard(reorderedCategories, draftCard.id);
 const duplicatedCard = Object.values(duplicatedCardDeck.cards).find((card) => card.id !== draftCard.id && card.name.startsWith(NEW_CARD_NAME));
@@ -193,6 +197,13 @@ assert(duplicatedCardDeck.cardOrderByCategory[draftCard.categoryId].includes(dup
 const movedCardDeck = moveCard(duplicatedCardDeck, duplicatedCard.id, pressureCategory.id, 0);
 assertEqual(movedCardDeck.cards[duplicatedCard.id].categoryId, pressureCategory.id, 'card move updates category id');
 assertEqual(movedCardDeck.cardOrderByCategory[pressureCategory.id][0], duplicatedCard.id, 'card move inserts at requested category position');
+const dragMovedCardDeck = moveCardToPosition(duplicatedCardDeck, duplicatedCard.id, pressureCategory.id, '');
+assertEqual(dragMovedCardDeck.cards[duplicatedCard.id].categoryId, pressureCategory.id, 'card drag helper updates target category id');
+assertEqual(dragMovedCardDeck.cardOrderByCategory[pressureCategory.id].at(-1), duplicatedCard.id, 'card drag helper appends to target category header');
+assert(!dragMovedCardDeck.cardOrderByCategory[draftCard.categoryId].includes(duplicatedCard.id), 'card drag helper removes card from source category order');
+const beforeDraftCardDeck = moveCardToPosition(dragMovedCardDeck, duplicatedCard.id, draftCard.categoryId, draftCard.id);
+const beforeDraftOrder = beforeDraftCardDeck.cardOrderByCategory[draftCard.categoryId];
+assertEqual(beforeDraftOrder.indexOf(duplicatedCard.id), beforeDraftOrder.indexOf(draftCard.id) - 1, 'card drag helper inserts before target card in destination category');
 
 const reorderedCardsDeck = reorderCards(movedCardDeck, draftCard.categoryId, [draftCard.id]);
 assertEqual(reorderedCardsDeck.cardOrderByCategory[draftCard.categoryId][0], draftCard.id, 'card reorder moves explicit card first');

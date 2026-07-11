@@ -120,6 +120,8 @@ The Cards dropdown represents those states with the supplied eye icons: slashed 
 
 If Priority exceeds `Max Cards`, runtime keeps the top ordered Priority cards, does not backfill with lower Active cards, records `priority-card-cap`, and marks over-cap omissions as `priority-over-max-cards`.
 
+Card Deck organization is stored directly on the active deck. Category drag handles update `categoryOrder`; card drag handles update `cardOrderByCategory` and, for cross-category drops, the card's `categoryId`. There is no second visible Card Scope selector under Card Decks. Runtime scope derives from the active deck's `off`, `active`, and `priority` states, with category/card order used for Priority ordering and deterministic hand selection.
+
 ```mermaid
 flowchart LR
     Snapshot["Turn snapshot"] --> Arbiter["Utility Arbiter"]

@@ -101,8 +101,58 @@ async function openCards(page, timeoutMs) {
   await page.waitForFunction(() => document.querySelector('[data-recursion-cards-panel]')?.hidden === false, null, { timeout: timeoutMs });
 }
 
+async function installCardSystemUiProofStubs(page, timeoutMs) {
+  await page.waitForFunction(() => Boolean(globalThis.__recursionLiveHarnessRuntime), null, { timeout: timeoutMs });
+  await page.evaluate(() => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    if (!runtime || runtime.__recursionCardSystemUiProofStubsInstalled) return;
+    runtime.recommendCardDraft = async (draft = {}) => ({
+      ok: true,
+      suggestion: {
+        name: draft.name && draft.name !== 'New Card' ? `${draft.name} Pressure` : 'Scene Boundary Pressure',
+        description: 'Keeps the immediate boundary actionable only when it changes the next beat.',
+        promptText: 'If the current boundary or pending interruption would alter the next character action, make that pressure visible; otherwise omit it.'
+      }
+    });
+    runtime.__recursionCardSystemUiProofStubsInstalled = true;
+  });
+}
+
+async function dragCenterToCenter(page, sourceSelector, targetSelector, timeoutMs) {
+  const source = page.locator(sourceSelector).first();
+  const target = page.locator(targetSelector).first();
+  await source.waitFor({ timeout: timeoutMs });
+  await target.waitFor({ timeout: timeoutMs });
+  await source.scrollIntoViewIfNeeded({ timeout: timeoutMs });
+  await target.scrollIntoViewIfNeeded({ timeout: timeoutMs });
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error(`Could not measure drag boxes for ${sourceSelector} -> ${targetSelector}`);
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 12 });
+  await page.mouse.up();
+}
+
+async function dragCenterToTopEdge(page, sourceSelector, targetSelector, timeoutMs) {
+  const source = page.locator(sourceSelector).first();
+  const target = page.locator(targetSelector).first();
+  await source.waitFor({ timeout: timeoutMs });
+  await target.waitFor({ timeout: timeoutMs });
+  await source.scrollIntoViewIfNeeded({ timeout: timeoutMs });
+  await target.scrollIntoViewIfNeeded({ timeout: timeoutMs });
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error(`Could not measure drag boxes for ${sourceSelector} -> ${targetSelector}`);
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 4, { steps: 12 });
+  await page.mouse.up();
+}
+
 async function runCardSystemScenario(page, report, timeoutMs) {
   const cardName = `Scene Boundary ${report.runId.slice(-6)}`;
+  await installCardSystemUiProofStubs(page, timeoutMs);
   await openCards(page, timeoutMs);
   await page.evaluate(() => {
     const select = document.querySelector('[data-recursion-card-deck-select]');
@@ -232,7 +282,10 @@ async function runCardSystemScenario(page, report, timeoutMs) {
       editableControls: Boolean(document.querySelector('[data-recursion-card-category-new]'))
         && Boolean(document.querySelector('[data-recursion-card-duplicate]'))
         && Boolean(document.querySelector('[data-recursion-card-delete-arm]'))
-        && Boolean(document.querySelector('[data-recursion-card-move]'))
+        && Boolean(document.querySelector('[data-recursion-card-drag-handle="card"]'))
+        && Boolean(document.querySelector('[data-recursion-card-drag-handle="category"]'))
+        && !Boolean(document.querySelector('[data-recursion-card-move]'))
+        && !Boolean(document.querySelector('[data-recursion-card-move-target]'))
     };
   }, cardName);
   if (!custom.activeDeckId || custom.categoryCount < 1 || !custom.hasSceneBoundary || !custom.editableControls) {
@@ -314,21 +367,59 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   }, createdCardId, { timeout: timeoutMs });
   addCheck(report, 'card-row-state', 'pass', 'Card row and deck bulk actions use eye-state icons for Active, Priority, and Inactive.', await cardSystemState(page));
 
-  await page.locator(`${rowSelector} [data-recursion-card-move]`).click({ timeout: timeoutMs });
-  const moveTargetState = await page.evaluate((cardId) => {
-    const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
-    const currentCategory = row?.closest('[data-recursion-card-deck-category]');
+  const dragSetup = await page.evaluate((cardId) => {
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const categories = Array.from(document.querySelectorAll('[data-recursion-card-deck-category]'));
+    const sourceRow = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
+    const sourceCategory = sourceRow?.closest('[data-recursion-card-deck-category]');
+    const targetCategory = categories.find((category) => category !== sourceCategory);
     return {
-      sameCategoryHasMoveTarget: Boolean(currentCategory?.querySelector('[data-recursion-card-move-target]:not([disabled])')),
-      otherCategoryMoveTargets: Array.from(document.querySelectorAll('[data-recursion-card-deck-category]'))
-        .filter((category) => category !== currentCategory)
-        .filter((category) => category.querySelector('[data-recursion-card-move-target]:not([disabled])')).length
+      sourceCategoryId: sourceCategory?.getAttribute('data-recursion-card-deck-category') || '',
+      targetCategoryId: targetCategory?.getAttribute('data-recursion-card-deck-category') || '',
+      firstCategoryId: deck?.categoryOrder?.[0] || '',
+      secondCategoryId: deck?.categoryOrder?.[1] || '',
+      hasOldMoveControls: Boolean(document.querySelector('[data-recursion-card-move]')) || Boolean(document.querySelector('[data-recursion-card-move-target]'))
     };
   }, createdCardId);
-  if (moveTargetState.sameCategoryHasMoveTarget || moveTargetState.otherCategoryMoveTargets < 1) {
-    fail(report, 'card-move-targets', 'Card move targets included the current category or omitted other categories.', moveTargetState);
+  if (!dragSetup.sourceCategoryId || !dragSetup.targetCategoryId || dragSetup.hasOldMoveControls) {
+    fail(report, 'card-drag-handles', 'Card drag handles did not replace old move-mode controls.', dragSetup);
   }
-  await page.locator(`${rowSelector} [data-recursion-card-move]`).click({ timeout: timeoutMs });
+  await dragCenterToCenter(
+    page,
+    `[data-recursion-card-id="${createdCardId}"] [data-recursion-card-drag-handle="card"]`,
+    `[data-recursion-card-deck-category="${dragSetup.targetCategoryId}"]`,
+    timeoutMs
+  );
+  await page.waitForFunction(({ cardId, targetCategoryId }) => {
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    return deck?.cards?.[cardId]?.categoryId === targetCategoryId
+      && deck?.cardOrderByCategory?.[targetCategoryId]?.includes(cardId);
+  }, { cardId: createdCardId, targetCategoryId: dragSetup.targetCategoryId }, { timeout: timeoutMs });
+  await dragCenterToTopEdge(
+    page,
+    `[data-recursion-card-deck-category="${dragSetup.secondCategoryId}"] [data-recursion-card-drag-handle="category"]`,
+    `[data-recursion-card-deck-category="${dragSetup.firstCategoryId}"] .recursion-card-deck-category-head`,
+    timeoutMs
+  );
+  await page.waitForFunction((categoryId) => {
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    return deck?.categoryOrder?.[0] === categoryId;
+  }, dragSetup.secondCategoryId, { timeout: timeoutMs });
+  addCheck(report, 'card-drag-handles', 'pass', 'Card and category drag handles replaced move mode and persisted deck order changes.', await cardSystemState(page));
+  const cardCategoryAfterDrag = await page.evaluate((cardId) => {
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    return deck?.cards?.[cardId]?.categoryId || '';
+  }, createdCardId);
+  if (cardCategoryAfterDrag) {
+    const toggle = page.locator(`[data-recursion-card-deck-category="${cardCategoryAfterDrag}"] [data-recursion-card-category-toggle]`).first();
+    const expanded = await toggle.getAttribute('aria-expanded', { timeout: timeoutMs }).catch(() => '');
+    if (expanded !== 'true') await toggle.click({ timeout: timeoutMs });
+    await page.waitForSelector(rowSelector, { timeout: timeoutMs });
+  }
 
   await page.locator(`${rowSelector} [data-recursion-card-delete-arm]`).click({ timeout: timeoutMs });
   await page.waitForSelector(`${rowSelector}.is-delete-pending [data-recursion-card-delete-confirm]`, { timeout: timeoutMs });

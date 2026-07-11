@@ -1350,12 +1350,6 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   left: 28px;
 }
 
-.recursion-card-move-target-slot,
-.recursion-card-move-cancel-slot {
-  flex-basis: 24px;
-  width: 24px;
-}
-
 .recursion-button:hover,
 .recursion-button:focus-visible,
 .recursion-hand-row:hover,
@@ -1569,7 +1563,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-card-deck-category {
-  --recursion-card-action-rail-width: 108px;
+  --recursion-card-action-rail-width: 116px;
   border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 6%, transparent);
   display: grid;
   gap: 4px;
@@ -1641,7 +1635,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 }
 
 .recursion-card-deck-card {
-  --recursion-card-action-rail-width: 108px;
+  --recursion-card-action-rail-width: 116px;
   align-items: center;
   background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 3%, transparent);
   border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 8%, transparent);
@@ -1684,6 +1678,53 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   gap: 4px;
   justify-content: end;
   width: var(--recursion-card-action-rail-width);
+}
+
+.recursion-card-drag-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.recursion-card-delete-slot + .recursion-card-drag-handle {
+  margin-left: 8px;
+}
+
+.recursion-card-drag-handle:active,
+.recursion-card-drag-handle[aria-pressed="true"] {
+  cursor: grabbing;
+}
+
+.recursion-card-drag-ghost {
+  background: color-mix(in srgb, var(--recursion-panel) 92%, #000);
+  border: 1px solid color-mix(in srgb, var(--recursion-accent) 42%, transparent);
+  border-radius: 5px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, .34);
+  left: 0;
+  max-width: min(360px, 82vw);
+  opacity: .92;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  width: max-content;
+  z-index: 120;
+}
+
+.recursion-card-deck-card.is-dragging,
+.recursion-card-deck-category.is-dragging > .recursion-card-deck-category-head {
+  opacity: .48;
+}
+
+.recursion-card-drop-line {
+  background: color-mix(in srgb, var(--recursion-accent) 72%, transparent);
+  border-radius: 999px;
+  display: block;
+  height: 2px;
+  margin: 2px 0;
+}
+
+.recursion-card-deck-category.is-drop-target {
+  outline: 1px solid color-mix(in srgb, var(--recursion-accent) 30%, transparent);
+  outline-offset: -1px;
 }
 
 .recursion-card-deck-card-name {
@@ -1872,13 +1913,6 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 
 .recursion-card-scope-notice[hidden] {
   display: none;
-}
-
-.recursion-card-scope-notice[data-recursion-card-move-mode] {
-  align-items: center;
-  display: flex;
-  gap: 6px;
-  justify-content: space-between;
 }
 
 .recursion-dropdown-title {

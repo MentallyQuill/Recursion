@@ -523,6 +523,10 @@ export function reorderCategories(deck, movingCategoryId, beforeCategoryId = '')
   return normalizeCustomDeck({ ...normalized, categoryOrder: order, updatedAt: nowIso() }, normalized.id);
 }
 
+export function moveCategoryToPosition(deck, categoryId, beforeCategoryId = '') {
+  return reorderCategories(deck, categoryId, beforeCategoryId);
+}
+
 export function deleteCategory(deck, categoryId) {
   const normalized = normalizeCustomDeck(deck, deck?.id) || deck;
   const id = normalizeId(categoryId);
@@ -671,6 +675,21 @@ export function moveCard(deck, cardId, targetCategoryId, targetIndex = Infinity)
   nextOrder.splice(insertAt, 0, id);
   cardOrderByCategory[target] = nextOrder;
   return normalizeCustomDeck({ ...normalized, cards, cardOrderByCategory, updatedAt: now }, normalized.id);
+}
+
+export function moveCardToPosition(deck, cardId, targetCategoryId, beforeCardId = '') {
+  const normalized = normalizeCustomDeck(deck, deck?.id) || deck;
+  const id = normalizeId(cardId);
+  const target = normalizeId(targetCategoryId);
+  const before = normalizeId(beforeCardId);
+  const card = normalized.cards?.[id];
+  if (!card || !normalized.categories?.[target]) return normalized;
+
+  const targetOrderWithoutMoving = (normalized.cardOrderByCategory?.[target] || []).filter((entry) => entry !== id);
+  const index = before && targetOrderWithoutMoving.includes(before)
+    ? targetOrderWithoutMoving.indexOf(before)
+    : targetOrderWithoutMoving.length;
+  return moveCard(normalized, id, target, index);
 }
 
 export function reorderCards(deck, categoryId, orderedCardIds = []) {

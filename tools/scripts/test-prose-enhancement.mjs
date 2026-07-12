@@ -39,8 +39,8 @@ assert(request.prompt.includes('* controlled chaos'), 'prompt includes the final
 assert(request.prompt.includes('<recursion_card_context>'), 'prose prompt includes card context section');
 assert(request.prompt.includes('Mara hides concern behind motion.'), 'prose prompt includes safe card context text');
 assert(request.prompt.includes(sourceText), 'prompt includes source text');
-assert(request.prompt.includes('Minimum edit ratio: 10%'), 'prose prompt states minimum edit ratio');
-assert(request.prompt.includes('Target edit ratio: 10-20%'), 'prose prompt states target edit ratio band');
+assert(request.prompt.includes('Make meaningful, minimal changes when a safe improvement exists.'), 'prose prompt permits safe minimal changes');
+assert(request.prompt.includes('return the source unchanged'), 'prose prompt permits an explicit no-safe-change result');
 assert(request.prompt.includes('Soft maximum edit ratio: 30%'), 'prose prompt states soft maximum edit ratio');
 assert(
   buildProseEnhancementRequest({ text: 'O\'Neill said, "We come back with authorization and a plan."' }).prompt.includes('authorization and a plan'),
@@ -80,26 +80,22 @@ const rejectedNoopBannedPhrase = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,
   text: sourceText
 }, { originalText: sourceText });
-assertEqual(rejectedNoopBannedPhrase.ok, false, 'prose no-op is rejected when banned slop is detected');
-assertEqual(
-  rejectedNoopBannedPhrase.error.code,
-  'RECURSION_PROSE_NOOP_WITH_DETECTED_SLOP',
-  'prose no-op rejection uses stable code'
-);
+assertEqual(rejectedNoopBannedPhrase.ok, true, 'prose no-op with detected slop is a completed unchanged result');
+assertEqual(rejectedNoopBannedPhrase.outcome, 'unchanged', 'prose detected no-op reports unchanged outcome');
 
 const cleanProseNoop = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,
   text: 'Mara crossed the room. "Keep the door shut," she said.'
 }, { originalText: 'Mara crossed the room. "Keep the door shut," she said.' });
-assertEqual(cleanProseNoop.ok, false, 'prose no-op is rejected even when no deterministic slop is detected');
-assertEqual(cleanProseNoop.error.code, 'RECURSION_PROSE_EXACT_NOOP', 'clean prose no-op uses stable error code');
+assertEqual(cleanProseNoop.ok, true, 'clean prose no-op is valid');
+assertEqual(cleanProseNoop.outcome, 'unchanged', 'clean prose no-op reports unchanged outcome');
 
 const dialogueOnlySlopNoop = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,
   text: 'Mara kept her hand on the latch. "Do not get the wrong idea, this is purely tactical."'
 }, { originalText: 'Mara kept her hand on the latch. "Do not get the wrong idea, this is purely tactical."' });
-assertEqual(dialogueOnlySlopNoop.ok, false, 'prose pass rejects dialogue-only no-op after Dialogue pass');
-assertEqual(dialogueOnlySlopNoop.error.code, 'RECURSION_PROSE_EXACT_NOOP', 'dialogue-only prose no-op uses stable error code');
+assertEqual(dialogueOnlySlopNoop.ok, true, 'prose pass accepts dialogue-only no-op after Dialogue pass');
+assertEqual(dialogueOnlySlopNoop.outcome, 'unchanged', 'dialogue-only prose no-op reports unchanged outcome');
 
 const acceptedDialogueSlopCleanup = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,

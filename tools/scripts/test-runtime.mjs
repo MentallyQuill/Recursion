@@ -877,10 +877,39 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-prose-skipped-after-dialogue-noop' });
-  assertEqual(result.ok, false, 'Prose + Dialogue reports failed dialogue pass');
-  assertDeepEqual(roleCalls, ['dialogueEnhancer', 'dialogueEnhancer'], 'Prose pass is not called after dialogue no-op');
-  assertDeepEqual(result.passResults.map((entry) => entry.status), ['unchanged', 'not-run'], 'Enhancement reports skipped prose pass');
-  assertEqual(result.passResults[1].reasonCode, 'previous-pass-failed', 'Skipped prose reports dependency reason');
+  assertEqual(result.ok, true, 'Prose + Dialogue completes after dialogue no-op');
+  assertDeepEqual(roleCalls, ['dialogueEnhancer', 'proseEnhancer'], 'Prose pass runs after dialogue no-op');
+  assertDeepEqual(result.passResults.map((entry) => entry.status), ['unchanged', 'unchanged'], 'Enhancement reports both selected passes as unchanged');
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara set the cup down. "Sit down before you fall over."');
+  const roleCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'prose-dialogue', applyMode: 'replace', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId) {
+        roleCalls.push(roleId);
+        if (roleId === 'dialogueEnhancer') {
+          return { ok: false, error: { code: 'RECURSION_TEST_DIALOGUE_FAILED', message: 'dialogue unavailable' } };
+        }
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.proseEnhancer.v1',
+            text: 'Mara placed the cup down and kept her hand on it. "Sit down before you fall over."'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-failure-prose-continues' });
+  assertEqual(result.ok, true, 'Prose applies when Dialogue provider fails');
+  assertEqual(result.degraded, true, 'mixed pass result reports degraded status');
+  assertDeepEqual(roleCalls, ['dialogueEnhancer', 'proseEnhancer'], 'Prose runs after Dialogue provider failure');
+  assertDeepEqual(result.passResults.map((entry) => entry.status), ['provider-failed', 'applied'], 'mixed pass outcomes remain explicit');
+  assertEqual(proseHost.message.text, 'Mara placed the cup down and kept her hand on it. "Sit down before you fall over."', 'Prose receives the original safe text after Dialogue failure');
 }
 
 {
@@ -903,8 +932,8 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-noop-detected-slop' });
-  assertEqual(result.ok, false, 'detected dialogue slop exact no-op skips after retry');
-  assertEqual(result.error.code, 'RECURSION_DIALOGUE_EXACT_NOOP', 'dialogue exact no-op skip uses stable code');
+  assertEqual(result.ok, true, 'detected dialogue slop exact no-op completes after retry');
+  assertEqual(result.unchanged, true, 'detected dialogue slop exact no-op reports unchanged');
   assertEqual(routerCalls.length, 2, 'detected dialogue slop exact no-op retries once');
   assertEqual(proseHost.message.swipes.length, 1, 'failed dialogue no-op does not append enhanced swipe');
   assertEqual(proseHost.message.text, 'Mara set the cup down. "What do you want to do next?"', 'failed dialogue no-op keeps original text');
@@ -930,9 +959,9 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-clean-noop' });
-  assertEqual(result.ok, false, 'clean dialogue exact no-op skips after retry');
-  assertEqual(result.error.code, 'RECURSION_DIALOGUE_EXACT_NOOP', 'clean dialogue exact no-op uses stable skip code');
-  assertEqual(routerCalls.length, 2, 'clean dialogue exact no-op retries once');
+  assertEqual(result.ok, true, 'clean dialogue exact no-op completes without retry');
+  assertEqual(result.unchanged, true, 'clean dialogue exact no-op reports unchanged');
+  assertEqual(routerCalls.length, 1, 'clean dialogue exact no-op does not spend a retry');
   assertEqual(proseHost.message.swipes.length, 1, 'clean dialogue exact no-op does not append duplicate swipe');
 }
 
@@ -958,13 +987,10 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-clean-noop-retries' });
-  assertEqual(result.ok, true, 'Dialogue exact no-op retries and accepts revised candidate');
-  assertEqual(routerCalls.length, 2, 'Dialogue exact no-op performs one retry');
-  assert(routerCalls[1].request.prompt.includes('previous revision returned the original text'), 'retry prompt explains exact no-op problem');
-  assertEqual(proseHost.message.swipes[1], 'Mara set the cup down. "Sit. We can argue after."', 'retry candidate is appended');
-  assertEqual(result.passHashes[0].attempt, 2, 'retry candidate records attempt number');
-  assertEqual(result.passHashes[0].retryReason, 'exact-noop', 'retry candidate records retry reason');
-  assertEqual(typeof result.passHashes[0].dialogueEditRatio, 'number', 'retry candidate records dialogue edit ratio');
+  assertEqual(result.ok, true, 'clean dialogue no-op completes without forcing a revision');
+  assertEqual(result.unchanged, true, 'clean dialogue no-op reports unchanged');
+  assertEqual(routerCalls.length, 1, 'clean dialogue no-op does not retry');
+  assertEqual(proseHost.message.swipes.length, 1, 'clean dialogue no-op does not append a duplicate swipe');
 }
 
 {
@@ -987,9 +1013,9 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-exact-noop-skips-after-retry' });
-  assertEqual(result.ok, false, 'Dialogue exact no-op skips after retry');
-  assertEqual(result.error.code, 'RECURSION_DIALOGUE_EXACT_NOOP', 'exact no-op uses stable error code');
-  assertEqual(routerCalls.length, 2, 'Dialogue exact no-op retries only once');
+  assertEqual(result.ok, true, 'Dialogue exact no-op completes without retry');
+  assertEqual(result.unchanged, true, 'Dialogue exact no-op reports unchanged');
+  assertEqual(routerCalls.length, 1, 'Dialogue exact no-op does not retry without an identified issue');
   assertEqual(proseHost.message.swipes.length, 1, 'exact duplicate enhanced swipe is not appended');
 }
 
@@ -1055,7 +1081,7 @@ assertNotEqual(
   assertEqual(result.ok, true, 'Prose + Dialogue enhancement succeeds');
   assertEqual(result.target, 'prose-dialogue', 'Prose + Dialogue result reports target');
   assertDeepEqual(roleCalls, ['dialogueEnhancer', 'proseEnhancer'], 'Prose + Dialogue runs Dialogue before Prose');
-  assertDeepEqual(result.passResults.map((entry) => entry.status), ['success', 'success'], 'Prose + Dialogue reports pass outcomes');
+  assertDeepEqual(result.passResults.map((entry) => entry.status), ['applied', 'applied'], 'Prose + Dialogue reports pass outcomes');
   assertEqual(proseHost.message.text, 'Mara placed the cup on the table. "Sit down before you fall over. We can argue after."', 'Replace applies one final output');
   const replaceCall = proseHost.calls.find((call) => call.type === 'replace');
   assertEqual(typeof result.editRatio, 'number', 'Prose + Dialogue result reports final edit ratio');
@@ -1218,8 +1244,8 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-as-swipe-unchanged' });
-  assertEqual(result.ok, false, 'identical As Swipe prose enhancement fails after retry');
-  assertEqual(result.error.code, 'RECURSION_PROSE_EXACT_NOOP', 'identical As Swipe uses exact no-op error');
+  assertEqual(result.ok, true, 'identical As Swipe prose enhancement completes as unchanged');
+  assertEqual(result.unchanged, true, 'identical As Swipe reports unchanged');
   assertEqual(proseHost.calls.some((call) => call.type === 'append' && call.options.select === true), false, 'identical As Swipe does not append an unchanged swipe');
   assertEqual(proseHost.message.swipes.length, 1, 'identical As Swipe keeps only the original swipe');
   assertEqual(proseHost.message.swipeId, 0, 'identical As Swipe keeps the original selected');

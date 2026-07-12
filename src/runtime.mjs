@@ -3304,24 +3304,36 @@ export function createRecursionRuntime({
       })
     };
     const passResults = [];
+    let hasPassFailure = false;
     let enhancementSceneKey = '';
     const appendEnhancementPassJournal = async ({ pass, status, reasonCode = '', reason = '', attempt = 1 } = {}) => {
       if (!identity.chatKey) return;
+      const passLabel = pass === 'dialogue' ? 'Dialogue Enhancement' : 'Prose Enhancement';
+      const statusLabel = status === 'applied'
+        ? 'applied'
+        : (status === 'unchanged'
+          ? 'no safe changes found'
+          : (status === 'provider-failed'
+            ? 'provider failed'
+            : (status === 'validation-failed' ? 'output rejected' : status)));
+      stageRuntimeActivity({
+        runId,
+        phase: pass === 'dialogue' ? 'dialogueEnhancing' : 'proseEnhancing',
+        severity: ['provider-failed', 'validation-failed'].includes(status) ? 'error' : 'success',
+        label: `${passLabel} ${statusLabel}.`,
+        providerLane: enhancementLaneForSettings(settings),
+        composerLane: enhancementLaneForSettings(settings),
+        chips: [passLabel],
+        detail: { pass, status, attempt, ...(reasonCode ? { reasonCode } : {}), ...(reason ? { reason } : {}) }
+      });
       await appendJournalSafe(runId, identity.chatKey, {
         event: 'enhancement.pass',
-        severity: ['failed', 'provider-failed', 'validation-failed', 'unchanged'].includes(status) ? 'error' : 'info',
+        severity: ['failed', 'provider-failed', 'validation-failed'].includes(status) ? 'error' : 'info',
         summary: `${pass} enhancement ${status}.`,
         runId,
         sceneKey: enhancementSceneKey,
         details: { pass, status, attempt, ...(reasonCode ? { reasonCode } : {}), ...(reason ? { reason } : {}) }
       });
-    };
-    const appendSkippedEnhancementPasses = async (reasonCode, reason) => {
-      for (const pass of passSequence) {
-        if (pass === 'dialogue') continue;
-        passResults.push({ pass, status: 'not-run', reasonCode });
-        await appendEnhancementPassJournal({ pass, status: 'not-run', reasonCode, reason });
-      }
     };
     const enhancementLane = enhancementLaneForSettings(settings);
     const enhancementReasoning = reasonerRequestMetadata(settings, 'enhancement', enhancementLane);
@@ -3405,7 +3417,12 @@ export function createRecursionRuntime({
       }
       function dialogueRetryReason({ originalText: retryOriginalText = '', validation = {} } = {}) {
         if (validation.ok !== true) return '';
-        if (validation.text === String(retryOriginalText ?? '')) return 'exact-noop';
+        if (validation.text === String(retryOriginalText ?? '')) {
+          const strongReasons = dialogueInterventionReasons(retryOriginalText);
+          const softReasons = dialogueSuspicionReasons(retryOriginalText);
+          const echoReasons = echoedUserPhraseReasons({ sourceText: retryOriginalText, contextMessages });
+          return strongReasons.length || softReasons.length || echoReasons.length ? 'exact-noop' : '';
+        }
         if ((validation.dialogueEditRatio ?? 0) >= ENHANCEMENT_EDIT_RATIO_MINIMUM) return '';
         const strongReasons = dialogueInterventionReasons(retryOriginalText);
         const softReasons = dialogueSuspicionReasons(retryOriginalText);
@@ -3416,109 +3433,41 @@ export function createRecursionRuntime({
         const passOriginalText = enhancedText;
         if (pass === 'dialogue') {
           let dialogueAttempt = await runDialogueEnhancementAttempt({ text: enhancedText, attempt: 1 });
-          const result = dialogueAttempt.result;
-          if (result?.ok !== true) {
+          if (dialogueAttempt.result?.ok !== true) {
+            const result = dialogueAttempt.result;
             passResults.push({ pass: 'dialogue', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed', attempt: dialogueAttempt.attempt });
             await appendEnhancementPassJournal({ pass: 'dialogue', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed', reason: result?.error?.message || '', attempt: dialogueAttempt.attempt });
-            await appendSkippedEnhancementPasses('previous-pass-failed', 'Dialogue pass did not complete.');
-            settleRuntimeActivity({
-              runId,
-              phase: 'settled',
-              severity: 'error',
-              label: 'Enhancement failed. Original kept.',
-              chips: ['Dialogue']
-            });
-            return { ok: false, target, mode, error: result?.error || { code: 'RECURSION_DIALOGUE_PROVIDER_FAILED' }, passResults };
+            hasPassFailure = true;
+            continue;
           }
-          const firstValidation = dialogueAttempt.validation;
-          let retryReason = '';
-          if (firstValidation?.ok === true) {
-            retryReason = dialogueRetryReason({ originalText: enhancedText, validation: firstValidation });
-          } else if (firstValidation?.error?.code === 'RECURSION_DIALOGUE_NOOP_WITH_DETECTED_SLOP') {
-            retryReason = 'exact-noop';
-          }
+          let validation = dialogueAttempt.validation;
+          const retryReason = dialogueRetryReason({ originalText: enhancedText, validation });
           if (retryReason) {
             const retry = await runDialogueEnhancementAttempt({ text: enhancedText, retryReason, attempt: 2 });
-            if (retry.result?.ok !== true && firstValidation?.ok !== true) {
+            if (retry.result?.ok !== true) {
+              const result = retry.result;
               passResults.push({ pass: 'dialogue', status: 'provider-failed', reasonCode: retry.result?.error?.code || 'provider-failed', attempt: 2 });
-              await appendEnhancementPassJournal({ pass: 'dialogue', status: 'provider-failed', reasonCode: retry.result?.error?.code || 'provider-failed', reason: retry.result?.error?.message || '', attempt: 2 });
-              await appendSkippedEnhancementPasses('previous-pass-failed', 'Dialogue retry did not complete.');
-              settleRuntimeActivity({
-                runId,
-                phase: 'settled',
-                severity: 'error',
-                label: 'Enhancement failed. Original kept.',
-                chips: ['Dialogue'],
-                detail: { reason: retry.result?.error?.message || 'Dialogue retry provider failed.', reasonCode: retry.result?.error?.code || 'provider-failed' }
-              });
-              return { ok: false, target, mode, error: retry.result?.error || { code: 'RECURSION_DIALOGUE_PROVIDER_FAILED' }, passResults };
+              await appendEnhancementPassJournal({ pass: 'dialogue', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed', reason: result?.error?.message || '', attempt: 2 });
+              hasPassFailure = true;
+              continue;
             }
-            if (retry.validation?.ok === true) dialogueAttempt = retry;
-            else if (firstValidation?.ok !== true) dialogueAttempt = retry;
-          }
-          const validation = dialogueAttempt.validation;
-          if (validation?.error?.code === 'RECURSION_DIALOGUE_NOOP_WITH_DETECTED_SLOP') {
-            passResults.push({ pass: 'dialogue', status: 'unchanged', reasonCode: 'exact-noop-after-retry', attempt: dialogueAttempt.attempt });
-            await appendEnhancementPassJournal({ pass: 'dialogue', status: 'unchanged', reasonCode: 'exact-noop-after-retry', reason: 'Dialogue returned unchanged text after retry.', attempt: dialogueAttempt.attempt });
-            await appendSkippedEnhancementPasses('previous-pass-failed', 'Dialogue returned unchanged text after retry.');
-            settleRuntimeActivity({
-              runId,
-              phase: 'settled',
-              severity: 'error',
-              label: 'Dialogue unchanged. Original kept.',
-              chips: ['Dialogue'],
-              detail: { reason: 'Dialogue returned unchanged text after retry. Prose was not run.', reasonCode: 'exact-noop-after-retry', passResults }
-            });
-            return {
-              ok: false,
-              target,
-              mode,
-              error: {
-                code: 'RECURSION_DIALOGUE_EXACT_NOOP',
-                message: 'Dialogue Enhancement returned unchanged text after retry.'
-              },
-              passResults
-            };
+            dialogueAttempt = retry;
+            validation = retry.validation;
           }
           if (validation.ok !== true) {
             passResults.push({ pass: 'dialogue', status: 'validation-failed', reasonCode: validation.error?.code || 'validation-failed', attempt: dialogueAttempt.attempt });
             await appendEnhancementPassJournal({ pass: 'dialogue', status: 'validation-failed', reasonCode: validation.error?.code || 'validation-failed', reason: validation.error?.message || '', attempt: dialogueAttempt.attempt });
-            await appendSkippedEnhancementPasses('previous-pass-failed', 'Dialogue output failed validation.');
-            settleRuntimeActivity({
-              runId,
-              phase: 'settled',
-              severity: 'error',
-              label: 'Enhancement failed validation. Original kept.',
-              chips: ['Dialogue']
-            });
-            return { ok: false, target, mode, error: validation.error, passResults };
+            hasPassFailure = true;
+            continue;
           }
-          if (validation.text === String(enhancedText ?? '')) {
-            passResults.push({ pass: 'dialogue', status: 'unchanged', reasonCode: 'exact-noop-after-retry', attempt: dialogueAttempt.attempt });
-            await appendEnhancementPassJournal({ pass: 'dialogue', status: 'unchanged', reasonCode: 'exact-noop-after-retry', reason: 'Dialogue returned unchanged text after retry.', attempt: dialogueAttempt.attempt });
-            await appendSkippedEnhancementPasses('previous-pass-failed', 'Dialogue returned unchanged text after retry.');
-            settleRuntimeActivity({
-              runId,
-              phase: 'settled',
-              severity: 'error',
-              label: 'Dialogue unchanged. Original kept.',
-              chips: ['Dialogue'],
-              detail: { reason: 'Dialogue returned unchanged text after retry. Prose was not run.', reasonCode: 'exact-noop-after-retry', passResults }
-            });
-            return {
-              ok: false,
-              target,
-              mode,
-              error: {
-                code: 'RECURSION_DIALOGUE_EXACT_NOOP',
-                message: 'Dialogue Enhancement returned unchanged text after retry.'
-              },
-              passResults
-            };
+          if (validation.outcome === 'unchanged' || validation.text === String(enhancedText ?? '')) {
+            passResults.push({ pass: 'dialogue', status: 'unchanged', reasonCode: validation.reasonCode || 'already-acceptable', reason: validation.reason || '', attempt: dialogueAttempt.attempt });
+            await appendEnhancementPassJournal({ pass: 'dialogue', status: 'unchanged', reasonCode: validation.reasonCode || 'already-acceptable', reason: validation.reason || 'Dialogue had no safe revision.', attempt: dialogueAttempt.attempt });
+            continue;
           }
           enhancedText = validation.text;
-          passResults.push({ pass: 'dialogue', status: 'success', attempt: dialogueAttempt.attempt });
-          await appendEnhancementPassJournal({ pass: 'dialogue', status: 'success', attempt: dialogueAttempt.attempt });
+          passResults.push({ pass: 'dialogue', status: 'applied', attempt: dialogueAttempt.attempt });
+          await appendEnhancementPassJournal({ pass: 'dialogue', status: 'applied', attempt: dialogueAttempt.attempt });
           passHashes.push({
             pass,
             hash: hashJson(enhancedText),
@@ -3562,51 +3511,35 @@ export function createRecursionRuntime({
           if (result?.ok !== true) {
             passResults.push({ pass: 'prose', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed' });
             await appendEnhancementPassJournal({ pass: 'prose', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed', reason: result?.error?.message || '' });
-            settleRuntimeActivity({
-              runId,
-              phase: 'settled',
-              severity: 'error',
-              label: 'Enhancement failed. Original kept.',
-              chips: ['Prose'],
-              detail: { reason: result?.error?.message || 'Prose provider failed.', reasonCode: result?.error?.code || 'provider-failed' }
-            });
-            return { ok: false, target, mode, error: result?.error || { code: 'RECURSION_PROSE_PROVIDER_FAILED' }, passResults };
+            hasPassFailure = true;
+            continue;
           }
           let validation = proseAttempt.validation;
-          if (validation?.error?.code === 'RECURSION_PROSE_EXACT_NOOP' || validation?.error?.code === 'RECURSION_PROSE_NOOP_WITH_DETECTED_SLOP') {
+          if (validation?.outcome === 'unchanged' && validation.reasonCode !== 'already-acceptable') {
             proseAttempt = await runProseEnhancementAttempt({ text: enhancedText, retryReason: 'exact-noop', attempt: 2 });
             result = proseAttempt.result;
             if (result?.ok !== true) {
               passResults.push({ pass: 'prose', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed', attempt: 2 });
               await appendEnhancementPassJournal({ pass: 'prose', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed', reason: result?.error?.message || '', attempt: 2 });
-              settleRuntimeActivity({
-                runId,
-                phase: 'settled',
-                severity: 'error',
-                label: 'Enhancement failed. Original kept.',
-                chips: ['Prose'],
-                detail: { reason: result?.error?.message || 'Prose retry provider failed.', reasonCode: result?.error?.code || 'provider-failed' }
-              });
-              return { ok: false, target, mode, error: result?.error || { code: 'RECURSION_PROSE_PROVIDER_FAILED' }, passResults };
+              hasPassFailure = true;
+              continue;
             }
             validation = proseAttempt.validation;
           }
           if (validation.ok !== true) {
             passResults.push({ pass: 'prose', status: 'validation-failed', reasonCode: validation.error?.code || 'validation-failed', attempt: proseAttempt.attempt });
             await appendEnhancementPassJournal({ pass: 'prose', status: 'validation-failed', reasonCode: validation.error?.code || 'validation-failed', reason: validation.error?.message || '', attempt: proseAttempt.attempt });
-            settleRuntimeActivity({
-              runId,
-              phase: 'settled',
-              severity: 'error',
-              label: 'Enhancement failed validation. Original kept.',
-              chips: ['Prose'],
-              detail: { reason: validation.error?.message || 'Prose output failed validation.', reasonCode: validation.error?.code || 'validation-failed' }
-            });
-            return { ok: false, target, mode, error: validation.error, passResults };
+            hasPassFailure = true;
+            continue;
+          }
+          if (validation.outcome === 'unchanged' || validation.text === String(enhancedText ?? '')) {
+            passResults.push({ pass: 'prose', status: 'unchanged', reasonCode: validation.reasonCode || 'already-acceptable', reason: validation.reason || '', attempt: proseAttempt.attempt });
+            await appendEnhancementPassJournal({ pass: 'prose', status: 'unchanged', reasonCode: validation.reasonCode || 'already-acceptable', reason: validation.reason || 'Prose had no safe revision.', attempt: proseAttempt.attempt });
+            continue;
           }
           enhancedText = validation.text;
-          passResults.push({ pass: 'prose', status: 'success' });
-          await appendEnhancementPassJournal({ pass: 'prose', status: 'success' });
+          passResults.push({ pass: 'prose', status: 'applied', attempt: proseAttempt.attempt });
+          await appendEnhancementPassJournal({ pass: 'prose', status: 'applied', attempt: proseAttempt.attempt });
           passHashes.push({
             pass,
             hash: hashJson(enhancedText),
@@ -3617,6 +3550,45 @@ export function createRecursionRuntime({
             ...(proseAttempt.generation.fallbackFrom ? { fallbackFrom: proseAttempt.generation.fallbackFrom } : {})
           });
         }
+      }
+      const finalTextChanged = String(enhancedText ?? '') !== originalText;
+      if (!finalTextChanged) {
+        if (hasPassFailure) {
+          settleRuntimeActivity({
+            runId,
+            phase: 'settled',
+            severity: 'error',
+            label: 'Enhancement pass failed. Original kept.',
+            chips: target === 'prose-dialogue' ? ['Dialogue', 'Prose'] : [target],
+            detail: { passResults, outcome: 'failed' }
+          });
+          return {
+            ok: false,
+            target,
+            mode,
+            error: { code: 'RECURSION_ENHANCEMENT_PASS_FAILED', message: 'At least one selected Enhancement pass failed.' },
+            passResults
+          };
+        }
+        settleRuntimeActivity({
+          runId,
+          phase: 'settled',
+          severity: 'success',
+          label: 'Enhancement complete. No safe changes found.',
+          chips: target === 'prose-dialogue' ? ['Dialogue', 'Prose'] : [target],
+          detail: { passResults, outcome: 'unchanged' }
+        });
+        return {
+          ok: true,
+          unchanged: true,
+          target,
+          mode,
+          messageId,
+          originalHash,
+          enhancedHash: originalHash,
+          passSequence,
+          passResults
+        };
       }
       marker.passSequence = passSequence;
       marker.passHashes = passHashes;
@@ -3652,11 +3624,13 @@ export function createRecursionRuntime({
       settleRuntimeActivity({
         runId,
         phase: 'settled',
-        severity: 'success',
-        label: target === 'dialogue' ? 'Dialogue enhanced.' : (target === 'prose-dialogue' ? 'Response enhanced.' : 'Prose enhanced.'),
+        severity: hasPassFailure ? 'warning' : 'success',
+        label: hasPassFailure
+          ? 'Enhancement applied with a pass issue.'
+          : (target === 'dialogue' ? 'Dialogue enhanced.' : (target === 'prose-dialogue' ? 'Response enhanced.' : 'Prose enhanced.')),
         chips: target === 'dialogue' ? ['Dialogue'] : (target === 'prose-dialogue' ? ['Dialogue', 'Prose'] : ['Prose'])
       });
-      return { ok: true, target, mode, messageId, originalHash, enhancedHash: hashJson(enhancedText), editRatio: marker.editRatio, passSequence, passHashes, passResults };
+      return { ok: true, degraded: hasPassFailure, target, mode, messageId, originalHash, enhancedHash: hashJson(enhancedText), editRatio: marker.editRatio, passSequence, passHashes, passResults };
     } catch (error) {
       settleRuntimeActivity({
         runId,

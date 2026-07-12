@@ -385,12 +385,12 @@ export function buildProseEnhancementRequest({
     '',
     'Intervention policy:',
     '- If the source contains a banned phrase or banned dialogue exception, do not return the original text unchanged.',
-    '- Minimum edit ratio: 10%.',
-    '- Target edit ratio: 10-20%.',
+    '- Make meaningful, minimal changes when a safe improvement exists.',
+    '- Do not change text merely to reach a percentage target.',
     '- Soft maximum edit ratio: 30%.',
     '- If a sentence is generic but not unsafe, improve it through concrete action, compression, or rhythm rather than decorative synonym swaps.',
     '- If the source is short or dialogue-heavy, come as close to the target band as possible without changing protected dialogue.',
-    '- Returning the source unchanged is never allowed. If no useful edit is available, report a failed pass rather than echoing the input.',
+    '- If no safe improvement is available, return the source unchanged and report no_safe_change rather than inventing content.',
     retryReason === 'exact-noop' ? '- The previous revision was identical to the input. Produce a concrete prose revision now; preserve dialogue exactly.' : '',
     '- Optional diagnostics are allowed in changePlan, but the text field is the only applied output.',
     '',
@@ -529,12 +529,16 @@ export function validateProseEnhancementResult(result = {}, { originalText = '' 
   }
   if (text === String(originalText ?? '')) {
     const interventionReasons = proseInterventionReasons(originalText);
-    return validationError(
-      interventionReasons.length ? 'RECURSION_PROSE_NOOP_WITH_DETECTED_SLOP' : 'RECURSION_PROSE_EXACT_NOOP',
-      interventionReasons.length
-        ? `Prose enhancement returned unchanged text despite detected slop: ${interventionReasons.join(', ')}.`
-        : 'Prose enhancement returned unchanged text.'
-    );
+    return {
+      ok: true,
+      outcome: 'unchanged',
+      text,
+      reasonCode: interventionReasons.length ? 'no-safe-change-after-provider-attempt' : 'already-acceptable',
+      reason: interventionReasons.length
+        ? `No safe prose revision was available for: ${interventionReasons.join(', ')}.`
+        : 'No safe prose revision was available.',
+      editRatio: 0
+    };
   }
-  return { ok: true, text, editRatio: roundedEnhancementEditRatio(originalText, text) };
+  return { ok: true, outcome: 'applied', text, editRatio: roundedEnhancementEditRatio(originalText, text) };
 }

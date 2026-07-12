@@ -269,14 +269,14 @@ export function buildDialogueEnhancementRequest({
     '',
     'Intervention policy:',
     '- If any intervention-required pattern appears, do not return the original text unchanged.',
-    '- Minimum edit ratio: 10%.',
-    '- Target edit ratio: 10-20%.',
+    '- Make meaningful, minimal changes when a safe improvement exists.',
+    '- Do not change text merely to reach a percentage target.',
     '- Soft maximum edit ratio: 30%.',
     '- Prefer precise, character-consistent revision over decorative rewriting.',
     '- If the source is short or structurally constrained, come as close to the target band as possible without breaking the hard rules.',
     '- Always produce the best dialogue-focused revision candidate.',
     '- If the dialogue is already strong, make subtle improvements through compression, rhythm, subtext, implication, character-specific word choice, or sharper response to the emotional pressure.',
-    '- Do not return the original text unchanged unless every safe revision would violate the hard rules.',
+    '- If no safe improvement is available, return the source unchanged and report no_safe_change rather than inventing content.',
     '- Optional diagnostics are allowed in changePlan, but the text field is the only applied output.',
     '',
     'Allowed dialogue edit levers:',
@@ -378,13 +378,19 @@ export function validateDialogueEnhancementResult(result = {}, { originalText = 
   }
   const interventionReasons = dialogueInterventionReasons(originalText);
   if (text === String(originalText ?? '') && interventionReasons.length) {
-    return validationError(
-      'RECURSION_DIALOGUE_NOOP_WITH_DETECTED_SLOP',
-      `Dialogue enhancement returned unchanged text despite detected slop: ${interventionReasons.join(', ')}.`
-    );
+    return {
+      ok: true,
+      outcome: 'unchanged',
+      text,
+      reasonCode: 'no-safe-change-after-provider-attempt',
+      reason: `No safe dialogue revision was available for: ${interventionReasons.join(', ')}.`,
+      editRatio: 0,
+      dialogueEditRatio: 0
+    };
   }
   return {
     ok: true,
+    outcome: text === String(originalText ?? '') ? 'unchanged' : 'applied',
     text,
     editRatio: roundedEnhancementEditRatio(originalText, text),
     dialogueEditRatio: roundedDialogueEditRatio(originalText, text)

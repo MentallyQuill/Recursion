@@ -47,10 +47,10 @@ assertEqual(request.responseSchema, DIALOGUE_ENHANCER_SCHEMA, 'request carries r
 assertEqual(request.machineJson, true, 'request requires machine JSON');
 assertEqual(request.contextMessages.length, 2, 'request respects bounded context');
 assert(request.prompt.includes('If any intervention-required pattern appears, do not return the original text unchanged.'), 'dialogue prompt explicitly forbids no-op when slop is detected');
-assert(request.prompt.includes('Minimum edit ratio: 10%'), 'dialogue prompt states minimum edit ratio');
-assert(request.prompt.includes('Target edit ratio: 10-20%'), 'dialogue prompt states target edit ratio band');
+assert(request.prompt.includes('Make meaningful, minimal changes when a safe improvement exists.'), 'dialogue prompt permits safe minimal changes');
+assert(request.prompt.includes('return the source unchanged'), 'dialogue prompt permits an explicit no-safe-change result');
 assert(request.prompt.includes('Soft maximum edit ratio: 30%'), 'dialogue prompt states soft maximum edit ratio');
-assert(!request.prompt.includes('returning it unchanged is allowed'), 'dialogue prompt no longer allows clean no-op');
+assert(request.prompt.includes('no safe improvement is available'), 'dialogue prompt explains clean no-op handling');
 assert(request.prompt.includes('Always produce the best dialogue-focused revision candidate'), 'dialogue prompt requires a candidate');
 assert(request.prompt.includes('Allowed dialogue edit levers'), 'dialogue prompt explains safe revision levers');
 assert(request.prompt.includes('"changePlan"'), 'dialogue prompt requests optional change diagnostics');
@@ -119,12 +119,8 @@ const rejectedNoopForcedQuestion = validateDialogueEnhancementResult({
   schema: DIALOGUE_ENHANCER_SCHEMA,
   text: 'Mara set the cup down. "What do you want to do next?"'
 }, { originalText: 'Mara set the cup down. "What do you want to do next?"' });
-assertEqual(rejectedNoopForcedQuestion.ok, false, 'dialogue no-op is rejected when forced-question slop is detected');
-assertEqual(
-  rejectedNoopForcedQuestion.error.code,
-  'RECURSION_DIALOGUE_NOOP_WITH_DETECTED_SLOP',
-  'dialogue no-op rejection uses stable code'
-);
+assertEqual(rejectedNoopForcedQuestion.ok, true, 'dialogue no-op with forced-question slop is a completed unchanged result');
+assertEqual(rejectedNoopForcedQuestion.outcome, 'unchanged', 'dialogue detected no-op reports unchanged outcome');
 
 const cleanNoop = validateDialogueEnhancementResult({
   schema: DIALOGUE_ENHANCER_SCHEMA,

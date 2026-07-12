@@ -171,8 +171,8 @@ Generation roles describe why a model call exists. They are not the same thing a
 | `rapidTurnDelta` | Utility | Select warm raw cards and write provider-authored turn guidance for the Rapid foreground path | Escalate to Standard only when a missing card is mandatory |
 | `guidanceComposer` | Utility | Write provider-authored direction for using selected raw cards in the next generation | Fall back to raw-card-only packet when invalid or unavailable |
 | `cardAuthoringAssist` | Utility | Rewrite a user draft or intent into a compact high-value Recursion card suggestion | Keep the user draft as local fallback and expose provider-fallback diagnostics |
-| `dialogueEnhancer` | Utility | Repair the latest assistant dialogue after host generation for voice drift, fake agency, parroting, unsupported tropes, and weak subtext while preserving scene events | Reveal the original assistant output unchanged |
-| `proseEnhancer` | Utility | Rewrite the latest assistant non-dialogue prose after host generation while preserving dialogue except banned slop cleanup | Reveal the original assistant output unchanged |
+| `dialogueEnhancer` | Utility | Repair the latest assistant dialogue after host generation for voice drift, fake agency, parroting, unsupported tropes, and weak subtext while preserving scene events | Preserve the last safe text and continue later selected Enhancement passes when no safe dialogue change is available |
+| `proseEnhancer` | Utility | Rewrite the latest assistant non-dialogue prose after host generation while preserving dialogue except banned slop cleanup | Preserve the last safe text when no safe prose change is available; do not create an identical swipe |
 | `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility guidance plus raw selected Card Evidence |
 | `providerTest` | Selected lane | Validate lane connectivity and structured response capability | Mark lane test failed with compact error |
 

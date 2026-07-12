@@ -426,6 +426,17 @@ function childStepFromEvent(event, state, order = 0) {
       source: detail.source || detail.sourceType,
       retryCount,
       reason,
+      children: Array.isArray(detail.sourceCards)
+        ? detail.sourceCards.map((sourceCard, childIndex) => ({
+            id: sourceCard.id,
+            label: sourceCard.label,
+            providerLane: event.providerLane || detail.lane || 'utility',
+            state: sourceCard.state || state,
+            source: detail.source || detail.sourceType,
+            reason: sourceCard.selectionState === 'priority' ? 'Priority source card included.' : '',
+            order: childIndex
+          }))
+        : [],
       sourcePhase: phase,
       sourceRoleId: roleId,
       order
@@ -572,6 +583,9 @@ function childIdFromRole(roleId, fallback) {
 
 function normalizeChildStep(input, index = 0) {
   const source = asObject(input);
+  const children = Array.isArray(source.children)
+    ? source.children.map((child, childIndex) => normalizeChildStep(child, childIndex)).sort(compareChildOrder)
+    : [];
   const roleId = safeDisplayText(source.sourceRoleId || source.roleId || source.role, '', 80);
   const label = roleLabel(roleId, safeDisplayText(source.label, `Item ${index + 1}`, 80));
   const rawId = source.id || roleId || label;
@@ -582,7 +596,7 @@ function normalizeChildStep(input, index = 0) {
   const state = normalizeStateWithRetry(source.state, retryCount);
   const childSource = normalizeChildSource(source.source || source.sourceType || (state === 'cached' ? 'cache' : ''));
   const reason = reasonFromSource(source, state, retryCount, childSource);
-  return {
+  const step = {
     id,
     label,
     providerLane: normalizeProviderLane(source.providerLane, roleId === 'reasonerComposer' ? 'reasoner' : 'utility'),
@@ -595,6 +609,8 @@ function normalizeChildStep(input, index = 0) {
     reason: reason || null,
     order: Number.isFinite(Number(source.order)) ? Number(source.order) : index
   };
+  if (children.length) step.children = children;
+  return step;
 }
 
 function normalizeStep(input, index = 0) {

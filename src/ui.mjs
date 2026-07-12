@@ -1597,6 +1597,30 @@ function renderProgressChildrenGroup(group, step, model, previousChildScrollTops
     if (!row) row = createProgressRowShell(childStep, true);
     updateProgressRow(row, childStep, true, model.tooltipsEnabled);
     insertAt(group, row, index);
+    const nestedChildren = Array.isArray(childStep.children) ? childStep.children : [];
+    let nested = row.querySelector?.('[data-recursion-progress-nested]');
+    if (nestedChildren.length) {
+      if (!nested) {
+        nested = el('div', {
+          className: 'recursion-step-children is-nested',
+          dataset: { recursionProgressNested: '' }
+        });
+        row.appendChild?.(nested);
+      }
+      const visibleNestedIds = new Set(nestedChildren.map((nestedChild, nestedIndex) => nestedChild.id || `nested-${nestedIndex}`));
+      for (const nestedRow of [...(nested.querySelectorAll?.('[data-recursion-progress-row]') || [])]) {
+        if (!visibleNestedIds.has(nestedRow.dataset?.recursionProgressStepId || '')) nestedRow.remove();
+      }
+      nestedChildren.forEach((nestedChild, nestedIndex) => {
+        const nestedId = nestedChild.id || `nested-${nestedIndex}`;
+        let nestedRow = findProgressChildRow(nested, nestedId);
+        if (!nestedRow) nestedRow = createProgressRowShell({ ...nestedChild, id: nestedId }, true);
+        updateProgressRow(nestedRow, { ...nestedChild, id: nestedId }, true, model.tooltipsEnabled);
+        insertAt(nested, nestedRow, nestedIndex);
+      });
+    } else if (nested) {
+      nested.remove();
+    }
   });
 
   const previousChildScrollTop = previousChildScrollTops.get(step.id || '');

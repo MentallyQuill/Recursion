@@ -804,6 +804,26 @@ export function activeCardDeckEligibility(settings = {}) {
   };
 }
 
+export function activeCardDeckSourceCards(settings = {}) {
+  const deck = getActiveCardDeck(settings);
+  const grouped = {};
+  for (const card of orderedDeckCardsAcrossCategories(deck)) {
+    if (!getDeckCardStatus(card).runnable) continue;
+    const family = String(card.builtinFamily || '').trim();
+    if (!family) continue;
+    if (!Array.isArray(grouped[family])) grouped[family] = [];
+    grouped[family].push({
+      id: card.id,
+      name: card.name,
+      description: card.description,
+      promptText: card.promptText,
+      selectionState: cardSelectionState(card),
+      selectedSubItems: Array.isArray(card.selectedSubItems) ? card.selectedSubItems : []
+    });
+  }
+  return grouped;
+}
+
 function emptyCardScope() {
   return {
     version: CARD_SCOPE_VERSION,

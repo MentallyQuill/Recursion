@@ -109,6 +109,33 @@ assertEqual(retriedGeneratedChild.meta, 'retried', 'generated card retry has vis
 assert(retriedGeneratedChild.reason.includes('retried once'), 'generated card retry keeps a safe visible reason');
 assertEqual(retriedGeneratedBatch.state, 'warning', 'retried generated child keeps batch caution-colored');
 
+const tracedCardProgress = createProgressRunModel({
+  activityHistory: [
+    { runId: 'traced-card-progress', phase: 'cardBatchRunning', label: 'Utility card batch', providerLane: 'utility', recordedAt: '1' },
+    {
+      runId: 'traced-card-progress',
+      phase: 'cardProgress',
+      detail: {
+        parentStepId: 'fused-card-bundle',
+        family: 'Scene Frame',
+        roleId: 'sceneFrameCard',
+        source: 'generated',
+        state: 'done',
+        sourceCards: [
+          { id: 'scene-location', label: 'location/situation', selectionState: 'priority', state: 'done' },
+          { id: 'scene-direction', label: 'immediate direction', selectionState: 'priority', state: 'done' }
+        ]
+      },
+      recordedAt: '2'
+    }
+  ],
+  activity: { runId: 'traced-card-progress', phase: 'cardProgress', recordedAt: '2' }
+});
+const tracedCard = tracedCardProgress.steps.find((step) => step.id === 'fused-card-bundle').children.find((child) => child.label === 'Scene Frame');
+assertEqual(tracedCard.children.length, 2, 'card progress exposes fused source cards');
+assertEqual(tracedCard.children[0].label, 'location/situation', 'card progress names first source card');
+assertEqual(tracedCard.children[0].reason, 'Priority source card included.', 'card progress explains priority source');
+
 const fusedBundleProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'fused-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },

@@ -89,7 +89,9 @@ export async function runStandardCardPipeline({
       ...sourceContext,
       expectedSnapshotHash: requests[index]?.snapshotHash,
       expectedRole: requests[index]?.metadata?.role,
-      expectedFamily: requests[index]?.metadata?.family
+      expectedFamily: requests[index]?.metadata?.family,
+      sourceCardIds: requests[index]?.metadata?.sourceCardIds || [],
+      sourceCards: requests[index]?.metadata?.sourceCards || []
     }).map((card) => {
       const retryCount = progressRetryCount(result?.diagnostics?.retryCount);
       return {

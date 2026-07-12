@@ -858,6 +858,32 @@ assertNotEqual(
 }
 
 {
+  const proseHost = createProseMessageHarness('Mara set the cup down. "Sit down before you fall over."');
+  const roleCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'prose-dialogue', applyMode: 'replace', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId) {
+        roleCalls.push(roleId);
+        return {
+          ok: true,
+          data: {
+            schema: roleId === 'dialogueEnhancer' ? 'recursion.dialogueEnhancer.v1' : 'recursion.proseEnhancer.v1',
+            text: 'Mara set the cup down. "Sit down before you fall over."'
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-prose-skipped-after-dialogue-noop' });
+  assertEqual(result.ok, false, 'Prose + Dialogue reports failed dialogue pass');
+  assertDeepEqual(roleCalls, ['dialogueEnhancer', 'dialogueEnhancer'], 'Prose pass is not called after dialogue no-op');
+  assertDeepEqual(result.passResults.map((entry) => entry.status), ['unchanged', 'not-run'], 'Enhancement reports skipped prose pass');
+  assertEqual(result.passResults[1].reasonCode, 'previous-pass-failed', 'Skipped prose reports dependency reason');
+}
+
+{
   const proseHost = createProseMessageHarness('Mara set the cup down. "What do you want to do next?"');
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
@@ -1029,6 +1055,7 @@ assertNotEqual(
   assertEqual(result.ok, true, 'Prose + Dialogue enhancement succeeds');
   assertEqual(result.target, 'prose-dialogue', 'Prose + Dialogue result reports target');
   assertDeepEqual(roleCalls, ['dialogueEnhancer', 'proseEnhancer'], 'Prose + Dialogue runs Dialogue before Prose');
+  assertDeepEqual(result.passResults.map((entry) => entry.status), ['success', 'success'], 'Prose + Dialogue reports pass outcomes');
   assertEqual(proseHost.message.text, 'Mara placed the cup on the table. "Sit down before you fall over. We can argue after."', 'Replace applies one final output');
   const replaceCall = proseHost.calls.find((call) => call.type === 'replace');
   assertEqual(typeof result.editRatio, 'number', 'Prose + Dialogue result reports final edit ratio');

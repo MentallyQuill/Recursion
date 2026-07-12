@@ -906,6 +906,10 @@ function normalizeDeckCard(card, { preserveId = false } = {}) {
     sourceRevisionHash: card?.source?.sourceRevisionHash || card?.freshness?.sourceRevisionHash || card?.sourceRevisionHash
   });
   if (preserveId && typeof card?.id === 'string' && card.id) normalized.id = card.id;
+  if (Array.isArray(card?.sourceCardIds) && card.sourceCardIds.length) normalized.sourceCardIds = card.sourceCardIds.map(String).filter(Boolean).slice(0, 32);
+  if (Array.isArray(card?.sourceCards) && card.sourceCards.length) normalized.sourceCards = card.sourceCards.slice(0, 32);
+  if (card?.sourceCoverage) normalized.sourceCoverage = String(card.sourceCoverage);
+  if (Array.isArray(card?.coveredSourceCardIds) && card.coveredSourceCardIds.length) normalized.coveredSourceCardIds = card.coveredSourceCardIds.map(String).filter(Boolean).slice(0, 32);
   return normalized;
 }
 
@@ -977,6 +981,16 @@ export function buildCardRequests(plan = {}, context = {}) {
       const selectedSubItems = Array.isArray(context.cardScope?.selectedSubItemsByFamily?.[catalog.family])
         ? context.cardScope.selectedSubItemsByFamily[catalog.family].map((item) => String(item))
         : [];
+      const sourceCards = Array.isArray(context.sourceCardsByFamily?.[catalog.family])
+        ? context.sourceCardsByFamily[catalog.family]
+          .map((card) => ({
+            id: cleanProviderPromptText(card?.id || '', 160),
+            name: cleanProviderPromptText(card?.name || '', 120),
+            selectionState: cleanProviderPromptText(card?.selectionState || '', 40),
+            promptText: cleanProviderPromptText(card?.promptText || '', CARD_TEXT_LIMIT)
+          }))
+          .filter((card) => card.id)
+        : [];
       const storyForm = normalizeStoryForm(context.storyForm || UNKNOWN_STORY_FORM);
       return {
         roleId: catalog.role,
@@ -986,6 +1000,7 @@ export function buildCardRequests(plan = {}, context = {}) {
           family: catalog.family,
           selectedSubItems
         },
+        sourceCards,
         storyForm,
         prompt: [
           `Create one compact ${catalog.family} card for the current scene.`,
@@ -1002,6 +1017,9 @@ export function buildCardRequests(plan = {}, context = {}) {
           'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
           cardInstructionContractLine(),
           cardPromptSafetyInstruction(catalog),
+          sourceCards.length
+            ? `Source deck cards included in this request:\n${sourceCards.map((card) => `- ${card.name || card.id} (${card.selectionState || 'active'}): ${card.promptText || 'source deck guidance'}`).join('\n')}`
+            : '',
           reason ? `Arbiter request reason: ${reason}` : '',
           `Snapshot hash: ${promptSnapshotHash}`,
           `Snapshot:\n${stringifyForPrompt(context.snapshot ?? {})}`
@@ -1013,6 +1031,7 @@ export function buildCardRequests(plan = {}, context = {}) {
           priority: catalog.priority,
           reason,
           ...(refreshOfCardId ? { refreshOfCardId } : {}),
+          ...(sourceCards.length ? { sourceCards, sourceCardIds: sourceCards.map((card) => card.id) } : {}),
           storyForm: {
             tense: storyForm.tense,
             pov: storyForm.pov,
@@ -1042,7 +1061,9 @@ export function buildFusedCardBundleRequest(plan = {}, context = {}) {
       reason: request.metadata.reason || '',
       selectedSubItems: Array.isArray(request.cardScope?.selectedSubItems) ? request.cardScope.selectedSubItems : [],
       refreshOfCardId: request.metadata.refreshOfCardId || '',
-      forcedBy: String(asObject(job).forcedBy || '').trim()
+      forcedBy: String(asObject(job).forcedBy || '').trim(),
+      sourceCards: Array.isArray(request.metadata.sourceCards) ? request.metadata.sourceCards : [],
+      sourceCardIds: Array.isArray(request.metadata.sourceCardIds) ? request.metadata.sourceCardIds : []
     };
   });
   if (!requestedCards.length) return null;
@@ -1058,6 +1079,9 @@ export function buildFusedCardBundleRequest(plan = {}, context = {}) {
       card.refreshOfCardId ? `- Refreshes cached card: ${card.refreshOfCardId}` : '- Refreshes cached card: none',
       card.forcedBy ? `- Forced by: ${card.forcedBy}` : '- Forced by: none',
       cardScopePromptBlock(catalog, card.selectedSubItems),
+      card.sourceCards.length
+        ? `- Source deck cards: ${card.sourceCards.map((source) => `${source.name || source.id} [${source.selectionState || 'active'}]`).join(', ')}`
+        : '',
       cardPromptSafetyInstruction(catalog)
     ].filter(Boolean).join('\n');
   });
@@ -1076,6 +1100,7 @@ export function buildFusedCardBundleRequest(plan = {}, context = {}) {
       snapshotHash ? `Top-level snapshotHash must be "${snapshotHash}".` : '',
       'Top-level items must be an array. Each item is one card object for one requested family.',
       `Each item must include schema "${CARD_RESPONSE_SCHEMA}", family, role, promptText, and evidenceRefs.`,
+      'Each item should include coveredSourceCardIds listing every source deck card represented in the fused prompt.',
       'Return at most one item per requested family. Do not generate unrequested families.',
       'If a requested card cannot be safely generated, omit it from items and add an omitted entry with family, role, and reason.',
       'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
@@ -1087,7 +1112,8 @@ export function buildFusedCardBundleRequest(plan = {}, context = {}) {
     ].filter(Boolean).join('\n\n'),
     metadata: {
       requestedCount: requestedCards.length,
-      requestedFamilies: requestedCards.map((card) => card.family)
+      requestedFamilies: requestedCards.map((card) => card.family),
+      requestedSourceCardIds: requestedCards.flatMap((card) => card.sourceCardIds)
     }
   };
 }
@@ -1109,7 +1135,7 @@ export function cardsFromProviderResult(result, context = {}) {
     const evidenceRefs = repairProviderEvidenceRefs(source.evidenceRefs ?? source.evidence, context);
     if (!hasValidMessageEvidenceRefs(evidenceRefs, context)) return [];
     try {
-      return [normalizeCard({
+      const normalized = normalizeCard({
         ...source,
         role: catalog.role,
         family: catalog.family,
@@ -1117,7 +1143,14 @@ export function cardsFromProviderResult(result, context = {}) {
         evidenceRefs,
         tokenEstimate: source.tokenEstimate ?? source.tokenCost,
         inspectorNotes: source.inspectorNotes
-      }, context)];
+      }, context);
+      const sourceCardIds = Array.isArray(context.sourceCardIds) ? context.sourceCardIds.map(String).filter(Boolean) : [];
+      const sourceCards = Array.isArray(context.sourceCards) ? context.sourceCards : [];
+      return [{
+        ...normalized,
+        ...(sourceCardIds.length ? { sourceCardIds, sourceCoverage: 'requested' } : {}),
+        ...(sourceCards.length ? { sourceCards } : {})
+      }];
     } catch {
       return [];
     }
@@ -1169,7 +1202,11 @@ export function cardsFromFusedProviderResult(result, context = {}) {
   const requested = new Map((Array.isArray(context.requestedCards) ? context.requestedCards : [])
     .map((card) => {
       const catalog = resolveCatalog({ family: card?.family, role: card?.role ?? card?.roleId }, { strict: false });
-      return catalog ? [catalog.family, catalog] : null;
+      return catalog ? [catalog.family, {
+        ...catalog,
+      sourceCardIds: Array.isArray(card?.sourceCardIds) ? card.sourceCardIds.map(String).filter(Boolean) : [],
+        sourceCards: Array.isArray(card?.sourceCards) ? card.sourceCards : []
+      }] : null;
     })
     .filter(Boolean));
   const seen = new Set();
@@ -1197,7 +1234,9 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     }, {
       ...context,
       expectedFamily: catalog.family,
-      expectedRole: catalog.role
+      expectedRole: catalog.role,
+      sourceCardIds: requested.get(catalog.family)?.sourceCardIds || [],
+      sourceCards: requested.get(catalog.family)?.sourceCards || []
     });
     if (!cards.length) {
       output.invalidFamilies.push(catalog.family);
@@ -1220,11 +1259,29 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     }
     seen.add(catalog.family);
     output.acceptedFamilies.push(catalog.family);
+    const expectedSourceCardIds = requested.get(catalog.family)?.sourceCardIds || [];
+    const coveredSourceCardIds = Array.isArray(item.coveredSourceCardIds)
+      ? item.coveredSourceCardIds.map(String).filter(Boolean)
+      : [];
+    if (expectedSourceCardIds.length && coveredSourceCardIds.length) {
+      const missingSourceCardIds = expectedSourceCardIds.filter((id) => !coveredSourceCardIds.includes(id));
+      if (missingSourceCardIds.length) {
+        output.diagnostics.push(`fused-source-missing:${catalog.family}:${missingSourceCardIds.join(',')}`);
+      }
+    }
     output.cards.push(...cards.map((card) => ({
       ...card,
       providerRole: 'fusedCardBundle',
       providerLane: result.lane || context.providerLane || 'utility',
-      fusedBundleId: result.diagnostics?.runId || result.diagnostics?.requestHash || ''
+      fusedBundleId: result.diagnostics?.runId || result.diagnostics?.requestHash || '',
+      ...(requested.get(catalog.family)?.sourceCardIds?.length
+        ? {
+            sourceCardIds: requested.get(catalog.family).sourceCardIds,
+            sourceCards: requested.get(catalog.family).sourceCards,
+            sourceCoverage: Array.isArray(item.coveredSourceCardIds) ? 'reported' : 'requested',
+            ...(Array.isArray(item.coveredSourceCardIds) ? { coveredSourceCardIds: item.coveredSourceCardIds.map(String).filter(Boolean) } : {})
+          }
+        : {})
     })));
   }
   for (const omission of Array.isArray(data.omitted) ? data.omitted : []) {

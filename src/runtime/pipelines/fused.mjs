@@ -140,7 +140,9 @@ export async function runFusedCardPipeline({
           ...sourceContext,
           expectedSnapshotHash: repairRequests[index]?.snapshotHash,
           expectedRole: repairRequests[index]?.metadata?.role,
-          expectedFamily: repairRequests[index]?.metadata?.family
+          expectedFamily: repairRequests[index]?.metadata?.family,
+          sourceCardIds: repairRequests[index]?.metadata?.sourceCardIds || [],
+          sourceCards: repairRequests[index]?.metadata?.sourceCards || []
         }).map((card) => ({
           ...card,
           providerLane: repairResult?.lane || repairRequests[index]?.lane || 'utility',

@@ -289,11 +289,20 @@ const fusedRequest = buildFusedCardBundleRequest(fusedPlan, {
       'Character Motivation': ['observable-pressure']
     }
   },
+  sourceCardsByFamily: {
+    'Scene Frame': [
+      { id: 'scene-location', name: 'location/situation', selectionState: 'priority' },
+      { id: 'scene-direction', name: 'immediate direction', selectionState: 'priority' },
+      { id: 'scene-beat', name: 'beat constraint', selectionState: 'priority' }
+    ]
+  },
   storyForm: fusedPlan.storyForm
 });
 assertEqual(fusedRequest.roleId, 'fusedCardBundle', 'Fused request uses fusedCardBundle role');
 assertEqual(fusedRequest.snapshotHash, 'snapshot-fused-1', 'Fused request carries snapshot hash');
 assertEqual(fusedRequest.requestedCards.length, 2, 'Fused request carries all requested cards');
+assertDeepEqual(fusedRequest.requestedCards[0].sourceCardIds, ['scene-location', 'scene-direction', 'scene-beat'], 'Fused request preserves source card ids');
+assert(fusedRequest.prompt.includes('location/situation'), 'Fused prompt names source cards');
 assert(fusedRequest.prompt.includes('Return one JSON object only.'), 'Fused prompt requires one JSON object');
 assert(fusedRequest.prompt.includes('schema "recursion.cardBundle.v1"'), 'Fused prompt names bundle schema');
 assert(fusedRequest.prompt.includes('Character Motivation'), 'Fused prompt includes requested family blocks');
@@ -349,6 +358,7 @@ const fusedProviderResult = {
 };
 const fusedParsed = cardsFromFusedProviderResult(fusedProviderResult, fusedCardContext);
 assertEqual(fusedParsed.cards.length, 2, 'Fused validator accepts valid requested siblings');
+assertDeepEqual(fusedParsed.cards[0].sourceCardIds, ['scene-location', 'scene-direction', 'scene-beat'], 'Fused cards preserve source card ids');
 assertDeepEqual(fusedParsed.cards.map((entry) => entry.family), ['Scene Frame', 'Character Motivation'], 'Fused validator rejects unrequested items');
 assertEqual(fusedParsed.cards[0].providerRole, 'fusedCardBundle', 'Fused cards retain provider role metadata');
 assertEqual(fusedParsed.cards[0].providerLane, 'reasoner', 'Fused cards retain provider lane metadata');

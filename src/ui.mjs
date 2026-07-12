@@ -1568,7 +1568,7 @@ function findProgressRow(container, stepId) {
 
 function findProgressChildRow(group, stepId) {
   return [...group.querySelectorAll('[data-recursion-progress-row]')]
-    .find((row) => row.dataset.recursionProgressStepId === stepId);
+    .find((row) => row.dataset.recursionProgressStepId === stepId && row.parentNode === group);
 }
 
 function findProgressChildrenGroup(list, parentStepId) {
@@ -1583,6 +1583,19 @@ function insertAt(container, node, index) {
   container.insertBefore(node, before);
 }
 
+function addClassName(node, className) {
+  if (!node || !className) return;
+  const classes = new Set(String(node.className || '').split(/\s+/).filter(Boolean));
+  classes.add(className);
+  node.className = [...classes].join(' ');
+}
+
+function removeClassName(node, className) {
+  if (!node || !className) return;
+  const classes = String(node.className || '').split(/\s+/).filter(Boolean).filter((entry) => entry !== className);
+  node.className = classes.join(' ');
+}
+
 function renderProgressChildrenGroup(group, step, model, previousChildScrollTops) {
   const children = Array.isArray(step.children) ? step.children : [];
   const childLimit = model.progressChildVisibleLimit || 5;
@@ -1595,6 +1608,7 @@ function renderProgressChildrenGroup(group, step, model, previousChildScrollTops
 
   const visibleIds = new Set(children.map((child, index) => child.id || `progress-child-${index}`));
   for (const row of [...group.querySelectorAll('[data-recursion-progress-row]')]) {
+    if (row.parentNode !== group) continue;
     if (!visibleIds.has(row.dataset.recursionProgressStepId || '')) row.remove();
   }
   children.forEach((child, index) => {
@@ -1607,6 +1621,7 @@ function renderProgressChildrenGroup(group, step, model, previousChildScrollTops
     const nestedChildren = Array.isArray(childStep.children) ? childStep.children : [];
     let nested = row.querySelector?.('[data-recursion-progress-nested]');
     if (nestedChildren.length) {
+      addClassName(row, 'has-nested');
       if (!nested) {
         nested = el('div', {
           className: 'recursion-step-children is-nested',
@@ -1616,6 +1631,7 @@ function renderProgressChildrenGroup(group, step, model, previousChildScrollTops
       }
       const visibleNestedIds = new Set(nestedChildren.map((nestedChild, nestedIndex) => nestedChild.id || `nested-${nestedIndex}`));
       for (const nestedRow of [...(nested.querySelectorAll?.('[data-recursion-progress-row]') || [])]) {
+        if (nestedRow.parentNode !== nested) continue;
         if (!visibleNestedIds.has(nestedRow.dataset?.recursionProgressStepId || '')) nestedRow.remove();
       }
       nestedChildren.forEach((nestedChild, nestedIndex) => {
@@ -1626,7 +1642,10 @@ function renderProgressChildrenGroup(group, step, model, previousChildScrollTops
         insertAt(nested, nestedRow, nestedIndex);
       });
     } else if (nested) {
+      removeClassName(row, 'has-nested');
       nested.remove();
+    } else {
+      removeClassName(row, 'has-nested');
     }
   });
 

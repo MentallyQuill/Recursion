@@ -164,6 +164,134 @@ assertEqual(unverifiedSourceCard.state, 'info', 'unverified source coverage is n
 assertEqual(unverifiedSourceCard.meta, 'included', 'unverified source coverage is labeled included');
 assertEqual(unverifiedSourceProgress.title, 'Ready', 'unverified source coverage does not raise a warning title');
 
+const runningSourceCardProgress = createProgressRunModel({
+  settings: {
+    cardDecks: {
+      activeCardDeckId: 'source-visible-deck',
+      customCardDecks: {
+        'source-visible-deck': {
+          id: 'source-visible-deck',
+          name: 'Source Visible Deck',
+          categoryOrder: ['scene-frame'],
+          categories: {
+            'scene-frame': { id: 'scene-frame', name: 'Scene Frame' }
+          },
+          cardOrderByCategory: {
+            'scene-frame': [
+              'sceneFrameCard:location-situation',
+              'sceneFrameCard:immediate-direction',
+              'sceneFrameCard:beat-constraint'
+            ]
+          },
+          cards: {
+            'sceneFrameCard:location-situation': {
+              id: 'sceneFrameCard:location-situation',
+              categoryId: 'scene-frame',
+              name: 'location/situation',
+              promptText: 'Keep current location and situation visible.',
+              selectionState: 'priority',
+              builtinFamily: 'Scene Frame',
+              builtinRoleId: 'sceneFrameCard'
+            },
+            'sceneFrameCard:immediate-direction': {
+              id: 'sceneFrameCard:immediate-direction',
+              categoryId: 'scene-frame',
+              name: 'immediate direction',
+              promptText: 'Track immediate direction.',
+              selectionState: 'priority',
+              builtinFamily: 'Scene Frame',
+              builtinRoleId: 'sceneFrameCard'
+            },
+            'sceneFrameCard:beat-constraint': {
+              id: 'sceneFrameCard:beat-constraint',
+              categoryId: 'scene-frame',
+              name: 'beat constraint',
+              promptText: 'Respect the next beat constraint.',
+              selectionState: 'priority',
+              builtinFamily: 'Scene Frame',
+              builtinRoleId: 'sceneFrameCard'
+            }
+          }
+        }
+      }
+    }
+  },
+  activityHistory: [
+    { runId: 'running-source-cards', phase: 'cardBatchRunning', label: 'Utility card batch', providerLane: 'utility', cardCounts: { requested: 1 }, recordedAt: '1' }
+  ],
+  activity: { runId: 'running-source-cards', phase: 'cardBatchRunning', label: 'Utility card batch', providerLane: 'utility', cardCounts: { requested: 1 }, recordedAt: '1' },
+  lastPlan: {
+    cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard' }]
+  }
+});
+const runningSourceCardCategory = runningSourceCardProgress.steps
+  .find((step) => step.id === 'utility-card-batch')
+  .children.find((child) => child.label === 'Scene Frame');
+assertEqual(
+  JSON.stringify((runningSourceCardCategory.children || []).map((child) => [child.label, child.state, child.meta])),
+  JSON.stringify([
+    ['location/situation', 'pending', 'waiting'],
+    ['immediate direction', 'pending', 'waiting'],
+    ['beat constraint', 'pending', 'waiting']
+  ]),
+  'running card batch exposes active source cards under the pending category row'
+);
+
+const mergedGeneratedAndPendingCategoryProgress = createProgressRunModel({
+  settings: {
+    cardDecks: {
+      activeCardDeckId: 'source-visible-deck',
+      customCardDecks: {
+        'source-visible-deck': {
+          id: 'source-visible-deck',
+          name: 'Source Visible Deck',
+          categoryOrder: ['scene-frame'],
+          categories: {
+            'scene-frame': { id: 'scene-frame', name: 'Scene Frame' }
+          },
+          cardOrderByCategory: {
+            'scene-frame': [
+              'sceneFrameCard:location-situation',
+              'sceneFrameCard:immediate-direction',
+              'sceneFrameCard:beat-constraint'
+            ]
+          },
+          cards: {
+            'sceneFrameCard:location-situation': {
+              id: 'sceneFrameCard:location-situation', categoryId: 'scene-frame', name: 'location/situation',
+              promptText: 'Keep current location visible.', selectionState: 'active', builtinFamily: 'Scene Frame', builtinRoleId: 'sceneFrameCard'
+            },
+            'sceneFrameCard:immediate-direction': {
+              id: 'sceneFrameCard:immediate-direction', categoryId: 'scene-frame', name: 'immediate direction',
+              promptText: 'Track immediate direction.', selectionState: 'active', builtinFamily: 'Scene Frame', builtinRoleId: 'sceneFrameCard'
+            },
+            'sceneFrameCard:beat-constraint': {
+              id: 'sceneFrameCard:beat-constraint', categoryId: 'scene-frame', name: 'beat constraint',
+              promptText: 'Respect the beat constraint.', selectionState: 'active', builtinFamily: 'Scene Frame', builtinRoleId: 'sceneFrameCard'
+            }
+          }
+        }
+      }
+    }
+  },
+  activityHistory: [
+    { runId: 'merged-category-progress', phase: 'cardBatchRunning', label: 'Utility card batch', providerLane: 'utility', recordedAt: '1' },
+    {
+      runId: 'merged-category-progress', phase: 'cardProgress', detail: {
+        parentStepId: 'utility-card-batch', id: 'generated-scene-frame', family: 'Scene Frame', roleId: 'sceneFrameCard',
+        source: 'generated', state: 'done'
+      }, recordedAt: '2'
+    }
+  ],
+  activity: { runId: 'merged-category-progress', phase: 'cardProgress', recordedAt: '2' },
+  lastPlan: { cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard' }] }
+});
+const mergedCategoryRows = mergedGeneratedAndPendingCategoryProgress.steps
+  .find((step) => step.id === 'utility-card-batch').children
+  .filter((child) => child.label === 'Scene Frame');
+assertEqual(mergedCategoryRows.length, 1, 'generated and pending category progress merge into one category row');
+assertEqual(mergedCategoryRows[0].children.length, 3, 'merged category row retains every eligible source card');
+
 const fusedBundleProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'fused-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },

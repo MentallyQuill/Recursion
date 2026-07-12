@@ -809,6 +809,8 @@ export function activeCardDeckSourceCards(settings = {}) {
   const grouped = {};
   for (const card of orderedDeckCardsAcrossCategories(deck)) {
     if (!getDeckCardStatus(card).runnable) continue;
+    const selectionState = cardSelectionState(card);
+    if (selectionState !== 'active' && selectionState !== 'priority') continue;
     const family = String(card.builtinFamily || '').trim();
     if (!family) continue;
     if (!Array.isArray(grouped[family])) grouped[family] = [];
@@ -817,7 +819,7 @@ export function activeCardDeckSourceCards(settings = {}) {
       name: card.name,
       description: card.description,
       promptText: card.promptText,
-      selectionState: cardSelectionState(card),
+      selectionState,
       selectedSubItems: Array.isArray(card.selectedSubItems) ? card.selectedSubItems : []
     });
   }

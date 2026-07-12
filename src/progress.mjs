@@ -1,3 +1,5 @@
+import { activeCardDeckSourceCards } from './card-decks.mjs';
+
 const VALID_STATES = new Set(['pending', 'running', 'done', 'cached', 'warning', 'failed', 'skipped', 'info']);
 const VALID_PROVIDER_LANES = new Set(['utility', 'reasoner']);
 const SAFE_PROGRESS_TITLES = new Set(['Generating', 'Ready', 'Idle', 'Issue', 'Needs attention']);
@@ -420,7 +422,7 @@ function childStepFromEvent(event, state, order = 0) {
   if (phase === 'cardProgress') {
     const roleId = cleanText(detail.roleId || detail.role);
     return normalizeChildStep({
-      id: detail.id,
+      id: childIdFromRole(roleId, detail.family || detail.id || activityLabelText(event)),
       label: detail.family || roleLabel(roleId, activityLabelText(event)),
       providerLane: event.providerLane || detail.lane || 'utility',
       state,
@@ -705,14 +707,31 @@ function appendPendingPlanSteps(map, view, orderStart = 0) {
 function appendPendingChildSteps(map, view, orderStart = 0) {
   const source = asObject(view);
   const jobs = Array.isArray(source.lastPlan?.cardJobs) ? source.lastPlan.cardJobs : [];
+  const sourceCardsByFamily = activeCardDeckSourceCards(source.settings || {});
   if (hasTerminalPromptOutcome(map)) return;
   const parentStepId = map.has('fused-card-bundle') ? 'fused-card-bundle' : 'utility-card-batch';
   if (parentStepId === 'fused-card-bundle') return;
   if (jobs.length && map.has(parentStepId)) {
-    let order = orderStart;
+    const parent = map.get(parentStepId);
+    const mergedJobs = new Map();
     for (const job of jobs) {
       const roleId = cleanText(job?.role || job?.roleId);
-      const family = cleanText(job?.family);
+      const family = cleanText(job?.family) || roleLabel(roleId, 'Card');
+      mergedJobs.set(`${roleId}|${family}`, { roleId, family });
+    }
+    for (const child of Array.isArray(parent.children) ? parent.children : []) {
+      const roleId = cleanText(child?.sourceRoleId);
+      const family = cleanText(child?.label);
+      if (!roleId && !family) continue;
+      mergedJobs.set(`${roleId}|${family}`, { roleId, family });
+    }
+    let order = orderStart;
+    for (const job of mergedJobs.values()) {
+      const roleId = job.roleId;
+      const family = job.family;
+      const sourceCards = Array.isArray(sourceCardsByFamily[family])
+        ? sourceCardsByFamily[family]
+        : [];
       upsertStep(map, normalizeStep({
         id: parentStepId,
         label: STEP_DEFINITIONS[parentStepId].label,
@@ -725,6 +744,14 @@ function appendPendingChildSteps(map, view, orderStart = 0) {
             providerLane: map.get(parentStepId)?.providerLane || 'utility',
             state: 'pending',
             sourceRoleId: roleId,
+            children: sourceCards.map((card, index) => ({
+              id: card.id,
+              label: card.name || card.id,
+              providerLane: map.get(parentStepId)?.providerLane || 'utility',
+              state: 'pending',
+              reason: card.selectionState === 'priority' ? 'Priority source card included.' : '',
+              order: index
+            })),
             order: order++
           }
         ]

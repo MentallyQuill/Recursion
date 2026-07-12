@@ -864,6 +864,23 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   padding: 4px 9px 4px 7px;
 }
 
+.recursion-step-row.child-row.has-nested {
+  height: auto;
+  min-height: var(--recursion-progress-child-row-height);
+}
+
+.recursion-step-row.child-row.has-nested .recursion-step-children.is-nested {
+  border-top: 0;
+  grid-column: 2 / -1;
+  max-height: none;
+  overflow: visible;
+  padding: 1px 0 0;
+}
+
+.recursion-step-row.child-row.has-nested .recursion-step-children.is-nested .recursion-step-row.child-row {
+  padding-left: 0;
+}
+
 .recursion-step-row.child-row .recursion-step-label {
   opacity: .92;
 }
@@ -899,7 +916,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   width: 10px;
 }
 
-.recursion-step-row.running .recursion-step-icon {
+.recursion-step-row.running > .recursion-step-icon {
   animation: recursion-spin 900ms linear infinite;
   background: conic-gradient(
     from 20deg,
@@ -914,7 +931,7 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   width: 12px;
 }
 
-.recursion-step-row.running .recursion-step-icon::after {
+.recursion-step-row.running > .recursion-step-icon::after {
   background: var(--recursion-bg);
   border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 4%, transparent);
   border-radius: inherit;
@@ -924,57 +941,57 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   position: absolute;
 }
 
-.recursion-step-row.done .recursion-step-icon {
+.recursion-step-row.done > .recursion-step-icon {
   background: var(--recursion-success);
   border-color: var(--recursion-success);
 }
 
-.recursion-step-row.cached .recursion-step-icon {
+.recursion-step-row.cached > .recursion-step-icon {
   background: #9b7cff;
   border-color: #9b7cff;
 }
 
-.recursion-step-row.skipped .recursion-step-icon {
+.recursion-step-row.skipped > .recursion-step-icon {
   background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 24%, transparent);
   border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 44%, transparent);
 }
 
-.recursion-step-row.info .recursion-step-icon {
-  background: color-mix(in srgb, var(--recursion-accent) 42%, transparent);
-  border-color: color-mix(in srgb, var(--recursion-accent) 58%, transparent);
+.recursion-step-row.info > .recursion-step-icon {
+  background: var(--recursion-success);
+  border-color: var(--recursion-success);
 }
 
-.recursion-step-row.warning .recursion-step-icon {
+.recursion-step-row.warning > .recursion-step-icon {
   background: var(--recursion-warning);
   border-color: var(--recursion-warning);
 }
 
-.recursion-step-row.failed .recursion-step-icon {
+.recursion-step-row.failed > .recursion-step-icon {
   background: var(--recursion-error);
   border-color: var(--recursion-error);
 }
 
-.recursion-step-row.running .recursion-step-meta {
+.recursion-step-row.running > .recursion-step-meta {
   color: color-mix(in srgb, var(--recursion-accent) 78%, transparent);
 }
 
-.recursion-step-row.cached .recursion-step-meta {
+.recursion-step-row.cached > .recursion-step-meta {
   color: color-mix(in srgb, var(--recursion-cached) 80%, transparent);
 }
 
-.recursion-step-row.skipped .recursion-step-meta {
+.recursion-step-row.skipped > .recursion-step-meta {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
 }
 
-.recursion-step-row.info .recursion-step-meta {
-  color: color-mix(in srgb, var(--recursion-accent) 72%, transparent);
+.recursion-step-row.info > .recursion-step-meta {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
 }
 
-.recursion-step-row.warning .recursion-step-meta {
+.recursion-step-row.warning > .recursion-step-meta {
   color: color-mix(in srgb, var(--recursion-warning) 86%, #8b6b00);
 }
 
-.recursion-step-row.failed .recursion-step-meta {
+.recursion-step-row.failed > .recursion-step-meta {
   color: color-mix(in srgb, var(--recursion-error) 86%, #610000);
 }
 

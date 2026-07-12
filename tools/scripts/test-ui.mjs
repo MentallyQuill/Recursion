@@ -731,8 +731,13 @@ assert(/@keyframes recursion-step-row-enter/.test(recursionCss), 'production pro
 assert(/@keyframes recursion-step-row-update/.test(recursionCss), 'production progress row update animation is defined');
 assert(/\.recursion-step-children\s*\{[\s\S]*?--recursion-progress-child-row-height:\s*25px;[\s\S]*?padding:\s*0 0 3px 22px;/.test(recursionCss), 'production progress child rows match the compact indented reference geometry');
 assert(/\.recursion-step-row\.child-row\s*\{[\s\S]*?height:\s*var\(--recursion-progress-child-row-height\);/.test(recursionCss), 'production child progress rows use the reference fixed child height');
-assert(/\.recursion-step-row\.running \.recursion-step-icon\s*\{[\s\S]*?height:\s*12px;[\s\S]*?width:\s*12px;/.test(recursionCss), 'production running progress spinner uses the 12px reference ring size');
-assert(/\.recursion-step-row\.running \.recursion-step-icon::after/.test(recursionCss), 'production running progress spinner uses an inner cutout like the reference ring');
+assert(/\.recursion-step-row\.child-row\.has-nested \.recursion-step-children\.is-nested\s*\{[\s\S]*?grid-column:\s*2 \/ -1;[\s\S]*?padding:\s*1px 0 0;/.test(recursionCss), 'nested source-card progress rows keep compact category-relative indentation');
+assert(!/\.recursion-step-row\.info > \.recursion-step-icon\s*\{[^}]*var\(--recursion-accent\)/.test(recursionCss), 'included/info progress rows do not use the running cyan accent');
+assert(/\.recursion-step-row\.info > \.recursion-step-icon\s*\{[^}]*background:\s*var\(--recursion-success\);[^}]*border-color:\s*var\(--recursion-success\);/.test(recursionCss), 'included/info progress rows use the success green status circle');
+assert(/\.recursion-step-row\.info > \.recursion-step-meta\s*\{[^}]*var\(--SmartThemeBodyColor/.test(recursionCss), 'included/info progress metadata stays neutral grey');
+assert(/\.recursion-step-row\.running > \.recursion-step-icon\s*\{[\s\S]*?height:\s*12px;[\s\S]*?width:\s*12px;/.test(recursionCss), 'production running progress spinner uses the 12px reference ring size');
+assert(/\.recursion-step-row\.running > \.recursion-step-icon::after/.test(recursionCss), 'production running progress spinner uses an inner cutout like the reference ring');
+assert(!/\.recursion-step-row\.running \.recursion-step-meta\s*\{/.test(recursionCss), 'running progress metadata color does not leak into nested child rows');
 assert(/\.recursion-status-popover\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-direction:\s*column;[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/.test(recursionCss), 'production progress popover uses a flex column shell so mobile height clamps constrain its contents');
 assert(/\.recursion-status-popover\[hidden\]\s*\{[\s\S]*?display:\s*none !important;/.test(recursionCss), 'production progress popover hidden state survives the flex display rule');
 assert(/\.recursion-status-head\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?padding:\s*7px 9px;/.test(recursionCss), 'production progress popover header uses the reference 34px compactness');
@@ -2296,6 +2301,42 @@ try {
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-status-popover]')).includes('Utility card batch'), 'progress popover renders progress rows');
   const originalActivity = view.activity;
   const originalProgressRun = view.progressRun;
+  view = {
+    ...view,
+    progressRun: {
+      runId: 'ui-progress-source-cards',
+      title: 'Generating',
+      steps: [
+        {
+          id: 'utility-card-batch',
+          label: 'Utility card batch',
+          providerLane: 'utility',
+          state: 'running',
+          children: [
+            {
+              id: 'scene-frame-card',
+              label: 'Scene Frame',
+              providerLane: 'utility',
+              state: 'running',
+              children: [
+                { id: 'scene-location-source', label: 'location/situation', providerLane: 'utility', state: 'pending' },
+                { id: 'scene-direction-source', label: 'immediate direction', providerLane: 'utility', state: 'pending' },
+                { id: 'scene-beat-source', label: 'beat constraint', providerLane: 'utility', state: 'pending' }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  };
+  ui.update();
+  const sourceLocationRow = root.querySelectorAll('[data-recursion-progress-row]')
+    .find((row) => row.dataset.recursionProgressStepId === 'scene-location-source');
+  assert(sourceLocationRow, 'source card row renders under running category progress');
+  ui.update();
+  const sourceLocationRowAfterHeartbeat = root.querySelectorAll('[data-recursion-progress-row]')
+    .find((row) => row.dataset.recursionProgressStepId === 'scene-location-source');
+  assertEqual(sourceLocationRowAfterHeartbeat, sourceLocationRow, 'heartbeat rerender preserves nested source card row node');
   const retryReason = 'Provider card batch retried once before this card completed.';
   view = {
     ...view,

@@ -8,6 +8,7 @@ import {
   selectHand
 } from './cards.mjs';
 import {
+  CARD_SCOPE_CATALOG,
   cardScopeSummary,
   enforceManualSelectionCap,
   filterCardJobsForScope,
@@ -1908,9 +1909,15 @@ function cardProgressDetail(card, source, state, options = {}) {
   const coveredSet = new Set(coveredSourceCardIds);
   const progressSource = card?.providerProgressSource === 'fused-repair' ? 'fused-repair' : source;
   const explicitParentStepId = safeText(options.parentStepId || '', 120);
+  const sourceCatalog = CARD_SCOPE_CATALOG.find((entry) => entry.family === family || entry.role === roleId);
+  const idSourceCards = expectedSourceCardIds.map((id) => {
+    const key = String(id).split(':').pop();
+    const item = sourceCatalog?.subItems?.find((candidate) => candidate.key === key);
+    return { id, name: item?.label || key, selectionState: 'active' };
+  });
   const sourceCards = Array.isArray(card?.sourceCards) && card.sourceCards.length
     ? card.sourceCards
-    : (Array.isArray(options.sourceCards) ? options.sourceCards : []);
+    : (Array.isArray(options.sourceCards) && options.sourceCards.length ? options.sourceCards : idSourceCards);
   return {
     parentStepId: explicitParentStepId || (progressSource === 'fused-repair'
       ? 'utility-card-batch'

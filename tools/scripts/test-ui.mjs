@@ -827,6 +827,9 @@ assert(!/className: 'recursion-mini-button'[^)\n]*text:/.test(recursionUi), 'pro
 assert(/title:\s*label/.test(recursionUi) && /'aria-label':\s*label/.test(recursionUi), 'production Card System icon buttons expose hover text and accessible labels');
 assert(/\.recursion-mini-button\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?background:\s*color-mix\(in srgb, var\(--SmartThemeBodyColor/.test(recursionCss), 'production Card System mini buttons use graphite Recursion skin instead of native white buttons');
 assert(/recursionCardDeckDuplicate:[\s\S]*recursionCardDeckEdit:[\s\S]*recursionCardDeckDelete:/.test(recursionUi), 'production Card Deck edit action sits with duplicate and delete deck controls');
+assert(/let deckRenameState = null/.test(recursionUi) && /recursionCardDeckRenameInput/.test(recursionUi), 'production Card Deck rename uses inline editor state and input');
+assert(/recursionCardDeckRenameConfirm/.test(recursionUi) && /recursionCardDeckRenameCancel/.test(recursionUi), 'production Card Deck rename uses inline accept and cancel controls');
+assert(!/globalThis\.prompt\?\.\('Deck name'/.test(recursionUi), 'production Card Deck rename does not use a blocking browser prompt');
 assert(/recursion-card-deck-actions/.test(recursionUi) && /recursion-card-deck-bar'/.test(recursionUi), 'production Card Deck controls use a dedicated right-side action rail');
 assert(/recursionCardCategoryNew:[\s\S]*?recursion-card-deck-tool-label', text: 'Categories'/.test(recursionUi), 'production Card System keeps the labeled add-category tool row');
 assert(!/recursion-card-deck-tool-label', text: 'Cards'/.test(recursionUi), 'production Card System removes the global add-card tool row');

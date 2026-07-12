@@ -1,4 +1,4 @@
-import { cacheContractVersions, createRecursionRuntime, rapidWarmContractVersions } from '../../src/runtime.mjs';
+import { cacheContractVersions, createRecursionRuntime, filterCardsForCardEligibility, filterPlanForCardEligibility, rapidWarmContractVersions } from '../../src/runtime.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
@@ -772,6 +772,52 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   assertEqual(proseHost.message.swipes[1], 'Mara set the cup down. "Call it whatever lets you sleep."', 'Dialogue target appends repaired dialogue swipe');
   assertEqual(proseHost.message.swipeId, 1, 'Dialogue target selects enhanced swipe');
 }
+
+const eligibilitySettings = {
+  mode: 'auto',
+  cardDecks: {
+    activeCardDeckId: 'eligibility-deck',
+    customCardDecks: {
+      'eligibility-deck': {
+        id: 'eligibility-deck',
+        name: 'Eligibility Deck',
+        categoryOrder: ['scene-frame', 'active-cast'],
+        categories: {
+          'scene-frame': { id: 'scene-frame', name: 'Scene Frame' },
+          'active-cast': { id: 'active-cast', name: 'Active Cast' }
+        },
+        cardOrderByCategory: {
+          'scene-frame': ['active-card', 'priority-card'],
+          'active-cast': ['inactive-card']
+        },
+        cards: {
+          'active-card': { id: 'active-card', categoryId: 'scene-frame', name: 'Active', promptText: 'Active prompt.', selectionState: 'active', builtinFamily: 'Scene Frame' },
+          'priority-card': { id: 'priority-card', categoryId: 'scene-frame', name: 'Priority', promptText: 'Priority prompt.', selectionState: 'priority', builtinFamily: 'Scene Frame' },
+          'inactive-card': { id: 'inactive-card', categoryId: 'active-cast', name: 'Inactive', promptText: 'Inactive prompt.', selectionState: 'off', builtinFamily: 'Active Cast' }
+        }
+      }
+    }
+  }
+};
+const eligibilityPlan = filterPlanForCardEligibility({
+  cardJobs: [
+    { family: 'Scene Frame', cardId: 'active-card' },
+    { family: 'Active Cast', cardId: 'inactive-card' }
+  ]
+}, eligibilitySettings);
+assertEqual(eligibilityPlan.plan.cardJobs.length, 1, 'Auto rejects inactive card jobs');
+assertEqual(eligibilityPlan.omitted[0].reason, 'inactive-card-ineligible', 'Auto records inactive card rejection');
+assertEqual(filterCardsForCardEligibility([
+  { id: 'runtime-scene', family: 'Scene Frame' },
+  { id: 'runtime-cast', family: 'Active Cast' }
+], eligibilitySettings).length, 1, 'Auto filters runtime family cards to eligible deck families');
+const changedEligibilitySettings = clone(eligibilitySettings);
+changedEligibilitySettings.cardDecks.customCardDecks['eligibility-deck'].cards['active-card'].selectionState = 'off';
+assertNotEqual(
+  cacheContractVersions(eligibilitySettings).cardEligibilityHash,
+  cacheContractVersions(changedEligibilitySettings).cardEligibilityHash,
+  'Card state changes invalidate cache eligibility'
+);
 
 {
   const proseHost = createProseMessageHarness('O\'Neill looked at Carter. "Options?"');

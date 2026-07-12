@@ -12,6 +12,7 @@ tmp/
 artifacts/
 .agents/
 .codex/
+.codex-remote-attachments/
 .superpowers/
 *.log
 

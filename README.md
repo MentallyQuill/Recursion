@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/branding/recursion-banner-white-transparent.png" alt="Recursion" width="100%">
+  <img src="assets/branding/recursion-banner-white-transparent.png" alt="Recursion" style="max-width:100%;height:auto">
 </p>
 
 # Recursion
@@ -27,48 +27,48 @@ Recursion is a scene reasoning layer for the reply in front of you.
 <table>
   <tr>
     <td width="50%">
-      <img src="assets/documentation/renders/recursion-operator-pipeline-controls.png" alt="Recursion pipeline controls" width="100%"><br>
+      <img src="assets/documentation/renders/recursion-operator-pipeline-controls.png" alt="Recursion pipeline controls" style="max-width:100%;height:auto"><br>
       <strong>Pipelines</strong><br>
       Pick Standard, Rapid, or Fused depending on whether you want maximum clarity, lower send-time latency, or one larger structured card pass.
     </td>
     <td width="50%">
-      <img src="assets/documentation/renders/recursion-operator-mode-controls.png" alt="Recursion mode controls" width="100%"><br>
+      <img src="assets/documentation/renders/recursion-operator-mode-controls.png" alt="Recursion mode controls" style="max-width:100%;height:auto"><br>
       <strong>Modes</strong><br>
       Use Auto when Recursion should prepare the next reply on its own, or Manual when you want to choose when scene work runs.
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="assets/documentation/renders/recursion-card-deck-editor.jpg" alt="Recursion card deck editor with categories and card states" width="100%"><br>
+      <img src="assets/documentation/renders/recursion-card-deck-editor.jpg" alt="Recursion card deck editor with categories and card states" style="max-width:100%;height:auto"><br>
       <strong>Cards &amp; Decks</strong><br>
       Start with the fixed scene-card catalog, then duplicate it into an editable deck with categories, authored cards, drag ordering, priority states, and card Assist.
     </td>
     <td width="50%">
-      <Render Needed>: assets/documentation/renders/recursion-card-hand-inspection.png - Live Last Brief or Full Viewer showing the selected card hand and omissions.<br>
+      <img src="assets/documentation/renders/recursion-operator-last-brief-states.png" alt="Recursion selected card hand inspection" style="max-width:100%;height:auto"><br>
       <strong>Card Hand</strong><br>
       Recursion selects a bounded hand for the next reply. Last Brief and the Full Viewer show the selected cards, omissions, evidence, and packet metadata.
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="assets/documentation/renders/recursion-operator-enhancements-controls.png" alt="Recursion enhancements controls" width="100%"><br>
+      <img src="assets/documentation/renders/recursion-operator-enhancements-controls.png" alt="Recursion enhancements controls" style="max-width:100%;height:auto"><br>
       <strong>Enhancements</strong><br>
       Clean up the reply that just landed by improving prose, dialogue, or both, then keep the improved version as a swipe or replace the original.
     </td>
     <td width="50%">
-      <img src="assets/documentation/renders/recursion-operator-story-form-controls.png" alt="Recursion tense and point of view controls" width="100%"><br>
+      <img src="assets/documentation/renders/recursion-operator-story-form-controls.png" alt="Recursion tense and point of view controls" style="max-width:100%;height:auto"><br>
       <strong>Tense &amp; PoV</strong><br>
       Let Recursion match the chat automatically, or force a past/present tense and point of view when the scene needs a steadier form.
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="assets/documentation/renders/recursion-operator-progress-menu-states.png" alt="Recursion progress dropdown states" width="100%"><br>
+      <img src="assets/documentation/renders/recursion-operator-progress-menu-states.png" alt="Recursion progress dropdown states" style="max-width:100%;height:auto"><br>
       <strong>Progress Dropdown</strong><br>
       Watch snapshot, planning, card work, prompt composition, install, fallback, and ready states without leaving the chat.
     </td>
     <td width="50%">
-      <img src="assets/documentation/renders/recursion-operator-last-brief-states.png" alt="Recursion Last Brief card viewer" width="100%"><br>
+      <img src="assets/documentation/renders/recursion-operator-last-brief-states.png" alt="Recursion Last Brief card viewer" style="max-width:100%;height:auto"><br>
       <strong>Last Brief</strong><br>
       Inspect the latest selected hand, card evidence, guidance, guardrails, omissions, and packet metadata from the compact viewer.
     </td>

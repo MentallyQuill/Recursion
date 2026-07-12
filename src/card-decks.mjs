@@ -782,6 +782,28 @@ export function deckPriorityFamilies(deck, settings = {}) {
   return families;
 }
 
+export function activeCardDeckEligibility(settings = {}) {
+  const deck = getActiveCardDeck(settings);
+  const cards = orderedDeckCardsAcrossCategories(deck)
+    .filter((card) => getDeckCardStatus(card).runnable);
+  const activeCardIds = cards
+    .filter((card) => cardSelectionState(card) === 'active')
+    .map((card) => card.id);
+  const priorityCardIds = cards
+    .filter((card) => cardSelectionState(card) === 'priority')
+    .map((card) => card.id);
+  return {
+    activeDeckId: deck.id,
+    activeCardIds,
+    priorityCardIds,
+    allowedCardIds: [...priorityCardIds, ...activeCardIds],
+    allowedFamilies: [...new Set(cards
+      .filter((card) => cardSelectionState(card) === 'active' || cardSelectionState(card) === 'priority')
+      .map((card) => String(card.builtinFamily || '').trim())
+      .filter(Boolean))]
+  };
+}
+
 function emptyCardScope() {
   return {
     version: CARD_SCOPE_VERSION,

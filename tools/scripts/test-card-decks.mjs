@@ -16,6 +16,7 @@ import {
   duplicateCardDeck,
   duplicateDeckName,
   getDeckCardStatus,
+  activeCardDeckEligibility,
   cardSelectionState,
   deckPriorityCardIds,
   deckPriorityFamilies,
@@ -69,6 +70,33 @@ assertEqual(getDeckCardStatus(draft).reason, 'draft-name', 'draft reason names d
 assertEqual(getDeckCardStatus({ ...draft, name: 'Scene Anchor', promptText: '' }).reason, 'needs-prompt', 'empty prompt is not runnable');
 assertEqual(getDeckCardStatus({ ...draft, name: 'Scene Anchor', promptText: 'Keep scene grounded.', enabled: false }).reason, 'disabled', 'disabled card is not runnable');
 assertEqual(getDeckCardStatus({ ...draft, name: 'Scene Anchor', promptText: 'Keep scene grounded.' }).runnable, true, 'named card with prompt is runnable');
+
+const eligibilityDeck = normalizeCustomDeck({
+  id: 'eligibility-deck',
+  name: 'Eligibility Deck',
+  categoryOrder: ['scene-frame', 'active-cast'],
+  categories: {
+    'scene-frame': { id: 'scene-frame', name: 'Scene Frame' },
+    'active-cast': { id: 'active-cast', name: 'Active Cast' }
+  },
+  cardOrderByCategory: {
+    'scene-frame': ['active-card', 'priority-card'],
+    'active-cast': ['inactive-card']
+  },
+  cards: {
+    'active-card': { id: 'active-card', categoryId: 'scene-frame', name: 'Active', promptText: 'Active prompt.', selectionState: 'active', builtinFamily: 'Scene Frame' },
+    'priority-card': { id: 'priority-card', categoryId: 'scene-frame', name: 'Priority', promptText: 'Priority prompt.', selectionState: 'priority', builtinFamily: 'Scene Frame' },
+    'inactive-card': { id: 'inactive-card', categoryId: 'active-cast', name: 'Inactive', promptText: 'Inactive prompt.', selectionState: 'off', builtinFamily: 'Active Cast' }
+  }
+});
+const eligibility = activeCardDeckEligibility({
+  cardDecks: {
+    activeCardDeckId: eligibilityDeck.id,
+    customCardDecks: { [eligibilityDeck.id]: eligibilityDeck }
+  }
+});
+assertDeepEqual(eligibility.allowedCardIds, ['priority-card', 'active-card'], 'Auto eligibility excludes inactive cards and keeps priority before active');
+assertDeepEqual(eligibility.priorityCardIds, ['priority-card'], 'Auto eligibility exposes priority card ids');
 
 const customDeck = normalizeCustomDeck({
   id: 'My Deck!',

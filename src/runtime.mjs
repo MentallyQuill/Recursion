@@ -17,6 +17,7 @@ import {
 } from './card-scope.mjs';
 import {
   activeCardDeckRuntimeScope,
+  activeCardDeckEligibility,
   deckPriorityCardIds,
   deckPriorityFamilies,
   getActiveCardDeck,
@@ -145,7 +146,8 @@ const HARD_CACHE_VERSION_FIELDS = Object.freeze([
   'cardCatalogHash',
   'promptPacketVersion',
   'promptContractHash',
-  'providerContractHash'
+  'providerContractHash',
+  'cardEligibilityHash'
 ]);
 
 function cleanString(value, fallback = '') {
@@ -220,7 +222,8 @@ function settingsWithRuntimeCardScope(settings = {}, options = {}) {
   };
   return {
     ...normalized,
-    cardScope: source.cardDecks ? activeCardDeckRuntimeScope(normalized) : normalizeCardScope(source.cardScope)
+    cardScope: source.cardDecks ? activeCardDeckRuntimeScope(normalized) : normalizeCardScope(source.cardScope),
+    cardEligibility: source.cardDecks ? activeCardDeckEligibility(normalized) : null
   };
 }
 
@@ -228,12 +231,74 @@ function runtimeScopePayload(settings = {}) {
   return scopePayloadForArbiter(settingsWithRuntimeCardScope(settings));
 }
 
+function usesCardDeckEligibility(settings = {}) {
+  return Boolean(settings?.cardDecks)
+    && (settings.mode !== 'manual' || Object.keys(settings.cardDecks.customCardDecks || {}).length > 0);
+}
+
 function filterCardJobsForRuntimeScope(cardJobs, settings = {}) {
-  return filterCardJobsForScope(cardJobs, settingsWithRuntimeCardScope(settings));
+  const normalized = settingsWithRuntimeCardScope(settings);
+  if (usesCardDeckEligibility(settings)) {
+    const result = filterPlanForCardEligibility({ cardJobs }, normalized);
+    return { cardJobs: result.plan.cardJobs, omitted: result.omitted, scope: runtimeScopePayload(normalized), diagnostics: result.diagnostics };
+  }
+  return filterCardJobsForScope(cardJobs, normalized);
 }
 
 function filterCardsForRuntimeScope(cards, settings = {}) {
-  return filterCardsForScope(cards, settingsWithRuntimeCardScope(settings));
+  const normalized = settingsWithRuntimeCardScope(settings);
+  if (usesCardDeckEligibility(settings)) {
+    const entries = Array.isArray(cards) ? cards : [];
+    const filtered = filterCardsForCardEligibility(entries, normalized);
+    const accepted = new Set(filtered);
+    const omitted = entries
+      .filter((card) => !accepted.has(card))
+      .map((card) => ({
+        cardId: String(card?.deckCardId || '').trim(),
+        family: String(card?.family || '').trim(),
+        reason: 'inactive-card-ineligible'
+      }));
+    return {
+      cards: filtered,
+      omitted,
+      scope: runtimeScopePayload(normalized),
+      diagnostics: omitted.map((entry) => `card-eligibility-rejected:${entry.family || entry.cardId}`)
+    };
+  }
+  return filterCardsForScope(cards, normalized);
+}
+
+export function filterPlanForCardEligibility(plan, settings = {}) {
+  const normalized = settingsWithRuntimeCardScope(settings);
+  const eligibility = normalized.cardEligibility || { allowedCardIds: [], allowedFamilies: [] };
+  const allowedIds = new Set(eligibility.allowedCardIds || []);
+  const allowedFamilies = new Set(eligibility.allowedFamilies || []);
+  const accepted = [];
+  const omitted = [];
+  for (const job of Array.isArray(plan?.cardJobs) ? plan.cardJobs : []) {
+    const cardId = String(job?.cardId || job?.refreshOfCardId || '').trim();
+    const family = String(job?.family || CARD_CATALOG.find((entry) => entry.role === job?.role)?.family || '').trim();
+    const allowed = cardId ? allowedIds.has(cardId) : allowedFamilies.has(family);
+    if (allowed) accepted.push(job);
+    else omitted.push({ cardId, family, reason: 'inactive-card-ineligible' });
+  }
+  return {
+    plan: { ...plan, cardJobs: accepted },
+    omitted,
+    diagnostics: omitted.map((entry) => `card-eligibility-rejected:${entry.family || entry.cardId}`)
+  };
+}
+
+export function filterCardsForCardEligibility(cards, settings = {}) {
+  const normalized = settingsWithRuntimeCardScope(settings);
+  const eligibility = normalized.cardEligibility || { allowedCardIds: [], allowedFamilies: [] };
+  const allowedIds = new Set(eligibility.allowedCardIds || []);
+  const allowedFamilies = new Set(eligibility.allowedFamilies || []);
+  return (Array.isArray(cards) ? cards : []).filter((card) => {
+    const cardId = String(card?.deckCardId || '').trim();
+    const family = String(card?.family || '').trim();
+    return cardId ? allowedIds.has(cardId) : allowedFamilies.has(family);
+  });
 }
 
 function cacheSettingsSignature(settings = {}) {
@@ -277,6 +342,16 @@ function rapidWarmSettingsSignature(settings = {}) {
   };
 }
 
+function cardEligibilitySignature(settings = {}) {
+  const eligibility = activeCardDeckEligibility(settings);
+  return hashJson({
+    activeDeckId: eligibility.activeDeckId,
+    activeCardIds: [...eligibility.activeCardIds].sort(),
+    priorityCardIds: [...eligibility.priorityCardIds].sort(),
+    allowedFamilies: [...eligibility.allowedFamilies].sort()
+  });
+}
+
 export function cacheContractVersions(settings = {}) {
   return {
     storageSchemaVersion: STORAGE_SCHEMA_VERSION,
@@ -289,6 +364,7 @@ export function cacheContractVersions(settings = {}) {
       storyFormSchema: STORY_FORM_SCHEMA
     }),
     providerContractHash: PROVIDER_CONTRACT_HASH,
+    cardEligibilityHash: cardEligibilitySignature(settings),
     settingsHash: hashJson(cacheSettingsSignature(settings))
   };
 }
@@ -1608,20 +1684,23 @@ function activeSceneCacheVariant(cache, snapshot) {
   };
 }
 
-function compactSceneCacheForArbiter(cache, snapshot) {
+function compactSceneCacheForArbiter(cache, snapshot, settings = {}) {
   const source = asObject(cache);
   const cacheState = ['active', 'stale', 'retired', 'invalid'].includes(source.cacheState) ? source.cacheState : 'active';
   const invalidation = asObject(source.invalidation);
   const invalidationReason = safeText(invalidation.reason || '', 120);
   const invalidationDetectedAt = safeText(invalidation.detectedAt || '', 80);
   const activeVariant = activeSceneCacheVariant(cache, snapshot);
-  const cards = activeVariant.cards
+  const cards = filterCardsForRuntimeScope(activeVariant.cards, settings).cards
     .map((card) => compactCacheCardForArbiter(card, snapshot))
     .filter(Boolean)
     .slice(0, 32);
   const latestHand = asObject(activeVariant.latestHand);
+  const eligibleCardIds = new Set(cards.map((card) => String(card?.id || '').trim()).filter(Boolean));
   const handCards = Array.isArray(latestHand.cardIds)
-    ? latestHand.cardIds.map((cardId) => arbiterSafeRef(cardId || '', 'card')).filter(Boolean).slice(0, 16)
+      ? latestHand.cardIds
+      .filter((cardId) => !usesCardDeckEligibility(settings) || eligibleCardIds.has(String(cardId || '').trim()))
+      .map((cardId) => arbiterSafeRef(cardId || '', 'card')).filter(Boolean).slice(0, 16)
     : [];
   const handId = arbiterSafeRef(latestHand.handId || '', 'hand');
   return {
@@ -4220,9 +4299,12 @@ export function createRecursionRuntime({
       chips: [arbiterLane === 'reasoner' ? 'Reasoner' : 'Utility']
     });
     try {
-      const cacheView = compactSceneCacheForArbiter(sceneCache, snapshot);
+      const cacheView = compactSceneCacheForArbiter(sceneCache, snapshot, settings);
       const cardScope = runtimeScopePayload(settings);
-      const catalog = cardScope.strictWhitelist ? cardScope.allowedCatalog : cardScope.availableCatalog;
+      const eligibility = settingsWithRuntimeCardScope(settings).cardEligibility;
+      const catalog = usesCardDeckEligibility(settings)
+        ? cardScope.availableCatalog.filter((entry) => eligibility.allowedFamilies.includes(entry.family))
+        : (cardScope.strictWhitelist ? cardScope.allowedCatalog : cardScope.availableCatalog);
       const result = await generationRouter.generate('utilityArbiter', {
         lane: arbiterLane,
         runId,
@@ -4238,6 +4320,9 @@ export function createRecursionRuntime({
           `Provider health: ${JSON.stringify(providerHealthForArbiter(settings))}`,
           `Card scope: ${JSON.stringify(cardScope)}`,
           cardScopePolicyLine(cardScope),
+          ...(usesCardDeckEligibility(settings)
+            ? [`Card Deck eligibility is a hard whitelist. Allowed families: ${JSON.stringify(eligibility.allowedFamilies)}. Inactive families are unavailable.`]
+            : []),
           arbiterCardJobContractLine(),
           arbiterStoryFormContractLine(),
           reasoningPolicyPromptLine(settings),
@@ -4425,6 +4510,7 @@ export function createRecursionRuntime({
         diagnostics: mergeDiagnostics(
           plan.diagnostics,
           scopeOmissionReasons(scopedCardJobs.omitted),
+          ...(scopedCardJobs.diagnostics || []),
           autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings),
           prioritySelection.diagnostics,
           manualReconciled.diagnostics
@@ -4505,7 +4591,7 @@ export function createRecursionRuntime({
         )
       });
       const behaviorPolicy = runPolicyForEffectivePlan(settings, plan);
-      const hand = selectHand(deck.cards, {
+      const hand = selectHand(filterCardsForRuntimeScope(deck.cards, settings).cards, {
         maxCards: budgetOr(plan.budgets?.maxCards, 6),
         maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
         behaviorPolicy,
@@ -5280,6 +5366,7 @@ export function createRecursionRuntime({
           rapidEscalationDiagnostics,
           freshDiagnostics,
           scopeOmissionReasons(scopedCardJobs.omitted),
+          ...(scopedCardJobs.diagnostics || []),
           autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings),
           prioritySelection.diagnostics,
           manualReconciled.diagnostics
@@ -5430,7 +5517,7 @@ export function createRecursionRuntime({
       });
       let promptSnapshot = sceneSnapshot;
       let promptDeck = deck;
-      let hand = selectHand(deck.cards, {
+      let hand = selectHand(filterCardsForRuntimeScope(deck.cards, settings).cards, {
         maxCards: budgetOr(plan.budgets?.maxCards, 6),
         maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
         behaviorPolicy,
@@ -5457,7 +5544,7 @@ export function createRecursionRuntime({
           ...deck,
           cards: rebaseCardsForSnapshot(deck.cards, promptSnapshot, plan)
         };
-        hand = selectHand(promptDeck.cards, {
+        hand = selectHand(filterCardsForRuntimeScope(promptDeck.cards, settings).cards, {
           maxCards: budgetOr(plan.budgets?.maxCards, 6),
           maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
           behaviorPolicy,
@@ -5533,7 +5620,7 @@ export function createRecursionRuntime({
             ...promptDeck,
             cards: rebaseCardsForSnapshot(promptDeck.cards, promptSnapshot, plan)
           };
-          hand = selectHand(promptDeck.cards, {
+          hand = selectHand(filterCardsForRuntimeScope(promptDeck.cards, settings).cards, {
             maxCards: budgetOr(plan.budgets?.maxCards, 6),
             maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
             behaviorPolicy,

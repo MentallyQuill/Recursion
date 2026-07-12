@@ -1034,6 +1034,13 @@ function cardMetaChips(card) {
   if (origin === 'fallback') chips.push('fallback');
   if (Number(source.providerRetryCount || source.retryCount || 0) > 0) chips.push('retried');
   if (cleanText(source.providerLane || source.composerLane).toLowerCase() === 'reasoner') chips.push('reasoner');
+  const sourceCoverage = cleanText(source.sourceCoverage).toLowerCase();
+  if (sourceCoverage === 'cached') chips.push('cached');
+  else if (sourceCoverage === 'reported') {
+    const expected = Array.isArray(source.sourceCardIds) ? source.sourceCardIds : [];
+    const covered = Array.isArray(source.coveredSourceCardIds) ? source.coveredSourceCardIds : [];
+    chips.push(expected.length && covered.length < expected.length ? 'coverage missing' : 'covered');
+  } else if (sourceCoverage === 'requested') chips.push('coverage unknown');
   const selectionTag = cleanText(source.selectionTag || source.scopeTag || source.selectionSource).toLowerCase();
   if (['focus', 'manual', 'guardrail'].includes(selectionTag)) chips.push(selectionTag);
   return [...new Set(chips)];
@@ -1782,6 +1789,9 @@ function handDropdownRenderKey(view, model, cards, packetText, packetMeta) {
     tooltipsEnabled: model.tooltipsEnabled,
     lastBriefStatus: model.lastBriefStatus,
     lastBriefReason: model.lastBriefReason,
+    lastBriefSourceCardCount: model.lastBriefSourceCardCount,
+    lastBriefCoverageStatus: model.lastBriefCoverageStatus,
+    lastBriefMissingSourceCardCount: model.lastBriefMissingSourceCardCount,
     hasPacket: Boolean(view.lastPacket),
     packetId: cleanText(view.lastPacket?.packetId || ''),
     packetText,
@@ -1894,7 +1904,7 @@ function renderHandDropdown(panel, view, model, options = {}) {
     el('span', {
       className: 'recursion-brief-summary',
       text: cards.length
-        ? `${cards.length} card${cards.length === 1 ? '' : 's'} - click row to expand - priority color only`
+        ? `${cards.length} card${cards.length === 1 ? '' : 's'} - ${model.lastBriefSourceCardCount || 0} source card${model.lastBriefSourceCardCount === 1 ? '' : 's'} - coverage ${model.lastBriefCoverageStatus || 'none'}`
         : '0 cards - waiting for composed hand'
     }),
     packetButton
@@ -2397,6 +2407,9 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
   for (const category of orderedDeckCategories(activeDeck)) {
     const categoryKey = cardCategoryExpansionKey(activeDeck.id, category.id);
     const categoryCards = orderedDeckCards(activeDeck, category.id);
+    const runnableCategoryCards = categoryCards.filter((card) => getDeckCardStatus(card).runnable);
+    const priorityCategoryCards = runnableCategoryCards.filter((card) => cardSelectionState(card) === 'priority');
+    const categoryDensityWarning = runnableCategoryCards.length >= 5;
     const categoryExpanded = expandedCategoryKeys?.has?.(categoryKey) === true;
     const categoryDeletePending = deleteConfirmFor(deleteState, 'category', activeDeck.id, category.id);
     const categoryActions = !activeDeck.readonly ? [
@@ -2410,7 +2423,8 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
         el('span', { className: 'recursion-card-deck-category-arrow', attrs: { 'aria-hidden': 'true' } }, [cardSystemIconSvg(categoryExpanded ? 'chevron-up' : 'chevron-down')]),
         el('span', { className: 'recursion-card-deck-category-copy' }, [
           el('strong', { text: category.name }),
-          el('span', { text: category.description || '' })
+          el('span', { text: `${runnableCategoryCards.length} source card${runnableCategoryCards.length === 1 ? '' : 's'}${priorityCategoryCards.length ? ` - ${priorityCategoryCards.length} priority` : ''}${categoryDensityWarning ? ' - focus may be diluted' : ''}` }),
+          ...(category.description ? [el('span', { text: category.description })] : [])
         ]),
         el('span', { className: 'recursion-card-deck-category-actions', dataset: { recursionCardCategoryAction: '' } }, categoryActions)
       ])

@@ -1903,6 +1903,9 @@ function cardProgressDetail(card, source, state, options = {}) {
   const providerLane = safeText(card?.providerLane || card?.lane || '', 40);
   const retryCount = progressRetryCount(card?.providerRetryCount || card?.retryCount);
   const reason = safeText(card?.providerProgressReason || card?.progressReason || '', 180);
+  const expectedSourceCardIds = Array.isArray(card?.sourceCardIds) ? card.sourceCardIds.map(String).filter(Boolean) : [];
+  const coveredSourceCardIds = Array.isArray(card?.coveredSourceCardIds) ? card.coveredSourceCardIds.map(String).filter(Boolean) : [];
+  const coveredSet = new Set(coveredSourceCardIds);
   const progressSource = card?.providerProgressSource === 'fused-repair' ? 'fused-repair' : source;
   const explicitParentStepId = safeText(options.parentStepId || '', 120);
   return {
@@ -1921,10 +1924,18 @@ function cardProgressDetail(card, source, state, options = {}) {
             id: safeIdentifier(sourceCard?.id || '', 'source-card', 160),
             label: safeText(sourceCard?.name || sourceCard?.id || '', 120),
             selectionState: safeText(sourceCard?.selectionState || 'active', 40),
-            state: state === 'failed' ? 'failed' : state
+            state: state === 'failed'
+              ? 'failed'
+              : (card?.sourceCoverage === 'reported'
+                ? (coveredSet.has(String(sourceCard?.id || '')) ? 'done' : 'warning')
+                : (card?.sourceCoverage === 'cached' ? 'cached' : 'warning')),
+            reason: card?.sourceCoverage === 'reported'
+              ? (coveredSet.has(String(sourceCard?.id || '')) ? 'Coverage confirmed by provider.' : 'Provider omitted this source card.')
+              : 'Included in category request; provider coverage was not reported.'
           }))
         }
       : {}),
+    ...(expectedSourceCardIds.length ? { sourceCoverage: card?.sourceCoverage || 'requested', coveredSourceCardIds } : {}),
     ...(retryCount ? { retryCount } : {}),
     ...(reason ? { reason } : {})
   };
@@ -2431,6 +2442,16 @@ export function createRecursionRuntime({
 
   function readyLastBrief(packet = lastPacket, hand = lastHand, { runId = '', reason = 'packet-ready' } = {}) {
     const cards = Array.isArray(hand?.cards) ? hand.cards : [];
+    const sourceCardIds = new Set(cards.flatMap((card) => Array.isArray(card?.sourceCardIds) ? card.sourceCardIds : []));
+    const missingSourceCardCount = cards.reduce((count, card) => {
+      if (card?.sourceCoverage !== 'reported') return count;
+      const expected = new Set(Array.isArray(card.sourceCardIds) ? card.sourceCardIds : []);
+      const covered = new Set(Array.isArray(card.coveredSourceCardIds) ? card.coveredSourceCardIds : []);
+      return count + [...expected].filter((id) => !covered.has(id)).length;
+    }, 0);
+    const coverageStatus = missingSourceCardCount > 0
+      ? 'missing'
+      : (cards.some((card) => card?.sourceCoverage === 'requested') ? 'requested' : (sourceCardIds.size ? 'covered' : 'none'));
     lastBrief = {
       status: 'ready',
       reason,
@@ -2438,6 +2459,9 @@ export function createRecursionRuntime({
       packetId: safeText(packet?.packetId || '', 180),
       handId: safeText(hand?.handId || '', 180),
       cardCount: cards.length,
+      sourceCardCount: sourceCardIds.size,
+      coverageStatus,
+      missingSourceCardCount,
       updatedAt: nowIso()
     };
   }
@@ -2454,6 +2478,9 @@ export function createRecursionRuntime({
       previousPacketId: safeText(lastPacket?.packetId || lastBrief.packetId || '', 180),
       previousHandId: safeText(lastHand?.handId || lastBrief.handId || '', 180),
       previousCardCount: previousCards.length,
+      sourceCardCount: 0,
+      coverageStatus: 'none',
+      missingSourceCardCount: 0,
       updatedAt: nowIso()
     };
   }

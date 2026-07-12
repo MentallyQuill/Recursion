@@ -88,10 +88,24 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
 
   await repo.saveSceneCache('Chat One', 'Scene One', {
     cacheState: 'active',
-    cards: [{ id: 'card-1', promptText: 'keep', inspectorNotes: 'private' }]
+    cards: [{
+      id: 'card-1',
+      promptText: 'keep',
+      inspectorNotes: 'private',
+      sourceCardIds: ['scene-location', 'scene-beat'],
+      sourceCards: [
+        { id: 'scene-location', name: 'location/situation', selectionState: 'active', promptText: 'private source text' }
+      ],
+      sourceCoverage: 'reported',
+      coveredSourceCardIds: ['scene-location']
+    }]
   });
   const cache = await repo.loadSceneCache('Chat One', 'Scene One');
   assertEqual(cache.cards[0].id, 'card-1', 'scene cache persisted');
+  assertDeepEqual(cache.cards[0].sourceCardIds, ['scene-location', 'scene-beat'], 'scene cache preserves source card ids');
+  assertEqual(cache.cards[0].sourceCards[0].name, 'location/situation', 'scene cache preserves source card names');
+  assertEqual(cache.cards[0].sourceCoverage, 'reported', 'scene cache preserves coverage state');
+  assert(!JSON.stringify(cache).includes('private source text'), 'scene cache omits source card prompt text');
 
   await repo.appendJournal('Chat One', { event: 'runtime.event', summary: 'zero' });
   await repo.appendJournal('Chat One', {

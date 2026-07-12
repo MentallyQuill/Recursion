@@ -84,7 +84,8 @@ uiActionStatus.clear();
 assertEqual(uiActionStatus.current(), null, 'UI action status clears transient state');
 const model = createRecursionViewModel({
   settings: { mode: 'auto' },
-  lastHand: { cards: [{ id: 'c1' }, { id: 'c2' }] },
+  lastHand: { cards: [{ id: 'c1', sourceCardIds: ['source-1', 'source-2'], sourceCoverage: 'reported', coveredSourceCardIds: ['source-1'] }, { id: 'c2' }] },
+  lastBrief: { status: 'ready', sourceCardCount: 2, coverageStatus: 'missing', missingSourceCardCount: 1 },
   activity: { phase: 'settled', label: 'Recursion prompt ready.', severity: 'success' },
   lastPacket: { diagnostics: { composerLane: 'utility' } }
 });
@@ -94,6 +95,9 @@ assertEqual(model.statusText, undefined, 'view model does not expose combined ru
 assertEqual(model.standbyStatusText, 'Recursion prompt ready.', 'settled prompt-ready activity exposes compact standby text with punctuation');
 assertEqual(model.generationStopVisible, false, 'settled prompt-ready view hides the stop generation button');
 assertEqual(model.handCount, 2, 'hand count built');
+assertEqual(model.lastBriefSourceCardCount, 2, 'Last Brief exposes source card count');
+assertEqual(model.lastBriefCoverageStatus, 'missing', 'Last Brief exposes source coverage status');
+assertEqual(model.lastBriefMissingSourceCardCount, 1, 'Last Brief exposes missing source count');
 assertEqual(model.composerLabel, 'Utility', 'composer label built');
 assertEqual(model.tooltipsEnabled, true, 'view model defaults tooltip hover help on');
 assertEqual(createRecursionViewModel({ settings: { ui: { tooltipsEnabled: false } } }).tooltipsEnabled, false, 'view model can disable tooltip hover help');

@@ -290,6 +290,24 @@ function normalizeSceneCard(card) {
   const firstMesId = Number(source.firstMesId ?? card.firstMesId ?? 0);
   const lastMesId = Number(source.lastMesId ?? card.lastMesId ?? 0);
   const expiresAfterMesId = Number(freshness.expiresAfterMesId);
+  const sourceCardIds = safeMetadataList(card.sourceCardIds, 180, 32);
+  const sourceCards = Array.isArray(card.sourceCards)
+    ? card.sourceCards.map((sourceCard) => {
+        const entry = sourceCard && typeof sourceCard === 'object' && !Array.isArray(sourceCard) ? sourceCard : {};
+        const id = safeMetadataText(entry.id, 180, '');
+        const name = safeMetadataText(entry.name || entry.label || id, 120, '');
+        if (!id || !name) return null;
+        return {
+          id,
+          name,
+          selectionState: ['active', 'priority', 'off'].includes(entry.selectionState) ? entry.selectionState : 'active'
+        };
+      }).filter(Boolean).slice(0, 32)
+    : [];
+  const sourceCoverage = ['requested', 'reported', 'covered', 'missing', 'cached', 'unknown'].includes(card.sourceCoverage)
+    ? card.sourceCoverage
+    : '';
+  const coveredSourceCardIds = safeMetadataList(card.coveredSourceCardIds, 180, 32);
   return {
     id: safeIdentifier(card.id || makeId('card'), 'card'),
     family: safeMetadataText(card.family || 'unknown', 80, 'unknown'),
@@ -325,7 +343,11 @@ function normalizeSceneCard(card) {
       reason: safeMetadataText(arbiter.reason || card.reason || '', 240)
     },
     arbiterDecisionHash: safeOptionalMetadataText(card.arbiterDecisionHash, 160),
-    inspectorNotes: sanitizedOptionalTextValue(card.inspectorNotes, 800)
+    inspectorNotes: sanitizedOptionalTextValue(card.inspectorNotes, 800),
+    ...(sourceCardIds.length ? { sourceCardIds } : {}),
+    ...(sourceCards.length ? { sourceCards } : {}),
+    ...(sourceCoverage ? { sourceCoverage } : {}),
+    ...(coveredSourceCardIds.length ? { coveredSourceCardIds } : {})
   };
 }
 

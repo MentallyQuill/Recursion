@@ -1265,11 +1265,16 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     const coveredSourceCardIds = Array.isArray(item.coveredSourceCardIds)
       ? item.coveredSourceCardIds.map(String).filter(Boolean)
       : [];
-    const hasCoverageReport = coveredSourceCardIds.length > 0;
-    if (expectedSourceCardIds.length && hasCoverageReport) {
+    const explicitOmittedSourceCardIds = Array.isArray(item.omittedSourceCardIds)
+      ? item.omittedSourceCardIds.map(String).filter(Boolean)
+      : [];
+    const hasCompleteCoverageReport = expectedSourceCardIds.length > 0
+      && coveredSourceCardIds.length === expectedSourceCardIds.length
+      && expectedSourceCardIds.every((id) => coveredSourceCardIds.includes(id));
+    if (expectedSourceCardIds.length && coveredSourceCardIds.length && !hasCompleteCoverageReport) {
       const missingSourceCardIds = expectedSourceCardIds.filter((id) => !coveredSourceCardIds.includes(id));
       if (missingSourceCardIds.length) {
-        output.diagnostics.push(`fused-source-missing:${catalog.family}:${missingSourceCardIds.join(',')}`);
+        output.diagnostics.push(`fused-source-coverage-incomplete:${catalog.family}:${missingSourceCardIds.join(',')}`);
       }
     }
     output.cards.push(...cards.map((card) => ({
@@ -1281,14 +1286,10 @@ export function cardsFromFusedProviderResult(result, context = {}) {
         ? {
             sourceCardIds: requested.get(catalog.family).sourceCardIds,
             sourceCards: requested.get(catalog.family).sourceCards,
-            sourceCoverage: hasCoverageReport ? 'reported' : 'included',
-            inclusionEvidence: hasCoverageReport ? 'provider-confirmed' : 'generation-contract',
-            ...(hasCoverageReport ? { coveredSourceCardIds } : {}),
-            ...(hasCoverageReport
-              ? {
-                  omittedSourceCardIds: expectedSourceCardIds.filter((id) => !coveredSourceCardIds.includes(id))
-                }
-              : {})
+            sourceCoverage: hasCompleteCoverageReport ? 'reported' : 'included',
+            inclusionEvidence: hasCompleteCoverageReport ? 'provider-confirmed' : 'generation-contract',
+            ...(coveredSourceCardIds.length ? { coveredSourceCardIds } : {}),
+            ...(explicitOmittedSourceCardIds.length ? { omittedSourceCardIds: explicitOmittedSourceCardIds } : {})
           }
         : {})
     })));

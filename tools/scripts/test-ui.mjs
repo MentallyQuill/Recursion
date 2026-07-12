@@ -990,6 +990,9 @@ assert(/recursionSettingsTab[\s\S]*?event\?\.stopPropagation\?\.\(\)/.test(recur
 assert(!/recursionSettingsSave/.test(recursionUi), 'settings panel has no broad Save Settings action because settings controls auto-save');
 assert(!/recursionSettingsClose/.test(recursionUi), 'settings panel has no redundant header close button');
 assert(!/settings-close/.test(barImplementationReference), 'implementation reference settings panel has no redundant close button');
+assert(/recursionResetSettingsDefaults/.test(recursionUi), 'Advanced settings exposes Reset Defaults control');
+assert(/Reset Play and Advanced settings to their defaults/.test(recursionUi), 'Reset Defaults confirmation explains its scope');
+assert(/resetSettingsMenu/.test(recursionUi), 'Reset Defaults invokes the runtime reset action');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(recursionCss), 'production CSS honors reduced-motion preferences');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.recursion-root \*[\s\S]*?animation:\s*none\s*!important;[\s\S]*?transition:\s*none\s*!important;/.test(recursionCss), 'reduced-motion rule disables Recursion animations and transitions');
 assert(/\.recursion-mobile-status-drawer\s*\{[\s\S]*?display:\s*none;/.test(recursionCss), 'mobile status drawer is hidden by default on desktop');

@@ -416,8 +416,26 @@ const fusedPartialCoverage = cardsFromFusedProviderResult({
     }]
   }
 }, fusedCardContext);
-assertEqual(fusedPartialCoverage.cards[0].sourceCoverage, 'reported', 'Partial coverage retains provider attribution');
-assertDeepEqual(fusedPartialCoverage.cards[0].omittedSourceCardIds, ['scene-direction', 'scene-beat'], 'Partial coverage records explicitly omitted source cards');
+assertEqual(fusedPartialCoverage.cards[0].sourceCoverage, 'included', 'Partial coverage still treats requested source cards as included');
+assertEqual(fusedPartialCoverage.cards[0].inclusionEvidence, 'generation-contract', 'Partial coverage falls back to contract inclusion');
+assert(!fusedPartialCoverage.cards[0].omittedSourceCardIds, 'Partial coverage does not invent explicit source omissions');
+assert(fusedPartialCoverage.diagnostics.some((entry) => entry.includes('fused-source-coverage-incomplete')), 'Partial coverage retains a diagnostic without failing source cards');
+const fusedExplicitOmission = cardsFromFusedProviderResult({
+  ok: true,
+  data: {
+    schema: 'recursion.cardBundle.v1',
+    snapshotHash: 'snapshot-fused-1',
+    items: [{
+      schema: 'recursion.card.v1',
+      family: 'Scene Frame',
+      role: 'sceneFrameCard',
+      promptText: 'The blocked door stays central.',
+      evidenceRefs: ['message:8'],
+      omittedSourceCardIds: ['scene-beat']
+    }]
+  }
+}, fusedCardContext);
+assertDeepEqual(fusedExplicitOmission.cards[0].omittedSourceCardIds, ['scene-beat'], 'Explicit source omissions are preserved');
 const fusedMismatch = cardsFromFusedProviderResult({
   ok: true,
   data: { schema: 'recursion.cardBundle.v1', snapshotHash: 'wrong', items: [] }

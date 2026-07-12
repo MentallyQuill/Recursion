@@ -1906,7 +1906,6 @@ function cardProgressDetail(card, source, state, options = {}) {
   const reason = safeText(card?.providerProgressReason || card?.progressReason || '', 180);
   const expectedSourceCardIds = Array.isArray(card?.sourceCardIds) ? card.sourceCardIds.map(String).filter(Boolean) : [];
   const coveredSourceCardIds = Array.isArray(card?.coveredSourceCardIds) ? card.coveredSourceCardIds.map(String).filter(Boolean) : [];
-  const coveredSet = new Set(coveredSourceCardIds);
   const omittedSourceCardIds = new Set(Array.isArray(card?.omittedSourceCardIds) ? card.omittedSourceCardIds.map(String).filter(Boolean) : []);
   const progressSource = card?.providerProgressSource === 'fused-repair' ? 'fused-repair' : source;
   const explicitParentStepId = safeText(options.parentStepId || '', 120);
@@ -2786,6 +2785,43 @@ export function createRecursionRuntime({
       return { ...result, warm: { queued: true, reason: 'settings-changed' } };
     }
     return { ok: true, settings: next, clear: null };
+  }
+
+  async function resetSettingsMenu() {
+    const before = settingsStore.get();
+    const next = settingsStore.resetSettingsMenu();
+    const resetKeys = [
+      'strength',
+      'minCards',
+      'maxCards',
+      'focus',
+      'promptFootprint',
+      'injection',
+      'ui',
+      'enhancements',
+      'retention',
+      'diagnostics'
+    ];
+    const changedKeys = resetKeys.filter((key) => !settingValuesEqual(before[key], next[key]));
+    if (changedKeys.length === 0) {
+      return { ok: true, reset: false, settings: next, clear: null };
+    }
+
+    supersedeActiveRun();
+    abortActiveRapidWarmRun('settings-reset');
+    return trackRuntimeMutation(async () => {
+      await invalidateActiveSceneCacheBestEffort('settings-reset', { changedKeys });
+      const clear = await clearPromptAfterSupersede({
+        successLabel: 'Recursion settings reset to defaults. Providers and decks were preserved.',
+        journalReason: 'settings-reset'
+      });
+      return {
+        ok: clear?.ok !== false,
+        reset: true,
+        settings: next,
+        clear
+      };
+    });
   }
 
   async function updateProvider(lane, patch = {}) {
@@ -5905,6 +5941,7 @@ export function createRecursionRuntime({
     recoverHeldProseEnhancementMessages,
     stopGeneration,
     updateSettings,
+    resetSettingsMenu,
     updateProvider,
     clearProviderKey,
     fetchProviderModels,

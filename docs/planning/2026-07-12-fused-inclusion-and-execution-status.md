@@ -44,7 +44,9 @@ type CardInclusionEvidence =
 
 Missing provider metadata means `included` with
 `generation-contract` evidence. It must not create a visible `Unverified`
-state.
+state. A partial `coveredSourceCardIds` list is also treated as incomplete
+optional attribution, not as proof that the remaining cards were omitted.
+Only an explicit `omittedSourceCardIds` list may fail individual source rows.
 
 ### Execution state
 
@@ -263,7 +265,9 @@ const children = sourceCards.map((sourceCard) => {
 
 ### Handle explicit omissions
 
-Explicit omission is the only source-card-specific coverage failure:
+Explicit omission is the only source-card-specific coverage failure. A partial
+coverage list may produce a private diagnostic, but must not synthesize an
+omission list:
 
 ```js
 const omittedIds = new Set(
@@ -390,10 +394,12 @@ it('fails only explicitly omitted source cards', () => {
    all source children are green when the fused call succeeds.
 6. Run a recovered Fused response and verify the parent, category, and source
    rows are yellow for the recovery reason.
-7. Run an explicit omission case and verify only the omitted source row is red
+7. Run a partial-coverage case and verify source rows inherit the successful
+   category state rather than becoming red.
+8. Run an explicit omission case and verify only the omitted source row is red
    while other included rows retain the category execution result.
-8. Verify a cached swipe renders purple at the category and source-card levels.
-9. Capture desktop and mobile screenshots of the expanded progress tree.
+9. Verify a cached swipe renders purple at the category and source-card levels.
+10. Capture desktop and mobile screenshots of the expanded progress tree.
 
 ## Acceptance Criteria
 

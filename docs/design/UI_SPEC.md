@@ -1201,6 +1201,7 @@ Advanced contains low-frequency controls grouped into collapsible sections:
 - UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
 - Retention: Source Messages, Source Text Budget, Provider Messages, Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries. These controls tune Recursion-owned windows and cache files; they do not delete SillyTavern chat.
 - Diagnostics: safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
+- Reset Defaults: a confirmed action at the bottom of Advanced that restores Play and Advanced controls to `DEFAULT_RECURSION_SETTINGS`. It preserves provider settings and session-only keys, custom card decks and scope, compact-bar settings, and viewer visibility.
 
 Injection controls apply to the final prompt packet after Utility guidance or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the Recursion packet to land in a different host lane or depth.
 

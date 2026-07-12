@@ -41,6 +41,8 @@ Every persisted record is cache-oriented. If it is stale, corrupt, too large, or
 
 It must not store scene decks, full cards, run journals, raw prompt packets, provider responses, transcript archives, or API keys. Direct endpoint API keys are session-only and must never be written to settings, cache records, journals, prompt packets, diagnostics, artifacts, or logs.
 
+The Advanced-tab Reset Defaults action replaces only the Play and Advanced settings with the current default contract. It preserves provider preferences and session-only keys, Card System decks and scope, compact-bar settings, and viewer visibility. It does not delete chat history, scene caches, run journals, or other Recursion-owned records; runtime invalidates the active scene cache and clears the installed prompt so the next turn reflects the reset settings.
+
 `extension_settings.recursion.retention` stores user-facing caps for Recursion-owned source-window and storage behavior:
 
 - Source Messages: recent visible messages used for source freshness.

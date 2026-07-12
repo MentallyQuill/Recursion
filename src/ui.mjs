@@ -276,6 +276,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   sourceVariantsPerScene: 'Active-source variants retained for swipe A/B/A reuse. Higher values preserve more swipe branches but make scene-cache files larger.',
   runJournalEntries: 'Sanitized Recursion activity entries retained per chat. Higher values help debugging but cost more local storage.',
   diagnostics: 'Local troubleshooting controls. Diagnostics are sanitized by default and are for understanding Recursion behavior, not feeding the model.',
+  resetDefaults: 'Reset Play and Advanced settings to their defaults. Provider settings, session keys, custom decks, deck scope, and compact-bar settings are preserved.',
   includeExcerpts: 'Include short sanitized excerpts in exported diagnostics. Leave off for privacy unless a bug report needs bounded text evidence.',
   resetSceneCache: 'Clear cached scene cards for the current chat so Recursion rebuilds its hand from fresh context.',
   clearRunJournal: 'Clear local Recursion activity history for this chat. This does not change cards, settings, or SillyTavern messages.',
@@ -2664,6 +2665,9 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
       button('Export Diagnostics', 'recursionExportDiagnostics', SETTINGS_TOOLTIPS.exportDiagnostics)
     ])
   ], { tooltip: SETTINGS_TOOLTIPS.diagnostics, tooltipsEnabled }));
+  const resetDefaults = button('Reset Defaults', 'recursionResetSettingsDefaults', 'Reset Play and Advanced settings to their defaults');
+  setTooltip(resetDefaults, tooltipsEnabled, SETTINGS_TOOLTIPS.resetDefaults);
+  group.appendChild(el('div', { className: 'recursion-settings-reset-actions' }, [resetDefaults]));
   panel.appendChild(group);
 }
 
@@ -5628,6 +5632,19 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         settingsPanelRendered = false;
         update();
       });
+    }
+    if (control('recursionResetSettingsDefaults')) {
+      const confirmed = typeof globalThis.confirm === 'function'
+        && globalThis.confirm(
+          'Reset Play and Advanced settings to their defaults?\n\n' +
+          'Providers, provider keys, custom decks, deck scope, and compact-bar settings will be preserved.'
+        );
+      if (confirmed) {
+        runAction(runtime?.resetSettingsMenu?.(), () => {
+          settingsPanelRendered = false;
+          update();
+        });
+      }
     }
     if (control('recursionClearRunJournal')) {
       runAction(runtime?.clearRunJournal?.(), () => {

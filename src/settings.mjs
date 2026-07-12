@@ -334,6 +334,25 @@ export function normalizeSettings(value = {}, secretStore = null) {
   };
 }
 
+export function resetSettingsMenuValue(value = {}, secretStore = null) {
+  const current = normalizeSettings(value, secretStore);
+  const defaults = cloneJson(DEFAULT_RECURSION_SETTINGS);
+  return normalizeSettings({
+    ...defaults,
+    enabled: current.enabled,
+    mode: current.mode,
+    pipelineMode: current.pipelineMode,
+    reasoningLevel: current.reasoningLevel,
+    storyFormOverride: current.storyFormOverride,
+    cardDecks: current.cardDecks,
+    providers: current.providers,
+    ui: {
+      ...defaults.ui,
+      viewerOpen: current.ui.viewerOpen
+    }
+  }, secretStore);
+}
+
 function migrateLegacyCardScopeToDeckSettings(cardScope) {
   const normalizedScope = normalizeCardScope(cardScope);
   return {
@@ -381,6 +400,9 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
     },
     update(patch = {}) {
       return persist(mergeSettingsPatch(root.recursion, patch));
+    },
+    resetSettingsMenu() {
+      return persist(resetSettingsMenuValue(root.recursion, secretStore));
     },
     updateProvider(lane, patch = {}) {
       const resolvedLane = requireProviderLane(lane);

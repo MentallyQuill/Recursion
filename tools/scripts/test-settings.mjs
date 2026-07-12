@@ -307,6 +307,50 @@ store.update({ enhancements: { applyMode: 'replace' } });
 store.update({ enhancements: { contextMessages: 21 } });
 assertDeepEqual(root.recursion.enhancements, { target: 'dialogue', applyMode: 'replace', contextMessages: 21 }, 'partial enhancements update preserves target and apply mode while changing context');
 
+const preservedDecks = cardDeckStore.get().cardDecks;
+store.update({
+  enabled: false,
+  mode: 'manual',
+  pipelineMode: 'rapid',
+  reasoningLevel: 'high',
+  storyFormOverride: 'present-third-limited',
+  cardDecks: preservedDecks,
+  strength: 'strong',
+  minCards: 8,
+  maxCards: 16,
+  focus: 'plot',
+  promptFootprint: 'rich',
+  injection: { placement: 'in_chat', role: 'assistant', depth: 8 },
+  ui: { tooltipsEnabled: false, progressChildVisibleLimit: 12, progressListVisibleLimit: 40 },
+  enhancements: { target: 'dialogue', applyMode: 'replace', contextMessages: 30 },
+  retention: { sourceWindowMessages: 80 },
+  diagnostics: { includeExcerpts: true }
+});
+store.updateProvider('utility', {
+  source: 'openai-compatible',
+  hostConnectionProfileId: 'profile-preserved',
+  openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'preserved-model' },
+  apiKey: 'preserved-secret'
+});
+const beforeMenuReset = store.get();
+const resetSettings = store.resetSettingsMenu();
+assertDeepEqual(resetSettings.providers, beforeMenuReset.providers, 'menu reset preserves provider settings');
+assertDeepEqual(resetSettings.cardDecks, beforeMenuReset.cardDecks, 'menu reset preserves custom decks and scope');
+assertEqual(resetSettings.enabled, beforeMenuReset.enabled, 'menu reset preserves compact-bar enabled state');
+assertEqual(resetSettings.mode, beforeMenuReset.mode, 'menu reset preserves compact-bar mode');
+assertEqual(resetSettings.pipelineMode, beforeMenuReset.pipelineMode, 'menu reset preserves compact-bar pipeline');
+assertEqual(resetSettings.reasoningLevel, beforeMenuReset.reasoningLevel, 'menu reset preserves reasoning level');
+assertEqual(resetSettings.storyFormOverride, beforeMenuReset.storyFormOverride, 'menu reset preserves story form');
+assertEqual(resetSettings.strength, DEFAULT_RECURSION_SETTINGS.strength, 'menu reset restores Play strength');
+assertEqual(resetSettings.minCards, DEFAULT_RECURSION_SETTINGS.minCards, 'menu reset restores minimum cards');
+assertEqual(resetSettings.maxCards, DEFAULT_RECURSION_SETTINGS.maxCards, 'menu reset restores maximum cards');
+assertDeepEqual(resetSettings.injection, DEFAULT_RECURSION_SETTINGS.injection, 'menu reset restores injection settings');
+assertDeepEqual(resetSettings.ui, { ...DEFAULT_RECURSION_SETTINGS.ui, viewerOpen: beforeMenuReset.ui.viewerOpen }, 'menu reset restores UI settings while preserving viewer state');
+assertDeepEqual(resetSettings.enhancements, DEFAULT_RECURSION_SETTINGS.enhancements, 'menu reset restores enhancement settings');
+assertDeepEqual(resetSettings.retention, DEFAULT_RECURSION_SETTINGS.retention, 'menu reset restores retention settings');
+assertDeepEqual(resetSettings.diagnostics, DEFAULT_RECURSION_SETTINGS.diagnostics, 'menu reset restores diagnostic settings');
+assertEqual(secrets.get('utility'), 'preserved-secret', 'menu reset preserves provider session secret');
+
 assertThrows(
   () => store.updateProvider('bad-lane', { apiKey: 'x' }),
   /Invalid provider lane/,

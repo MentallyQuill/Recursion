@@ -110,7 +110,7 @@ Main controls:
 
 - Play: a Behavior section containing Strength, Min Cards, Max Cards, Prompt Footprint, and Focus.
 - Providers: collapsible Utility and Reasoner provider setup, test controls, and session key controls.
-- Advanced: collapsible Injection, UI, Enhancements, Retention, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, enhancement context length, Recursion-owned cap settings, safe excerpts, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point.
+- Advanced: collapsible Injection, UI, Enhancements, Retention, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, enhancement context length, Recursion-owned cap settings, safe excerpts, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving providers, session-only provider keys, custom decks and scope, compact-bar settings, and viewer visibility.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 

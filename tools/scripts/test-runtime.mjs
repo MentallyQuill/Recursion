@@ -4719,6 +4719,47 @@ for (const pipelineMode of ['standard', 'rapid']) {
 
 {
   let releaseClear;
+  const { runtime, calls, settingsStore } = createRuntimeHarness({
+    settings: {
+      strength: 'strong',
+      injection: { depth: 7 },
+      ui: { tooltipsEnabled: false },
+      enabled: false,
+      mode: 'manual'
+    },
+    hostPrompt: {
+      async clear() {
+        await new Promise((resolve) => {
+          releaseClear = resolve;
+        });
+        return { ok: true, cleared: true };
+      }
+    }
+  });
+  settingsStore.updateProvider('utility', {
+    source: 'openai-compatible',
+    openAICompatible: { model: 'preserved-model' },
+    apiKey: 'preserved-secret'
+  });
+  const reset = runtime.resetSettingsMenu();
+  await waitUntil(() => typeof releaseClear === 'function', 'settings reset did not start prompt clear');
+  assertEqual(runtime.view().settings.strength, 'balanced', 'settings reset restores Play settings immediately');
+  assertEqual(runtime.view().settings.injection.depth, 1, 'settings reset restores Advanced settings immediately');
+  assertEqual(runtime.view().settings.enabled, false, 'settings reset preserves compact-bar enabled state');
+  assertEqual(runtime.view().settings.mode, 'manual', 'settings reset preserves compact-bar mode');
+  assertEqual(runtime.view().settings.providers.utility.openAICompatible.model, 'preserved-model', 'settings reset preserves provider fields');
+  releaseClear();
+  const result = await reset;
+  assertEqual(result.ok, true, 'settings reset returns success after prompt clear');
+  assertEqual(result.reset, true, 'settings reset reports that values changed');
+  assertEqual(result.clear.ok, true, 'settings reset returns prompt clear result');
+  assertEqual(calls.clear, 1, 'settings reset clears host prompt once');
+  assertEqual(settingsStore.getApiKey('utility'), 'preserved-secret', 'settings reset preserves provider session key');
+  assertEqual(runtime.view().activity.label, 'Recursion settings reset to defaults. Providers and decks were preserved.', 'settings reset surfaces success label');
+}
+
+{
+  let releaseClear;
   let updateResolved = false;
   const { runtime } = createRuntimeHarness({
     settings: { injection: { placement: 'in_prompt', role: 'system', depth: 1 } },

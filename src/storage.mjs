@@ -304,10 +304,14 @@ function normalizeSceneCard(card) {
         };
       }).filter(Boolean).slice(0, 32)
     : [];
-  const sourceCoverage = ['requested', 'reported', 'covered', 'missing', 'cached', 'unknown'].includes(card.sourceCoverage)
+  const sourceCoverage = ['included', 'requested', 'reported', 'covered', 'missing', 'cached', 'unknown'].includes(card.sourceCoverage)
     ? card.sourceCoverage
     : '';
+  const inclusionEvidence = ['provider-confirmed', 'generation-contract', 'explicit-omission'].includes(card.inclusionEvidence)
+    ? card.inclusionEvidence
+    : '';
   const coveredSourceCardIds = safeMetadataList(card.coveredSourceCardIds, 180, 32);
+  const omittedSourceCardIds = safeMetadataList(card.omittedSourceCardIds, 180, 32);
   return {
     id: safeIdentifier(card.id || makeId('card'), 'card'),
     family: safeMetadataText(card.family || 'unknown', 80, 'unknown'),
@@ -347,7 +351,9 @@ function normalizeSceneCard(card) {
     ...(sourceCardIds.length ? { sourceCardIds } : {}),
     ...(sourceCards.length ? { sourceCards } : {}),
     ...(sourceCoverage ? { sourceCoverage } : {}),
-    ...(coveredSourceCardIds.length ? { coveredSourceCardIds } : {})
+    ...(inclusionEvidence ? { inclusionEvidence } : {}),
+    ...(coveredSourceCardIds.length ? { coveredSourceCardIds } : {}),
+    ...(omittedSourceCardIds.length ? { omittedSourceCardIds } : {})
   };
 }
 

@@ -434,9 +434,9 @@ function childStepFromEvent(event, state, order = 0) {
             id: sourceCard.id,
             label: sourceCard.label,
             providerLane: event.providerLane || detail.lane || 'utility',
-            state: sourceCard.state || state,
+            state: sourceCard.state === 'info' ? state : (sourceCard.state || state),
             source: detail.source || detail.sourceType,
-            reason: sourceCard.selectionState === 'priority' ? 'Priority source card included.' : '',
+            reason: sourceCard.reason || (sourceCard.selectionState === 'priority' ? 'Priority source card included.' : ''),
             order: childIndex
           }))
         : [],

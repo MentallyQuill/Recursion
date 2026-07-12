@@ -1907,6 +1907,7 @@ function cardProgressDetail(card, source, state, options = {}) {
   const expectedSourceCardIds = Array.isArray(card?.sourceCardIds) ? card.sourceCardIds.map(String).filter(Boolean) : [];
   const coveredSourceCardIds = Array.isArray(card?.coveredSourceCardIds) ? card.coveredSourceCardIds.map(String).filter(Boolean) : [];
   const coveredSet = new Set(coveredSourceCardIds);
+  const omittedSourceCardIds = new Set(Array.isArray(card?.omittedSourceCardIds) ? card.omittedSourceCardIds.map(String).filter(Boolean) : []);
   const progressSource = card?.providerProgressSource === 'fused-repair' ? 'fused-repair' : source;
   const explicitParentStepId = safeText(options.parentStepId || '', 120);
   const sourceCatalog = CARD_SCOPE_CATALOG.find((entry) => entry.family === family || entry.role === roleId);
@@ -1934,18 +1935,23 @@ function cardProgressDetail(card, source, state, options = {}) {
             id: safeIdentifier(sourceCard?.id || '', 'source-card', 160),
             label: safeText(sourceCard?.name || sourceCard?.id || '', 120),
             selectionState: safeText(sourceCard?.selectionState || 'active', 40),
-            state: state === 'failed'
+            state: omittedSourceCardIds.has(String(sourceCard?.id || ''))
               ? 'failed'
-              : (card?.sourceCoverage === 'reported'
-                ? (coveredSet.has(String(sourceCard?.id || '')) ? 'done' : 'warning')
-                : (card?.sourceCoverage === 'cached' ? 'cached' : 'info')),
-            reason: card?.sourceCoverage === 'reported'
-              ? (coveredSet.has(String(sourceCard?.id || '')) ? 'Coverage confirmed by provider.' : 'Provider omitted this source card.')
-              : 'Included in fused category result; individual attribution unavailable.'
+              : (card?.sourceCoverage === 'cached' ? 'cached' : state),
+            reason: omittedSourceCardIds.has(String(sourceCard?.id || ''))
+              ? 'Provider explicitly omitted this source card.'
+              : (card?.inclusionEvidence === 'provider-confirmed'
+                ? 'Included and confirmed by provider.'
+                : 'Included in category generation.')
           }))
         }
       : {}),
-    ...(expectedSourceCardIds.length ? { sourceCoverage: card?.sourceCoverage || 'requested', coveredSourceCardIds } : {}),
+    ...(expectedSourceCardIds.length ? {
+      sourceCoverage: card?.sourceCoverage || 'included',
+      inclusionEvidence: card?.inclusionEvidence || 'generation-contract',
+      coveredSourceCardIds,
+      ...(omittedSourceCardIds.size ? { omittedSourceCardIds: [...omittedSourceCardIds] } : {})
+    } : {}),
     ...(retryCount ? { retryCount } : {}),
     ...(reason ? { reason } : {})
   };
@@ -2453,15 +2459,12 @@ export function createRecursionRuntime({
   function readyLastBrief(packet = lastPacket, hand = lastHand, { runId = '', reason = 'packet-ready' } = {}) {
     const cards = Array.isArray(hand?.cards) ? hand.cards : [];
     const sourceCardIds = new Set(cards.flatMap((card) => Array.isArray(card?.sourceCardIds) ? card.sourceCardIds : []));
-    const missingSourceCardCount = cards.reduce((count, card) => {
-      if (card?.sourceCoverage !== 'reported') return count;
-      const expected = new Set(Array.isArray(card.sourceCardIds) ? card.sourceCardIds : []);
-      const covered = new Set(Array.isArray(card.coveredSourceCardIds) ? card.coveredSourceCardIds : []);
-      return count + [...expected].filter((id) => !covered.has(id)).length;
-    }, 0);
+    const missingSourceCardCount = cards.reduce((count, card) => (
+      count + (Array.isArray(card?.omittedSourceCardIds) ? card.omittedSourceCardIds.length : 0)
+    ), 0);
     const coverageStatus = missingSourceCardCount > 0
-      ? 'missing'
-      : (cards.some((card) => card?.sourceCoverage === 'requested') ? 'requested' : (sourceCardIds.size ? 'covered' : 'none'));
+      ? 'degraded'
+      : (sourceCardIds.size ? 'included' : 'none');
     lastBrief = {
       status: 'ready',
       reason,

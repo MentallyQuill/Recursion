@@ -362,6 +362,8 @@ assertDeepEqual(fusedParsed.cards[0].sourceCardIds, ['scene-location', 'scene-di
 assertDeepEqual(fusedParsed.cards.map((entry) => entry.family), ['Scene Frame', 'Character Motivation'], 'Fused validator rejects unrequested items');
 assertEqual(fusedParsed.cards[0].providerRole, 'fusedCardBundle', 'Fused cards retain provider role metadata');
 assertEqual(fusedParsed.cards[0].providerLane, 'reasoner', 'Fused cards retain provider lane metadata');
+assertEqual(fusedParsed.cards[0].sourceCoverage, 'included', 'Fused cards treat absent coverage metadata as included');
+assertEqual(fusedParsed.cards[0].inclusionEvidence, 'generation-contract', 'Fused cards explain contract-based inclusion when provider coverage is absent');
 assert(fusedParsed.diagnostics.includes('fused-item-rejected:Items'), 'Fused validator records rejected unrequested item');
 assertDeepEqual(fusedParsed.omissions, [{ family: 'Items', role: 'possessionsItemsCard', reason: 'provider-skipped' }], 'Fused validator keeps provider omissions');
 const fusedMixedEvidence = cardsFromFusedProviderResult({
@@ -381,6 +383,41 @@ const fusedMixedEvidence = cardsFromFusedProviderResult({
 }, fusedCardContext);
 assertEqual(fusedMixedEvidence.cards.length, 1, 'Fused validator keeps cards with at least one valid message evidence ref');
 assertDeepEqual(fusedMixedEvidence.cards[0].evidenceRefs, ['message:8'], 'Fused validator drops stale evidence refs and keeps valid refs');
+const fusedEmptyCoverage = cardsFromFusedProviderResult({
+  ok: true,
+  data: {
+    schema: 'recursion.cardBundle.v1',
+    snapshotHash: 'snapshot-fused-1',
+    items: [{
+      schema: 'recursion.card.v1',
+      family: 'Scene Frame',
+      role: 'sceneFrameCard',
+      promptText: 'The blocked door stays central.',
+      evidenceRefs: ['message:8'],
+      coveredSourceCardIds: []
+    }]
+  }
+}, fusedCardContext);
+assertEqual(fusedEmptyCoverage.cards[0].sourceCoverage, 'included', 'Empty coverage metadata does not create a reported omission');
+assertEqual(fusedEmptyCoverage.cards[0].inclusionEvidence, 'generation-contract', 'Empty coverage metadata falls back to contract inclusion');
+assert(!fusedEmptyCoverage.diagnostics.some((entry) => entry.includes('fused-source-missing')), 'Empty coverage metadata does not create missing-source diagnostics');
+const fusedPartialCoverage = cardsFromFusedProviderResult({
+  ok: true,
+  data: {
+    schema: 'recursion.cardBundle.v1',
+    snapshotHash: 'snapshot-fused-1',
+    items: [{
+      schema: 'recursion.card.v1',
+      family: 'Scene Frame',
+      role: 'sceneFrameCard',
+      promptText: 'The blocked door stays central.',
+      evidenceRefs: ['message:8'],
+      coveredSourceCardIds: ['scene-location']
+    }]
+  }
+}, fusedCardContext);
+assertEqual(fusedPartialCoverage.cards[0].sourceCoverage, 'reported', 'Partial coverage retains provider attribution');
+assertDeepEqual(fusedPartialCoverage.cards[0].omittedSourceCardIds, ['scene-direction', 'scene-beat'], 'Partial coverage records explicitly omitted source cards');
 const fusedMismatch = cardsFromFusedProviderResult({
   ok: true,
   data: { schema: 'recursion.cardBundle.v1', snapshotHash: 'wrong', items: [] }

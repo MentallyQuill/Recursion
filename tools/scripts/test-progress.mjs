@@ -157,12 +157,28 @@ const unverifiedSourceProgress = createProgressRunModel({
   ],
   activity: { runId: 'unverified-source-progress', phase: 'cardProgress', recordedAt: '2' }
 });
-const unverifiedSourceCard = unverifiedSourceProgress.steps
+const includedSourceCard = unverifiedSourceProgress.steps
   .find((step) => step.id === 'utility-card-batch')
   .children.find((child) => child.label === 'Scene Frame').children[0];
-assertEqual(unverifiedSourceCard.state, 'info', 'unverified source coverage is neutral');
-assertEqual(unverifiedSourceCard.meta, 'included', 'unverified source coverage is labeled included');
-assertEqual(unverifiedSourceProgress.title, 'Ready', 'unverified source coverage does not raise a warning title');
+assertEqual(includedSourceCard.state, 'done', 'included source coverage is successful');
+assertEqual(unverifiedSourceProgress.title, 'Ready', 'included source coverage does not raise a warning title');
+
+const cautionedSourceProgress = createProgressRunModel({
+  activityHistory: [{
+    runId: 'cautioned-source-progress',
+    phase: 'cardProgress',
+    detail: {
+      parentStepId: 'utility-card-batch',
+      family: 'Scene Frame',
+      roleId: 'sceneFrameCard',
+      state: 'warning',
+      sourceCards: [{ id: 'scene-location', label: 'location/situation', state: 'warning', reason: 'JSON repaired.' }]
+    },
+    recordedAt: '1'
+  }],
+  activity: { runId: 'cautioned-source-progress', phase: 'cardProgress', recordedAt: '1' }
+});
+assertEqual(cautionedSourceProgress.steps.find((step) => step.id === 'utility-card-batch').children[0].children[0].state, 'warning', 'source cards inherit category caution');
 
 const runningSourceCardProgress = createProgressRunModel({
   settings: {

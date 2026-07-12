@@ -909,7 +909,9 @@ function normalizeDeckCard(card, { preserveId = false } = {}) {
   if (Array.isArray(card?.sourceCardIds) && card.sourceCardIds.length) normalized.sourceCardIds = card.sourceCardIds.map(String).filter(Boolean).slice(0, 32);
   if (Array.isArray(card?.sourceCards) && card.sourceCards.length) normalized.sourceCards = card.sourceCards.slice(0, 32);
   if (card?.sourceCoverage) normalized.sourceCoverage = String(card.sourceCoverage);
+  if (card?.inclusionEvidence) normalized.inclusionEvidence = String(card.inclusionEvidence);
   if (Array.isArray(card?.coveredSourceCardIds) && card.coveredSourceCardIds.length) normalized.coveredSourceCardIds = card.coveredSourceCardIds.map(String).filter(Boolean).slice(0, 32);
+  if (Array.isArray(card?.omittedSourceCardIds) && card.omittedSourceCardIds.length) normalized.omittedSourceCardIds = card.omittedSourceCardIds.map(String).filter(Boolean).slice(0, 32);
   return normalized;
 }
 
@@ -1263,7 +1265,8 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     const coveredSourceCardIds = Array.isArray(item.coveredSourceCardIds)
       ? item.coveredSourceCardIds.map(String).filter(Boolean)
       : [];
-    if (expectedSourceCardIds.length && coveredSourceCardIds.length) {
+    const hasCoverageReport = coveredSourceCardIds.length > 0;
+    if (expectedSourceCardIds.length && hasCoverageReport) {
       const missingSourceCardIds = expectedSourceCardIds.filter((id) => !coveredSourceCardIds.includes(id));
       if (missingSourceCardIds.length) {
         output.diagnostics.push(`fused-source-missing:${catalog.family}:${missingSourceCardIds.join(',')}`);
@@ -1278,8 +1281,14 @@ export function cardsFromFusedProviderResult(result, context = {}) {
         ? {
             sourceCardIds: requested.get(catalog.family).sourceCardIds,
             sourceCards: requested.get(catalog.family).sourceCards,
-            sourceCoverage: Array.isArray(item.coveredSourceCardIds) ? 'reported' : 'requested',
-            ...(Array.isArray(item.coveredSourceCardIds) ? { coveredSourceCardIds: item.coveredSourceCardIds.map(String).filter(Boolean) } : {})
+            sourceCoverage: hasCoverageReport ? 'reported' : 'included',
+            inclusionEvidence: hasCoverageReport ? 'provider-confirmed' : 'generation-contract',
+            ...(hasCoverageReport ? { coveredSourceCardIds } : {}),
+            ...(hasCoverageReport
+              ? {
+                  omittedSourceCardIds: expectedSourceCardIds.filter((id) => !coveredSourceCardIds.includes(id))
+                }
+              : {})
           }
         : {})
     })));

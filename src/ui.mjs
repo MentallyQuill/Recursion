@@ -1039,8 +1039,8 @@ function cardMetaChips(card) {
   else if (sourceCoverage === 'reported') {
     const expected = Array.isArray(source.sourceCardIds) ? source.sourceCardIds : [];
     const covered = Array.isArray(source.coveredSourceCardIds) ? source.coveredSourceCardIds : [];
-    chips.push(expected.length && covered.length < expected.length ? 'coverage missing' : 'covered');
-  } else if (sourceCoverage === 'requested') chips.push('coverage unknown');
+    chips.push(expected.length && covered.length < expected.length ? 'omitted' : 'covered');
+  } else if (sourceCoverage === 'included' || sourceCoverage === 'requested') chips.push('included');
   const selectionTag = cleanText(source.selectionTag || source.scopeTag || source.selectionSource).toLowerCase();
   if (['focus', 'manual', 'guardrail'].includes(selectionTag)) chips.push(selectionTag);
   return [...new Set(chips)];

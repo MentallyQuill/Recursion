@@ -149,7 +149,7 @@ if (missing.length) {
 }
 ```
 
-Use `sourceCoverage: 'reported'` only when the provider actually returns coverage. Otherwise use `sourceCoverage: 'requested'`.
+Use `sourceCoverage: 'reported'` only when the provider actually returns coverage. Otherwise use `sourceCoverage: 'requested'`, rendered as neutral `included` information rather than caution.
 
 ## Phase 4: Standard/Fused Progress Tree
 
@@ -386,7 +386,7 @@ The progress renderer should map these to the existing state language:
 
 ```js
 const sourceState = {
-  requested: 'warning',
+  requested: 'info',
   covered: 'done',
   missing: 'warning',
   failed: 'failed',
@@ -454,7 +454,7 @@ const unknown = [...covered].filter((id) => !expected.has(id));
 const missing = [...expected].filter((id) => !covered.has(id));
 ```
 
-Unknown IDs, duplicates, unrequested families, empty prompt text, and malformed coverage should create diagnostics. Preserve a useful family result when possible, but mark it yellow and offer repair.
+Unknown IDs, duplicates, unrequested families, empty prompt text, and malformed coverage should create diagnostics. Preserve a useful family result when possible; mark it yellow only when the output is actually damaged or a source is explicitly missing. Lack of attribution alone remains neutral.
 
 ### Mobile and Accessibility Checks
 

@@ -159,7 +159,8 @@ Source children should use the existing progress state language:
 - Spinner: pending/running/repairing.
 - Green: success, covered, or included.
 - Purple: cached.
-- Yellow: requested without coverage, missing coverage, retrying, or caution.
+- Neutral included: requested without provider attribution in an otherwise successful category result.
+- Yellow: explicit missing coverage, retrying, repaired output, or another actionable caution.
 - Red: provider/validation failure.
 
 The label must clarify the semantics. `included` is more truthful than `generated` for a source deck card that contributed to a family call.
@@ -267,7 +268,7 @@ Coverage unknown
 Missing from provider result
 ```
 
-`Included` is not proof of provider coverage. A provider response without coverage IDs is `requested` or `unknown`, not `covered`.
+`Included` is not proof of provider coverage. A provider response without coverage IDs is `requested` or `unknown`, rendered as neutral `included`, not as caution and not as `covered`.
 
 ### Priority Clarity
 

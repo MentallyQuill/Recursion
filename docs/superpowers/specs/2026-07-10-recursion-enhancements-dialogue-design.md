@@ -115,7 +115,7 @@ Compact bar status:
 - `Enhancing prose...`
 - `Enhancing dialogue...`
 - `Enhancing response...`
-- `Enhancement skipped.`
+- `Enhancement failed validation. Original kept.`
 - `Enhancement failed. Original kept.`
 
 Progress menu rows:

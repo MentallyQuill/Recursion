@@ -255,7 +255,7 @@ Fused progress treats `Fused card bundle` as the single parent row for the bundl
 
 Enhancements are post-generation provider passes with their own top-level rows: `Prose Enhancement`, `Dialogue Enhancement`, or `Enhancement` for combined Prose + Dialogue. Low and Medium route them through Utility; High and Ultra route them through Reasoner when that lane is available. While running, compact current-step text is `Enhancing prose...`, `Enhancing dialogue...`, or `Enhancing response...`; it must not reuse `Utility card batch`, seed prompt-install rows, or imply that a card batch is running.
 
-If Dialogue Enhancement returns exact duplicate text after its retry, the warning surface should use `Dialogue unchanged. Original kept.` and must not append a duplicate enhanced swipe.
+If Dialogue Enhancement returns exact duplicate text after its retry, the failure surface should use `Dialogue unchanged. Original kept.` and must not append a duplicate enhanced swipe. Validation failures and provider failures are terminal failures, not amber cautions.
 
 The compact bar, progress panel, and cards panel should consume stable presenter state derived from the shared Recursion view model. DOM rendering may remain in the main UI module while presenter modules stay pure and testable.
 

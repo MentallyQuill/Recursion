@@ -939,6 +939,11 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
   border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 44%, transparent);
 }
 
+.recursion-step-row.info .recursion-step-icon {
+  background: color-mix(in srgb, var(--recursion-accent) 42%, transparent);
+  border-color: color-mix(in srgb, var(--recursion-accent) 58%, transparent);
+}
+
 .recursion-step-row.warning .recursion-step-icon {
   background: var(--recursion-warning);
   border-color: var(--recursion-warning);
@@ -959,6 +964,10 @@ body.recursion-prose-capture-active #chat .mes.last_mes:not(.user_mes):not([is_u
 
 .recursion-step-row.skipped .recursion-step-meta {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
+}
+
+.recursion-step-row.info .recursion-step-meta {
+  color: color-mix(in srgb, var(--recursion-accent) 72%, transparent);
 }
 
 .recursion-step-row.warning .recursion-step-meta {

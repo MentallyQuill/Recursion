@@ -136,6 +136,34 @@ assertEqual(tracedCard.children.length, 2, 'card progress exposes fused source c
 assertEqual(tracedCard.children[0].label, 'location/situation', 'card progress names first source card');
 assertEqual(tracedCard.children[0].reason, 'Priority source card included.', 'card progress explains priority source');
 
+const unverifiedSourceProgress = createProgressRunModel({
+  activityHistory: [
+    { runId: 'unverified-source-progress', phase: 'cardBatchRunning', label: 'Utility card batch', providerLane: 'utility', recordedAt: '1' },
+    {
+      runId: 'unverified-source-progress',
+      phase: 'cardProgress',
+      detail: {
+        parentStepId: 'utility-card-batch',
+        family: 'Scene Frame',
+        roleId: 'sceneFrameCard',
+        source: 'generated',
+        state: 'done',
+        sourceCards: [
+          { id: 'scene-location', label: 'location/situation', selectionState: 'priority', state: 'info', reason: 'Included in fused category result; individual attribution unavailable.' }
+        ]
+      },
+      recordedAt: '2'
+    }
+  ],
+  activity: { runId: 'unverified-source-progress', phase: 'cardProgress', recordedAt: '2' }
+});
+const unverifiedSourceCard = unverifiedSourceProgress.steps
+  .find((step) => step.id === 'utility-card-batch')
+  .children.find((child) => child.label === 'Scene Frame').children[0];
+assertEqual(unverifiedSourceCard.state, 'info', 'unverified source coverage is neutral');
+assertEqual(unverifiedSourceCard.meta, 'included', 'unverified source coverage is labeled included');
+assertEqual(unverifiedSourceProgress.title, 'Ready', 'unverified source coverage does not raise a warning title');
+
 const fusedBundleProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'fused-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },

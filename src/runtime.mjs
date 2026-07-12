@@ -1908,6 +1908,9 @@ function cardProgressDetail(card, source, state, options = {}) {
   const coveredSet = new Set(coveredSourceCardIds);
   const progressSource = card?.providerProgressSource === 'fused-repair' ? 'fused-repair' : source;
   const explicitParentStepId = safeText(options.parentStepId || '', 120);
+  const sourceCards = Array.isArray(card?.sourceCards) && card.sourceCards.length
+    ? card.sourceCards
+    : (Array.isArray(options.sourceCards) ? options.sourceCards : []);
   return {
     parentStepId: explicitParentStepId || (progressSource === 'fused-repair'
       ? 'utility-card-batch'
@@ -1918,9 +1921,9 @@ function cardProgressDetail(card, source, state, options = {}) {
     state,
     providerLane: providerLane === 'reasoner' ? 'reasoner' : 'utility',
     cardId: safeIdentifier(card?.id || '', 'card', 160),
-    ...(Array.isArray(card?.sourceCards) && card.sourceCards.length
+    ...(sourceCards.length
       ? {
-          sourceCards: card.sourceCards.map((sourceCard) => ({
+          sourceCards: sourceCards.map((sourceCard) => ({
             id: safeIdentifier(sourceCard?.id || '', 'source-card', 160),
             label: safeText(sourceCard?.name || sourceCard?.id || '', 120),
             selectionState: safeText(sourceCard?.selectionState || 'active', 40),
@@ -1928,10 +1931,10 @@ function cardProgressDetail(card, source, state, options = {}) {
               ? 'failed'
               : (card?.sourceCoverage === 'reported'
                 ? (coveredSet.has(String(sourceCard?.id || '')) ? 'done' : 'warning')
-                : (card?.sourceCoverage === 'cached' ? 'cached' : 'warning')),
+                : (card?.sourceCoverage === 'cached' ? 'cached' : 'info')),
             reason: card?.sourceCoverage === 'reported'
               ? (coveredSet.has(String(sourceCard?.id || '')) ? 'Coverage confirmed by provider.' : 'Provider omitted this source card.')
-              : 'Included in category request; provider coverage was not reported.'
+              : 'Included in fused category result; individual attribution unavailable.'
           }))
         }
       : {}),
@@ -2597,13 +2600,16 @@ export function createRecursionRuntime({
     return result;
   }
 
-  function stageCardProgress(runId, cards, { source, state, parentStepId } = {}) {
+  function stageCardProgress(runId, cards, { source, state, parentStepId, sourceCardsByFamily } = {}) {
     const list = Array.isArray(cards) ? cards : [];
     for (const card of list) {
       const retryCount = progressRetryCount(card?.providerRetryCount);
       const cardState = source === 'generated' && state === 'done' && retryCount > 0 ? 'warning' : state;
       const severity = cardState === 'failed' ? 'error' : (cardState === 'warning' ? 'warning' : 'success');
-      const detail = cardProgressDetail(card, source, cardState, { parentStepId });
+      const fallbackSourceCards = Array.isArray(card?.sourceCards) && card.sourceCards.length
+        ? card.sourceCards
+        : (sourceCardsByFamily?.[card?.family] || []);
+      const detail = cardProgressDetail(card, source, cardState, { parentStepId, sourceCards: fallbackSourceCards });
       if (!detail.roleId && !detail.family) continue;
       const providerLane = source === 'generated' ? detail.providerLane : 'utility';
       const progressSource = detail.source || source;
@@ -3296,7 +3302,7 @@ export function createRecursionRuntime({
       if (!identity.chatKey) return;
       await appendJournalSafe(runId, identity.chatKey, {
         event: 'enhancement.pass',
-        severity: ['failed', 'provider-failed', 'validation-failed', 'unchanged'].includes(status) ? 'warn' : 'info',
+        severity: ['failed', 'provider-failed', 'validation-failed', 'unchanged'].includes(status) ? 'error' : 'info',
         summary: `${pass} enhancement ${status}.`,
         runId,
         sceneKey: enhancementSceneKey,
@@ -3411,7 +3417,7 @@ export function createRecursionRuntime({
             settleRuntimeActivity({
               runId,
               phase: 'settled',
-              severity: 'warning',
+              severity: 'error',
               label: 'Enhancement failed. Original kept.',
               chips: ['Dialogue']
             });
@@ -3433,7 +3439,7 @@ export function createRecursionRuntime({
               settleRuntimeActivity({
                 runId,
                 phase: 'settled',
-                severity: 'warning',
+                severity: 'error',
                 label: 'Enhancement failed. Original kept.',
                 chips: ['Dialogue'],
                 detail: { reason: retry.result?.error?.message || 'Dialogue retry provider failed.', reasonCode: retry.result?.error?.code || 'provider-failed' }
@@ -3451,7 +3457,7 @@ export function createRecursionRuntime({
             settleRuntimeActivity({
               runId,
               phase: 'settled',
-              severity: 'warning',
+              severity: 'error',
               label: 'Dialogue unchanged. Original kept.',
               chips: ['Dialogue'],
               detail: { reason: 'Dialogue returned unchanged text after retry. Prose was not run.', reasonCode: 'exact-noop-after-retry', passResults }
@@ -3474,8 +3480,8 @@ export function createRecursionRuntime({
             settleRuntimeActivity({
               runId,
               phase: 'settled',
-              severity: 'warning',
-              label: 'Enhancement skipped.',
+              severity: 'error',
+              label: 'Enhancement failed validation. Original kept.',
               chips: ['Dialogue']
             });
             return { ok: false, target, mode, error: validation.error, passResults };
@@ -3487,7 +3493,7 @@ export function createRecursionRuntime({
             settleRuntimeActivity({
               runId,
               phase: 'settled',
-              severity: 'warning',
+              severity: 'error',
               label: 'Dialogue unchanged. Original kept.',
               chips: ['Dialogue'],
               detail: { reason: 'Dialogue returned unchanged text after retry. Prose was not run.', reasonCode: 'exact-noop-after-retry', passResults }
@@ -3537,7 +3543,7 @@ export function createRecursionRuntime({
             settleRuntimeActivity({
               runId,
               phase: 'settled',
-              severity: 'warning',
+              severity: 'error',
               label: 'Enhancement failed. Original kept.',
               chips: ['Prose'],
               detail: { reason: result?.error?.message || 'Prose provider failed.', reasonCode: result?.error?.code || 'provider-failed' }
@@ -3551,8 +3557,8 @@ export function createRecursionRuntime({
             settleRuntimeActivity({
               runId,
               phase: 'settled',
-              severity: 'warning',
-              label: 'Enhancement skipped.',
+              severity: 'error',
+              label: 'Enhancement failed validation. Original kept.',
               chips: ['Prose'],
               detail: { reason: validation.error?.message || 'Prose output failed validation.', reasonCode: validation.error?.code || 'validation-failed' }
             });
@@ -3613,7 +3619,7 @@ export function createRecursionRuntime({
       settleRuntimeActivity({
         runId,
         phase: 'settled',
-        severity: 'warning',
+        severity: 'error',
         label: 'Enhancement failed. Original kept.',
         chips: ['Enhancement']
       });
@@ -5562,13 +5568,15 @@ export function createRecursionRuntime({
         };
         lastPlan = plan;
       }
+      const sourceCardsByFamily = activeCardDeckSourceCards(settings);
       stageCardProgress(runId, cacheCards, {
         source: 'cache',
         state: 'cached',
+        sourceCardsByFamily,
         parentStepId: settings.pipelineMode === 'fused' && !reuseCacheOnly ? 'fused-card-bundle' : undefined
       });
-      stageCardProgress(runId, providerCards, { source: 'generated', state: 'done' });
-      stageCardProgress(runId, generatedCards, { source: 'fallback', state: 'warning' });
+      stageCardProgress(runId, providerCards, { source: 'generated', state: 'done', sourceCardsByFamily });
+      stageCardProgress(runId, generatedCards, { source: 'fallback', state: 'warning', sourceCardsByFamily });
       if (action === 'reuse-cache' && !cacheCards.length) {
         const clear = await runPromptMutationSection(runId, async () => {
           const result = await clearPromptBestEffort(host);

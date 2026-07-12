@@ -1,4 +1,4 @@
-const VALID_STATES = new Set(['pending', 'running', 'done', 'cached', 'warning', 'failed', 'skipped']);
+const VALID_STATES = new Set(['pending', 'running', 'done', 'cached', 'warning', 'failed', 'skipped', 'info']);
 const VALID_PROVIDER_LANES = new Set(['utility', 'reasoner']);
 const SAFE_PROGRESS_TITLES = new Set(['Generating', 'Ready', 'Idle', 'Issue', 'Needs attention']);
 const DEFAULT_HERO_PIXEL_ROWS = 3;
@@ -135,7 +135,7 @@ const PHASE_STEP_IDS = Object.freeze({
   settled: 'recursion-prompt-ready'
 });
 
-const FINAL_STATES = new Set(['done', 'warning', 'failed', 'skipped']);
+const FINAL_STATES = new Set(['done', 'warning', 'failed', 'skipped', 'info']);
 const UNSAFE_DISPLAY_PATTERN = /\b(raw\s*prompt|prompt\s*text|system\s*prompt|password|api[-_\s]*key|authorization|cookie|credentials?|session[-_\s]*id|session[-_\s]*key|bearer\s+\S+|sk-[a-z0-9_-]+|private[-_\s]*secret)\b\s*(?:[:=]|\]|$)/i;
 
 function asObject(value) {
@@ -258,6 +258,7 @@ function metaForState(state, source = '', reason = '', retryCount = 0) {
   if (state === 'done' && normalizedSource === 'generated') return 'generated';
   if (state === 'done') return 'done';
   if (state === 'cached') return 'cached';
+  if (state === 'info') return 'included';
   if (state === 'running') return 'running';
   if (state === 'warning' && (normalizeRetryCount(retryCount) > 0 || reasonMentionsRetry(reason))) return 'retried';
   if (state === 'warning' && normalizedSource === 'fallback') return 'fallback';

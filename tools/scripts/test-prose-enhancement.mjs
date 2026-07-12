@@ -91,14 +91,15 @@ const cleanProseNoop = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,
   text: 'Mara crossed the room. "Keep the door shut," she said.'
 }, { originalText: 'Mara crossed the room. "Keep the door shut," she said.' });
-assertEqual(cleanProseNoop.ok, true, 'prose no-op remains valid when no deterministic slop is detected');
-assertEqual(cleanProseNoop.editRatio, 0, 'prose validation reports no-op edit ratio without rejecting it');
+assertEqual(cleanProseNoop.ok, false, 'prose no-op is rejected even when no deterministic slop is detected');
+assertEqual(cleanProseNoop.error.code, 'RECURSION_PROSE_EXACT_NOOP', 'clean prose no-op uses stable error code');
 
 const dialogueOnlySlopNoop = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,
   text: 'Mara kept her hand on the latch. "Do not get the wrong idea, this is purely tactical."'
 }, { originalText: 'Mara kept her hand on the latch. "Do not get the wrong idea, this is purely tactical."' });
-assertEqual(dialogueOnlySlopNoop.ok, true, 'prose no-op does not veto dialogue-only slop after Dialogue pass');
+assertEqual(dialogueOnlySlopNoop.ok, false, 'prose pass rejects dialogue-only no-op after Dialogue pass');
+assertEqual(dialogueOnlySlopNoop.error.code, 'RECURSION_PROSE_EXACT_NOOP', 'dialogue-only prose no-op uses stable error code');
 
 const acceptedDialogueSlopCleanup = validateProseEnhancementResult({
   schema: PROSE_ENHANCER_SCHEMA,

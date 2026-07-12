@@ -3525,18 +3525,33 @@ export function createRecursionRuntime({
           continue;
         }
         if (pass === 'prose') {
-          await appendEnhancementPassJournal({ pass: 'prose', status: 'started' });
-          const request = buildProseEnhancementRequest({
-            text: enhancedText,
-            contextMessages,
-            contextMessageLimit: enhancementSettings.contextMessages,
-            storyForm,
-            cardContext: enhancementContext.cardContext,
-            lane: enhancementLane,
-            ...enhancementReasoning
-          });
-          const generation = await generateEnhancementPass('proseEnhancer', request);
-          const result = generation.result;
+          async function runProseEnhancementAttempt({ text, retryReason = '', attempt = 1 } = {}) {
+            await appendEnhancementPassJournal({
+              pass: 'prose',
+              status: attempt > 1 ? 'retrying' : 'started',
+              reasonCode: retryReason,
+              reason: retryReason === 'exact-noop' ? 'Previous prose output matched the original.' : '',
+              attempt
+            });
+            const request = buildProseEnhancementRequest({
+              text,
+              contextMessages,
+              contextMessageLimit: enhancementSettings.contextMessages,
+              storyForm,
+              cardContext: enhancementContext.cardContext,
+              lane: enhancementLane,
+              retryReason,
+              ...enhancementReasoning
+            });
+            const generation = await generateEnhancementPass('proseEnhancer', request);
+            const result = generation.result;
+            if (result?.ok !== true) return { ok: false, generation, result, attempt, retryReason };
+            const validation = validateProseEnhancementResult(result.data, { originalText: text });
+            return { ok: validation.ok === true, validation, generation, result, attempt, retryReason };
+          }
+
+          let proseAttempt = await runProseEnhancementAttempt({ text: enhancedText, attempt: 1 });
+          let result = proseAttempt.result;
           if (result?.ok !== true) {
             passResults.push({ pass: 'prose', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed' });
             await appendEnhancementPassJournal({ pass: 'prose', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed', reason: result?.error?.message || '' });
@@ -3550,10 +3565,28 @@ export function createRecursionRuntime({
             });
             return { ok: false, target, mode, error: result?.error || { code: 'RECURSION_PROSE_PROVIDER_FAILED' }, passResults };
           }
-          const validation = validateProseEnhancementResult(result.data, { originalText: enhancedText });
+          let validation = proseAttempt.validation;
+          if (validation?.error?.code === 'RECURSION_PROSE_EXACT_NOOP' || validation?.error?.code === 'RECURSION_PROSE_NOOP_WITH_DETECTED_SLOP') {
+            proseAttempt = await runProseEnhancementAttempt({ text: enhancedText, retryReason: 'exact-noop', attempt: 2 });
+            result = proseAttempt.result;
+            if (result?.ok !== true) {
+              passResults.push({ pass: 'prose', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed', attempt: 2 });
+              await appendEnhancementPassJournal({ pass: 'prose', status: 'provider-failed', reasonCode: result?.error?.code || 'provider-failed', reason: result?.error?.message || '', attempt: 2 });
+              settleRuntimeActivity({
+                runId,
+                phase: 'settled',
+                severity: 'error',
+                label: 'Enhancement failed. Original kept.',
+                chips: ['Prose'],
+                detail: { reason: result?.error?.message || 'Prose retry provider failed.', reasonCode: result?.error?.code || 'provider-failed' }
+              });
+              return { ok: false, target, mode, error: result?.error || { code: 'RECURSION_PROSE_PROVIDER_FAILED' }, passResults };
+            }
+            validation = proseAttempt.validation;
+          }
           if (validation.ok !== true) {
-            passResults.push({ pass: 'prose', status: 'validation-failed', reasonCode: validation.error?.code || 'validation-failed' });
-            await appendEnhancementPassJournal({ pass: 'prose', status: 'validation-failed', reasonCode: validation.error?.code || 'validation-failed', reason: validation.error?.message || '' });
+            passResults.push({ pass: 'prose', status: 'validation-failed', reasonCode: validation.error?.code || 'validation-failed', attempt: proseAttempt.attempt });
+            await appendEnhancementPassJournal({ pass: 'prose', status: 'validation-failed', reasonCode: validation.error?.code || 'validation-failed', reason: validation.error?.message || '', attempt: proseAttempt.attempt });
             settleRuntimeActivity({
               runId,
               phase: 'settled',
@@ -3571,8 +3604,10 @@ export function createRecursionRuntime({
             pass,
             hash: hashJson(enhancedText),
             editRatio: validation.editRatio ?? roundedEnhancementEditRatio(passOriginalText, enhancedText),
-            lane: generation.lane,
-            ...(generation.fallbackFrom ? { fallbackFrom: generation.fallbackFrom } : {})
+            lane: proseAttempt.generation.lane,
+            attempt: proseAttempt.attempt,
+            ...(proseAttempt.retryReason ? { retryReason: proseAttempt.retryReason } : {}),
+            ...(proseAttempt.generation.fallbackFrom ? { fallbackFrom: proseAttempt.generation.fallbackFrom } : {})
           });
         }
       }

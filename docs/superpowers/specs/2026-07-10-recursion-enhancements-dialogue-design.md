@@ -46,7 +46,7 @@ Recursion captures the latest assistant output, masks it while enhancement runs,
 
 Recursion captures the latest assistant output, masks it while enhancement runs, replaces the active assistant text with the final enhanced output, then reveals the message.
 
-If enhancement fails validation, times out, is canceled, is stale, or the selected provider lane is unavailable, Recursion reveals the original output unchanged. Low and Medium use Utility. High and Ultra use Reasoner directly instead of falling back to Utility. The context-message setting supplies the bounded recent transcript window, preserving sender labels when available; runtime derives recent dialogue examples and selected-card context from that window and the current hand. Byte-identical provider output is accepted only when deterministic local detectors find no required slop intervention.
+If enhancement fails validation, times out, is canceled, is stale, or the selected provider lane is unavailable, Recursion reveals the original output unchanged and reports a terminal failure. Low and Medium use Utility. High and Ultra use Reasoner directly instead of falling back to Utility. The context-message setting supplies the bounded recent transcript window, preserving sender labels when available; runtime derives recent dialogue examples and selected-card context from that window and the current hand. Byte-identical provider output is never accepted. An exact no-op receives one targeted retry; a second no-op fails without creating a swipe.
 
 ## User Experience
 

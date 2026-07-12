@@ -1218,12 +1218,11 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-as-swipe-unchanged' });
-  assertEqual(result.ok, true, 'identical As Swipe prose enhancement returns success');
-  assertEqual(result.skipped, undefined, 'identical As Swipe is no longer skipped');
-  assertEqual(proseHost.calls.some((call) => call.type === 'append' && call.options.select === true), true, 'identical As Swipe still appends an enhanced swipe');
-  assertEqual(proseHost.message.swipes.length, 2, 'identical As Swipe keeps original and enhanced swipes');
-  assertEqual(proseHost.message.swipes[1], 'She was angry. "Keep the door shut," Mara said.', 'identical As Swipe stores provider output as enhanced swipe');
-  assertEqual(proseHost.message.swipeId, 1, 'identical As Swipe selects provider output');
+  assertEqual(result.ok, false, 'identical As Swipe prose enhancement fails after retry');
+  assertEqual(result.error.code, 'RECURSION_PROSE_EXACT_NOOP', 'identical As Swipe uses exact no-op error');
+  assertEqual(proseHost.calls.some((call) => call.type === 'append' && call.options.select === true), false, 'identical As Swipe does not append an unchanged swipe');
+  assertEqual(proseHost.message.swipes.length, 1, 'identical As Swipe keeps only the original swipe');
+  assertEqual(proseHost.message.swipeId, 0, 'identical As Swipe keeps the original selected');
 }
 
 {

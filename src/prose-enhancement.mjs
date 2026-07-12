@@ -351,6 +351,7 @@ export function buildProseEnhancementRequest({
   storyForm = null,
   cardContext = [],
   lane = '',
+  retryReason = '',
   reasoningCategory = 'prose-enhancement',
   reasoningIntent = 'minimal'
 } = {}) {
@@ -389,7 +390,8 @@ export function buildProseEnhancementRequest({
     '- Soft maximum edit ratio: 30%.',
     '- If a sentence is generic but not unsafe, improve it through concrete action, compression, or rhythm rather than decorative synonym swaps.',
     '- If the source is short or dialogue-heavy, come as close to the target band as possible without changing protected dialogue.',
-    '- If the prose is already clean, returning it unchanged is allowed.',
+    '- Returning the source unchanged is never allowed. If no useful edit is available, report a failed pass rather than echoing the input.',
+    retryReason === 'exact-noop' ? '- The previous revision was identical to the input. Produce a concrete prose revision now; preserve dialogue exactly.' : '',
     '- Optional diagnostics are allowed in changePlan, but the text field is the only applied output.',
     '',
     BANNED_AI_SLOP_LIST,
@@ -525,11 +527,13 @@ export function validateProseEnhancementResult(result = {}, { originalText = '' 
     if (containsBannedPhrase(originalDialogue[index].text)) continue;
     return validationError('RECURSION_PROSE_DIALOGUE_CHANGED', 'Prose enhancement changed dialogue.');
   }
-  const interventionReasons = proseInterventionReasons(originalText);
-  if (text === String(originalText ?? '') && interventionReasons.length) {
+  if (text === String(originalText ?? '')) {
+    const interventionReasons = proseInterventionReasons(originalText);
     return validationError(
-      'RECURSION_PROSE_NOOP_WITH_DETECTED_SLOP',
-      `Prose enhancement returned unchanged text despite detected slop: ${interventionReasons.join(', ')}.`
+      interventionReasons.length ? 'RECURSION_PROSE_NOOP_WITH_DETECTED_SLOP' : 'RECURSION_PROSE_EXACT_NOOP',
+      interventionReasons.length
+        ? `Prose enhancement returned unchanged text despite detected slop: ${interventionReasons.join(', ')}.`
+        : 'Prose enhancement returned unchanged text.'
     );
   }
   return { ok: true, text, editRatio: roundedEnhancementEditRatio(originalText, text) };

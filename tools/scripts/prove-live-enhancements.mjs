@@ -17,7 +17,7 @@ function envValue(name, fallback = '') {
 }
 
 function proofScript() {
-  return async ({ target, applyMode }) => {
+  return async ({ target, applyMode, pipelineMode }) => {
     const rawContext = () => globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
     const decorateContext = (ctx = {}) => {
       ctx.saveChat = async () => {};
@@ -80,15 +80,24 @@ function proofScript() {
     if (!activeRuntime) return { ok: false, reason: 'runtime-unavailable' };
     await activeRuntime.updateSettings({
       enabled: true,
+      mode: 'auto',
+      pipelineMode,
       reasoningLevel: 'medium',
       reasonerUse: 'always',
       enhancements: { target, applyMode, contextMessages: 3 }
     });
     const seed = seedAssistant();
+    const prepared = await activeRuntime.prepareForGeneration({
+      userMessage: 'Mara is guarded and dislikes being managed. She just saw the other person flinch.'
+    });
+    const preparedView = activeRuntime.view?.() || {};
+    const preparedHandCardCount = Array.isArray(preparedView.lastHand?.cards)
+      ? preparedView.lastHand.cards.length
+      : 0;
     const before = messageState(seed.mesid);
     const result = await activeRuntime.enhanceLatestAssistantMessage({ reason: `live-${target}-${applyMode}` });
     const after = messageState(seed.mesid);
-    return { ok: result?.ok !== false, target, applyMode, seed, result, before, after };
+    return { ok: result?.ok !== false, target, applyMode, pipelineMode, seed, prepared, preparedHandCardCount, result, before, after };
   };
 }
 
@@ -143,6 +152,7 @@ function qualityDelta(before = '', after = '') {
 const baseUrl = envValue('SILLYTAVERN_BASE_URL', 'http://127.0.0.1:8000');
 const user = envValue('RECURSION_SILLYTAVERN_USER', 'recursion-soak-a');
 const password = envValue('SILLYTAVERN_PASSWORD', '');
+const selectedCase = envValue('RECURSION_ENHANCEMENT_PROOF_CASE', '');
 const userValidation = validateSoakUserHandle(user);
 if (!userValidation.ok) fail('unsafe-user', 'RECURSION_SILLYTAVERN_USER must be a dedicated recursion-soak-* user.', { user, reason: userValidation.reason });
 
@@ -199,38 +209,58 @@ try {
     });
   }
 
-  for (const testCase of [
-    { target: 'on', applyMode: 'as-swipe' },
-    { target: 'on', applyMode: 'replace' }
-  ]) {
+  const testCases = [
+    { target: 'on', applyMode: 'as-swipe', pipelineMode: 'standard' },
+    { target: 'on', applyMode: 'as-swipe', pipelineMode: 'rapid' },
+    { target: 'on', applyMode: 'as-swipe', pipelineMode: 'fused' },
+    { target: 'on', applyMode: 'replace', pipelineMode: 'standard' },
+    { target: 'on', applyMode: 'replace', pipelineMode: 'rapid' },
+    { target: 'on', applyMode: 'replace', pipelineMode: 'fused' }
+  ];
+  const selectedCases = selectedCase
+    ? testCases.filter((testCase) => `${testCase.pipelineMode}-${testCase.applyMode}` === selectedCase)
+    : testCases;
+  if (!selectedCases.length) fail('invalid-proof-case', 'RECURSION_ENHANCEMENT_PROOF_CASE did not match a live proof case.', { selectedCase });
+  for (const testCase of selectedCases) {
     const proof = await page.evaluate(proofScript(), testCase);
     const beforeText = testCase.applyMode === 'as-swipe' ? proof.before.swipes[0] : proof.before.text;
     const afterText = testCase.applyMode === 'as-swipe' ? proof.after.swipes[proof.after.swipeId] : proof.after.text;
     const quality = qualityDelta(beforeText, afterText);
     const pass = testCase.applyMode === 'as-swipe'
-      ? proof.ok === true
+      ? proof.prepared?.ok === true
+        && proof.result?.installedCardCount > 0
+        && proof.ok === true
         && proof.result?.mode === testCase.applyMode
         && Array.isArray(proof.result?.patches)
         && proof.result.patches.length > 0
+        && Array.isArray(proof.result?.cardOutcomes)
+        && proof.result.cardOutcomes.length === proof.result.installedCardCount
         && proof.after.swipes.length === 2
         && proof.after.swipeInfoLength === proof.after.swipes.length
         && proof.after.swipeId === 1
         && proof.after.swipes[0] === proof.before.swipes[0]
         && quality.significant === true
-      : proof.ok === true
+      : proof.prepared?.ok === true
+        && proof.result?.installedCardCount > 0
+        && proof.ok === true
         && proof.result?.mode === testCase.applyMode
         && Array.isArray(proof.result?.patches)
         && proof.result.patches.length > 0
+        && Array.isArray(proof.result?.cardOutcomes)
+        && proof.result.cardOutcomes.length === proof.result.installedCardCount
         && proof.after.swipes.length === 1
         && quality.significant === true;
     report.checks.push({
-      name: `enhancement-${testCase.target}-${testCase.applyMode}`,
+      name: `enhancement-${testCase.pipelineMode}-${testCase.target}-${testCase.applyMode}`,
       status: pass ? 'pass' : 'fail',
       details: {
         ok: proof.ok,
         resultOk: proof.result?.ok,
         skipped: proof.result?.skipped === true,
         resultMode: proof.result?.mode || '',
+        preparedOk: proof.prepared?.ok === true,
+        preparedHandCardCount: proof.preparedHandCardCount,
+        installedCardCount: proof.result?.installedCardCount || 0,
         patchCount: proof.result?.patches?.length || 0,
         reviewDomains: proof.result?.reviewDomains || {},
         cardOutcomes: proof.result?.cardOutcomes || [],
@@ -243,7 +273,9 @@ try {
         beforePreview: beforeText.slice(0, 500),
         afterPreview: afterText.slice(0, 500),
         markerCount: proof.after.markerCount,
-        errorCode: proof.result?.error?.code || ''
+        errorCode: proof.result?.error?.code || '',
+        errorActualSchema: proof.result?.error?.actualSchema || '',
+        errorResponseFields: proof.result?.error?.responseFields || []
       }
     });
     if (!pass) fail(`enhancement-${testCase.target}-${testCase.applyMode}-failed`, `Enhancement ${testCase.target}/${testCase.applyMode} proof failed.`, proof);

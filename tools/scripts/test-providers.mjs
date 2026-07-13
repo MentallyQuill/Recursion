@@ -235,6 +235,16 @@ assertEqual(calls.at(-1).responseSchema, 'recursion.cardBundle.v1', 'fusedCardBu
 assertEqual(calls.at(-1).machineJson, true, 'fusedCardBundle request marks machine JSON calls');
 assertEqual(machineJsonSchemaForRequest(calls.at(-1)).schema.properties.schema.const, 'recursion.cardBundle.v1', 'fusedCardBundle machine schema constrains bundle schema');
 
+const generationReviewMachineSchema = machineJsonSchemaForRequest({
+  responseSchema: 'recursion.generationReview.v1',
+  machineJson: true,
+  sourceHash: 'review-source-hash'
+});
+assert(generationReviewMachineSchema.schema.required.includes('sourceHash'), 'generation review machine schema requires its frozen source hash');
+assert(generationReviewMachineSchema.schema.required.includes('cardOutcomes'), 'generation review machine schema requires the card-outcome ledger');
+assert(generationReviewMachineSchema.schema.required.includes('patches'), 'generation review machine schema requires the bounded patch list');
+assertDeepEqual(generationReviewMachineSchema.schema.properties.cardOutcomes.items.properties.status.enum, ['honored', 'repaired', 'not-applicable', 'partially-reflected', 'violated', 'requires-regeneration'], 'generation review machine schema constrains card-outcome status values');
+
 const rawReviewRouter = createGenerationRouter({
   client: {
     async generate() {
@@ -313,6 +323,8 @@ const wrongSchemaRouter = createGenerationRouter({
 const wrongSchema = await wrongSchemaRouter.generate('providerTest', { prompt: 'Wrong schema.' });
 assertEqual(wrongSchema.ok, false, 'known provider role rejects mismatched schema');
 assertEqual(wrongSchema.error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'known provider role schema mismatch uses stable error code');
+assertEqual(wrongSchema.error.actualSchema, 'wrong.schema', 'schema mismatch exposes the returned schema name without raw provider text');
+assertDeepEqual(wrongSchema.error.responseFields, ['ok', 'schema'], 'schema mismatch exposes only safe top-level response keys for diagnosis');
 const wrongSchemaBatch = await wrongSchemaRouter.batch([
   { roleId: 'utilityArbiter', prompt: 'Known valid schema.' },
   { roleId: 'providerTest', prompt: 'Known wrong schema.' }
@@ -320,6 +332,61 @@ const wrongSchemaBatch = await wrongSchemaRouter.batch([
 assertEqual(wrongSchemaBatch[0].ok, true, 'batch schema validation keeps valid slot successful');
 assertEqual(wrongSchemaBatch[1].ok, false, 'batch schema validation fails wrong-schema slot');
 assertEqual(wrongSchemaBatch[1].error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'batch wrong-schema slot uses stable error code');
+
+const schemaOmittedReviewRouter = createGenerationRouter({
+  client: createProviderClient({
+    host: {
+      generation: {
+        async generate() {
+          return {
+            text: JSON.stringify({
+              cardOutcomes: [],
+              patches: []
+            }),
+            providerId: 'fake-host',
+            model: 'fake-model'
+          };
+        }
+      }
+    },
+    settingsStore: createStore()
+  })
+});
+const schemaOmittedReview = await schemaOmittedReviewRouter.generate('generationReviewer', {
+  prompt: 'Return the reviewer result.',
+  sourceHash: 'review-source-hash'
+});
+assertEqual(schemaOmittedReview.ok, true, 'generation reviewer recovers a complete response that only omits its schema envelope');
+assertEqual(schemaOmittedReview.data.schema, 'recursion.generationReview.v1', 'generation reviewer normalizes the omitted schema from its requested contract');
+assertEqual(schemaOmittedReview.data.sourceHash, 'review-source-hash', 'generation reviewer normalizes an omitted immutable source hash from its request');
+assertDeepEqual(schemaOmittedReview.data.assessment, {}, 'generation reviewer supplies an empty assessment when the provider omits optional display metadata');
+
+const staleReviewRouter = createGenerationRouter({
+  client: createProviderClient({
+    host: {
+      generation: {
+        async generate() {
+          return {
+            text: JSON.stringify({
+              sourceHash: 'wrong-source-hash',
+              cardOutcomes: [],
+              patches: []
+            }),
+            providerId: 'fake-host',
+            model: 'fake-model'
+          };
+        }
+      }
+    },
+    settingsStore: createStore()
+  })
+});
+const staleReview = await staleReviewRouter.generate('generationReviewer', {
+  prompt: 'Return the reviewer result.',
+  sourceHash: 'review-source-hash'
+});
+assertEqual(staleReview.ok, false, 'generation reviewer does not normalize a nonempty wrong source hash');
+assertEqual(staleReview.error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'wrong reviewer source remains a provider schema failure before patch application');
 
 const disabledReasonerProviderTestCalls = [];
 const disabledReasonerProviderTestStore = createStore();

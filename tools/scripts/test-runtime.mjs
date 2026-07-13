@@ -1543,6 +1543,71 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   assertEqual(activity.current().severity, 'success', `${pipelineMode} preserves the successful prompt-ready state after review failure`);
 }
 
+for (const pipelineMode of ['standard', 'rapid', 'fused']) {
+  const proseHost = createProseMessageHarness('Mara crossed the room. "Keep the door shut," Mara said.');
+  const reviewerRequests = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { pipelineMode, enhancements: { target: 'on', applyMode: 'as-swipe', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              cardJobs: [],
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              reasonerDecision: { mode: 'skip', reason: 'generation review outcome contract fixture' },
+              diagnostics: []
+            }
+          };
+        }
+        if (roleId !== 'generationReviewer') throw new Error(`Unexpected reviewer fixture role: ${roleId}`);
+        reviewerRequests.push(request);
+        const cardIds = request.reviewSnapshot?.installedHand?.map((card) => card.cardId).filter(Boolean) || [];
+        assert(cardIds.length > 0, `${pipelineMode} reviewer receives the prepared installed hand`);
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.generationReview.v1',
+            sourceHash: proseHost.message.originalHash,
+            assessment: { response: 'repaired' },
+            reviewDomains: { dialogue: 'repaired' },
+            cardOutcomes: cardIds.map((cardId) => ({
+              cardId,
+              status: reviewerRequests.length === 1 ? 'included' : 'honored',
+              evidenceTargetIds: []
+            })),
+            patches: [{
+              id: 'dialogue:1',
+              domain: 'dialogue',
+              before: '"Keep the door shut,"',
+              after: '"Keep the door shut," Mara said quietly.',
+              reason: 'Adds a bounded delivery cue.',
+              cardRefs: []
+            }]
+          }
+        };
+      }
+    }
+  });
+  const prepared = await runtime.prepareForGeneration({ userMessage: 'The lamp breaks.' });
+  assertEqual(prepared.ok, true, `${pipelineMode} prepares a hand before review`);
+  assert(runtime.view().lastHand.cards.length > 0, `${pipelineMode} retains generated cards for review`);
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: `unit-${pipelineMode}-generation-review-invalid-outcome` });
+  assertEqual(result.ok, true, `${pipelineMode} corrects an unsupported card outcome status`);
+  assertEqual(result.installedCardCount, result.cardOutcomes.length, `${pipelineMode} reports the frozen installed-card count used to validate the review ledger`);
+  assertEqual(reviewerRequests.length, 2, `${pipelineMode} retries once after an unsupported card outcome status`);
+  const retryPrompt = reviewerRequests[1].prompt;
+  assert(retryPrompt.includes('Allowed card outcome statuses: honored, repaired, not-applicable, partially-reflected, violated, requires-regeneration.'), `${pipelineMode} retry repeats the outcome enum`);
+  for (const card of reviewerRequests[1].reviewSnapshot.installedHand) {
+    assert(retryPrompt.includes(`"cardId":"${card.cardId}","status":"honored","evidenceTargetIds":[]`), `${pipelineMode} retry requires complete coverage for ${card.cardId}`);
+  }
+}
+
 {
   const baseline = rapidWarmContractVersions({ pipelineMode: 'rapid', mode: 'auto' });
   const unrelated = rapidWarmContractVersions({

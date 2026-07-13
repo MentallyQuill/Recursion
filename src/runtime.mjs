@@ -3409,6 +3409,7 @@ export function createRecursionRuntime({
       }
     };
     const publicSnapshot = publicGenerationReviewSnapshot(reviewSnapshot);
+    const installedCardCount = publicSnapshot.installedHand.length;
     const snapshotHash = generationReviewSnapshotHash(publicSnapshot);
     const marker = {
       schema: 'recursion.generationReviewMarker.v1',
@@ -3574,7 +3575,7 @@ export function createRecursionRuntime({
         chips: partialFailed || validation.requiresRegeneration ? ['Enhancement', 'Partial failed'] : ['Enhancement', 'Applied'],
         detail: { patchCount: patches.length, reviewDomains: validation.reviewDomains, cardOutcomes, outcome: marker.outcome }
       });
-      return { ok: true, partialFailed: partialFailed || validation.requiresRegeneration, mode, messageId, sourceHash, enhancedHash: marker.enhancedHash, marker, patches, reviewDomains: validation.reviewDomains, cardOutcomes };
+      return { ok: true, partialFailed: partialFailed || validation.requiresRegeneration, mode, messageId, sourceHash, enhancedHash: marker.enhancedHash, marker, patches, reviewDomains: validation.reviewDomains, cardOutcomes, installedCardCount };
     } catch (error) {
       settleRuntimeActivity({ runId, phase: 'settled', severity: 'error', label: 'Generation review failed. Original kept.', chips: ['Enhancement'] });
       return { ok: false, mode, error: { code: 'RECURSION_GENERATION_REVIEW_FAILED', message: String(error?.message || error || 'Generation review failed.') } };

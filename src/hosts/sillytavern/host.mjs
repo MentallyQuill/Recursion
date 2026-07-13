@@ -772,7 +772,10 @@ async function sendViaConnectionProfile(context, request = {}) {
     requestMaxTokens(request),
     {
       stream: false,
-      extractData: true,
+      // Connection Manager collapses a malformed structured reply to `{}` when it
+      // extracts it itself. Keep the raw provider envelope so Recursion's parser
+      // can apply its bounded recovery policy.
+      extractData: request.machineJson !== true,
       includePreset: request.machineJson === true ? false : true,
       includeInstruct: request.machineJson === true ? false : true
     },

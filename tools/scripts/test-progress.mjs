@@ -135,6 +135,7 @@ const tracedCard = tracedCardProgress.steps.find((step) => step.id === 'fused-ca
 assertEqual(tracedCard.children.length, 2, 'card progress exposes fused source cards');
 assertEqual(tracedCard.children[0].label, 'location/situation', 'card progress names first source card');
 assertEqual(tracedCard.children[0].reason, 'Priority source card included.', 'card progress explains priority source');
+assertEqual(tracedCard.children[0].meta, 'included', 'fused source cards report inclusion rather than category generation');
 
 const unverifiedSourceProgress = createProgressRunModel({
   activityHistory: [

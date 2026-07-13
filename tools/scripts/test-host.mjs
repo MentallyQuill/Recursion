@@ -1139,7 +1139,7 @@ assertDeepEqual(
 );
 assertEqual(connectionProfileCalls[0].maxTokens, 512, 'connection profile service receives configured max tokens');
 assertEqual(connectionProfileCalls[0].requestOptions.stream, false, 'connection profile service disables streaming for structured calls');
-assertEqual(connectionProfileCalls[0].requestOptions.extractData, true, 'connection profile service requests extracted data');
+assertEqual(connectionProfileCalls[0].requestOptions.extractData, false, 'connection profile service preserves raw structured output for Recursion parsing and recovery');
 assertEqual(connectionProfileCalls[0].requestOptions.includePreset, false, 'connection profile service skips host preset for machine JSON');
 assertEqual(connectionProfileCalls[0].requestOptions.includeInstruct, false, 'connection profile service skips host instruct for machine JSON');
 assertEqual(connectionProfileCalls[0].parameters.json_schema.name, 'recursion_utilityArbiter_v1', 'connection profile service receives JSON schema name');

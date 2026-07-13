@@ -160,29 +160,39 @@ export function buildGenerationReviewRequest({
   const targetList = eligibleGenerationReviewTargets(targets).map(({ id, domain, before }) => ({ id, domain, before })).slice(0, 120);
   const retryTargetIds = Array.isArray(retry?.targetIds) ? retry.targetIds.map(String).filter(Boolean).slice(0, 120) : [];
   const retryCardIds = Array.isArray(retry?.cardIds) ? retry.cardIds.map(String).filter(Boolean).slice(0, 120) : [];
+  const installedCardIds = snapshot.installedHand.map((card) => card.cardId).filter(Boolean);
+  const cardOutcomeSkeleton = installedCardIds.map((cardId) => ({
+    cardId,
+    status: 'honored',
+    evidenceTargetIds: []
+  }));
   const prompt = [
     'Return a Recursion Generation Review and Enhancement result as strict JSON.',
     'Review the completed assistant response against its frozen generation context.',
     'Return replacements only for listed target IDs. Never return a full rewritten message. Target IDs are authoritative; copy their before text exactly when supplied.',
     'Assess turn fulfillment, installed card and scene fidelity, narrative execution, and anti-slop.',
     'Only installed cards are review obligations. Do not force every card into visible prose.',
+    'Return exactly one cardOutcomes object for every installed card in the frozen review snapshot. cardId values must match exactly.',
+    `Allowed card outcome statuses: ${[...CARD_OUTCOME_STATUSES].join(', ')}.`,
     'Use dialogue, prose, or beat targets only when the change is locally supported by the frozen context.',
     'Do not invent facts, resolve pressure, add a new outcome, or force inactive or irrelevant cards into the response.',
     'Anti-slop is contextual: remove canned interaction traps and repeated generic shorthand, but preserve card-, character-, or genre-supported language.',
     'Do not replace one cliche with a neighboring cliche.',
     'If a material defect cannot be repaired within a bounded target, report requires-regeneration. Otherwise return at least one valid patch.',
     retryTargetIds.length ? `Mandatory retry: return a valid patch using one of these target IDs: ${retryTargetIds.join(', ')}.` : '',
-    retryCardIds.length ? `Mandatory retry: return exactly one valid cardOutcomes entry for each of these installed card IDs: ${retryCardIds.join(', ')}. Keep all other response fields compatible with the frozen source.` : '',
+    retryCardIds.length ? `Mandatory retry: correct the status for these card IDs: ${retryCardIds.join(', ')}. Still return the complete cardOutcomes array for every installed card.` : '',
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<review_snapshot>${JSON.stringify(snapshot)}</review_snapshot>`,
     `<targets>${JSON.stringify(targetList)}</targets>`,
+    `<card_outcomes_template>${JSON.stringify(cardOutcomeSkeleton)}</card_outcomes_template>`,
     `<anti_slop_profile>${BANNED_AI_SLOP_LIST}</anti_slop_profile>`,
     contextContract ? `<context_contract>${safeText(JSON.stringify(contextContract), 1800)}</context_contract>` : '',
     `<source>${source}</source>`,
-    `Return {"schema":"${GENERATION_REVIEW_SCHEMA}","sourceHash":"${safeText(sourceHash, 180)}","assessment":{},"reviewDomains":{},"cardOutcomes":[],"patches":[]}.`
+    `Return {"schema":"${GENERATION_REVIEW_SCHEMA}","sourceHash":"${safeText(sourceHash, 180)}","assessment":{},"reviewDomains":{},"cardOutcomes":${JSON.stringify(cardOutcomeSkeleton)},"patches":[]}.`
   ].filter(Boolean).join('\n');
   return {
     prompt,
+    systemPrompt: 'Return only one valid Recursion Generation Review JSON object. Do not emit prose, markdown, reasoning, or an alternate schema.',
     responseSchema: GENERATION_REVIEW_SCHEMA,
     responseLength: 3200,
     machineJson: true,

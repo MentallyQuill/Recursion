@@ -11,7 +11,7 @@ const HERO_CONTROL_ONLY_STEP_IDS = new Set([
   'recursion-prompt-ready',
   'provider-test'
 ]);
-const VALID_CHILD_SOURCES = new Set(['generated', 'cache', 'fallback', 'provider', 'local', 'fused-repair']);
+const VALID_CHILD_SOURCES = new Set(['generated', 'included', 'cache', 'fallback', 'provider', 'local', 'fused-repair']);
 const MODEL_CALL_ROLE_IDS = new Set([
   'sceneFrameCard',
   'activeCastCard',
@@ -251,6 +251,7 @@ function aggregateReason(children = []) {
 
 function metaForState(state, source = '', reason = '', retryCount = 0) {
   const normalizedSource = normalizeChildSource(source);
+  if (state === 'done' && normalizedSource === 'included') return 'included';
   if (state === 'done' && normalizedSource === 'generated') return 'generated';
   if (state === 'done') return 'done';
   if (state === 'cached') return 'cached';
@@ -413,6 +414,8 @@ function childStepFromEvent(event, state, order = 0) {
   }
   if (phase === 'cardProgress') {
     const roleId = cleanText(detail.roleId || detail.role);
+    const sourceCardsAreIncluded = cleanText(detail.parentStepId) === 'fused-card-bundle'
+      && normalizeChildSource(detail.source || detail.sourceType) === 'generated';
     return normalizeChildStep({
       id: childIdFromRole(roleId, detail.family || detail.id || activityLabelText(event)),
       label: detail.family || roleLabel(roleId, activityLabelText(event)),
@@ -427,7 +430,9 @@ function childStepFromEvent(event, state, order = 0) {
             label: sourceCard.label,
             providerLane: event.providerLane || detail.lane || 'utility',
             state: sourceCard.state === 'info' ? state : (sourceCard.state || state),
-            source: detail.source || detail.sourceType,
+            // Fused calls generate categories. Their source-card children are inputs,
+            // so the UI must describe them as included rather than generated.
+            source: sourceCardsAreIncluded ? 'included' : (detail.source || detail.sourceType),
             reason: sourceCard.reason || (sourceCard.selectionState === 'priority' ? 'Priority source card included.' : ''),
             order: childIndex
           }))

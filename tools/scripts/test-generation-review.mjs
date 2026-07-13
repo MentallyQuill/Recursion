@@ -133,6 +133,25 @@ const normalizedOutcome = validateGenerationReviewResult({
 assertEqual(normalizedOutcome.ok, true, 'documented outcome alias validates');
 assertEqual(normalizedOutcome.cardOutcomes[0].status, 'not-applicable', 'validator returns canonical outcome status');
 
+const invalidOutcome = validateGenerationReviewResult({
+  ...validPatch,
+  cardOutcomes: [{ cardId: 'room-boundary', status: 'included', evidenceTargetIds: [] }]
+}, { sourceHash: 'source-hash', targets, reviewSnapshot });
+assertEqual(invalidOutcome.ok, false, 'validator rejects an unsupported card outcome status');
+assertEqual(invalidOutcome.error.code, 'RECURSION_GENERATION_REVIEW_CARD_OUTCOME_INVALID', 'unsupported outcome has a stable semantic error code');
+assertEqual(invalidOutcome.retryable, true, 'unsupported outcome status is eligible for a correction');
+
+const reviewerContractRequest = buildGenerationReviewRequest({
+  sourceText,
+  sourceHash: 'source-hash',
+  targets,
+  reviewSnapshot,
+  retry: { cardIds: ['room-boundary'] }
+});
+assert(reviewerContractRequest.prompt.includes('Allowed card outcome statuses: honored, repaired, not-applicable, partially-reflected, violated, requires-regeneration.'), 'reviewer request explicitly constrains card outcome statuses');
+assert(reviewerContractRequest.prompt.includes('"cardId":"room-boundary","status":"honored","evidenceTargetIds":[]'), 'reviewer retry includes the complete installed-card outcome skeleton');
+assertEqual(reviewerContractRequest.systemPrompt, 'Return only one valid Recursion Generation Review JSON object. Do not emit prose, markdown, reasoning, or an alternate schema.', 'reviewer request reinforces the machine JSON contract in the system message');
+
 const overlap = validateGenerationReviewResult({
   ...validPatch,
   patches: [

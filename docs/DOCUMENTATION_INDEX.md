@@ -51,6 +51,8 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [UI Spec](design/UI_SPEC.md) - Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, viewer, settings, and provider controls.
 - [Turn Context Compiler Seed Note](design/RECURSION_TURN_CONTEXT_COMPILER.md) - Historical seed note superseded by the V1 spec family.
 - [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - Approved product and UX direction for the unified Enhancement feature.
+- [Editorial Transformation Design](superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md) - Approved Repair, Recompose, and Redirect direction for evidence-led editorial transformation; supersedes the patch-only product boundary.
+- [Editorial Transformation Implementation Plan](superpowers/plans/2026-07-13-recursion-editorial-transformation.md) - V1 implementation sequence, real module contracts, tests, UI behavior, and verification for Repair, Recompose, and Redirect.
 - [Design Folder Guide](design/README.md)
 
 ## Architecture Specs

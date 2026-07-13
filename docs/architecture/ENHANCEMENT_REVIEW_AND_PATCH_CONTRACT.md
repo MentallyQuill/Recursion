@@ -78,10 +78,16 @@ The source is preflighted locally before any provider request.
 | Response has no valid bounded target | No | `skipped/no-eligible-target` |
 | Review finds one or more valid bounded repairs | Yes | `applied` |
 | Review has a documented outcome-label alias | No | Normalize the alias, then validate normally. |
-| Review has missing/invalid installed-card outcome coverage but safe patches | One shared semantic correction request for only affected ledger entries | `partial-failed` if coverage remains unresolved; safe patches may still apply. |
+| Review has missing/invalid installed-card outcome coverage but safe patches | One shared semantic correction request with the complete installed-card ledger | `partial-failed` if coverage remains unresolved; safe patches may still apply. |
 | Review has unsafe patch shape, target, source, or overlap | One shared correction only when structural recovery has not already spent it | `validation-failed`; no unsafe patch applies. |
 | Provider error or invalid schema | One shared structured-output correction only when eligible | `provider-failed` or `validation-failed` |
 | Material turn/scene contradiction cannot be repaired locally | No local patch for that issue | `requires-regeneration` evidence result |
+
+### Request-known metadata recovery
+
+Some connection-profile providers intermittently omit machine-envelope metadata even when the returned reviewer payload contains its actual semantic work. Recursion may restore the **missing only** `schema` and `sourceHash` values from the immutable request, and default omitted display-only `assessment` and `reviewDomains` to empty objects. This recovery is allowed only for `generationReviewer` responses that already contain array-shaped `cardOutcomes` and `patches`. A nonempty mismatched source hash, malformed patch list, malformed ledger, unknown card ID, incomplete coverage, invalid status, or unsafe target still fails the normal validator; no provider response gains authority merely because the envelope is completed locally.
+
+For Connection Manager requests, `machineJson` also requires `extractData: false`. SillyTavern's extracted-data path attempts its own JSON parse and substitutes `{}` when it cannot parse a provider's visible text. That destroys the response Recursion needs for its parser and one bounded correction request. Recursion instead receives the raw Connection Manager envelope, extracts visible content itself, and keeps the normal parser, schema, and semantic validation sequence authoritative. Non-machine generation continues to use SillyTavern's extracted-data behavior.
 
 An enabled Enhancement review with a repairable defect must not silently succeed without a patch. Conversely, a response with no valid bounded target must not incur a paid model call merely to establish that fact.
 
@@ -89,7 +95,7 @@ An enabled Enhancement review with a repairable defect must not silently succeed
 
 The first combined result may contain a valid narrative patch while omitting a repairable card-fidelity or anti-slop ledger entry. Recursion preserves only independently safe patches, then spends at most one shared correction request against the **same frozen source, target IDs, review snapshot, and pipeline provenance**. That request is selected by the Structured Output Recovery policy: raw reformat for complete damaged JSON, schema correction for a role contract mismatch, or semantic correction for a structurally valid but incomplete review ledger. A normal enhancement therefore uses one provider call; a deficient first result can use at most one corrective provider request total.
 
-If the permitted correction still leaves a repairable review finding unresolved, Recursion may apply the independently safe patches, but the overall enhancement outcome is `partial-failed`, never `success` or a generic `caution`. The progress tree is explicit: resolved domains are green; unresolved findings are red with their reason. `replace` and `as-swipe` use the same policy, so the user can see and retain a valid paid-for improvement without mistaking it for a complete review result. Any unsafe patch invalidates the provider result rather than being selectively applied.
+If the permitted correction still leaves a repairable review finding unresolved, Recursion may apply the independently safe patches, but the overall enhancement outcome is `partial-failed`, never `success` or a generic `caution`. The correction repeats the complete installed-card ledger because the validator always requires one outcome for every installed card; it never asks the provider for only the malformed entry. The progress tree is explicit: resolved domains are green; unresolved findings are red with their reason. `replace` and `as-swipe` use the same policy, so the user can see and retain a valid paid-for improvement without mistaking it for a complete review result. Any unsafe patch invalidates the provider result rather than being selectively applied.
 
 ## Generation review scope
 
@@ -180,6 +186,8 @@ export function buildGenerationReviewRequest({
   ...reasoning
 } = {}) {
   const eligible = eligibleReviewTargets(targets);
+  const installedCardIds = reviewSnapshot.installedHand.map((card) => card.cardId);
+  const cardOutcomes = installedCardIds.map((cardId) => ({ cardId, status: 'honored', evidenceTargetIds: [] }));
   return {
     lane,
     ...reasoning,
@@ -192,16 +200,19 @@ export function buildGenerationReviewRequest({
       'Return replacements only for the listed target IDs. Never return a full rewritten message.',
       'Assess turn fulfillment, installed card and scene fidelity, narrative execution, and anti-slop.',
       'Only installed cards are review obligations. Do not force every card into visible prose.',
+      'Return exactly one cardOutcomes object for every installed card in the frozen review snapshot. cardId values must match exactly.',
+      'Allowed card outcome statuses: honored, repaired, not-applicable, partially-reflected, violated, requires-regeneration.',
       'Use dialogue or prose targets only when the change is locally supported by the frozen context.',
       'Do not invent facts, resolve pressure, add a new outcome, or force inactive or irrelevant cards into the response.',
       'If a material defect requires more than local replacement, record requires-regeneration in assessment; do not fake a repair.',
-      retry ? `Mandatory retry: resolve each finding using one of: ${JSON.stringify(retry.targetIds)}.` : '',
+      retry ? `Mandatory retry: resolve each finding using one of: ${JSON.stringify(retry.targetIds)}. Still return the complete cardOutcomes array.` : '',
       `<source_hash>${sourceHash}</source_hash>`,
       `<eligible>${JSON.stringify(eligible)}</eligible>`,
       `<targets>${JSON.stringify(targets)}</targets>`,
+      `<card_outcomes_template>${JSON.stringify(cardOutcomes)}</card_outcomes_template>`,
       `<review_snapshot>${serializeGenerationReviewSnapshot(reviewSnapshot, contextContract)}</review_snapshot>`,
       `<source>${sourceText}</source>`,
-      `Return {"schema":"${GENERATION_REVIEW_SCHEMA}","sourceHash":"${sourceHash}","assessment":{},"cardOutcomes":[],"reviewDomains":{},"patches":[]}.`
+      `Return {"schema":"${GENERATION_REVIEW_SCHEMA}","sourceHash":"${sourceHash}","assessment":{},"cardOutcomes":${JSON.stringify(cardOutcomes)},"reviewDomains":{},"patches":[]}.`
     ].filter(Boolean).join('\n')
   };
 }
@@ -456,6 +467,7 @@ This is a pre-alpha contract replacement. Remove obsolete `recursion.dialogueEnh
 ### Unit and contract tests
 
 - Target segmentation: dialogue-only, prose-only, mixed prose/dialogue, nested punctuation, contiguous beat ranges, and whitespace preservation.
+- Card-outcome contract: each accepted enum value and alias; unsupported values such as `included`; duplicate, missing, and uninstalled card IDs; and evidence-target validation.
 - Request builder: source hash, only bounded/redacted context, installed-hand manifest, Prompt Packet, Last Brief, anti-slop profile version, and stable target IDs.
 - Validator: schema mismatch, stale source, unknown/duplicate target, invalid patch domain, unchanged replacement, empty replacement, overlapping patches, non-installed card outcome, and no-patch output without `requires-regeneration`.
 - Application: descending replacement order, unchanged surrounding text, post-application dialogue/prose invariants, and bounded beat replacement.
@@ -478,7 +490,7 @@ Run each test against the installed extension copy and a real configured provide
 
 1. Generate a response with each pipeline: Standard, Rapid, and Fused.
 2. Run the single Enhancement As Swipe path and confirm its bounded revision is visible in the selected swipe.
-3. Confirm one review provider call per eligible enhancement, exact review-domain statuses, individual installed-card outcomes, and anti-slop findings in the progress tree.
+3. Confirm one review provider call per eligible enhancement, or one semantic correction after a contract violation; verify exact review-domain statuses, complete individual installed-card outcomes, and anti-slop findings in the progress tree.
 4. Exercise Standard, Rapid, and Fused custom-deck paths; verify a card appears in review only when it was installed and that Fused source-card children retain correct lineage.
 5. Confirm a repeated identical swipe reuses the validated review result when its cache contract permits it; verify purple cached states.
 6. Confirm a changed source message, changed card/deck state, changed enhancement context depth, changed anti-slop profile, and force-fresh action bypass cache.

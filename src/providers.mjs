@@ -220,6 +220,50 @@ function schemaSafeName(schema) {
 export function machineJsonSchemaForRequest(request = {}) {
   const schema = String(request?.responseSchema || '').trim();
   if (!schema || request?.machineJson !== true) return null;
+  if (schema === 'recursion.generationReview.v1') {
+    const sourceHash = String(request?.sourceHash || '').trim();
+    return {
+      name: schemaSafeName(schema),
+      schema: {
+        type: 'object',
+        properties: {
+          schema: { const: schema },
+          sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
+          assessment: { type: 'object', additionalProperties: true },
+          reviewDomains: { type: 'object', additionalProperties: true },
+          cardOutcomes: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                cardId: { type: 'string' },
+                status: { enum: ['honored', 'repaired', 'not-applicable', 'partially-reflected', 'violated', 'requires-regeneration'] },
+                evidenceTargetIds: { type: 'array', items: { type: 'string' } }
+              },
+              required: ['cardId', 'status', 'evidenceTargetIds'],
+              additionalProperties: true
+            }
+          },
+          patches: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                domain: { type: 'string' },
+                before: { type: 'string' },
+                after: { type: 'string' }
+              },
+              required: ['id', 'domain', 'before', 'after'],
+              additionalProperties: true
+            }
+          }
+        },
+        required: ['schema', 'sourceHash', 'assessment', 'reviewDomains', 'cardOutcomes', 'patches'],
+        additionalProperties: true
+      }
+    };
+  }
   const properties = {
     schema: { const: schema }
   };
@@ -245,12 +289,32 @@ function validateRoleResponseSchema(roleId, data) {
   if (!expected) throw unsupportedRoleError(roleId);
   const actual = String(data?.schema || '').trim();
   if (actual !== expected) {
-    throw providerError(
+    const error = providerError(
       'RECURSION_PROVIDER_SCHEMA_MISMATCH',
       'Provider output schema did not match the requested role.',
       { retryable: false }
     );
+    error.actualSchema = actual || '(missing)';
+    error.responseFields = plainObject(data)
+      ? Object.keys(data).filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key)).sort().slice(0, 24)
+      : [];
+    throw error;
   }
+}
+
+function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
+  if (roleId !== 'generationReviewer' || !plainObject(data) || String(data.schema || '').trim()) return data;
+  const sourceHash = String(request?.sourceHash || '').trim();
+  const returnedSourceHash = String(data.sourceHash || '').trim();
+  if (!sourceHash || (returnedSourceHash && returnedSourceHash !== sourceHash)) return data;
+  if (!Array.isArray(data.cardOutcomes) || !Array.isArray(data.patches)) return data;
+  return {
+    ...data,
+    schema: expectedResponseSchema(roleId),
+    sourceHash: returnedSourceHash || sourceHash,
+    assessment: plainObject(data.assessment) ? data.assessment : {},
+    reviewDomains: plainObject(data.reviewDomains) ? data.reviewDomains : {}
+  };
 }
 
 function normalizeBatchRequest(entry) {
@@ -869,10 +933,16 @@ function sanitizedError(error, request = {}) {
   const message = error?.external === true
     ? 'Provider generation failed.'
     : scrubKnownRequestText(error?.message || 'Provider generation failed.', request);
+  const actualSchema = scrubKnownRequestText(error?.actualSchema || '', request);
+  const responseFields = Array.isArray(error?.responseFields)
+    ? error.responseFields.map((field) => String(field).replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 80)).filter(Boolean).slice(0, 24)
+    : [];
   return sanitize({
     code: scrubKnownRequestText(rawCode, request),
     message: truncate(compact(message), 300),
-    retryable: retryableError(error)
+    retryable: retryableError(error),
+    ...(actualSchema ? { actualSchema: truncate(compact(actualSchema), 120) } : {}),
+    ...(responseFields.length ? { responseFields } : {})
   }, 300);
 }
 
@@ -1516,7 +1586,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
             composedExternalSignal.signal || null
           );
           const parsed = parseProviderStructuredOutput(raw.text);
-          const data = parsed.data;
+          const data = normalizeRoleResponseEnvelope(roleId, parsed.data, attemptRequest);
           validateRoleResponseSchema(roleId, data);
           const latencyMs = Date.now() - started;
           const diagnostics = sanitize({
@@ -1757,7 +1827,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
     async function successResult(entry, raw, retryCount = 0, extraDiagnostics = {}) {
       throwSlotFailure(raw);
       const parsed = parseProviderStructuredOutput(raw?.text);
-      const data = parsed.data;
+      const data = normalizeRoleResponseEnvelope(entry.roleId, parsed.data, entry.request);
       validateRoleResponseSchema(entry.roleId, data);
       const diagnostics = sanitize({
         ...entry.diagnostics,
@@ -1813,7 +1883,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     function emitSlotSuccessActivity(entry, raw, retryCount = 0) {
       const parsed = parseProviderStructuredOutput(raw?.text);
-      const data = parsed.data;
+      const data = normalizeRoleResponseEnvelope(entry.roleId, parsed.data, entry.request);
       validateRoleResponseSchema(entry.roleId, data);
       emitSlotActivity(entry, {
         severity: retryCount > 0 ? 'warning' : 'success',

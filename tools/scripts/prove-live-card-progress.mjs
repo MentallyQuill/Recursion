@@ -48,7 +48,13 @@ try {
   await input.fill(message);
   await page.locator('#send_but, button#send_but').first().click();
   await page.waitForFunction((expected) => (globalThis.SillyTavern?.getContext?.()?.chat?.length || 0) >= expected + 2, before, { timeout: timeoutMs });
-  await page.waitForTimeout(1000);
+  await page.waitForFunction(() => {
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    const phase = String(view?.activity?.phase || '').toLowerCase();
+    const brief = String(view?.lastBrief?.status || '').toLowerCase();
+    return ['idle', 'settled', 'ready'].includes(phase) || brief === 'ready';
+  }, null, { timeout: timeoutMs });
+  await page.waitForTimeout(500);
 
   const status = page.locator('[data-recursion-status-trigger]').first();
   await status.click();

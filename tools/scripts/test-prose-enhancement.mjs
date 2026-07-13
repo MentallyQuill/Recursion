@@ -40,7 +40,7 @@ assert(request.prompt.includes('<recursion_card_context>'), 'prose prompt includ
 assert(request.prompt.includes('Mara hides concern behind motion.'), 'prose prompt includes safe card context text');
 assert(request.prompt.includes(sourceText), 'prompt includes source text');
 assert(request.prompt.includes('Make meaningful, minimal changes when a safe improvement exists.'), 'prose prompt permits safe minimal changes');
-assert(request.prompt.includes('return the source unchanged'), 'prose prompt permits an explicit no-safe-change result');
+assert(request.prompt.includes('Do not use no_safe_change or return the source unchanged.'), 'prose prompt forbids no-safe-change output');
 assert(request.prompt.includes('Soft maximum edit ratio: 30%'), 'prose prompt states soft maximum edit ratio');
 assert(
   buildProseEnhancementRequest({ text: 'O\'Neill said, "We come back with authorization and a plan."' }).prompt.includes('authorization and a plan'),
@@ -66,8 +66,13 @@ assertEqual(dialogueSpans("Mara's hand didn't move. The door's latch held.").len
 
 assertEqual(
   proseEnhancementKey({ chatKey: 'chat-a', messageId: 4, swipeId: 0, originalHash: 'abc' }),
-  'chat-a::4::0::abc',
+  'chat-a::4::0::abc::',
   'prose enhancement duplicate key is stable'
+);
+assert(
+  proseEnhancementKey({ chatKey: 'chat-a', messageId: 4, swipeId: 0, originalHash: 'abc', contextHash: 'context-a' })
+    !== proseEnhancementKey({ chatKey: 'chat-a', messageId: 4, swipeId: 0, originalHash: 'abc', contextHash: 'context-b' }),
+  'prose enhancement key changes when context changes'
 );
 
 const accepted = validateProseEnhancementResult({

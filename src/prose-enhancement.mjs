@@ -351,6 +351,7 @@ export function buildProseEnhancementRequest({
   storyForm = null,
   cardContext = [],
   lane = '',
+  contextContract = null,
   retryReason = '',
   reasoningCategory = 'prose-enhancement',
   reasoningIntent = 'minimal'
@@ -361,8 +362,15 @@ export function buildProseEnhancementRequest({
   const storyFormLine = storyForm && typeof storyForm === 'object'
     ? `Story form: ${safeText(JSON.stringify(storyForm), 600)}`
     : 'Story form: infer from source text.';
+  const retryLines = retryReason === 'exact-noop' ? [
+    'Mandatory retry correction:',
+    '- Your previous response was rejected because it reproduced the input.',
+    '- Rewrite or tighten at least one complete non-dialogue sentence. Preserve quoted dialogue exactly.',
+    '- An identical text field is a failed response.'
+  ] : [];
   const prompt = [
-    'You are a prose editor. Your job is to rewrite <text_to_transform> into stronger prose while preserving all dialogue except explicitly banned slop.',
+    'You are a prose editor. Your job is to rewrite <text_to_transform> into stronger prose while preserving all dialogue except explicitly banned slop. Return a concrete, safe revision whenever there is non-dialogue prose.',
+    ...retryLines,
     'Rules:',
     '- Do not change any dialogue. Not a single word.',
     '- You may rewrite non-dialogue prose freely for rhythm, clarity, diction, texture, pacing, and sentence structure.',
@@ -377,6 +385,7 @@ export function buildProseEnhancementRequest({
     '- Cut filler phrases that carry no meaning',
     '- Tighten overly wordy constructions without losing meaning',
     '- Favor flowing sentences connected by conjunctions over short stopped ones',
+    '- Do not return the source text unchanged. Make the smallest defensible prose revision.',
     "- Remove any unnecessary 'waiting' at the end of the dialog, if that wait is already clear by the text or cannot be implemented naturally with something else, then remove it",
     '',
     'The dialogue-protection rule has one explicit exception: if exact dialogue contains banned AI slop from the list below, remove or neutralize that banned pattern with the smallest possible wording change. Do not otherwise rewrite dialogue.',
@@ -390,8 +399,7 @@ export function buildProseEnhancementRequest({
     '- Soft maximum edit ratio: 30%.',
     '- If a sentence is generic but not unsafe, improve it through concrete action, compression, or rhythm rather than decorative synonym swaps.',
     '- If the source is short or dialogue-heavy, come as close to the target band as possible without changing protected dialogue.',
-    '- If no safe improvement is available, return the source unchanged and report no_safe_change rather than inventing content.',
-    retryReason === 'exact-noop' ? '- The previous revision was identical to the input. Produce a concrete prose revision now; preserve dialogue exactly.' : '',
+    '- Do not use no_safe_change or return the source unchanged. Apply the smallest safe prose revision.',
     '- Optional diagnostics are allowed in changePlan, but the text field is the only applied output.',
     '',
     BANNED_AI_SLOP_LIST,
@@ -408,7 +416,7 @@ export function buildProseEnhancementRequest({
     targetText,
     '</text_to_transform>',
     '',
-    `Return strict JSON only: {"schema":"${PROSE_ENHANCER_SCHEMA}","text":"rewritten text","changePlan":{"changed":true,"targets":["banned-phrase"],"noChangeReason":""}}. No explanations, no notes, no commentary.`
+    `Return strict JSON only: {"schema":"${PROSE_ENHANCER_SCHEMA}","text":"rewritten text","changePlan":{"changed":true,"targets":["banned-phrase"],"noChangeReason":""}}. The text field must differ from the input. No explanations, no notes, no commentary.`
   ].join('\n');
   return {
     prompt,
@@ -425,7 +433,8 @@ export function buildProseEnhancementRequest({
         text: safeText(card?.text || card?.summary || '', 700)
       }))
       .filter((card) => card.family && card.text),
-    contextMessages: (Array.isArray(contextMessages) ? contextMessages : []).slice(-limit)
+    contextMessages: (Array.isArray(contextMessages) ? contextMessages : []).slice(-limit),
+    ...(contextContract ? { contextContract } : {})
   };
 }
 
@@ -465,8 +474,8 @@ export function dialogueSpans(text = '') {
   return spans;
 }
 
-export function proseEnhancementKey({ chatKey = '', messageId = '', swipeId = 0, originalHash = '' } = {}) {
-  return [chatKey, messageId, swipeId, originalHash].map((value) => String(value ?? '')).join('::');
+export function proseEnhancementKey({ chatKey = '', messageId = '', swipeId = 0, originalHash = '', contextHash = '' } = {}) {
+  return [chatKey, messageId, swipeId, originalHash, contextHash].map((value) => String(value ?? '')).join('::');
 }
 
 function bannedPhrases() {

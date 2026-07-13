@@ -627,18 +627,47 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   const serializedFallbackEvents = JSON.stringify(fallbackActivityEvents);
   assertEqual(fallbackSaved.storageStatus.persisted, false, 'fallback save returns non-durable storage status');
   assertEqual(fallbackSaved.storageStatus.fallback, 'memory', 'fallback save records memory fallback status');
+  assertEqual(fallbackSaved.storageStatus.reason, 'memory-fallback', 'fallback save records fallback reason');
   assert(fallbackActivityEvents.some((event) => event.phase === 'storageWarning' && event.severity === 'warning'), 'fallback save emits storage warning activity');
   assert(fallbackActivityEvents.some((event) => event.logicalStage === 'Storage fallback'), 'fallback save reports fallback logical stage');
   assert(!fallbackActivityEvents.some((event) => event.logicalStage === 'Storage ready'), 'fallback save does not report durable storage ready');
   assert(!serializedFallbackEvents.includes('sk-storage-secret'), 'fallback storage warning omits adapter secret details');
 
-  const indexFallbackActivityEvents = [];
-  const indexFallbackRepo = createStorageRepository({
+  const verificationEvents = [];
+  let verificationWrites = 0;
+  const verificationRepo = createStorageRepository({
     storage: {
       async readJson() {
-        return null;
+        return verificationWrites > 0 ? null : null;
       },
       async writeJson(key) {
+        verificationWrites += 1;
+        return { ok: true, key };
+      },
+      async deleteJson(key) {
+        return { ok: true, key };
+      }
+    },
+    activity: {
+      stage(event) {
+        verificationEvents.push(event);
+      }
+    }
+  });
+  const verificationSaved = await verificationRepo.saveSceneCache('Verification Chat', 'Scene', {});
+  assertEqual(verificationSaved.storageStatus.persisted, false, 'cache save rejects missing read-back verification');
+  assertEqual(verificationSaved.storageStatus.reason, 'write-verification-failed', 'cache save reports verification failure reason');
+  assert(verificationEvents.some((event) => event.detail?.reason === 'write-verification-failed'), 'verification failure reaches storage activity');
+
+  const indexFallbackActivityEvents = [];
+  const indexFallbackWrites = new Map();
+  const indexFallbackRepo = createStorageRepository({
+    storage: {
+      async readJson(key) {
+        return indexFallbackWrites.get(key) || null;
+      },
+      async writeJson(key, value) {
+        indexFallbackWrites.set(key, value);
         if (key === SYSTEM_INDEX_KEY) return { ok: true, key, fallback: 'memory' };
         return { ok: true, key };
       },

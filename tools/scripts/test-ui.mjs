@@ -453,24 +453,21 @@ assertEqual(concurrentDerivedProgress.currentStepText, '2 model calls running...
 const enhancementProviderProgress = createProgressRunModel({
   settings: { mode: 'auto' },
   activityHistory: [
-    { runId: 'run-enhance', phase: 'enhancementResponse', label: 'Enhancing response...', providerLane: 'reasoner' },
-    { runId: 'run-enhance', phase: 'providerCallRunning', label: 'Provider call running.', providerLane: 'reasoner', detail: { roleId: 'dialogueEnhancer' } },
-    { runId: 'run-enhance', phase: 'providerCallRunning', label: 'Provider call running.', providerLane: 'reasoner', detail: { roleId: 'proseEnhancer' } }
+    { runId: 'run-enhance', phase: 'generationReviewing', label: 'Reviewing generated response...', providerLane: 'reasoner' },
+    { runId: 'run-enhance', phase: 'providerCallRunning', label: 'Provider call running.', providerLane: 'reasoner', detail: { roleId: 'generationReviewer' } }
   ],
-  activity: { runId: 'run-enhance', phase: 'providerCallRunning', label: 'Provider call running.', providerLane: 'reasoner', detail: { roleId: 'proseEnhancer' } }
+  activity: { runId: 'run-enhance', phase: 'providerCallRunning', label: 'Provider call running.', providerLane: 'reasoner', detail: { roleId: 'generationReviewer' } }
 });
 assertDeepEqual(
   enhancementProviderProgress.steps
-    .filter((step) => ['dialogue-enhancement', 'prose-enhancement'].includes(step.id))
+    .filter((step) => step.id === 'generation-review')
     .map((step) => [step.id, step.label, step.providerLane, step.sourceRoleId]),
   [
-    ['dialogue-enhancement', 'Dialogue Enhancement', 'reasoner', 'dialogueEnhancer'],
-    ['prose-enhancement', 'Prose Enhancement', 'reasoner', 'proseEnhancer']
+    ['generation-review', 'Generation review', 'reasoner', 'generationReviewer']
   ],
-  'derived progress labels enhancement provider calls as first-class enhancement rows'
+  'derived progress labels the unified reviewer as a first-class enhancement row'
 );
 assertEqual(enhancementProviderProgress.steps.some((step) => step.id === 'utility-card-batch'), false, 'enhancement provider calls do not create a Utility card batch row');
-assertEqual(enhancementProviderProgress.steps.some((step) => step.id === 'enhancement-response'), false, 'derived progress hides generic Enhancement row once concrete enhancement pass rows exist');
 
 const derivedCachedProgress = createProgressRunModel({
   settings: { mode: 'auto' },
@@ -603,7 +600,7 @@ assertEqual(customProgressCapsViewModel.progressListVisibleLimit, 24, 'view mode
 const barImplementationReference = readFileSync(new URL('../../docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md', import.meta.url), 'utf8');
 const uiSpec = readFileSync(new URL('../../docs/design/UI_SPEC.md', import.meta.url), 'utf8');
 const recursionCss = readFileSync(new URL('../../styles/recursion.css', import.meta.url), 'utf8');
-assert(recursionCss.includes('recursion-enhancement-capture-active'), 'enhancement capture CSS hides the class toggled by the extension');
+assert(!recursionCss.includes('recursion-enhancement-capture-active'), 'Enhancement CSS never hides SillyTavern streamed assistant text');
 const recursionUi = readFileSync(new URL('../../src/ui.mjs', import.meta.url), 'utf8');
 const cardSystemUiProof = readFileSync(new URL('./prove-card-system-ui.mjs', import.meta.url), 'utf8');
 assert(existsSync(new URL('../../assets/icons/card-system/handle-category.svg', import.meta.url)), 'production Card System includes the supplied category handle asset');
@@ -2017,26 +2014,17 @@ try {
   );
   assertDeepEqual(
     root.querySelectorAll('[data-recursion-enhancement-target-choice]').map((choice) => choice.dataset.recursionEnhancementTargetChoice),
-    ['off', 'prose', 'dialogue', 'prose-dialogue'],
-    'Enhancements selector uses Off/Prose/Dialogue/Prose + Dialogue target order'
+    ['off', 'on'],
+    'Enhancements selector uses Off/Enhancement target order'
   );
   assertDeepEqual(
     root.querySelectorAll('[data-recursion-enhancement-target-icon]').map((icon) => icon.dataset.recursionEnhancementTargetIcon),
-    ['off', 'prose', 'dialogue', 'prose-dialogue'],
+    ['off', 'on'],
     'Enhancements selector renders one icon slot for each target option'
   );
-  const proseTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-prose]').querySelector('[data-recursion-enhancement-target-icon]');
-  const dialogueTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-dialogue]').querySelector('[data-recursion-enhancement-target-icon]');
-  const combinedTargetChoice = root.querySelector('[data-recursion-enhancement-target-choice-prose-dialogue]');
-  const combinedTargetIcon = combinedTargetChoice.querySelector('[data-recursion-enhancement-target-icon]');
-  assert(proseTargetIcon.className.includes('is-prose'), 'Prose target row uses prose icon');
-  assert(dialogueTargetIcon.className.includes('is-dialogue'), 'Dialogue target row uses dialogue icon');
-  assert(combinedTargetChoice.className.includes('is-combo'), 'Prose + Dialogue target row owns combo icon slot layout');
-  assert(combinedTargetIcon.className.includes('is-combo'), 'Prose + Dialogue target row uses stacked combo icon');
-  assertEqual(combinedTargetIcon.children.length, 2, 'Prose + Dialogue target row stacks two compact icons');
-  assert(combinedTargetIcon.children[0].className.includes('is-prose'), 'Prose + Dialogue target row places prose icon first');
-  assert(combinedTargetIcon.children[1].className.includes('is-dialogue'), 'Prose + Dialogue target row places dialogue icon second');
-  assertEqual(root.querySelectorAll('[data-recursion-enhancement-target-choice-tip]').length, 4, 'Enhancements selector renders mini descriptions for all target options');
+  const enhancementTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-on]').querySelector('[data-recursion-enhancement-target-icon]');
+  assert(enhancementTargetIcon.className.includes('is-on'), 'Enhancement target uses the unified review icon');
+  assertEqual(root.querySelectorAll('[data-recursion-enhancement-target-choice-tip]').length, 2, 'Enhancements selector renders mini descriptions for both target options');
   assertEqual(
     root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-label'),
     'Enhancements: Off',
@@ -2254,12 +2242,12 @@ try {
   root.querySelector('[data-recursion-enhancement-apply-choice-replace]').querySelector('[data-recursion-enhancement-apply-choice-name]').click();
   assertDeepEqual(settingsUpdates.at(-1), { enhancements: { applyMode: 'replace' } }, 'Enhancements menu switches apply mode from nested row content clicks');
   assertEqual(root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-expanded'), 'true', 'Enhancements menu stays open after apply mode selection');
-  root.querySelector('[data-recursion-enhancement-target-choice-dialogue]').querySelector('[data-recursion-enhancement-target-choice-tip]').click();
-  assertDeepEqual(settingsUpdates.at(-1), { enhancements: { target: 'dialogue' } }, 'Enhancements menu switches target from nested row content clicks');
+  root.querySelector('[data-recursion-enhancement-target-choice-on]').querySelector('[data-recursion-enhancement-target-choice-tip]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { enhancements: { target: 'on' } }, 'Enhancements menu enables review from nested row content clicks');
   assertEqual(root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-expanded'), 'true', 'Enhancements button keeps menu open after target selection');
   assertEqual(root.querySelector('[data-recursion-enhancements-menu]').hidden, false, 'Enhancements menu stays open after target selection');
-  assert(root.querySelector('[data-recursion-enhancement-target-choice-dialogue]').className.includes('is-selected'), 'Enhancements target selection highlights immediately');
-  view = { ...view, settings: { ...view.settings, enhancements: { target: 'dialogue', applyMode: 'replace', contextMessages: 13 } } };
+  assert(root.querySelector('[data-recursion-enhancement-target-choice-on]').className.includes('is-selected'), 'Enhancements target selection highlights immediately');
+  view = { ...view, settings: { ...view.settings, enhancements: { target: 'on', applyMode: 'replace', contextMessages: 13 } } };
   ui.update();
   assert(!root.querySelector('[data-recursion-enhancements-button]').className.includes('is-off'), 'Enhancements button is no longer grey when enabled');
 
@@ -2999,7 +2987,7 @@ try {
       tooltipsEnabled: false
     },
     enhancements: {
-      target: 'dialogue',
+      target: 'on',
       applyMode: 'replace',
       contextMessages: 21
     },

@@ -24,6 +24,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 ## Provider, Privacy, And Safety Docs
 
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md) - Current provider lanes, source routing, machine-JSON schema metadata, structured calls, validation, and secret handling contract.
+- [Structured Output Recovery Design](superpowers/specs/2026-07-13-recursion-structured-output-recovery-design.md) - Shared one-budget recovery contract for malformed provider output, batch slots, Fused fragments, raw-text reformat, and Generation Review semantic correction.
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md) - Current storage, journal, diagnostics, redaction, and retention contract.
 - [Provider Setup](user/PROVIDER_SETUP.md) - Utility and Reasoner setup, source options, autosaving provider fields, model discovery, session-only keys, provider tests, fallback behavior, and safe verification.
 - [Prompt Privacy And Safety](user/PROMPT_PRIVACY_AND_SAFETY.md) - Prompt packet contents, injection boundary, storage limits, redaction, external extension coexistence, and safety checks.
@@ -49,11 +50,13 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) - Source-backed V1 contract for Strength, Min/Max Cards, Focus, and Prompt Footprint backend effects.
 - [UI Spec](design/UI_SPEC.md) - Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, viewer, settings, and provider controls.
 - [Turn Context Compiler Seed Note](design/RECURSION_TURN_CONTEXT_COMPILER.md) - Historical seed note superseded by the V1 spec family.
+- [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - Approved product and UX direction for the unified Enhancement feature.
 - [Design Folder Guide](design/README.md)
 
 ## Architecture Specs
 
 - [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md)
+- [Generation Review and Enhancement Contract](architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - Card-aware response review, bounded patches, anti-slop, cache, progress, and semantic validation under the shared structured-output recovery policy.
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md)
@@ -75,6 +78,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Documentation Expansion Plan](planning/DOCUMENTATION_EXPANSION_PLAN.md)
 - [0.1.0-pre-alpha.6 Documentation Update Brief](planning/2026-07-11-documentation-update-pre-alpha-6.md)
 - [Provider JSON Robustness Pass](planning/PROVIDER_JSON_ROBUSTNESS_PASS.md)
+- [Structured Output Recovery Implementation Plan](superpowers/plans/2026-07-13-recursion-structured-output-recovery.md)
 - [Planning Folder Guide](planning/README.md)
 - [Internal Superpowers Execution Plan](superpowers/plans/2026-06-30-recursion-v1.md)
 

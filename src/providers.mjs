@@ -46,8 +46,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'rapidTurnDelta',
   'guidanceComposer',
   'cardAuthoringAssist',
-  'dialogueEnhancer',
-  'proseEnhancer',
+  'generationReviewer',
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
@@ -69,8 +68,7 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   rapidTurnDelta: 'recursion.rapidTurnDelta.v2',
   guidanceComposer: 'recursion.guidanceComposer.v1',
   cardAuthoringAssist: 'recursion.cardAuthoringAssist.v1',
-  dialogueEnhancer: 'recursion.dialogueEnhancer.v1',
-  proseEnhancer: 'recursion.proseEnhancer.v1',
+  generationReviewer: 'recursion.generationReview.v1',
   reasonerComposer: 'recursion.reasonerComposer.v1',
   providerTest: 'recursion.providerTest.v1'
 });
@@ -810,12 +808,6 @@ function structuredOutputRetryableError(error) {
     || code === 'RECURSION_PROVIDER_SCHEMA_MISMATCH';
 }
 
-function enhancementTextFallbackSchema(roleId = '') {
-  if (roleId === 'dialogueEnhancer') return 'recursion.dialogueEnhancer.v1';
-  if (roleId === 'proseEnhancer') return 'recursion.proseEnhancer.v1';
-  return '';
-}
-
 function structuredOutputFieldHint(roleId, request = {}) {
   const expected = expectedResponseSchema(roleId);
   const fields = [];
@@ -1476,6 +1468,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
     let runId = String(options.runId || request.runId || makeId('provider'));
     let retryCount = 0;
     let retryFormatError = null;
+    let structuredRecoverySpent = options.allowStructuredRecovery === false;
+    let structuredOutputRecovery = '';
     let lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
 
     const activityRunId = activityStart(activity, {
@@ -1536,6 +1530,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
             responseHash: responseTextHash(raw.text),
             schema: data.schema,
             retryCount,
+            ...(structuredOutputRecovery ? { structuredOutputRecovery } : {}),
             latencyMs,
             completedAt: nowIso()
           }, 300);
@@ -1561,55 +1556,12 @@ export function createGenerationRouter({ client, activity = null, journal = null
             lane,
             data,
             text: JSON.stringify(data),
-            diagnostics
+            diagnostics,
+            recoverySpent: structuredRecoverySpent
           };
         } catch (error) {
-          const textFallbackSchema = enhancementTextFallbackSchema(roleId);
-          if (textFallbackSchema && structuredOutputRetryableError(error) && String(raw?.text || '').trim()) {
-            const text = truncate(String(raw.text || '').trim(), 12000);
-            const latencyMs = Date.now() - started;
-            const data = {
-              schema: textFallbackSchema,
-              text
-            };
-            const diagnostics = sanitize({
-              ...lastDiagnostics,
-              ...reasoningDiagnostics(raw),
-              providerSource: raw.providerSource,
-              providerId: raw.providerId,
-              model: raw.model,
-              responseId: raw.responseId,
-              responseHash: responseTextHash(raw.text),
-              schema: data.schema,
-              textFallback: true,
-              retryCount,
-              latencyMs,
-              completedAt: nowIso()
-            }, 300);
-            await queueJournalAppend({
-              ...diagnostics,
-              status: 'success',
-              recordedAt: nowIso()
-            });
-            activitySettle(activity, {
-              runId,
-              phase: 'settled',
-              outcome: 'success',
-              providerLane: lane,
-              composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
-              label: 'Provider call completed.',
-              detail: diagnostics
-            });
-            return {
-              ok: true,
-              roleId,
-              lane,
-              data,
-              text,
-              diagnostics
-            };
-          }
-          const canRetry = attempt === 0 && (retryableError(error) || structuredOutputRetryableError(error));
+          const structuredRetry = structuredOutputRetryableError(error);
+          const canRetry = attempt === 0 && (retryableError(error) || (structuredRetry && options.allowStructuredRecovery !== false));
           let retrySkippedReason = '';
           const latencyMs = Date.now() - started;
           if (canRetry) {
@@ -1625,7 +1577,11 @@ export function createGenerationRouter({ client, activity = null, journal = null
             }, options, [options.signal, request.signal]);
             if (retryFreshness.ok) {
               retryCount = 1;
-              retryFormatError = structuredOutputRetryableError(error) ? error : null;
+              retryFormatError = structuredRetry ? error : null;
+              if (structuredRetry) {
+                structuredRecoverySpent = true;
+                structuredOutputRecovery = 'slot_correction_retry';
+              }
               continue;
             }
             retrySkippedReason = retryFreshness.reason;
@@ -1643,6 +1599,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
           const diagnostics = sanitize({
             ...lastDiagnostics,
             retryCount,
+            ...(structuredOutputRecovery ? { structuredOutputRecovery } : {}),
             error: safeError,
             status: statusForError(error)
           }, 300);
@@ -1667,6 +1624,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
             lane,
             error: safeError,
             diagnostics,
+            recoverySpent: structuredRecoverySpent,
             recoverableText: roleId === 'fusedCardBundle' ? truncate(String(raw?.text || ''), 12000) : ''
           };
         }
@@ -1680,7 +1638,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
       roleId,
       lane,
       error: { code: 'RECURSION_PROVIDER_FAILED', message: 'Provider generation failed.', retryable: false },
-      diagnostics: lastDiagnostics
+      diagnostics: lastDiagnostics,
+      recoverySpent: structuredRecoverySpent
     };
   }
 
@@ -1795,7 +1754,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       }
     }
 
-    async function successResult(entry, raw, retryCount = 0) {
+    async function successResult(entry, raw, retryCount = 0, extraDiagnostics = {}) {
       throwSlotFailure(raw);
       const parsed = parseProviderStructuredOutput(raw?.text);
       const data = parsed.data;
@@ -1812,6 +1771,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         schema: data.schema,
         ...batchDiagnosticsFromResponse(raw),
         retryCount,
+        ...extraDiagnostics,
         latencyMs: Date.now() - entry.started,
         completedAt: nowIso()
       }, 300);
@@ -2032,6 +1992,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       }
     }
 
+    const retryCandidates = [];
     for (let batchIndex = 0; batchIndex < rawResponses.length; batchIndex += 1) {
       const raw = rawResponses[batchIndex];
       const entry = pendingEntries[batchIndex];
@@ -2039,8 +2000,68 @@ export function createGenerationRouter({ client, activity = null, journal = null
         results[entry.index] = await successResult(entry, raw, batchRetryCount);
         emitSlotSettledActivity(entry, raw, batchRetryCount);
       } catch (error) {
+        if (structuredOutputRetryableError(error) && options.allowStructuredRecovery !== false && entry.request.signal?.aborted !== true) {
+          retryCandidates.push({ entry, error, raw });
+          continue;
+        }
         results[entry.index] = await failureResult(entry, error, batchRetryCount, batchDiagnosticsFromResponse(raw));
         emitSlotFailureActivity(entry, error, raw, batchRetryCount, { force: true });
+      }
+    }
+
+    if (retryCandidates.length) {
+      const retryFreshness = await checkRetryFreshness({
+        runId: batchRunId,
+        attempt: 1,
+        batch: true,
+        retryCount: 1,
+        entries: retryCandidates.map(({ entry, error }) => ({
+          index: entry.index,
+          roleId: entry.roleId,
+          lane: entry.lane,
+          error: sanitizedError(error, entry.request),
+          request: cleanRequestForDiagnostics(entry.request)
+        }))
+      }, options, [options.signal, ...retryCandidates.map(({ entry }) => entry.request.signal)]);
+      if (retryFreshness.ok) {
+        try {
+          const retriedRaw = await withBatchTimeout(
+            (requestsWithSignals) => client.batch(requestsWithSignals),
+            retryCandidates.map(({ entry, error }) => ({
+              roleId: entry.roleId,
+              ...requestWithStructuredRetryPrompt(entry.request, { roleId: entry.roleId, error })
+            })),
+            effectiveTimeoutMs,
+            options.signal || null
+          );
+          if (!Array.isArray(retriedRaw) || retriedRaw.length !== retryCandidates.length) {
+            throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Provider correction batch response shape did not match its request batch.', { retryable: false });
+          }
+          for (let index = 0; index < retryCandidates.length; index += 1) {
+            const { entry } = retryCandidates[index];
+            const raw = retriedRaw[index];
+            try {
+              results[entry.index] = await successResult(entry, raw, 1, { structuredOutputRecovery: 'slot_correction_retry' });
+              emitSlotSettledActivity(entry, raw, 1);
+            } catch (error) {
+              results[entry.index] = await failureResult(entry, error, 1, batchDiagnosticsFromResponse(raw));
+              emitSlotFailureActivity(entry, error, raw, 1, { force: true });
+            }
+          }
+        } catch (error) {
+          for (const { entry, raw } of retryCandidates) {
+            results[entry.index] = await failureResult(entry, error, 1, batchDiagnosticsFromResponse(raw));
+            emitSlotFailureActivity(entry, error, raw, 1, { force: true });
+          }
+        }
+      } else {
+        for (const { entry, error, raw } of retryCandidates) {
+          results[entry.index] = await failureResult(entry, error, batchRetryCount, {
+            ...batchDiagnosticsFromResponse(raw),
+            retrySkippedReason: retryFreshness.reason
+          });
+          emitSlotFailureActivity(entry, error, raw, batchRetryCount, { force: true });
+        }
       }
     }
 

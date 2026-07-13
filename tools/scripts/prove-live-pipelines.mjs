@@ -310,6 +310,42 @@ export async function selectPipeline(page, pipeline, timeoutMs) {
   }, pipeline, { timeout: timeoutMs });
 }
 
+async function ensureRunnableDeckFixture(page, timeoutMs) {
+  await page.evaluate(async () => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    const settings = runtime?.view?.()?.settings;
+    if (!runtime || !settings?.cardDecks) return;
+    const decks = settings.cardDecks;
+    const activeDeck = decks.customCardDecks?.[decks.activeCardDeckId];
+    if (activeDeck) {
+      const cards = Object.fromEntries(Object.entries(activeDeck.cards || {}).map(([id, card]) => [id, {
+        ...card,
+        selectionState: 'active'
+      }]));
+      await runtime.updateSettings({
+        cardDecks: {
+          ...decks,
+          customCardDecks: {
+            ...decks.customCardDecks,
+            [activeDeck.id]: { ...activeDeck, cards }
+          }
+        }
+      });
+      return;
+    }
+    const defaultEnabledState = structuredClone(decks.defaultEnabledState || settings.cardScope?.families || {});
+    for (const family of Object.values(defaultEnabledState)) {
+      if (!family || typeof family !== 'object') continue;
+      family.enabled = true;
+      for (const key of Object.keys(family.subItems || {})) family.subItems[key] = true;
+    }
+    await runtime.updateSettings({
+      cardDecks: { ...decks, activeCardDeckId: 'default', defaultEnabledState }
+    });
+  });
+  await page.waitForFunction(() => /Hand\s+\d+/.test(String(document.querySelector('[data-recursion-hand-count]')?.textContent || '')), null, { timeout: timeoutMs }).catch(() => {});
+}
+
 export async function selectInjectionSettings(page, settings, timeoutMs) {
   const panel = page.locator('[data-recursion-settings-panel]').first();
   const panelOpen = await panel.evaluate((node) => node.hidden === false).catch(() => false);
@@ -534,13 +570,19 @@ async function sendAndWait(page, message, { requirePrompt, timeoutMs }) {
 }
 
 async function triggerRapidWarm(page, timeoutMs) {
-  const warm = await page.evaluate(async () => {
-    const runtime = globalThis.__recursionLiveHarnessRuntime;
-    if (!runtime || typeof runtime.warmRapidScene !== 'function') {
-      return { ok: false, reason: 'runtime-unavailable' };
-    }
-    return runtime.warmRapidScene({ reason: 'live-pipeline-proof' });
-  }).catch((error) => ({ ok: false, reason: 'runtime-error', message: String(error?.message || error) }));
+  let warm = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    warm = await page.evaluate(async () => {
+      const runtime = globalThis.__recursionLiveHarnessRuntime;
+      if (!runtime || typeof runtime.warmRapidScene !== 'function') {
+        return { ok: false, reason: 'runtime-unavailable' };
+      }
+      return runtime.warmRapidScene({ reason: 'live-pipeline-proof' });
+    }).catch((error) => ({ ok: false, reason: 'runtime-error', message: String(error?.message || error) }));
+    if (warm?.ok === true && warm?.skipped !== true && warm?.rapid?.status === 'ready') break;
+    if (!warm?.superseded) break;
+    await page.waitForTimeout(750);
+  }
   if (warm?.ok !== true || warm?.skipped === true || warm?.rapid?.status !== 'ready') {
     fail('rapid-warm-unavailable', 'Rapid warm did not produce a ready warm deck before foreground proof.', { warm });
   }
@@ -609,7 +651,12 @@ function compactIssue(message) {
 }
 
 function isBenignConsoleIssue(issue = {}) {
-  return issue.type === 'warning' && /^Stream stats:\s+\d+\s+tokens\b/i.test(String(issue.text || ''));
+  const text = String(issue.text || '');
+  const url = String(issue.url || '');
+  return (issue.type === 'warning' && /^Stream stats:\s+\d+\s+tokens\b/i.test(text))
+    // A stale SillyTavern browser cache can request an old, non-Recursion toolbar image.
+    // It does not affect Recursion's loaded modules or the visual surface under test.
+    || (issue.type === 'error' && /Failed to load resource:.*404/i.test(text) && /\/img\/recursion\.svg$/i.test(url));
 }
 
 function assertPipelineProof(pipeline, proof, issues) {
@@ -780,6 +827,7 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
         });
         await page.goto(env.SILLYTAVERN_BASE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
         await waitForRoot(page, timeoutMs);
+        await ensureRunnableDeckFixture(page, timeoutMs);
         for (const pipeline of args.pipelines) {
           const issueStart = { console: consoleIssues.length, page: pageIssues.length };
           const requestStart = serializedPromptRequests.length;

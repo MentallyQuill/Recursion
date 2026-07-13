@@ -6,7 +6,7 @@ import { STORY_FORM_OVERRIDE_OPTIONS } from './story-form.mjs';
 
 const MODES = new Set(['auto', 'manual']);
 const PIPELINE_MODES = new Set(['standard', 'rapid', 'fused']);
-const ENHANCEMENT_TARGETS = new Set(['off', 'prose', 'dialogue', 'prose-dialogue']);
+const ENHANCEMENT_TARGETS = new Set(['off', 'on']);
 const ENHANCEMENT_APPLY_MODES = new Set(['as-swipe', 'replace']);
 const STRENGTHS = new Set(['light', 'balanced', 'strong']);
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
@@ -169,8 +169,11 @@ export function normalizeInjectionSettings(value = {}) {
 
 export function normalizeEnhancementsSettings(value = {}) {
   const source = value && typeof value === 'object' ? value : {};
+  const target = String(source.target ?? '').trim().toLowerCase();
   return {
-    target: enumValue(source.target, ENHANCEMENT_TARGETS, DEFAULT_RECURSION_SETTINGS.enhancements.target),
+    target: ['prose', 'dialogue', 'prose-dialogue'].includes(target)
+      ? 'on'
+      : enumValue(target, ENHANCEMENT_TARGETS, DEFAULT_RECURSION_SETTINGS.enhancements.target),
     applyMode: enumValue(source.applyMode, ENHANCEMENT_APPLY_MODES, DEFAULT_RECURSION_SETTINGS.enhancements.applyMode),
     contextMessages: Math.round(numberInRange(
       source.contextMessages,

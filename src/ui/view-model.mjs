@@ -29,9 +29,7 @@ const PHASE_LABELS = Object.freeze({
   utilityComposing: 'Composing prompt packet with Utility...',
   reasonerComposing: 'Reasoner refining guidance...',
   promptInstalling: 'Installing Recursion prompt...',
-  dialogueEnhancing: 'Enhancing dialogue...',
-  enhancementResponse: 'Enhancing response...',
-  proseEnhancing: 'Enhancing prose...',
+  generationReviewing: 'Reviewing generated response...',
   promptPacketBuilt: 'Recursion prompt ready.',
   storageSaving: 'Saving scene cache...',
   storageComplete: 'Scene cache saved.',
@@ -113,7 +111,7 @@ function pipelineLabel(value) {
 
 function normalizeEnhancementTarget(value) {
   const target = cleanText(value, 'off').toLowerCase();
-  if (target === 'prose' || target === 'dialogue' || target === 'prose-dialogue') return target;
+  if (target === 'on' || target === 'prose' || target === 'dialogue' || target === 'prose-dialogue') return 'on';
   return 'off';
 }
 
@@ -122,11 +120,7 @@ function normalizeEnhancementApplyMode(value) {
 }
 
 function enhancementTargetLabel(value) {
-  const target = normalizeEnhancementTarget(value);
-  if (target === 'prose') return 'Prose';
-  if (target === 'dialogue') return 'Dialogue';
-  if (target === 'prose-dialogue') return 'Prose + Dialogue';
-  return 'Off';
+  return normalizeEnhancementTarget(value) === 'on' ? 'Enhancement' : 'Off';
 }
 
 function enhancementApplyModeLabel(value) {
@@ -283,6 +277,8 @@ export function createRecursionViewModel(view = {}) {
     lastBriefSourceCardCount: Math.max(0, Math.floor(Number(source.lastBrief?.sourceCardCount) || 0)),
     lastBriefCoverageStatus: cleanText(source.lastBrief?.coverageStatus || 'none', 'none'),
     lastBriefMissingSourceCardCount: Math.max(0, Math.floor(Number(source.lastBrief?.missingSourceCardCount) || 0)),
+    lastCacheDecision: source.lastCacheDecision || null,
+    contextContract: source.contextContract || null,
     enabled,
     modeLabel: modeLabel(mode),
     pipelineLabel: pipelineLabel(pipelineMode),

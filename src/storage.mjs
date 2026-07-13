@@ -872,7 +872,11 @@ function storageWriteStatus(result) {
     const fallback = safeOptionalMetadataText(source.fallback, 80) || 'unknown';
     return {
       persisted: false,
-      fallback
+      fallback,
+      reason: safeOptionalMetadataText(source.reason, 120) || 'memory-fallback',
+      ...(safeOptionalMetadataText(source.fallbackReason, 240)
+        ? { fallbackReason: safeOptionalMetadataText(source.fallbackReason, 240) }
+        : {})
     };
   }
   return { persisted: true };
@@ -905,19 +909,23 @@ function reportStorageWriteStatus(activity, operationId, status, detail = {}) {
     });
     return;
   }
+  const warningReason = status.fallbackReason || status.reason;
   reportActivity(activity, {
     operationId,
     phase: 'storageWarning',
     logicalStage: 'Storage fallback',
     mode: 'background',
     severity: 'warning',
-    label: 'Recursion storage warning; continuing in memory.',
+    label: warningReason
+      ? `Recursion storage warning: ${warningReason}`
+      : 'Recursion storage warning; continuing in memory.',
     chips: ['Storage'],
     detail: {
       ...detail,
       persisted: false,
       fallback: status.fallback,
-      reason: status.reason
+      reason: status.reason,
+      ...(status.fallbackReason ? { fallbackReason: status.fallbackReason } : {})
     }
   });
 }
@@ -1170,11 +1178,27 @@ export function createStorageRepository({
       const record = normalizeSceneCache(chatKey, sceneKey, value, currentRetention());
       const writeResult = await storage.writeJson(key, record);
       const sceneWriteStatus = storageWriteStatus(writeResult);
+      let verifiedSceneWriteStatus = sceneWriteStatus;
+      if (sceneWriteStatus.persisted) {
+        const persistedRecord = await storage.readJson(key);
+        const verified = persistedRecord
+          && persistedRecord.recordType === record.recordType
+          && persistedRecord.chatKey === record.chatKey
+          && persistedRecord.sceneKey === record.sceneKey;
+        if (!verified) {
+          const failure = typeof storage.getLastFailure === 'function' ? storage.getLastFailure() : null;
+          verifiedSceneWriteStatus = {
+            persisted: false,
+            reason: 'write-verification-failed',
+            ...(failure?.message ? { fallbackReason: failure.message } : {})
+          };
+        }
+      }
       let indexWriteStatus = { persisted: true };
-      if (sceneWriteStatus.persisted || sceneWriteStatus.fallback) {
+      if (verifiedSceneWriteStatus.persisted || verifiedSceneWriteStatus.fallback) {
         indexWriteStatus = storageWriteStatus(await writeIndexEntry(key, 'sceneCache', safeId(chatKey, 'chat')));
       }
-      const storageStatus = combineStorageStatuses(sceneWriteStatus, indexWriteStatus);
+      const storageStatus = combineStorageStatuses(verifiedSceneWriteStatus, indexWriteStatus);
       reportStorageWriteStatus(activity, operationId, storageStatus, {
         kind: 'sceneCache',
         chatKey: safeId(chatKey, 'chat'),

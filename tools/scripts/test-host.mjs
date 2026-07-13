@@ -737,6 +737,8 @@ await assertRejects(
 assertEqual(storageFetchCalls.length, storageFetchCountBeforeRejectedKeys, 'default storage rejects unsafe keys before fetch');
 
 const fallbackUploadCalls = [];
+let fallbackUploadAttempts = 0;
+const fallbackUploadFiles = new Map();
 const fallbackUploadHost = createSillyTavernHost({
   contextFactory: () => ({
     chatId: 'fallback-upload-chat',
@@ -746,22 +748,37 @@ const fallbackUploadHost = createSillyTavernHost({
   settingsRoot: {},
   fetchImpl: async (url, options = {}) => {
     fallbackUploadCalls.push({ url, options });
-    if (url === '/api/files/upload') return { ok: false, status: 500, json: async () => ({ error: 'disk unavailable' }) };
-    if (url.startsWith('/user/files/')) throw new Error('read should stay in memory after fallback');
+    if (url === '/api/files/upload') {
+      fallbackUploadAttempts += 1;
+      if (fallbackUploadAttempts === 1) return { ok: false, status: 500, json: async () => ({ error: 'disk unavailable' }) };
+      const body = JSON.parse(options.body);
+      fallbackUploadFiles.set(body.name, JSON.parse(Buffer.from(body.data, 'base64').toString('utf8')));
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    if (url === '/api/files/verify') {
+      const body = JSON.parse(options.body);
+      return { ok: true, status: 200, json: async () => Object.fromEntries((body.urls || []).map((entry) => [entry, fallbackUploadFiles.has(decodeURIComponent(String(entry).split('/').at(-1)))])) };
+    }
+    if (url.startsWith('/user/files/')) {
+      const name = decodeURIComponent(url.slice('/user/files/'.length));
+      return fallbackUploadFiles.has(name)
+        ? { ok: true, status: 200, json: async () => fallbackUploadFiles.get(name) }
+        : { ok: false, status: 404, json: async () => ({}) };
+    }
     throw new Error(`Unexpected fallback fetch URL: ${url}`);
   }
 });
 assertDeepEqual(
   await fallbackUploadHost.storageAdapter.writeJson('recursion-fallback-upload.v1.json', { fallback: true }),
-  { ok: true, key: 'recursion-fallback-upload.v1.json', fallback: 'memory' },
-  'default storage downgrades failed uploads to memory storage'
+  { ok: true, key: 'recursion-fallback-upload.v1.json' },
+  'default storage retries transient upload failures before memory fallback'
 );
 assertDeepEqual(
   await fallbackUploadHost.storageAdapter.readJson('recursion-fallback-upload.v1.json'),
   { fallback: true },
-  'default storage reads fallback writes from memory without user-file API'
+  'default storage reads the durable value after retry'
 );
-assert(!fallbackUploadCalls.some((call) => call.url.startsWith('/user/files/')), 'fallback storage skips user-file reads after upload failure');
+assertEqual(fallbackUploadAttempts, 2, 'default storage retries durable upload once');
 const fallbackUploadCallCountBeforeRejectedKeys = fallbackUploadCalls.length;
 await assertRejects(
   async () => fallbackUploadHost.storageAdapter.writeJson('../recursion-fallback-escape.v1.json', { ok: false }),
@@ -809,15 +826,21 @@ await assertRejects(
 assertEqual(fallbackThrownUploadCalls.length, 0, 'default storage does not fetch when JSON serialization fails');
 assertDeepEqual(
   await fallbackThrownUploadHost.storageAdapter.writeJson('recursion-fallback-thrown-upload.v1.json', { outage: true }),
-  { ok: true, key: 'recursion-fallback-thrown-upload.v1.json', fallback: 'memory' },
-  'default storage downgrades thrown upload failures to memory storage'
+  {
+    ok: true,
+    key: 'recursion-fallback-thrown-upload.v1.json',
+    fallback: 'memory',
+    reason: 'memory-fallback',
+    fallbackReason: 'write failed for recursion-fallback-thrown-upload.v1.json: simulated user-file API outage'
+  },
+  'default storage reports thrown upload failures as memory fallback'
 );
 assertDeepEqual(
   await fallbackThrownUploadHost.storageAdapter.readJson('recursion-fallback-thrown-upload.v1.json'),
   { outage: true },
   'default storage reads memory value after thrown upload fallback'
 );
-assertEqual(fallbackThrownUploadCalls.length, 1, 'default storage avoids failing user-file API after thrown upload fallback');
+assertEqual(fallbackThrownUploadCalls.length, 3, 'default storage retries durable reads after thrown upload fallback');
 
 const previousSillyTavern = globalThis.SillyTavern;
 const globalHeaderCalls = [];

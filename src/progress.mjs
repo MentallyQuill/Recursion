@@ -53,9 +53,7 @@ const STEP_ORDER = [
   'rapid-warm-failed',
   'reusing-scene-deck',
   'provider-test',
-  'dialogue-enhancement',
-  'enhancement-response',
-  'prose-enhancement',
+  'generation-review',
   'fused-card-bundle',
   'utility-card-batch',
   'validating-cards',
@@ -84,9 +82,7 @@ const STEP_DEFINITIONS = Object.freeze({
   'rapid-warm-failed': { label: 'Rapid warm', providerLane: 'utility' },
   'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
   'provider-test': { label: 'Provider test', providerLane: 'utility' },
-  'dialogue-enhancement': { label: 'Dialogue Enhancement', currentLabel: 'Enhancing dialogue', providerLane: 'utility' },
-  'enhancement-response': { label: 'Enhancement', currentLabel: 'Enhancing response', providerLane: 'utility' },
-  'prose-enhancement': { label: 'Prose Enhancement', currentLabel: 'Enhancing prose', providerLane: 'utility' },
+  'generation-review': { label: 'Generation review', currentLabel: 'Reviewing generated response', providerLane: 'utility' },
   'fused-card-bundle': { label: 'Fused card bundle', providerLane: 'utility' },
   'utility-card-batch': { label: 'Utility card batch', providerLane: 'utility' },
   'validating-cards': { label: 'Validating cards', providerLane: 'utility' },
@@ -130,9 +126,7 @@ const PHASE_STEP_IDS = Object.freeze({
   promptClearing: 'clearing-recursion-prompt',
   promptClearFailed: 'clearing-recursion-prompt',
   providerTestFailed: 'provider-test',
-  dialogueEnhancing: 'dialogue-enhancement',
-  enhancementResponse: 'enhancement-response',
-  proseEnhancing: 'prose-enhancement',
+  generationReviewing: 'generation-review',
   cacheWarning: 'checking-scene-cache',
   settled: 'recursion-prompt-ready'
 });
@@ -320,8 +314,7 @@ function roleStepId(event) {
   if (roleId === 'utilityArbiter') return 'planning-card-pass';
   if (roleId === 'reasonerComposer') return 'reasoner-guidance';
   if (roleId === 'guidanceComposer') return 'composing-prompt-packet';
-  if (roleId === 'dialogueEnhancer') return 'dialogue-enhancement';
-  if (roleId === 'proseEnhancer') return 'prose-enhancement';
+  if (roleId === 'generationReviewer') return 'generation-review';
   if (roleId === 'fusedCardBundle') return 'fused-card-bundle';
   if (MODEL_CALL_ROLE_IDS.has(roleId)) return 'utility-card-batch';
   return null;
@@ -333,8 +326,7 @@ function roleLabel(roleId, fallback = '') {
   if (id === 'reasonerComposer') return 'Reasoner synthesis';
   if (id === 'utilityArbiter') return 'Utility Arbiter';
   if (id === 'guidanceComposer') return 'Guidance composer';
-  if (id === 'dialogueEnhancer') return 'Dialogue Enhancement';
-  if (id === 'proseEnhancer') return 'Prose Enhancement';
+  if (id === 'generationReviewer') return 'Generation review';
   if (id === 'fusedCardBundle') return 'Fused card bundle';
   if (id === 'providerTest') return 'Provider test';
   return fallback;
@@ -442,6 +434,31 @@ function childStepFromEvent(event, state, order = 0) {
         : [],
       sourcePhase: phase,
       sourceRoleId: roleId,
+      order
+    }, order);
+  }
+  if (phase === 'generationReviewing' && Array.isArray(detail.cardOutcomes)) {
+    const stateForOutcome = (status) => {
+      if (status === 'violated' || status === 'requires-regeneration' || status === 'unresolved') return 'failed';
+      if (status === 'partially-reflected') return 'warning';
+      if (status === 'not-applicable') return 'info';
+      return 'done';
+    };
+    return normalizeChildStep({
+      id: 'generation-review-cards',
+      label: 'Installed cards',
+      providerLane: event.providerLane || detail.lane || 'utility',
+      state,
+      source: 'generated',
+      children: detail.cardOutcomes.map((outcome, childIndex) => ({
+        id: outcome.cardId,
+        label: outcome.name || outcome.cardId,
+        providerLane: event.providerLane || detail.lane || 'utility',
+        state: stateForOutcome(cleanText(outcome.status)),
+        reason: outcome.reason || '',
+        order: childIndex
+      })),
+      sourcePhase: phase,
       order
     }, order);
   }
@@ -947,11 +964,8 @@ function deriveProgressRun(view) {
     }, eventOrder));
   }
   appendRapidWarmStatusStep(steps, source, order++);
-  if (steps.has('enhancement-response') && (steps.has('dialogue-enhancement') || steps.has('prose-enhancement'))) {
-    steps.delete('enhancement-response');
-  }
   const beforePlanSteps = [...steps.values()];
-  const hasEnhancementStep = steps.has('prose-enhancement') || steps.has('dialogue-enhancement') || steps.has('enhancement-response');
+  const hasEnhancementStep = steps.has('generation-review');
   if (!isControlOnlyProgress(runId, beforePlanSteps) && !hasEnhancementStep) {
     appendPendingPlanSteps(steps, view, order);
     appendPendingChildSteps(steps, view, order);

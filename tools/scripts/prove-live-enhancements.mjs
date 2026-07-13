@@ -73,7 +73,7 @@ function proofScript() {
         swipeId: Number(msg?.swipe_id ?? 0),
         swipes: Array.isArray(msg?.swipes) ? msg.swipes.map((entry) => String(entry || '')) : [],
         swipeInfoLength: Array.isArray(msg?.swipe_info) ? msg.swipe_info.length : 0,
-        markerCount: Array.isArray(msg?.__recursionProseEnhancementSwipes) ? msg.__recursionProseEnhancementSwipes.filter(Boolean).length : 0
+        markerCount: Array.isArray(msg?.__recursionGenerationReviewSwipes) ? msg.__recursionGenerationReviewSwipes.filter(Boolean).length : 0
       };
     };
     const activeRuntime = globalThis.__recursionLiveHarnessRuntime || null;
@@ -200,28 +200,27 @@ try {
   }
 
   for (const testCase of [
-    { target: 'dialogue', applyMode: 'as-swipe' },
-    { target: 'prose-dialogue', applyMode: 'replace' }
+    { target: 'on', applyMode: 'as-swipe' },
+    { target: 'on', applyMode: 'replace' }
   ]) {
     const proof = await page.evaluate(proofScript(), testCase);
-    const expectedPasses = testCase.target === 'prose-dialogue' ? ['dialogue', 'prose'] : ['dialogue'];
     const beforeText = testCase.applyMode === 'as-swipe' ? proof.before.swipes[0] : proof.before.text;
     const afterText = testCase.applyMode === 'as-swipe' ? proof.after.swipes[proof.after.swipeId] : proof.after.text;
     const quality = qualityDelta(beforeText, afterText);
     const pass = testCase.applyMode === 'as-swipe'
       ? proof.ok === true
-        && proof.result?.target === testCase.target
         && proof.result?.mode === testCase.applyMode
-        && JSON.stringify(proof.result?.passSequence || []) === JSON.stringify(expectedPasses)
+        && Array.isArray(proof.result?.patches)
+        && proof.result.patches.length > 0
         && proof.after.swipes.length === 2
         && proof.after.swipeInfoLength === proof.after.swipes.length
         && proof.after.swipeId === 1
         && proof.after.swipes[0] === proof.before.swipes[0]
         && quality.significant === true
       : proof.ok === true
-        && proof.result?.target === testCase.target
         && proof.result?.mode === testCase.applyMode
-        && JSON.stringify(proof.result?.passSequence || []) === JSON.stringify(expectedPasses)
+        && Array.isArray(proof.result?.patches)
+        && proof.result.patches.length > 0
         && proof.after.swipes.length === 1
         && quality.significant === true;
     report.checks.push({
@@ -231,9 +230,10 @@ try {
         ok: proof.ok,
         resultOk: proof.result?.ok,
         skipped: proof.result?.skipped === true,
-        resultTarget: proof.result?.target || '',
         resultMode: proof.result?.mode || '',
-        passSequence: proof.result?.passSequence || [],
+        patchCount: proof.result?.patches?.length || 0,
+        reviewDomains: proof.result?.reviewDomains || {},
+        cardOutcomes: proof.result?.cardOutcomes || [],
         beforeSwipeCount: proof.before.swipes.length,
         afterSwipeCount: proof.after.swipes.length,
         afterSwipeInfoLength: proof.after.swipeInfoLength,

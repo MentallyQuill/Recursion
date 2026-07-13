@@ -1,5 +1,7 @@
 # Enhancement No-Op and Pass Continuation Fix
 
+> **Superseded design:** use [Generation Review and Enhancement Contract](../architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) for new implementation. This document records the prior two-full-message-pass repair approach and must not be used as the implementation authority.
+
 ## Purpose
 
 This document defines the fix for Recursion Enhancements that return unchanged text, incorrectly report failure, or prevent a separately selected pass from running.
@@ -515,4 +517,3 @@ The fix is complete when:
 - every selected pass has an explicit terminal status;
 - the main Recursion status area explains the exact pass outcome;
 - live SG-1-style generation proves the call order and final swipe behavior.
-

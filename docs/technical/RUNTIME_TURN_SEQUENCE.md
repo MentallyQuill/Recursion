@@ -14,7 +14,7 @@ This manual describes the turn lifecycle implemented by `src/runtime.mjs` and th
 
 Pipeline selection is separate from Auto/Manual. The compact bar owns the Pipeline selector as an icon-only dropdown immediately to the left of the Mode button. `Standard` runs the full foreground pipeline on send. `Rapid` warms a provider-generated card packet in the background and uses a short foreground Utility delta on send. `Fused` runs the foreground Arbiter and then generates all requested cards through one structured bundle call before the shared deck/hand/compose/install stages. Settings may persist `pipelineMode`, but Settings must not render a second Standard/Rapid/Fused toggle.
 
-Enhancements are separate from Auto/Manual and Standard/Rapid/Fused. They run only after SillyTavern has produced an assistant message and only when `settings.enhancements.target` is `prose`, `dialogue`, or `prose-dialogue`. `Off` leaves the host output untouched. `As Swipe` preserves the original host output, appends one enhanced sibling swipe, and selects the enhanced swipe when a valid non-duplicate candidate exists. `Replace` replaces the active assistant text with the enhanced result. Low and Medium route enhancement calls through Utility; High and Ultra route them through Reasoner when that lane is available, then retry the same pass through Utility if the Reasoner call fails. If the hold, provider call, validation, or Dialogue duplicate check fails, runtime reveals the original host output unchanged.
+Enhancement is separate from Auto/Manual and Standard/Rapid/Fused. It runs only after SillyTavern has produced an assistant message and only when `settings.enhancements.enabled` is true. `Off` leaves the host output untouched. `As Swipe` preserves the original host output, appends one enhanced sibling swipe, and selects it when safe patches were applied. `Replace` replaces the active assistant text only after safe patches validate. Low and Medium route `generationReviewer` through Utility; High and Ultra route it through Reasoner when available, with normal same-request routing fallback to Utility. Parser/schema recovery and semantic review recovery share one correction budget; a malformed, unsafe, or unresolved result reveals the original unless independently safe patches can truthfully apply as `partial-failed`.
 
 ## Auto Sequence
 
@@ -83,7 +83,7 @@ sequenceDiagram
 
 Background warm:
 
-1. After an assistant message lands, Enhancements run first when enabled. Only after those passes settle does `warmRapidScene()` capture the current source revision for Rapid. The runtime-level Rapid warm entrypoint waits behind any active or pending enhancement barrier, so settings-triggered or event-triggered Rapid warm cannot snapshot the unenhanced assistant text.
+1. After an assistant message lands, Generation Review and Enhancement runs first when enabled. Only after it settles does `warmRapidScene()` capture the current source revision for Rapid. The runtime-level Rapid warm entrypoint waits behind any active or pending review barrier, so settings-triggered or event-triggered Rapid warm cannot snapshot an unfinalized assistant text.
 2. Runtime uses the provider Arbiter and provider card roles to build or refresh a scene deck for that exact revision.
 3. Runtime saves the active scene cache variant with `variant.rapid` metadata, including the warm artifact id, source revision hash, selected card ids, guidance metadata, contract hashes, and Rapid pipeline version.
 4. Background warm does not compose a final prompt packet, does not call the SillyTavern prompt adapter, and never installs Recursion prompt keys.
@@ -116,21 +116,19 @@ sequenceDiagram
         Runtime-->>Host: leave output unchanged
     else enabled
         Runtime->>Host: holdAssistantMessage(messageId)
-        Runtime->>Runtime: snapshot bounded scene context
-        alt target includes Dialogue
-            Runtime->>EnhancementLane: dialogueEnhancer(context, source text)
-            EnhancementLane-->>Runtime: dialogue-enhanced text
-            Runtime->>Runtime: validate dialogue/narration shell
+        Runtime->>Runtime: freeze source, packet, installed hand, pipeline, context, anti-slop profile
+        Runtime->>EnhancementLane: generationReviewer(frozen snapshot, exact targets)
+        EnhancementLane-->>Runtime: recursion.generationReview.v1
+        Runtime->>Runtime: parse, schema, target, patch, and installed-card ledger validation
+        opt one shared recovery request remains eligible
+            Runtime->>EnhancementLane: structured or semantic correction
+            EnhancementLane-->>Runtime: corrected structured result
+            Runtime->>Runtime: validate without another correction
         end
-        alt target includes Prose
-            Runtime->>EnhancementLane: proseEnhancer(context, current text)
-            EnhancementLane-->>Runtime: prose-enhanced text
-            Runtime->>Runtime: validate source hash, length, dialogue, banned-list exception
-        end
-        alt As Swipe and valid
-            Runtime->>Host: appendAssistantMessageSwipe(messageId, text, select)
-        else Replace and valid
-            Runtime->>Host: replaceAssistantMessageText(messageId, text)
+        alt As Swipe and safe patches
+            Runtime->>Host: appendAssistantMessageSwipe(messageId, patched text, select)
+        else Replace and safe patches
+            Runtime->>Host: replaceAssistantMessageText(messageId, patched text)
         else invalid or failed
             Runtime->>Host: revealAssistantMessage(messageId)
         end
@@ -139,9 +137,11 @@ sequenceDiagram
     end
 ```
 
-The hold path blanks the active assistant text before the player sees the unenhanced host output. Hold state is transient and restored through `revealAssistantMessage()` on any failure. Runtime builds enhancement-lane requests from the original text, the latest bounded message context, the source-message hash, and normalized `enhancements.contextMessages`. Dialogue Enhancement uses character/card/context evidence to remove echoing, forced questions, over-technical "smart" speech, unearned defensive deflection, romance cliches, and other dialogue slop before improving naturalness and subtext. It measures both whole-message `editRatio` and dialogue-span-only `dialogueEditRatio`; the latter drives low-change retry so narration-heavy replies do not dilute dialogue revisions. Exact no-op Dialogue output retries once. Low dialogue-span edits retry once when strong slop, soft suspicion, or echoed-user context signals are present. If the retry still returns byte-identical text, runtime keeps the original instead of applying a duplicate enhanced swipe. Prose Enhancement then polishes the current text when target is `prose` or `prose-dialogue`.
+The hold path blanks the active assistant text before the player sees the unenhanced host output. Hold state is transient and restored through `revealAssistantMessage()` on any failure. Runtime builds one Generation Review request from the original text, source-message hash, generation-time pipeline mode, installed-hand/source-card lineage, Prompt Packet, Last Brief, bounded message context, character evidence, anti-slop profile, and normalized `enhancements.contextMessages`. The reviewer can assess dialogue, prose, pacing, subtext, card/scene fidelity, and anti-slop together, but can return only exact local dialogue or prose replacements. It cannot return a full rewrite or writable beat range.
 
-`As Swipe` uses a marker derived from the original text hash, target, apply mode, and enhancement schema so the same enhanced swipe can be found instead of duplicated. Markers include per-pass `editRatio`, applied lane, and fallback metadata; Dialogue passes also include `dialogueEditRatio`, attempt number, and retry reason when a retry supplied the applied candidate. `Replace` writes the enhanced text into the active assistant message/swipe and asks the host adapter to save and update the visible message block best-effort. Both modes run before Rapid warm so future Rapid source revisions see the selected final text. While active, progress shows a first-class `Prose Enhancement`, `Dialogue Enhancement`, or `Enhancement` row with compact text `Enhancing prose...`, `Enhancing dialogue...`, or `Enhancing response...`, not the card-batch progress label.
+The provider router first applies the shared Structured Output Recovery policy. A parser/schema correction and a Generation Review semantic correction consume the same one external correction budget. After a structurally valid result arrives, the semantic validator verifies the frozen source hash, exact target text, target non-overlap, installed card IDs, outcome labels, and evidence IDs. It may normalize only documented outcome-label aliases. Missing/invalid installed-card outcome coverage is eligible for the single semantic correction only if parser/schema recovery did not already spend it. A safe patch with unresolved coverage applies as `partial-failed`, showing red unresolved card children; source-mismatched, stale, overlapping, or otherwise unsafe patches are never applied.
+
+`As Swipe` uses a marker derived from the original text hash, frozen review snapshot hash, apply mode, Generation Review schema, anti-slop profile, installed-hand lineage, and patch-ledger hash so the same enhanced swipe can be found instead of duplicated. Markers include applied lane, pipeline provenance, recovery metadata, review-domain statuses, card outcomes, and final outcome. `Replace` writes the enhanced text into the active assistant message/swipe and asks the host adapter to save and update the visible message block best-effort. Both modes run before Rapid warm so future Rapid source revisions see the selected final text. While active, progress shows the first-class `Generation review` row with compact text `Reviewing generated response...`, not the card-batch progress label.
 
 If the player stops SillyTavern generation before Enhancements start, runtime cancels the armed pass. Any delayed assistant-landed or generation-ended event for that canceled generation must skip Enhancements, must not call enhancer roles, and must not hold, replace, reveal, or append assistant message text. The next fresh host generation clears that cancellation marker when it arms a new enhancement pass.
 

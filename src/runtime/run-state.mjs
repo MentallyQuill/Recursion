@@ -2,6 +2,7 @@ export function createRuntimeRunState() {
   let activeRunId = null;
   let activeRunController = null;
   let activeRapidWarmRun = null;
+  let activeAttempt = null;
   let hostGenerationActive = false;
   const activeRuntimeMutations = new Set();
   let activePromptMutationId = null;
@@ -14,6 +15,7 @@ export function createRuntimeRunState() {
         activeRunId,
         activeRunController,
         activeRapidWarmRun,
+        activeAttempt,
         hostGenerationActive,
         activeRuntimeMutations: activeRuntimeMutations.size,
         activeRuntimeMutationSet: activeRuntimeMutations,
@@ -31,6 +33,25 @@ export function createRuntimeRunState() {
         activeRunId = null;
         activeRunController = null;
       }
+    },
+    beginAttempt(attempt = {}) {
+      activeAttempt = {
+        runId: String(attempt.runId || ''),
+        kind: ['normal', 'swipe', 'fresh'].includes(attempt.kind) ? attempt.kind : 'normal',
+        sourceRevisionHash: String(attempt.sourceRevisionHash || ''),
+        packetId: String(attempt.packetId || ''),
+        startedAt: String(attempt.startedAt || new Date().toISOString()),
+        canceled: false
+      };
+      return activeAttempt;
+    },
+    cancelAttempt(runId = activeAttempt?.runId, reason = 'host-generation-stopped') {
+      if (!activeAttempt || (runId && String(runId) !== activeAttempt.runId)) return null;
+      activeAttempt = { ...activeAttempt, canceled: true, cancelReason: String(reason || '') };
+      return activeAttempt;
+    },
+    clearAttempt(runId = activeAttempt?.runId) {
+      if (!runId || activeAttempt?.runId === String(runId)) activeAttempt = null;
     },
     setHostGenerationActive(value) {
       hostGenerationActive = Boolean(value);

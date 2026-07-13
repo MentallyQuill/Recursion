@@ -224,6 +224,7 @@ export function buildDialogueEnhancementRequest({
   characterContext = {},
   cardContext = [],
   lane = '',
+  contextContract = null,
   reasoningCategory = 'dialogue-enhancement',
   reasoningIntent = 'minimal',
   retryReason = ''
@@ -236,15 +237,16 @@ export function buildDialogueEnhancementRequest({
     : 'Story form: infer from source text.';
   const retryLines = retryReason ? [
     '',
-    'Retry instruction:',
+    'Mandatory retry correction:',
     retryReason === 'low-dialogue-edit-ratio'
-      ? '- Your previous revision stayed too close to the source. Revise the dialogue more decisively while preserving structure, speaker intent, and character voice.'
-      : '- Your previous revision returned the original text. Produce a real dialogue revision candidate while preserving all hard rules.'
+      ? '- Your previous revision stayed too close to the source. Replace at least one complete dialogue line with a materially distinct, character-consistent line while preserving scene facts.'
+      : '- Your previous response was rejected because it reproduced the input. Replace at least one complete dialogue line. An identical text field is a failed response.'
   ] : [];
   const prompt = [
     'You are a dialogue consistency editor.',
-    'Your job is to repair dialogue in <text_to_transform> without improving general prose.',
+    'Your job is to repair dialogue in <text_to_transform> without improving general prose. Return a concrete, safe revision whenever dialogue exists.',
     'Return the full assistant message with repaired dialogue, not a diff.',
+    ...(retryLines.length ? retryLines : []),
     '',
     'Hard rules:',
     '- Edit dialogue and only the smallest necessary dialogue-adjacent beat.',
@@ -252,6 +254,7 @@ export function buildDialogueEnhancementRequest({
     '- Do not add facts, decisions, consent changes, relationship progress, names, locations, objects, or outcomes.',
     '- Do not make characters warmer, more helpful, more articulate, more romantic, or more emotionally honest unless character evidence supports it.',
     '- Preserve unresolved pressure unless character evidence supports resolution.',
+    '- Do not return the source text unchanged. Make the smallest defensible dialogue revision.',
     '',
     'Priority order for character signals:',
     '1. Example dialogue.',
@@ -276,7 +279,7 @@ export function buildDialogueEnhancementRequest({
     '- If the source is short or structurally constrained, come as close to the target band as possible without breaking the hard rules.',
     '- Always produce the best dialogue-focused revision candidate.',
     '- If the dialogue is already strong, make subtle improvements through compression, rhythm, subtext, implication, character-specific word choice, or sharper response to the emotional pressure.',
-    '- If no safe improvement is available, return the source unchanged and report no_safe_change rather than inventing content.',
+    '- Do not use no_safe_change or return the source unchanged. Apply the smallest safe, character-consistent revision.',
     '- Optional diagnostics are allowed in changePlan, but the text field is the only applied output.',
     '',
     'Allowed dialogue edit levers:',
@@ -308,12 +311,11 @@ export function buildDialogueEnhancementRequest({
     '<scene_context>',
     sceneContext,
     '</scene_context>',
-    ...retryLines,
     '<text_to_transform>',
     targetText,
     '</text_to_transform>',
     '',
-    `Return strict JSON only: {"schema":"${DIALOGUE_ENHANCER_SCHEMA}","text":"rewritten full assistant message","changePlan":{"changed":true,"targets":["forced-question"],"noChangeReason":""}}. No explanations, no notes, no commentary.`
+    `Return strict JSON only: {"schema":"${DIALOGUE_ENHANCER_SCHEMA}","text":"rewritten full assistant message","changePlan":{"changed":true,"targets":["forced-question"],"noChangeReason":""}}. The text field must differ from the input. No explanations, no notes, no commentary.`
   ].join('\n');
   return {
     prompt,
@@ -337,7 +339,8 @@ export function buildDialogueEnhancementRequest({
         text: safeText(card?.text || card?.summary || '', 700)
       }))
       .filter((card) => card.family && card.text),
-    contextMessages: (Array.isArray(contextMessages) ? contextMessages : []).slice(-limit)
+    contextMessages: (Array.isArray(contextMessages) ? contextMessages : []).slice(-limit),
+    ...(contextContract ? { contextContract } : {})
   };
 }
 

@@ -1150,7 +1150,7 @@ export function createSillyTavernHost({
       if (Array.isArray(found.raw.swipes)) ensureSwipeInfoArray(found.raw);
       setRawAssistantText(found.raw, text);
       delete found.raw.__recursionHeldText;
-      found.raw.__recursionProseEnhancement = asObject(options.marker);
+      found.raw.__recursionGenerationReview = asObject(options.marker);
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
       return { ok: true, messageId: found.normalized.mesId, text: stringValue(text) };
@@ -1166,8 +1166,8 @@ export function createSillyTavernHost({
       const swipeInfo = enhancedSwipeInfo(marker);
       found.raw.swipes.push(stringValue(text));
       found.raw.swipe_info.push(swipeInfo);
-      if (!Array.isArray(found.raw.__recursionProseEnhancementSwipes)) found.raw.__recursionProseEnhancementSwipes = [];
-      found.raw.__recursionProseEnhancementSwipes[index] = marker;
+      if (!Array.isArray(found.raw.__recursionGenerationReviewSwipes)) found.raw.__recursionGenerationReviewSwipes = [];
+      found.raw.__recursionGenerationReviewSwipes[index] = marker;
       if (options.select !== false) {
         found.raw.swipe_id = index;
         setRawAssistantText(found.raw, text);
@@ -1182,8 +1182,8 @@ export function createSillyTavernHost({
     async findEnhancedSwipe(messageId, marker = {}) {
       const context = currentContext(contextFactory);
       const found = findRawAssistantMessage(context, messageId);
-      if (!found || !Array.isArray(found.raw?.__recursionProseEnhancementSwipes)) return null;
-      const markers = found.raw.__recursionProseEnhancementSwipes;
+      if (!found || !Array.isArray(found.raw?.__recursionGenerationReviewSwipes)) return null;
+      const markers = found.raw.__recursionGenerationReviewSwipes;
       for (let index = 0; index < markers.length; index += 1) {
         if (markerMatches(markers[index], marker)) {
           return { index, text: Array.isArray(found.raw.swipes) ? stringValue(found.raw.swipes[index]) : '' };
@@ -1203,7 +1203,7 @@ export function createSillyTavernHost({
       setRawAssistantText(found.raw, text);
       alignRootExtraToSwipe(found.raw, index);
       delete found.raw.__recursionHeldText;
-      if (options.marker) found.raw.__recursionProseEnhancement = asObject(options.marker);
+      if (options.marker) found.raw.__recursionGenerationReview = asObject(options.marker);
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
       await reloadCurrentChatBestEffort(context);

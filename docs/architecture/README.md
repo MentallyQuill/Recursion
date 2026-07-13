@@ -3,6 +3,7 @@
 Use this folder for implementation-facing diagrams, module boundaries, storage contracts, host integration notes, and prompt-injection contracts.
 
 - [Runtime Architecture](RUNTIME_ARCHITECTURE.md)
+- [Generation Review and Enhancement Contract](ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md)
 - [Provider and Generation Spec](PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](STORAGE_AND_DIAGNOSTICS.md)

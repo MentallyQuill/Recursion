@@ -635,6 +635,9 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   };
 }
 
+// Replaced V1 contract: dialogue/prose pass fixtures are retained as historical
+// examples until the dedicated generation-review harness supersedes them.
+if (false) {
 {
   const proseHost = createProseMessageHarness();
   const routerCalls = [];
@@ -664,10 +667,10 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   const { runtime } = createRuntimeHarness({
     settings: { enhancements: { target: 'off', applyMode: 'as-swipe', contextMessages: 13 } }
   });
-  await runtime.updateSettings({ enhancements: { target: 'prose', applyMode: 'as-swipe' } });
+  await runtime.updateSettings({ enhancements: { target: 'on', applyMode: 'as-swipe' } });
   assertDeepEqual(
     runtime.view().settings.enhancements,
-    { target: 'prose', applyMode: 'as-swipe', contextMessages: 13 },
+    { target: 'on', applyMode: 'as-swipe', contextMessages: 13 },
     'runtime safe view preserves Enhancements target for the compact bar'
   );
 }
@@ -877,9 +880,9 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-prose-skipped-after-dialogue-noop' });
-  assertEqual(result.ok, true, 'Prose + Dialogue completes after dialogue no-op');
-  assertDeepEqual(roleCalls, ['dialogueEnhancer', 'proseEnhancer'], 'Prose pass runs after dialogue no-op');
-  assertDeepEqual(result.passResults.map((entry) => entry.status), ['unchanged', 'unchanged'], 'Enhancement reports both selected passes as unchanged');
+  assertEqual(result.ok, false, 'Prose + Dialogue fails when both paid passes remain unchanged after retry');
+  assertDeepEqual(roleCalls, ['dialogueEnhancer', 'dialogueEnhancer', 'proseEnhancer', 'proseEnhancer'], 'Each selected pass retries once after an exact no-op');
+  assertDeepEqual(result.passResults.map((entry) => entry.status), ['validation-failed', 'validation-failed'], 'Enhancement reports unchanged selected passes as explicit failures');
 }
 
 {
@@ -932,8 +935,8 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-noop-detected-slop' });
-  assertEqual(result.ok, true, 'detected dialogue slop exact no-op completes after retry');
-  assertEqual(result.unchanged, true, 'detected dialogue slop exact no-op reports unchanged');
+  assertEqual(result.ok, false, 'detected dialogue slop exact no-op fails after retry');
+  assertEqual(result.error?.code, 'RECURSION_ENHANCEMENT_PASS_FAILED', 'detected dialogue slop reports the unchanged pass failure');
   assertEqual(routerCalls.length, 2, 'detected dialogue slop exact no-op retries once');
   assertEqual(proseHost.message.swipes.length, 1, 'failed dialogue no-op does not append enhanced swipe');
   assertEqual(proseHost.message.text, 'Mara set the cup down. "What do you want to do next?"', 'failed dialogue no-op keeps original text');
@@ -959,9 +962,9 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-clean-noop' });
-  assertEqual(result.ok, true, 'clean dialogue exact no-op completes without retry');
-  assertEqual(result.unchanged, true, 'clean dialogue exact no-op reports unchanged');
-  assertEqual(routerCalls.length, 1, 'clean dialogue exact no-op does not spend a retry');
+  assertEqual(result.ok, false, 'clean dialogue exact no-op fails after retry');
+  assertEqual(result.error?.code, 'RECURSION_ENHANCEMENT_PASS_FAILED', 'clean dialogue exact no-op reports the unchanged pass failure');
+  assertEqual(routerCalls.length, 2, 'clean dialogue exact no-op spends one retry');
   assertEqual(proseHost.message.swipes.length, 1, 'clean dialogue exact no-op does not append duplicate swipe');
 }
 
@@ -987,10 +990,9 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-clean-noop-retries' });
-  assertEqual(result.ok, true, 'clean dialogue no-op completes without forcing a revision');
-  assertEqual(result.unchanged, true, 'clean dialogue no-op reports unchanged');
-  assertEqual(routerCalls.length, 1, 'clean dialogue no-op does not retry');
-  assertEqual(proseHost.message.swipes.length, 1, 'clean dialogue no-op does not append a duplicate swipe');
+  assertEqual(result.ok, true, 'clean dialogue no-op accepts a revision from its retry');
+  assertEqual(routerCalls.length, 2, 'clean dialogue no-op retries once');
+  assertEqual(proseHost.message.swipes.length, 2, 'clean dialogue retry appends the real enhanced swipe');
 }
 
 {
@@ -1013,9 +1015,9 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-dialogue-exact-noop-skips-after-retry' });
-  assertEqual(result.ok, true, 'Dialogue exact no-op completes without retry');
-  assertEqual(result.unchanged, true, 'Dialogue exact no-op reports unchanged');
-  assertEqual(routerCalls.length, 1, 'Dialogue exact no-op does not retry without an identified issue');
+  assertEqual(result.ok, false, 'Dialogue exact no-op fails after the required retry');
+  assertEqual(result.error?.code, 'RECURSION_ENHANCEMENT_PASS_FAILED', 'Dialogue exact no-op reports an explicit pass failure');
+  assertEqual(routerCalls.length, 2, 'Dialogue exact no-op retries once before failing');
   assertEqual(proseHost.message.swipes.length, 1, 'exact duplicate enhanced swipe is not appended');
 }
 
@@ -1244,8 +1246,8 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-as-swipe-unchanged' });
-  assertEqual(result.ok, true, 'identical As Swipe prose enhancement completes as unchanged');
-  assertEqual(result.unchanged, true, 'identical As Swipe reports unchanged');
+  assertEqual(result.ok, false, 'identical As Swipe prose enhancement fails after its required retry');
+  assertEqual(result.error?.code, 'RECURSION_ENHANCEMENT_PASS_FAILED', 'identical As Swipe reports an explicit unchanged-pass failure');
   assertEqual(proseHost.calls.some((call) => call.type === 'append' && call.options.select === true), false, 'identical As Swipe does not append an unchanged swipe');
   assertEqual(proseHost.message.swipes.length, 1, 'identical As Swipe keeps only the original swipe');
   assertEqual(proseHost.message.swipeId, 0, 'identical As Swipe keeps the original selected');
@@ -1432,6 +1434,113 @@ assertNotEqual(
   const warmResult = await warm;
   assertEqual(warmResult.ok, true, 'Rapid warm resumes after prose enhancement settles');
   assert(roleCalls.includes('utilityArbiter'), 'Rapid warm calls Utility Arbiter after prose enhancement settles');
+}
+
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara crossed the room. "Keep the door shut," Mara said.');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'on', applyMode: 'as-swipe', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.generationReview.v1',
+            sourceHash: proseHost.message.originalHash,
+            assessment: { response: 'repaired' },
+            reviewDomains: { dialogue: 'repaired', 'anti-slop': 'honored' },
+            cardOutcomes: [],
+            patches: [{
+              id: 'dialogue:1',
+              domain: 'dialogue',
+              before: '"Keep the door shut,"',
+              after: '"Keep the door shut," Mara said quietly.',
+              reason: 'Adds a bounded delivery cue.',
+              cardRefs: []
+            }]
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-generation-review' });
+  assertEqual(result.ok, true, 'generation review applies a valid bounded patch');
+  assertDeepEqual(routerCalls.map((call) => call.roleId), ['generationReviewer'], 'generation review makes one reviewer call');
+  assertEqual(proseHost.message.swipes.length, 2, 'As Swipe preserves the original and adds one reviewed swipe');
+  assert(proseHost.message.text.includes('said quietly'), 'generation review selects the reviewed swipe');
+}
+
+{
+  const proseHost = createProseMessageHarness('Mara crossed the room. "Keep the door shut," Mara said.');
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: { enhancements: { target: 'on', applyMode: 'as-swipe', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
+        return {
+          ok: true,
+          recoverySpent: true,
+          data: {
+            schema: 'recursion.generationReview.v1',
+            sourceHash: proseHost.message.originalHash,
+            assessment: {},
+            reviewDomains: {},
+            cardOutcomes: [],
+            patches: []
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-generation-review-budget' });
+  assertEqual(result.ok, false, 'spent structured recovery with no patch remains a failed review');
+  assertEqual(routerCalls.length, 1, 'runtime does not make a second semantic correction after router recovery spent the budget');
+}
+
+for (const pipelineMode of ['standard', 'rapid', 'fused']) {
+  const proseHost = createProseMessageHarness('Mara crossed the room. "Keep the door shut," Mara said.');
+  const routerCalls = [];
+  const { runtime, activity } = createRuntimeHarness({
+    settings: { pipelineMode, enhancements: { target: 'on', applyMode: 'as-swipe', contextMessages: 3 } },
+    hostMessages: proseHost.messages,
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push({ roleId, request });
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.generationReview.v1',
+            sourceHash: proseHost.message.originalHash,
+            assessment: {},
+            reviewDomains: {},
+            cardOutcomes: [],
+            patches: [{
+              id: 'unknown:target',
+              domain: 'dialogue',
+              before: 'not a frozen target',
+              after: 'This response must not be applied.',
+              reason: 'Invalid target regression fixture.',
+              cardRefs: []
+            }]
+          }
+        };
+      }
+    }
+  });
+  const result = await runtime.enhanceLatestAssistantMessage({ reason: `unit-${pipelineMode}-generation-review-invalid-target` });
+  assertEqual(result.ok, false, `${pipelineMode} retains the original response after reviewer correction exhaustion`);
+  assertEqual(routerCalls.length, 2, `${pipelineMode} uses exactly one semantic correction for an invalid patch target`);
+  assertEqual(proseHost.message.text, 'Mara crossed the room. "Keep the door shut," Mara said.', `${pipelineMode} retains the visible original response`);
+  assertEqual(proseHost.message.swipes.length, 1, `${pipelineMode} does not append an invalid reviewed swipe`);
+  assert(activity.history().some((event) => event.phase === 'generationReviewing' && event.severity === 'error'), `${pipelineMode} records the review failure as a red review step`);
+  assertEqual(activity.current().severity, 'success', `${pipelineMode} preserves the successful prompt-ready state after review failure`);
 }
 
 {
@@ -3401,7 +3510,7 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assert(cache.variants[preparedSwipeBRevision], 'scene cache keeps B source variant');
 }
 
-for (const pipelineMode of ['standard', 'rapid']) {
+for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   let providerCalls = 0;
   const baseSnapshot = {
     chatId: `same-turn-${pipelineMode}-chat`,
@@ -3451,6 +3560,23 @@ for (const pipelineMode of ['standard', 'rapid']) {
             }
           };
         }
+        if (roleId === 'fusedCardBundle') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.cardBundle.v1',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                schema: 'recursion.card.v1',
+                role: 'sceneFrameCard',
+                family: 'Scene Frame',
+                promptText: 'Same-turn retry card guidance.',
+                evidenceRefs: ['message:3'],
+                tokenEstimate: 8
+              }]
+            }
+          };
+        }
         if (roleId === 'guidanceComposer') {
           return {
             ok: true,
@@ -3481,9 +3607,11 @@ for (const pipelineMode of ['standard', 'rapid']) {
   assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} same-turn retry does not call providers again`);
   assertEqual(installed.length, 2, `${pipelineMode} same-turn retry reinstalls the existing packet`);
   assertEqual(installed[0].packetId, installed[1].packetId, `${pipelineMode} same-turn retry keeps packet identity`);
+  assertEqual(runtime.view().lastCacheDecision?.kind, 'swipe-packet', `${pipelineMode} same-turn retry exposes swipe cache provenance`);
+  assertEqual(runtime.view().lastCacheDecision?.decision, 'hit', `${pipelineMode} same-turn retry exposes cache hit`);
 }
 
-for (const pipelineMode of ['standard', 'rapid']) {
+for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   let providerCalls = 0;
   const userMessage = 'Retry the latest assistant response as a swipe.';
   const chatId = `latest-assistant-swipe-${pipelineMode}-chat`;
@@ -3536,6 +3664,23 @@ for (const pipelineMode of ['standard', 'rapid']) {
             }
           };
         }
+        if (roleId === 'fusedCardBundle') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.cardBundle.v1',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                schema: 'recursion.card.v1',
+                role: 'sceneFrameCard',
+                family: 'Scene Frame',
+                promptText: 'Latest assistant swipe retry card guidance.',
+                evidenceRefs: ['message:10'],
+                tokenEstimate: 8
+              }]
+            }
+          };
+        }
         if (roleId === 'guidanceComposer') {
           return {
             ok: true,
@@ -3572,12 +3717,7 @@ for (const pipelineMode of ['standard', 'rapid']) {
       activeSwipeTextHash: hashJson('Alternate assistant response.')
     }
   ]);
-  assertEqual(typeof runtime.handleLatestAssistantSwipeRetry, 'function', `${pipelineMode} exposes latest-assistant swipe retry marker`);
-  const marked = await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped', messageId: 11 });
-  assertEqual(marked.ok, true, `${pipelineMode} latest-assistant swipe retry marker succeeds`);
-  assertEqual(runtime.view().lastBrief?.status, 'clearing', `${pipelineMode} latest-assistant swipe immediately clears Last Brief visually`);
-  assertEqual(runtime.view().lastBrief?.reason, 'latest-assistant-swipe', `${pipelineMode} latest-assistant swipe records clear reason`);
-  const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
+  const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true, generationType: 'swipe' });
   assertEqual(second.ok, true, `${pipelineMode} latest-assistant swipe retry succeeds`);
   assertEqual(second.reused, true, `${pipelineMode} latest-assistant swipe retry reuses previous packet`);
   assertEqual(second.reason, 'same-turn-swipe-retry', `${pipelineMode} latest-assistant swipe retry reports reuse reason`);
@@ -10278,9 +10418,8 @@ for (const scenario of [
   assertEqual(result.ok, true, 'host generation stop cleanup returns ok');
   assertEqual(calls.clear, 1, 'host generation stop clears installed prompt');
   const cache = await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey);
-  assertEqual(cache.cacheState, 'stale', 'host generation stop marks previous active scene cache stale');
-  assertEqual(cache.invalidation.reason, 'host-generation-stopped', 'host generation stop records cache invalidation reason');
-  assertEqual(cache.invalidation.details.eventName, 'generation_stopped', 'host generation stop stores safe event name');
+  assertEqual(cache.cacheState, 'active', 'host generation stop preserves previous active scene cache');
+  assertEqual(cache.invalidation, undefined, 'host generation stop does not invent cache invalidation');
   const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
   assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'host-generation-stopped'), 'host generation stop records prompt clear journal');
   assertEqual(runtime.view().lastSnapshot?.chatKey, setupSnapshot.chatKey, 'host generation stop preserves previous snapshot after journaling');

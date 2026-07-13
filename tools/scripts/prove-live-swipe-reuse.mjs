@@ -119,6 +119,24 @@ function proofScript() {
                 }
               };
             }
+            if (roleId === 'fusedCardBundle') {
+              return {
+                ok: true,
+                data: {
+                  schema: 'recursion.cardBundle.v1',
+                  snapshotHash: request.snapshotHash,
+                  items: [{
+                    schema: 'recursion.card.v1',
+                    family: 'Scene Frame',
+                    role: 'sceneFrameCard',
+                    promptText: 'Served browser swipe proof card.',
+                    summary: 'Served browser swipe proof card.',
+                    evidenceRefs: ['message:10'],
+                    tokenEstimate: 8
+                  }]
+                }
+              };
+            }
             if (roleId === 'guidanceComposer') {
               return {
                 ok: true,
@@ -175,8 +193,7 @@ function proofScript() {
           }
         ]
       };
-      await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped' });
-      const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
+      const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true, generationType: 'swipe' });
       return {
         pipelineMode,
         firstOk: first.ok === true,
@@ -192,16 +209,21 @@ function proofScript() {
 
     const servedStandard = await proveServedRuntimePipeline('standard');
     const servedRapid = await proveServedRuntimePipeline('rapid');
+    const servedFused = await proveServedRuntimePipeline('fused');
     return {
       ok: servedStandard.reused
         && servedRapid.reused
+        && servedFused.reused
         && servedStandard.providerCallsSecond === 0
         && servedRapid.providerCallsSecond === 0
+        && servedFused.providerCallsSecond === 0
         && servedStandard.packetIdStable
-        && servedRapid.packetIdStable,
+        && servedRapid.packetIdStable
+        && servedFused.packetIdStable,
       mode: 'served-runtime-playwright',
       standard: servedStandard,
-      rapid: servedRapid
+      rapid: servedRapid,
+      fused: servedFused
     };
   };
 }

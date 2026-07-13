@@ -31,16 +31,16 @@ Recursion should use its own chat-attached top bar instead of adopting the Direc
 Default desktop shape:
 
 ```text
-[power] [pipeline icon] [mode icon] [cards] [prose] [tense/PoV] | [Hero Pixel Array] Selecting turn hand... [stop]    [reasoning] v | ...
+[power] [pipeline icon] [mode icon] [cards] [enhancement] [tense/PoV] | [Hero Pixel Array] Selecting turn hand... [stop]    [reasoning] v | ...
 ```
 
 Narrow/mobile shape:
 
 ```text
-[power] [pipeline] [mode] [cards] [prose] [form] | [Hero Pixel Array] Selecting... [stop]     v | ...
+[power] [pipeline] [mode] [cards] [enhancement] [form] | [Hero Pixel Array] Selecting... [stop]     v | ...
 ```
 
-The desktop bar uses one compact row with distinct zones for power, pipeline, mode, card scope, prose enhancement, story form, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
+The desktop bar uses one compact row with distinct zones for power, pipeline, mode, card scope, Generation Review and Enhancement, story form, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
 
 The exact copyable HTML/CSS snapshot for this V1 bar lives in `docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md`. Treat that file as the implementation reference for reproducing the current mock in SillyTavern: it captures the final class names, inline SVG icons, Hero Pixel Array, progress menu, mode menu, Last Brief dropdown, Prompt Packet panel, metachips, and 12px active progress spinner treatment.
 
@@ -49,10 +49,10 @@ Recursion chrome should use explicit compact font sizing instead of inheriting S
 Canonical desktop layout:
 
 ```text
-[power] [pipeline] [mode arrows] [cards] [prose] [form] | [blocks] Selecting turn hand... [stop] [reasoning] v | ...
-[power] [pipeline] [mode arrows] [cards] [prose] [form] | [blocks] Installing prompt...   [stop] [reasoning] v | ...
-[power] [pipeline] [mode arrows] [cards] [prose] [form] | [blocks] Manual scope active...  [reasoning] Cards v | ...
-[power-off] [pipeline] [mode arrows] [cards] [prose-off] [form] |                         [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] [enhancement] [form] | [blocks] Selecting turn hand... [stop] [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] [enhancement] [form] | [blocks] Installing prompt...   [stop] [reasoning] v | ...
+[power] [pipeline] [mode arrows] [cards] [enhancement] [form] | [blocks] Manual scope active...  [reasoning] Cards v | ...
+[power-off] [pipeline] [mode arrows] [cards] [enhancement-off] [form] |                         [reasoning] v | ...
 ```
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
@@ -158,15 +158,13 @@ Reference mode selector CSS:
 
 The card scope selector is an icon-only stacked-cards button in the left bar flow. It sits immediately to the right of Mode and to the left of Enhancements. Its accessible label and tooltip carry the meaning; it must not render a visible `Cards` title or selected-count text in the compact bar.
 
-Enhancements is an icon-only upgrade button immediately to the right of Cards and immediately to the left of Tense & PoV. It uses the repo-local `assets/icons/upgrade.svg` mask icon, opens a compact dropdown, and exposes an apply segmented control followed by target rows with mini-descriptions:
+Enhancement is an icon-only upgrade button immediately to the right of Cards and immediately to the left of Tense & PoV. It uses the repo-local `assets/icons/upgrade.svg` mask icon and opens a compact dropdown with one on/off state and an apply segmented control:
 
 - Apply: `As Swipe` keeps the original output, adds an enhanced sibling swipe, and selects it; `Replace` replaces the active output with the enhanced text.
 - `Off`: leave SillyTavern output unchanged.
-- `Prose`: run the prose polish pass.
-- `Dialogue`: run the dialogue anti-slop and natural-subtext pass.
-- `Prose + Dialogue`: run Dialogue first, then Prose on the resulting text.
+- `On`: run one card-aware Generation Review and Enhancement against the frozen host response. It reviews prose, dialogue, pacing, subtext, scene/card fidelity, and anti-slop together, then returns only validated local dialogue or prose patches.
 
-When set to `Off`, the Enhancements icon uses the same muted/grey disabled treatment as the off power toggle. The compact bar does not expose a Recast-style pass editor. The only numeric Enhancements setting belongs in Advanced settings as context message count.
+When set to `Off`, the Enhancement icon uses the same muted/grey disabled treatment as the off power toggle. The compact bar does not expose a Recast-style pass editor. The only numeric Enhancement setting belongs in Advanced settings as context message count.
 
 The Tense & PoV selector sits immediately to the right of Enhancements and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `PaM`, `Pr1`, `Pr2`, `Pr3L`, `Pr3O`, or `PrM` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, `Tense & PoV: Present Mixed`, and equivalent options.
 
@@ -253,9 +251,9 @@ The Hero Pixel Array and progress menu must render from the same normalized `pro
 
 Fused progress treats `Fused card bundle` as the single parent row for the bundle provider call. The bundle provider role must not also appear as a child row. Fused child rows appear only after there is material card-family progress, such as accepted bundle items under `Fused card bundle` or repaired siblings under `Utility card batch`; the menu must not seed speculative pending children for every requested family while the bundle is still unresolved.
 
-Enhancements are post-generation provider passes with their own top-level rows: `Prose Enhancement`, `Dialogue Enhancement`, or `Enhancement` for combined Prose + Dialogue. Low and Medium route them through Utility; High and Ultra route them through Reasoner when that lane is available. While running, compact current-step text is `Enhancing prose...`, `Enhancing dialogue...`, or `Enhancing response...`; it must not reuse `Utility card batch`, seed prompt-install rows, or imply that a card batch is running.
+Enhancement is one post-generation provider pass with a top-level `Generation review` row. Low and Medium route it through Utility; High and Ultra route it through Reasoner when that lane is available. SillyTavern's original response remains visible while review runs; Recursion never hides or replaces streaming text before the review has produced a validated revision. While running, compact current-step text is `Reviewing generated response...`; it must not reuse `Utility card batch`, seed prompt-install rows, or imply that a card batch is running. The progress tree owns `Card and scene fidelity`, card-outcome children, `Narrative execution`, `Anti-slop`, `Applying revisions`, and `Enhanced swipe`/`Replace` outcome rows. A failed review is a red review row with its reason, while the already installed `Recursion prompt ready` state remains green and the original response stays selected.
 
-If Dialogue Enhancement returns exact duplicate text after its retry, the failure surface should use `Dialogue unchanged. Original kept.` and must not append a duplicate enhanced swipe. Validation failures and provider failures are terminal failures, not amber cautions.
+An unchanged or unsafe review result must not append a duplicate enhanced swipe. Parser/schema recovery and review-semantic recovery share one external correction budget. A recovered valid result is amber with a compact retry reason; incomplete installed-card coverage after that one budget is `partial-failed`, with red unresolved card children. Validation failures and provider failures are terminal failures, not amber cautions.
 
 The compact bar, progress panel, and cards panel should consume stable presenter state derived from the shared Recursion view model. DOM rendering may remain in the main UI module while presenter modules stay pure and testable.
 

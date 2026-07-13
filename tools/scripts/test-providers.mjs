@@ -43,8 +43,7 @@ function responseSchemaForRole(roleId) {
   if (roleId === 'rapidTurnDelta') return 'recursion.rapidTurnDelta.v2';
   if (roleId === 'guidanceComposer') return 'recursion.guidanceComposer.v1';
   if (roleId === 'cardAuthoringAssist') return 'recursion.cardAuthoringAssist.v1';
-  if (roleId === 'dialogueEnhancer') return 'recursion.dialogueEnhancer.v1';
-  if (roleId === 'proseEnhancer') return 'recursion.proseEnhancer.v1';
+  if (roleId === 'generationReviewer') return 'recursion.generationReview.v1';
   if (roleId === 'fusedCardBundle') return 'recursion.cardBundle.v1';
   if (roleId === 'providerTest') return 'recursion.providerTest.v1';
   return 'recursion.card.v1';
@@ -81,8 +80,7 @@ const expectedUtilityRoles = [
   'rapidTurnDelta',
   'guidanceComposer',
   'cardAuthoringAssist',
-  'dialogueEnhancer',
-  'proseEnhancer',
+  'generationReviewer',
   'providerTest'
 ];
 assertDeepEqual(UTILITY_ROLE_IDS, expectedUtilityRoles, 'utility role catalog exactly matches Task 6 plan');
@@ -228,19 +226,16 @@ assertEqual(calls.at(-1).responseSchema, 'recursion.guidanceComposer.v1', 'guida
 await router.generate('cardAuthoringAssist', { prompt: 'Card authoring assist' });
 assertEqual(calls.at(-1).lane, 'utility', 'cardAuthoringAssist uses utility lane');
 assertEqual(calls.at(-1).responseSchema, 'recursion.cardAuthoringAssist.v1', 'cardAuthoringAssist request carries expected response schema');
-await router.generate('dialogueEnhancer', { prompt: 'Dialogue enhancement' });
-assertEqual(calls.at(-1).lane, 'utility', 'dialogueEnhancer uses utility lane');
-assertEqual(calls.at(-1).responseSchema, 'recursion.dialogueEnhancer.v1', 'dialogueEnhancer request carries expected response schema');
-await router.generate('proseEnhancer', { prompt: 'Prose enhancement' });
-assertEqual(calls.at(-1).lane, 'utility', 'proseEnhancer uses utility lane');
-assertEqual(calls.at(-1).responseSchema, 'recursion.proseEnhancer.v1', 'proseEnhancer request carries expected response schema');
+await router.generate('generationReviewer', { prompt: 'Generation review' });
+assertEqual(calls.at(-1).lane, 'utility', 'generationReviewer uses utility lane');
+assertEqual(calls.at(-1).responseSchema, 'recursion.generationReview.v1', 'generationReviewer request carries expected response schema');
 await router.generate('fusedCardBundle', { prompt: 'Fused card bundle', snapshotHash: 'fused-provider-hash' });
 assertEqual(calls.at(-1).lane, 'utility', 'fusedCardBundle uses utility lane by default');
 assertEqual(calls.at(-1).responseSchema, 'recursion.cardBundle.v1', 'fusedCardBundle request carries card-bundle response schema');
 assertEqual(calls.at(-1).machineJson, true, 'fusedCardBundle request marks machine JSON calls');
 assertEqual(machineJsonSchemaForRequest(calls.at(-1)).schema.properties.schema.const, 'recursion.cardBundle.v1', 'fusedCardBundle machine schema constrains bundle schema');
 
-const proseTextRouter = createGenerationRouter({
+const rawReviewRouter = createGenerationRouter({
   client: {
     async generate() {
       return {
@@ -251,28 +246,9 @@ const proseTextRouter = createGenerationRouter({
     }
   }
 });
-const proseTextResult = await proseTextRouter.generate('proseEnhancer', { prompt: 'Return rewritten text.' });
-assertEqual(proseTextResult.ok, true, 'proseEnhancer accepts raw rewritten text when provider ignores JSON');
-assertEqual(proseTextResult.data.schema, 'recursion.proseEnhancer.v1', 'proseEnhancer raw text fallback wraps schema');
-assertEqual(proseTextResult.data.text, 'Mara crossed the room and stopped at the handle.', 'proseEnhancer raw text fallback preserves visible text');
-assertEqual(proseTextResult.diagnostics.textFallback, true, 'proseEnhancer raw text fallback is diagnostic');
-
-const dialogueTextRouter = createGenerationRouter({
-  client: {
-    async generate() {
-      return {
-        text: 'Mara kept her hand on the latch. "Leave it."',
-        providerId: 'fake-host',
-        model: 'fake-model'
-      };
-    }
-  }
-});
-const dialogueTextResult = await dialogueTextRouter.generate('dialogueEnhancer', { prompt: 'Return rewritten dialogue.' });
-assertEqual(dialogueTextResult.ok, true, 'dialogueEnhancer accepts raw rewritten text when provider ignores JSON');
-assertEqual(dialogueTextResult.data.schema, 'recursion.dialogueEnhancer.v1', 'dialogueEnhancer raw text fallback wraps schema');
-assertEqual(dialogueTextResult.data.text, 'Mara kept her hand on the latch. "Leave it."', 'dialogueEnhancer raw text fallback preserves visible text');
-assertEqual(dialogueTextResult.diagnostics.textFallback, true, 'dialogueEnhancer raw text fallback is diagnostic');
+const rawReviewResult = await rawReviewRouter.generate('generationReviewer', { prompt: 'Return a patch ledger.' });
+assertEqual(rawReviewResult.ok, false, 'generationReviewer rejects raw text because a patch ledger is required');
+assertEqual(rawReviewResult.error.code, 'RECURSION_JSON_PARSE_FAILED', 'generationReviewer raw text has a stable parse error');
 
 store.update({ reasonerUse: 'always' });
 store.updateProvider('reasoner', { enabled: true });
@@ -494,10 +470,54 @@ const formatRetried = await formatRetryRouter.generate('utilityArbiter', {
 assertEqual(formatRetried.ok, true, 'structured-output schema mismatch retries once');
 assertEqual(formatRetryAttempts, 2, 'structured-output retry makes exactly one retry attempt');
 assertEqual(formatRetried.diagnostics.retryCount, 1, 'structured-output retry records retry count');
+assertEqual(formatRetried.recoverySpent, true, 'structured-output retry marks the shared recovery budget spent');
+assertEqual(formatRetried.diagnostics.structuredOutputRecovery, 'slot_correction_retry', 'structured-output retry has stable recovery metadata');
 assert(formatRetryPrompts[1].includes('Previous response was rejected'), 'structured-output retry adds correction prompt');
 assert(formatRetryPrompts[1].includes('recursion.utilityArbiter.v1'), 'structured-output retry names expected schema');
 assert(formatRetryPrompts[1].includes('"schema": "recursion.utilityArbiter.v1"'), 'structured-output retry spells out schema field');
 assert(formatRetryPrompts[1].includes('"snapshotHash": "retry-snapshot-hash"'), 'structured-output retry spells out snapshot hash field');
+
+let noStructuredRecoveryAttempts = 0;
+const noStructuredRecovery = await createGenerationRouter({
+  client: {
+    async generate() {
+      noStructuredRecoveryAttempts += 1;
+      return { text: '{"schema":"wrong.schema"}', providerId: 'fake-host', model: 'fake-model' };
+    }
+  }
+}).generate('generationReviewer', { prompt: 'Do not spend another recovery request.' }, { allowStructuredRecovery: false });
+assertEqual(noStructuredRecovery.ok, false, 'explicitly spent recovery budget rejects a second structured retry');
+assertEqual(noStructuredRecoveryAttempts, 1, 'spent recovery budget does not make a second provider call');
+assertEqual(noStructuredRecovery.recoverySpent, true, 'result retains caller-provided recovery-spent state');
+
+const slotBatchCalls = [];
+const slotRecoveryRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      throw new Error('single generation is not expected');
+    },
+    async batch(requests) {
+      slotBatchCalls.push(requests);
+      if (slotBatchCalls.length === 1) {
+        return [
+          { text: responseTextForRole('sceneFrameCard'), providerId: 'fake-host', model: 'fake-model' },
+          { text: '{"schema":"wrong.schema"}', providerId: 'fake-host', model: 'fake-model' }
+        ];
+      }
+      return [{ text: responseTextForRole('sceneConstraintsCard'), providerId: 'fake-host', model: 'fake-model' }];
+    }
+  }
+});
+const slotRecovered = await slotRecoveryRouter.batch([
+  { roleId: 'sceneFrameCard', prompt: 'Scene Frame' },
+  { roleId: 'sceneConstraintsCard', prompt: 'Scene Constraints' }
+]);
+assertEqual(slotBatchCalls.length, 2, 'one invalid structured batch slot gets one correction batch');
+assertEqual(slotBatchCalls[1].length, 1, 'valid batch sibling is not reissued');
+assertEqual(slotRecovered[0].diagnostics.retryCount, 0, 'initial valid batch sibling remains clean');
+assertEqual(slotRecovered[1].ok, true, 'corrected batch slot succeeds');
+assertEqual(slotRecovered[1].diagnostics.retryCount, 1, 'corrected batch slot records one retry');
+assertEqual(slotRecovered[1].diagnostics.structuredOutputRecovery, 'slot_correction_retry', 'corrected batch slot records structured recovery');
 
 let retryAttempts = 0;
 const retryHost = {
@@ -964,12 +984,17 @@ assertDeepEqual(
   'stale batch retry guard receives pending batch entries'
 );
 
+let malformedSlotBatchCalls = 0;
 const routerMalformedSlot = await createGenerationRouter({
   client: {
     async generate() {
       throw new Error('single generate should not be used for malformed batch test');
     },
     async batch() {
+      malformedSlotBatchCalls += 1;
+      if (malformedSlotBatchCalls > 1) {
+        return [{ text: 'not-json', roleId: 'providerTest', lane: 'utility', providerId: 'fake-host', model: 'fake-model' }];
+      }
       return [
         { text: responseTextForRole('utilityArbiter'), roleId: 'utilityArbiter', lane: 'utility', providerId: 'fake-host', model: 'fake-model' },
         { text: 'not-json', roleId: 'providerTest', lane: 'utility', providerId: 'fake-host', model: 'fake-model' }
@@ -986,12 +1011,17 @@ assertEqual(routerMalformedSlot[1].error.code, 'RECURSION_JSON_PARSE_FAILED', 'r
 
 const routerBatchLeakActivity = createActivityReporter();
 const routerBatchLeakJournal = [];
+let routerBatchLeakCalls = 0;
 const routerBatchLeak = await createGenerationRouter({
   client: {
     async generate() {
       throw new Error('single generate should not be used for leak batch test');
     },
     async batch() {
+      routerBatchLeakCalls += 1;
+      if (routerBatchLeakCalls > 1) {
+        return [{ text: 'RAW_BATCH_RESPONSE_MARKER_42 not json', roleId: 'providerTest', lane: 'utility', providerId: 'fake-host', model: 'fake-model' }];
+      }
       return [
         { text: responseTextForRole('utilityArbiter'), roleId: 'utilityArbiter', lane: 'utility', providerId: 'fake-host', model: 'fake-model' },
         { text: 'RAW_BATCH_RESPONSE_MARKER_42 not json', roleId: 'providerTest', lane: 'utility', providerId: 'fake-host', model: 'fake-model' }

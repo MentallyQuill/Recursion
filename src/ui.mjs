@@ -99,22 +99,10 @@ const ENHANCEMENT_TARGET_OPTIONS = Object.freeze([
     tip: 'Shows the SillyTavern generation unchanged.'
   },
   {
-    value: 'prose',
-    label: 'Prose',
-    title: 'Improve prose rhythm.',
-    tip: 'Polishes narration and style while preserving events and dialogue intent.'
-  },
-  {
-    value: 'dialogue',
-    label: 'Dialogue',
-    title: 'Improve dialogue.',
-    tip: 'Removes dialogue slop and pushes speech toward natural subtext.'
-  },
-  {
-    value: 'prose-dialogue',
-    label: 'Prose + Dialogue',
-    title: 'Improve dialogue, then prose.',
-    tip: 'Runs dialogue cleanup first, then prose polish on the final text.'
+    value: 'on',
+    label: 'Enhancement',
+    title: 'Review and improve the completed generation.',
+    tip: 'Reviews the installed card hand, prose, dialogue, pacing, and anti-slop rules in one bounded pass.'
   }
 ]);
 const ENHANCEMENT_APPLY_OPTIONS = Object.freeze([
@@ -257,8 +245,8 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   maxCards: 'Upper Manual card-selection cap and Ultra Reasoning Level card target. Medium and High use the average, so this also sets the upper range for busier scenes.',
   focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, constraints, scene, or plot without becoming a hard whitelist.',
   footprint: 'Prompt budget for the composed Recursion packet. Compact spends fewer tokens, Rich preserves more scene detail when the moment is complex.',
-  enhancements: 'Optional post-generation pass that improves prose, dialogue, or both after the host writes. Low and Medium use Utility; High and Ultra use Reasoner.',
-  proseContextMessages: 'Recent visible messages sent with the assistant output so the enhancement pass can match local tone without reading the whole chat.',
+  enhancements: 'Optional post-generation review that checks the installed card hand, prose, dialogue, pacing, and anti-slop rules before applying bounded revisions.',
+  proseContextMessages: 'Recent visible messages sent with the generated response so the review can check continuity without reading the whole chat.',
   injection: 'Compatibility controls for where the final composed Recursion packet lands in SillyTavern. These do not create per-card prompt controls.',
   injectionPlacement: 'Choose the SillyTavern prompt lane for the composed Recursion packet. In Prompt is the recommended default; In Chat can help presets that weight recent chat harder.',
   injectionRole: 'Role SillyTavern assigns to Recursion prompt blocks. System is safest for instruction-like scene guidance; User or Assistant exist for preset compatibility.',
@@ -381,9 +369,7 @@ function modeLabel(value) {
 
 function normalizeEnhancementTarget(value) {
   const target = cleanText(value, 'off').toLowerCase();
-  if (target === 'prose') return 'prose';
-  if (target === 'dialogue') return 'dialogue';
-  if (target === 'prose-dialogue') return 'prose-dialogue';
+  if (target === 'on' || target === 'prose' || target === 'dialogue' || target === 'prose-dialogue') return 'on';
   return 'off';
 }
 
@@ -393,11 +379,7 @@ function normalizeEnhancementApplyMode(value) {
 }
 
 function enhancementTargetLabel(value) {
-  const target = normalizeEnhancementTarget(value);
-  if (target === 'prose') return 'Prose';
-  if (target === 'dialogue') return 'Dialogue';
-  if (target === 'prose-dialogue') return 'Prose + Dialogue';
-  return 'Off';
+  return normalizeEnhancementTarget(value) === 'on' ? 'Enhancement' : 'Off';
 }
 
 function enhancementApplyModeLabel(value) {
@@ -406,19 +388,9 @@ function enhancementApplyModeLabel(value) {
 
 function enhancementTargetIcon(option) {
   const target = normalizeEnhancementTarget(option?.value);
-  if (target === 'prose-dialogue') {
+  if (target === 'on') {
     return el('span', {
-      className: 'recursion-enhancements-choice-symbol is-combo',
-      attrs: { 'aria-hidden': 'true' },
-      dataset: { recursionEnhancementTargetIcon: target }
-    }, [
-      el('span', { className: 'recursion-enhancements-choice-symbol-part is-prose' }),
-      el('span', { className: 'recursion-enhancements-choice-symbol-part is-dialogue' })
-    ]);
-  }
-  if (target === 'prose' || target === 'dialogue') {
-    return el('span', {
-      className: `recursion-enhancements-choice-symbol is-${target}`,
+      className: 'recursion-enhancements-choice-symbol is-on',
       attrs: { 'aria-hidden': 'true' },
       dataset: { recursionEnhancementTargetIcon: target }
     });
@@ -770,9 +742,8 @@ function enhancementApplyChoice(option) {
 }
 
 function enhancementTargetChoice(option) {
-  const isCombo = normalizeEnhancementTarget(option?.value) === 'prose-dialogue';
   return el('button', {
-    className: isCombo ? 'recursion-enhancements-choice is-combo' : 'recursion-enhancements-choice',
+    className: 'recursion-enhancements-choice',
     attrs: {
       type: 'button',
       title: option.title,
@@ -1916,6 +1887,13 @@ function renderHandDropdown(panel, view, model, options = {}) {
     packetButton.setAttribute('disabled', 'disabled');
   }
   setTooltip(packetButton, model.tooltipsEnabled, briefPacket ? 'Open injected prompt packet' : 'No prompt packet has been composed yet.');
+  const cacheDecision = model.lastCacheDecision?.decision === 'hit'
+    ? (model.lastCacheDecision?.kind === 'swipe-packet' ? 'swipe reused' : 'cached')
+    : '';
+  const sourceWindow = model.contextContract?.sourceWindow;
+  const sourceSummary = sourceWindow?.actualMessages
+    ? `source ${sourceWindow.actualMessages}/${sourceWindow.configuredMessages}`
+    : '';
   panel.appendChild(el('div', { className: 'recursion-brief-head' }, [
     el('span', {
       className: 'recursion-dropdown-title',
@@ -1924,7 +1902,7 @@ function renderHandDropdown(panel, view, model, options = {}) {
     el('span', {
       className: 'recursion-brief-summary',
       text: cards.length
-        ? `${cards.length} card${cards.length === 1 ? '' : 's'} - ${model.lastBriefSourceCardCount || 0} source card${model.lastBriefSourceCardCount === 1 ? '' : 's'} - coverage ${model.lastBriefCoverageStatus || 'none'}`
+        ? `${cards.length} card${cards.length === 1 ? '' : 's'} - ${model.lastBriefSourceCardCount || 0} source card${model.lastBriefSourceCardCount === 1 ? '' : 's'} - coverage ${model.lastBriefCoverageStatus || 'none'}${cacheDecision ? ` - ${cacheDecision}` : ''}${sourceSummary ? ` - ${sourceSummary}` : ''}`
         : '0 cards - waiting for composed hand'
     }),
     packetButton
@@ -4264,7 +4242,6 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const selected = choiceTarget === target;
       choice.className = [
         'recursion-enhancements-choice',
-        choiceTarget === 'prose-dialogue' ? 'is-combo' : '',
         selected ? 'is-selected' : ''
       ].filter(Boolean).join(' ');
       choice.setAttribute('aria-current', selected ? 'true' : 'false');
@@ -4283,7 +4260,6 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const selected = choiceTarget === selectedTarget;
       choice.className = [
         'recursion-enhancements-choice',
-        choiceTarget === 'prose-dialogue' ? 'is-combo' : '',
         selected ? 'is-selected' : ''
       ].filter(Boolean).join(' ');
       choice.setAttribute('aria-current', selected ? 'true' : 'false');

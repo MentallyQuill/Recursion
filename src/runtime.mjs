@@ -26,6 +26,7 @@ import {
   normalizeCardDeckSettings
 } from './card-decks.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
+import { boundEnhancementMessages, buildContextContract, contextMessageIdentity } from './context-contract.mjs';
 import { enhancementContextFromSnapshot } from './enhancement-context.mjs';
 import { ENHANCEMENT_EDIT_RATIO_MINIMUM, roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
 import { composeGuidanceForCards, composePromptPacket, GUIDANCE_SCHEMA as PROMPT_GUIDANCE_SCHEMA, PROMPT_PACKET_VERSION } from './prompt.mjs';
@@ -50,18 +51,14 @@ import { createMemoryStorageAdapter, createStorageRepository } from './storage.m
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { asObject } from './safe-values.mjs';
 import {
-  buildProseEnhancementRequest,
-  proseEnhancementKey,
-  validateProseEnhancementResult
-} from './prose-enhancement.mjs';
-import {
-  buildDialogueEnhancementRequest,
-  dialogueInterventionReasons,
-  dialogueSuspicionReasons,
-  echoedUserPhraseReasons,
-  roundedDialogueEditRatio,
-  validateDialogueEnhancementResult
-} from './dialogue-enhancement.mjs';
+  applyGenerationReviewPatches,
+  buildGenerationReviewRequest,
+  buildGenerationReviewTargets,
+  generationReviewKey,
+  generationReviewSnapshotHash,
+  publicGenerationReviewSnapshot,
+  validateGenerationReviewResult
+} from './generation-review.mjs';
 import { buildDiagnosticsPayload } from './runtime/diagnostics.mjs';
 import {
   clearJournalDetails,
@@ -82,8 +79,8 @@ const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
 const PROVIDER_TEST_RESPONSE_TOKENS = 256;
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
-const PROSE_ENHANCEMENT_TIMEOUT_MS = 120000;
-const PROSE_ENHANCEMENT_BARRIER_TIMEOUT_MS = PROSE_ENHANCEMENT_TIMEOUT_MS + 5000;
+const GENERATION_REVIEW_TIMEOUT_MS = 120000;
+const GENERATION_REVIEW_BARRIER_TIMEOUT_MS = GENERATION_REVIEW_TIMEOUT_MS + 5000;
 const STORAGE_SCHEMA_VERSION = 1;
 const RUNTIME_CACHE_CONTRACT_VERSION = 1;
 const DEFAULT_CHAT_ID = 'chat';
@@ -2081,6 +2078,7 @@ export function createRecursionRuntime({
   let lastHand = { cards: [], omitted: [] };
   let lastPlan = null;
   let lastSnapshot = null;
+  let lastCacheDecision = null;
   let lastBrief = {
     status: 'empty',
     reason: 'initial',
@@ -2279,7 +2277,7 @@ export function createRecursionRuntime({
   }
 
   function proseEnhancementEnabled(settings = settingsStore.get()) {
-    return ['prose', 'dialogue', 'prose-dialogue'].includes(enhancementTarget(settings));
+    return enhancementTarget(settings) === 'on';
   }
 
   function armProseEnhancementForHostGeneration(settings = settingsStore.get(), runId = '') {
@@ -2318,7 +2316,7 @@ export function createRecursionRuntime({
     return Boolean(pendingProseEnhancement || activeProseEnhancementPromise);
   }
 
-  async function waitForProseEnhancementBarrier(timeoutMs = PROSE_ENHANCEMENT_BARRIER_TIMEOUT_MS) {
+  async function waitForProseEnhancementBarrier(timeoutMs = GENERATION_REVIEW_BARRIER_TIMEOUT_MS) {
     const startedAt = Date.now();
     let waited = false;
     while (proseEnhancementActive()) {
@@ -2589,6 +2587,7 @@ export function createRecursionRuntime({
     lastSnapshot = null;
     lastSavedSceneCacheRef = null;
     runState.clearLatestAssistantSwipeRetry();
+    runState.clearAttempt?.();
     runState.clearFreshNextGeneration();
     clearLastBrief({ status: 'empty', reason: 'source-cleared' });
   }
@@ -2787,6 +2786,19 @@ export function createRecursionRuntime({
     return { ok: true, settings: next, clear: null };
   }
 
+  function recordCacheDecision(runId, decision = {}) {
+    lastCacheDecision = {
+      decision: safeText(decision.decision || '', 40),
+      kind: safeText(decision.kind || '', 60),
+      reason: safeText(decision.reason || '', 180),
+      variant: safeText(decision.variant || '', 40),
+      reusedCardIds: Array.isArray(decision.reusedCardIds) ? decision.reusedCardIds.map((id) => safeText(id, 160)).filter(Boolean).slice(0, 32) : [],
+      providerCallsSkipped: Array.isArray(decision.providerCallsSkipped) ? decision.providerCallsSkipped.map((role) => safeText(role, 80)).filter(Boolean).slice(0, 16) : [],
+      recordedAt: nowIso()
+    };
+    return lastCacheDecision;
+  }
+
   async function resetSettingsMenu() {
     const before = settingsStore.get();
     const next = settingsStore.resetSettingsMenu();
@@ -2944,9 +2956,11 @@ export function createRecursionRuntime({
     return {
       activeRunId: state.activeRunId,
       hostGenerationActive: state.hostGenerationActive,
+      activeAttempt: state.activeAttempt,
       lastPacket,
       lastHand,
       lastPlan,
+      lastCacheDecision,
       lastSnapshot: viewSnapshot(lastSnapshot),
       lastBrief: { ...lastBrief },
       freshNextGeneration: freshNextGenerationView(),
@@ -2958,6 +2972,7 @@ export function createRecursionRuntime({
       activityHistory: safeActivityHistory(activity),
       providerProfiles: listProviderConnectionProfilesForUi(),
       settings: safeSettingsView(settingsStore.get()),
+      contextContract: buildContextContract(lastSnapshot || {}, settingsStore.get()),
       updatedAt: nowIso()
     };
   }
@@ -3185,10 +3200,12 @@ export function createRecursionRuntime({
     chips,
     outcome = 'success',
     settleSeverity = 'success',
-    clearVolatileState = true
+    clearVolatileState = true,
+    invalidateCache = true,
+    clearSwipeRetry = true
   }) {
     const runId = makeId(idPrefix);
-    clearPendingLatestAssistantSwipeRetry();
+    if (clearSwipeRetry) clearPendingLatestAssistantSwipeRetry();
     clearPendingFreshNextGeneration();
     supersedeActiveRun();
     return trackRuntimeMutation(async () => {
@@ -3201,7 +3218,7 @@ export function createRecursionRuntime({
         label: startLabel,
         chips
       });
-      await invalidateActiveSceneCacheBestEffort(reason, invalidationDetails);
+      if (invalidateCache) await invalidateActiveSceneCacheBestEffort(reason, invalidationDetails);
       if (clearVolatileState) clearVolatileSceneState();
       const clear = await runPromptMutationSection(null, async () => {
         const clearResult = await clearPromptBestEffort(host);
@@ -3257,6 +3274,16 @@ export function createRecursionRuntime({
     if (hostStopCleanupPromise) return hostStopCleanupPromise;
     const source = asObject(details);
     const eventName = safeText(source.eventName || source.event || 'generation_stopped', 80);
+    const attempt = runState.current().activeAttempt;
+    const preserveLastKnownGood = attempt?.kind === 'swipe' && Boolean(lastPacket && lastHand?.cards?.length);
+    if (preserveLastKnownGood) {
+      runState.setLatestAssistantSwipeRetry({
+        eventName: 'message_swiped',
+        ...(details.messageId !== undefined ? { messageId: details.messageId } : {}),
+        reason: 'stopped-swipe-preserve-last-known-good',
+        recordedAt: nowIso()
+      });
+    }
     cancelPendingProseEnhancement('prose-enhancement-canceled');
     setHostGenerationActive(false);
     hostStopCleanupPromise = clearForHostEvent({
@@ -3268,12 +3295,17 @@ export function createRecursionRuntime({
         ...(source.hostStop ? { hostStop: redact(source.hostStop) } : {})
       },
       startLabel: 'Stopping Recursion after generation cancel...',
-      successLabel: 'Generation canceled. Recursion prompt cleared.',
+      successLabel: preserveLastKnownGood
+        ? 'Swipe stopped; previous context preserved.'
+        : 'Generation canceled. Recursion prompt cleared.',
       chips: ['Stop', 'Prompt'],
       outcome: 'skipped',
       settleSeverity: 'info',
-      clearVolatileState: false
+      clearVolatileState: false,
+      invalidateCache: false,
+      clearSwipeRetry: false
     }).finally(() => {
+      runState.clearAttempt?.(attempt?.runId);
       hostStopCleanupPromise = null;
     });
     return hostStopCleanupPromise;
@@ -3282,7 +3314,274 @@ export function createRecursionRuntime({
   function handleHostGenerationEnded() {
     clearPendingProseEnhancement();
     setHostGenerationActive(false);
+    runState.clearAttempt?.();
     return { ok: true };
+  }
+
+  function generationReviewInstalledHand(settings) {
+    const deck = getActiveCardDeck(settings);
+    const sourceCardsByFamily = activeCardDeckSourceCards(settings);
+    const sourceById = new Map(Object.values(sourceCardsByFamily).flat().map((card) => [String(card.id), card]));
+    const installed = [];
+    const seen = new Set();
+    for (const generated of Array.isArray(lastHand?.cards) ? lastHand.cards : []) {
+      const sourceCards = Array.isArray(generated?.sourceCards) && generated.sourceCards.length
+        ? generated.sourceCards
+        : (sourceCardsByFamily?.[generated?.family] || []);
+      for (const source of sourceCards) {
+        const card = sourceById.get(String(source?.id || '')) || source;
+        const cardId = safeText(card?.id || '', 160);
+        if (!cardId || seen.has(cardId)) continue;
+        seen.add(cardId);
+        installed.push({
+          cardId,
+          categoryId: safeText(card?.categoryId || '', 160),
+          name: safeText(card?.name || generated?.name || '', 120),
+          description: safeText(card?.description || '', 600),
+          promptText: safeText(card?.promptText || generated?.promptText || '', 1200),
+          kind: safeText(card?.kind || 'deck-card', 40),
+          selectionState: safeText(card?.selectionState || '', 40),
+          packetRefs: [safeText(generated?.id || '', 160)].filter(Boolean),
+          sourceCardIds: [cardId]
+        });
+      }
+    }
+    return {
+      deck: {
+        id: safeText(deck?.id || '', 160),
+        name: safeText(deck?.name || '', 160),
+        revisionHash: hashJson({ id: deck?.id || '', cards: deck?.cards || {}, categories: deck?.categories || {} })
+      },
+      installedHand: installed
+    };
+  }
+
+  async function runGenerationReview(details = {}) {
+    const settings = settingsStore.get();
+    const enhancementSettings = asObject(settings.enhancements);
+    const mode = enhancementApplyMode(settings);
+    const reason = safeText(details.reason || '', 80);
+    if (reason === 'assistant-message-landed' && !pendingProseEnhancement && canceledProseEnhancement) {
+      return { ok: true, skipped: true, reason: canceledProseEnhancement.reason || 'generation-review-canceled' };
+    }
+    if (!proseEnhancementEnabled(settings)) {
+      clearPendingProseEnhancement();
+      return { ok: true, skipped: true, reason: 'enhancement-off' };
+    }
+    const messages = asObject(host.messages);
+    if (typeof messages.activeAssistantMessageIdentity !== 'function') {
+      return { ok: true, skipped: true, reason: 'host-message-api-unavailable' };
+    }
+    const identity = messages.activeAssistantMessageIdentity();
+    if (!identity?.text) {
+      clearPendingProseEnhancement();
+      return { ok: true, skipped: true, reason: 'assistant-message-unavailable' };
+    }
+    const runId = makeId('generation-review');
+    const messageId = identity.messageId;
+    const originalText = String(identity.text || '');
+    const sourceHash = identity.originalHash || hashJson(originalText);
+    const lane = enhancementLaneForSettings(settings);
+    const snapshot = typeof host.snapshot === 'function' ? await host.snapshot() : {};
+    const enhancementContext = enhancementContextFromSnapshot({
+      snapshot,
+      hand: lastHand,
+      activeText: originalText,
+      activeSender: identity.sender || '',
+      contextMessageLimit: enhancementSettings.contextMessages
+    });
+    const contextContract = buildContextContract(snapshot, settings);
+    const contextMessages = boundEnhancementMessages(
+      enhancementContext.contextMessages,
+      contextContract.enhancementContext.effectiveMessages,
+      contextContract.enhancementContext.characterBudget
+    ).messages;
+    const reviewSnapshot = {
+      ...generationReviewInstalledHand(settings),
+      promptPacket: lastPacket || {},
+      lastBrief,
+      storyForm: lastPacket?.storyForm || lastPlan?.storyForm || {},
+      pipeline: settings.pipelineMode,
+      context: {
+        messages: contextMessages,
+        character: enhancementContext.characterContext || {},
+        generatedCardContext: enhancementContext.cardContext || {}
+      }
+    };
+    const publicSnapshot = publicGenerationReviewSnapshot(reviewSnapshot);
+    const snapshotHash = generationReviewSnapshotHash(publicSnapshot);
+    const marker = {
+      schema: 'recursion.generationReviewMarker.v1',
+      chatKey: identity.chatKey,
+      messageId,
+      swipeId: identity.swipeId ?? 0,
+      sourceHash,
+      snapshotHash,
+      applyMode: mode,
+      key: generationReviewKey({ chatKey: identity.chatKey, messageId, swipeId: identity.swipeId ?? 0, sourceHash, snapshotHash })
+    };
+    const existing = await messages.findEnhancedSwipe?.(messageId, marker);
+    if (existing && mode === 'as-swipe' && typeof messages.selectAssistantMessageSwipe === 'function') {
+      await messages.selectAssistantMessageSwipe(messageId, existing.index, { marker });
+      settleRuntimeActivity({ runId, phase: 'settled', severity: 'success', label: 'Generation review reused from cache.', chips: ['Enhancement', 'Cached'] });
+      clearPendingProseEnhancement();
+      return { ok: true, cached: true, mode, messageId, sourceHash, marker };
+    }
+    const targets = buildGenerationReviewTargets(originalText);
+    if (!generationRouter || typeof generationRouter.generate !== 'function') {
+      return { ok: false, error: { code: 'RECURSION_GENERATION_REVIEW_UNAVAILABLE', message: 'Generation review provider is unavailable.' } };
+    }
+    let held = false;
+    let enhanced = false;
+    try {
+      stageRuntimeActivity({
+        runId,
+        phase: 'generationReviewing',
+        label: 'Reviewing generated response...',
+        providerLane: lane,
+        composerLane: lane,
+        chips: ['Enhancement', 'Cards']
+      });
+      if (typeof messages.holdAssistantMessage === 'function') {
+        const hold = await messages.holdAssistantMessage(messageId);
+        held = hold?.ok !== false;
+      }
+      const baseRequest = buildGenerationReviewRequest({
+        sourceText: originalText,
+        sourceHash,
+        targets,
+        reviewSnapshot: publicSnapshot,
+        contextContract,
+        lane,
+        ...reasonerRequestMetadata(settings, 'generation-review', lane)
+      });
+      const generate = async (request, routerOptions = {}) => {
+        const primary = await generationRouter.generate('generationReviewer', request, {
+          runId,
+          timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
+          ...routerOptions
+        });
+        if (primary?.ok === true || lane !== 'reasoner') return { result: primary, lane };
+        if (primary?.recoverySpent === true) return { result: primary, lane };
+        const fallbackRequest = { ...request, lane: 'utility' };
+        delete fallbackRequest.reasoningCategory;
+        delete fallbackRequest.reasoningIntent;
+        const fallback = await generationRouter.generate('generationReviewer', fallbackRequest, {
+          runId,
+          timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
+          ...routerOptions
+        });
+        return { result: fallback, lane: fallback?.ok === true ? 'utility' : lane, fallbackFrom: fallback?.ok === true ? 'reasoner' : '' };
+      };
+      let response = await generate(baseRequest);
+      let validation = response.result?.ok === true
+        ? validateGenerationReviewResult(response.result.data, { sourceHash, targets, reviewSnapshot: publicSnapshot })
+        : { ok: false, error: response.result?.error || { code: 'RECURSION_GENERATION_REVIEW_PROVIDER_FAILED', message: 'Generation review provider failed.' } };
+      if (!validation.ok && validation.retryable === true && response.result?.recoverySpent !== true) {
+        response = await generate(buildGenerationReviewRequest({
+          ...baseRequest,
+          sourceText: originalText,
+          sourceHash,
+          targets,
+          reviewSnapshot: publicSnapshot,
+          contextContract,
+          lane,
+          retry: {
+            targetIds: validation.invalidTargetIds || Object.values(targets).flat().map((target) => target.id),
+            cardIds: validation.invalidCardIds || validation.missingCardIds || []
+          },
+          ...reasonerRequestMetadata(settings, 'generation-review', lane)
+        }), { allowStructuredRecovery: false });
+        validation = response.result?.ok === true
+          ? validateGenerationReviewResult(response.result.data, { sourceHash, targets, reviewSnapshot: publicSnapshot })
+          : { ok: false, error: response.result?.error || { code: 'RECURSION_GENERATION_REVIEW_PROVIDER_FAILED', message: 'Generation review provider failed.' } };
+      }
+      const partialFailed = !validation.ok;
+      const patches = validation.safePatches || validation.patches || [];
+      if ((!validation.ok && !patches.length) || (validation.requiresRegeneration && !patches.length)) {
+        const error = validation.error || { code: 'RECURSION_GENERATION_REVIEW_REQUIRES_REGENERATION', message: 'Generation review requires a fresh host generation.' };
+        stageRuntimeActivity({ runId, phase: 'generationReviewing', severity: 'error', label: 'Generation review failed. Original kept.', chips: ['Enhancement'], detail: { error, reviewDomains: validation.reviewDomains, cardOutcomes: validation.cardOutcomes } });
+        await appendJournalSafe(runId, identity.chatKey, { event: 'generation-review.failed', severity: 'error', summary: error.message, runId, sceneKey: safeText(snapshot?.sceneKey || '', 180), details: { code: error.code, reviewDomains: validation.reviewDomains, cardOutcomes: validation.cardOutcomes } });
+        settleRuntimeActivity({ runId, phase: 'settled', outcome: 'success', label: 'Recursion prompt ready. Enhancement failed; original kept.', chips: ['Enhancement', 'Failed'], detail: { error } });
+        return { ok: false, mode, error, validation };
+      }
+      const enhancedText = applyGenerationReviewPatches(originalText, patches, targets);
+      if (enhancedText === originalText) {
+        return { ok: false, error: { code: 'RECURSION_GENERATION_REVIEW_NO_EFFECT', message: 'Generation review returned no effective revision.' } };
+      }
+      marker.enhancedHash = hashJson(enhancedText);
+      marker.patchHash = hashJson(patches);
+      marker.reviewDomains = validation.reviewDomains;
+      marker.patches = patches;
+      marker.outcome = partialFailed || validation.requiresRegeneration ? 'partial-failed' : 'applied';
+      const cardNames = new Map(publicSnapshot.installedHand.map((card) => [card.cardId, card.name]));
+      const unresolvedCardOutcomes = (validation.missingCardIds || validation.invalidCardIds || []).map((cardId) => ({
+        cardId,
+        status: 'unresolved',
+        reason: validation.error?.message || 'Card outcome coverage missing.'
+      }));
+      const cardOutcomes = [...(validation.cardOutcomes || []), ...unresolvedCardOutcomes];
+      marker.cardOutcomes = cardOutcomes;
+      stageRuntimeActivity({
+        runId,
+        phase: 'generationReviewing',
+        severity: partialFailed || validation.requiresRegeneration ? 'error' : 'success',
+        label: partialFailed || validation.requiresRegeneration ? 'Generation review partially applied.' : 'Generation review complete.',
+        providerLane: response.lane,
+        composerLane: response.lane,
+        chips: ['Enhancement', 'Cards'],
+        detail: {
+          reviewDomains: validation.reviewDomains || {},
+          cardOutcomes: cardOutcomes.map((outcome) => ({
+            ...outcome,
+            name: cardNames.get(String(outcome.cardId || '')) || String(outcome.cardId || '')
+          }))
+        }
+      });
+      if (mode === 'replace') {
+        const replace = await messages.replaceAssistantMessageText?.(messageId, enhancedText, { marker });
+        if (replace?.ok === false) return { ok: false, mode, error: replace.error };
+        enhanced = true;
+      } else {
+        if (held && typeof messages.revealAssistantMessage === 'function') {
+          await messages.revealAssistantMessage(messageId);
+          held = false;
+        }
+        const append = await messages.appendAssistantMessageSwipe?.(messageId, enhancedText, { marker, select: true });
+        if (append?.ok === false) return { ok: false, mode, error: append.error };
+        enhanced = true;
+      }
+      await appendJournalSafe(runId, identity.chatKey, {
+        event: partialFailed || validation.requiresRegeneration ? 'generation-review.partial-failed' : 'generation-review.applied',
+        severity: partialFailed || validation.requiresRegeneration ? 'error' : 'info',
+        summary: partialFailed || validation.requiresRegeneration ? 'Generation review applied safe revisions with unresolved findings.' : 'Generation review applied bounded revisions.',
+        runId,
+        sceneKey: safeText(snapshot?.sceneKey || '', 180),
+        details: {
+          patchCount: patches.length,
+          reviewDomains: validation.reviewDomains,
+          cardOutcomes,
+          lane: response.lane,
+          outcome: marker.outcome,
+          unresolvedCardIds: validation.missingCardIds || validation.invalidCardIds || []
+        }
+      });
+      settleRuntimeActivity({
+        runId,
+        phase: 'settled',
+        severity: partialFailed || validation.requiresRegeneration ? 'error' : 'success',
+        label: partialFailed || validation.requiresRegeneration ? 'Generation review partial result applied.' : 'Generation review applied.',
+        chips: partialFailed || validation.requiresRegeneration ? ['Enhancement', 'Partial failed'] : ['Enhancement', 'Applied'],
+        detail: { patchCount: patches.length, reviewDomains: validation.reviewDomains, cardOutcomes, outcome: marker.outcome }
+      });
+      return { ok: true, partialFailed: partialFailed || validation.requiresRegeneration, mode, messageId, sourceHash, enhancedHash: marker.enhancedHash, marker, patches, reviewDomains: validation.reviewDomains, cardOutcomes };
+    } catch (error) {
+      settleRuntimeActivity({ runId, phase: 'settled', severity: 'error', label: 'Generation review failed. Original kept.', chips: ['Enhancement'] });
+      return { ok: false, mode, error: { code: 'RECURSION_GENERATION_REVIEW_FAILED', message: String(error?.message || error || 'Generation review failed.') } };
+    } finally {
+      clearPendingProseEnhancement();
+      if (held && !enhanced && typeof messages.revealAssistantMessage === 'function') await messages.revealAssistantMessage(messageId);
+    }
   }
 
   async function enhanceLatestAssistantMessage(details = {}) {
@@ -3298,6 +3597,9 @@ export function createRecursionRuntime({
   }
 
   async function enhanceLatestAssistantMessageImpl(details = {}) {
+    return runGenerationReview(details);
+    /* Legacy dialogue/prose enhancer implementation retained below only until its
+       follow-on host harness deletion is completed. It is unreachable. */
     const settings = settingsStore.get();
     const enhancementSettings = asObject(settings.enhancements);
     const target = enhancementTarget(settings);
@@ -3400,7 +3702,26 @@ export function createRecursionRuntime({
         activeSender: identity.sender || '',
         contextMessageLimit: enhancementSettings.contextMessages
       });
-      const contextMessages = enhancementContext.contextMessages;
+      const contextContract = buildContextContract(snapshot || {}, settings);
+      const boundedEnhancementContext = boundEnhancementMessages(
+        enhancementContext.contextMessages,
+        contextContract.enhancementContext.effectiveMessages,
+        contextContract.enhancementContext.characterBudget
+      );
+      const contextMessages = boundedEnhancementContext.messages;
+      marker.contextHash = hashJson({
+        sourceRevisionHash: snapshot?.sourceRevisionHash || '',
+        contextMessages: contextMessageIdentity(contextMessages),
+        enhancementContextMessages: contextContract.enhancementContext.configuredMessages,
+        cardIds: Array.isArray(lastHand?.cards) ? lastHand.cards.map((card) => card.id) : []
+      });
+      marker.key = proseEnhancementKey({
+        chatKey: identity.chatKey,
+        messageId,
+        swipeId: identity.swipeId ?? 0,
+        originalHash: `${target}:${mode}:${originalHash}`,
+        contextHash: marker.contextHash
+      });
       const storyForm = lastPacket?.storyForm || lastPlan?.storyForm || null;
       let enhancedText = originalText;
       const passHashes = [];
@@ -3438,7 +3759,8 @@ export function createRecursionRuntime({
         const request = buildDialogueEnhancementRequest({
           text,
           contextMessages,
-          contextMessageLimit: enhancementSettings.contextMessages,
+          contextMessageLimit: contextMessages.length,
+          contextContract,
           storyForm,
           characterContext: enhancementContext.characterContext,
           cardContext: enhancementContext.cardContext,
@@ -3457,10 +3779,7 @@ export function createRecursionRuntime({
       function dialogueRetryReason({ originalText: retryOriginalText = '', validation = {} } = {}) {
         if (validation.ok !== true) return '';
         if (validation.text === String(retryOriginalText ?? '')) {
-          const strongReasons = dialogueInterventionReasons(retryOriginalText);
-          const softReasons = dialogueSuspicionReasons(retryOriginalText);
-          const echoReasons = echoedUserPhraseReasons({ sourceText: retryOriginalText, contextMessages });
-          return strongReasons.length || softReasons.length || echoReasons.length ? 'exact-noop' : '';
+          return 'exact-noop';
         }
         if ((validation.dialogueEditRatio ?? 0) >= ENHANCEMENT_EDIT_RATIO_MINIMUM) return '';
         const strongReasons = dialogueInterventionReasons(retryOriginalText);
@@ -3500,8 +3819,9 @@ export function createRecursionRuntime({
             continue;
           }
           if (validation.outcome === 'unchanged' || validation.text === String(enhancedText ?? '')) {
-            passResults.push({ pass: 'dialogue', status: 'unchanged', reasonCode: validation.reasonCode || 'already-acceptable', reason: validation.reason || '', attempt: dialogueAttempt.attempt });
-            await appendEnhancementPassJournal({ pass: 'dialogue', status: 'unchanged', reasonCode: validation.reasonCode || 'already-acceptable', reason: validation.reason || 'Dialogue had no safe revision.', attempt: dialogueAttempt.attempt });
+            passResults.push({ pass: 'dialogue', status: 'validation-failed', reasonCode: 'unchanged-after-retry', reason: 'Provider returned unchanged dialogue after the required retry.', attempt: dialogueAttempt.attempt });
+            await appendEnhancementPassJournal({ pass: 'dialogue', status: 'validation-failed', reasonCode: 'unchanged-after-retry', reason: 'Provider returned unchanged dialogue after the required retry.', attempt: dialogueAttempt.attempt });
+            hasPassFailure = true;
             continue;
           }
           enhancedText = validation.text;
@@ -3530,8 +3850,9 @@ export function createRecursionRuntime({
             });
             const request = buildProseEnhancementRequest({
               text,
-              contextMessages,
-              contextMessageLimit: enhancementSettings.contextMessages,
+          contextMessages,
+          contextMessageLimit: contextMessages.length,
+          contextContract,
               storyForm,
               cardContext: enhancementContext.cardContext,
               lane: enhancementLane,
@@ -3554,7 +3875,7 @@ export function createRecursionRuntime({
             continue;
           }
           let validation = proseAttempt.validation;
-          if (validation?.outcome === 'unchanged' && validation.reasonCode !== 'already-acceptable') {
+          if (validation?.outcome === 'unchanged' || validation?.text === String(enhancedText ?? '')) {
             proseAttempt = await runProseEnhancementAttempt({ text: enhancedText, retryReason: 'exact-noop', attempt: 2 });
             result = proseAttempt.result;
             if (result?.ok !== true) {
@@ -3572,8 +3893,9 @@ export function createRecursionRuntime({
             continue;
           }
           if (validation.outcome === 'unchanged' || validation.text === String(enhancedText ?? '')) {
-            passResults.push({ pass: 'prose', status: 'unchanged', reasonCode: validation.reasonCode || 'already-acceptable', reason: validation.reason || '', attempt: proseAttempt.attempt });
-            await appendEnhancementPassJournal({ pass: 'prose', status: 'unchanged', reasonCode: validation.reasonCode || 'already-acceptable', reason: validation.reason || 'Prose had no safe revision.', attempt: proseAttempt.attempt });
+            passResults.push({ pass: 'prose', status: 'validation-failed', reasonCode: 'unchanged-after-retry', reason: 'Provider returned unchanged prose after the required retry.', attempt: proseAttempt.attempt });
+            await appendEnhancementPassJournal({ pass: 'prose', status: 'validation-failed', reasonCode: 'unchanged-after-retry', reason: 'Provider returned unchanged prose after the required retry.', attempt: proseAttempt.attempt });
+            hasPassFailure = true;
             continue;
           }
           enhancedText = validation.text;
@@ -4002,11 +4324,13 @@ export function createRecursionRuntime({
   async function saveSceneCacheSafe(runId, snapshot, value) {
     try {
       const result = await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, value);
-      lastSavedSceneCacheRef = {
-        chatKey: snapshot.chatKey,
-        sceneKey: snapshot.sceneKey
-      };
-      if (result?.storageStatus?.persisted !== false) {
+      if (result?.storageStatus?.persisted === false) {
+        lastSavedSceneCacheRef = null;
+      } else {
+        lastSavedSceneCacheRef = {
+          chatKey: snapshot.chatKey,
+          sceneKey: snapshot.sceneKey
+        };
         await maintainRetentionSafe(runId, snapshot);
       }
       return result;
@@ -5302,12 +5626,20 @@ export function createRecursionRuntime({
   async function reinstallLastPacketForSameTurn(runId, snapshot) {
     const packet = lastPacket;
     const hand = lastHand;
+    recordCacheDecision(runId, {
+      decision: 'hit',
+      kind: 'swipe-packet',
+      reason: 'same-turn-source-unchanged',
+      reusedCardIds: hand.cards?.map((card) => card.id),
+      providerCallsSkipped: ['utilityArbiter', 'standardCardCalls', 'fusedCardBundle', 'guidanceComposer']
+    });
     const install = await runPromptMutationSection(runId, async () => {
       stageRuntimeActivity({
         runId,
         phase: 'promptInstalling',
         label: 'Reinstalling Recursion prompt for swipe retry...',
         chips: ['Prompt', 'Swipe']
+        , detail: { cacheDecision: 'hit', cacheKind: 'swipe-packet', cacheReason: 'same-turn-source-unchanged' }
       });
       if (!isActiveRun(runId)) return supersededResult(runId);
       const result = await installPrompt(host, packet);
@@ -5348,7 +5680,7 @@ export function createRecursionRuntime({
     };
   }
 
-  async function prepareForGeneration({ userMessage = '', refreshReason = '', hostGeneration = false } = {}) {
+  async function prepareForGeneration({ userMessage = '', refreshReason = '', hostGeneration = false, generationType = '' } = {}) {
     const settings = settingsStore.get();
     setHostGenerationActive(hostGeneration);
     if (settings.enabled === false) {
@@ -5381,14 +5713,24 @@ export function createRecursionRuntime({
     if (hostGeneration === true) armProseEnhancementForHostGeneration(settings, runId);
     else clearPendingProseEnhancement();
     const signal = startRun(runId);
+    const hostGenerationType = safeText(generationType, 40).toLowerCase();
+    const explicitSwipe = hostGeneration === true && hostGenerationType === 'swipe';
+    const explicitRegenerate = hostGeneration === true && hostGenerationType === 'regenerate';
     const freshContext = hostGeneration === true
       ? consumePendingFreshNextGeneration(runId)
       : null;
-    const freshReason = freshContext ? 'user-fresh-next-generation' : '';
+    const freshReason = freshContext
+      ? 'user-fresh-next-generation'
+      : (explicitRegenerate ? 'host-regenerate' : '');
     const modeChip = settings.mode === 'manual' ? 'Manual' : 'Auto';
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: [modeChip] });
+    if (explicitSwipe && !runState.current().pendingLatestAssistantSwipeRetry) {
+      // SillyTavern passes `swipe` directly to the interceptor after changing the active swipe.
+      // This is the authoritative signal; MESSAGE_SWIPED remains only a UI/navigation fallback.
+      markLatestAssistantSwipeRetry({ eventName: 'host-generation-swipe' });
+    }
+    const hasSwipeRetry = explicitSwipe || Boolean(runState.current().pendingLatestAssistantSwipeRetry);
     if (lastBrief.status !== 'clearing') {
-      const hasSwipeRetry = Boolean(runState.current().pendingLatestAssistantSwipeRetry);
       clearLastBrief({
         status: 'clearing',
         reason: freshReason || (hasSwipeRetry ? 'latest-assistant-swipe' : (refreshReason || 'generation-started')),
@@ -5406,20 +5748,27 @@ export function createRecursionRuntime({
           });
         }
       }
-      const baseSnapshot = settings.pipelineMode === 'rapid' && !refreshReason && !freshContext
+      const bypassSwipeReuse = Boolean(refreshReason || freshContext || explicitRegenerate);
+      const baseSnapshot = settings.pipelineMode === 'rapid' && !bypassSwipeReuse
         ? snapshotWithoutVisiblePendingUserMessage(hostSnapshot, pendingUserMessage)
         : hostSnapshot;
       const snapshot = snapshotWithPendingUserMessage(baseSnapshot, pendingUserMessage);
       if (!isActiveRun(runId)) return supersededResult(runId);
-      const swipeRetrySnapshot = !refreshReason && !freshContext
+      runState.beginAttempt?.({
+        runId,
+        kind: (freshContext || explicitRegenerate) ? 'fresh' : (hasSwipeRetry ? 'swipe' : 'normal'),
+        sourceRevisionHash: activeSourceRevisionHash(snapshot),
+        packetId: lastPacket?.packetId
+      });
+      const swipeRetrySnapshot = !bypassSwipeReuse
         ? reusableSnapshotForLatestAssistantSwipeRetry(snapshot, pendingUserMessage)
         : null;
-      if (refreshReason || freshContext) clearPendingLatestAssistantSwipeRetry();
+      if (bypassSwipeReuse) clearPendingLatestAssistantSwipeRetry();
       if (swipeRetrySnapshot) {
         lastSnapshot = swipeRetrySnapshot;
         return await reinstallLastPacketForSameTurn(runId, swipeRetrySnapshot);
       }
-      if (!refreshReason && !freshContext && canReuseLastPacketForSnapshot(snapshot)) {
+      if (!bypassSwipeReuse && canReuseLastPacketForSnapshot(snapshot)) {
         lastSnapshot = snapshot;
         return await reinstallLastPacketForSameTurn(runId, snapshot);
       }
@@ -5443,7 +5792,7 @@ export function createRecursionRuntime({
         });
         if (!isActiveRun(runId)) return supersededResult(runId);
       }
-      const rapidForeground = settings.pipelineMode === 'rapid' && !refreshReason && !freshContext;
+      const rapidForeground = settings.pipelineMode === 'rapid' && !bypassSwipeReuse;
       const rapidCacheSnapshot = rapidForeground ? baseSnapshot : snapshot;
       let initialCache = freshStaleSceneCache(await loadSceneCacheSafe(runId, rapidCacheSnapshot, settings), freshContext, rapidCacheSnapshot);
       if (!isActiveRun(runId)) return supersededResult(runId);
@@ -5600,6 +5949,18 @@ export function createRecursionRuntime({
         ? []
         : filterScopedCards(cardsWithOrigin(sanitizedCacheCards(runId, sceneSnapshot, activeCache.cards), 'cache'));
       const reuseCacheOnly = !freshContext && action === 'reuse-cache' && cacheCards.length > 0;
+      recordCacheDecision(runId, {
+        decision: reuseCacheOnly ? 'hit' : 'miss',
+        kind: 'scene-cards',
+        reason: reuseCacheOnly ? 'arbiter-reuse-cache' : (action === 'reuse-cache' ? 'cache-unavailable' : 'card-generation-required'),
+        variant: activeSceneCacheVariant(cache, sceneSnapshot).exact ? 'exact' : 'miss',
+        reusedCardIds: reuseCacheOnly ? cacheCards.map((card) => card.id) : [],
+        providerCallsSkipped: reuseCacheOnly
+          ? settings.pipelineMode === 'fused'
+            ? ['standardCardCalls', 'fusedCardBundle', 'guidanceComposer']
+            : ['standardCardCalls', 'guidanceComposer']
+          : []
+      });
       const generatedCardResult = reuseCacheOnly
         ? { cards: [], diagnostics: [] }
         : await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, settings, signal });

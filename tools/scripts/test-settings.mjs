@@ -55,9 +55,9 @@ assertEqual(normalizeSettings({ pipelineMode: 'standard' }).pipelineMode, 'stand
 assertEqual(normalizeSettings({ pipelineMode: 'fast' }).pipelineMode, 'standard', 'invalid pipeline mode normalizes to Standard');
 assertDeepEqual(normalizeEnhancementsSettings({}), { target: 'off', applyMode: 'as-swipe', contextMessages: 13 }, 'enhancements direct normalizer defaults safely');
 assertDeepEqual(normalizeSettings({}).enhancements, { target: 'off', applyMode: 'as-swipe', contextMessages: 13 }, 'enhancements default off with bounded context');
-assertDeepEqual(normalizeSettings({ enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: '35' } }).enhancements, { target: 'prose', applyMode: 'as-swipe', contextMessages: 35 }, 'enhancements accept Prose As Swipe and clamp context high');
-assertDeepEqual(normalizeSettings({ enhancements: { target: 'dialogue', applyMode: 'replace', contextMessages: '-3' } }).enhancements, { target: 'dialogue', applyMode: 'replace', contextMessages: 0 }, 'enhancements accept Dialogue Replace and clamp context low');
-assertDeepEqual(normalizeSettings({ enhancements: { target: 'prose-dialogue', applyMode: 'as-swipe', contextMessages: 21 } }).enhancements, { target: 'prose-dialogue', applyMode: 'as-swipe', contextMessages: 21 }, 'enhancements accept Prose + Dialogue target');
+assertDeepEqual(normalizeSettings({ enhancements: { target: 'on', applyMode: 'as-swipe', contextMessages: '35' } }).enhancements, { target: 'on', applyMode: 'as-swipe', contextMessages: 35 }, 'enhancements accept Generation Review As Swipe and clamp context high');
+assertDeepEqual(normalizeSettings({ enhancements: { target: 'on', applyMode: 'replace', contextMessages: '-3' } }).enhancements, { target: 'on', applyMode: 'replace', contextMessages: 0 }, 'enhancements accept Generation Review Replace and clamp context low');
+assertDeepEqual(normalizeSettings({ enhancements: { target: 'prose-dialogue', applyMode: 'as-swipe', contextMessages: 21 } }).enhancements, { target: 'on', applyMode: 'as-swipe', contextMessages: 21 }, 'legacy prose/dialogue setting normalizes to Generation Review');
 assertDeepEqual(normalizeSettings({ enhancements: { target: 'bad', applyMode: 'sidecar', contextMessages: '' } }).enhancements, { target: 'off', applyMode: 'as-swipe', contextMessages: 13 }, 'invalid enhancement settings normalize to safe defaults');
 assertEqual(normalizeSettings({ mode: 'manual', pipelineMode: 'rapid' }).mode, 'manual', 'Rapid does not replace Auto/Manual mode');
 assertEqual(normalizeSettings({ mode: 'manual', pipelineMode: 'fused' }).mode, 'manual', 'Fused does not replace Auto/Manual mode');
@@ -302,10 +302,10 @@ assertEqual(root.recursion.injection.placement, 'in_chat', 'partial injection up
 assertEqual(root.recursion.injection.role, 'assistant', 'partial injection update preserves role');
 assertEqual(root.recursion.injection.depth, 2, 'partial injection update changes depth');
 
-store.update({ enhancements: { target: 'dialogue' } });
+store.update({ enhancements: { target: 'on' } });
 store.update({ enhancements: { applyMode: 'replace' } });
 store.update({ enhancements: { contextMessages: 21 } });
-assertDeepEqual(root.recursion.enhancements, { target: 'dialogue', applyMode: 'replace', contextMessages: 21 }, 'partial enhancements update preserves target and apply mode while changing context');
+assertDeepEqual(root.recursion.enhancements, { target: 'on', applyMode: 'replace', contextMessages: 21 }, 'partial enhancements update preserves target and apply mode while changing context');
 
 const preservedDecks = cardDeckStore.get().cardDecks;
 store.update({
@@ -322,7 +322,7 @@ store.update({
   promptFootprint: 'rich',
   injection: { placement: 'in_chat', role: 'assistant', depth: 8 },
   ui: { tooltipsEnabled: false, progressChildVisibleLimit: 12, progressListVisibleLimit: 40 },
-  enhancements: { target: 'dialogue', applyMode: 'replace', contextMessages: 30 },
+  enhancements: { target: 'on', applyMode: 'replace', contextMessages: 30 },
   retention: { sourceWindowMessages: 80 },
   diagnostics: { includeExcerpts: true }
 });

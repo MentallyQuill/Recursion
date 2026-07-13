@@ -64,8 +64,23 @@ async function parseJsonResponse(response) {
 
 function assertOk(response, action, fileName) {
   if (!response?.ok) {
-    throw new Error(`SillyTavern file ${action} failed for ${fileName}: HTTP ${response?.status ?? 'unknown'}`);
+    const error = new Error(`SillyTavern file ${action} failed for ${fileName}: HTTP ${response?.status ?? 'unknown'}`);
+    error.status = response?.status;
+    throw error;
   }
+}
+
+function storageFailure(operation, fileName, error) {
+  const status = error?.status ?? error?.response?.status;
+  const message = status
+    ? `${operation} failed for ${fileName}: HTTP ${status}`
+    : `${operation} failed for ${fileName}: ${String(error?.message || 'Unknown storage error').slice(0, 160)}`;
+  return {
+    operation,
+    fileName,
+    ...(status === undefined ? {} : { status }),
+    message: message.slice(0, 240)
+  };
 }
 
 function serializeStorageJson(value) {
@@ -96,30 +111,37 @@ export function createSillyTavernUserFileStorageAdapter({ contextFactory = null,
   if (typeof fetchImpl !== 'function') return createMemoryStorageAdapter();
 
   const memoryStorage = createMemoryStorageAdapter();
-  let fallbackStorage = false;
+  let lastFailure = null;
 
   async function readMemory(fileName) {
     return memoryStorage.readJson(fileName);
   }
 
-  async function writeMemory(key, fileName, value) {
+  async function writeMemory(key, fileName, value, failure = null) {
     await memoryStorage.writeJson(fileName, value);
-    return { ok: true, key, fallback: 'memory' };
+    return {
+      ok: true,
+      key,
+      fallback: 'memory',
+      reason: 'memory-fallback',
+      ...(failure?.message ? { fallbackReason: failure.message } : {})
+    };
   }
 
-  async function deleteMemory(key, fileName) {
+  async function deleteMemory(key, fileName, failure = null) {
     await memoryStorage.deleteJson(fileName);
-    return { ok: true, key, fallback: 'memory' };
-  }
-
-  function downgradeToMemory() {
-    fallbackStorage = true;
+    return {
+      ok: true,
+      key,
+      fallback: 'memory',
+      reason: 'memory-fallback',
+      ...(failure?.message ? { fallbackReason: failure.message } : {})
+    };
   }
 
   return {
     async readJson(key) {
       const fileName = validateStorageFileName(key);
-      if (fallbackStorage) return readMemory(fileName);
       const context = currentContext(contextFactory);
       try {
         const exists = await verifyUserFileExists(fetchImpl, context, fileName);
@@ -127,33 +149,38 @@ export function createSillyTavernUserFileStorageAdapter({ contextFactory = null,
         const response = await fetchImpl(`/user/files/${encodeURIComponent(fileName)}`, { method: 'GET' });
         if (response?.status === 404) return null;
         assertOk(response, 'read', fileName);
-        return parseJsonResponse(response);
-      } catch {
-        downgradeToMemory();
+        const value = await parseJsonResponse(response);
+        lastFailure = null;
+        return value;
+      } catch (error) {
+        lastFailure = storageFailure('read', fileName, error);
         return readMemory(fileName);
       }
     },
     async writeJson(key, value) {
       const fileName = validateStorageFileName(key);
       const jsonText = serializeStorageJson(value);
-      if (fallbackStorage) return writeMemory(key, fileName, value);
       const context = currentContext(contextFactory);
-      try {
-        const response = await fetchImpl('/api/files/upload', {
-          method: 'POST',
-          headers: await requestHeaders(context),
-          body: JSON.stringify({ name: fileName, data: encodeBase64Utf8(jsonText) })
-        });
-        assertOk(response, 'write', fileName);
-        return { ok: true, key };
-      } catch {
-        downgradeToMemory();
-        return writeMemory(key, fileName, value);
+      let failure = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const response = await fetchImpl('/api/files/upload', {
+            method: 'POST',
+            headers: await requestHeaders(context),
+            body: JSON.stringify({ name: fileName, data: encodeBase64Utf8(jsonText) })
+          });
+          assertOk(response, 'write', fileName);
+          lastFailure = null;
+          return { ok: true, key };
+        } catch (error) {
+          failure = storageFailure('write', fileName, error);
+        }
       }
+      lastFailure = failure;
+      return writeMemory(key, fileName, value, failure);
     },
     async deleteJson(key) {
       const fileName = validateStorageFileName(key);
-      if (fallbackStorage) return deleteMemory(key, fileName);
       const context = currentContext(contextFactory);
       try {
         const response = await fetchImpl('/api/files/delete', {
@@ -163,11 +190,15 @@ export function createSillyTavernUserFileStorageAdapter({ contextFactory = null,
         });
         if (response?.status === 404) return { ok: true, key, missing: true };
         assertOk(response, 'delete', fileName);
+        lastFailure = null;
         return { ok: true, key };
-      } catch {
-        downgradeToMemory();
-        return deleteMemory(key, fileName);
+      } catch (error) {
+        lastFailure = storageFailure('delete', fileName, error);
+        return deleteMemory(key, fileName, lastFailure);
       }
+    },
+    getLastFailure() {
+      return lastFailure ? { ...lastFailure } : null;
     }
   };
 }

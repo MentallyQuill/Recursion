@@ -12,7 +12,6 @@ let hostEventUnsubscribers = [];
 let settingsBootstrapUnsubscribers = [];
 let settingsLoadEventObserved = false;
 
-const ENHANCEMENT_CAPTURE_CLASS = 'recursion-enhancement-capture-active';
 const ENHANCEMENT_OWNED_MUTATION_TAIL_MS = 3000;
 let enhancementOwnedMutationUntilMs = 0;
 
@@ -42,22 +41,8 @@ function publishLiveHarnessRuntime(nextRuntime) {
   }
 }
 
-function setEnhancementCaptureActive(active) {
-  try {
-    const classListTargets = [
-      globalThis.document?.documentElement?.classList,
-      globalThis.document?.body?.classList
-    ].filter(Boolean);
-    for (const classList of classListTargets) {
-      classList.toggle?.(ENHANCEMENT_CAPTURE_CLASS, Boolean(active));
-      if (typeof classList.toggle !== 'function') {
-        if (active) classList.add?.(ENHANCEMENT_CAPTURE_CLASS);
-        else classList.remove?.(ENHANCEMENT_CAPTURE_CLASS);
-      }
-    }
-  } catch {
-    // Visual capture is best-effort; chat state holding still protects data.
-  }
+function setEnhancementCaptureActive() {
+  // The original SillyTavern response remains visible while Generation Review runs.
 }
 
 function refreshEnhancementCaptureState(activeRuntime = runtime) {
@@ -271,8 +256,16 @@ function registerHostEvents(nextRuntime, currentHost = host) {
   };
   const chatChangedEvent = resolveChatChangedEvent(context);
   registerRuntimeHostEvent(eventSource, chatChangedEvent, () => {
-    refreshAssistantSignature();
+    const nextAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
+    const enhancementOwnedChatMutation = Date.now() <= enhancementOwnedMutationUntilMs
+      && Boolean(nextAssistantIdentity)
+      && nextAssistantIdentity === lastAssistantIdentity;
+    lastAssistantIdentity = nextAssistantIdentity;
     runtime ||= nextRuntime;
+    if (enhancementOwnedChatMutation) {
+      setEnhancementCaptureActive(false);
+      return { ok: true, skipped: true, reason: 'enhancement-owned-chat-mutation' };
+    }
     clearEnhancementOwnedMutationWindow();
     setEnhancementCaptureActive(false);
     return invokeRuntimeCleanup('handleChatChanged', 'Chat change cleanup failed.');
@@ -540,14 +533,15 @@ async function teardownRecursion(label) {
   publishLiveHarnessRuntime(null);
 }
 
-export async function recursionGenerationInterceptor(chat) {
+export async function recursionGenerationInterceptor(chat, _contextSize, _abort, generationType = '') {
   const activeRuntime = bootstrapRecursion();
   if (!activeRuntime) return chat;
 
   try {
     await activeRuntime.prepareForGeneration({
       userMessage: latestPendingUserMessageFromPayload(chat),
-      hostGeneration: true
+      hostGeneration: true,
+      generationType
     });
     refreshEnhancementCaptureState(activeRuntime);
   } catch (error) {

@@ -1,0 +1,120 @@
+import { readFileSync } from 'node:fs';
+import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
+
+const oracleModule = await import('./lib/live-enhancement-run-oracle.mjs').catch(() => ({}));
+const oracleSource = readFileSync('tools/scripts/lib/live-enhancement-run-oracle.mjs', 'utf8');
+const evaluate = typeof oracleModule.evaluateLiveEnhancementRun === 'function'
+  ? oracleModule.evaluateLiveEnhancementRun
+  : () => ({ ok: true, failures: [] });
+
+const doneRows = [
+  { label: 'Editorial diagnosis', state: 'done' },
+  { label: 'Editorial candidate', state: 'done' },
+  { label: 'Recursion prompt ready', state: 'done' }
+];
+const mutation = { kind: 'swipe', recursionOwned: true, validated: true };
+
+const negativeControls = [
+  evaluate({
+    transitions: [
+      { label: 'Editorial candidate', state: 'caution' },
+      { label: 'Editorial candidate', state: 'done' }
+    ],
+    finalRows: doneRows,
+    journalDelta: [],
+    enhancementMutation: mutation
+  }),
+  evaluate({
+    transitions: [
+      { label: 'Editorial diagnosis', state: 'failed' },
+      { label: 'Editorial diagnosis', state: 'done' }
+    ],
+    finalRows: doneRows,
+    journalDelta: [],
+    enhancementMutation: mutation
+  }),
+  evaluate({
+    transitions: doneRows,
+    finalRows: doneRows,
+    journalDelta: [{
+      id: 'journal-failed',
+      runId: 'editorial-1',
+      severity: 'error',
+      event: 'provider.call.failed',
+      details: { roleId: 'editorialTransformer' }
+    }],
+    enhancementMutation: mutation
+  }),
+  evaluate({
+    transitions: [...doneRows, { label: 'Editorial enhancement', state: 'skipped' }],
+    finalRows: [...doneRows, { label: 'Editorial enhancement', state: 'skipped' }],
+    journalDelta: [],
+    enhancementMutation: { kind: 'none', recursionOwned: false, validated: false }
+  })
+];
+
+assertDeepEqual(
+  negativeControls.map((result) => result.ok),
+  [false, false, false, false],
+  'strict live enhancement oracle rejects every false-pass negative control'
+);
+
+const unmatchedProvider = evaluate({
+  transitions: doneRows,
+  finalRows: doneRows,
+  journalDelta: [{
+    id: 'journal-started',
+    runId: 'editorial-2',
+    severity: 'info',
+    event: 'provider.call.started',
+    details: { roleId: 'editorialDiagnostician' },
+    hashes: { requestHash: 'request-1' }
+  }],
+  enhancementMutation: mutation
+});
+assertEqual(unmatchedProvider.ok, false, 'strict live enhancement oracle rejects unmatched provider starts');
+
+const healthy = evaluate({
+  transitions: [
+    { label: 'Editorial diagnosis', state: 'running' },
+    { label: 'Editorial diagnosis', state: 'done' },
+    { label: 'Editorial candidate', state: 'running' },
+    { label: 'Editorial candidate', state: 'done' },
+    { label: 'Recursion prompt ready', state: 'done' }
+  ],
+  finalRows: doneRows,
+  journalDelta: [
+    {
+      id: 'journal-started',
+      runId: 'editorial-3',
+      severity: 'info',
+      event: 'provider.call.started',
+      details: { roleId: 'editorialDiagnostician' },
+      hashes: { requestHash: 'request-2' }
+    },
+    {
+      id: 'journal-completed',
+      runId: 'editorial-3',
+      severity: 'info',
+      event: 'provider.call.completed',
+      details: { roleId: 'editorialDiagnostician' },
+      hashes: { requestHash: 'request-2' }
+    }
+  ],
+  enhancementMutation: mutation
+});
+assertEqual(healthy.ok, true, 'strict live enhancement oracle accepts a fully healthy concrete enhancement');
+assert(oracleSource.includes('attributeOldValue: true'), 'browser oracle requests progress attribute old values');
+assert(oracleSource.includes('mutation.oldValue'), 'browser oracle records transient progress states from mutation old values');
+
+for (const scriptPath of [
+  'tools/scripts/prove-live-enhancements.mjs',
+  'tools/scripts/prove-live-card-progress.mjs'
+]) {
+  const source = readFileSync(scriptPath, 'utf8');
+  assert(source.includes('installLiveEnhancementRunOracle'), `${scriptPath} installs the strict live enhancement oracle before generation`);
+  assert(source.includes('collectLiveEnhancementRunOracle'), `${scriptPath} collects the strict live enhancement oracle before reporting pass`);
+  assert(source.includes('oracle.verdict.ok'), `${scriptPath} gates its pass result on the strict oracle verdict`);
+}
+
+console.log('[pass] live enhancement run oracle');

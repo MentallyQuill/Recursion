@@ -696,7 +696,14 @@ function profileGenerationRequested(request = {}) {
 }
 
 function requestMaxTokens(request = {}) {
-  return request.responseLength ?? request.maxTokens ?? request.providerConfig?.maxTokens;
+  const positive = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : undefined;
+  };
+  const configured = positive(request.providerConfig?.maxTokens);
+  const requested = positive(request.responseLength) ?? positive(request.maxTokens);
+  if (configured && requested) return Math.min(configured, requested);
+  return configured ?? requested;
 }
 
 function requestTemperature(request = {}) {

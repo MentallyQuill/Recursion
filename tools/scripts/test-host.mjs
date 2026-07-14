@@ -1190,6 +1190,13 @@ assertDeepEqual(
 );
 assertEqual(connectionProfileCalls[0].parameters.temperature, 0.15, 'connection profile service receives configured temperature');
 assertEqual(connectionProfileCalls[0].parameters.top_p, 0.7, 'connection profile service receives configured top p');
+const cappedConnectionProfileResult = await createGenerationRouter({ client: connectionProfileHost.providerClient }).generate('utilityArbiter', {
+  prompt: 'Use the configured profile ceiling.',
+  snapshotHash: 'profile-capped-snapshot-hash',
+  responseLength: 900
+});
+assertEqual(cappedConnectionProfileResult.ok, true, 'host connection profile accepts an oversized request budget');
+assertEqual(connectionProfileCalls[1].maxTokens, 512, 'host connection profile request cannot exceed configured lane max tokens');
 assert(typeof connectionProfileCalls[0].parameters.signal?.addEventListener === 'function', 'connection profile service receives abort-capable provider signal');
 assertEqual(connectionProfileCalls[0].parameters.signal.aborted, false, 'connection profile service receives active provider signal');
 

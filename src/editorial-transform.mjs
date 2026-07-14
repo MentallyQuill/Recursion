@@ -233,12 +233,11 @@ export function validateEditorialVerification(result = {}, { sourceHash = '', sn
   return { ok: true, decision: data.decision, evidenceRefs: array(data.evidenceRefs).map(String), reason: safeText(data.reason || '', 600) };
 }
 
-function requestBase(schema, prompt, lane = '', responseLength = 5000) {
+function requestBase(schema, prompt, lane = '') {
   return {
     prompt,
     systemPrompt: `Return only one valid ${schema} JSON object. Do not emit prose, markdown, reasoning, or an alternate schema.`,
     responseSchema: schema,
-    responseLength,
     machineJson: true,
     ...(lane ? { lane } : {}),
     reasoningCategory: 'editorial-transform',
@@ -313,7 +312,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     `<source>${safeText(sourceText, MAX_SOURCE)}</source>`
   ].join('\n');
   return {
-    ...requestBase(EDITORIAL_PASS_SCHEMA, prompt, lane, 8192),
+    ...requestBase(EDITORIAL_PASS_SCHEMA, prompt, lane),
     sourceHash,
     snapshotHash,
     mode,

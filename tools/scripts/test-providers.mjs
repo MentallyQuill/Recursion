@@ -1470,6 +1470,13 @@ const openAiProviderTestResult = await openAiRouter.generate('providerTest', {
 });
 assertEqual(openAiProviderTestResult.ok, true, 'openai-compatible provider test route succeeds');
 assertEqual(fetchCalls[1].body.max_tokens, 256, 'openai-compatible provider test request uses responseLength instead of configured max tokens');
+const openAiCappedResult = await openAiRouter.generate('utilityArbiter', {
+  prompt: 'OpenAI compatible capped request',
+  snapshotHash: 'openai-capped-snapshot-hash',
+  responseLength: 999
+});
+assertEqual(openAiCappedResult.ok, true, 'openai-compatible oversized request succeeds');
+assertEqual(fetchCalls[2].body.max_tokens, 321, 'openai-compatible request cannot exceed configured lane max tokens');
 
 async function captureReasoningBody({
   baseUrl,

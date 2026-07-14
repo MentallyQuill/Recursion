@@ -96,17 +96,19 @@ assertEqual(staleCandidate.error.code, 'RECURSION_EDITORIAL_DIAGNOSIS_STALE', 'c
 const diagnosisRequest = buildEditorialDiagnosisRequest({ mode: 'recompose', sourceText, sourceHash, snapshotHash, snapshot, lane: 'reasoner' });
 assert(diagnosisRequest.prompt.includes('Return only one valid Recursion Editorial Diagnosis JSON object.'), 'diagnosis prompt names contract');
 assert(!diagnosisRequest.prompt.includes('Return a complete candidate'), 'diagnosis prompt cannot request candidate');
+assertEqual(diagnosisRequest.responseLength, undefined, 'diagnosis inherits the selected provider lane max tokens');
 assertDeepEqual(diagnosisRequest.validEvidenceIds, evidence.map((entry) => entry.id), 'diagnosis request exposes the frozen evidence ids as structured provider fields');
 const passRequest = buildEditorialPassRequest({ mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosis, evidence, snapshot, lane: 'reasoner' });
 assert(passRequest.prompt.includes('The diagnosis below is authoritative.'), 'transform prompt pins diagnosis');
 assert(passRequest.prompt.includes('one complete candidate'), 'transform prompt allows full rewrite');
-assertEqual(passRequest.responseLength, 8192, 'transform reserves enough completion budget for thinking-profile JSON and candidate text');
+assertEqual(passRequest.responseLength, undefined, 'transform inherits the selected provider lane max tokens');
 assertDeepEqual(passRequest.validEvidenceIds, evidence.map((entry) => entry.id), 'transform request exposes the frozen evidence ids as structured provider fields');
 assertDeepEqual(passRequest.installedCardIds, ['relationship'], 'transform request exposes frozen installed card ids');
 const redirectRequest = buildEditorialPassRequest({ mode: 'redirect', sourceText, sourceHash, snapshotHash, diagnosis: { ...diagnosis, mode: 'redirect' }, evidence, snapshot });
 assert(redirectRequest.prompt.includes('source may be negative evidence'), 'Redirect prompt allows source-negative evidence');
 const verifierRequest = buildEditorialVerificationRequest({ mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, evidence, candidate: candidate.candidate });
 assert(verifierRequest.prompt.includes('Return only accept or reject'), 'verifier cannot write candidate');
+assertEqual(verifierRequest.responseLength, undefined, 'verifier inherits the selected provider lane max tokens');
 
 const verification = validateEditorialVerification({ schema: EDITORIAL_VERIFICATION_SCHEMA, sourceHash, snapshotHash, diagnosisHash, decision: 'accept', evidenceRefs: ['packet:constraint'] }, { sourceHash, snapshotHash, diagnosisHash, evidence });
 assertEqual(verification.ok, true, 'accepted verifier result passes');

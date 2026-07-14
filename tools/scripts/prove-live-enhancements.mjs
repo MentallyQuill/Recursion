@@ -4,6 +4,10 @@ import {
   createSillyTavernHttpSession,
   validateSoakUserHandle
 } from './lib/sillytavern-live-harness.mjs';
+import {
+  collectLiveEnhancementRunOracle,
+  installLiveEnhancementRunOracle
+} from './lib/live-enhancement-run-oracle.mjs';
 
 function fail(result, message, details = {}) {
   const error = new Error(message);
@@ -203,13 +207,8 @@ try {
     }
   });
   if (providerTest?.ok !== true) {
-    report.checks.push({
-      name: 'utility-provider-live-call-nonfatal',
-      status: 'warning',
-      details: {
-        reason: 'Provider test returned invalid structured output; continuing to direct enhancer calls.',
-        code: providerTest?.error?.code || ''
-      }
+    fail('utility-provider-live-call-failed', 'Utility provider test failed before the live Enhancement proof.', {
+      code: providerTest?.error?.code || ''
     });
   }
 
@@ -226,7 +225,9 @@ try {
     : testCases;
   if (!selectedCases.length) fail('invalid-proof-case', 'RECURSION_ENHANCEMENT_PROOF_CASE did not match a live proof case.', { selectedCase });
   for (const testCase of selectedCases) {
+    await installLiveEnhancementRunOracle(page);
     const proof = await page.evaluate(proofScript(), testCase);
+    const oracle = await collectLiveEnhancementRunOracle(page);
     const beforeText = testCase.applyMode === 'as-swipe' ? proof.before.swipes[0] : proof.before.text;
     const afterText = testCase.applyMode === 'as-swipe' ? proof.after.swipes[proof.after.swipeId] : proof.after.text;
     const quality = qualityDelta(beforeText, afterText);
@@ -246,7 +247,7 @@ try {
       && proof.preparedHandCardCount > 0
       && proof.duplicateFamilyOmissions.length === 0
       && validCardOutcomeLedger;
-    const pass = testCase.applyMode === 'as-swipe'
+    const behaviorPass = testCase.applyMode === 'as-swipe'
       ? proof.prepared?.ok === true
         && proof.ok === true
         && validatedEditorialResult
@@ -260,6 +261,7 @@ try {
         && validatedEditorialResult
         && proof.after.swipes.length === 1
         && quality.significant === true;
+    const pass = behaviorPass && oracle.verdict.ok;
     report.checks.push({
       name: `enhancement-${testCase.pipelineMode}-${testCase.target}-${testCase.applyMode}`,
       status: pass ? 'pass' : 'fail',
@@ -288,7 +290,9 @@ try {
         markerCount: proof.after.markerCount,
         errorCode: proof.result?.error?.code || '',
         errorActualSchema: proof.result?.error?.actualSchema || '',
-        errorResponseFields: proof.result?.error?.responseFields || []
+        errorResponseFields: proof.result?.error?.responseFields || [],
+        oracle: oracle.verdict,
+        oracleObservation: oracle.observation
       }
     });
     if (!pass) fail(`enhancement-${testCase.target}-${testCase.applyMode}-failed`, `Enhancement ${testCase.target}/${testCase.applyMode} proof failed.`, proof);

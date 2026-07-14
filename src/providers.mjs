@@ -1019,9 +1019,11 @@ function positiveTokenLimit(value) {
 }
 
 function providerRequestMaxTokens(enriched = {}) {
-  return positiveTokenLimit(enriched.responseLength)
-    ?? positiveTokenLimit(enriched.maxTokens)
-    ?? positiveTokenLimit(enriched.providerConfig?.maxTokens);
+  const configured = positiveTokenLimit(enriched.providerConfig?.maxTokens);
+  const requested = positiveTokenLimit(enriched.responseLength)
+    ?? positiveTokenLimit(enriched.maxTokens);
+  if (configured && requested) return Math.min(configured, requested);
+  return configured ?? requested;
 }
 
 function parseOpenAiText(payload, enriched = {}) {

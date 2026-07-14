@@ -2246,13 +2246,13 @@
   height: 6px;
   margin-left: auto;
   opacity: .45;
-  transform: translateY(3px) rotate(45deg);
+  transform: rotate(45deg);
   width: 6px;
 }
 
 .recursion-brief-card[aria-expanded="true"] .recursion-expand-glyph {
   opacity: .72;
-  transform: translateY(5px) rotate(225deg);
+  transform: rotate(225deg);
 }
 
 .recursion-card-text {

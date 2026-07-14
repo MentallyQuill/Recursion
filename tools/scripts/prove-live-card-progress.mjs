@@ -2,6 +2,10 @@ import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { resolve } from 'node:path';
 import { createSillyTavernHttpSession, validateSoakUserHandle } from './lib/sillytavern-live-harness.mjs';
+import {
+  collectLiveEnhancementRunOracle,
+  installLiveEnhancementRunOracle
+} from './lib/live-enhancement-run-oracle.mjs';
 
 const baseUrl = process.env.SILLYTAVERN_BASE_URL || '';
 const userCheck = validateSoakUserHandle(process.env.RECURSION_SILLYTAVERN_USER || '');
@@ -21,6 +25,9 @@ const browser = await chromium.launch({ headless: process.env.RECURSION_SILLYTAV
 try {
   const context = await browser.newContext({ viewport: { width: 1360, height: 820 } });
   await context.addCookies(session.playwrightCookies());
+  await context.addInitScript(() => {
+    globalThis.__recursionLiveHarness = true;
+  });
   const page = await context.newPage();
   const issues = [];
   page.on('console', (message) => {
@@ -45,6 +52,8 @@ try {
   await enhancements.click();
   await page.locator('[data-recursion-enhancement-target-choice-redirect]').first().click();
   await page.waitForFunction(() => /redirect/i.test(document.querySelector('[data-recursion-enhancements-button]')?.getAttribute('aria-label') || ''), null, { timeout: timeoutMs });
+  await page.waitForFunction(() => Boolean(globalThis.__recursionLiveHarnessRuntime), null, { timeout: timeoutMs });
+  await installLiveEnhancementRunOracle(page);
 
   const message = `Card progress proof ${Date.now()}: keep the archive door, candle, Mara, and missing captain in the immediate scene. Return a concise next beat.`;
   const input = page.locator('#send_textarea, textarea#send_textarea, textarea[name="send_textarea"]').first();
@@ -85,6 +94,7 @@ try {
       text: String(popover?.textContent || '').replace(/\s+/g, ' ').trim()
     };
   });
+  const oracle = await collectLiveEnhancementRunOracle(page);
   await page.screenshot({ path: resolve(artifactDir, 'desktop.png'), fullPage: false });
   await page.setViewportSize({ width: 420, height: 900 });
   await page.waitForTimeout(300);
@@ -96,10 +106,11 @@ try {
     ...(!snapshot.popoverOpen ? ['progress-popover-closed'] : []),
     ...(snapshot.rows.length === 0 ? ['progress-tree-empty'] : []),
     ...(unhealthyRows.length ? ['progress-tree-unhealthy'] : []),
-    ...(!promptReady ? ['prompt-ready-not-done'] : [])
+    ...(!promptReady ? ['prompt-ready-not-done'] : []),
+    ...(!oracle.verdict.ok ? oracle.verdict.failures : [])
   ];
   const statusValue = failures.length ? 'fail' : 'pass';
-  console.log(JSON.stringify({ status: statusValue, user, snapshot, unhealthyRows, promptReady, failures, issues, artifactDir }, null, 2));
+  console.log(JSON.stringify({ status: statusValue, user, snapshot, unhealthyRows, promptReady, oracle, failures, issues, artifactDir }, null, 2));
   if (failures.length) process.exitCode = 1;
 } finally {
   await browser.close().catch(() => {});

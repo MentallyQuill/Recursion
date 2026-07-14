@@ -707,6 +707,9 @@ assert(!/\.recursion-mode-choice-icon::before/.test(recursionCss), 'production m
 assert(/\.recursion-mode-icon\s*\{[\s\S]*?pointer-events:\s*none;/.test(recursionCss), 'production mode icon container does not become an independent click target');
 assert(/\.recursion-mode-icon \*\s*\{[\s\S]*?pointer-events:\s*none;/.test(recursionCss), 'production mode icon graphics do not become independent click targets');
 assert(/\.recursion-brief-card\s*\{[\s\S]*?grid-template-columns:\s*138px minmax\(0,\s*1fr\);/.test(recursionCss), 'production Last Brief cards use the reference two-column card grid');
+assert(/\.recursion-expand-glyph\s*\{[\s\S]*?transform:\s*rotate\(45deg\);/.test(recursionCss)
+  && !recursionCss.includes('transform: translateY(3px) rotate(45deg);')
+  && !recursionCss.includes('transform: translateY(5px) rotate(225deg);'), 'Last Brief card chevrons stay vertically centered by the row flex alignment');
 assert(/\.recursion-card-text\s*\{[\s\S]*?-webkit-line-clamp:\s*1;/.test(recursionCss), 'production Last Brief cards clamp text to one line while compact');
 assert(/\.recursion-brief-card\[aria-expanded="true"\] \.recursion-card-text\s*\{[\s\S]*?max-height:\s*none;[\s\S]*?overflow:\s*visible;[\s\S]*?white-space:\s*normal;[\s\S]*?-webkit-line-clamp:\s*unset;/.test(recursionCss), 'expanded Last Brief cards grow to full text without nested scroll or ellipsis');
 assert(/\.status-popover\s*\{[\s\S]*?left:\s*-3px;/.test(barImplementationReference), 'status popover aligns to the visible left edge of the bar');

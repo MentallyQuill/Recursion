@@ -748,6 +748,18 @@ assertEqual(generationReviewProgress.steps[0].label, 'Generation review', 'gener
 assertEqual(generationReviewProgress.currentStepText, 'Reviewing generated response...', 'generation review gets compact current-step text');
 assertEqual(createHeroPixelBlocks(generationReviewProgress).length, 1, 'generation review gets one Hero Pixel block');
 
+for (const [roleId, expectedId, expectedLabel] of [
+  ['editorialDiagnostician', 'editorial-diagnosis', 'Editorial diagnosis'],
+  ['editorialTransformer', 'editorial-candidate', 'Editorial candidate'],
+  ['editorialVerifier', 'editorial-verification', 'Editorial verification']
+]) {
+  const editorialProgress = createProgressRunModel({
+    activity: { runId: `editorial-${roleId}`, phase: 'providerCallRunning', label: expectedLabel, providerLane: 'utility', detail: { roleId }, recordedAt: '1' }
+  });
+  assertEqual(editorialProgress.steps[0].id, expectedId, `${roleId} maps to editorial progress row`);
+  assertEqual(editorialProgress.steps[0].label, expectedLabel, `${roleId} uses product-facing editorial label`);
+}
+
 const hostStoppedProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'host-stopped-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },

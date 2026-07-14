@@ -387,6 +387,7 @@ if (lifecycleFailures.length) {
   };
   globalThis.extension_settings = { recursion: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' } };
   globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
 
   await globalThis.recursionOnDelete();
   assertEqual(
@@ -397,6 +398,7 @@ if (lifecycleFailures.length) {
   assert(prompts.length > 0, 'latest assistant swipe retry setup calls provider once');
   const callsAfterSetup = prompts.length;
   const writesAfterSetup = fake.promptWrites.length;
+  const preparedPacketId = globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId;
   fake.context.chat = [
     { mesid: 1, is_user: true, mes: userText },
     {
@@ -409,16 +411,24 @@ if (lifecycleFailures.length) {
   ];
   await eventSource.emit('message_swiped', {});
   assertEqual(
-    await globalThis.recursionGenerationInterceptor(fake.context.chat),
+    await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'swipe'),
     fake.context.chat,
-    'latest assistant swipe retry with sparse event payload keeps original chat'
+    'latest assistant native swipe sequence keeps original chat'
   );
-  assertEqual(prompts.length, callsAfterSetup, 'latest assistant swipe retry with sparse event payload does not call providers again');
-  assert(fake.promptWrites.length > writesAfterSetup, 'latest assistant swipe retry with sparse event payload reinstalls previous prompt');
+  assertEqual(fake.context.chat.length, 2, 'latest assistant native swipe sequence does not append a second assistant row');
+  assertEqual(fake.context.chat[1].swipes.length, 2, 'latest assistant native swipe sequence preserves both response variants');
+  assertEqual(fake.context.chat[1].swipe_id, 1, 'latest assistant native swipe sequence keeps the selected response variant');
+  assertEqual(prompts.length, callsAfterSetup, 'latest assistant native swipe sequence does not call providers again');
+  assert(fake.promptWrites.length > writesAfterSetup, 'latest assistant native swipe sequence reinstalls previous prompt');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastCacheDecision?.kind, 'swipe-packet', 'latest assistant native swipe sequence records packet-cache provenance');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastCacheDecision?.decision, 'hit', 'latest assistant native swipe sequence records a packet-cache hit');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId, preparedPacketId, 'latest assistant native swipe sequence preserves packet identity');
   for (const key of RECURSION_PROMPT_KEYS) {
-    assert(fake.promptState.get(key), `latest assistant swipe retry with sparse event payload keeps ${key} installed`);
+    assert(fake.promptState.get(key), `latest assistant native swipe sequence keeps ${key} installed`);
   }
   await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
   if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
   else globalThis.SillyTavern = previousGlobals.SillyTavern;
   if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;

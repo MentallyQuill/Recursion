@@ -44,6 +44,9 @@ function responseSchemaForRole(roleId) {
   if (roleId === 'guidanceComposer') return 'recursion.guidanceComposer.v1';
   if (roleId === 'cardAuthoringAssist') return 'recursion.cardAuthoringAssist.v1';
   if (roleId === 'generationReviewer') return 'recursion.generationReview.v1';
+  if (roleId === 'editorialDiagnostician') return 'recursion.editorialDiagnosis.v1';
+  if (roleId === 'editorialTransformer') return 'recursion.editorialPass.v1';
+  if (roleId === 'editorialVerifier') return 'recursion.editorialVerification.v1';
   if (roleId === 'fusedCardBundle') return 'recursion.cardBundle.v1';
   if (roleId === 'providerTest') return 'recursion.providerTest.v1';
   return 'recursion.card.v1';
@@ -81,6 +84,9 @@ const expectedUtilityRoles = [
   'guidanceComposer',
   'cardAuthoringAssist',
   'generationReviewer',
+  'editorialDiagnostician',
+  'editorialTransformer',
+  'editorialVerifier',
   'providerTest'
 ];
 assertDeepEqual(UTILITY_ROLE_IDS, expectedUtilityRoles, 'utility role catalog exactly matches Task 6 plan');
@@ -229,6 +235,13 @@ assertEqual(calls.at(-1).responseSchema, 'recursion.cardAuthoringAssist.v1', 'ca
 await router.generate('generationReviewer', { prompt: 'Generation review' });
 assertEqual(calls.at(-1).lane, 'utility', 'generationReviewer uses utility lane');
 assertEqual(calls.at(-1).responseSchema, 'recursion.generationReview.v1', 'generationReviewer request carries expected response schema');
+await router.generate('editorialDiagnostician', { prompt: 'Editorial diagnosis' });
+assertEqual(calls.at(-1).lane, 'utility', 'editorialDiagnostician uses utility lane by default');
+assertEqual(calls.at(-1).responseSchema, 'recursion.editorialDiagnosis.v1', 'editorialDiagnostician request carries diagnosis schema');
+await router.generate('editorialTransformer', { prompt: 'Editorial transform' });
+assertEqual(calls.at(-1).responseSchema, 'recursion.editorialPass.v1', 'editorialTransformer request carries pass schema');
+await router.generate('editorialVerifier', { prompt: 'Editorial verify' });
+assertEqual(calls.at(-1).responseSchema, 'recursion.editorialVerification.v1', 'editorialVerifier request carries verifier schema');
 await router.generate('fusedCardBundle', { prompt: 'Fused card bundle', snapshotHash: 'fused-provider-hash' });
 assertEqual(calls.at(-1).lane, 'utility', 'fusedCardBundle uses utility lane by default');
 assertEqual(calls.at(-1).responseSchema, 'recursion.cardBundle.v1', 'fusedCardBundle request carries card-bundle response schema');
@@ -238,12 +251,17 @@ assertEqual(machineJsonSchemaForRequest(calls.at(-1)).schema.properties.schema.c
 const generationReviewMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.generationReview.v1',
   machineJson: true,
-  sourceHash: 'review-source-hash'
+  sourceHash: 'review-source-hash',
+  validTargetIds: ['dialogue:1', 'prose:2'],
+  installedCardIds: ['room-boundary']
 });
 assert(generationReviewMachineSchema.schema.required.includes('sourceHash'), 'generation review machine schema requires its frozen source hash');
 assert(generationReviewMachineSchema.schema.required.includes('cardOutcomes'), 'generation review machine schema requires the card-outcome ledger');
 assert(generationReviewMachineSchema.schema.required.includes('patches'), 'generation review machine schema requires the bounded patch list');
 assertDeepEqual(generationReviewMachineSchema.schema.properties.cardOutcomes.items.properties.status.enum, ['honored', 'repaired', 'not-applicable', 'partially-reflected', 'violated', 'requires-regeneration'], 'generation review machine schema constrains card-outcome status values');
+assertDeepEqual(generationReviewMachineSchema.schema.properties.cardOutcomes.items.properties.cardId.enum, ['room-boundary'], 'generation review machine schema constrains outcomes to installed cards');
+assertDeepEqual(generationReviewMachineSchema.schema.properties.cardOutcomes.items.properties.evidenceTargetIds.items.enum, ['dialogue:1', 'prose:2'], 'generation review machine schema constrains evidence to frozen targets');
+assertDeepEqual(generationReviewMachineSchema.schema.properties.patches.items.properties.id.enum, ['dialogue:1', 'prose:2'], 'generation review machine schema constrains patches to frozen targets');
 
 const rawReviewRouter = createGenerationRouter({
   client: {

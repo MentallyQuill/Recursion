@@ -62,8 +62,8 @@ function clearEnhancementOwnedMutationWindow() {
 
 function runtimeEnhancementEnabled(activeRuntime = runtime) {
   try {
-    const target = String(activeRuntime?.view?.()?.settings?.enhancements?.target || 'off').toLowerCase();
-    return target === 'prose' || target === 'dialogue' || target === 'prose-dialogue';
+    const mode = String(activeRuntime?.view?.()?.settings?.enhancements?.mode || 'off').toLowerCase();
+    return mode !== 'off';
   } catch {
     return false;
   }

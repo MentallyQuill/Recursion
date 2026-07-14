@@ -111,6 +111,7 @@ function pipelineLabel(value) {
 
 function normalizeEnhancementTarget(value) {
   const target = cleanText(value, 'off').toLowerCase();
+  if (['repair', 'recompose', 'redirect'].includes(target)) return target;
   if (target === 'on' || target === 'prose' || target === 'dialogue' || target === 'prose-dialogue') return 'on';
   return 'off';
 }
@@ -120,7 +121,11 @@ function normalizeEnhancementApplyMode(value) {
 }
 
 function enhancementTargetLabel(value) {
-  return normalizeEnhancementTarget(value) === 'on' ? 'Enhancement' : 'Off';
+  const target = normalizeEnhancementTarget(value);
+  if (target === 'repair') return 'Repair';
+  if (target === 'recompose') return 'Recompose';
+  if (target === 'redirect') return 'Redirect';
+  return target === 'on' ? 'Enhancement' : 'Off';
 }
 
 function enhancementApplyModeLabel(value) {
@@ -236,7 +241,10 @@ export function createRecursionViewModel(view = {}) {
   const enabled = settings.enabled !== false;
   const mode = normalizeMode(settings.mode);
   const pipelineMode = normalizePipelineMode(settings.pipelineMode);
-  const enhancementTarget = normalizeEnhancementTarget(settings.enhancements?.target);
+  const explicitEnhancementMode = cleanText(settings.enhancements?.mode, '').toLowerCase();
+  const enhancementTarget = ['off', 'repair', 'recompose', 'redirect'].includes(explicitEnhancementMode)
+    ? explicitEnhancementMode
+    : normalizeEnhancementTarget(settings.enhancements?.target);
   const enhancementApplyMode = normalizeEnhancementApplyMode(settings.enhancements?.applyMode);
   const cardDecks = normalizeCardDeckSettings(settings.cardDecks);
   const deckSettings = settings.cardDecks ? { ...settings, cardDecks } : settings;
@@ -278,6 +286,7 @@ export function createRecursionViewModel(view = {}) {
     lastBriefCoverageStatus: cleanText(source.lastBrief?.coverageStatus || 'none', 'none'),
     lastBriefMissingSourceCardCount: Math.max(0, Math.floor(Number(source.lastBrief?.missingSourceCardCount) || 0)),
     lastCacheDecision: source.lastCacheDecision || null,
+    editorialResult: source.editorialResult || null,
     contextContract: source.contextContract || null,
     enabled,
     modeLabel: modeLabel(mode),

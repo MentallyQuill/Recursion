@@ -54,6 +54,9 @@ const STEP_ORDER = [
   'reusing-scene-deck',
   'provider-test',
   'generation-review',
+  'editorial-diagnosis',
+  'editorial-candidate',
+  'editorial-verification',
   'fused-card-bundle',
   'utility-card-batch',
   'validating-cards',
@@ -83,6 +86,9 @@ const STEP_DEFINITIONS = Object.freeze({
   'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
   'provider-test': { label: 'Provider test', providerLane: 'utility' },
   'generation-review': { label: 'Generation review', currentLabel: 'Reviewing generated response', providerLane: 'utility' },
+  'editorial-diagnosis': { label: 'Editorial diagnosis', currentLabel: 'Diagnosing response', providerLane: 'utility' },
+  'editorial-candidate': { label: 'Editorial candidate', currentLabel: 'Transforming response', providerLane: 'utility' },
+  'editorial-verification': { label: 'Editorial verification', currentLabel: 'Verifying candidate', providerLane: 'reasoner' },
   'fused-card-bundle': { label: 'Fused card bundle', providerLane: 'utility' },
   'utility-card-batch': { label: 'Utility card batch', providerLane: 'utility' },
   'validating-cards': { label: 'Validating cards', providerLane: 'utility' },
@@ -127,6 +133,9 @@ const PHASE_STEP_IDS = Object.freeze({
   promptClearFailed: 'clearing-recursion-prompt',
   providerTestFailed: 'provider-test',
   generationReviewing: 'generation-review',
+  editorialDiagnosing: 'editorial-diagnosis',
+  editorialTransforming: 'editorial-candidate',
+  editorialVerifying: 'editorial-verification',
   cacheWarning: 'checking-scene-cache',
   settled: 'recursion-prompt-ready'
 });
@@ -316,6 +325,9 @@ function roleStepId(event) {
   if (roleId === 'reasonerComposer') return 'reasoner-guidance';
   if (roleId === 'guidanceComposer') return 'composing-prompt-packet';
   if (roleId === 'generationReviewer') return 'generation-review';
+  if (roleId === 'editorialDiagnostician') return 'editorial-diagnosis';
+  if (roleId === 'editorialTransformer') return 'editorial-candidate';
+  if (roleId === 'editorialVerifier') return 'editorial-verification';
   if (roleId === 'fusedCardBundle') return 'fused-card-bundle';
   if (MODEL_CALL_ROLE_IDS.has(roleId)) return 'utility-card-batch';
   return null;
@@ -328,6 +340,9 @@ function roleLabel(roleId, fallback = '') {
   if (id === 'utilityArbiter') return 'Utility Arbiter';
   if (id === 'guidanceComposer') return 'Guidance composer';
   if (id === 'generationReviewer') return 'Generation review';
+  if (id === 'editorialDiagnostician') return 'Editorial diagnosis';
+  if (id === 'editorialTransformer') return 'Editorial candidate';
+  if (id === 'editorialVerifier') return 'Editorial verification';
   if (id === 'fusedCardBundle') return 'Fused card bundle';
   if (id === 'providerTest') return 'Provider test';
   return fallback;

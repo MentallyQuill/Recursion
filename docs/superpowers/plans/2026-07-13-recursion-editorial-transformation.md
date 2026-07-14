@@ -704,7 +704,199 @@ node tools\scripts\test-model-eval-harness.mjs
 node tools\scripts\eval-recursion-models.mjs --pack editorial
 ```
 
-## Phase 6: Update schemas, docs, and examples in place
+## Phase 6: Certify editorial UI with Playwright visual regression
+
+**Files:**
+
+- Add: `tools/scripts/prove-editorial-transformation-ui.mjs`
+- Add: `tools/scripts/lib/editorial-ui-fixtures.mjs`
+- Add: `tools/scripts/lib/visual-regression.mjs`
+- Add: `tests/visual-baselines/editorial-transformation/README.md`
+- Add: approved baseline PNGs under `tests/visual-baselines/editorial-transformation/`
+- Modify: `package.json`
+- Modify: `tools/scripts/test-live-harness.mjs`
+- Modify: `tools/scripts/test-extension-smoke.mjs`
+- Modify: `tools/scripts/test-ui.mjs`
+
+This is a real browser-certification gate, not a screenshot collection task.
+It mounts the served extension in SillyTavern for the dedicated
+`recursion-soak-ui` user, uses only audited fixed fixture text and deterministic
+editorial provider responses, and makes no real provider call or chat send.
+The fixture bridge belongs in the test harness; it must not add a production
+global, URL flag, persisted setting, or runtime bypass.
+
+### 6.1 Cover every editorial mode in every pipeline
+
+Run the full Standard/Rapid/Fused × Repair/Recompose/Redirect matrix at both
+fixed viewports: desktop `1440×900` and phone `390×844`. The core matrix uses
+successful `As Swipe` outcomes; Redirect deliberately starts with a requested
+Replace value so the forced-swipe UI and host behavior are proven. Add one
+successful Recompose Replace case per pipeline and one accepted High/Ultra
+verification case per pipeline.
+
+```js
+const EDITORIAL_UI_MATRIX = Object.freeze([
+  ...['standard', 'rapid', 'fused'].flatMap((pipeline) => [
+    { pipeline, mode: 'repair', applyMode: 'as-swipe', reasoningLevel: 'medium' },
+    { pipeline, mode: 'recompose', applyMode: 'as-swipe', reasoningLevel: 'medium' },
+    { pipeline, mode: 'redirect', applyMode: 'replace', expectedApplyMode: 'as-swipe', reasoningLevel: 'medium' }
+  ]),
+  ...['standard', 'rapid', 'fused'].map((pipeline) => ({
+    pipeline, mode: 'recompose', applyMode: 'replace', expectedApplyMode: 'replace', reasoningLevel: 'medium'
+  })),
+  { pipeline: 'standard', mode: 'recompose', applyMode: 'as-swipe', reasoningLevel: 'high', verification: 'accepted' },
+  { pipeline: 'rapid', mode: 'redirect', applyMode: 'as-swipe', reasoningLevel: 'high', verification: 'accepted' },
+  { pipeline: 'fused', mode: 'recompose', applyMode: 'as-swipe', reasoningLevel: 'ultra', verification: 'accepted' }
+]);
+
+const EDITORIAL_VIEWPORTS = Object.freeze([
+  { name: 'desktop', width: 1440, height: 900 },
+  { name: 'phone', width: 390, height: 844 }
+]);
+```
+
+Each fixture must use a source/candidate/ledger/card-outcome set tailored to
+the selected mode, but all text must be safe for local binary artifacts. The
+fixture must contain an installed hand and Prompt Packet for Standard, a valid
+`warm-v2` packet for Rapid, and accepted Fused bundle lineage for Fused. This
+proves the editorial layer does not erase the pipeline-specific UI/provenance.
+
+### 6.2 Assert every visible contract, not just the final text
+
+Give the replacement controls and terminal UI stable test selectors as part of
+the feature implementation:
+
+```text
+data-recursion-editorial-mode-choice="repair|recompose|redirect|off"
+data-recursion-editorial-apply-choice="as-swipe|replace"
+data-recursion-editorial-progress
+data-recursion-editorial-result
+data-recursion-editorial-ledger
+data-recursion-editorial-verification
+data-recursion-state="pending|running|success|cached|warning|error"
+data-recursion-visual-volatile
+```
+
+For every matrix row, Playwright must assert all of the following through the
+visible mounted UI and the host swipe state:
+
+- bar button label, tooltip, selected mode, keyboard focus, `Esc` close, and
+  the compact menu order `Off`, `Repair`, `Recompose`, `Redirect`;
+- an explicit `Off` preflight leaves the bar neutral, starts no editorial
+  fixture/provider work, appends no swipe, and creates no editorial progress
+  row before the selected mode is armed;
+- `As Swipe`/`Replace` controls, including disabled Replace plus `Redirect
+  always creates a swipe.` helper when Redirect is selected;
+- settings Context Messages value remains visible and persists across reopening;
+- selected Standard/Rapid/Fused control remains left of Mode and retains its
+  appropriate pipeline indicator during the editorial run;
+- stable progress rows: captured evidence, diagnosis, candidate/patches,
+  validation, conditional verification, and applied swipe/response;
+- result inspector: original and result panes, mode label, full-response
+  transformation label for Recompose/Redirect, preservation/change ledgers,
+  card outcomes, risk flags, producer lane, and verification decision;
+- Repair/Recompose Swipe creates and selects one new host swipe; Recompose
+  Replace mutates only the selected assistant message; Redirect creates and
+  selects a swipe even when Replace was requested;
+- phone layout retains a one-row bar, moves status to the mobile drawer, keeps
+  the active popover in the viewport, and makes inspector/progress content
+  scrollable without clipping controls.
+
+The successful-fixture assertion is deliberately strict:
+
+```js
+async function assertEditorialSuccess(page, { mode, expectedApplyMode, verification = 'not-required' }) {
+  const root = page.locator('[data-recursion-root]');
+  await assertEqual(await root.locator('[data-recursion-state="warning"], [data-recursion-state="error"]').count(), 0,
+    'successful editorial fixture has no Recursion caution or error indicator');
+  await assertEqual(await root.locator('[data-recursion-editorial-progress] [data-recursion-state="pending"], [data-recursion-editorial-progress] [data-recursion-state="running"]').count(), 0,
+    'successful editorial fixture leaves no pending or running progress row');
+  await assertEqual(await root.getByText(/caution|failed|error|original kept/i).count(), 0,
+    'successful editorial fixture exposes no caution or failure copy');
+  await assertEqual(await root.locator('[data-recursion-editorial-verification]').getAttribute('data-decision'), verification,
+    'visible verification decision is truthful');
+  await assertEqual(await root.locator('[data-recursion-editorial-result]').getAttribute('data-apply-mode'), expectedApplyMode,
+    `${mode} exposes the actual application mode`);
+}
+```
+
+Collect `pageerror` and browser console events for the whole scenario. A
+successful matrix row requires zero page errors and zero console warnings or
+errors; the report must include the event arrays even when empty. No broad
+allowlist is permitted—an expected host warning must be eliminated or the row
+is not certification-quality.
+
+### 6.3 Make visual regression an actual gate
+
+Use the maintained `visual-regression.mjs` helper. It captures locator
+screenshots with animations disabled and masks only elements tagged
+`data-recursion-visual-volatile`; baseline presence and dimensions are a
+deterministic gate, while each run also records a content hash for human visual
+review. No private Playwright comparator or network-installed image package is
+required.
+
+For every matrix row and both viewports, compare these approved baselines:
+
+```text
+enhancement-menu
+editorial-inspector
+```
+
+The same matrix also asserts the progress-list structure and activity ribbon;
+live generation-specific progress transitions remain covered by the existing
+pipeline harness because this editorial matrix is generation-free.
+
+The baseline path is deterministic:
+
+```js
+const baselinePath = join(
+  'tests', 'visual-baselines', 'editorial-transformation',
+  viewport.name, pipeline, mode, `${state}.png`
+);
+
+await assertVisualBaseline({
+  actual: await captureStableLocator(page, screenshotTarget, { maskSelector: '[data-recursion-visual-volatile]' }),
+  baselinePath,
+  requireBaseline: true
+});
+```
+
+Missing baselines fail by default. `UPDATE_VISUAL_BASELINES=1` may write a new
+baseline only in a dedicated-user, no-generation fixture run; it is never used
+by CI or the normal certification command. Every baseline update needs human
+review for compactness, theme-neutral styling, responsive clipping, and absence
+of secret/transcript material before it is committed.
+
+### 6.4 Browser runner, artifacts, and verification
+
+The runner writes only redaction-safe fixture artifacts under
+`artifacts/live-smoke/editorial-ui/<run-id>/`: report, summary, event log,
+baseline-diff images on failure, desktop/phone screenshots, and Playwright
+trace. It must use the existing dedicated-user rejection and served-extension
+freshness checks before browser navigation. It is classified as a
+**no-generation UI run** because it sends no chat and invokes no provider.
+
+Add the package command:
+
+```json
+"prove:editorial-ui": "node tools/scripts/prove-editorial-transformation-ui.mjs"
+```
+
+Run both contract and browser gates:
+
+```powershell
+node tools\scripts\test-ui.mjs
+node tools\scripts\test-extension-smoke.mjs
+node tools\scripts\test-live-harness.mjs
+node tools\scripts\prove-editorial-transformation-ui.mjs --live --write-artifacts --strict
+```
+
+Expected result: every 24-case matrix row is `pass`, baseline
+comparison is within threshold, warning/error/page-error counts are zero, and
+the final report has no `caution`, `failed`, `error`, `stale-extension`, or
+`manual-required` state.
+
+## Phase 7: Update schemas, docs, and examples in place
 
 **Files:**
 
@@ -716,6 +908,9 @@ node tools\scripts\eval-recursion-models.mjs --pack editorial
 - Modify: `docs/technical/MODEL_CALLS_AND_PROVIDER_ROUTING.md`
 - Modify: `docs/architecture/CACHE_USE_AND_REUSE_SPEC.md`
 - Modify: `docs/testing/TESTING_STRATEGY.md`
+- Modify: `docs/testing/SILLYTAVERN_PLAYWRIGHT_HARNESS.md`
+- Modify: `docs/testing/LIVE_SMOKE_TEST_PLAN.md`
+- Modify: `docs/testing/ARTIFACT_CONTRACT.md`
 - Modify: `docs/user/RECURSION_OPERATOR_MANUAL.md`
 - Modify: `docs/DOCUMENTATION_INDEX.md`
 
@@ -751,7 +946,7 @@ Schema excerpt:
 }
 ```
 
-## Phase 7: Full verification and removal audit
+## Phase 8: Full verification and removal audit
 
 Run the focused suite, then the project gates defined by `package.json`:
 
@@ -764,6 +959,7 @@ node tools\scripts\test-ui.mjs
 node tools\scripts\test-diagnostics.mjs
 node tools\scripts\test-model-eval-harness.mjs
 node tools\scripts\test-extension-smoke.mjs
+node tools\scripts\prove-editorial-transformation-ui.mjs --live --write-artifacts --strict
 npm.cmd test
 ```
 
@@ -788,6 +984,9 @@ each mode:
    change or host regeneration.
 6. cancellation, malformed output, stale source, and verifier rejection leave
    the original assistant message visible and intact.
+7. The dedicated-user Playwright certification passes all 24 editorial rows at
+   desktop and phone widths with approved visual baselines and zero browser,
+   Recursion, or report warnings/errors.
 
 ## Delivery criteria
 
@@ -801,6 +1000,9 @@ each mode:
   verifier can neither correct output nor create a candidate.
 - The fixed editorial corpus meets its continuity, Recompose-strength, and
   Redirect-engagement gates before release.
+- The 24-case dedicated-user Playwright matrix passes at desktop and phone
+  viewports, with visual baselines, no clipping, and zero browser or Recursion
+  warning/error/caution states.
 - The user sees the actual editorial mode, result, and verification state.
 - No tournament code, ranking prompt, candidate array, or automatic selection
   path exists.

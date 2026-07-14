@@ -56,6 +56,13 @@ const request = buildGenerationReviewRequest({
 
 assertEqual(request.responseSchema, GENERATION_REVIEW_SCHEMA, 'request carries generation-review schema');
 assertEqual(request.machineJson, true, 'request requires machine JSON');
+assertEqual(request.sourceHash, 'source-hash', 'request exposes the immutable source hash to the provider schema');
+assertDeepEqual(
+  request.validTargetIds,
+  ['dialogue:1', 'prose:1', 'prose:2'],
+  'request exposes the complete bounded patch-target set to the provider schema'
+);
+assertDeepEqual(request.installedCardIds, ['room-boundary'], 'request exposes installed card IDs to the provider schema');
 assert(request.prompt.includes('installed cards are review obligations'), 'prompt defines installed-card review boundary');
 assert(request.prompt.includes('anti-slop'), 'prompt includes anti-slop review domain');
 assert(request.prompt.includes('room-boundary'), 'prompt includes installed custom-card identity');

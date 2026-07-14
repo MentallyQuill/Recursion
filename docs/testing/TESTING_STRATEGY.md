@@ -36,7 +36,7 @@ Highest-priority invariants:
 - Rapid invalid provider output and mandatory gaps escalate to Standard for the same pending user message.
 - Prompt packet installation is replace-or-clear by Recursion metadata, not blind append.
 - Stale provider results cannot update the active scene cache or active prompt packet.
-- Older SillyTavern swipe changes clear stale Recursion prompts and cannot reuse cards from a different active source revision; latest-assistant swipe retries reuse the same prompt packet without provider work.
+- Older SillyTavern swipe changes clear stale Recursion prompts and cannot reuse cards from a different active source revision. Latest-assistant native swipe retries must preserve one assistant row with multiple swipe variants, process `MESSAGE_SWIPED` before the generation interceptor's `generationType: "swipe"`, reinstall the same prompt packet, record a `swipe-packet` cache hit, and perform no provider work. Post-generation editorial setting changes must not invalidate that packet or clear its prompt lanes.
 - Utility is the default provider lane for Arbiter and composition work.
 - Reasoner composition is optional and must fall back to Utility or local composition on timeout, failure, off state, or invalid schema.
 - Runtime must trim over-budget `cardJobs` before provider card calls; deterministic tests should prove provider card-call count cannot exceed the effective hand budget for the turn.
@@ -84,7 +84,29 @@ Focused contract tests should use deterministic fixtures and fake provider respo
 
 Generation Review regressions additionally prove that SillyTavern streaming remains visible while review is pending and that exhausted invalid-target and invalid-card-outcome corrections are isolated to a red `Generation review` row. Standard, Rapid, and Fused fixtures must retain the original message and the successful prompt-ready state in that case; no invalid review may append a swipe or downgrade an already-installed prompt. The live enhancement proof must first prepare each pipeline's real installed hand and then require complete valid card-outcome coverage from the reviewer.
 
+Generation Review requests must expose the frozen `sourceHash`, eligible target IDs, and installed card IDs as structured request fields, not prompt prose alone. Provider machine JSON schemas must bind the source hash and constrain patch IDs, evidence target IDs, and card-outcome IDs to those frozen sets before runtime semantic validation.
+
 ## Playwright Readiness
+
+### Editorial transformation UI matrix
+
+`npm.cmd run prove:editorial-ui -- --dry-run` prints the complete no-generation
+matrix. A live run requires `SILLYTAVERN_BASE_URL` and drives every editorial
+mode (`Off`, `Repair`, `Recompose`, `Redirect`) across Standard, Rapid, and
+Fused pipelines at desktop and compact-phone widths:
+
+```powershell
+$env:SILLYTAVERN_BASE_URL = 'http://127.0.0.1:8000'
+$env:RECURSION_SILLYTAVERN_USER = 'recursion-soak-a'
+npm.cmd run prove:editorial-ui
+```
+
+Each row opens the visible controls, checks the selected mode and pipeline,
+captures a screenshot artifact, and fails on visible caution/error surfaces.
+The run writes `artifacts/editorial-ui/report.json`; generation is never
+triggered by this matrix. Set `EDITORIAL_UI_VISUAL_BASELINES=1` to enable the
+stable screenshot baseline capture and dimension gate; dynamic regions must be
+marked `data-recursion-visual-volatile` and are masked before comparison.
 
 The Playwright readiness command must not contact SillyTavern. It proves browser automation is available before any live chat, user file, prompt, or provider state is touched. When Playwright is missing, it returns `environment-fail` with sanitized details.
 

@@ -25,7 +25,8 @@
     "check:soak-users": "node tools/scripts/check-sillytavern-soak-users.mjs",
     "smoke:sillytavern": "node tools/scripts/smoke-sillytavern-live.mjs",
     "prove:card-system-ui": "node tools/scripts/prove-card-system-ui.mjs",
-    "prove:card-system-assist": "node tools/scripts/prove-card-system-assist.mjs"
+    "prove:card-system-assist": "node tools/scripts/prove-card-system-assist.mjs",
+    "prove:editorial-ui": "node tools/scripts/prove-editorial-transformation-ui.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.1"

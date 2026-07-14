@@ -3692,8 +3692,13 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
     messages
   });
   let activeSnapshot = snapshotFromMessages(initialMessages);
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { pipelineMode, mode: 'auto', reasonerUse: 'off' },
+  const { runtime, installed, cleared, storage } = createRuntimeHarness({
+    settings: {
+      pipelineMode,
+      mode: 'auto',
+      reasonerUse: 'off',
+      enhancements: { mode: 'off', applyMode: 'as-swipe', contextMessages: 13 }
+    },
     snapshot: () => activeSnapshot,
     generationRouter: {
       async generate(roleId, request = {}) {
@@ -3769,6 +3774,17 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   assertEqual(installed.length, 1, `${pipelineMode} latest-assistant swipe setup installs one packet`);
   assertEqual(runtime.view().lastBrief?.status, 'ready', `${pipelineMode} latest-assistant swipe setup marks Last Brief ready`);
   const callsAfterFirst = providerCalls;
+  const settingUpdate = await runtime.updateSettings({
+    enhancements: { mode: 'repair', applyMode: 'as-swipe', contextMessages: 13 }
+  });
+  assertEqual(settingUpdate.clear, null, `${pipelineMode} enhancement-only setting change does not clear the prepared prompt`);
+  assertEqual(cleared.length, 0, `${pipelineMode} enhancement-only setting change does not write empty prompt lanes`);
+  const journalAfterSettings = await storage.loadRunJournal(activeSnapshot.chatKey);
+  assertEqual(
+    journalAfterSettings.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'settings-changed'),
+    false,
+    `${pipelineMode} enhancement-only setting change does not invalidate the scene cache`
+  );
   activeSnapshot = snapshotFromMessages([
     ...initialMessages,
     {

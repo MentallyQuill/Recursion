@@ -84,7 +84,7 @@ function proofScript() {
       pipelineMode,
       reasoningLevel: 'medium',
       reasonerUse: 'always',
-      enhancements: { target, applyMode, contextMessages: 3 }
+      enhancements: { mode: target, applyMode, contextMessages: 3 }
     });
     const seed = seedAssistant();
     const prepared = await activeRuntime.prepareForGeneration({
@@ -210,12 +210,12 @@ try {
   }
 
   const testCases = [
-    { target: 'on', applyMode: 'as-swipe', pipelineMode: 'standard' },
-    { target: 'on', applyMode: 'as-swipe', pipelineMode: 'rapid' },
-    { target: 'on', applyMode: 'as-swipe', pipelineMode: 'fused' },
-    { target: 'on', applyMode: 'replace', pipelineMode: 'standard' },
-    { target: 'on', applyMode: 'replace', pipelineMode: 'rapid' },
-    { target: 'on', applyMode: 'replace', pipelineMode: 'fused' }
+    { target: 'recompose', applyMode: 'as-swipe', pipelineMode: 'standard' },
+    { target: 'recompose', applyMode: 'as-swipe', pipelineMode: 'rapid' },
+    { target: 'recompose', applyMode: 'as-swipe', pipelineMode: 'fused' },
+    { target: 'recompose', applyMode: 'replace', pipelineMode: 'standard' },
+    { target: 'recompose', applyMode: 'replace', pipelineMode: 'rapid' },
+    { target: 'recompose', applyMode: 'replace', pipelineMode: 'fused' }
   ];
   const selectedCases = selectedCase
     ? testCases.filter((testCase) => `${testCase.pipelineMode}-${testCase.applyMode}` === selectedCase)

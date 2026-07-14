@@ -47,6 +47,9 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'guidanceComposer',
   'cardAuthoringAssist',
   'generationReviewer',
+  'editorialDiagnostician',
+  'editorialTransformer',
+  'editorialVerifier',
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
@@ -69,6 +72,9 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   guidanceComposer: 'recursion.guidanceComposer.v1',
   cardAuthoringAssist: 'recursion.cardAuthoringAssist.v1',
   generationReviewer: 'recursion.generationReview.v1',
+  editorialDiagnostician: 'recursion.editorialDiagnosis.v1',
+  editorialTransformer: 'recursion.editorialPass.v1',
+  editorialVerifier: 'recursion.editorialVerification.v1',
   reasonerComposer: 'recursion.reasonerComposer.v1',
   providerTest: 'recursion.providerTest.v1'
 });
@@ -222,6 +228,14 @@ export function machineJsonSchemaForRequest(request = {}) {
   if (!schema || request?.machineJson !== true) return null;
   if (schema === 'recursion.generationReview.v1') {
     const sourceHash = String(request?.sourceHash || '').trim();
+    const validTargetIds = [...new Set((Array.isArray(request?.validTargetIds) ? request.validTargetIds : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean))];
+    const installedCardIds = [...new Set((Array.isArray(request?.installedCardIds) ? request.installedCardIds : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean))];
+    const targetIdSchema = validTargetIds.length > 0 ? { enum: validTargetIds } : { type: 'string' };
+    const cardIdSchema = installedCardIds.length > 0 ? { enum: installedCardIds } : { type: 'string' };
     return {
       name: schemaSafeName(schema),
       schema: {
@@ -236,9 +250,9 @@ export function machineJsonSchemaForRequest(request = {}) {
             items: {
               type: 'object',
               properties: {
-                cardId: { type: 'string' },
+                cardId: cardIdSchema,
                 status: { enum: ['honored', 'repaired', 'not-applicable', 'partially-reflected', 'violated', 'requires-regeneration'] },
-                evidenceTargetIds: { type: 'array', items: { type: 'string' } }
+                evidenceTargetIds: { type: 'array', items: targetIdSchema, uniqueItems: true }
               },
               required: ['cardId', 'status', 'evidenceTargetIds'],
               additionalProperties: true
@@ -249,7 +263,7 @@ export function machineJsonSchemaForRequest(request = {}) {
             items: {
               type: 'object',
               properties: {
-                id: { type: 'string' },
+                id: targetIdSchema,
                 domain: { type: 'string' },
                 before: { type: 'string' },
                 after: { type: 'string' }

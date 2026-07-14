@@ -2014,17 +2014,17 @@ try {
   );
   assertDeepEqual(
     root.querySelectorAll('[data-recursion-enhancement-target-choice]').map((choice) => choice.dataset.recursionEnhancementTargetChoice),
-    ['off', 'on'],
-    'Enhancements selector uses Off/Enhancement target order'
+    ['off', 'repair', 'recompose', 'redirect'],
+    'Enhancements selector uses Off/Repair/Recompose/Redirect mode order'
   );
   assertDeepEqual(
     root.querySelectorAll('[data-recursion-enhancement-target-icon]').map((icon) => icon.dataset.recursionEnhancementTargetIcon),
-    ['off', 'on'],
-    'Enhancements selector renders one icon slot for each target option'
+    ['off', 'repair', 'recompose', 'redirect'],
+    'Enhancements selector renders one icon slot for each editorial mode'
   );
-  const enhancementTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-on]').querySelector('[data-recursion-enhancement-target-icon]');
-  assert(enhancementTargetIcon.className.includes('is-on'), 'Enhancement target uses the unified review icon');
-  assertEqual(root.querySelectorAll('[data-recursion-enhancement-target-choice-tip]').length, 2, 'Enhancements selector renders mini descriptions for both target options');
+  const enhancementTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-recompose]').querySelector('[data-recursion-enhancement-target-icon]');
+  assert(enhancementTargetIcon.className.includes('is-on'), 'Recompose mode uses the unified review icon');
+  assertEqual(root.querySelectorAll('[data-recursion-enhancement-target-choice-tip]').length, 4, 'Enhancements selector renders mini descriptions for all editorial modes');
   assertEqual(
     root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-label'),
     'Enhancements: Off',
@@ -2242,14 +2242,20 @@ try {
   root.querySelector('[data-recursion-enhancement-apply-choice-replace]').querySelector('[data-recursion-enhancement-apply-choice-name]').click();
   assertDeepEqual(settingsUpdates.at(-1), { enhancements: { applyMode: 'replace' } }, 'Enhancements menu switches apply mode from nested row content clicks');
   assertEqual(root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-expanded'), 'true', 'Enhancements menu stays open after apply mode selection');
-  root.querySelector('[data-recursion-enhancement-target-choice-on]').querySelector('[data-recursion-enhancement-target-choice-tip]').click();
-  assertDeepEqual(settingsUpdates.at(-1), { enhancements: { target: 'on' } }, 'Enhancements menu enables review from nested row content clicks');
+  root.querySelector('[data-recursion-enhancement-target-choice-recompose]').querySelector('[data-recursion-enhancement-target-choice-tip]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { enhancements: { mode: 'recompose' } }, 'Enhancements menu selects Recompose from nested row content clicks');
   assertEqual(root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-expanded'), 'true', 'Enhancements button keeps menu open after target selection');
   assertEqual(root.querySelector('[data-recursion-enhancements-menu]').hidden, false, 'Enhancements menu stays open after target selection');
-  assert(root.querySelector('[data-recursion-enhancement-target-choice-on]').className.includes('is-selected'), 'Enhancements target selection highlights immediately');
-  view = { ...view, settings: { ...view.settings, enhancements: { target: 'on', applyMode: 'replace', contextMessages: 13 } } };
+  assert(root.querySelector('[data-recursion-enhancement-target-choice-recompose]').className.includes('is-selected'), 'Recompose selection highlights immediately');
+  view = { ...view, settings: { ...view.settings, enhancements: { mode: 'recompose', target: 'on', applyMode: 'replace', contextMessages: 13 } } };
   ui.update();
   assert(!root.querySelector('[data-recursion-enhancements-button]').className.includes('is-off'), 'Enhancements button is no longer grey when enabled');
+  view = { ...view, settings: { ...view.settings, enhancements: { mode: 'redirect', target: 'on', applyMode: 'as-swipe', contextMessages: 13 } } };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-enhancement-apply-choice-replace]').disabled, true, 'Redirect disables Replace application');
+  assertEqual(root.querySelector('[data-recursion-enhancement-apply-choice-replace]').getAttribute('aria-disabled'), 'true', 'Redirect exposes disabled Replace state accessibly');
+  view = { ...view, settings: { ...view.settings, enhancements: { mode: 'recompose', target: 'on', applyMode: 'replace', contextMessages: 13 } } };
+  ui.update();
 
   root.querySelector('[data-recursion-mode-button]').setBoundingClientRect({ left: 63, top: 3, width: 24, height: 24, right: 87, bottom: 27 });
   let bubbledModeClicks = 0;
@@ -2987,6 +2993,7 @@ try {
       tooltipsEnabled: false
     },
     enhancements: {
+      mode: 'recompose',
       target: 'on',
       applyMode: 'replace',
       contextMessages: 21

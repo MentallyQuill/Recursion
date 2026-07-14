@@ -99,10 +99,22 @@ const ENHANCEMENT_TARGET_OPTIONS = Object.freeze([
     tip: 'Shows the SillyTavern generation unchanged.'
   },
   {
-    value: 'on',
-    label: 'Enhancement',
-    title: 'Review and improve the completed generation.',
-    tip: 'Reviews the installed card hand, prose, dialogue, pacing, and anti-slop rules in one bounded pass.'
+    value: 'repair',
+    label: 'Repair',
+    title: 'Repair local defects with exact patches.',
+    tip: 'Keeps the source structure and changes only diagnosed spans.'
+  },
+  {
+    value: 'recompose',
+    label: 'Recompose',
+    title: 'Rewrite the response from grounded evidence.',
+    tip: 'Allows a complete candidate when the diagnosis supports a stronger editorial transformation.'
+  },
+  {
+    value: 'redirect',
+    label: 'Redirect',
+    title: 'Replace a drifted response with an evidence-grounded one.',
+    tip: 'Treats the source as potentially negative evidence and always keeps the original as a swipe.'
   }
 ]);
 const ENHANCEMENT_APPLY_OPTIONS = Object.freeze([
@@ -369,6 +381,7 @@ function modeLabel(value) {
 
 function normalizeEnhancementTarget(value) {
   const target = cleanText(value, 'off').toLowerCase();
+  if (['repair', 'recompose', 'redirect'].includes(target)) return target;
   if (target === 'on' || target === 'prose' || target === 'dialogue' || target === 'prose-dialogue') return 'on';
   return 'off';
 }
@@ -379,7 +392,11 @@ function normalizeEnhancementApplyMode(value) {
 }
 
 function enhancementTargetLabel(value) {
-  return normalizeEnhancementTarget(value) === 'on' ? 'Enhancement' : 'Off';
+  const target = normalizeEnhancementTarget(value);
+  if (target === 'repair') return 'Repair';
+  if (target === 'recompose') return 'Recompose';
+  if (target === 'redirect') return 'Redirect';
+  return target === 'on' ? 'Enhancement' : 'Off';
 }
 
 function enhancementApplyModeLabel(value) {
@@ -388,7 +405,7 @@ function enhancementApplyModeLabel(value) {
 
 function enhancementTargetIcon(option) {
   const target = normalizeEnhancementTarget(option?.value);
-  if (target === 'on') {
+  if (target !== 'off') {
     return el('span', {
       className: 'recursion-enhancements-choice-symbol is-on',
       attrs: { 'aria-hidden': 'true' },
@@ -3573,7 +3590,12 @@ function buildRoot() {
         el('div', { className: 'recursion-enhancements-apply-row', attrs: { role: 'group', 'aria-label': 'Enhancement apply mode' }, dataset: { recursionEnhancementApplyRow: '' } },
           ENHANCEMENT_APPLY_OPTIONS.map(enhancementApplyChoice)),
         el('div', { className: 'recursion-enhancements-target-list', attrs: { role: 'group', 'aria-label': 'Enhancement target' }, dataset: { recursionEnhancementTargetList: '' } },
-          ENHANCEMENT_TARGET_OPTIONS.map(enhancementTargetChoice))
+          ENHANCEMENT_TARGET_OPTIONS.map(enhancementTargetChoice)),
+        el('div', { className: 'recursion-editorial-inspector', attrs: { hidden: '' }, dataset: { recursionEditorialInspector: '' } }, [
+          el('div', { className: 'recursion-editorial-inspector-heading', text: 'Editorial result', dataset: { recursionEditorialInspectorHeading: '' } }),
+          el('div', { className: 'recursion-editorial-inspector-status', text: '', dataset: { recursionEditorialInspectorStatus: '' } }),
+          el('div', { className: 'recursion-editorial-inspector-ledger', text: '', dataset: { recursionEditorialInspectorLedger: '' } })
+        ])
       ])
     ]),
     el('div', { className: 'recursion-story-form-cluster' }, [
@@ -4229,7 +4251,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function renderEnhancementsState(view = currentView()) {
     const settings = asObject(view.settings?.enhancements);
-    const target = normalizeEnhancementTarget(settings.target);
+    const explicitMode = cleanText(settings.mode, '').toLowerCase();
+    const target = ['repair', 'recompose', 'redirect', 'off'].includes(explicitMode)
+      ? explicitMode
+      : normalizeEnhancementTarget(settings.target);
     const applyMode = normalizeEnhancementApplyMode(settings.applyMode);
     const label = target === 'off'
       ? 'Off'
@@ -4248,8 +4273,23 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     for (const choice of root.querySelectorAll('[data-recursion-enhancement-apply-choice]')) {
       const selected = cleanText(choice.dataset.recursionEnhancementApplyChoice).toLowerCase() === applyMode;
-      choice.className = selected ? 'recursion-enhancements-apply-choice is-selected' : 'recursion-enhancements-apply-choice';
+      const disabled = target === 'redirect' && cleanText(choice.dataset.recursionEnhancementApplyChoice).toLowerCase() === 'replace';
+      choice.disabled = disabled;
+      choice.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+      choice.className = [
+        'recursion-enhancements-apply-choice',
+        selected ? 'is-selected' : '',
+        disabled ? 'is-disabled' : ''
+      ].filter(Boolean).join(' ');
       choice.setAttribute('aria-current', selected ? 'true' : 'false');
+    }
+    const result = view.editorialResult;
+    const inspector = root.querySelector('[data-recursion-editorial-inspector]');
+    if (inspector) {
+      inspector.hidden = !result || result.status === 'running';
+      setText(inspector, '[data-recursion-editorial-inspector-status]', result ? `${enhancementTargetLabel(result.mode)}: ${cleanText(result.outcome, 'pending')}${result.verification && result.verification !== 'not-required' ? ` · verification ${cleanText(result.verification)}` : ''}` : '');
+      const ledgerCount = (Array.isArray(result?.preservationLedger) ? result.preservationLedger.length : 0) + (Array.isArray(result?.changeLedger) ? result.changeLedger.length : 0);
+      setText(inspector, '[data-recursion-editorial-inspector-ledger]', result ? `${ledgerCount} ledger entries · ${Array.isArray(result.cardOutcomes) ? result.cardOutcomes.length : 0} card outcomes` : '');
     }
   }
 
@@ -5665,7 +5705,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setPipelineMenuOpen(false);
     }
     const enhancementApplyChoice = control('recursionEnhancementApplyChoice');
-    if (enhancementApplyChoice) {
+    if (enhancementApplyChoice && enhancementApplyChoice.disabled !== true) {
       panelRerenderClickEvents?.add(event);
       event?.stopPropagation?.();
       runAction(runtime?.updateSettings?.({ enhancements: { applyMode: normalizeEnhancementApplyMode(enhancementApplyChoice.dataset.recursionEnhancementApplyChoice) } }));
@@ -5676,7 +5716,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       event?.stopPropagation?.();
       const target = normalizeEnhancementTarget(enhancementTargetChoice.dataset.recursionEnhancementTargetChoice);
       renderEnhancementsTargetSelection(target);
-      runAction(runtime?.updateSettings?.({ enhancements: { target } }));
+      const mode = ['repair', 'recompose', 'redirect'].includes(target) ? target : 'off';
+      runAction(runtime?.updateSettings?.({ enhancements: { mode } }));
     }
     const storyFormAutoChoice = control('recursionStoryFormAutoChoice');
     if (storyFormAutoChoice) {
@@ -6213,6 +6254,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         )
       },
       enhancements: {
+        mode: cleanText(currentView().settings?.enhancements?.mode, 'off'),
         target: normalizeEnhancementTarget(currentView().settings?.enhancements?.target),
         applyMode: normalizeEnhancementApplyMode(currentView().settings?.enhancements?.applyMode),
         contextMessages: integerInRange(

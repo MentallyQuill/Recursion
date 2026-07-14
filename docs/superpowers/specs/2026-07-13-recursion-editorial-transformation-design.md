@@ -466,8 +466,10 @@ candidate carousel is introduced.
 
 ## Acceptance criteria
 
-- The setting persists only `off`, `repair`, `recompose`, or `redirect`; old
-  target aliases are removed rather than preserved.
+- The visible setting persists only `off`, `repair`, `recompose`, or
+  `redirect`; old target aliases never appear in new UI/provider requests. A
+  narrow host-read bridge may recognize an old persisted target only to keep an
+  already-running host hook alive during migration.
 - Repair accepts only deterministic bounded patches and directs material cases
   to Recompose or Redirect.
 - Recompose and Redirect can replace the entire assistant response when their
@@ -482,5 +484,11 @@ candidate carousel is introduced.
 - A fixed editorial evaluation corpus proves that valid Recomposes are
   materially stronger and that Redirects answer the user without inventing or
   resolving unsupported state.
+- A dedicated-user Playwright UI certification runs Off, Repair, Recompose, and
+  Redirect across Standard, Rapid, and Fused at desktop and compact-phone
+  viewports (24 rows). Every successful fixture must finish with no browser/page errors,
+  console warnings, Recursion caution/error indicators, or failed progress
+  rows, and must match an approved visual baseline after dynamic regions are
+  masked.
 - Progress, marker, cache, diagnostics, UI copy, schemas, tests, and user
   docs identify the actual mode and application result.

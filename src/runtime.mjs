@@ -59,6 +59,17 @@ import {
   publicGenerationReviewSnapshot,
   validateGenerationReviewResult
 } from './generation-review.mjs';
+import {
+  applyEditorialArtifact,
+  buildEditorialDiagnosisRequest,
+  buildEditorialEvidence,
+  buildEditorialPassRequest,
+  buildEditorialVerificationRequest,
+  editorialPassKey,
+  validateEditorialDiagnosis,
+  validateEditorialPass,
+  validateEditorialVerification
+} from './editorial-transform.mjs';
 import { buildDiagnosticsPayload } from './runtime/diagnostics.mjs';
 import {
   clearJournalDetails,
@@ -95,7 +106,7 @@ const PLAN_ACTIONS = new Set(['skip', 'reuse-cache', 'refresh-cards', 'compose-b
 const REASONER_DECISION_MODES = new Set(['use', 'skip']);
 const PROMPT_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const SCENE_STATUSES = new Set(['same-scene', 'soft-shift', 'hard-shift', 'unknown']);
-const PROMPT_NEUTRAL_SETTING_KEYS = new Set(['reasoningLevel', 'reasonerUse']);
+const PROMPT_NEUTRAL_SETTING_KEYS = new Set(['reasoningLevel', 'reasonerUse', 'enhancements']);
 const DEFAULT_LOW_REASONING_MAX_CARDS = 3;
 const DEFAULT_NORMAL_REASONING_MAX_CARDS = 6;
 const DEFAULT_ULTRA_REASONING_MAX_CARDS = 10;
@@ -1541,7 +1552,7 @@ function safeSettingsView(settings) {
     reasonerUse: safeText(source.reasonerUse || 'auto', 40),
     storyFormOverride: safeText(source.storyFormOverride || 'auto', 40),
     enhancements: {
-      target: safeText(enhancements.target, 40),
+      mode: safeText(enhancements.mode || 'off', 40),
       applyMode: safeText(enhancements.applyMode, 40),
       contextMessages: numberOr(enhancements.contextMessages, 13)
     },
@@ -2094,6 +2105,7 @@ export function createRecursionRuntime({
   let pendingProseEnhancement = null;
   let activeProseEnhancementPromise = null;
   let canceledProseEnhancement = null;
+  let lastEditorialResult = null;
 
   async function readSnapshot() {
     if (typeof host?.snapshot !== 'function') {
@@ -2262,7 +2274,9 @@ export function createRecursionRuntime({
   }
 
   function enhancementTarget(settings = settingsStore.get()) {
-    return safeText(settings?.enhancements?.target || 'off', 40);
+    const mode = safeText(settings?.enhancements?.mode || 'off', 40);
+    if (['repair', 'recompose', 'redirect'].includes(mode)) return mode;
+    return mode === 'off' ? safeText(settings?.enhancements?.target || 'off', 40) : 'off';
   }
 
   function enhancementApplyMode(settings = settingsStore.get()) {
@@ -2277,7 +2291,7 @@ export function createRecursionRuntime({
   }
 
   function proseEnhancementEnabled(settings = settingsStore.get()) {
-    return enhancementTarget(settings) === 'on';
+    return enhancementTarget(settings) !== 'off';
   }
 
   function armProseEnhancementForHostGeneration(settings = settingsStore.get(), runId = '') {
@@ -2970,6 +2984,7 @@ export function createRecursionRuntime({
       }),
       activity: safeCurrentActivity(activity),
       activityHistory: safeActivityHistory(activity),
+      editorialResult: lastEditorialResult ? { ...lastEditorialResult } : null,
       providerProfiles: listProviderConnectionProfilesForUi(),
       settings: safeSettingsView(settingsStore.get()),
       contextContract: buildContextContract(lastSnapshot || {}, settingsStore.get()),
@@ -3597,7 +3612,190 @@ export function createRecursionRuntime({
     }
   }
 
+  async function runEditorialTransform(details = {}) {
+    const settings = settingsStore.get();
+    const enhancementSettings = asObject(settings.enhancements);
+    const editorialMode = safeText(enhancementSettings.mode || 'off', 32);
+    if (!['repair', 'recompose', 'redirect'].includes(editorialMode)) {
+      clearPendingProseEnhancement();
+      return { ok: true, skipped: true, reason: 'editorial-off' };
+    }
+    const messages = asObject(host.messages);
+    if (typeof messages.activeAssistantMessageIdentity !== 'function') return { ok: true, skipped: true, reason: 'host-message-api-unavailable' };
+    const identity = messages.activeAssistantMessageIdentity();
+    if (!identity?.text) return { ok: true, skipped: true, reason: 'assistant-message-unavailable' };
+    const runId = makeId('editorial');
+    const messageId = identity.messageId;
+    const sourceText = String(identity.text || '');
+    const sourceHash = identity.originalHash || hashJson(sourceText);
+    const lane = enhancementLaneForSettings(settings);
+    const snapshot = typeof host.snapshot === 'function' ? await host.snapshot() : {};
+    const enhancementContext = enhancementContextFromSnapshot({
+      snapshot,
+      hand: lastHand,
+      activeText: sourceText,
+      activeSender: identity.sender || '',
+      contextMessageLimit: enhancementSettings.contextMessages
+    });
+    const contextContract = buildContextContract(snapshot, settings);
+    const contextMessages = boundEnhancementMessages(
+      enhancementContext.contextMessages,
+      contextContract.enhancementContext.effectiveMessages,
+      contextContract.enhancementContext.characterBudget
+    ).messages;
+    const reviewSnapshot = {
+      ...generationReviewInstalledHand(settings),
+      promptPacket: lastPacket || {},
+      lastBrief,
+      storyForm: lastPacket?.storyForm || lastPlan?.storyForm || {},
+      pipeline: settings.pipelineMode,
+      context: {
+        messages: contextMessages,
+        character: enhancementContext.characterContext || {},
+        generatedCardContext: enhancementContext.cardContext || {}
+      }
+    };
+    const publicSnapshot = publicGenerationReviewSnapshot(reviewSnapshot);
+    const snapshotHash = generationReviewSnapshotHash(publicSnapshot);
+    const applyMode = editorialMode === 'redirect' ? 'as-swipe' : enhancementApplyMode(settings);
+    const key = editorialPassKey({
+      chatKey: identity.chatKey,
+      messageId,
+      swipeId: identity.swipeId ?? 0,
+      sourceHash,
+      snapshotHash,
+      mode: editorialMode,
+      applyMode,
+      verificationRequired: (settings.reasoningLevel === 'high' || settings.reasoningLevel === 'ultra') && editorialMode !== 'repair'
+    });
+    const markerBase = {
+      schema: 'recursion.editorialMarker.v1',
+      chatKey: identity.chatKey,
+      messageId,
+      swipeId: identity.swipeId ?? 0,
+      mode: editorialMode,
+      applyMode,
+      sourceHash,
+      snapshotHash,
+      key
+    };
+    lastEditorialResult = { mode: editorialMode, status: 'running', outcome: 'diagnosing', applyMode };
+    const existing = await messages.findEnhancedSwipe?.(messageId, markerBase);
+    if (existing && applyMode === 'as-swipe' && typeof messages.selectAssistantMessageSwipe === 'function') {
+      await messages.selectAssistantMessageSwipe(messageId, existing.index, { marker: markerBase });
+      lastEditorialResult = { mode: editorialMode, status: 'success', outcome: 'cached', applyMode, verification: markerBase.verification || 'cached', candidateHash: markerBase.candidateHash || '' };
+      settleRuntimeActivity({ runId, phase: 'settled', severity: 'success', label: `${editorialMode} reused from cache.`, chips: ['Enhancement', 'Cached'] });
+      return { ok: true, cached: true, mode: editorialMode, messageId, sourceHash, marker: markerBase };
+    }
+    if (!generationRouter || typeof generationRouter.generate !== 'function') return { ok: false, error: { code: 'RECURSION_EDITORIAL_UNAVAILABLE', message: 'Editorial provider is unavailable.' } };
+    const evidence = buildEditorialEvidence(publicSnapshot, sourceText);
+    const targets = editorialMode === 'repair' ? buildGenerationReviewTargets(sourceText) : {};
+    const recoveryToken = { spent: false };
+    let held = false;
+    let enhanced = false;
+    let verificationResult = { decision: 'not-required' };
+    async function generateEditorialRole(roleId, request, options = {}) {
+      const primaryLane = request?.lane === 'reasoner' ? 'reasoner' : 'utility';
+      const primary = await generationRouter.generate(roleId, request, {
+        runId,
+        timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
+        allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true
+      });
+      if (primary?.recoverySpent === true) recoveryToken.spent = true;
+      if (primary?.ok === true || primaryLane !== 'reasoner') return { result: primary, lane: primaryLane };
+      if (primary?.recoverySpent === true) return { result: primary, lane: primaryLane };
+      const fallbackRequest = { ...request, lane: 'utility' };
+      delete fallbackRequest.reasoningCategory;
+      delete fallbackRequest.reasoningIntent;
+      const fallback = await generationRouter.generate(roleId, fallbackRequest, {
+        runId,
+        timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
+        allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true
+      });
+      if (fallback?.recoverySpent === true) recoveryToken.spent = true;
+      return { result: fallback, lane: fallback?.ok === true ? 'utility' : primaryLane };
+    }
+    try {
+      if (typeof messages.holdAssistantMessage === 'function') {
+        const hold = await messages.holdAssistantMessage(messageId);
+        held = hold?.ok !== false;
+      }
+      stageRuntimeActivity({ runId, phase: 'editorialDiagnosing', label: 'Diagnosing response...', providerLane: lane, composerLane: lane, chips: ['Enhancement', editorialMode] });
+      const diagnosisResponse = await generateEditorialRole('editorialDiagnostician', {
+        ...buildEditorialDiagnosisRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot, lane }),
+        ...reasonerRequestMetadata(settings, 'editorial-transform', lane)
+      });
+      const diagnosisValidation = diagnosisResponse.result?.ok === true
+        ? validateEditorialDiagnosis(diagnosisResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot })
+        : { ok: false, error: diagnosisResponse.result?.error || { code: 'RECURSION_EDITORIAL_DIAGNOSIS_FAILED', message: 'Editorial diagnosis failed.' } };
+      if (!diagnosisValidation.ok || diagnosisValidation.value?.decision !== 'proceed') {
+        if (held && typeof messages.revealAssistantMessage === 'function') { await messages.revealAssistantMessage(messageId); held = false; }
+        const reason = diagnosisValidation.value?.decision || diagnosisValidation.error?.message || 'editorial-diagnosis-failed';
+        stageRuntimeActivity({ runId, phase: 'editorialDiagnosing', severity: diagnosisValidation.value ? 'warning' : 'error', label: `Editorial diagnosis ${reason}.`, providerLane: diagnosisResponse.lane, detail: { mode: editorialMode, decision: reason } });
+        settleRuntimeActivity({ runId, phase: 'settled', severity: diagnosisValidation.value ? 'warning' : 'error', label: diagnosisValidation.value ? `Editorial ${reason}; original kept.` : 'Editorial diagnosis failed. Original kept.', chips: ['Enhancement', diagnosisValidation.value ? 'Review' : 'Failed'], detail: { mode: editorialMode, decision: reason } });
+        lastEditorialResult = { mode: editorialMode, status: diagnosisValidation.value ? 'warning' : 'error', outcome: 'original-kept', decision: reason, applyMode };
+        return { ok: Boolean(diagnosisValidation.value), skipped: Boolean(diagnosisValidation.value), mode: editorialMode, reason, validation: diagnosisValidation };
+      }
+      const diagnosisHash = diagnosisValidation.hash;
+      stageRuntimeActivity({ runId, phase: 'editorialTransforming', label: editorialMode === 'repair' ? 'Applying grounded repairs...' : `${editorialMode === 'redirect' ? 'Redirecting' : 'Recomposing'} response...`, providerLane: lane, composerLane: lane, chips: ['Enhancement', editorialMode] });
+      const transformResponse = await generateEditorialRole('editorialTransformer', {
+        ...buildEditorialPassRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosis: diagnosisValidation.value, evidence, snapshot: publicSnapshot, targets, lane }),
+        ...reasonerRequestMetadata(settings, 'editorial-transform', lane)
+      });
+      const validation = transformResponse.result?.ok === true
+        ? validateEditorialPass(transformResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, snapshot: publicSnapshot, targets })
+        : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
+      if (!validation.ok) return { ok: false, mode: editorialMode, error: validation.error, validation };
+      if ((settings.reasoningLevel === 'high' || settings.reasoningLevel === 'ultra') && editorialMode !== 'repair') {
+        stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: lane, composerLane: lane, chips: ['Enhancement', 'Verify'] });
+        const verifierResponse = await generateEditorialRole('editorialVerifier', {
+          ...buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, evidence, candidate: validation.artifact.candidate, lane }),
+          ...reasonerRequestMetadata(settings, 'editorial-verify', lane)
+        }, { allowStructuredRecovery: false });
+        verificationResult = verifierResponse.result?.ok === true
+          ? validateEditorialVerification(verifierResponse.result.data, { sourceHash, snapshotHash, diagnosisHash, evidence })
+          : { ok: false, decision: 'reject', error: verifierResponse.result?.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_FAILED', message: 'Editorial verification failed.' } };
+        if (!verificationResult.ok || verificationResult.decision !== 'accept') return { ok: false, mode: editorialMode, error: verificationResult.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_REJECTED', message: 'Editorial verifier rejected candidate.' }, validation: verificationResult };
+      }
+      const transformedText = applyEditorialArtifact(sourceText, validation.artifact, targets);
+      if (!transformedText || transformedText === sourceText) return { ok: false, mode: editorialMode, error: { code: 'RECURSION_EDITORIAL_NO_EFFECT', message: 'Editorial transform returned no effective revision.' } };
+      const marker = {
+        ...markerBase,
+        diagnosisHash,
+        candidateHash: hashJson(transformedText),
+        producerLane: transformResponse.lane,
+        verification: verificationResult.decision,
+        cardOutcomes: validation.cardOutcomes,
+        preservationLedger: validation.artifact.candidate?.preservationLedger || [],
+        changeLedger: validation.artifact.candidate?.changeLedger || [],
+        riskFlags: validation.artifact.candidate?.riskFlags || []
+      };
+      lastEditorialResult = { mode: editorialMode, status: 'success', outcome: 'applied', applyMode, verification: verificationResult.decision, candidateHash: marker.candidateHash, diagnosisHash: marker.diagnosisHash, preservationLedger: marker.preservationLedger, changeLedger: marker.changeLedger, riskFlags: marker.riskFlags, cardOutcomes: marker.cardOutcomes };
+      if (applyMode === 'replace') {
+        const replace = await messages.replaceAssistantMessageText?.(messageId, transformedText, { marker });
+        if (replace?.ok === false) return { ok: false, mode: editorialMode, error: replace.error };
+      } else {
+        if (held && typeof messages.revealAssistantMessage === 'function') { await messages.revealAssistantMessage(messageId); held = false; }
+        const append = await messages.appendAssistantMessageSwipe?.(messageId, transformedText, { marker, select: true });
+        if (append?.ok === false) return { ok: false, mode: editorialMode, error: append.error };
+      }
+      enhanced = true;
+      settleRuntimeActivity({ runId, phase: 'settled', severity: 'success', label: `${editorialMode} applied.`, chips: ['Enhancement', editorialMode], detail: { mode: editorialMode, applyMode, verification: verificationResult.decision } });
+      return { ok: true, mode: editorialMode, messageId, sourceHash, enhancedHash: marker.candidateHash, marker, artifact: validation.artifact, verification: verificationResult };
+    } catch (error) {
+      lastEditorialResult = { mode: editorialMode, status: 'error', outcome: 'original-kept', applyMode, decision: safeText(error?.message || error, 180) };
+      settleRuntimeActivity({ runId, phase: 'settled', severity: 'error', label: 'Editorial transform failed. Original kept.', chips: ['Enhancement', 'Failed'] });
+      return { ok: false, mode: editorialMode, error: { code: 'RECURSION_EDITORIAL_FAILED', message: String(error?.message || error || 'Editorial transform failed.') } };
+    } finally {
+      clearPendingProseEnhancement();
+      if (held && !enhanced && typeof messages.revealAssistantMessage === 'function') await messages.revealAssistantMessage(messageId);
+    }
+  }
+
   async function enhanceLatestAssistantMessageImpl(details = {}) {
+    if (['repair', 'recompose', 'redirect'].includes(safeText(settingsStore.get()?.enhancements?.mode || '', 32))) {
+      return runEditorialTransform(details);
+    }
     return runGenerationReview(details);
     /* Legacy dialogue/prose enhancer implementation retained below only until its
        follow-on host harness deletion is completed. It is unreachable. */

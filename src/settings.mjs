@@ -7,6 +7,7 @@ import { STORY_FORM_OVERRIDE_OPTIONS } from './story-form.mjs';
 const MODES = new Set(['auto', 'manual']);
 const PIPELINE_MODES = new Set(['standard', 'rapid', 'fused']);
 const ENHANCEMENT_TARGETS = new Set(['off', 'on']);
+const EDITORIAL_ENHANCEMENT_MODES = new Set(['off', 'repair', 'recompose', 'redirect']);
 const ENHANCEMENT_APPLY_MODES = new Set(['as-swipe', 'replace']);
 const STRENGTHS = new Set(['light', 'balanced', 'strong']);
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
@@ -49,6 +50,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   reasonerUse: 'auto',
   storyFormOverride: 'auto',
   enhancements: {
+    mode: 'off',
     target: 'off',
     applyMode: 'as-swipe',
     contextMessages: 13
@@ -169,12 +171,17 @@ export function normalizeInjectionSettings(value = {}) {
 
 export function normalizeEnhancementsSettings(value = {}) {
   const source = value && typeof value === 'object' ? value : {};
-  const target = String(source.target ?? '').trim().toLowerCase();
+  const rawMode = String(source.mode ?? '').trim().toLowerCase();
+  const rawTarget = String(source.target ?? '').trim().toLowerCase();
+  const hasEditorialMode = EDITORIAL_ENHANCEMENT_MODES.has(rawMode);
+  const mode = hasEditorialMode ? rawMode : 'off';
+  const legacyTargetEnabled = ['on', 'prose', 'dialogue', 'prose-dialogue'].includes(rawTarget);
+  const target = hasEditorialMode ? (mode === 'off' && legacyTargetEnabled ? 'on' : (mode === 'off' ? 'off' : 'on')) : (legacyTargetEnabled ? 'on' : 'off');
+  const requestedApplyMode = enumValue(source.applyMode, ENHANCEMENT_APPLY_MODES, DEFAULT_RECURSION_SETTINGS.enhancements.applyMode);
   return {
-    target: ['prose', 'dialogue', 'prose-dialogue'].includes(target)
-      ? 'on'
-      : enumValue(target, ENHANCEMENT_TARGETS, DEFAULT_RECURSION_SETTINGS.enhancements.target),
-    applyMode: enumValue(source.applyMode, ENHANCEMENT_APPLY_MODES, DEFAULT_RECURSION_SETTINGS.enhancements.applyMode),
+    mode,
+    target,
+    applyMode: mode === 'redirect' ? 'as-swipe' : requestedApplyMode,
     contextMessages: Math.round(numberInRange(
       source.contextMessages,
       DEFAULT_RECURSION_SETTINGS.enhancements.contextMessages,

@@ -622,6 +622,49 @@ if (lifecycleFailures.length) {
 }
 
 {
+  const fake = createFakeSillyTavernContext('editorial-owned-commit-event');
+  const eventSource = createFakeEventSource();
+  let enhancementCalls = 0;
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    GENERATION_ENDED: 'generation_ended'
+  };
+  fake.context.chat = [
+    { mesid: 0, is_user: true, mes: 'Keep the response grounded.' },
+    { mesid: 1, is_user: false, mes: 'The grounded response landed.' }
+  ];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasonerUse: 'off',
+      enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionOnActivate(), true, 'owned commit event setup activates');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  activeRuntime.proseEnhancementPending = () => true;
+  activeRuntime.proseEnhancementRunning = () => true;
+  activeRuntime.enhanceLatestAssistantMessage = async () => {
+    enhancementCalls += 1;
+    return { ok: true };
+  };
+  await eventSource.emit('generation_ended', { mesid: 1 });
+  assertEqual(enhancementCalls, 0, 'generation ended during a Recursion-owned commit does not start another Enhancement');
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const fake = createFakeSillyTavernContext('generation-stopped-event');
   const eventSource = createFakeEventSource();
   fake.context.eventSource = eventSource;
@@ -875,10 +918,11 @@ if (lifecycleFailures.length) {
   assertEqual(context.chat[2].mes, 'Mara was furious. "Keep the door shut," she said.', 'stream token event preserves streaming assistant text in chat state');
   await eventSource.emit('message_received', { mesid: 2 });
   assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'message received does not run prose enhancement before generation ended');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementRunning(), false, 'native generation remains pending but is not already executing Enhancement');
   const landed = eventSource.emit('generation_ended', { mesid: 2 });
   await waitUntil(
-    () => globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive === true,
-    'assistant-landed generation review stays active before provider resolves'
+    () => context.controlEvents.includes('lock'),
+    'assistant-landed generation review locks controls before provider resolves'
   );
   assertEqual(fakeDocumentElement.classList.contains('recursion-enhancement-capture-active'), false, 'completed source stays visible while generation review resolves');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive, true, 'assistant-landed prose enhancement keeps host generation active while provider is pending');

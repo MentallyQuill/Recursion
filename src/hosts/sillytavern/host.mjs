@@ -331,6 +331,21 @@ function eventSourceObject(event) {
   return payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
 }
 
+function markerMatchesSwipeText(marker = {}, text = '') {
+  const candidate = asObject(marker);
+  return candidate.schema === 'recursion.editorialMarker.v1'
+    && stringValue(candidate.candidateHash) === hashJson(stringValue(text));
+}
+
+function removeEnhancementMarkerFromExtra(extra = {}) {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return false;
+  const recursion = extra.recursion;
+  if (!recursion || typeof recursion !== 'object' || Array.isArray(recursion) || !recursion.enhancement) return false;
+  delete recursion.enhancement;
+  if (!Object.keys(recursion).length) delete extra.recursion;
+  return true;
+}
+
 function eventPayloadShape(event) {
   const payload = eventPayload(event);
   const payloadType = payload === null ? 'null' : (Array.isArray(payload) ? 'array' : typeof payload);
@@ -1250,11 +1265,39 @@ export function createSillyTavernHost({
       if (!found || !Array.isArray(found.raw?.__recursionGenerationReviewSwipes)) return null;
       const markers = found.raw.__recursionGenerationReviewSwipes;
       for (let index = 0; index < markers.length; index += 1) {
-        if (markerMatches(markers[index], marker)) {
-          return { index, text: Array.isArray(found.raw.swipes) ? stringValue(found.raw.swipes[index]) : '' };
+        const text = Array.isArray(found.raw.swipes) ? stringValue(found.raw.swipes[index]) : '';
+        if (markerMatchesSwipeText(markers[index], text) && markerMatches(markers[index], marker)) {
+          return { index, text };
         }
       }
       return null;
+    },
+    async sanitizeAssistantEnhancementMarker(messageId) {
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context, messageId);
+      if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
+      const index = finiteNonNegativeInteger(found.raw.swipe_id) ?? 0;
+      const text = activeRawAssistantText(found.raw);
+      const swipeInfo = Array.isArray(found.raw.swipe_info) ? found.raw.swipe_info[index] : null;
+      const swipeMarker = asObject(swipeInfo?.extra?.recursion?.enhancement);
+      const indexedMarker = Array.isArray(found.raw.__recursionGenerationReviewSwipes)
+        ? asObject(found.raw.__recursionGenerationReviewSwipes[index])
+        : {};
+      const marker = Object.keys(swipeMarker).length ? swipeMarker : indexedMarker;
+      if (!Object.keys(marker).length || markerMatchesSwipeText(marker, text)) {
+        return { ok: true, removed: false, messageId: found.normalized.mesid, index };
+      }
+      removeEnhancementMarkerFromExtra(swipeInfo?.extra);
+      removeEnhancementMarkerFromExtra(found.raw.extra);
+      if (Array.isArray(found.raw.__recursionGenerationReviewSwipes)) {
+        delete found.raw.__recursionGenerationReviewSwipes[index];
+      }
+      if (!markerMatchesSwipeText(found.raw.__recursionGenerationReview, text)) {
+        delete found.raw.__recursionGenerationReview;
+      }
+      updateMessageBlockBestEffort(context, found.index, found.raw);
+      await saveChatBestEffort(context);
+      return { ok: true, removed: true, messageId: found.normalized.mesid, index, reason: 'candidate-hash-mismatch' };
     },
     async selectAssistantMessageSwipe(messageId, swipeIndex, options = {}) {
       const context = currentContext(contextFactory);

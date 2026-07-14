@@ -354,6 +354,23 @@ function registerHostEvents(nextRuntime, currentHost = host) {
       const details = normalizeHostMessageEvent(currentHost, eventName, payload);
       const finalGenerationEvent = String(eventName || '').toLowerCase() === 'generation_ended'
         || String(details.eventName || '').toLowerCase() === 'generation_ended';
+      if (
+        finalGenerationEvent
+        && typeof nextRuntime.proseEnhancementRunning === 'function'
+        && nextRuntime.proseEnhancementRunning()
+      ) {
+        markEnhancementOwnedMutationWindow();
+        return { ok: true, skipped: true, reason: 'enhancement-owned-generation-ended' };
+      }
+      const sanitizeEnhancementMarker = () => {
+        if (!finalGenerationEvent || typeof currentHost?.messages?.sanitizeAssistantEnhancementMarker !== 'function') {
+          return Promise.resolve({ ok: true, skipped: true, reason: 'marker-sanitation-unavailable' });
+        }
+        return Promise.resolve(currentHost.messages.sanitizeAssistantEnhancementMarker(details.messageId)).catch((error) => {
+          warn('Enhancement marker sanitation failed.', error);
+          return { ok: false, error };
+        });
+      };
       const generationEnded = () => invokeRuntimeCleanup(
         'handleHostGenerationEnded',
         'Generation end cleanup failed.',
@@ -365,7 +382,8 @@ function registerHostEvents(nextRuntime, currentHost = host) {
           return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement assistant hold failed.', details)
             .then(() => ({ ok: true, skipped: true, reason: 'enhancement-awaiting-generation-ended' }));
         }
-        return lockEnhancementControls(currentHost)
+        return sanitizeEnhancementMarker()
+          .then(() => lockEnhancementControls(currentHost))
           .then(() => invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement assistant hold failed.', details))
           .then(() => {
             markEnhancementOwnedMutationWindow();
@@ -383,13 +401,15 @@ function registerHostEvents(nextRuntime, currentHost = host) {
           });
       }
       if (!nextAssistantIdentity || nextAssistantIdentity === lastAssistantIdentity) {
-        return generationEnded()
+        return sanitizeEnhancementMarker()
+          .then(() => generationEnded())
           .then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }))
           .finally(() => setEnhancementCaptureActive(false));
       }
       lastAssistantIdentity = nextAssistantIdentity;
       const enhancementEnabled = runtimeEnhancementEnabled(nextRuntime);
-      return Promise.resolve(enhancementEnabled ? lockEnhancementControls(currentHost) : null)
+      return sanitizeEnhancementMarker()
+        .then(() => (enhancementEnabled ? lockEnhancementControls(currentHost) : null))
         .then(() => generationEnded())
         .then(() => {
           if (enhancementEnabled) markEnhancementOwnedMutationWindow();

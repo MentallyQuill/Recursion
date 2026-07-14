@@ -74,10 +74,11 @@ const generationRouter = createGenerationRouter({
     }
   }
 });
+const editorialStorage = createStorageRepository({ storage: createMemoryStorageAdapter() });
 const runtime = createRecursionRuntime({
   host,
   settingsStore: createSettingsStore({ root: {} }),
-  storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
+  storage: editorialStorage,
   activity,
   generationRouter
 });
@@ -86,6 +87,13 @@ const result = await runtime.enhanceLatestAssistantMessage({ reason: 'editorial-
 assertEqual(result.ok, true, 'recompose runtime succeeds');
 assertEqual(result.mode, 'recompose', 'runtime returns editorial mode');
 assertEqual(message.text, 'The latch clicked. He refused to name the sender.', 'runtime applies candidate as swipe');
+const editorialJournal = await editorialStorage.loadRunJournal('editorial-chat');
+const editorialSettlement = editorialJournal.entries.find((entry) => entry.event === 'editorial.run.settled');
+assert(editorialSettlement, 'successful Editorial run records a terminal journal event');
+assertEqual(editorialSettlement.severity, 'info', 'successful Editorial settlement is informational');
+assertEqual(editorialSettlement.details.mode, 'recompose', 'Editorial settlement records mode');
+assertEqual(editorialSettlement.details.status, 'success', 'Editorial settlement records status');
+assertEqual(editorialSettlement.details.outcome, 'applied', 'Editorial settlement records applied outcome');
 assert(calls.some((call) => call.roleId === 'editorialDiagnostician'), 'runtime calls diagnostician');
 assert(calls.some((call) => call.roleId === 'editorialTransformer'), 'runtime calls transformer');
 const diagnosisCalls = calls.filter((call) => call.roleId === 'editorialDiagnostician');
@@ -106,6 +114,7 @@ const concurrentMessage = { messageId: 12, chatKey: 'editorial-concurrent-chat',
 let releaseConcurrentTransform;
 let concurrentTransformStarted = false;
 let concurrentAppendCalls = 0;
+const concurrentStorage = createStorageRepository({ storage: createMemoryStorageAdapter() });
 const concurrentRuntime = createRecursionRuntime({
   host: {
     async snapshot() {
@@ -129,7 +138,7 @@ const concurrentRuntime = createRecursionRuntime({
     prompt: { async install() { return { ok: true }; }, async clear() { return { ok: true }; } }
   },
   settingsStore: createSettingsStore({ root: {} }),
-  storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
+  storage: concurrentStorage,
   activity: createActivityReporter(),
   generationRouter: createGenerationRouter({
     client: {
@@ -186,6 +195,12 @@ const concurrentResult = await concurrentResultPromise;
 assertEqual(concurrentResult.ok, false, 'Editorial rejects a commit after the active swipe changes');
 assertEqual(concurrentResult.error?.code, 'RECURSION_EDITORIAL_SOURCE_CHANGED', 'Editorial reports the stale source identity');
 assertEqual(concurrentAppendCalls, 0, 'Editorial never appends against a changed active swipe');
+const concurrentJournal = await concurrentStorage.loadRunJournal(concurrentMessage.chatKey);
+const failedSettlement = concurrentJournal.entries.find((entry) => entry.event === 'editorial.run.settled');
+assert(failedSettlement, 'failed Editorial commit records a terminal journal event');
+assertEqual(failedSettlement.severity, 'error', 'failed Editorial settlement records error severity');
+assertEqual(failedSettlement.details.status, 'error', 'failed Editorial settlement records error status');
+assertEqual(failedSettlement.details.reasonCode, 'RECURSION_EDITORIAL_SOURCE_CHANGED', 'failed Editorial settlement records the exact reason code');
 
 const transformSource = 'Mara repeated the tactical offer while keeping her hand on the latch.';
 const transformMessage = { messageId: 18, chatKey: 'editorial-transform-correction-chat', swipeId: 0, text: transformSource, swipes: [transformSource] };

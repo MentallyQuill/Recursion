@@ -157,7 +157,7 @@ function activeSwipeText(source, fallbackText) {
 
 function normalizeMessage(message, index) {
   const source = asObject(message);
-  const mesId = numericMessageId(source, index);
+  const mesid = numericMessageId(source, index);
   const role = messageRole(source);
   const visible = source.visible === false || source.hidden === true || source.is_system === true ? false : true;
   const text = messageText(source);
@@ -166,7 +166,7 @@ function normalizeMessage(message, index) {
   const activeText = activeSwipeText(source, text);
   return {
     id: stringValue(source.mesid ?? source.id ?? source.index ?? index),
-    mesId,
+    mesid,
     index,
     role,
     isUser: role === 'user',
@@ -204,7 +204,7 @@ function findRawAssistantMessage(context = {}, messageId = null) {
     const raw = messages[index];
     const normalized = normalizeMessage(raw, index);
     if (normalized.visible === false || normalized.isUser || normalized.isSystem) continue;
-    if (Number.isFinite(requested) && normalized.mesId !== requested && normalized.index !== requested) continue;
+    if (Number.isFinite(requested) && normalized.mesid !== requested && normalized.index !== requested) continue;
     return { raw, normalized, index };
   }
   return null;
@@ -303,16 +303,6 @@ async function saveChatBestEffort(context = {}) {
   }
 }
 
-async function reloadCurrentChatBestEffort(context = {}) {
-  const reload = context.reloadCurrentChat || globalThis.reloadCurrentChat;
-  if (typeof reload !== 'function') return;
-  try {
-    await reload();
-  } catch {
-    // UI refresh is best effort; chat state was already saved.
-  }
-}
-
 function markerMatches(candidate = {}, marker = {}) {
   const expected = asObject(marker);
   if (!Object.keys(expected).length) return false;
@@ -325,7 +315,7 @@ export function latestSillyTavernAssistantMessageIdentity(context = {}) {
   if (!latestAssistant) return '';
   return [
     stringValue(context?.chatId || context?.chat_id || ''),
-    stringValue(latestAssistant.mesId ?? latestAssistant.index)
+    stringValue(latestAssistant.mesid ?? latestAssistant.index)
   ].join('::');
 }
 
@@ -374,7 +364,7 @@ function isLatestAssistantEvent(messageId, context = {}, swiped = false) {
   const latestAssistant = latestAssistantMessage(context.context || context);
   if (!latestAssistant) return false;
   if (messageId === undefined || messageId === null || messageId === '') return Boolean(swiped);
-  return stringValue(messageId) === stringValue(latestAssistant.mesId ?? latestAssistant.index);
+  return stringValue(messageId) === stringValue(latestAssistant.mesid ?? latestAssistant.index);
 }
 
 export function normalizeSillyTavernMessageEvent(event = {}, context = {}) {
@@ -383,7 +373,7 @@ export function normalizeSillyTavernMessageEvent(event = {}, context = {}) {
   const rawMessageId = eventMessageId(event);
   const swiped = Boolean(source.swiped || eventName === 'message_swiped');
   const latestAssistant = latestAssistantMessage(context.context || context);
-  const messageId = rawMessageId ?? (swiped && latestAssistant ? latestAssistant.mesId : null);
+  const messageId = rawMessageId ?? (swiped && latestAssistant ? latestAssistant.mesid : null);
   return {
     eventName,
     messageId,
@@ -409,7 +399,7 @@ function sourceRevisionMessages(messages) {
   return (Array.isArray(messages) ? messages : [])
     .filter((message) => message?.visible !== false)
     .map((message) => ({
-      mesid: message.mesId,
+      mesid: message.mesid,
       role: message.role,
       textHash: hashJson(String(message.text ?? '')),
       ...(Number.isFinite(message.swipeId) ? { swipeId: message.swipeId } : {}),
@@ -1119,7 +1109,7 @@ export function createSillyTavernHost({
       const text = activeRawAssistantText(found.raw);
       return {
         chatKey: stringValue(context?.chatId || context?.chat_id || context?.currentChatId || 'chat'),
-        messageId: found.normalized.mesId,
+        messageId: found.normalized.mesid,
         swipeId: found.normalized.swipeId ?? finiteNonNegativeInteger(found.raw?.swipe_id) ?? 0,
         text,
         originalHash: hashJson(text)
@@ -1132,7 +1122,7 @@ export function createSillyTavernHost({
       const activeText = activeRawAssistantText(found.raw);
       if (activeText) found.raw.__recursionHeldText = activeText;
       updateMessageBlockBestEffort(context, found.index, found.raw);
-      return { ok: true, messageId: found.normalized.mesId };
+      return { ok: true, messageId: found.normalized.mesid };
     },
     async revealAssistantMessage(messageId) {
       const context = currentContext(contextFactory);
@@ -1144,7 +1134,7 @@ export function createSillyTavernHost({
       }
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
-      return { ok: true, messageId: found.normalized.mesId };
+      return { ok: true, messageId: found.normalized.mesid };
     },
     async replaceAssistantMessageText(messageId, text, options = {}) {
       const context = currentContext(contextFactory);
@@ -1156,7 +1146,7 @@ export function createSillyTavernHost({
       found.raw.__recursionGenerationReview = asObject(options.marker);
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
-      return { ok: true, messageId: found.normalized.mesId, text: stringValue(text) };
+      return { ok: true, messageId: found.normalized.mesid, text: stringValue(text) };
     },
     async appendAssistantMessageSwipe(messageId, text, options = {}) {
       const context = currentContext(contextFactory);
@@ -1179,8 +1169,7 @@ export function createSillyTavernHost({
       delete found.raw.__recursionHeldText;
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
-      await reloadCurrentChatBestEffort(context);
-      return { ok: true, messageId: found.normalized.mesId, index, text: stringValue(text) };
+      return { ok: true, messageId: found.normalized.mesid, index, text: stringValue(text) };
     },
     async findEnhancedSwipe(messageId, marker = {}) {
       const context = currentContext(contextFactory);
@@ -1209,8 +1198,7 @@ export function createSillyTavernHost({
       if (options.marker) found.raw.__recursionGenerationReview = asObject(options.marker);
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
-      await reloadCurrentChatBestEffort(context);
-      return { ok: true, messageId: found.normalized.mesId, index, text };
+      return { ok: true, messageId: found.normalized.mesid, index, text };
     },
     async recoverHeldAssistantMessages(details = {}) {
       const context = currentContext(contextFactory);

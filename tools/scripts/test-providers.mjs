@@ -254,7 +254,8 @@ const editorialDiagnosisMachineSchema = machineJsonSchemaForRequest({
   mode: 'recompose',
   sourceHash: 'editorial-source-hash',
   snapshotHash: 'editorial-snapshot-hash',
-  validEvidenceIds: ['user:0', 'message:17', 'source:0']
+  validEvidenceIds: ['user:0', 'message:17', 'source:0'],
+  validPreservationEvidenceIds: ['user:0', 'message:17']
 });
 assertDeepEqual(
   editorialDiagnosisMachineSchema.schema.required,
@@ -271,8 +272,13 @@ assertDeepEqual(
 );
 assertDeepEqual(
   editorialDiagnosisMachineSchema.schema.properties.brief.properties.preserve.items.properties.evidenceRefs.items.enum,
+  ['user:0', 'message:17'],
+  'Editorial diagnosis machine schema excludes source-draft evidence from preservation claims'
+);
+assertDeepEqual(
+  editorialDiagnosisMachineSchema.schema.properties.brief.properties.discard.items.properties.evidenceRefs.items.enum,
   ['user:0', 'message:17', 'source:0'],
-  'Editorial diagnosis machine schema constrains evidence references to the frozen evidence set'
+  'Editorial diagnosis machine schema keeps source-draft evidence available to discard claims'
 );
 const editorialPassMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialPass.v1',
@@ -282,11 +288,13 @@ const editorialPassMachineSchema = machineJsonSchemaForRequest({
   snapshotHash: 'editorial-snapshot-hash',
   diagnosisHash: 'editorial-diagnosis-hash',
   validEvidenceIds: ['user:0', 'message:17', 'source:0'],
+  validPreservationEvidenceIds: ['user:0', 'message:17'],
   installedCardIds: ['card-a', 'card-b']
 });
 assertDeepEqual(editorialPassMachineSchema.schema.properties.cardOutcomes.items.properties.cardId.enum, ['card-a', 'card-b'], 'Editorial pass machine schema constrains card outcomes to the frozen installed hand');
 assertDeepEqual(editorialPassMachineSchema.schema.properties.cardOutcomes.items.properties.evidenceRefs.items.enum, ['user:0', 'message:17', 'source:0'], 'Editorial pass machine schema constrains outcome evidence to frozen ids');
 assertDeepEqual(editorialPassMachineSchema.schema.properties.candidate.required, ['text', 'preservationLedger', 'changeLedger', 'riskFlags'], 'Editorial full-candidate schema requires every semantically validated field');
+assertDeepEqual(editorialPassMachineSchema.schema.properties.candidate.properties.preservationLedger.items.properties.evidenceRefs.items.enum, ['user:0', 'message:17'], 'Editorial candidate schema excludes source-draft evidence from preservation claims');
 const editorialVerifierMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialVerification.v1',
   machineJson: true,
@@ -301,6 +309,77 @@ assertDeepEqual(
   'Editorial verifier machine schema requires the candidate identity and decision envelope'
 );
 assertDeepEqual(editorialVerifierMachineSchema.schema.properties.evidenceRefs.items.enum, ['user:0', 'message:17'], 'Editorial verifier constrains optional evidence references to frozen ids');
+
+const editorialIdentityRouter = createGenerationRouter({
+  client: {
+    async generate(roleId) {
+      const shared = {
+        schema: responseSchemaForRole(roleId),
+        sourceHash: 'model-authored-source-hash',
+        snapshotHash: 'model-authored-snapshot-hash'
+      };
+      if (roleId === 'editorialDiagnostician') {
+        return {
+          text: JSON.stringify({
+            ...shared,
+            mode: 'redirect',
+            decision: 'proceed',
+            brief: {
+              mode: 'recompose',
+              diagnosis: [],
+              preserve: [],
+              discard: [],
+              allowedChanges: [],
+              forbiddenChanges: []
+            }
+          })
+        };
+      }
+      if (roleId === 'editorialTransformer') {
+        return {
+          text: JSON.stringify({
+            ...shared,
+            mode: 'redirect',
+            diagnosisHash: 'model-authored-diagnosis-hash',
+            cardOutcomes: [],
+            candidate: {
+              text: 'Recomposed candidate.',
+              preservationLedger: [],
+              changeLedger: [],
+              riskFlags: []
+            }
+          })
+        };
+      }
+      return {
+        text: JSON.stringify({
+          ...shared,
+          diagnosisHash: 'model-authored-diagnosis-hash',
+          decision: 'accept'
+        })
+      };
+    }
+  }
+});
+const trustedEditorialIdentity = {
+  mode: 'recompose',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash',
+  diagnosisHash: 'trusted-diagnosis-hash'
+};
+const normalizedDiagnosis = await editorialIdentityRouter.generate('editorialDiagnostician', trustedEditorialIdentity);
+assertEqual(normalizedDiagnosis.data.mode, trustedEditorialIdentity.mode, 'Editorial diagnosis mode comes from the frozen request');
+assertEqual(normalizedDiagnosis.data.sourceHash, trustedEditorialIdentity.sourceHash, 'Editorial diagnosis source identity comes from the frozen request');
+assertEqual(normalizedDiagnosis.data.snapshotHash, trustedEditorialIdentity.snapshotHash, 'Editorial diagnosis snapshot identity comes from the frozen request');
+const normalizedTransform = await editorialIdentityRouter.generate('editorialTransformer', trustedEditorialIdentity);
+assertEqual(normalizedTransform.data.mode, trustedEditorialIdentity.mode, 'Editorial transform mode comes from the frozen request');
+assertEqual(normalizedTransform.data.sourceHash, trustedEditorialIdentity.sourceHash, 'Editorial transform source identity comes from the frozen request');
+assertEqual(normalizedTransform.data.snapshotHash, trustedEditorialIdentity.snapshotHash, 'Editorial transform snapshot identity comes from the frozen request');
+assertEqual(normalizedTransform.data.diagnosisHash, trustedEditorialIdentity.diagnosisHash, 'Editorial transform diagnosis identity comes from the frozen request');
+const normalizedVerification = await editorialIdentityRouter.generate('editorialVerifier', trustedEditorialIdentity);
+assertEqual(normalizedVerification.data.sourceHash, trustedEditorialIdentity.sourceHash, 'Editorial verification source identity comes from the frozen request');
+assertEqual(normalizedVerification.data.snapshotHash, trustedEditorialIdentity.snapshotHash, 'Editorial verification snapshot identity comes from the frozen request');
+assertEqual(normalizedVerification.data.diagnosisHash, trustedEditorialIdentity.diagnosisHash, 'Editorial verification diagnosis identity comes from the frozen request');
 
 const generationReviewMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.generationReview.v1',
@@ -680,6 +759,51 @@ const retried = await retryRouter.generate('utilityArbiter', { prompt: 'Retry on
 assertEqual(retried.ok, true, 'transient retry succeeds');
 assertEqual(retryAttempts, 2, 'transient failure retries exactly once');
 assertEqual(retried.diagnostics.retryCount, 1, 'retry count recorded');
+
+let nestedHostRetryAttempts = 0;
+const nestedHostRetryRouter = createGenerationRouter({
+  client: createProviderClient({
+    host: {
+      generation: {
+        async generate() {
+          nestedHostRetryAttempts += 1;
+          if (nestedHostRetryAttempts === 1) {
+            const cause = new Error('temporary connection profile reset');
+            cause.code = 'ECONNRESET';
+            throw new Error('API request failed', { cause });
+          }
+          return { text: responseTextForRole('utilityArbiter') };
+        }
+      }
+    },
+    settingsStore: createStore()
+  })
+});
+const nestedHostRetried = await nestedHostRetryRouter.generate('utilityArbiter', { prompt: 'Retry nested host failure.' });
+assertEqual(nestedHostRetried.ok, true, 'nested SillyTavern connection-profile failure retries');
+assertEqual(nestedHostRetryAttempts, 2, 'nested connection-profile failure retries exactly once');
+assertEqual(nestedHostRetried.diagnostics.retryCount, 1, 'nested connection-profile retry count recorded');
+
+let nestedHostFailureAttempts = 0;
+const nestedHostFailure = await createGenerationRouter({
+  client: createProviderClient({
+    host: {
+      generation: {
+        async generate() {
+          nestedHostFailureAttempts += 1;
+          const cause = new Error('temporary connection profile reset');
+          cause.code = 'ECONNRESET';
+          throw new Error('API request failed', { cause });
+        }
+      }
+    },
+    settingsStore: createStore()
+  })
+}).generate('editorialDiagnostician', { prompt: 'Report nested host failure.' });
+assertEqual(nestedHostFailure.ok, false, 'repeated nested connection-profile failure remains visible');
+assertEqual(nestedHostFailureAttempts, 2, 'repeated nested connection-profile failure spends one retry');
+assertEqual(nestedHostFailure.error.code, 'ECONNRESET', 'nested connection-profile diagnostics expose the safe root cause code');
+assertEqual(nestedHostFailure.error.message, 'temporary connection profile reset', 'nested connection-profile diagnostics expose the safe root cause message');
 
 let staleRetryAttempts = 0;
 const staleRetryGuardContexts = [];

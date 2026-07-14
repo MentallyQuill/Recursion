@@ -413,10 +413,13 @@ if (lifecycleFailures.length) {
     }
   ];
   await eventSource.emit('message_swiped', {});
+  const truncatedSwipePayload = [
+    { mesid: 1, is_user: true, mes: userText }
+  ];
   assertEqual(
-    await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'swipe'),
-    fake.context.chat,
-    'latest assistant native swipe sequence keeps original chat'
+    await globalThis.recursionGenerationInterceptor(truncatedSwipePayload, undefined, undefined, 'swipe'),
+    truncatedSwipePayload,
+    'latest assistant native swipe sequence keeps the truncated interceptor payload'
   );
   assertEqual(fake.context.chat.length, 2, 'latest assistant native swipe sequence does not append a second assistant row');
   assertEqual(fake.context.chat[1].swipes.length, 2, 'latest assistant native swipe sequence preserves both response variants');
@@ -429,6 +432,172 @@ if (lifecycleFailures.length) {
   for (const key of RECURSION_PROMPT_KEYS) {
     assert(fake.promptState.get(key), `latest assistant native swipe sequence keeps ${key} installed`);
   }
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const fake = createFakeSillyTavernContext('editorial-swipe-overlap');
+  const eventSource = createFakeEventSource();
+  const roles = [];
+  let transformerStarted = false;
+  let transformerSignal = null;
+  const userText = 'Keep the team in the booth while they assess the transport method.';
+  const assistantText = 'Carter kept her hands around the coffee mug while she studied Will.';
+  const snapshotHashFromPrompt = (prompt) => String(prompt || '').match(/Snapshot hash:\s*([^\s<]+)/i)?.[1]
+    || String(prompt || '').match(/snapshotHash must be "([^"]+)"/i)?.[1]
+    || '';
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    MESSAGE_SWIPED: 'message_swiped',
+    GENERATION_STOPPED: 'generation_stopped',
+    GENERATION_ENDED: 'generation_ended'
+  };
+  fake.context.chat = Array.from({ length: 30 }, (_, index) => ({
+    mesid: index,
+    is_user: index === 29 ? true : index % 2 === 0,
+    mes: index === 29 ? userText : `bounded extension message ${index}`
+  }));
+  fake.context.generateRaw = async (request = {}) => {
+    const prompt = String(request.prompt || '');
+    const snapshotHash = snapshotHashFromPrompt(prompt);
+    if (prompt.includes('Recursion Editorial Pass JSON object')) {
+      roles.push('editorialTransformer');
+      transformerStarted = true;
+      transformerSignal = request.signal || null;
+      await new Promise((resolve, reject) => {
+        if (request.signal?.aborted) {
+          const error = new Error('Provider generation was aborted.');
+          error.code = 'RECURSION_PROVIDER_ABORTED';
+          reject(error);
+          return;
+        }
+        request.signal?.addEventListener?.('abort', () => {
+          const error = new Error('Provider generation was aborted.');
+          error.code = 'RECURSION_PROVIDER_ABORTED';
+          reject(error);
+        }, { once: true });
+      });
+    }
+    if (prompt.includes('Recursion Editorial Diagnosis JSON object')) {
+      roles.push('editorialDiagnostician');
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.editorialDiagnosis.v1',
+          mode: 'recompose',
+          sourceHash: 'trusted-by-runtime',
+          snapshotHash: 'trusted-by-runtime',
+          decision: 'proceed',
+          brief: {
+            mode: 'recompose',
+            diagnosis: [{ dimension: 'continuity', problem: 'Tighten the immediate reaction.', evidenceRefs: ['source:0'] }],
+            preserve: [],
+            discard: [{ claim: 'Loose response wording.', evidenceRefs: ['source:0'] }],
+            allowedChanges: ['Rewrite the immediate reaction.'],
+            forbiddenChanges: ['Do not move the team out of the booth.']
+          }
+        })
+      };
+    }
+    if (prompt.includes('Generate all requested Recursion scene cards')) {
+      roles.push('fusedCardBundle');
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.cardBundle.v1',
+          snapshotHash,
+          items: [{
+            schema: 'recursion.card.v1',
+            family: 'Scene Frame',
+            role: 'sceneFrameCard',
+            promptText: 'Keep the team seated in the public diner booth.',
+            evidenceRefs: ['message:29'],
+            tokenEstimate: 12
+          }]
+        })
+      };
+    }
+    if (prompt.includes('Write Recursion response guidance')) {
+      roles.push('guidanceComposer');
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.guidanceComposer.v1',
+          snapshotHash,
+          guidanceText: 'Keep the response in the diner booth.',
+          sourceCardIds: [],
+          guardrailCardIds: [],
+          omittedCardIds: [],
+          diagnostics: ['extension-editorial-overlap-guidance']
+        })
+      };
+    }
+    roles.push('utilityArbiter');
+    return {
+      text: JSON.stringify({
+        schema: 'recursion.utilityArbiter.v1',
+        snapshotHash,
+        action: 'compose-brief',
+        sceneStatus: 'same-scene',
+        cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
+        reasonerDecision: { mode: 'skip', reason: 'extension overlap setup', signals: [] },
+        budgets: { targetBriefTokens: 500, maxCards: 6 },
+        diagnostics: ['extension-editorial-overlap-arbiter']
+      })
+    };
+  };
+  globalThis.extension_settings = {
+    recursion: {
+      pipelineMode: 'fused',
+      mode: 'auto',
+      reasoningLevel: 'medium',
+      reasonerUse: 'off',
+      enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  assertEqual(
+    await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'normal'),
+    fake.context.chat,
+    'extension overlap setup keeps native chat payload'
+  );
+  const initialView = globalThis.__recursionLiveHarnessRuntime.view();
+  const initialPacketId = initialView.lastBrief?.packetId;
+  const initialPipelineCalls = roles.filter((roleId) => ['utilityArbiter', 'fusedCardBundle', 'guidanceComposer'].includes(roleId)).length;
+  fake.context.chat.push({
+    mesid: 30,
+    is_user: false,
+    mes: assistantText,
+    swipe_id: 0,
+    swipes: [assistantText],
+    swipe_info: [{ send_date: '2026-07-14T00:00:00.000Z', extra: {} }]
+  });
+  const enhancementEvent = eventSource.emit('generation_ended', { mesid: 30 });
+  await waitUntil(() => transformerStarted, 'extension overlap Editorial transformer did not start');
+  fake.context.chat[30].swipe_id = 1;
+  fake.context.chat[30].swipes.push('');
+  await eventSource.emit('message_swiped', { mesid: 30 });
+  await eventSource.emit('generation_stopped', { mesid: 30 });
+  await enhancementEvent;
+  const truncatedSwipePayload = fake.context.chat.slice(0, 30);
+  await globalThis.recursionGenerationInterceptor(truncatedSwipePayload, undefined, undefined, 'swipe');
+  const finalView = globalThis.__recursionLiveHarnessRuntime.view();
+  const finalPipelineCalls = roles.filter((roleId) => ['utilityArbiter', 'fusedCardBundle', 'guidanceComposer'].includes(roleId)).length;
+
+  assertEqual(transformerSignal?.aborted, true, 'extension event order aborts active Editorial provider work');
+  assertEqual(finalPipelineCalls, initialPipelineCalls, 'extension event order makes no new Arbiter, Fused, or Guidance calls on swipe');
+  assertEqual(finalView.lastCacheDecision?.kind, 'swipe-packet', 'extension event order records packet-cache reuse');
+  assertEqual(finalView.lastBrief?.packetId, initialPacketId, 'extension event order preserves packet identity');
+  assertEqual(fake.context.chat[30].swipes.length, 2, 'extension cancellation leaves only the native empty swipe placeholder');
+  assertEqual(fake.context.chat[30].__recursionGenerationReview, undefined, 'extension cancellation appends no Recursion enhancement marker');
+  assertEqual(finalView.activity?.label, 'Recursion prompt reused for swipe retry.', 'extension event order leaves cached swipe progress authoritative');
+
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;
   delete globalThis.__recursionLiveHarnessRuntime;

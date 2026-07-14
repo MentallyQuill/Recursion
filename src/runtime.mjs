@@ -2104,6 +2104,7 @@ export function createRecursionRuntime({
   let storageSaveTail = Promise.resolve();
   let pendingProseEnhancement = null;
   let activeProseEnhancementPromise = null;
+  let activeProseEnhancementLifecycle = null;
   let canceledProseEnhancement = null;
   let lastEditorialResult = null;
 
@@ -2320,6 +2321,30 @@ export function createRecursionRuntime({
       runId: safeText(pendingProseEnhancement?.runId || '', 120)
     };
     clearPendingProseEnhancement();
+  }
+
+  async function cancelActiveProseEnhancement(reason = 'prose-enhancement-canceled') {
+    cancelPendingProseEnhancement(reason);
+    const lifecycle = activeProseEnhancementLifecycle;
+    if (!lifecycle?.promise) return { ok: true, skipped: true, reason: 'prose-enhancement-not-active' };
+    lifecycle.cancelReason = safeText(reason || 'prose-enhancement-canceled', 80);
+    try {
+      lifecycle.controller?.abort?.();
+    } catch {
+      // Awaiting the lifecycle still prevents stale host mutation if abort delivery fails.
+    }
+    try {
+      await lifecycle.promise;
+    } catch {
+      // Enhancement failures are normalized by the enhancement runner.
+    }
+    return { ok: true, canceled: true, reason: lifecycle.cancelReason };
+  }
+
+  function enhancementCancelReason(details = {}) {
+    const lifecycle = details.enhancementLifecycle;
+    if (!details.enhancementSignal?.aborted) return '';
+    return safeText(lifecycle?.cancelReason || canceledProseEnhancement?.reason || 'prose-enhancement-canceled', 80);
   }
 
   function proseEnhancementPending() {
@@ -2569,12 +2594,16 @@ export function createRecursionRuntime({
   function sameSourceBeforeLatestAssistant(currentSnapshot, previousSnapshot, latestAssistantEntry) {
     const candidate = snapshotWithoutLatestAssistant(currentSnapshot, latestAssistantEntry);
     if (!candidate || !previousSnapshot) return false;
+    const candidateMessages = sourceWindowMessages(candidate);
+    const previousMessages = sourceWindowMessages(previousSnapshot);
+    if (!candidateMessages.length || candidateMessages.length > previousMessages.length) return false;
+    const previousSuffix = previousMessages.slice(previousMessages.length - candidateMessages.length);
     return safeText(candidate.chatId || DEFAULT_CHAT_ID, 160) === safeText(previousSnapshot.chatId || DEFAULT_CHAT_ID, 160)
       && safeText(candidate.chatKey || DEFAULT_CHAT_ID, 160) === safeText(previousSnapshot.chatKey || DEFAULT_CHAT_ID, 160)
       && safeText(candidate.sceneKey || DEFAULT_SCENE_KEY, 160) === safeText(previousSnapshot.sceneKey || DEFAULT_SCENE_KEY, 160)
       && safeText(candidate.sceneFingerprint || '', 180) === safeText(previousSnapshot.sceneFingerprint || '', 180)
       && numberOr(candidate.latestMesId, 0) === numberOr(previousSnapshot.latestMesId, 0)
-      && hashJson(sourceWindowMessages(candidate)) === hashJson(sourceWindowMessages(previousSnapshot));
+      && hashJson(candidateMessages) === hashJson(previousSuffix);
   }
 
   function reusableSnapshotForLatestAssistantSwipeRetry(snapshot, pendingUserMessage) {
@@ -3287,40 +3316,43 @@ export function createRecursionRuntime({
 
   async function handleHostGenerationStopped(details = {}) {
     if (hostStopCleanupPromise) return hostStopCleanupPromise;
-    const source = asObject(details);
-    const eventName = safeText(source.eventName || source.event || 'generation_stopped', 80);
-    const attempt = runState.current().activeAttempt;
-    const preserveLastKnownGood = attempt?.kind === 'swipe' && Boolean(lastPacket && lastHand?.cards?.length);
-    if (preserveLastKnownGood) {
-      runState.setLatestAssistantSwipeRetry({
-        eventName: 'message_swiped',
-        ...(details.messageId !== undefined ? { messageId: details.messageId } : {}),
-        reason: 'stopped-swipe-preserve-last-known-good',
-        recordedAt: nowIso()
+    hostStopCleanupPromise = (async () => {
+      const source = asObject(details);
+      const eventName = safeText(source.eventName || source.event || 'generation_stopped', 80);
+      await cancelActiveProseEnhancement('prose-enhancement-canceled');
+      const attempt = runState.current().activeAttempt;
+      const preserveLastKnownGood = attempt?.kind === 'swipe' && Boolean(lastPacket && lastHand?.cards?.length);
+      if (preserveLastKnownGood) {
+        runState.setLatestAssistantSwipeRetry({
+          eventName: 'message_swiped',
+          ...(details.messageId !== undefined ? { messageId: details.messageId } : {}),
+          reason: 'stopped-swipe-preserve-last-known-good',
+          recordedAt: nowIso()
+        });
+      }
+      setHostGenerationActive(false);
+      const result = await clearForHostEvent({
+        idPrefix: 'host-stop',
+        reason: 'host-generation-stopped',
+        invalidationDetails: {
+          source: safeText(source.source || 'host-event', 80),
+          ...(eventName ? { eventName } : {}),
+          ...(source.hostStop ? { hostStop: redact(source.hostStop) } : {})
+        },
+        startLabel: 'Stopping Recursion after generation cancel...',
+        successLabel: preserveLastKnownGood
+          ? 'Swipe stopped; previous context preserved.'
+          : 'Generation canceled. Recursion prompt cleared.',
+        chips: ['Stop', 'Prompt'],
+        outcome: 'skipped',
+        settleSeverity: 'info',
+        clearVolatileState: false,
+        invalidateCache: false,
+        clearSwipeRetry: false
       });
-    }
-    cancelPendingProseEnhancement('prose-enhancement-canceled');
-    setHostGenerationActive(false);
-    hostStopCleanupPromise = clearForHostEvent({
-      idPrefix: 'host-stop',
-      reason: 'host-generation-stopped',
-      invalidationDetails: {
-        source: safeText(source.source || 'host-event', 80),
-        ...(eventName ? { eventName } : {}),
-        ...(source.hostStop ? { hostStop: redact(source.hostStop) } : {})
-      },
-      startLabel: 'Stopping Recursion after generation cancel...',
-      successLabel: preserveLastKnownGood
-        ? 'Swipe stopped; previous context preserved.'
-        : 'Generation canceled. Recursion prompt cleared.',
-      chips: ['Stop', 'Prompt'],
-      outcome: 'skipped',
-      settleSeverity: 'info',
-      clearVolatileState: false,
-      invalidateCache: false,
-      clearSwipeRetry: false
-    }).finally(() => {
       runState.clearAttempt?.(attempt?.runId);
+      return result;
+    })().finally(() => {
       hostStopCleanupPromise = null;
     });
     return hostStopCleanupPromise;
@@ -3601,7 +3633,21 @@ export function createRecursionRuntime({
   }
 
   async function enhanceLatestAssistantMessage(details = {}) {
-    const run = enhanceLatestAssistantMessageImpl(details);
+    if (activeProseEnhancementLifecycle?.promise) return activeProseEnhancementLifecycle.promise;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const lifecycle = {
+      controller,
+      signal: controller?.signal ?? null,
+      cancelReason: '',
+      promise: null
+    };
+    const run = enhanceLatestAssistantMessageImpl({
+      ...asObject(details),
+      enhancementSignal: lifecycle.signal,
+      enhancementLifecycle: lifecycle
+    });
+    lifecycle.promise = run;
+    activeProseEnhancementLifecycle = lifecycle;
     activeProseEnhancementPromise = run;
     try {
       return await run;
@@ -3609,11 +3655,16 @@ export function createRecursionRuntime({
       if (activeProseEnhancementPromise === run) {
         activeProseEnhancementPromise = null;
       }
+      if (activeProseEnhancementLifecycle === lifecycle) {
+        activeProseEnhancementLifecycle = null;
+      }
     }
   }
 
   async function runEditorialTransform(details = {}) {
     const settings = settingsStore.get();
+    const enhancementSignal = details.enhancementSignal || null;
+    const enhancementLifecycle = details.enhancementLifecycle || null;
     const enhancementSettings = asObject(settings.enhancements);
     const editorialMode = safeText(enhancementSettings.mode || 'off', 32);
     if (!['repair', 'recompose', 'redirect'].includes(editorialMode)) {
@@ -3679,7 +3730,51 @@ export function createRecursionRuntime({
       snapshotHash,
       key
     };
+    if (enhancementLifecycle) enhancementLifecycle.runId = runId;
     lastEditorialResult = { mode: editorialMode, status: 'running', outcome: 'diagnosing', applyMode };
+    function canceledEditorialResult() {
+      const reason = enhancementCancelReason(details) || 'prose-enhancement-canceled';
+      lastEditorialResult = {
+        mode: editorialMode,
+        status: 'skipped',
+        outcome: 'original-kept',
+        applyMode,
+        decision: reason
+      };
+      settleRuntimeActivity({
+        runId,
+        phase: 'settled',
+        outcome: 'skipped',
+        severity: 'info',
+        label: 'Editorial canceled; original kept.',
+        chips: ['Enhancement', 'Canceled'],
+        detail: { mode: editorialMode, applyMode, reason }
+      });
+      return { ok: true, skipped: true, mode: editorialMode, reason };
+    }
+    function failEditorial(error = {}, label = 'Editorial transform failed. Original kept.') {
+      const safeError = {
+        code: safeText(error?.code || 'RECURSION_EDITORIAL_FAILED', 120),
+        message: safeText(error?.message || 'Editorial transform failed.', 300)
+      };
+      lastEditorialResult = {
+        mode: editorialMode,
+        status: 'error',
+        outcome: 'original-kept',
+        applyMode,
+        decision: safeError.message,
+        errorCode: safeError.code
+      };
+      settleRuntimeActivity({
+        runId,
+        phase: 'settled',
+        severity: 'error',
+        label,
+        chips: ['Enhancement', 'Failed'],
+        detail: { mode: editorialMode, applyMode, reasonCode: safeError.code }
+      });
+      return { ok: false, mode: editorialMode, error: safeError };
+    }
     const existing = await messages.findEnhancedSwipe?.(messageId, markerBase);
     if (existing && applyMode === 'as-swipe' && typeof messages.selectAssistantMessageSwipe === 'function') {
       await messages.selectAssistantMessageSwipe(messageId, existing.index, { marker: markerBase });
@@ -3687,7 +3782,9 @@ export function createRecursionRuntime({
       settleRuntimeActivity({ runId, phase: 'settled', severity: 'success', label: `${editorialMode} reused from cache.`, chips: ['Enhancement', 'Cached'] });
       return { ok: true, cached: true, mode: editorialMode, messageId, sourceHash, marker: markerBase };
     }
-    if (!generationRouter || typeof generationRouter.generate !== 'function') return { ok: false, error: { code: 'RECURSION_EDITORIAL_UNAVAILABLE', message: 'Editorial provider is unavailable.' } };
+    if (!generationRouter || typeof generationRouter.generate !== 'function') {
+      return failEditorial({ code: 'RECURSION_EDITORIAL_UNAVAILABLE', message: 'Editorial provider is unavailable.' });
+    }
     const evidence = buildEditorialEvidence(publicSnapshot, sourceText);
     const targets = editorialMode === 'repair' ? buildGenerationReviewTargets(sourceText) : {};
     const recoveryToken = { spent: false };
@@ -3695,10 +3792,17 @@ export function createRecursionRuntime({
     let enhanced = false;
     let verificationResult = { decision: 'not-required' };
     async function generateEditorialRole(roleId, request, options = {}) {
+      if (enhancementSignal?.aborted) {
+        return {
+          result: { ok: false, error: { code: 'RECURSION_PROVIDER_ABORTED', message: 'Provider generation was aborted.' } },
+          lane: request?.lane === 'reasoner' ? 'reasoner' : 'utility'
+        };
+      }
       const primaryLane = request?.lane === 'reasoner' ? 'reasoner' : 'utility';
       const primary = await generationRouter.generate(roleId, request, {
         runId,
         timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
+        signal: enhancementSignal,
         allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true
       });
       if (primary?.recoverySpent === true) recoveryToken.spent = true;
@@ -3710,6 +3814,7 @@ export function createRecursionRuntime({
       const fallback = await generationRouter.generate(roleId, fallbackRequest, {
         runId,
         timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
+        signal: enhancementSignal,
         allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true
       });
       if (fallback?.recoverySpent === true) recoveryToken.spent = true;
@@ -3721,44 +3826,98 @@ export function createRecursionRuntime({
         held = hold?.ok !== false;
       }
       stageRuntimeActivity({ runId, phase: 'editorialDiagnosing', label: 'Diagnosing response...', providerLane: lane, composerLane: lane, chips: ['Enhancement', editorialMode] });
-      const diagnosisResponse = await generateEditorialRole('editorialDiagnostician', {
+      const diagnosisRequest = {
         ...buildEditorialDiagnosisRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot, lane }),
         ...reasonerRequestMetadata(settings, 'editorial-transform', lane)
-      });
-      const diagnosisValidation = diagnosisResponse.result?.ok === true
+      };
+      let diagnosisResponse = await generateEditorialRole('editorialDiagnostician', diagnosisRequest);
+      if (enhancementSignal?.aborted) return canceledEditorialResult();
+      let diagnosisValidation = diagnosisResponse.result?.ok === true
         ? validateEditorialDiagnosis(diagnosisResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot })
         : { ok: false, error: diagnosisResponse.result?.error || { code: 'RECURSION_EDITORIAL_DIAGNOSIS_FAILED', message: 'Editorial diagnosis failed.' } };
+      if (!diagnosisValidation.ok && diagnosisResponse.result?.ok === true && recoveryToken.spent !== true) {
+        recoveryToken.spent = true;
+        diagnosisResponse = await generateEditorialRole('editorialDiagnostician', {
+          ...buildEditorialDiagnosisRequest({
+            mode: editorialMode,
+            sourceText,
+            sourceHash,
+            snapshotHash,
+            snapshot: publicSnapshot,
+            lane,
+            retry: diagnosisValidation.error
+          }),
+          ...reasonerRequestMetadata(settings, 'editorial-transform', lane)
+        }, { allowStructuredRecovery: false });
+        if (enhancementSignal?.aborted) return canceledEditorialResult();
+        diagnosisValidation = diagnosisResponse.result?.ok === true
+          ? validateEditorialDiagnosis(diagnosisResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot })
+          : { ok: false, error: diagnosisResponse.result?.error || { code: 'RECURSION_EDITORIAL_DIAGNOSIS_FAILED', message: 'Editorial diagnosis failed.' } };
+      }
       if (!diagnosisValidation.ok || diagnosisValidation.value?.decision !== 'proceed') {
         if (held && typeof messages.revealAssistantMessage === 'function') { await messages.revealAssistantMessage(messageId); held = false; }
         const reason = diagnosisValidation.value?.decision || diagnosisValidation.error?.message || 'editorial-diagnosis-failed';
-        stageRuntimeActivity({ runId, phase: 'editorialDiagnosing', severity: diagnosisValidation.value ? 'warning' : 'error', label: `Editorial diagnosis ${reason}.`, providerLane: diagnosisResponse.lane, detail: { mode: editorialMode, decision: reason } });
-        settleRuntimeActivity({ runId, phase: 'settled', severity: diagnosisValidation.value ? 'warning' : 'error', label: diagnosisValidation.value ? `Editorial ${reason}; original kept.` : 'Editorial diagnosis failed. Original kept.', chips: ['Enhancement', diagnosisValidation.value ? 'Review' : 'Failed'], detail: { mode: editorialMode, decision: reason } });
-        lastEditorialResult = { mode: editorialMode, status: diagnosisValidation.value ? 'warning' : 'error', outcome: 'original-kept', decision: reason, applyMode };
+        const noChange = diagnosisValidation.value?.decision === 'no-change';
+        const severity = noChange ? 'success' : (diagnosisValidation.value ? 'warning' : 'error');
+        stageRuntimeActivity({ runId, phase: 'editorialDiagnosing', severity, label: noChange ? 'Editorial diagnosis complete.' : `Editorial diagnosis ${reason}.`, providerLane: diagnosisResponse.lane, detail: { mode: editorialMode, decision: reason } });
+        settleRuntimeActivity({ runId, phase: 'settled', severity, label: noChange ? 'Editorial complete; no changes needed.' : (diagnosisValidation.value ? `Editorial ${reason}; original kept.` : 'Editorial diagnosis failed. Original kept.'), chips: ['Enhancement', noChange ? 'Complete' : (diagnosisValidation.value ? 'Review' : 'Failed')], detail: { mode: editorialMode, decision: reason } });
+        lastEditorialResult = { mode: editorialMode, status: noChange ? 'success' : (diagnosisValidation.value ? 'warning' : 'error'), outcome: 'original-kept', decision: reason, applyMode };
         return { ok: Boolean(diagnosisValidation.value), skipped: Boolean(diagnosisValidation.value), mode: editorialMode, reason, validation: diagnosisValidation };
       }
       const diagnosisHash = diagnosisValidation.hash;
       stageRuntimeActivity({ runId, phase: 'editorialTransforming', label: editorialMode === 'repair' ? 'Applying grounded repairs...' : `${editorialMode === 'redirect' ? 'Redirecting' : 'Recomposing'} response...`, providerLane: lane, composerLane: lane, chips: ['Enhancement', editorialMode] });
-      const transformResponse = await generateEditorialRole('editorialTransformer', {
+      let transformResponse = await generateEditorialRole('editorialTransformer', {
         ...buildEditorialPassRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosis: diagnosisValidation.value, evidence, snapshot: publicSnapshot, targets, lane }),
         ...reasonerRequestMetadata(settings, 'editorial-transform', lane)
       });
-      const validation = transformResponse.result?.ok === true
+      if (enhancementSignal?.aborted) return canceledEditorialResult();
+      let validation = transformResponse.result?.ok === true
         ? validateEditorialPass(transformResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, snapshot: publicSnapshot, targets })
         : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
-      if (!validation.ok) return { ok: false, mode: editorialMode, error: validation.error, validation };
+      if (!validation.ok && transformResponse.result?.ok === true && recoveryToken.spent !== true) {
+        recoveryToken.spent = true;
+        transformResponse = await generateEditorialRole('editorialTransformer', {
+          ...buildEditorialPassRequest({
+            mode: editorialMode,
+            sourceText,
+            sourceHash,
+            snapshotHash,
+            diagnosis: diagnosisValidation.value,
+            evidence,
+            snapshot: publicSnapshot,
+            targets,
+            lane,
+            retry: validation.error
+          }),
+          ...reasonerRequestMetadata(settings, 'editorial-transform', lane)
+        }, { allowStructuredRecovery: false });
+        if (enhancementSignal?.aborted) return canceledEditorialResult();
+        validation = transformResponse.result?.ok === true
+          ? validateEditorialPass(transformResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, snapshot: publicSnapshot, targets })
+          : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
+      }
+      if (!validation.ok) return { ...failEditorial(validation.error), validation };
       if ((settings.reasoningLevel === 'high' || settings.reasoningLevel === 'ultra') && editorialMode !== 'repair') {
         stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: lane, composerLane: lane, chips: ['Enhancement', 'Verify'] });
         const verifierResponse = await generateEditorialRole('editorialVerifier', {
           ...buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, evidence, candidate: validation.artifact.candidate, lane }),
           ...reasonerRequestMetadata(settings, 'editorial-verify', lane)
         }, { allowStructuredRecovery: false });
+        if (enhancementSignal?.aborted) return canceledEditorialResult();
         verificationResult = verifierResponse.result?.ok === true
           ? validateEditorialVerification(verifierResponse.result.data, { sourceHash, snapshotHash, diagnosisHash, evidence })
           : { ok: false, decision: 'reject', error: verifierResponse.result?.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_FAILED', message: 'Editorial verification failed.' } };
-        if (!verificationResult.ok || verificationResult.decision !== 'accept') return { ok: false, mode: editorialMode, error: verificationResult.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_REJECTED', message: 'Editorial verifier rejected candidate.' }, validation: verificationResult };
+        if (!verificationResult.ok || verificationResult.decision !== 'accept') {
+          return {
+            ...failEditorial(verificationResult.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_REJECTED', message: 'Editorial verifier rejected candidate.' }, 'Editorial verification failed. Original kept.'),
+            validation: verificationResult
+          };
+        }
       }
       const transformedText = applyEditorialArtifact(sourceText, validation.artifact, targets);
-      if (!transformedText || transformedText === sourceText) return { ok: false, mode: editorialMode, error: { code: 'RECURSION_EDITORIAL_NO_EFFECT', message: 'Editorial transform returned no effective revision.' } };
+      if (!transformedText || transformedText === sourceText) {
+        return failEditorial({ code: 'RECURSION_EDITORIAL_NO_EFFECT', message: 'Editorial transform returned no effective revision.' });
+      }
       const marker = {
         ...markerBase,
         diagnosisHash,
@@ -3770,22 +3929,25 @@ export function createRecursionRuntime({
         changeLedger: validation.artifact.candidate?.changeLedger || [],
         riskFlags: validation.artifact.candidate?.riskFlags || []
       };
+      if (enhancementSignal?.aborted) return canceledEditorialResult();
       lastEditorialResult = { mode: editorialMode, status: 'success', outcome: 'applied', applyMode, verification: verificationResult.decision, candidateHash: marker.candidateHash, diagnosisHash: marker.diagnosisHash, preservationLedger: marker.preservationLedger, changeLedger: marker.changeLedger, riskFlags: marker.riskFlags, cardOutcomes: marker.cardOutcomes };
       if (applyMode === 'replace') {
         const replace = await messages.replaceAssistantMessageText?.(messageId, transformedText, { marker });
-        if (replace?.ok === false) return { ok: false, mode: editorialMode, error: replace.error };
+        if (replace?.ok === false) return failEditorial(replace.error);
       } else {
         if (held && typeof messages.revealAssistantMessage === 'function') { await messages.revealAssistantMessage(messageId); held = false; }
         const append = await messages.appendAssistantMessageSwipe?.(messageId, transformedText, { marker, select: true });
-        if (append?.ok === false) return { ok: false, mode: editorialMode, error: append.error };
+        if (append?.ok === false) return failEditorial(append.error);
       }
       enhanced = true;
       settleRuntimeActivity({ runId, phase: 'settled', severity: 'success', label: `${editorialMode} applied.`, chips: ['Enhancement', editorialMode], detail: { mode: editorialMode, applyMode, verification: verificationResult.decision } });
       return { ok: true, mode: editorialMode, messageId, sourceHash, enhancedHash: marker.candidateHash, marker, artifact: validation.artifact, verification: verificationResult };
     } catch (error) {
-      lastEditorialResult = { mode: editorialMode, status: 'error', outcome: 'original-kept', applyMode, decision: safeText(error?.message || error, 180) };
-      settleRuntimeActivity({ runId, phase: 'settled', severity: 'error', label: 'Editorial transform failed. Original kept.', chips: ['Enhancement', 'Failed'] });
-      return { ok: false, mode: editorialMode, error: { code: 'RECURSION_EDITORIAL_FAILED', message: String(error?.message || error || 'Editorial transform failed.') } };
+      if (enhancementSignal?.aborted) return canceledEditorialResult();
+      return failEditorial({
+        code: error?.code || 'RECURSION_EDITORIAL_FAILED',
+        message: String(error?.message || error || 'Editorial transform failed.')
+      });
     } finally {
       clearPendingProseEnhancement();
       if (held && !enhanced && typeof messages.revealAssistantMessage === 'function') await messages.revealAssistantMessage(messageId);
@@ -5883,6 +6045,12 @@ export function createRecursionRuntime({
 
   async function prepareForGeneration({ userMessage = '', refreshReason = '', hostGeneration = false, generationType = '' } = {}) {
     const settings = settingsStore.get();
+    const hostGenerationType = safeText(generationType, 40).toLowerCase();
+    const explicitSwipe = hostGeneration === true && hostGenerationType === 'swipe';
+    const explicitRegenerate = hostGeneration === true && hostGenerationType === 'regenerate';
+    if (hostGeneration === true && activeProseEnhancementPromise) {
+      await cancelActiveProseEnhancement(explicitSwipe ? 'latest-assistant-swipe' : 'new-host-generation');
+    }
     setHostGenerationActive(hostGeneration);
     if (settings.enabled === false) {
       clearPendingProseEnhancement();
@@ -5914,9 +6082,11 @@ export function createRecursionRuntime({
     if (hostGeneration === true) armProseEnhancementForHostGeneration(settings, runId);
     else clearPendingProseEnhancement();
     const signal = startRun(runId);
-    const hostGenerationType = safeText(generationType, 40).toLowerCase();
-    const explicitSwipe = hostGeneration === true && hostGenerationType === 'swipe';
-    const explicitRegenerate = hostGeneration === true && hostGenerationType === 'regenerate';
+    if (explicitSwipe) {
+      // SillyTavern's swipe interceptor payload can end on the preceding user row
+      // while the authoritative host snapshot still contains the assistant row.
+      pendingUserMessage = normalizePendingUserMessage('');
+    }
     const freshContext = hostGeneration === true
       ? consumePendingFreshNextGeneration(runId)
       : null;

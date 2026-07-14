@@ -41,23 +41,31 @@ try {
     await mode.click();
     await page.locator('[data-recursion-mode-choice-auto]').first().click();
   }
+  const enhancements = page.locator('[data-recursion-enhancements-button]').first();
+  await enhancements.click();
+  await page.locator('[data-recursion-enhancement-target-choice-redirect]').first().click();
+  await page.waitForFunction(() => /redirect/i.test(document.querySelector('[data-recursion-enhancements-button]')?.getAttribute('aria-label') || ''), null, { timeout: timeoutMs });
 
-  const before = await page.evaluate(() => globalThis.SillyTavern?.getContext?.()?.chat?.length || 0);
   const message = `Card progress proof ${Date.now()}: keep the archive door, candle, Mara, and missing captain in the immediate scene. Return a concise next beat.`;
   const input = page.locator('#send_textarea, textarea#send_textarea, textarea[name="send_textarea"]').first();
   await input.fill(message);
   await page.locator('#send_but, button#send_but').first().click();
-  await page.waitForFunction((expected) => (globalThis.SillyTavern?.getContext?.()?.chat?.length || 0) >= expected + 2, before, { timeout: timeoutMs });
+  await page.waitForFunction((sentMessage) => {
+    const chat = globalThis.SillyTavern?.getContext?.()?.chat || [];
+    const userIndex = chat.findLastIndex((entry) => entry?.is_user === true && String(entry?.mes || '') === sentMessage);
+    return userIndex >= 0 && chat.slice(userIndex + 1).some((entry) => entry?.is_user === false && String(entry?.mes || '').trim());
+  }, message, { timeout: timeoutMs });
+  const status = page.locator('[data-recursion-status-trigger]').first();
+  if (!await page.evaluate(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false)) await status.click();
   await page.waitForFunction(() => {
-    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const phase = String(view?.activity?.phase || '').toLowerCase();
-    const brief = String(view?.lastBrief?.status || '').toLowerCase();
-    return ['idle', 'settled', 'ready'].includes(phase) || brief === 'ready';
+    const rows = [...document.querySelectorAll('[data-recursion-status-popover] [data-recursion-progress-row]')];
+    const hasEditorial = rows.some((row) => /editorial/i.test(String(row.dataset.recursionProgressLabel || '')));
+    const active = rows.some((row) => ['running', 'pending'].includes(String(row.dataset.recursionProgressState || '')));
+    return hasEditorial && !active;
   }, null, { timeout: timeoutMs });
   await page.waitForTimeout(500);
-
-  const status = page.locator('[data-recursion-status-trigger]').first();
-  await status.click();
+  if (!await page.evaluate(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false)) await status.click();
+  await page.waitForFunction(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false, null, { timeout: timeoutMs });
   await page.waitForTimeout(300);
 
   const snapshot = await page.evaluate(() => {
@@ -70,6 +78,9 @@ try {
     }));
     return {
       popoverOpen: popover?.hidden === false,
+      enhancementMode: document.querySelector('[data-recursion-enhancements-button]')?.getAttribute('aria-label') || '',
+      title: String(popover?.querySelector('[data-recursion-progress-title]')?.textContent || '').replace(/\s+/g, ' ').trim(),
+      subtitle: String(popover?.querySelector('[data-recursion-progress-subtitle]')?.textContent || '').replace(/\s+/g, ' ').trim(),
       rows,
       text: String(popover?.textContent || '').replace(/\s+/g, ' ').trim()
     };
@@ -78,9 +89,18 @@ try {
   await page.setViewportSize({ width: 420, height: 900 });
   await page.waitForTimeout(300);
   await page.screenshot({ path: resolve(artifactDir, 'mobile.png'), fullPage: false });
-  console.log(JSON.stringify({ status: 'pass', user, snapshot, issues, artifactDir }, null, 2));
-  if (!snapshot.popoverOpen) process.exitCode = 1;
-  if (snapshot.rows.some((row) => row.label === 'location/situation' && row.state === 'failed')) process.exitCode = 2;
+  const healthyTerminalStates = new Set(['done', 'cached', 'skipped']);
+  const unhealthyRows = snapshot.rows.filter((row) => !healthyTerminalStates.has(row.state));
+  const promptReady = snapshot.rows.some((row) => /recursion prompt ready/i.test(row.label) && row.state === 'done');
+  const failures = [
+    ...(!snapshot.popoverOpen ? ['progress-popover-closed'] : []),
+    ...(snapshot.rows.length === 0 ? ['progress-tree-empty'] : []),
+    ...(unhealthyRows.length ? ['progress-tree-unhealthy'] : []),
+    ...(!promptReady ? ['prompt-ready-not-done'] : [])
+  ];
+  const statusValue = failures.length ? 'fail' : 'pass';
+  console.log(JSON.stringify({ status: statusValue, user, snapshot, unhealthyRows, promptReady, failures, issues, artifactDir }, null, 2));
+  if (failures.length) process.exitCode = 1;
 } finally {
   await browser.close().catch(() => {});
 }

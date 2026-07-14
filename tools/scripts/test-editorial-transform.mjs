@@ -22,7 +22,12 @@ const snapshot = {
   lastBrief: { userTurn: 'She closes the door and asks who sent him.' },
   storyForm: { tense: 'present', pov: 'third-limited' },
   pipeline: 'standard',
-  context: { messages: [{ mesid: 17, role: 'user', text: 'Who sent you?' }] },
+  context: {
+    messages: [
+      { mesid: 17, role: 'user', text: 'Who sent you?' },
+      { mesid: 18, role: 'assistant', text: sourceText }
+    ]
+  },
   antiSlopProfileVersion: 'v1'
 };
 const evidence = buildEditorialEvidence(snapshot, sourceText);
@@ -66,6 +71,8 @@ assert(evidence.some((item) => item.id === 'source:0' && item.authority === 'sou
 assert(evidence.some((item) => item.id === 'packet:constraint' && item.authority === 'hard-constraint'), 'packet constraint has hard authority');
 assert(evidence.some((item) => item.id === 'user:0' && item.excerpt === 'She closes the door and asks who sent him.'), 'latest user-turn evidence keeps the explicit brief turn');
 assert(evidence.some((item) => item.id === 'message:17' && item.excerpt === 'Who sent you?'), 'bounded transcript messages receive provider-citable evidence ids');
+assert(!evidence.some((item) => item.id === 'message:18'), 'active assistant draft cannot re-enter preservation evidence as an authoritative context message');
+assert(!evidence.find((item) => item.id === 'context:0')?.excerpt.includes(sourceText), 'aggregate context evidence excludes the active assistant draft');
 
 const diagnosisValidation = validateEditorialDiagnosis(diagnosis, { mode: 'recompose', sourceText, sourceHash, snapshotHash, snapshot });
 assertEqual(diagnosisValidation.ok, true, 'valid diagnosis passes');
@@ -93,6 +100,7 @@ assertDeepEqual(diagnosisRequest.validEvidenceIds, evidence.map((entry) => entry
 const passRequest = buildEditorialPassRequest({ mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosis, evidence, snapshot, lane: 'reasoner' });
 assert(passRequest.prompt.includes('The diagnosis below is authoritative.'), 'transform prompt pins diagnosis');
 assert(passRequest.prompt.includes('one complete candidate'), 'transform prompt allows full rewrite');
+assertEqual(passRequest.responseLength, 8192, 'transform reserves enough completion budget for thinking-profile JSON and candidate text');
 assertDeepEqual(passRequest.validEvidenceIds, evidence.map((entry) => entry.id), 'transform request exposes the frozen evidence ids as structured provider fields');
 assertDeepEqual(passRequest.installedCardIds, ['relationship'], 'transform request exposes frozen installed card ids');
 const redirectRequest = buildEditorialPassRequest({ mode: 'redirect', sourceText, sourceHash, snapshotHash, diagnosis: { ...diagnosis, mode: 'redirect' }, evidence, snapshot });

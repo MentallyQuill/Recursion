@@ -181,13 +181,50 @@ assert(!String(normalizedSwipeEvent.text).includes('[object Object]'), 'object-s
   const boundedSnapshot = await boundedHost.snapshot();
   assertEqual(boundedSnapshot.messages.length, 12, 'host snapshot keeps bounded source messages');
   assertDeepEqual(
-    boundedSnapshot.messages.map((message) => message.mesId),
+    boundedSnapshot.messages.map((message) => message.mesid),
     [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
-    'host snapshot keeps newest bounded source window'
+    'host snapshot keeps canonical SillyTavern message ids in the newest bounded source window'
   );
   assertEqual(boundedSnapshot.sourceWindowMessageCount, 12, 'snapshot exposes source window count');
   assertEqual(boundedSnapshot.sourceWindowTruncated, true, 'snapshot marks bounded source window');
   assertEqual(boundedSnapshot.sourceWindowLimitReason, 'message-cap', 'snapshot records message cap reason');
+}
+
+{
+  const placeholderContext = {
+    chatId: 'long-swipe-placeholder-chat',
+    chat: Array.from({ length: 30 }, (_, index) => ({
+      mesid: index,
+      is_user: index % 2 === 0,
+      mes: `visible message ${index}`
+    })),
+    extensionSettings: {
+      recursion: {
+        retention: {
+          sourceWindowMessages: 10,
+          sourceWindowCharacters: 6000,
+          providerVisibleMessages: 4
+        }
+      }
+    }
+  };
+  placeholderContext.chat[29] = {
+    mesid: 29,
+    is_user: false,
+    mes: 'Previous assistant swipe.',
+    swipe_id: 1,
+    swipes: ['Previous assistant swipe.', '']
+  };
+  const placeholderHost = createSillyTavernHost({
+    contextFactory: () => placeholderContext,
+    fetchImpl: null
+  });
+  const placeholderSnapshot = await placeholderHost.snapshot();
+  const placeholderAssistant = placeholderSnapshot.messages.at(-1);
+  assertEqual(placeholderAssistant.mesid, 29, 'blank active swipe placeholder preserves canonical assistant message id');
+  assertEqual(placeholderAssistant.swipeId, 1, 'blank active swipe placeholder preserves active swipe index');
+  assertEqual(placeholderAssistant.swipeCount, 2, 'blank active swipe placeholder preserves swipe count');
+  assertEqual(placeholderSnapshot.latestMesId, 29, 'blank active swipe placeholder keeps snapshot latest message id aligned');
 }
 
 const swipeContext = {
@@ -269,7 +306,7 @@ assertEqual((await mutationHost.messages.findEnhancedSwipe(4, { originalHash: 'h
 assertEqual((await mutationHost.messages.replaceAssistantMessageText(4, 'Replacement text.', { marker: { originalHash: 'hash-b' } })).ok, true, 'host replaces active assistant text');
 assertEqual(mutationContext.chat[0].swipes[1], 'Replacement text.', 'replace updates selected swipe text');
 assert(messageMutationCalls.some((entry) => entry.save === true), 'message mutation saves chat');
-assert(messageMutationCalls.some((entry) => entry.reload === true), 'enhanced swipe refreshes current chat UI');
+assertEqual(messageMutationCalls.some((entry) => entry.reload === true), false, 'self-authored swipe mutation does not reload the chat and emit CHAT_CHANGED');
 
 const latestMutationContext = {
   chatId: 'prose-latest-host-chat',

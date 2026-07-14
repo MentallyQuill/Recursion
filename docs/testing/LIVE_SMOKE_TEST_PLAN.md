@@ -79,7 +79,9 @@ $env:RECURSION_LIVE_SWIPE='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts
 ```
 
-This command uses the no-generation browser smoke path, then creates a temporary in-page chat state with an older assistant message that has two swipes and a later user message. It emits SillyTavern's real `MESSAGE_SWIPED` event path, verifies Recursion clears seeded prompt text for that source mutation, verifies the activity ribbon reports source cleanup, and records hashed A/B/A source revision evidence. Latest-assistant swipe retry coverage is deterministic: extension smoke verifies it does not clear prompt lanes or Rapid-warm again, and runtime smoke verifies the same pending user turn reinstalls the previous packet without provider work. The live swipe proof restores the original chat after the proof and does not call providers.
+This command uses the no-generation browser smoke path, then creates a temporary in-page chat state with an older assistant message that has two swipes and a later user message. It emits SillyTavern's real `MESSAGE_SWIPED` event path, verifies Recursion clears seeded prompt text for that source mutation, verifies the activity ribbon reports source cleanup, and records hashed A/B/A source revision evidence. Latest-assistant swipe retry coverage is deterministic: extension smoke keeps the assistant in the host chat while passing an interceptor payload that ends on the preceding user row, then proves it does not clear prompt lanes, Rapid-warm again, or call a provider. The served-runtime Playwright proof uses the same divergent payload/snapshot shape for Standard, Rapid, and Fused. The live swipe proof restores the original chat after the proof and does not call external providers.
+
+Before any served Playwright proof, synchronize and hash-check the complete extension directory that backs `/scripts/extensions/third-party/Recursion`. Updating only a profile data copy or selected source modules is not sufficient evidence: SillyTavern may continue serving stale transitive modules such as `cards.mjs`.
 
 Generation-enabled Utility smoke target:
 

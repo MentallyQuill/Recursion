@@ -94,10 +94,14 @@ function proofScript() {
     const preparedHandCardCount = Array.isArray(preparedView.lastHand?.cards)
       ? preparedView.lastHand.cards.length
       : 0;
+    const preparedFamilies = new Set((preparedView.lastHand?.cards || []).map((card) => String(card?.family || '')).filter(Boolean));
+    const duplicateFamilyOmissions = (preparedView.lastHand?.omitted || []).filter((entry) => (
+      entry?.reason === 'max-cards' && preparedFamilies.has(String(entry?.family || ''))
+    ));
     const before = messageState(seed.mesid);
     const result = await activeRuntime.enhanceLatestAssistantMessage({ reason: `live-${target}-${applyMode}` });
     const after = messageState(seed.mesid);
-    return { ok: result?.ok !== false, target, applyMode, pipelineMode, seed, prepared, preparedHandCardCount, result, before, after };
+    return { ok: result?.ok !== false, target, applyMode, pipelineMode, seed, prepared, preparedHandCardCount, duplicateFamilyOmissions, result, before, after };
   };
 }
 
@@ -226,28 +230,34 @@ try {
     const beforeText = testCase.applyMode === 'as-swipe' ? proof.before.swipes[0] : proof.before.text;
     const afterText = testCase.applyMode === 'as-swipe' ? proof.after.swipes[proof.after.swipeId] : proof.after.text;
     const quality = qualityDelta(beforeText, afterText);
+    const cardOutcomes = Array.isArray(proof.result?.marker?.cardOutcomes)
+      ? proof.result.marker.cardOutcomes
+      : [];
+    const outcomeCardIds = cardOutcomes.map((outcome) => String(outcome?.cardId || '')).filter(Boolean);
+    const validCardOutcomeLedger = cardOutcomes.length > 0
+      && new Set(outcomeCardIds).size === cardOutcomes.length
+      && cardOutcomes.every((outcome) => Array.isArray(outcome?.evidenceRefs) && outcome.evidenceRefs.length > 0);
+    const validatedEditorialResult = proof.result?.ok === true
+      && proof.result?.mode === testCase.target
+      && proof.result?.marker?.applyMode === testCase.applyMode
+      && proof.result?.artifact?.kind === 'candidate'
+      && typeof proof.result?.artifact?.text === 'string'
+      && proof.result.artifact.text.length > 0
+      && proof.preparedHandCardCount > 0
+      && proof.duplicateFamilyOmissions.length === 0
+      && validCardOutcomeLedger;
     const pass = testCase.applyMode === 'as-swipe'
       ? proof.prepared?.ok === true
-        && proof.result?.installedCardCount > 0
         && proof.ok === true
-        && proof.result?.mode === testCase.applyMode
-        && Array.isArray(proof.result?.patches)
-        && proof.result.patches.length > 0
-        && Array.isArray(proof.result?.cardOutcomes)
-        && proof.result.cardOutcomes.length === proof.result.installedCardCount
+        && validatedEditorialResult
         && proof.after.swipes.length === 2
         && proof.after.swipeInfoLength === proof.after.swipes.length
         && proof.after.swipeId === 1
         && proof.after.swipes[0] === proof.before.swipes[0]
         && quality.significant === true
       : proof.prepared?.ok === true
-        && proof.result?.installedCardCount > 0
         && proof.ok === true
-        && proof.result?.mode === testCase.applyMode
-        && Array.isArray(proof.result?.patches)
-        && proof.result.patches.length > 0
-        && Array.isArray(proof.result?.cardOutcomes)
-        && proof.result.cardOutcomes.length === proof.result.installedCardCount
+        && validatedEditorialResult
         && proof.after.swipes.length === 1
         && quality.significant === true;
     report.checks.push({
@@ -260,10 +270,13 @@ try {
         resultMode: proof.result?.mode || '',
         preparedOk: proof.prepared?.ok === true,
         preparedHandCardCount: proof.preparedHandCardCount,
-        installedCardCount: proof.result?.installedCardCount || 0,
-        patchCount: proof.result?.patches?.length || 0,
-        reviewDomains: proof.result?.reviewDomains || {},
-        cardOutcomes: proof.result?.cardOutcomes || [],
+        duplicateFamilyOmissions: proof.duplicateFamilyOmissions,
+        artifactKind: proof.result?.artifact?.kind || '',
+        resultApplyMode: proof.result?.marker?.applyMode || '',
+        installedCardCount: proof.preparedHandCardCount,
+        outcomeCardCount: cardOutcomes.length,
+        validCardOutcomeLedger,
+        cardOutcomes,
         beforeSwipeCount: proof.before.swipes.length,
         afterSwipeCount: proof.after.swipes.length,
         afterSwipeInfoLength: proof.after.swipeInfoLength,

@@ -3812,6 +3812,193 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
 }
 
 {
+  const userText = 'Retry while Editorial is still transforming.';
+  const assistantText = 'The team remained seated while Carter questioned the transport pattern.';
+  const chatId = 'editorial-overlap-swipe-chat';
+  const initialMessages = Array.from({ length: 30 }, (_, index) => ({
+    mesid: index,
+    role: index === 29 ? 'user' : (index % 2 === 0 ? 'user' : 'assistant'),
+    text: index === 29 ? userText : `bounded message ${index}`,
+    visible: true
+  }));
+  const snapshotFromMessages = (messages) => ({
+    chatId,
+    chatKey: chatId,
+    sceneKey: 'editorial-overlap-swipe-scene',
+    sceneFingerprint: 'editorial-overlap-swipe-scene-fp',
+    latestMesId: messages.at(-1)?.mesid || 0,
+    messages: messages.slice(-20)
+  });
+  let activeSnapshot = snapshotFromMessages(initialMessages);
+  let swipeStarting = false;
+  let transformerRelease;
+  let transformerSignal = null;
+  let transformerStarted = false;
+  let appendCount = 0;
+  const lifecycleEvents = [];
+  const providerRoles = [];
+  const transformerGate = new Promise((resolve) => { transformerRelease = resolve; });
+  const sourceHash = hashJson(assistantText);
+  const message = {
+    chatKey: chatId,
+    messageId: 30,
+    swipeId: 0,
+    text: assistantText,
+    originalHash: sourceHash,
+    swipes: [assistantText]
+  };
+  const { runtime, installed } = createRuntimeHarness({
+    settings: {
+      pipelineMode: 'fused',
+      mode: 'auto',
+      reasonerUse: 'off',
+      enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
+    },
+    snapshot: async () => {
+      if (swipeStarting) lifecycleEvents.push('swipe-snapshot-read');
+      return activeSnapshot;
+    },
+    hostMessages: {
+      activeAssistantMessageIdentity() {
+        return { ...message };
+      },
+      async holdAssistantMessage() {
+        lifecycleEvents.push('editorial-held');
+        return { ok: true };
+      },
+      async revealAssistantMessage() {
+        lifecycleEvents.push('editorial-reveal-complete');
+        return { ok: true };
+      },
+      async appendAssistantMessageSwipe() {
+        appendCount += 1;
+        return { ok: true };
+      },
+      async findEnhancedSwipe() {
+        return null;
+      }
+    },
+    generationRouter: {
+      async generate(roleId, request = {}, options = {}) {
+        providerRoles.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              action: 'compose-brief',
+              sceneStatus: 'same-scene',
+              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
+              reasonerDecision: { mode: 'skip', reason: 'overlap swipe setup', signals: [] },
+              budgets: { targetBriefTokens: 500, maxCards: 6 },
+              diagnostics: ['editorial-overlap-swipe-setup']
+            }
+          };
+        }
+        if (roleId === 'fusedCardBundle') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.cardBundle.v1',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                schema: 'recursion.card.v1',
+                role: 'sceneFrameCard',
+                family: 'Scene Frame',
+                promptText: 'Keep the team seated while they assess the transport method.',
+                evidenceRefs: ['message:29'],
+                tokenEstimate: 12
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Keep the response in the diner booth.',
+              sourceCardIds: request.sourceCardIds || [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['editorial-overlap-swipe-guidance']
+            }
+          };
+        }
+        if (roleId === 'editorialDiagnostician') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.editorialDiagnosis.v1',
+              mode: 'recompose',
+              sourceHash: request.sourceHash,
+              snapshotHash: request.snapshotHash,
+              decision: 'proceed',
+              brief: {
+                mode: 'recompose',
+                diagnosis: [{ dimension: 'continuity', problem: 'Tighten the immediate reaction.', evidenceRefs: ['source:0'] }],
+                preserve: [{ claim: 'The team remains seated.', evidenceRefs: ['message:29'] }],
+                discard: [{ claim: 'Loose reaction wording.', evidenceRefs: ['source:0'] }],
+                allowedChanges: ['Rewrite the immediate reaction.'],
+                forbiddenChanges: ['Do not move anyone out of the booth.']
+              }
+            }
+          };
+        }
+        if (roleId === 'editorialTransformer') {
+          transformerStarted = true;
+          transformerSignal = options.signal || null;
+          lifecycleEvents.push('editorial-transformer-started');
+          if (transformerSignal?.aborted) transformerRelease();
+          else transformerSignal?.addEventListener?.('abort', () => transformerRelease(), { once: true });
+          await transformerGate;
+          return {
+            ok: false,
+            error: {
+              code: transformerSignal?.aborted ? 'RECURSION_PROVIDER_ABORTED' : 'TEST_TRANSFORMER_RELEASED',
+              message: transformerSignal?.aborted ? 'Provider generation was aborted.' : 'Test released uncanceled transformer.'
+            }
+          };
+        }
+        throw new Error(`unexpected editorial overlap role ${roleId}`);
+      }
+    }
+  });
+
+  const first = await runtime.prepareForGeneration({ userMessage: userText, hostGeneration: true });
+  assertEqual(first.ok, true, 'Editorial overlap setup installs the initial Fused packet');
+  const initialPacketId = installed.at(-1)?.packetId;
+  const initialPipelineCalls = providerRoles.filter((roleId) => ['utilityArbiter', 'fusedCardBundle', 'guidanceComposer'].includes(roleId)).length;
+  activeSnapshot = snapshotFromMessages([
+    ...initialMessages,
+    { mesid: 30, role: 'assistant', text: assistantText, visible: true, swipeId: 1, swipeCount: 2, activeSwipeTextHash: hashJson('') }
+  ]);
+  const enhancement = runtime.enhanceLatestAssistantMessage({ reason: 'assistant-message-landed' });
+  await waitUntil(() => transformerStarted, 'Editorial overlap transformer did not start');
+  swipeStarting = true;
+  const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true, generationType: 'swipe' });
+  const signalWasAborted = isAbortSignal(transformerSignal) && transformerSignal.aborted;
+  transformerRelease();
+  const enhancementResult = await enhancement;
+  const revealIndex = lifecycleEvents.indexOf('editorial-reveal-complete');
+  const swipeSnapshotIndex = lifecycleEvents.indexOf('swipe-snapshot-read');
+  const finalPipelineCalls = providerRoles.filter((roleId) => ['utilityArbiter', 'fusedCardBundle', 'guidanceComposer'].includes(roleId)).length;
+
+  assertEqual(signalWasAborted, true, 'native swipe aborts the active Editorial provider call');
+  assertEqual(enhancementResult.skipped, true, 'aborted Editorial work settles as skipped');
+  assertEqual(enhancementResult.reason, 'latest-assistant-swipe', 'aborted Editorial work records the swipe cancellation reason');
+  assert(revealIndex >= 0 && revealIndex < swipeSnapshotIndex, 'Editorial reveal completes before the swipe snapshot is read');
+  assertEqual(second.reused, true, 'overlapping Editorial swipe reuses the previous packet');
+  assertEqual(second.reason, 'same-turn-swipe-retry', 'overlapping Editorial swipe reports packet reuse');
+  assertEqual(finalPipelineCalls, initialPipelineCalls, 'overlapping Editorial swipe makes no new Arbiter, Fused, or Guidance calls');
+  assertEqual(installed.at(-1)?.packetId, initialPacketId, 'overlapping Editorial swipe preserves packet identity');
+  assertEqual(appendCount, 0, 'aborted Editorial work appends no enhancement swipe');
+  assertEqual(runtime.view().activity.label, 'Recursion prompt reused for swipe retry.', 'new swipe progress remains authoritative after old Editorial cancellation');
+}
+
+{
   let providerCalls = 0;
   const baseSnapshot = {
     chatId: 'force-same-turn-chat',

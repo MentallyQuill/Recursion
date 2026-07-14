@@ -255,7 +255,7 @@ function editorialClaimSchema(validEvidenceIds) {
   };
 }
 
-function editorialBriefSchema(mode, validEvidenceIds) {
+function editorialBriefSchema(mode, validEvidenceIds, validPreservationEvidenceIds = validEvidenceIds) {
   return {
     type: 'object',
     properties: {
@@ -274,7 +274,7 @@ function editorialBriefSchema(mode, validEvidenceIds) {
           additionalProperties: false
         }
       },
-      preserve: { type: 'array', maxItems: 12, items: editorialClaimSchema(validEvidenceIds) },
+      preserve: { type: 'array', maxItems: 12, items: editorialClaimSchema(validPreservationEvidenceIds) },
       discard: { type: 'array', maxItems: 12, items: editorialClaimSchema(validEvidenceIds) },
       allowedChanges: { type: 'array', maxItems: 12, items: { type: 'string' } },
       forbiddenChanges: { type: 'array', maxItems: 12, items: { type: 'string' } }
@@ -302,12 +302,12 @@ function editorialCardOutcomesSchema(installedCardIds, validEvidenceIds) {
   };
 }
 
-function editorialCandidateSchema(validEvidenceIds) {
+function editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds = validEvidenceIds) {
   return {
     type: 'object',
     properties: {
       text: { type: 'string' },
-      preservationLedger: { type: 'array', maxItems: 12, items: editorialClaimSchema(validEvidenceIds) },
+      preservationLedger: { type: 'array', maxItems: 12, items: editorialClaimSchema(validPreservationEvidenceIds) },
       changeLedger: {
         type: 'array',
         maxItems: 12,
@@ -391,6 +391,7 @@ export function machineJsonSchemaForRequest(request = {}) {
       ? String(request.mode).trim()
       : '';
     const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
+    const validPreservationEvidenceIds = uniqueRequestStrings(request?.validPreservationEvidenceIds);
     const decisions = mode === 'redirect'
       ? ['proceed', 'no-change']
       : mode === 'recompose'
@@ -406,7 +407,7 @@ export function machineJsonSchemaForRequest(request = {}) {
           sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
           snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
           decision: { enum: decisions },
-          brief: editorialBriefSchema(mode, validEvidenceIds)
+          brief: editorialBriefSchema(mode, validEvidenceIds, validPreservationEvidenceIds)
         },
         required: ['schema', 'mode', 'sourceHash', 'snapshotHash', 'decision', 'brief'],
         additionalProperties: true
@@ -421,6 +422,7 @@ export function machineJsonSchemaForRequest(request = {}) {
       ? String(request.mode).trim()
       : '';
     const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
+    const validPreservationEvidenceIds = uniqueRequestStrings(request?.validPreservationEvidenceIds);
     const installedCardIds = uniqueRequestStrings(request?.installedCardIds);
     const validTargetIds = uniqueRequestStrings(request?.validTargetIds);
     const properties = {
@@ -451,7 +453,7 @@ export function machineJsonSchemaForRequest(request = {}) {
       };
       required.push('patches');
     } else {
-      properties.candidate = editorialCandidateSchema(validEvidenceIds);
+      properties.candidate = editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds);
       required.push('candidate');
     }
     return {
@@ -526,7 +528,24 @@ function validateRoleResponseSchema(roleId, data) {
 }
 
 function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
-  if (roleId !== 'generationReviewer' || !plainObject(data) || String(data.schema || '').trim()) return data;
+  if (!plainObject(data)) return data;
+  if (['editorialDiagnostician', 'editorialTransformer', 'editorialVerifier'].includes(roleId)) {
+    const normalized = { ...data };
+    for (const field of ['sourceHash', 'snapshotHash']) {
+      const trusted = String(request?.[field] || '').trim();
+      if (trusted) normalized[field] = trusted;
+    }
+    if (roleId !== 'editorialVerifier') {
+      const mode = String(request?.mode || '').trim();
+      if (mode) normalized.mode = mode;
+    }
+    if (roleId !== 'editorialDiagnostician') {
+      const diagnosisHash = String(request?.diagnosisHash || '').trim();
+      if (diagnosisHash) normalized.diagnosisHash = diagnosisHash;
+    }
+    return normalized;
+  }
+  if (roleId !== 'generationReviewer' || String(data.schema || '').trim()) return data;
   const sourceHash = String(request?.sourceHash || '').trim();
   const returnedSourceHash = String(data.sourceHash || '').trim();
   if (!sourceHash || (returnedSourceHash && returnedSourceHash !== sourceHash)) return data;
@@ -1080,12 +1099,46 @@ function responseTextHash(text) {
   return hashJson(String(text ?? ''));
 }
 
+function errorChain(error, limit = 6) {
+  const chain = [];
+  const seen = new Set();
+  let current = error;
+  while (current && typeof current === 'object' && chain.length < limit && !seen.has(current)) {
+    chain.push(current);
+    seen.add(current);
+    current = current.cause;
+  }
+  return chain;
+}
+
+function retryability(error) {
+  const chain = errorChain(error);
+  for (const entry of chain) {
+    if (entry?.retryable === true) return true;
+    if (entry?.retryable === false) return false;
+    if (TRANSIENT_CODES.has(entry?.code)) return true;
+    const status = Number(entry?.status);
+    if (status === 429 || (status >= 500 && status < 600)) return true;
+    if (status >= 400 && status < 500) return false;
+  }
+  return chain.some((entry) => /^api request failed$/i.test(String(entry?.message || '').trim()))
+    ? true
+    : null;
+}
+
 function retryableError(error) {
-  if (error?.retryable === true) return true;
-  if (error?.retryable === false) return false;
-  if (TRANSIENT_CODES.has(error?.code)) return true;
-  const status = Number(error?.status);
-  return status === 429 || (status >= 500 && status < 600);
+  return retryability(error) === true;
+}
+
+function actionableError(error) {
+  const chain = errorChain(error);
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    const entry = chain[index];
+    const code = String(entry?.code || '').trim();
+    const status = Number(entry?.status);
+    if ((code && code !== 'Error') || Number.isFinite(status) || typeof entry?.retryable === 'boolean') return entry;
+  }
+  return chain.at(-1) || error;
 }
 
 function structuredOutputRetryableError(error) {
@@ -1152,13 +1205,14 @@ function collectStrings(value, target) {
 }
 
 function sanitizedError(error, request = {}) {
-  const rawCode = String(error?.code || error?.name || 'RECURSION_PROVIDER_FAILED');
-  const message = error?.external === true
+  const actionable = actionableError(error);
+  const rawCode = String(actionable?.code || actionable?.name || 'RECURSION_PROVIDER_FAILED');
+  const message = actionable?.external === true
     ? 'Provider generation failed.'
-    : scrubKnownRequestText(error?.message || 'Provider generation failed.', request);
-  const actualSchema = scrubKnownRequestText(error?.actualSchema || '', request);
-  const responseFields = Array.isArray(error?.responseFields)
-    ? error.responseFields.map((field) => String(field).replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 80)).filter(Boolean).slice(0, 24)
+    : scrubKnownRequestText(actionable?.message || 'Provider generation failed.', request);
+  const actualSchema = scrubKnownRequestText(actionable?.actualSchema || '', request);
+  const responseFields = Array.isArray(actionable?.responseFields)
+    ? actionable.responseFields.map((field) => String(field).replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 80)).filter(Boolean).slice(0, 24)
     : [];
   return sanitize({
     code: scrubKnownRequestText(rawCode, request),

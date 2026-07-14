@@ -70,9 +70,15 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
   const contextMessages = array(context.messages);
   const latestUserMessage = [...contextMessages].reverse().find((message) => message?.role === 'user');
   const messageText = (message) => message?.text ?? message?.mes ?? message?.content ?? '';
+  const normalizedSource = compact(source).replace(/\s+/g, ' ');
+  const isActiveAssistantDraft = (message) => (
+    message?.role === 'assistant'
+    && compact(messageText(message)).replace(/\s+/g, ' ') === normalizedSource
+  );
+  const authoritativeContextMessages = contextMessages.filter((message) => !isActiveAssistantDraft(message));
   const userTurn = brief.userTurn || brief.userMessage || messageText(latestUserMessage);
   addEvidence(entries, 'user:0', 'user-turn', 'continuity-fact', userTurn || 'No explicit user turn supplied.');
-  for (const message of contextMessages) {
+  for (const message of authoritativeContextMessages) {
     const messageId = String(message?.mesid ?? message?.messageId ?? message?.id ?? '').trim();
     if (!/^\d+$/.test(messageId)) continue;
     addEvidence(entries, `message:${messageId}`, 'context', 'continuity-fact', messageText(message));
@@ -90,7 +96,12 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
   if (brief.userTurn || brief.userMessage) addEvidence(entries, 'brief:turn', 'last-brief', 'continuity-fact', brief.userTurn || brief.userMessage);
   if (Object.keys(storyForm).length) addEvidence(entries, 'story-form:0', 'story-form', 'hard-constraint', JSON.stringify(storyForm));
   for (const [index, sentence] of sourceSentences(source).entries()) addEvidence(entries, `source:${index}`, 'source-draft', 'source-draft', sentence);
-  if (Object.keys(context).length) addEvidence(entries, 'context:0', 'context', 'continuity-fact', JSON.stringify(context));
+  if (Object.keys(context).length) {
+    addEvidence(entries, 'context:0', 'context', 'continuity-fact', JSON.stringify({
+      ...context,
+      messages: authoritativeContextMessages
+    }));
+  }
   let total = 0;
   return entries.filter((entry) => {
     if (entries.indexOf(entry) >= MAX_EVIDENCE) return false;
@@ -222,12 +233,12 @@ export function validateEditorialVerification(result = {}, { sourceHash = '', sn
   return { ok: true, decision: data.decision, evidenceRefs: array(data.evidenceRefs).map(String), reason: safeText(data.reason || '', 600) };
 }
 
-function requestBase(schema, prompt, lane = '') {
+function requestBase(schema, prompt, lane = '', responseLength = 5000) {
   return {
     prompt,
     systemPrompt: `Return only one valid ${schema} JSON object. Do not emit prose, markdown, reasoning, or an alternate schema.`,
     responseSchema: schema,
-    responseLength: 5000,
+    responseLength,
     machineJson: true,
     ...(lane ? { lane } : {}),
     reasoningCategory: 'editorial-transform',
@@ -235,14 +246,26 @@ function requestBase(schema, prompt, lane = '') {
   };
 }
 
-export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', snapshot = {}, lane = '' } = {}) {
+export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', snapshot = {}, lane = '', retry = null } = {}) {
   const evidence = buildEditorialEvidence(snapshot, sourceText);
+  const validPreservationEvidenceIds = evidence
+    .filter((entry) => !['source-draft', 'source-negative'].includes(entry.authority))
+    .map((entry) => entry.id);
+  const correction = retry
+    ? [
+        'Editorial diagnosis correction required.',
+        `The previous diagnosis failed semantic validation: ${safeText(retry?.code || 'RECURSION_EDITORIAL_DIAGNOSIS_INVALID', 120)} - ${safeText(retry?.message || 'Invalid diagnosis.', 360)}`,
+        `Preservation claims may cite only these evidence IDs: ${JSON.stringify(validPreservationEvidenceIds)}.`,
+        'Return one complete corrected diagnosis object; do not discuss the correction.'
+      ]
+    : [];
   const prompt = [
     'Return only one valid Recursion Editorial Diagnosis JSON object.',
     `Selected mode: ${mode}.`,
     'Diagnose the completed response against frozen evidence before any candidate is written.',
     'Return no candidate text. Use source-draft evidence only to identify discardable material, never to preserve a fact.',
     'Choose proceed, no-change, requires-recompose, or requires-redirect according to the selected mode.',
+    ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
     `<evidence>${JSON.stringify(evidence)}</evidence>`,
@@ -253,13 +276,26 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
     sourceHash,
     snapshotHash,
     mode,
-    validEvidenceIds: evidence.map((entry) => entry.id)
+    validEvidenceIds: evidence.map((entry) => entry.id),
+    validPreservationEvidenceIds
   };
 }
 
-export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', diagnosis = {}, evidence = [], snapshot = {}, targets = {}, lane = '' } = {}) {
+export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', diagnosis = {}, evidence = [], snapshot = {}, targets = {}, lane = '', retry = null } = {}) {
   const full = FULL_MODES.has(mode);
   const targetList = Object.values(targets || {}).flat().map((entry) => ({ id: entry.id, domain: entry.domain, before: entry.before })).slice(0, 120);
+  const validPreservationEvidenceIds = array(evidence)
+    .filter((entry) => !['source-draft', 'source-negative'].includes(entry?.authority))
+    .map((entry) => String(entry?.id || ''))
+    .filter(Boolean);
+  const correction = retry
+    ? [
+        'Editorial pass correction required.',
+        `The previous pass failed semantic validation: ${safeText(retry?.code || 'RECURSION_EDITORIAL_PASS_INVALID', 120)} - ${safeText(retry?.message || 'Invalid editorial pass.', 360)}`,
+        `Preservation claims may cite only these evidence IDs: ${JSON.stringify(validPreservationEvidenceIds)}.`,
+        'Return one complete corrected editorial pass object; do not discuss the correction.'
+      ]
+    : [];
   const prompt = [
     'Return only one valid Recursion Editorial Pass JSON object.',
     `Selected mode: ${mode}.`,
@@ -267,6 +303,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     mode === 'redirect' ? 'The source may be negative evidence. Preserve only facts supported by frozen evidence.' : 'Preserve supported facts, commitments, constraints, and the user turn while improving execution.',
     'The diagnosis below is authoritative. Do not add a new diagnosis or revise its preservation/discard decisions.',
     'Every preservation claim, major change, patch, and card outcome must cite only supplied evidence IDs.',
+    ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
     `<diagnosis>${JSON.stringify(diagnosis)}</diagnosis>`,
@@ -276,12 +313,13 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     `<source>${safeText(sourceText, MAX_SOURCE)}</source>`
   ].join('\n');
   return {
-    ...requestBase(EDITORIAL_PASS_SCHEMA, prompt, lane),
+    ...requestBase(EDITORIAL_PASS_SCHEMA, prompt, lane, 8192),
     sourceHash,
     snapshotHash,
     mode,
     diagnosisHash: editorialDiagnosisHash(diagnosis),
     validEvidenceIds: array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean),
+    validPreservationEvidenceIds,
     installedCardIds: array(snapshot?.installedHand).map((card) => String(card?.cardId || card?.id || '')).filter(Boolean),
     validTargetIds: targetList.map((entry) => String(entry.id || '')).filter(Boolean)
   };

@@ -177,6 +177,7 @@ function proofScript() {
       const first = await runtime.prepareForGeneration({ userMessage: activeSnapshot.messages[0].text, hostGeneration: true });
       if (!first?.ok || !installs[0]?.packetId) throw new Error(`${pipelineMode} first served-runtime install failed`);
       const callsAfterFirst = providerCalls;
+      const firstView = runtime.view();
       activeSnapshot = {
         ...activeSnapshot,
         latestMesId: 11,
@@ -193,9 +194,16 @@ function proofScript() {
           }
         ]
       };
-      const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true, generationType: 'swipe' });
+      const swipePayloadUserMessage = activeSnapshot.messages[0].text;
+      const second = await runtime.prepareForGeneration({
+        userMessage: swipePayloadUserMessage,
+        hostGeneration: true,
+        generationType: 'swipe'
+      });
+      const secondView = runtime.view();
       return {
         pipelineMode,
+        swipePayloadEndedOnUser: Boolean(swipePayloadUserMessage),
         firstOk: first.ok === true,
         secondOk: second.ok === true,
         reused: second.reused === true,
@@ -203,7 +211,12 @@ function proofScript() {
         providerCallsFirst: callsAfterFirst,
         providerCallsSecond: providerCalls - callsAfterFirst,
         packetIdStable: installs[0]?.packetId === installs[1]?.packetId,
-        installCount: installs.length
+        installCount: installs.length,
+        firstPacketSnapshotHash: installs[0]?.snapshotHash || '',
+        secondPacketSnapshotHash: installs[1]?.snapshotHash || '',
+        firstSnapshot: firstView.lastSnapshot || null,
+        secondSnapshot: secondView.lastSnapshot || null,
+        cacheDecision: secondView.lastCacheDecision || null
       };
     }
 
@@ -214,6 +227,9 @@ function proofScript() {
       ok: servedStandard.reused
         && servedRapid.reused
         && servedFused.reused
+        && servedStandard.swipePayloadEndedOnUser
+        && servedRapid.swipePayloadEndedOnUser
+        && servedFused.swipePayloadEndedOnUser
         && servedStandard.providerCallsSecond === 0
         && servedRapid.providerCallsSecond === 0
         && servedFused.providerCallsSecond === 0

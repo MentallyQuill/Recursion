@@ -10,7 +10,7 @@ const source = 'She smiled. "Who sent you?" He told her the sender name, then re
 const message = { messageId: 8, chatKey: 'editorial-chat', swipeId: 0, text: source, swipes: [source] };
 const calls = [];
 const host = {
-  async snapshot() { return { chatId: 'editorial-chat', chatKey: 'editorial-chat', sceneKey: 'scene', sceneFingerprint: 'scene-fp', turnFingerprint: 'turn-fp', latestMesId: 8, messages: [{ mesid: 8, role: 'assistant', text: source, visible: true }] }; },
+  async snapshot() { return { chatId: 'editorial-chat', chatKey: 'editorial-chat', sceneKey: 'scene', sceneFingerprint: 'scene-fp', turnFingerprint: 'turn-fp', latestMesId: 8, messages: [{ mesid: 7, role: 'user', text: 'Keep the sender unidentified.', visible: true }, { mesid: 8, role: 'assistant', text: source, visible: true }] }; },
   messages: {
     activeAssistantMessageIdentity() { return { ...message, originalHash: hashJson(source) }; },
     async holdAssistantMessage() { calls.push('hold'); message.text = ''; return { ok: true }; },
@@ -76,7 +76,12 @@ assertEqual(result.mode, 'recompose', 'runtime returns editorial mode');
 assertEqual(message.text, 'The latch clicked. He refused to name the sender.', 'runtime applies candidate as swipe');
 assert(calls.some((call) => call.roleId === 'editorialDiagnostician'), 'runtime calls diagnostician');
 assert(calls.some((call) => call.roleId === 'editorialTransformer'), 'runtime calls transformer');
-assertEqual(calls.find((call) => call.roleId === 'editorialDiagnostician').request.responseSchema, 'recursion.editorialDiagnosis.v1', 'runtime sends the diagnosis response contract to the provider');
+const diagnosisCall = calls.find((call) => call.roleId === 'editorialDiagnostician');
+const transformCall = calls.find((call) => call.roleId === 'editorialTransformer');
+assertEqual(diagnosisCall.request.responseSchema, 'recursion.editorialDiagnosis.v1', 'runtime sends the diagnosis response contract to the provider');
+assert(diagnosisCall.request.validEvidenceIds.includes('message:7'), 'runtime diagnosis request exposes bounded transcript evidence ids at the provider boundary');
+assert(transformCall.request.validEvidenceIds.includes('message:7'), 'runtime transform request preserves the same frozen evidence id set');
+assert(Array.isArray(transformCall.request.installedCardIds), 'runtime transform request exposes the frozen installed-card identity set');
 assertEqual(runtime.view().activity.severity, 'success', 'successful Editorial transform settles success');
 assertEqual(runtime.view().editorialResult?.status, 'success', 'successful Editorial transform records a success result');
 console.log('[pass] editorial runtime');

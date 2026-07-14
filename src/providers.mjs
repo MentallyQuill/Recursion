@@ -53,7 +53,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
-export const PROVIDER_CONTRACT_VERSION = 2;
+export const PROVIDER_CONTRACT_VERSION = 3;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.card.v1',
@@ -223,6 +223,112 @@ function schemaSafeName(schema) {
   return String(schema || '').trim().replace(/[^a-zA-Z0-9_-]+/g, '_');
 }
 
+function uniqueRequestStrings(value) {
+  return [...new Set((Array.isArray(value) ? value : [])
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean))];
+}
+
+function requestStringSchema(values) {
+  return values.length > 0 ? { enum: values } : { type: 'string' };
+}
+
+function editorialEvidenceRefsSchema(validEvidenceIds) {
+  return {
+    type: 'array',
+    items: requestStringSchema(validEvidenceIds),
+    minItems: 1,
+    maxItems: 8,
+    uniqueItems: true
+  };
+}
+
+function editorialClaimSchema(validEvidenceIds) {
+  return {
+    type: 'object',
+    properties: {
+      claim: { type: 'string' },
+      evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds)
+    },
+    required: ['claim', 'evidenceRefs'],
+    additionalProperties: false
+  };
+}
+
+function editorialBriefSchema(mode, validEvidenceIds) {
+  return {
+    type: 'object',
+    properties: {
+      mode: mode ? { const: mode } : { enum: ['repair', 'recompose', 'redirect'] },
+      diagnosis: {
+        type: 'array',
+        maxItems: 10,
+        items: {
+          type: 'object',
+          properties: {
+            dimension: { enum: ['turn-fulfillment', 'card-fidelity', 'scene-execution', 'voice', 'pacing', 'anti-slop'] },
+            problem: { type: 'string' },
+            evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds)
+          },
+          required: ['dimension', 'problem', 'evidenceRefs'],
+          additionalProperties: false
+        }
+      },
+      preserve: { type: 'array', maxItems: 12, items: editorialClaimSchema(validEvidenceIds) },
+      discard: { type: 'array', maxItems: 12, items: editorialClaimSchema(validEvidenceIds) },
+      allowedChanges: { type: 'array', maxItems: 12, items: { type: 'string' } },
+      forbiddenChanges: { type: 'array', maxItems: 12, items: { type: 'string' } }
+    },
+    required: ['mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges'],
+    additionalProperties: false
+  };
+}
+
+function editorialCardOutcomesSchema(installedCardIds, validEvidenceIds) {
+  return {
+    type: 'array',
+    minItems: installedCardIds.length,
+    maxItems: installedCardIds.length,
+    items: {
+      type: 'object',
+      properties: {
+        cardId: requestStringSchema(installedCardIds),
+        status: { enum: ['honored', 'repaired', 'not-applicable', 'partially-reflected', 'violated'] },
+        evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds)
+      },
+      required: ['cardId', 'status', 'evidenceRefs'],
+      additionalProperties: false
+    }
+  };
+}
+
+function editorialCandidateSchema(validEvidenceIds) {
+  return {
+    type: 'object',
+    properties: {
+      text: { type: 'string' },
+      preservationLedger: { type: 'array', maxItems: 12, items: editorialClaimSchema(validEvidenceIds) },
+      changeLedger: {
+        type: 'array',
+        maxItems: 12,
+        items: {
+          type: 'object',
+          properties: {
+            kind: { enum: ['remove', 'rewrite', 'reorder', 'add-supported-detail', 'redirect'] },
+            summary: { type: 'string' },
+            evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds)
+          },
+          required: ['kind', 'summary', 'evidenceRefs'],
+          additionalProperties: false
+        }
+      },
+      riskFlags: { type: 'array', items: { enum: ['none', 'continuity-risk', 'voice-risk', 'card-interpretation-risk'] }, uniqueItems: true }
+    },
+    required: ['text', 'preservationLedger', 'changeLedger', 'riskFlags'],
+    additionalProperties: false
+  };
+}
+
 export function machineJsonSchemaForRequest(request = {}) {
   const schema = String(request?.responseSchema || '').trim();
   if (!schema || request?.machineJson !== true) return null;
@@ -281,17 +387,26 @@ export function machineJsonSchemaForRequest(request = {}) {
   if (schema === 'recursion.editorialDiagnosis.v1') {
     const sourceHash = String(request?.sourceHash || '').trim();
     const snapshotHash = String(request?.snapshotHash || '').trim();
+    const mode = ['repair', 'recompose', 'redirect'].includes(String(request?.mode || '').trim())
+      ? String(request.mode).trim()
+      : '';
+    const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
+    const decisions = mode === 'redirect'
+      ? ['proceed', 'no-change']
+      : mode === 'recompose'
+        ? ['proceed', 'no-change', 'requires-redirect']
+        : ['proceed', 'no-change', 'requires-recompose', 'requires-redirect'];
     return {
       name: schemaSafeName(schema),
       schema: {
         type: 'object',
         properties: {
           schema: { const: schema },
-          mode: { enum: ['repair', 'recompose', 'redirect'] },
+          mode: mode ? { const: mode } : { enum: ['repair', 'recompose', 'redirect'] },
           sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
           snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
-          decision: { enum: ['proceed', 'no-change', 'requires-recompose', 'requires-redirect'] },
-          brief: { type: 'object', additionalProperties: true }
+          decision: { enum: decisions },
+          brief: editorialBriefSchema(mode, validEvidenceIds)
         },
         required: ['schema', 'mode', 'sourceHash', 'snapshotHash', 'decision', 'brief'],
         additionalProperties: true
@@ -302,22 +417,50 @@ export function machineJsonSchemaForRequest(request = {}) {
     const sourceHash = String(request?.sourceHash || '').trim();
     const snapshotHash = String(request?.snapshotHash || '').trim();
     const diagnosisHash = String(request?.diagnosisHash || '').trim();
+    const mode = ['repair', 'recompose', 'redirect'].includes(String(request?.mode || '').trim())
+      ? String(request.mode).trim()
+      : '';
+    const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
+    const installedCardIds = uniqueRequestStrings(request?.installedCardIds);
+    const validTargetIds = uniqueRequestStrings(request?.validTargetIds);
+    const properties = {
+      schema: { const: schema },
+      mode: mode ? { const: mode } : { enum: ['repair', 'recompose', 'redirect'] },
+      sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
+      snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
+      diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' },
+      cardOutcomes: editorialCardOutcomesSchema(installedCardIds, validEvidenceIds)
+    };
+    const required = ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'cardOutcomes'];
+    if (mode === 'repair') {
+      properties.patches = {
+        type: 'array',
+        minItems: 1,
+        items: {
+          type: 'object',
+          properties: {
+            id: requestStringSchema(validTargetIds),
+            before: { type: 'string' },
+            after: { type: 'string' },
+            domain: { enum: ['dialogue', 'narrative-execution', 'anti-slop', 'card-fidelity'] },
+            evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds)
+          },
+          required: ['id', 'before', 'after', 'domain', 'evidenceRefs'],
+          additionalProperties: false
+        }
+      };
+      required.push('patches');
+    } else {
+      properties.candidate = editorialCandidateSchema(validEvidenceIds);
+      required.push('candidate');
+    }
     return {
       name: schemaSafeName(schema),
       schema: {
         type: 'object',
-        properties: {
-          schema: { const: schema },
-          mode: { enum: ['repair', 'recompose', 'redirect'] },
-          sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
-          snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
-          diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' },
-          cardOutcomes: { type: 'array' },
-          candidate: { type: 'object', additionalProperties: true },
-          patches: { type: 'array' }
-        },
-        required: ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'cardOutcomes'],
-        additionalProperties: true
+        properties,
+        required,
+        additionalProperties: false
       }
     };
   }
@@ -325,6 +468,7 @@ export function machineJsonSchemaForRequest(request = {}) {
     const sourceHash = String(request?.sourceHash || '').trim();
     const snapshotHash = String(request?.snapshotHash || '').trim();
     const diagnosisHash = String(request?.diagnosisHash || '').trim();
+    const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
     return {
       name: schemaSafeName(schema),
       schema: {
@@ -334,7 +478,9 @@ export function machineJsonSchemaForRequest(request = {}) {
           sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
           snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
           diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' },
-          decision: { enum: ['accept', 'reject'] }
+          decision: { enum: ['accept', 'reject'] },
+          evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds),
+          reason: { type: 'string' }
         },
         required: ['schema', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'decision'],
         additionalProperties: true

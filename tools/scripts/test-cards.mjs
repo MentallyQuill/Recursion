@@ -627,6 +627,35 @@ const refreshedDeck = applyCardPlan([
 });
 assertEqual(refreshedDeck.cards.find((entry) => entry.id === 'cached-risk-1').status, 'stale', 'regenerate marks old cached card stale');
 assertEqual(refreshedDeck.cards.find((entry) => entry.id === 'fresh-risk-1').status, 'active', 'fresh replacement remains active');
+
+const repeatedFamilyDeck = applyCardPlan([
+  deckCard('Scene Frame', 'Oldest frame.', { id: 'frame-oldest', tokenEstimate: 10 }),
+  deckCard('Scene Constraints', 'Oldest constraints.', { id: 'constraints-oldest', tokenEstimate: 10 }),
+  deckCard('Scene Frame', 'Older frame.', { id: 'frame-older', tokenEstimate: 10 }),
+  deckCard('Scene Constraints', 'Older constraints.', { id: 'constraints-older', tokenEstimate: 10 })
+], {
+  acceptedCards: [
+    deckCard('Scene Frame', 'Current frame.', { id: 'frame-current', tokenEstimate: 10 }),
+    deckCard('Scene Constraints', 'Current constraints.', { id: 'constraints-current', tokenEstimate: 10 })
+  ],
+  lifecycle: [
+    { action: 'select', cardId: 'frame-oldest', reason: 'cached' },
+    { action: 'select', cardId: 'constraints-oldest', reason: 'cached' },
+    { action: 'select', cardId: 'frame-older', reason: 'cached' },
+    { action: 'select', cardId: 'constraints-older', reason: 'cached' },
+    { action: 'select', cardId: 'frame-current', reason: 'generated' },
+    { action: 'select', cardId: 'constraints-current', reason: 'generated' }
+  ]
+});
+assertDeepEqual(
+  repeatedFamilyDeck.cards.filter((entry) => entry.status === 'active').map((entry) => entry.id),
+  ['frame-current', 'constraints-current'],
+  'deck keeps only the newest generated card active for each fixed catalog role'
+);
+assert(
+  repeatedFamilyDeck.cards.filter((entry) => ['frame-oldest', 'frame-older', 'constraints-oldest', 'constraints-older'].includes(entry.id)).every((entry) => entry.status === 'stale'),
+  'older same-role cache cards are marked stale even when lifecycle output reselects every card'
+);
 const truncationRequest = buildCardRequests({
   cardJobs: [{
     role: 'sceneFrameCard',

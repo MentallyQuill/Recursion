@@ -253,7 +253,8 @@ const editorialDiagnosisMachineSchema = machineJsonSchemaForRequest({
   machineJson: true,
   mode: 'recompose',
   sourceHash: 'editorial-source-hash',
-  snapshotHash: 'editorial-snapshot-hash'
+  snapshotHash: 'editorial-snapshot-hash',
+  validEvidenceIds: ['user:0', 'message:17', 'source:0']
 });
 assertDeepEqual(
   editorialDiagnosisMachineSchema.schema.required,
@@ -262,18 +263,44 @@ assertDeepEqual(
 );
 assertEqual(editorialDiagnosisMachineSchema.schema.properties.sourceHash.const, 'editorial-source-hash', 'Editorial diagnosis machine schema freezes source identity');
 assertEqual(editorialDiagnosisMachineSchema.schema.properties.snapshotHash.const, 'editorial-snapshot-hash', 'Editorial diagnosis machine schema freezes snapshot identity');
+assertEqual(editorialDiagnosisMachineSchema.schema.properties.mode.const, 'recompose', 'Editorial diagnosis machine schema freezes selected mode');
+assertDeepEqual(
+  editorialDiagnosisMachineSchema.schema.properties.brief.required,
+  ['mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges'],
+  'Editorial diagnosis machine schema requires the complete validated brief'
+);
+assertDeepEqual(
+  editorialDiagnosisMachineSchema.schema.properties.brief.properties.preserve.items.properties.evidenceRefs.items.enum,
+  ['user:0', 'message:17', 'source:0'],
+  'Editorial diagnosis machine schema constrains evidence references to the frozen evidence set'
+);
+const editorialPassMachineSchema = machineJsonSchemaForRequest({
+  responseSchema: 'recursion.editorialPass.v1',
+  machineJson: true,
+  mode: 'recompose',
+  sourceHash: 'editorial-source-hash',
+  snapshotHash: 'editorial-snapshot-hash',
+  diagnosisHash: 'editorial-diagnosis-hash',
+  validEvidenceIds: ['user:0', 'message:17', 'source:0'],
+  installedCardIds: ['card-a', 'card-b']
+});
+assertDeepEqual(editorialPassMachineSchema.schema.properties.cardOutcomes.items.properties.cardId.enum, ['card-a', 'card-b'], 'Editorial pass machine schema constrains card outcomes to the frozen installed hand');
+assertDeepEqual(editorialPassMachineSchema.schema.properties.cardOutcomes.items.properties.evidenceRefs.items.enum, ['user:0', 'message:17', 'source:0'], 'Editorial pass machine schema constrains outcome evidence to frozen ids');
+assertDeepEqual(editorialPassMachineSchema.schema.properties.candidate.required, ['text', 'preservationLedger', 'changeLedger', 'riskFlags'], 'Editorial full-candidate schema requires every semantically validated field');
 const editorialVerifierMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialVerification.v1',
   machineJson: true,
   sourceHash: 'editorial-source-hash',
   snapshotHash: 'editorial-snapshot-hash',
-  diagnosisHash: 'editorial-diagnosis-hash'
+  diagnosisHash: 'editorial-diagnosis-hash',
+  validEvidenceIds: ['user:0', 'message:17']
 });
 assertDeepEqual(
   editorialVerifierMachineSchema.schema.required,
   ['schema', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'decision'],
   'Editorial verifier machine schema requires the candidate identity and decision envelope'
 );
+assertDeepEqual(editorialVerifierMachineSchema.schema.properties.evidenceRefs.items.enum, ['user:0', 'message:17'], 'Editorial verifier constrains optional evidence references to frozen ids');
 
 const generationReviewMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.generationReview.v1',

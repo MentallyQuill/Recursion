@@ -67,8 +67,16 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
   const packet = parseObject(data.promptPacket);
   const storyForm = parseObject(data.storyForm);
   const context = parseObject(data.context);
-  const userTurn = brief.userTurn || brief.userMessage || array(context.messages).find((message) => message?.role === 'user')?.content;
+  const contextMessages = array(context.messages);
+  const latestUserMessage = [...contextMessages].reverse().find((message) => message?.role === 'user');
+  const messageText = (message) => message?.text ?? message?.mes ?? message?.content ?? '';
+  const userTurn = brief.userTurn || brief.userMessage || messageText(latestUserMessage);
   addEvidence(entries, 'user:0', 'user-turn', 'continuity-fact', userTurn || 'No explicit user turn supplied.');
+  for (const message of contextMessages) {
+    const messageId = String(message?.mesid ?? message?.messageId ?? message?.id ?? '').trim();
+    if (!/^\d+$/.test(messageId)) continue;
+    addEvidence(entries, `message:${messageId}`, 'context', 'continuity-fact', messageText(message));
+  }
   for (const [index, constraint] of array(packet.constraints || packet.hardConstraints).entries()) {
     addEvidence(entries, `packet:constraint${index ? `:${index}` : ''}`, 'prompt-packet', 'hard-constraint', constraint);
   }
@@ -240,7 +248,13 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
     `<evidence>${JSON.stringify(evidence)}</evidence>`,
     `<source>${safeText(sourceText, MAX_SOURCE)}</source>`
   ].join('\n');
-  return { ...requestBase(EDITORIAL_DIAGNOSIS_SCHEMA, prompt, lane), sourceHash, snapshotHash, mode };
+  return {
+    ...requestBase(EDITORIAL_DIAGNOSIS_SCHEMA, prompt, lane),
+    sourceHash,
+    snapshotHash,
+    mode,
+    validEvidenceIds: evidence.map((entry) => entry.id)
+  };
 }
 
 export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', diagnosis = {}, evidence = [], snapshot = {}, targets = {}, lane = '' } = {}) {
@@ -261,7 +275,16 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     `<targets>${JSON.stringify(targetList)}</targets>`,
     `<source>${safeText(sourceText, MAX_SOURCE)}</source>`
   ].join('\n');
-  return { ...requestBase(EDITORIAL_PASS_SCHEMA, prompt, lane), sourceHash, snapshotHash, mode, diagnosisHash: editorialDiagnosisHash(diagnosis) };
+  return {
+    ...requestBase(EDITORIAL_PASS_SCHEMA, prompt, lane),
+    sourceHash,
+    snapshotHash,
+    mode,
+    diagnosisHash: editorialDiagnosisHash(diagnosis),
+    validEvidenceIds: array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean),
+    installedCardIds: array(snapshot?.installedHand).map((card) => String(card?.cardId || card?.id || '')).filter(Boolean),
+    validTargetIds: targetList.map((entry) => String(entry.id || '')).filter(Boolean)
+  };
 }
 
 export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', evidence = [], candidate = {}, lane = '' } = {}) {
@@ -275,7 +298,14 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
     `<evidence>${JSON.stringify(evidence)}</evidence>`,
     `<candidate>${JSON.stringify(candidate)}</candidate>`
   ].join('\n');
-  return { ...requestBase(EDITORIAL_VERIFICATION_SCHEMA, prompt, lane), sourceHash, snapshotHash, diagnosisHash, mode };
+  return {
+    ...requestBase(EDITORIAL_VERIFICATION_SCHEMA, prompt, lane),
+    sourceHash,
+    snapshotHash,
+    diagnosisHash,
+    mode,
+    validEvidenceIds: array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean)
+  };
 }
 
 export function editorialPassKey({ chatKey = '', messageId = '', swipeId = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', mode = '', applyMode = '', verificationRequired = false } = {}) {

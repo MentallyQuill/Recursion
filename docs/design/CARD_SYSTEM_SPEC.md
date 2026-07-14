@@ -260,7 +260,7 @@ Runtime rejects obvious Character Motivation prompt text that presents first-per
 
 ## Scene Deck and Turn Hand
 
-The scene deck is the current cache of cards for one scene. It may include active, stowed, and stale cards, but only active cards can be selected for injection.
+The scene deck is the current cache of cards for one scene. It may include active, stowed, and stale cards, but only active cards can be selected for injection. The fixed V1 generated-card catalog allows at most one active card per role in a scene variant. When a newer card for a role is accepted, older active cards for that role become stale even if an incomplete Arbiter lifecycle response selected every cached and generated ID. Historical source variants remain separate cache variants; they are never accumulated as simultaneously active same-role cards in the current variant.
 
 The turn hand is the selected subset of cards for one prompt composition event. It is rebuilt for each generation trigger and should not be treated as durable state. The hand contains card IDs, family labels, prompt text, token estimates, emphasis, and any lane hints needed by [Prompt Composition Spec](../architecture/PROMPT_COMPOSITION_SPEC.md).
 

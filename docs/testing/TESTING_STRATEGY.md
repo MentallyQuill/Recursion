@@ -86,6 +86,8 @@ Generation Review regressions additionally prove that SillyTavern streaming rema
 
 Generation Review requests must expose the frozen `sourceHash`, eligible target IDs, and installed card IDs as structured request fields, not prompt prose alone. Provider machine JSON schemas must bind the source hash and constrain patch IDs, evidence target IDs, and card-outcome IDs to those frozen sets before runtime semantic validation.
 
+Editorial regressions must cover both provider and semantic boundaries. Diagnosis, Transform, and Verification requests expose frozen evidence IDs as structured fields; Transform also exposes installed-card and repair-target IDs. Provider tests assert the complete nested schemas, and runtime tests must prove a bounded `message:N` transcript reference survives Diagnosis into Transform. Card lifecycle tests must also recreate repeated cached/generated same-role waves and prove that only the newest card for each fixed generated role remains active before hand selection.
+
 ## Playwright Readiness
 
 ### Editorial transformation UI matrix

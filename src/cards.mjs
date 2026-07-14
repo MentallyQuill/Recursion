@@ -1309,15 +1309,43 @@ export function cardsFromFusedProviderResult(result, context = {}) {
   return finalize();
 }
 
+function enforceOneActiveCardPerRole(cards, acceptedCardIds = new Map()) {
+  const activeByRole = new Map();
+  for (const [index, card] of cards.entries()) {
+    if (card?.status !== 'active') continue;
+    const roleKey = String(card.role || card.family || '').trim();
+    if (!roleKey) continue;
+    const acceptedRank = acceptedCardIds.has(card.id) ? acceptedCardIds.get(card.id) : -1;
+    const current = activeByRole.get(roleKey);
+    if (!current || acceptedRank > current.acceptedRank || (acceptedRank === current.acceptedRank && index > current.index)) {
+      activeByRole.set(roleKey, { card, index, acceptedRank });
+    }
+  }
+  for (const card of cards) {
+    if (card?.status !== 'active') continue;
+    const roleKey = String(card.role || card.family || '').trim();
+    const winner = activeByRole.get(roleKey)?.card;
+    if (!winner || winner.id === card.id) continue;
+    card.status = 'stale';
+    card.arbiter = {
+      ...card.arbiter,
+      reason: `superseded by newer ${roleKey} card`
+    };
+  }
+  return cards;
+}
+
 export function applyCardPlan(existingCards = [], plan = {}) {
   const cards = new Map();
+  const acceptedCardIds = new Map();
   for (const card of Array.isArray(existingCards) ? existingCards : []) {
     const normalized = normalizeDeckCard(card, { preserveId: true });
     cards.set(normalized.id, normalized);
   }
-  for (const card of Array.isArray(plan.acceptedCards) ? plan.acceptedCards : []) {
+  for (const [index, card] of (Array.isArray(plan.acceptedCards) ? plan.acceptedCards : []).entries()) {
     const normalized = normalizeDeckCard(card);
     cards.set(normalized.id, normalized);
+    acceptedCardIds.set(normalized.id, index);
   }
   for (const action of Array.isArray(plan.lifecycle) ? plan.lifecycle : []) {
     const event = asObject(action);
@@ -1348,7 +1376,7 @@ export function applyCardPlan(existingCards = [], plan = {}) {
     cards.set(card.id, card);
   }
   return {
-    cards: [...cards.values()],
+    cards: enforceOneActiveCardPerRole([...cards.values()], acceptedCardIds),
     updatedAt: nowIso()
   };
 }

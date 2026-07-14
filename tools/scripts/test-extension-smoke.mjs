@@ -398,7 +398,10 @@ if (lifecycleFailures.length) {
   assert(prompts.length > 0, 'latest assistant swipe retry setup calls provider once');
   const callsAfterSetup = prompts.length;
   const writesAfterSetup = fake.promptWrites.length;
-  const preparedPacketId = globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId;
+  const preparedView = globalThis.__recursionLiveHarnessRuntime.view();
+  const preparedPacketId = preparedView.lastBrief?.packetId;
+  assertEqual(preparedView.lastBrief?.status, 'ready', 'successful extension setup leaves Last Brief ready');
+  assertEqual(preparedView.activity?.label, 'Recursion prompt ready.', 'successful extension setup settles prompt-ready activity');
   fake.context.chat = [
     { mesid: 1, is_user: true, mes: userText },
     {

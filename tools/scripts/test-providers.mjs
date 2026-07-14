@@ -248,6 +248,33 @@ assertEqual(calls.at(-1).responseSchema, 'recursion.cardBundle.v1', 'fusedCardBu
 assertEqual(calls.at(-1).machineJson, true, 'fusedCardBundle request marks machine JSON calls');
 assertEqual(machineJsonSchemaForRequest(calls.at(-1)).schema.properties.schema.const, 'recursion.cardBundle.v1', 'fusedCardBundle machine schema constrains bundle schema');
 
+const editorialDiagnosisMachineSchema = machineJsonSchemaForRequest({
+  responseSchema: 'recursion.editorialDiagnosis.v1',
+  machineJson: true,
+  mode: 'recompose',
+  sourceHash: 'editorial-source-hash',
+  snapshotHash: 'editorial-snapshot-hash'
+});
+assertDeepEqual(
+  editorialDiagnosisMachineSchema.schema.required,
+  ['schema', 'mode', 'sourceHash', 'snapshotHash', 'decision', 'brief'],
+  'Editorial diagnosis machine schema requires the semantic identity and decision envelope'
+);
+assertEqual(editorialDiagnosisMachineSchema.schema.properties.sourceHash.const, 'editorial-source-hash', 'Editorial diagnosis machine schema freezes source identity');
+assertEqual(editorialDiagnosisMachineSchema.schema.properties.snapshotHash.const, 'editorial-snapshot-hash', 'Editorial diagnosis machine schema freezes snapshot identity');
+const editorialVerifierMachineSchema = machineJsonSchemaForRequest({
+  responseSchema: 'recursion.editorialVerification.v1',
+  machineJson: true,
+  sourceHash: 'editorial-source-hash',
+  snapshotHash: 'editorial-snapshot-hash',
+  diagnosisHash: 'editorial-diagnosis-hash'
+});
+assertDeepEqual(
+  editorialVerifierMachineSchema.schema.required,
+  ['schema', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'decision'],
+  'Editorial verifier machine schema requires the candidate identity and decision envelope'
+);
+
 const generationReviewMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.generationReview.v1',
   machineJson: true,

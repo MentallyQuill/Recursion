@@ -278,6 +278,69 @@ export function machineJsonSchemaForRequest(request = {}) {
       }
     };
   }
+  if (schema === 'recursion.editorialDiagnosis.v1') {
+    const sourceHash = String(request?.sourceHash || '').trim();
+    const snapshotHash = String(request?.snapshotHash || '').trim();
+    return {
+      name: schemaSafeName(schema),
+      schema: {
+        type: 'object',
+        properties: {
+          schema: { const: schema },
+          mode: { enum: ['repair', 'recompose', 'redirect'] },
+          sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
+          snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
+          decision: { enum: ['proceed', 'no-change', 'requires-recompose', 'requires-redirect'] },
+          brief: { type: 'object', additionalProperties: true }
+        },
+        required: ['schema', 'mode', 'sourceHash', 'snapshotHash', 'decision', 'brief'],
+        additionalProperties: true
+      }
+    };
+  }
+  if (schema === 'recursion.editorialPass.v1') {
+    const sourceHash = String(request?.sourceHash || '').trim();
+    const snapshotHash = String(request?.snapshotHash || '').trim();
+    const diagnosisHash = String(request?.diagnosisHash || '').trim();
+    return {
+      name: schemaSafeName(schema),
+      schema: {
+        type: 'object',
+        properties: {
+          schema: { const: schema },
+          mode: { enum: ['repair', 'recompose', 'redirect'] },
+          sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
+          snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
+          diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' },
+          cardOutcomes: { type: 'array' },
+          candidate: { type: 'object', additionalProperties: true },
+          patches: { type: 'array' }
+        },
+        required: ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'cardOutcomes'],
+        additionalProperties: true
+      }
+    };
+  }
+  if (schema === 'recursion.editorialVerification.v1') {
+    const sourceHash = String(request?.sourceHash || '').trim();
+    const snapshotHash = String(request?.snapshotHash || '').trim();
+    const diagnosisHash = String(request?.diagnosisHash || '').trim();
+    return {
+      name: schemaSafeName(schema),
+      schema: {
+        type: 'object',
+        properties: {
+          schema: { const: schema },
+          sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
+          snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
+          diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' },
+          decision: { enum: ['accept', 'reject'] }
+        },
+        required: ['schema', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'decision'],
+        additionalProperties: true
+      }
+    };
+  }
   const properties = {
     schema: { const: schema }
   };

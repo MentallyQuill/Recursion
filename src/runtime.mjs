@@ -5505,7 +5505,8 @@ export function createRecursionRuntime({
       lastSnapshot = promptSnapshot;
       lastHand = hand;
       lastPacket = packet;
-      readyLastBrief(packet, hand, { runId, reason: installOk ? 'rapid-packet-installed' : 'rapid-install-failed' });
+      if (installOk) readyLastBrief(packet, hand, { runId, reason: 'rapid-packet-installed' });
+      else clearLastBrief({ status: 'empty', reason: 'prompt-install-failed', runId });
       await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
       await appendJournalSafe(runId, promptSnapshot.chatKey, {
         event: installOk ? 'prompt.installed' : 'prompt.install_failed',
@@ -5868,7 +5869,8 @@ export function createRecursionRuntime({
     });
     if (install?.superseded) return install;
     const installOk = install?.ok !== false;
-    readyLastBrief(packet, hand, { runId, reason: installOk ? 'same-turn-swipe-retry' : 'same-turn-swipe-install-failed' });
+    if (installOk) readyLastBrief(packet, hand, { runId, reason: 'same-turn-swipe-retry' });
+    else clearLastBrief({ status: 'empty', reason: 'prompt-install-failed', runId });
     return {
       ok: true,
       reused: true,
@@ -6376,12 +6378,14 @@ export function createRecursionRuntime({
         }
         const install = await installPrompt(host, packet);
         const installOk = install?.ok !== false;
-        readyLastBrief(packet, hand, {
-          runId,
-          reason: installOk
-            ? (freshContext ? 'fresh-next-generation-installed' : 'packet-installed')
-            : (freshContext ? 'fresh-next-generation-install-failed' : 'install-failed')
-        });
+        if (installOk) {
+          readyLastBrief(packet, hand, {
+            runId,
+            reason: freshContext ? 'fresh-next-generation-installed' : 'packet-installed'
+          });
+        } else {
+          clearLastBrief({ status: 'empty', reason: 'prompt-install-failed', runId });
+        }
         await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
         await appendJournalSafe(runId, promptSnapshot.chatKey, {
           event: installOk ? 'prompt.installed' : 'prompt.install_failed',

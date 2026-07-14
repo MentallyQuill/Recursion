@@ -19,6 +19,7 @@ import {
 } from '../../src/card-scope.mjs';
 import { activeCardDeckRuntimeScope } from '../../src/card-decks.mjs';
 import { packetToPromptBlocks } from '../../src/prompt.mjs';
+import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { hashJson } from '../../src/core.mjs';
 import { safeDiagnosticText, safeIdentifier, safeText, unsafeObjectString } from '../../src/safe-values.mjs';
 import { UNKNOWN_STORY_FORM } from '../../src/story-form.mjs';
@@ -5324,6 +5325,7 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   assertEqual(installed.length, 1, 'failed install still received packet');
   assertEqual(view.activity.severity, 'warning', 'install failure settles warning');
   assertEqual(view.activity.label, 'Prompt install failed. Generation will continue without Recursion.', 'install failure label');
+  assertEqual(view.lastBrief?.status, 'empty', 'failed prompt install does not report Last Brief as ready');
   assertEqual(view.activeRunId, null, 'active run cleared after install failure');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
   assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.install_failed'], 'install failure journals hand before failure');
@@ -7363,6 +7365,9 @@ for (const scenario of [
 {
   const roleCalls = [];
   let fusedRequest = null;
+  let fusedStarted = false;
+  let releaseFused;
+  const fusedGate = new Promise((resolve) => { releaseFused = resolve; });
   const { runtime } = createRuntimeHarness({
     settings: healthyReasonerSettings({ pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'high' }),
     generationRouter: {
@@ -7396,7 +7401,9 @@ for (const scenario of [
           };
         }
         if (roleId === 'fusedCardBundle') {
+          fusedStarted = true;
           fusedRequest = request;
+          await fusedGate;
           return {
             ok: true,
             roleId,
@@ -7448,7 +7455,16 @@ for (const scenario of [
       }
     }
   });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Generate fused cards.' });
+  const pending = runtime.prepareForGeneration({ userMessage: 'Generate fused cards.' });
+  await waitUntil(() => fusedStarted, 'Fused runtime did not enter the bundle call');
+  const pendingView = runtime.view();
+  const pendingProgress = createProgressRunModel(pendingView);
+  const pendingBundle = pendingProgress.steps.find((step) => step.id === 'fused-card-bundle');
+  assert(['fusedCardBundleRunning', 'providerCallRunning'].includes(pendingView.activity.phase), 'Fused runtime keeps foreground provider activity while bundle is pending');
+  assertEqual(pendingBundle?.state, 'running', 'Fused bundle remains running during the provider wait');
+  assert(createHeroPixelBlocks(pendingProgress).some((block) => block.id === 'fused-card-bundle' && block.state === 'running'), 'Fused waiting exposes a running hero pixel during the provider wait');
+  releaseFused();
+  const result = await pending;
   assertEqual(result.ok, true, 'Fused runtime installs prompt');
   assertEqual(roleCalls.filter((roleId) => roleId === 'fusedCardBundle').length, 1, 'Fused runtime makes one bundle card call');
   assert(!roleCalls.includes('sceneFrameCard'), 'Fused runtime does not call individual Scene Frame card role');
@@ -7460,6 +7476,9 @@ for (const scenario of [
   assert(result.packet.sections.cardEvidence.includes('FUSED_RUNTIME_SCENE_FRAME'), 'Fused Scene Frame reaches packet evidence');
   assert(result.packet.sections.cardEvidence.includes('FUSED_RUNTIME_CONSTRAINT'), 'Fused Constraints reaches packet evidence');
   assertEqual(result.packet.diagnostics.pipelineMode, 'fused', 'Fused prompt packet records pipeline mode');
+  const settledFusedProgress = createProgressRunModel(runtime.view());
+  assertEqual(settledFusedProgress.steps.some((step) => step.state === 'running'), false, 'Fused waiting clears running progress after completion');
+  assertEqual(runtime.view().activity.label, 'Recursion prompt ready.', 'Fused runtime settles prompt-ready after completion');
 }
 
 {

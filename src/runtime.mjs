@@ -2085,6 +2085,7 @@ export function createRecursionRuntime({
 } = {}) {
   const runState = createRuntimeRunState();
   let hostStopCleanupPromise = null;
+  let recursionStopRequest = null;
   let lastPacket = null;
   let lastHand = { cards: [], omitted: [] };
   let lastPlan = null;
@@ -3319,7 +3320,53 @@ export function createRecursionRuntime({
     hostStopCleanupPromise = (async () => {
       const source = asObject(details);
       const eventName = safeText(source.eventName || source.event || 'generation_stopped', 80);
-      await cancelActiveProseEnhancement('prose-enhancement-canceled');
+      const beforeStop = runState.current();
+      const journalContext = promptClearContext(lastSnapshot);
+      const recursionRequested = source.recursionRequested === true
+        || source.source === 'recursion-ui'
+        || eventName === 'recursion_stop_button'
+        || Boolean(recursionStopRequest);
+      const stopRunId = safeText(beforeStop.activeAttempt?.runId || beforeStop.activeRunId || makeId('host-stop-observation'), 160);
+      const stopJournal = journalContext?.chatKey
+        ? appendJournalSafe(stopRunId, journalContext.chatKey, {
+            event: 'host.generation_stopped',
+            severity: recursionRequested ? 'info' : 'warn',
+            summary: recursionRequested
+              ? 'Host generation stopped after a Recursion stop request.'
+              : 'Host generation stopped without a Recursion stop request.',
+            runId: stopRunId,
+            sceneKey: safeText(journalContext.sceneKey || '', 180),
+            details: {
+              recursionRequested,
+              eventName,
+              source: safeText(source.source || 'host-event', 180),
+              reason: safeText(source.reason || '', 180),
+              origin: safeText(source.origin || '', 180),
+              action: safeText(source.action || '', 180),
+              cause: safeText(source.cause || '', 180),
+              messageId: finiteNumberOrNull(source.messageId ?? source.mesid ?? source.id),
+              payloadType: safeText(source.payloadType || '', 40),
+              payloadKeys: (Array.isArray(source.payloadKeys) ? source.payloadKeys : [])
+                .map((key) => safeText(key, 80))
+                .filter(Boolean)
+                .slice(0, 40),
+              hostGenerationActive: Boolean(beforeStop.hostGenerationActive),
+              enhancementPending: Boolean(pendingProseEnhancement),
+              enhancementActive: Boolean(activeProseEnhancementPromise),
+              activeRunId: safeText(beforeStop.activeRunId || '', 160),
+              activeAttemptKind: safeText(beforeStop.activeAttempt?.kind || '', 80),
+              enhancementControlsLocked: source.enhancementControlsLocked === true,
+              ...(recursionStopRequest ? { recursionStopRequest: redact(recursionStopRequest) } : {})
+            }
+          })
+        : Promise.resolve(null);
+      const cancellation = cancelActiveProseEnhancement('prose-enhancement-canceled');
+      await Promise.all([cancellation, stopJournal]);
+      try {
+        await host.messages?.removeEmptyAssistantSwipePlaceholders?.(source.messageId);
+      } catch {
+        // Placeholder cleanup is best-effort; stop settlement must still complete.
+      }
       const attempt = runState.current().activeAttempt;
       const preserveLastKnownGood = attempt?.kind === 'swipe' && Boolean(lastPacket && lastHand?.cards?.length);
       if (preserveLastKnownGood) {
@@ -3930,6 +3977,21 @@ export function createRecursionRuntime({
         riskFlags: validation.artifact.candidate?.riskFlags || []
       };
       if (enhancementSignal?.aborted) return canceledEditorialResult();
+      const currentIdentity = messages.activeAssistantMessageIdentity();
+      const sourceChanged = !currentIdentity
+        || String(currentIdentity.chatKey ?? '') !== String(identity.chatKey ?? '')
+        || String(currentIdentity.messageId ?? '') !== String(messageId ?? '')
+        || Number(currentIdentity.swipeId ?? 0) !== Number(identity.swipeId ?? 0)
+        || String(currentIdentity.originalHash || hashJson(String(currentIdentity.text || ''))) !== String(sourceHash);
+      if (sourceChanged) {
+        return failEditorial(
+          {
+            code: 'RECURSION_EDITORIAL_SOURCE_CHANGED',
+            message: 'The active assistant swipe changed before Editorial could commit.'
+          },
+          'Editorial source changed. Original kept.'
+        );
+      }
       lastEditorialResult = { mode: editorialMode, status: 'success', outcome: 'applied', applyMode, verification: verificationResult.decision, candidateHash: marker.candidateHash, diagnosisHash: marker.diagnosisHash, preservationLedger: marker.preservationLedger, changeLedger: marker.changeLedger, riskFlags: marker.riskFlags, cardOutcomes: marker.cardOutcomes };
       if (applyMode === 'replace') {
         const replace = await messages.replaceAssistantMessageText?.(messageId, transformedText, { marker });
@@ -4372,17 +4434,26 @@ export function createRecursionRuntime({
 
   async function stopGeneration(details = {}) {
     cancelPendingProseEnhancement('prose-enhancement-canceled');
-    setHostGenerationActive(false);
-    const hostStop = await requestHostGenerationStop(details);
-    const cleanup = await handleHostGenerationStopped({
-      source: 'recursion-ui',
-      eventName: 'recursion_stop_button',
-      hostStop
-    });
-    return {
-      ...asObject(cleanup),
-      hostStop
+    supersedeActiveRun();
+    recursionStopRequest = {
+      source: safeText(details.source || 'recursion-ui', 80),
+      requestedAt: nowIso()
     };
+    try {
+      const hostStop = await requestHostGenerationStop(details);
+      const cleanup = await handleHostGenerationStopped({
+        source: 'recursion-ui',
+        eventName: 'recursion_stop_button',
+        recursionRequested: true,
+        hostStop
+      });
+      return {
+        ...asObject(cleanup),
+        hostStop
+      };
+    } finally {
+      recursionStopRequest = null;
+    }
   }
 
   function providerTestPrompt(lane) {
@@ -6295,13 +6366,6 @@ export function createRecursionRuntime({
         return { ok: true, skipped: true, reason: 'arbiter-skip', plan, clear };
       }
 
-      stageRuntimeActivity({
-        runId,
-        phase: plan.cardJobs?.length ? 'cardBatchRunning' : 'cacheReusing',
-        label: plan.cardJobs?.length ? 'Generating scene cards...' : 'Reusing scene deck...',
-        cardCounts: { requested: plan.cardJobs?.length || 0 },
-        chips: ['Cards']
-      });
       const cache = sceneSnapshot.chatKey === snapshot.chatKey && sceneSnapshot.sceneKey === snapshot.sceneKey
         ? initialCache
         : freshStaleSceneCache(await loadSceneCacheSafe(runId, sceneSnapshot, settings), freshContext, sceneSnapshot);
@@ -6320,6 +6384,13 @@ export function createRecursionRuntime({
         ? []
         : filterScopedCards(cardsWithOrigin(sanitizedCacheCards(runId, sceneSnapshot, activeCache.cards), 'cache'));
       const reuseCacheOnly = !freshContext && action === 'reuse-cache' && cacheCards.length > 0;
+      stageRuntimeActivity({
+        runId,
+        phase: reuseCacheOnly ? 'cacheReusing' : 'cardBatchRunning',
+        label: reuseCacheOnly ? 'Reusing scene deck...' : 'Generating scene cards...',
+        cardCounts: { requested: plan.cardJobs?.length || 0 },
+        chips: ['Cards']
+      });
       recordCacheDecision(runId, {
         decision: reuseCacheOnly ? 'hit' : 'miss',
         kind: 'scene-cards',

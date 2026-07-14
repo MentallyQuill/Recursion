@@ -206,6 +206,9 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
     if (compact(text).replace(/\s+/g, ' ') === normalizedSource) return fail('RECURSION_EDITORIAL_NO_EFFECT', 'Editorial candidate did not change the source.');
     if (text.length > maxCandidateLength(String(sourceText).length)) return fail('RECURSION_EDITORIAL_CANDIDATE_TOO_LARGE', 'Editorial candidate exceeded its bounded output budget.');
     if (!validateClaimList(data.candidate.preservationLedger, known)) return fail('RECURSION_EDITORIAL_EVIDENCE_INVALID', 'Candidate preservation ledger cited invalid evidence.');
+    if (hashJson(data.candidate.preservationLedger) !== hashJson(array(diagnosis?.brief?.preserve))) {
+      return fail('RECURSION_EDITORIAL_PRESERVATION_LEDGER_MISMATCH', 'Candidate preservation ledger must exactly match the validated diagnosis preservation ledger.');
+    }
     if (!Array.isArray(data.candidate.changeLedger) || data.candidate.changeLedger.length > 12 || data.candidate.changeLedger.some((entry) => !CHANGE_KINDS.has(entry?.kind) || !safeText(entry?.summary, MAX_CLAIM) || !refs(entry?.evidenceRefs, known))) return fail('RECURSION_EDITORIAL_EVIDENCE_INVALID', 'Candidate change ledger cited invalid evidence.');
     if (!Array.isArray(data.candidate.riskFlags) || data.candidate.riskFlags.some((flag) => !RISK_FLAGS.has(flag))) return fail('RECURSION_EDITORIAL_CANDIDATE_INVALID', 'Candidate risk flags are invalid.');
     return { ok: true, artifact: { kind: 'candidate', mode, text, candidate: data.candidate }, cardOutcomes: data.cardOutcomes, evidence };
@@ -264,6 +267,9 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
     'Diagnose the completed response against frozen evidence before any candidate is written.',
     'Return no candidate text. Use source-draft evidence only to identify discardable material, never to preserve a fact.',
     'Choose proceed, no-change, requires-recompose, or requires-redirect according to the selected mode.',
+    'Repair changes only bounded spans. Recompose can replace the entire response while preserving its supported intent and direction. Redirect replaces an unsupported core intent or direction.',
+    'For selected Recompose, choose proceed for repetition, slop, pacing, voice, phrasing, scene execution, or any defect fixable by a full rewrite that keeps the supported intent.',
+    'Never choose requires-redirect only for repetition, verbosity, awkward execution, or other quality defects that Recompose can remove.',
     ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
@@ -287,6 +293,10 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     .filter((entry) => !['source-draft', 'source-negative'].includes(entry?.authority))
     .map((entry) => String(entry?.id || ''))
     .filter(Boolean);
+  const requiredPreservationLedger = array(diagnosis?.brief?.preserve).map((entry) => ({
+    claim: String(entry?.claim || ''),
+    evidenceRefs: array(entry?.evidenceRefs).map(String)
+  }));
   const correction = retry
     ? [
         'Editorial pass correction required.',
@@ -301,6 +311,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     full ? 'Return one complete candidate. You may replace every source sentence when the validated diagnosis supports it.' : 'Return only exact non-overlapping replacements for supplied targets.',
     mode === 'redirect' ? 'The source may be negative evidence. Preserve only facts supported by frozen evidence.' : 'Preserve supported facts, commitments, constraints, and the user turn while improving execution.',
     'The diagnosis below is authoritative. Do not add a new diagnosis or revise its preservation/discard decisions.',
+    `Copy diagnosis.brief.preserve exactly into candidate.preservationLedger: ${JSON.stringify(requiredPreservationLedger)}. Do not add, remove, or rewrite preservation claims or evidence IDs.`,
     'Every preservation claim, major change, patch, and card outcome must cite only supplied evidence IDs.',
     ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
@@ -319,6 +330,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     diagnosisHash: editorialDiagnosisHash(diagnosis),
     validEvidenceIds: array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean),
     validPreservationEvidenceIds,
+    requiredPreservationLedger,
     installedCardIds: array(snapshot?.installedHand).map((card) => String(card?.cardId || card?.id || '')).filter(Boolean),
     validTargetIds: targetList.map((entry) => String(entry.id || '')).filter(Boolean)
   };

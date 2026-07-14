@@ -331,6 +331,21 @@ function eventSourceObject(event) {
   return payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
 }
 
+function eventPayloadShape(event) {
+  const payload = eventPayload(event);
+  const payloadType = payload === null ? 'null' : (Array.isArray(payload) ? 'array' : typeof payload);
+  const payloadKeys = payloadType === 'object'
+    ? Object.keys(payload).map((key) => stringValue(key).slice(0, 80)).sort().slice(0, 40)
+    : [];
+  return { payloadType, payloadKeys };
+}
+
+function eventDiagnosticScalar(source, key) {
+  const value = source?.[key];
+  if (!['string', 'number', 'boolean'].includes(typeof value)) return '';
+  return stringValue(value).slice(0, 180);
+}
+
 function eventMessageId(event) {
   const source = eventSourceObject(event);
   const payload = eventPayload(event);
@@ -370,6 +385,7 @@ function isLatestAssistantEvent(messageId, context = {}, swiped = false) {
 export function normalizeSillyTavernMessageEvent(event = {}, context = {}) {
   const source = eventSourceObject(event);
   const eventName = eventNameOf(event, context);
+  const payloadShape = eventPayloadShape(event);
   const rawMessageId = eventMessageId(event);
   const swiped = Boolean(source.swiped || eventName === 'message_swiped');
   const latestAssistant = latestAssistantMessage(context.context || context);
@@ -382,7 +398,14 @@ export function normalizeSillyTavernMessageEvent(event = {}, context = {}) {
     deleted: Boolean(source.deleted || eventName === 'message_deleted'),
     edited: Boolean(source.edited || eventName === 'message_edited' || eventName === 'message_updated'),
     latestAssistant: isLatestAssistantEvent(messageId, context, swiped),
-    text: generationResponseText(source.text, source.message, source.content, typeof eventPayload(event) === 'string' ? eventPayload(event) : '')
+    text: generationResponseText(source.text, source.message, source.content, typeof eventPayload(event) === 'string' ? eventPayload(event) : ''),
+    payloadType: payloadShape.payloadType,
+    payloadKeys: payloadShape.payloadKeys,
+    ...Object.fromEntries(
+      ['source', 'reason', 'origin', 'action', 'cause']
+        .map((key) => [key, eventDiagnosticScalar(source, key)])
+        .filter(([, value]) => Boolean(value))
+    )
   };
 }
 
@@ -993,6 +1016,39 @@ export function createSillyTavernHost({
   };
 
   const generation = {
+    async lockControls() {
+      const context = currentContext(contextFactory);
+      try {
+        if (typeof context.deactivateSendButtons === 'function') context.deactivateSendButtons();
+        if (typeof context.swipe?.hide === 'function') context.swipe.hide();
+        return { ok: true, locked: true };
+      } catch (error) {
+        return {
+          ok: false,
+          locked: false,
+          error: {
+            code: 'RECURSION_HOST_CONTROL_LOCK_FAILED',
+            message: stringValue(error?.message || error || 'SillyTavern controls could not be locked.').slice(0, 300)
+          }
+        };
+      }
+    },
+    async unlockControls() {
+      const context = currentContext(contextFactory);
+      try {
+        if (typeof context.activateSendButtons === 'function') context.activateSendButtons();
+        return { ok: true, locked: false };
+      } catch (error) {
+        return {
+          ok: false,
+          locked: true,
+          error: {
+            code: 'RECURSION_HOST_CONTROL_UNLOCK_FAILED',
+            message: stringValue(error?.message || error || 'SillyTavern controls could not be unlocked.').slice(0, 300)
+          }
+        };
+      }
+    },
     async start(details = {}) {
       const context = currentContext(contextFactory);
       const type = nativeGenerationType(details?.type);
@@ -1127,7 +1183,10 @@ export function createSillyTavernHost({
       const found = findRawAssistantMessage(context, messageId);
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
       const activeText = activeRawAssistantText(found.raw);
-      if (activeText) found.raw.__recursionHeldText = activeText;
+      if (activeText) {
+        found.raw.__recursionHeldText = activeText;
+        found.raw.__recursionHeldSwipeId = finiteNonNegativeInteger(found.raw.swipe_id) ?? 0;
+      }
       updateMessageBlockBestEffort(context, found.index, found.raw);
       return { ok: true, messageId: found.normalized.mesid };
     },
@@ -1136,8 +1195,13 @@ export function createSillyTavernHost({
       const found = findRawAssistantMessage(context, messageId);
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
       if (found.raw.__recursionHeldText !== undefined) {
+        const heldSwipeId = finiteNonNegativeInteger(found.raw.__recursionHeldSwipeId);
+        if (heldSwipeId !== null && Array.isArray(found.raw.swipes) && heldSwipeId < found.raw.swipes.length) {
+          found.raw.swipe_id = heldSwipeId;
+        }
         setRawAssistantText(found.raw, found.raw.__recursionHeldText);
         delete found.raw.__recursionHeldText;
+        delete found.raw.__recursionHeldSwipeId;
       }
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
@@ -1150,6 +1214,7 @@ export function createSillyTavernHost({
       if (Array.isArray(found.raw.swipes)) ensureSwipeInfoArray(found.raw);
       setRawAssistantText(found.raw, text);
       delete found.raw.__recursionHeldText;
+      delete found.raw.__recursionHeldSwipeId;
       found.raw.__recursionGenerationReview = asObject(options.marker);
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
@@ -1174,6 +1239,7 @@ export function createSillyTavernHost({
         found.raw.extra = cloneJsonSafe(swipeInfo.extra);
       }
       delete found.raw.__recursionHeldText;
+      delete found.raw.__recursionHeldSwipeId;
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
       return { ok: true, messageId: found.normalized.mesid, index, text: stringValue(text) };
@@ -1202,10 +1268,40 @@ export function createSillyTavernHost({
       setRawAssistantText(found.raw, text);
       alignRootExtraToSwipe(found.raw, index);
       delete found.raw.__recursionHeldText;
+      delete found.raw.__recursionHeldSwipeId;
       if (options.marker) found.raw.__recursionGenerationReview = asObject(options.marker);
       updateMessageBlockBestEffort(context, found.index, found.raw);
       await saveChatBestEffort(context);
       return { ok: true, messageId: found.normalized.mesid, index, text };
+    },
+    async removeEmptyAssistantSwipePlaceholders(messageId) {
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context, messageId);
+      if (!found) return { ok: false, removed: 0, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
+      if (!Array.isArray(found.raw.swipes) || found.raw.swipes.length <= 1) return { ok: true, removed: 0 };
+      ensureSwipeInfoArray(found.raw);
+      let removed = 0;
+      while (found.raw.swipes.length > 1 && !stringValue(found.raw.swipes.at(-1)).trim()) {
+        found.raw.swipes.pop();
+        found.raw.swipe_info.pop();
+        if (Array.isArray(found.raw.__recursionGenerationReviewSwipes)) {
+          found.raw.__recursionGenerationReviewSwipes.length = Math.min(
+            found.raw.__recursionGenerationReviewSwipes.length,
+            found.raw.swipes.length
+          );
+        }
+        removed += 1;
+      }
+      if (!removed) return { ok: true, removed: 0 };
+      const index = Math.max(0, Math.min(finiteNonNegativeInteger(found.raw.swipe_id) ?? 0, found.raw.swipes.length - 1));
+      found.raw.swipe_id = index;
+      setRawAssistantText(found.raw, found.raw.swipes[index]);
+      alignRootExtraToSwipe(found.raw, index);
+      delete found.raw.__recursionHeldText;
+      delete found.raw.__recursionHeldSwipeId;
+      updateMessageBlockBestEffort(context, found.index, found.raw);
+      await saveChatBestEffort(context);
+      return { ok: true, removed, messageId: found.normalized.mesid, index };
     },
     async recoverHeldAssistantMessages(details = {}) {
       const context = currentContext(contextFactory);
@@ -1219,10 +1315,16 @@ export function createSillyTavernHost({
         const heldText = stringValue(raw.__recursionHeldText);
         if (!heldText) {
           delete raw.__recursionHeldText;
+          delete raw.__recursionHeldSwipeId;
           continue;
+        }
+        const heldSwipeId = finiteNonNegativeInteger(raw.__recursionHeldSwipeId);
+        if (heldSwipeId !== null && Array.isArray(raw.swipes) && heldSwipeId < raw.swipes.length) {
+          raw.swipe_id = heldSwipeId;
         }
         setRawAssistantText(raw, heldText);
         delete raw.__recursionHeldText;
+        delete raw.__recursionHeldSwipeId;
         updateMessageBlockBestEffort(context, index, raw);
         recovered += 1;
       }

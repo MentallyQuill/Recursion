@@ -51,6 +51,7 @@ const JOURNAL_EVENTS = new Set([
   'card.generated',
   'card.rejected',
   'hand.selected',
+  'host.generation_stopped',
   'prompt.installed',
   'prompt.install_failed',
   'prompt.install_skipped',

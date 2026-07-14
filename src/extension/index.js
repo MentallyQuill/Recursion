@@ -14,6 +14,7 @@ let settingsLoadEventObserved = false;
 
 const ENHANCEMENT_OWNED_MUTATION_TAIL_MS = 3000;
 let enhancementOwnedMutationUntilMs = 0;
+let enhancementControlsLocked = false;
 
 function hasSillyTavernContext() {
   return typeof globalThis.SillyTavern?.getContext === 'function'
@@ -66,6 +67,31 @@ function runtimeEnhancementEnabled(activeRuntime = runtime) {
     return mode !== 'off';
   } catch {
     return false;
+  }
+}
+
+async function lockEnhancementControls(currentHost = host) {
+  if (enhancementControlsLocked) return { ok: true, locked: true, unchanged: true };
+  enhancementControlsLocked = true;
+  try {
+    const result = await currentHost?.generation?.lockControls?.();
+    if (result?.ok === false) enhancementControlsLocked = false;
+    return result || { ok: true, locked: true };
+  } catch (error) {
+    enhancementControlsLocked = false;
+    warn('Enhancement control lock failed.', error);
+    return { ok: false, locked: false, error };
+  }
+}
+
+async function unlockEnhancementControls(currentHost = host) {
+  if (!enhancementControlsLocked) return { ok: true, locked: false, unchanged: true };
+  enhancementControlsLocked = false;
+  try {
+    return await currentHost?.generation?.unlockControls?.() || { ok: true, locked: false };
+  } catch (error) {
+    warn('Enhancement control unlock failed.', error);
+    return { ok: false, locked: false, error };
   }
 }
 
@@ -314,7 +340,10 @@ function registerHostEvents(nextRuntime, currentHost = host) {
       refreshAssistantSignature();
       runtime ||= nextRuntime;
       clearEnhancementOwnedMutationWindow();
-      return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', normalizeHostMessageEvent(currentHost, eventName, payload))
+      const details = normalizeHostMessageEvent(currentHost, eventName, payload);
+      details.enhancementControlsLocked = enhancementControlsLocked;
+      return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', details)
+        .finally(() => unlockEnhancementControls(currentHost))
         .finally(() => setEnhancementCaptureActive(false));
     });
   }
@@ -336,12 +365,14 @@ function registerHostEvents(nextRuntime, currentHost = host) {
           return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement assistant hold failed.', details)
             .then(() => ({ ok: true, skipped: true, reason: 'enhancement-awaiting-generation-ended' }));
         }
-        return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement assistant hold failed.', details)
+        return lockEnhancementControls(currentHost)
+          .then(() => invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement assistant hold failed.', details))
           .then(() => {
             markEnhancementOwnedMutationWindow();
             return invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Enhancement failed.', { reason: 'assistant-message-landed' });
           })
           .then(() => generationEnded())
+          .finally(() => unlockEnhancementControls(currentHost))
           .then(() => {
             lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
             return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
@@ -357,14 +388,17 @@ function registerHostEvents(nextRuntime, currentHost = host) {
           .finally(() => setEnhancementCaptureActive(false));
       }
       lastAssistantIdentity = nextAssistantIdentity;
-      return generationEnded()
+      const enhancementEnabled = runtimeEnhancementEnabled(nextRuntime);
+      return Promise.resolve(enhancementEnabled ? lockEnhancementControls(currentHost) : null)
+        .then(() => generationEnded())
         .then(() => {
-          if (runtimeEnhancementEnabled(nextRuntime)) markEnhancementOwnedMutationWindow();
+          if (enhancementEnabled) markEnhancementOwnedMutationWindow();
           return invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Enhancement failed.', { reason: 'assistant-message-landed' });
         })
+        .finally(() => unlockEnhancementControls(currentHost))
         .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }))
         .finally(() => {
-          if (runtimeEnhancementEnabled(nextRuntime)) markEnhancementOwnedMutationWindow();
+          if (enhancementEnabled) markEnhancementOwnedMutationWindow();
           setEnhancementCaptureActive(false);
         });
     });
@@ -521,6 +555,7 @@ async function teardownRecursion(label) {
   settingsLoadEventObserved = false;
   clearEnhancementOwnedMutationWindow();
   setEnhancementCaptureActive(false);
+  await unlockEnhancementControls(host);
   try {
     await runtime?.dispose?.();
   } catch (error) {

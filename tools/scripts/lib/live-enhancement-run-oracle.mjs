@@ -30,6 +30,17 @@ function countByKey(entries = []) {
   return counts;
 }
 
+export function journalDeltaSince(journal = [], { baselineIds = [], startedAt = '' } = {}) {
+  const baseline = new Set((baselineIds || []).map((id) => String(id || '')).filter(Boolean));
+  const startedAtMs = Date.parse(String(startedAt || ''));
+  return (Array.isArray(journal) ? journal : []).filter((entry) => {
+    if (baseline.has(String(entry?.id || ''))) return false;
+    const recordedAtMs = Date.parse(String(entry?.recordedAt || ''));
+    if (Number.isFinite(startedAtMs) && Number.isFinite(recordedAtMs) && recordedAtMs < startedAtMs) return false;
+    return true;
+  });
+}
+
 export function evaluateLiveEnhancementRun({
   transitions = [],
   finalRows = [],
@@ -182,8 +193,6 @@ export async function collectLiveEnhancementRunOracle(page) {
     const journal = Array.isArray(diagnosticsResult?.diagnostics?.journal)
       ? diagnosticsResult.diagnostics.journal
       : [];
-    const baselineIds = new Set(state.baselineJournalIds || []);
-    const journalDelta = journal.filter((entry) => !baselineIds.has(String(entry?.id || '')));
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
     const assistant = [...(Array.isArray(context.chat) ? context.chat : [])].reverse().find((entry) => entry?.is_user === false) || null;
     const swipeId = Number(assistant?.swipe_id ?? 0);
@@ -209,11 +218,18 @@ export async function collectLiveEnhancementRunOracle(page) {
     return {
       transitions: state.transitions || [],
       finalRows,
-      journalDelta,
+      journal,
+      baselineJournalIds: state.baselineJournalIds || [],
       enhancementMutation,
       startedAt: state.startedAt
     };
   });
+  observation.journalDelta = journalDeltaSince(observation.journal, {
+    baselineIds: observation.baselineJournalIds,
+    startedAt: observation.startedAt
+  });
+  delete observation.journal;
+  delete observation.baselineJournalIds;
   return {
     observation,
     verdict: evaluateLiveEnhancementRun(observation)

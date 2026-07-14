@@ -1330,7 +1330,7 @@ assertNotEqual(
 {
   const proseHost = createProseMessageHarness();
   const roleCalls = [];
-  const { runtime } = createRuntimeHarness({
+  const { runtime, storage } = createRuntimeHarness({
     settings: { enhancements: { target: 'prose', applyMode: 'replace', contextMessages: 13 } },
     hostMessages: proseHost.messages,
     generationRouter: {
@@ -3357,6 +3357,14 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
       && event.detail?.state === 'warning'),
     'activity history includes local fallback card child progress'
   );
+  assert(
+    view.activityHistory.some((event) => event.phase === 'cardBatchRunning'),
+    'local fallback card work is reported as a card batch rather than cache reuse'
+  );
+  assert(
+    !view.activityHistory.some((event) => event.phase === 'cacheReusing'),
+    'local fallback card work never reports a cache hit'
+  );
   assertNoSecretText(view.activityHistory, 'runtime view activity history');
   assertEqual(view.activeRunId, null, 'active run cleared after auto success');
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
@@ -5068,7 +5076,7 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
 {
   let releaseClear;
   let updateResolved = false;
-  const { runtime, calls } = createRuntimeHarness({
+  const { runtime, calls, storage } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     hostPrompt: {
       async clear() {
@@ -5479,7 +5487,7 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
 }
 
 {
-  const { runtime, calls, installed } = createRuntimeHarness({
+  const { runtime, calls, installed, storage } = createRuntimeHarness({
     settings: { enabled: false, mode: 'auto', reasonerUse: 'off' },
     hostPrompt: { methods: { clear: undefined } }
   });
@@ -10595,7 +10603,7 @@ for (const scenario of [
 }
 
 {
-  const { runtime, calls } = createRuntimeHarness({
+  const { runtime, calls, storage } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' }
   });
   const prepared = await runtime.prepareForGeneration({
@@ -10604,11 +10612,20 @@ for (const scenario of [
   });
   assertEqual(prepared.ok, true, 'host-stop preservation setup installs prompt');
   const before = runtime.view();
+  const setupSnapshot = before.lastSnapshot;
   const beforePacketId = before.lastPacket?.packetId;
   const beforeHandId = before.lastHand?.handId;
   assert(beforePacketId, 'host-stop preservation setup has prompt packet');
   assert(beforeHandId, 'host-stop preservation setup has hand');
-  const stopped = await runtime.handleHostGenerationStopped({ eventName: 'generation_stopped' });
+  const stopped = await runtime.handleHostGenerationStopped({
+    eventName: 'generation_stopped',
+    messageId: 42,
+    source: 'host-runtime',
+    reason: 'generation-aborted',
+    origin: 'unknown-listener',
+    payloadType: 'object',
+    payloadKeys: ['mesid', 'origin', 'reason', 'source']
+  });
   assertEqual(stopped.ok, true, 'post-install host generation stop cleanup succeeds');
   assertEqual(calls.clear, 1, 'post-install host generation stop clears host prompt');
   const after = runtime.view();
@@ -10617,12 +10634,24 @@ for (const scenario of [
   assert(after.lastHand.cards.length > 0, 'host generation stop keeps selected cards visible');
   assertEqual(after.lastPlan?.schema, UTILITY_ARBITER_SCHEMA, 'host generation stop preserves plan diagnostics for inspection');
   assert(after.lastSnapshot, 'host generation stop preserves last snapshot for diagnostics');
+  const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
+  const stopEntry = journal.entries.find((entry) => entry.event === 'host.generation_stopped');
+  assert(stopEntry, 'unexpected host generation stop records a dedicated journal entry');
+  assertEqual(stopEntry.severity, 'warn', 'unexpected host generation stop is warning severity');
+  assertEqual(stopEntry.details.recursionRequested, false, 'host event is distinguished from an explicit Recursion stop');
+  assertEqual(stopEntry.details.hostGenerationActive, true, 'stop journal captures host generation state before cleanup');
+  assertEqual(stopEntry.details.enhancementPending, false, 'stop journal captures pending Enhancement state before cleanup');
+  assertEqual(stopEntry.details.eventName, 'generation_stopped', 'stop journal records normalized event name');
+  assertEqual(stopEntry.details.source, 'host-runtime', 'stop journal records normalized source');
+  assertEqual(stopEntry.details.reason, 'generation-aborted', 'stop journal records normalized reason');
+  assertEqual(stopEntry.details.origin, 'unknown-listener', 'stop journal records normalized origin');
+  assertDeepEqual(stopEntry.details.payloadKeys, ['mesid', 'origin', 'reason', 'source'], 'stop journal records raw payload keys');
 }
 
 {
   let releaseArbiter;
   const hostStopCalls = [];
-  const { runtime, calls, installed } = createRuntimeHarness({
+  const { runtime, calls, installed, storage } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     hostGeneration: {
       async stop(details = {}) {
@@ -10651,6 +10680,7 @@ for (const scenario of [
   });
   const pending = runtime.prepareForGeneration({ userMessage: 'Stop before install.', hostGeneration: true });
   await waitUntil(() => typeof releaseArbiter === 'function', 'host-stop run did not enter arbiter');
+  const stopSnapshot = runtime.view().lastSnapshot;
   assertEqual(runtime.view().hostGenerationActive, true, 'runtime tracks host generation while interceptor-owned generation is active');
   assertEqual(typeof runtime.stopGeneration, 'function', 'runtime exposes unified stop action');
   const stopped = runtime.stopGeneration({ source: 'recursion-ui' });
@@ -10672,6 +10702,12 @@ for (const scenario of [
   assert(view.lastSnapshot, 'host generation stop preserves last snapshot for cancellation diagnostics');
   assertEqual(view.activity.label, 'Generation canceled. Recursion prompt cleared.', 'host generation stop surfaces canceled cleanup');
   assertEqual(view.activity.outcome, 'skipped', 'host generation stop activity is neutral skipped outcome');
+  const journal = await storage.loadRunJournal(stopSnapshot.chatKey);
+  const stopEntry = journal.entries.find((entry) => entry.event === 'host.generation_stopped');
+  assert(stopEntry, 'explicit Recursion stop records a dedicated journal entry');
+  assertEqual(stopEntry.severity, 'info', 'explicit Recursion stop is informational');
+  assertEqual(stopEntry.details.recursionRequested, true, 'explicit Recursion stop records its origin');
+  assertEqual(stopEntry.details.hostGenerationActive, true, 'explicit stop captures host generation state before cleanup');
 }
 
 {

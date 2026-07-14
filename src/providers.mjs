@@ -302,12 +302,18 @@ function editorialCardOutcomesSchema(installedCardIds, validEvidenceIds) {
   };
 }
 
-function editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds = validEvidenceIds) {
+function editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds = validEvidenceIds, requiredPreservationLedger = null) {
+  const preservationLedger = {
+    type: 'array',
+    maxItems: 12,
+    items: editorialClaimSchema(validPreservationEvidenceIds),
+    ...(Array.isArray(requiredPreservationLedger) ? { const: requiredPreservationLedger } : {})
+  };
   return {
     type: 'object',
     properties: {
       text: { type: 'string' },
-      preservationLedger: { type: 'array', maxItems: 12, items: editorialClaimSchema(validPreservationEvidenceIds) },
+      preservationLedger,
       changeLedger: {
         type: 'array',
         maxItems: 12,
@@ -423,6 +429,9 @@ export function machineJsonSchemaForRequest(request = {}) {
       : '';
     const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
     const validPreservationEvidenceIds = uniqueRequestStrings(request?.validPreservationEvidenceIds);
+    const requiredPreservationLedger = Array.isArray(request?.requiredPreservationLedger)
+      ? request.requiredPreservationLedger
+      : null;
     const installedCardIds = uniqueRequestStrings(request?.installedCardIds);
     const validTargetIds = uniqueRequestStrings(request?.validTargetIds);
     const properties = {
@@ -453,7 +462,7 @@ export function machineJsonSchemaForRequest(request = {}) {
       };
       required.push('patches');
     } else {
-      properties.candidate = editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds);
+      properties.candidate = editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds, requiredPreservationLedger);
       required.push('candidate');
     }
     return {

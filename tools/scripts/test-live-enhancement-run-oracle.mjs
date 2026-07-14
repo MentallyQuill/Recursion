@@ -6,6 +6,21 @@ const oracleSource = readFileSync('tools/scripts/lib/live-enhancement-run-oracle
 const evaluate = typeof oracleModule.evaluateLiveEnhancementRun === 'function'
   ? oracleModule.evaluateLiveEnhancementRun
   : () => ({ ok: true, failures: [] });
+const journalDeltaSince = oracleModule.journalDeltaSince;
+
+assertEqual(typeof journalDeltaSince, 'function', 'live oracle exposes timestamp-bounded journal delta filtering');
+assertDeepEqual(
+  journalDeltaSince([
+    { id: 'old-failure', recordedAt: '2026-07-14T14:44:54.983Z', event: 'provider.call.failed' },
+    { id: 'baseline-entry', recordedAt: '2026-07-14T15:33:00.000Z', event: 'provider.call.completed' },
+    { id: 'new-failure', recordedAt: '2026-07-14T15:33:02.000Z', event: 'provider.call.failed' }
+  ], {
+    baselineIds: ['baseline-entry'],
+    startedAt: '2026-07-14T15:33:01.000Z'
+  }).map((entry) => entry.id),
+  ['new-failure'],
+  'live oracle excludes stale retained journal failures but preserves current-run failures'
+);
 
 const doneRows = [
   { label: 'Editorial diagnosis', state: 'done' },

@@ -289,11 +289,13 @@ const editorialPassMachineSchema = machineJsonSchemaForRequest({
   diagnosisHash: 'editorial-diagnosis-hash',
   validEvidenceIds: ['user:0', 'message:17', 'source:0'],
   validPreservationEvidenceIds: ['user:0', 'message:17'],
+  requiredPreservationLedger: [{ claim: 'Keep the guarded posture.', evidenceRefs: ['message:17'] }],
   installedCardIds: ['card-a', 'card-b']
 });
 assertDeepEqual(editorialPassMachineSchema.schema.properties.cardOutcomes.items.properties.cardId.enum, ['card-a', 'card-b'], 'Editorial pass machine schema constrains card outcomes to the frozen installed hand');
 assertDeepEqual(editorialPassMachineSchema.schema.properties.cardOutcomes.items.properties.evidenceRefs.items.enum, ['user:0', 'message:17', 'source:0'], 'Editorial pass machine schema constrains outcome evidence to frozen ids');
 assertDeepEqual(editorialPassMachineSchema.schema.properties.candidate.required, ['text', 'preservationLedger', 'changeLedger', 'riskFlags'], 'Editorial full-candidate schema requires every semantically validated field');
+assertDeepEqual(editorialPassMachineSchema.schema.properties.candidate.properties.preservationLedger.const, [{ claim: 'Keep the guarded posture.', evidenceRefs: ['message:17'] }], 'Editorial candidate schema freezes the validated diagnosis preservation ledger');
 assertDeepEqual(editorialPassMachineSchema.schema.properties.candidate.properties.preservationLedger.items.properties.evidenceRefs.items.enum, ['user:0', 'message:17'], 'Editorial candidate schema excludes source-draft evidence from preservation claims');
 const editorialVerifierMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialVerification.v1',

@@ -44,9 +44,10 @@ function proofScript() {
     }
     const context = () => decorateContext(rawContext());
     const assistantText = [
-      'Mara kept her hand on the latch.',
-      '"So you are saying you are worried. Are you okay? I can provide support if you want. Do not get the wrong idea, this is purely tactical."'
+      'Mara smiled warmly and released the latch.',
+      '"So you are saying you are worried. Are you okay? I can provide support if you want. Do not get the wrong idea, this is purely tactical," she said.'
     ].join(' ');
+    const userInstruction = 'Mara is mute and never speaks. She remains guarded at the latched door after seeing the other person flinch. Respond only through physical action; do not release the latch.';
     const seedAssistant = () => {
       const ctx = context();
       if (!Array.isArray(ctx.chat)) ctx.chat = [];
@@ -55,7 +56,7 @@ function proofScript() {
         mesid: 0,
         is_user: true,
         name: 'Recursion Enhancement Proof User',
-        mes: 'Mara is guarded and dislikes being managed. She just saw the other person flinch.'
+        mes: userInstruction
       });
       const mesid = 1;
       const message = {
@@ -92,7 +93,7 @@ function proofScript() {
     });
     const seed = seedAssistant();
     const prepared = await activeRuntime.prepareForGeneration({
-      userMessage: 'Mara is guarded and dislikes being managed. She just saw the other person flinch.'
+      userMessage: userInstruction
     });
     const preparedView = activeRuntime.view?.() || {};
     const preparedHandCardCount = Array.isArray(preparedView.lastHand?.cards)
@@ -213,12 +214,9 @@ try {
   }
 
   const testCases = [
-    { target: 'recompose', applyMode: 'as-swipe', pipelineMode: 'standard' },
-    { target: 'recompose', applyMode: 'as-swipe', pipelineMode: 'rapid' },
-    { target: 'recompose', applyMode: 'as-swipe', pipelineMode: 'fused' },
-    { target: 'recompose', applyMode: 'replace', pipelineMode: 'standard' },
-    { target: 'recompose', applyMode: 'replace', pipelineMode: 'rapid' },
-    { target: 'recompose', applyMode: 'replace', pipelineMode: 'fused' }
+    { target: 'redirect', applyMode: 'as-swipe', pipelineMode: 'standard' },
+    { target: 'redirect', applyMode: 'as-swipe', pipelineMode: 'rapid' },
+    { target: 'redirect', applyMode: 'as-swipe', pipelineMode: 'fused' }
   ];
   const selectedCases = selectedCase
     ? testCases.filter((testCase) => `${testCase.pipelineMode}-${testCase.applyMode}` === selectedCase)
@@ -227,6 +225,16 @@ try {
   for (const testCase of selectedCases) {
     await installLiveEnhancementRunOracle(page);
     const proof = await page.evaluate(proofScript(), testCase);
+    await page.waitForFunction(() => {
+      const rows = [...document.querySelectorAll('[data-recursion-status-popover] [data-recursion-progress-row]')];
+      const stateFor = (label) => rows
+        .filter((row) => String(row.dataset.recursionProgressLabel || '').trim().toLowerCase() === label)
+        .map((row) => String(row.dataset.recursionProgressState || '').trim().toLowerCase());
+      return stateFor('editorial diagnosis').includes('done')
+        && stateFor('editorial candidate').includes('done')
+        && stateFor('recursion prompt ready').includes('done')
+        && !rows.some((row) => ['running', 'pending'].includes(String(row.dataset.recursionProgressState || '').trim().toLowerCase()));
+    }, null, { timeout: 10000 });
     const oracle = await collectLiveEnhancementRunOracle(page);
     const beforeText = testCase.applyMode === 'as-swipe' ? proof.before.swipes[0] : proof.before.text;
     const afterText = testCase.applyMode === 'as-swipe' ? proof.after.swipes[proof.after.swipeId] : proof.after.text;

@@ -101,6 +101,92 @@ assert(Array.isArray(transformCall.request.installedCardIds), 'runtime transform
 assertEqual(runtime.view().activity.severity, 'success', 'successful Editorial transform settles success');
 assertEqual(runtime.view().editorialResult?.status, 'success', 'successful Editorial transform records a success result');
 
+const concurrentSource = 'Mara kept one hand on the latch.';
+const concurrentMessage = { messageId: 12, chatKey: 'editorial-concurrent-chat', swipeId: 0, text: concurrentSource, swipes: [concurrentSource] };
+let releaseConcurrentTransform;
+let concurrentTransformStarted = false;
+let concurrentAppendCalls = 0;
+const concurrentRuntime = createRecursionRuntime({
+  host: {
+    async snapshot() {
+      return {
+        chatId: concurrentMessage.chatKey,
+        chatKey: concurrentMessage.chatKey,
+        sceneKey: 'scene',
+        sceneFingerprint: 'scene-fp',
+        turnFingerprint: 'turn-fp',
+        latestMesId: 12,
+        messages: [{ mesid: 11, role: 'user', text: 'Keep Mara at the door.', visible: true }, { mesid: 12, role: 'assistant', text: concurrentSource, visible: true }]
+      };
+    },
+    messages: {
+      activeAssistantMessageIdentity() { return { ...concurrentMessage, originalHash: hashJson(concurrentMessage.text) }; },
+      async holdAssistantMessage() { return { ok: true }; },
+      async revealAssistantMessage() { return { ok: true }; },
+      async appendAssistantMessageSwipe() { concurrentAppendCalls += 1; return { ok: true }; },
+      async findEnhancedSwipe() { return null; }
+    },
+    prompt: { async install() { return { ok: true }; }, async clear() { return { ok: true }; } }
+  },
+  settingsStore: createSettingsStore({ root: {} }),
+  storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
+  activity: createActivityReporter(),
+  generationRouter: createGenerationRouter({
+    client: {
+      async generate(roleId, request) {
+        if (roleId === 'editorialDiagnostician') {
+          return {
+            text: JSON.stringify({
+              schema: 'recursion.editorialDiagnosis.v1',
+              mode: 'recompose',
+              sourceHash: request.sourceHash,
+              snapshotHash: request.snapshotHash,
+              decision: 'proceed',
+              brief: {
+                mode: 'recompose',
+                diagnosis: [{ dimension: 'anti-slop', problem: 'The response is generic.', evidenceRefs: ['source:0'] }],
+                preserve: [{ claim: 'Mara stays at the door.', evidenceRefs: ['message:11'] }],
+                discard: [{ claim: 'Generic action.', evidenceRefs: ['source:0'] }],
+                allowedChanges: ['Rewrite the response.'],
+                forbiddenChanges: ['Do not move Mara.']
+              }
+            })
+          };
+        }
+        concurrentTransformStarted = true;
+        await new Promise((resolve) => { releaseConcurrentTransform = resolve; });
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.editorialPass.v1',
+            mode: 'recompose',
+            sourceHash: request.sourceHash,
+            snapshotHash: request.snapshotHash,
+            diagnosisHash: request.diagnosisHash,
+            cardOutcomes: [],
+            candidate: {
+              text: 'Mara braced her palm against the latch.',
+              preservationLedger: [{ claim: 'Mara stays at the door.', evidenceRefs: ['message:11'] }],
+              changeLedger: [{ kind: 'rewrite', summary: 'Made the action concrete.', evidenceRefs: ['source:0'] }],
+              riskFlags: []
+            }
+          })
+        };
+      }
+    }
+  })
+});
+await concurrentRuntime.updateSettings({ enhancements: { mode: 'recompose', applyMode: 'as-swipe' } });
+const concurrentResultPromise = concurrentRuntime.enhanceLatestAssistantMessage({ reason: 'editorial-concurrent-swipe-test' });
+while (!concurrentTransformStarted) await new Promise((resolve) => setTimeout(resolve, 0));
+concurrentMessage.swipeId = 1;
+concurrentMessage.text = 'A concurrent native swipe took ownership.';
+concurrentMessage.swipes.push(concurrentMessage.text);
+releaseConcurrentTransform();
+const concurrentResult = await concurrentResultPromise;
+assertEqual(concurrentResult.ok, false, 'Editorial rejects a commit after the active swipe changes');
+assertEqual(concurrentResult.error?.code, 'RECURSION_EDITORIAL_SOURCE_CHANGED', 'Editorial reports the stale source identity');
+assertEqual(concurrentAppendCalls, 0, 'Editorial never appends against a changed active swipe');
+
 const transformSource = 'Mara repeated the tactical offer while keeping her hand on the latch.';
 const transformMessage = { messageId: 18, chatKey: 'editorial-transform-correction-chat', swipeId: 0, text: transformSource, swipes: [transformSource] };
 const transformCalls = [];

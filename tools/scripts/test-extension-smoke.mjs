@@ -1,4 +1,4 @@
-import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
+import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 import { hashJson } from '../../src/core.mjs';
 
 const RECURSION_PROMPT_KEYS = [
@@ -41,9 +41,11 @@ for (const hook of hooks) {
 function createFakeSillyTavernContext(label) {
   const promptWrites = [];
   const promptState = new Map();
+  const controlEvents = [];
   const fake = {
     promptWrites,
     promptState,
+    controlEvents,
     context: {
       chatId: `${label}-chat`,
       chat: [{ mesid: 0, is_user: true, mes: `${label} user message.` }],
@@ -55,6 +57,17 @@ function createFakeSillyTavernContext(label) {
         }
         promptWrites.push({ key, text, position, depth, scan, role });
         promptState.set(key, text);
+      },
+      deactivateSendButtons() {
+        controlEvents.push('lock');
+      },
+      activateSendButtons() {
+        controlEvents.push('unlock');
+      },
+      swipe: {
+        hide() {
+          controlEvents.push('hide-swipes');
+        }
       },
       async generateRaw() {
         return {
@@ -594,7 +607,8 @@ if (lifecycleFailures.length) {
   assertEqual(finalPipelineCalls, initialPipelineCalls, 'extension event order makes no new Arbiter, Fused, or Guidance calls on swipe');
   assertEqual(finalView.lastCacheDecision?.kind, 'swipe-packet', 'extension event order records packet-cache reuse');
   assertEqual(finalView.lastBrief?.packetId, initialPacketId, 'extension event order preserves packet identity');
-  assertEqual(fake.context.chat[30].swipes.length, 2, 'extension cancellation leaves only the native empty swipe placeholder');
+  assertEqual(fake.context.chat[30].swipes.length, 1, 'extension cancellation removes the native empty swipe placeholder');
+  assert(fake.context.chat[30].swipes.every((text) => String(text).trim()), 'extension cancellation leaves no blank assistant swipes');
   assertEqual(fake.context.chat[30].__recursionGenerationReview, undefined, 'extension cancellation appends no Recursion enhancement marker');
   assertEqual(finalView.activity?.label, 'Recursion prompt reused for swipe retry.', 'extension event order leaves cached swipe progress authoritative');
 
@@ -771,6 +785,7 @@ if (lifecycleFailures.length) {
     extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
     extension_prompt_roles: { SYSTEM: 'SYSTEM' },
     eventSource,
+    controlEvents: [],
     event_types: {
       CHAT_CHANGED: 'chat_changed',
       GENERATION_ENDED: 'generation_ended',
@@ -779,6 +794,17 @@ if (lifecycleFailures.length) {
       STREAM_TOKEN_RECEIVED: 'stream_token_received'
     },
     setExtensionPrompt() {},
+    deactivateSendButtons() {
+      context.controlEvents.push('lock');
+    },
+    activateSendButtons() {
+      context.controlEvents.push('unlock');
+    },
+    swipe: {
+      hide() {
+        context.controlEvents.push('hide-swipes');
+      }
+    },
     async generateRaw(request = {}) {
       if (interceptorComplete) {
         await proseGate;
@@ -856,10 +882,12 @@ if (lifecycleFailures.length) {
   );
   assertEqual(fakeDocumentElement.classList.contains('recursion-enhancement-capture-active'), false, 'completed source stays visible while generation review resolves');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive, true, 'assistant-landed prose enhancement keeps host generation active while provider is pending');
+  assertDeepEqual(context.controlEvents, ['lock', 'hide-swipes'], 'assistant-landed enhancement locks SillyTavern send and swipe controls while pending');
   resolveProse();
   await landed;
   assertEqual(context.chat[2].mes, 'Mara crossed the room. "Keep the door shut," she said.', 'assistant-landed prose enhancement replaces held text');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive, false, 'assistant-landed prose enhancement clears host generation after provider settles');
+  assertDeepEqual(context.controlEvents, ['lock', 'hide-swipes', 'unlock'], 'assistant-landed enhancement unlocks SillyTavern controls only after settlement');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.status, 'ready', 'assistant-landed prose enhancement leaves Last Brief ready');
   const prosePacketId = globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId;
   await eventSource.emit('message_updated', { mesid: 2 });

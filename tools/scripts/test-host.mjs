@@ -34,6 +34,28 @@ assertEqual(normalizedSwipeEvent.swiped, true, 'swipe event is normalized by hos
 assertEqual(normalizedSwipeEvent.latestAssistant, true, 'latest assistant identity is normalized by host adapter');
 assert(!String(normalizedSwipeEvent.text).includes('[object Object]'), 'object-shaped event content is JSON-normalized');
 
+const normalizedStopEvent = normalizeSillyTavernMessageEvent(
+  {
+    mesid: 7,
+    source: 'host-runtime',
+    reason: 'generation-aborted',
+    origin: 'unknown-listener',
+    authorization: 'must-not-be-recorded',
+    prompt: 'must-not-be-recorded'
+  },
+  { eventName: 'generation_stopped' }
+);
+assertEqual(normalizedStopEvent.source, 'host-runtime', 'generation stop source survives host normalization');
+assertEqual(normalizedStopEvent.reason, 'generation-aborted', 'generation stop reason survives host normalization');
+assertEqual(normalizedStopEvent.origin, 'unknown-listener', 'generation stop origin survives host normalization');
+assertEqual(normalizedStopEvent.payloadType, 'object', 'generation stop records raw payload shape');
+assertDeepEqual(
+  normalizedStopEvent.payloadKeys,
+  ['authorization', 'mesid', 'origin', 'prompt', 'reason', 'source'],
+  'generation stop records sorted payload keys without payload values'
+);
+assert(!JSON.stringify(normalizedStopEvent).includes('must-not-be-recorded'), 'generation stop normalization excludes sensitive payload values');
+
 {
   const eventHost = createSillyTavernHost({
     contextFactory: () => ({
@@ -305,6 +327,17 @@ assertEqual(mutationContext.chat[0].mes, 'Polished assistant text.', 'active mes
 assertEqual((await mutationHost.messages.findEnhancedSwipe(4, { originalHash: 'hash-a' })).index, 1, 'host finds existing enhanced swipe marker');
 assertEqual((await mutationHost.messages.replaceAssistantMessageText(4, 'Replacement text.', { marker: { originalHash: 'hash-b' } })).ok, true, 'host replaces active assistant text');
 assertEqual(mutationContext.chat[0].swipes[1], 'Replacement text.', 'replace updates selected swipe text');
+mutationContext.chat[0].swipes.push('');
+mutationContext.chat[0].swipe_info.push({ send_date: '2026-07-14T00:00:00.000Z', extra: {} });
+mutationContext.chat[0].swipe_id = 2;
+mutationContext.chat[0].mes = '';
+const emptySwipeCleanup = await mutationHost.messages.removeEmptyAssistantSwipePlaceholders(4);
+assertEqual(emptySwipeCleanup.ok, true, 'host removes trailing empty assistant swipe placeholders');
+assertEqual(emptySwipeCleanup.removed, 1, 'host reports one removed empty swipe placeholder');
+assertEqual(mutationContext.chat[0].swipes.length, 2, 'empty swipe cleanup preserves only substantive swipes');
+assertEqual(mutationContext.chat[0].swipe_info.length, 2, 'empty swipe cleanup keeps swipe metadata aligned');
+assertEqual(mutationContext.chat[0].swipe_id, 1, 'empty swipe cleanup restores the latest substantive swipe');
+assertEqual(mutationContext.chat[0].mes, 'Replacement text.', 'empty swipe cleanup restores substantive assistant text');
 assert(messageMutationCalls.some((entry) => entry.save === true), 'message mutation saves chat');
 assertEqual(messageMutationCalls.some((entry) => entry.reload === true), false, 'self-authored swipe mutation does not reload the chat and emit CHAT_CHANGED');
 
@@ -1009,6 +1042,25 @@ assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
     'host stop uses SillyTavern context stopGeneration'
   );
   assertDeepEqual(stopCalls, ['stop'], 'host stop calls SillyTavern generation stop once');
+}
+
+{
+  const controlCalls = [];
+  const controlHost = createSillyTavernHost({
+    contextFactory: () => ({
+      currentChatId: 'generation-control-chat',
+      chat: [],
+      deactivateSendButtons: () => controlCalls.push('lock'),
+      activateSendButtons: () => controlCalls.push('unlock'),
+      swipe: {
+        hide: () => controlCalls.push('hide-swipes')
+      }
+    }),
+    settingsRoot: {}
+  });
+  assertEqual((await controlHost.generation.lockControls({ source: 'editorial' })).ok, true, 'host locks native generation controls');
+  assertEqual((await controlHost.generation.unlockControls({ source: 'editorial' })).ok, true, 'host unlocks native generation controls');
+  assertDeepEqual(controlCalls, ['lock', 'hide-swipes', 'unlock'], 'host generation control lock uses SillyTavern supported controls');
 }
 
 {

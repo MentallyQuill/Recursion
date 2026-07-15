@@ -389,12 +389,62 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
   return { ok: true, artifact: { kind: 'patches', mode: 'repair', patches }, cardOutcomes: data.cardOutcomes, evidence };
 }
 
-export function validateEditorialVerification(result = {}, { sourceHash = '', snapshotHash = '', diagnosisHash = '', evidence = [] } = {}) {
+function validateRedirectVerificationChecks(checks, known, decision) {
+  if (!Array.isArray(checks) || checks.length !== REDIRECT_VERIFICATION_CHECKS.length) {
+    return fail(REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'Redirect verification check coverage is incomplete.');
+  }
+  const byName = new Map();
+  for (const entry of checks) {
+    if (!REDIRECT_VERIFICATION_CHECKS.includes(entry?.check) || byName.has(entry.check)) {
+      return fail(REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'Redirect verification returned an unknown or duplicate check.');
+    }
+    if (!['pass', 'fail', 'unclear'].includes(entry?.status)
+      || !refs(entry?.evidenceRefs, known)
+      || !safeText(entry?.note, MAX_CLAIM)) {
+      return fail(REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'Redirect verification returned an invalid status, evidence reference, or note.');
+    }
+    byName.set(entry.check, {
+      check: entry.check,
+      status: entry.status,
+      evidenceRefs: array(entry.evidenceRefs).map(String),
+      note: safeText(entry.note, MAX_CLAIM)
+    });
+  }
+  if (REDIRECT_VERIFICATION_CHECKS.some((check) => !byName.has(check))) {
+    return fail(REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'Redirect verification omitted a required check.');
+  }
+  if (decision === 'accept' && [...byName.values()].some((entry) => entry.status !== 'pass')) {
+    return fail(REDIRECT_ERROR_CODES.VERIFICATION_ACCEPT_INVALID, 'Redirect verification cannot accept a failed or unclear check.');
+  }
+  return { ok: true, checks: [...byName.values()] };
+}
+
+export function validateEditorialVerification(result = {}, {
+  mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', candidateHash = '', evidence = []
+} = {}) {
   const data = object(result);
-  if (data.schema !== EDITORIAL_VERIFICATION_SCHEMA || data.sourceHash !== sourceHash || data.snapshotHash !== snapshotHash || data.diagnosisHash !== diagnosisHash) return fail('RECURSION_EDITORIAL_VERIFICATION_STALE', 'Editorial verification does not match the candidate.');
+  if (data.schema !== EDITORIAL_VERIFICATION_SCHEMA
+    || data.mode !== mode
+    || data.sourceHash !== sourceHash
+    || data.snapshotHash !== snapshotHash
+    || data.diagnosisHash !== diagnosisHash
+    || data.candidateHash !== candidateHash) {
+    return fail('RECURSION_EDITORIAL_VERIFICATION_STALE', 'Editorial verification does not match the candidate.');
+  }
   if (!['accept', 'reject'].includes(data.decision)) return fail('RECURSION_EDITORIAL_VERIFICATION_INVALID', 'Editorial verifier must return accept or reject.');
-  if (data.evidenceRefs !== undefined && !refs(data.evidenceRefs, evidenceMap(evidence))) return fail('RECURSION_EDITORIAL_EVIDENCE_INVALID', 'Editorial verification cited unknown evidence.');
-  return { ok: true, decision: data.decision, evidenceRefs: array(data.evidenceRefs).map(String), reason: safeText(data.reason || '', 600) };
+  const known = evidenceMap(evidence);
+  if (data.evidenceRefs !== undefined && !refs(data.evidenceRefs, known)) return fail('RECURSION_EDITORIAL_EVIDENCE_INVALID', 'Editorial verification cited unknown evidence.');
+  const redirectChecks = mode === 'redirect'
+    ? validateRedirectVerificationChecks(data.checks, known, data.decision)
+    : { ok: true, checks: [] };
+  if (!redirectChecks.ok) return redirectChecks;
+  return {
+    ok: true,
+    decision: data.decision,
+    checks: redirectChecks.checks,
+    evidenceRefs: array(data.evidenceRefs).map(String),
+    reason: safeText(data.reason || '', 600)
+  };
 }
 
 function requestBase(schema, prompt, lane = '') {
@@ -533,6 +583,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
 }
 
 export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', evidence = [], candidate = {}, lane = '' } = {}) {
+  const candidateHash = hashJson(String(candidate?.text || ''));
   const prompt = [
     'Return only accept or reject for this one editorial candidate.',
     'Do not rewrite, score, compare, rank, or propose another candidate.',
@@ -540,6 +591,7 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
     `<diagnosis_hash>${safeText(diagnosisHash, 180)}</diagnosis_hash>`,
+    `<candidate_hash>${safeText(candidateHash, 180)}</candidate_hash>`,
     `<evidence>${JSON.stringify(evidence)}</evidence>`,
     `<candidate>${JSON.stringify(candidate)}</candidate>`
   ].join('\n');
@@ -548,9 +600,16 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
     sourceHash,
     snapshotHash,
     diagnosisHash,
+    candidateHash,
     mode,
+    candidate,
     validEvidenceIds: array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean)
   };
+}
+
+export function editorialVerificationRequired(mode = '', reasoningLevel = '') {
+  if (mode === 'redirect') return true;
+  return mode === 'recompose' && ['high', 'ultra'].includes(String(reasoningLevel || '').toLowerCase());
 }
 
 export function editorialPassKey({ chatKey = '', messageId = '', swipeId = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', mode = '', applyMode = '', verificationRequired = false } = {}) {

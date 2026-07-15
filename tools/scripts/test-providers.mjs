@@ -348,17 +348,47 @@ assertDeepEqual(editorialPassMachineSchema.schema.properties.candidate.propertie
 const editorialVerifierMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialVerification.v1',
   machineJson: true,
+  mode: 'recompose',
   sourceHash: 'editorial-source-hash',
   snapshotHash: 'editorial-snapshot-hash',
   diagnosisHash: 'editorial-diagnosis-hash',
+  candidateHash: 'editorial-candidate-hash',
   validEvidenceIds: ['user:0', 'message:17']
 });
 assertDeepEqual(
   editorialVerifierMachineSchema.schema.required,
-  ['schema', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'decision'],
+  ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash', 'decision'],
   'Editorial verifier machine schema requires the candidate identity and decision envelope'
 );
 assertDeepEqual(editorialVerifierMachineSchema.schema.properties.evidenceRefs.items.enum, ['user:0', 'message:17'], 'Editorial verifier constrains optional evidence references to frozen ids');
+assertEqual(Object.prototype.hasOwnProperty.call(editorialVerifierMachineSchema.schema.properties, 'checks'), false, 'Recompose verifier does not receive Redirect checks');
+const redirectVerifierMachineSchema = machineJsonSchemaForRequest({
+  responseSchema: 'recursion.editorialVerification.v1',
+  machineJson: true,
+  mode: 'redirect',
+  sourceHash: 'redirect-source-hash',
+  snapshotHash: 'redirect-snapshot-hash',
+  diagnosisHash: 'redirect-diagnosis-hash',
+  candidateHash: 'redirect-candidate-hash',
+  validEvidenceIds: ['user:0', 'source:0']
+});
+assertDeepEqual(
+  redirectVerifierMachineSchema.schema.required,
+  ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash', 'decision', 'checks'],
+  'Redirect verifier requires candidate identity and exact check coverage'
+);
+assertEqual(redirectVerifierMachineSchema.schema.properties.checks.minItems, 8, 'Redirect verifier requires all eight checks');
+assertEqual(redirectVerifierMachineSchema.schema.properties.checks.maxItems, 8, 'Redirect verifier cannot add extra checks');
+assertDeepEqual(
+  redirectVerifierMachineSchema.schema.properties.checks.items.properties.check.enum,
+  [
+    'source-failure-removed', 'replacement-objective-fulfilled', 'required-beats-satisfied',
+    'forbidden-source-beats-excluded', 'character-pressure-coherent', 'hard-constraints-preserved',
+    'user-turn-answered', 'unsupported-facts-absent'
+  ],
+  'Redirect verifier schema freezes the eight semantic checks'
+);
+assertEqual(redirectVerifierMachineSchema.schema.additionalProperties, false, 'Redirect verifier rejects undeclared output fields');
 
 const editorialIdentityRouter = createGenerationRouter({
   client: {
@@ -405,6 +435,8 @@ const editorialIdentityRouter = createGenerationRouter({
         text: JSON.stringify({
           ...shared,
           diagnosisHash: 'model-authored-diagnosis-hash',
+          mode: 'redirect',
+          candidateHash: 'model-authored-candidate-hash',
           decision: 'accept'
         })
       };
@@ -415,7 +447,8 @@ const trustedEditorialIdentity = {
   mode: 'recompose',
   sourceHash: 'trusted-source-hash',
   snapshotHash: 'trusted-snapshot-hash',
-  diagnosisHash: 'trusted-diagnosis-hash'
+  diagnosisHash: 'trusted-diagnosis-hash',
+  candidateHash: 'trusted-candidate-hash'
 };
 const normalizedDiagnosis = await editorialIdentityRouter.generate('editorialDiagnostician', trustedEditorialIdentity);
 assertEqual(normalizedDiagnosis.data.mode, trustedEditorialIdentity.mode, 'Editorial diagnosis mode comes from the frozen request');
@@ -430,6 +463,8 @@ const normalizedVerification = await editorialIdentityRouter.generate('editorial
 assertEqual(normalizedVerification.data.sourceHash, trustedEditorialIdentity.sourceHash, 'Editorial verification source identity comes from the frozen request');
 assertEqual(normalizedVerification.data.snapshotHash, trustedEditorialIdentity.snapshotHash, 'Editorial verification snapshot identity comes from the frozen request');
 assertEqual(normalizedVerification.data.diagnosisHash, trustedEditorialIdentity.diagnosisHash, 'Editorial verification diagnosis identity comes from the frozen request');
+assertEqual(normalizedVerification.data.mode, trustedEditorialIdentity.mode, 'Editorial verification mode comes from the frozen request');
+assertEqual(normalizedVerification.data.candidateHash, trustedEditorialIdentity.candidateHash, 'Editorial verification candidate identity comes from the frozen request');
 
 const generationReviewMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.generationReview.v1',

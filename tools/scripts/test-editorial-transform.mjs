@@ -1,8 +1,10 @@
+import * as editorialTransform from '../../src/editorial-transform.mjs';
 import {
   EDITORIAL_DIAGNOSIS_SCHEMA,
   EDITORIAL_PASS_SCHEMA,
   EDITORIAL_VERIFICATION_SCHEMA,
   REDIRECT_ERROR_CODES,
+  REDIRECT_VERIFICATION_CHECKS,
   buildEditorialEvidence,
   buildEditorialDiagnosisRequest,
   buildEditorialPassRequest,
@@ -307,13 +309,62 @@ assert(redirectRequest.prompt.includes('Rebuild the response around diagnosis.br
 assert(redirectRequest.prompt.includes('Do not preserve any forbidden source beat'), 'Redirect transformer prompt excludes forbidden source beats');
 assert(redirectRequest.prompt.includes('Silence, restraint, refusal, and delayed action remain valid'), 'Redirect transformer prompt preserves supported restraint');
 assert(redirectRequest.prompt.includes('A lexical rewrite that preserves the source objective or beat plan is not a Redirect.'), 'Redirect transformer prompt rejects minor rewrites');
+assertEqual(typeof editorialTransform.editorialVerificationRequired, 'function', 'shared editorial verification policy is exported');
+for (const level of ['low', 'medium', 'high', 'ultra']) {
+  assertEqual(editorialTransform.editorialVerificationRequired('redirect', level), true, `Redirect verifies at ${level}`);
+}
+assertEqual(editorialTransform.editorialVerificationRequired('recompose', 'medium'), false, 'Medium Recompose remains direct');
+assertEqual(editorialTransform.editorialVerificationRequired('recompose', 'high'), true, 'High Recompose verifies');
+assertEqual(editorialTransform.editorialVerificationRequired('repair', 'ultra'), false, 'Repair does not use candidate verification');
+
+const candidateHash = hashJson(candidate.candidate.text);
 const verifierRequest = buildEditorialVerificationRequest({ mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, evidence, candidate: candidate.candidate });
 assert(verifierRequest.prompt.includes('Return only accept or reject'), 'verifier cannot write candidate');
 assertEqual(verifierRequest.responseLength, undefined, 'verifier inherits the selected provider lane max tokens');
+assertEqual(verifierRequest.candidateHash, candidateHash, 'verifier request binds exact candidate text');
+assert(verifierRequest.prompt.includes(`<candidate_hash>${candidateHash}</candidate_hash>`), 'verifier prompt includes candidate identity');
 
-const verification = validateEditorialVerification({ schema: EDITORIAL_VERIFICATION_SCHEMA, sourceHash, snapshotHash, diagnosisHash, decision: 'accept', evidenceRefs: ['packet:constraint'] }, { sourceHash, snapshotHash, diagnosisHash, evidence });
+const verification = validateEditorialVerification({ schema: EDITORIAL_VERIFICATION_SCHEMA, mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, decision: 'accept', evidenceRefs: ['packet:constraint'] }, { mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, evidence });
 assertEqual(verification.ok, true, 'accepted verifier result passes');
-assertEqual(validateEditorialVerification({ schema: EDITORIAL_VERIFICATION_SCHEMA, sourceHash, snapshotHash, diagnosisHash, decision: 'rewrite' }, { sourceHash, snapshotHash, diagnosisHash, evidence }).ok, false, 'verifier cannot return rewrite');
+assertEqual(validateEditorialVerification({ schema: EDITORIAL_VERIFICATION_SCHEMA, mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, decision: 'rewrite' }, { mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, evidence }).ok, false, 'verifier cannot return rewrite');
+
+const redirectCandidateHash = hashJson(redirectCandidate.candidate.text);
+const passingRedirectChecks = REDIRECT_VERIFICATION_CHECKS.map((check) => ({
+  check,
+  status: 'pass',
+  evidenceRefs: ['user:0'],
+  note: 'Supported by frozen evidence.'
+}));
+const redirectVerification = {
+  schema: EDITORIAL_VERIFICATION_SCHEMA,
+  mode: 'redirect',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash: redirectDiagnosisHash,
+  candidateHash: redirectCandidateHash,
+  decision: 'accept',
+  checks: passingRedirectChecks
+};
+const redirectVerificationFixture = {
+  mode: 'redirect',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash: redirectDiagnosisHash,
+  candidateHash: redirectCandidateHash,
+  evidence
+};
+assertEqual(validateEditorialVerification(redirectVerification, redirectVerificationFixture).ok, true, 'complete Redirect verification passes');
+assertEqual(validateEditorialVerification({ ...redirectVerification, candidateHash: 'stale' }, redirectVerificationFixture).error?.code, 'RECURSION_EDITORIAL_VERIFICATION_STALE', 'verification binds exact candidate');
+assertEqual(validateEditorialVerification({ ...redirectVerification, checks: passingRedirectChecks.slice(1) }, redirectVerificationFixture).error?.code, REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'missing Redirect verifier check fails');
+assertEqual(validateEditorialVerification({ ...redirectVerification, checks: [...passingRedirectChecks.slice(0, -1), passingRedirectChecks[0]] }, redirectVerificationFixture).error?.code, REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'duplicate Redirect verifier check fails');
+assertEqual(validateEditorialVerification({ ...redirectVerification, checks: passingRedirectChecks.map((entry, index) => index ? entry : { ...entry, check: 'unknown-check' }) }, redirectVerificationFixture).error?.code, REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'unknown Redirect verifier check fails');
+assertEqual(validateEditorialVerification({ ...redirectVerification, checks: passingRedirectChecks.map((entry, index) => index ? entry : { ...entry, evidenceRefs: ['missing'] }) }, redirectVerificationFixture).error?.code, REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'Redirect verifier check rejects unknown evidence');
+assertEqual(validateEditorialVerification({ ...redirectVerification, checks: passingRedirectChecks.map((entry, index) => index ? entry : { ...entry, note: '' }) }, redirectVerificationFixture).error?.code, REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'Redirect verifier check requires a concise note');
+const unclearRedirectChecks = passingRedirectChecks.map((entry, index) => index ? entry : { ...entry, status: 'unclear' });
+assertEqual(validateEditorialVerification({ ...redirectVerification, checks: unclearRedirectChecks }, redirectVerificationFixture).error?.code, REDIRECT_ERROR_CODES.VERIFICATION_ACCEPT_INVALID, 'accept cannot contain unclear checks');
+const rejectedRedirectVerification = validateEditorialVerification({ ...redirectVerification, decision: 'reject', checks: unclearRedirectChecks }, redirectVerificationFixture);
+assertEqual(rejectedRedirectVerification.ok, true, 'structurally valid Redirect rejection remains a valid verifier result');
+assertEqual(rejectedRedirectVerification.decision, 'reject', 'Redirect rejection preserves verifier decision');
 
 assertDeepEqual(applyEditorialArtifact(sourceText, { kind: 'candidate', mode: 'recompose', text: candidate.candidate.text }), candidate.candidate.text, 'candidate application returns full text');
 assert(editorialPassKey({ chatKey: 'chat', messageId: 1, sourceHash, snapshotHash, mode: 'recompose' }) !== editorialPassKey({ chatKey: 'chat', messageId: 1, sourceHash, snapshotHash, mode: 'repair' }), 'mode changes cache identity');

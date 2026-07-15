@@ -18,7 +18,8 @@ import {
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 import {
   REDIRECT_FAILURE_CATEGORIES,
-  REDIRECT_PRESSURE_EFFECTS
+  REDIRECT_PRESSURE_EFFECTS,
+  REDIRECT_VERIFICATION_CHECKS
 } from './editorial-transform.mjs';
 
 const LANES = new Set(['utility', 'reasoner']);
@@ -445,6 +446,25 @@ function editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds
   };
 }
 
+function editorialVerificationChecksSchema(validEvidenceIds) {
+  return {
+    type: 'array',
+    minItems: REDIRECT_VERIFICATION_CHECKS.length,
+    maxItems: REDIRECT_VERIFICATION_CHECKS.length,
+    items: {
+      type: 'object',
+      properties: {
+        check: { enum: [...REDIRECT_VERIFICATION_CHECKS] },
+        status: { enum: ['pass', 'fail', 'unclear'] },
+        evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds),
+        note: { type: 'string' }
+      },
+      required: ['check', 'status', 'evidenceRefs', 'note'],
+      additionalProperties: false
+    }
+  };
+}
+
 export function machineJsonSchemaForRequest(request = {}) {
   const schema = String(request?.responseSchema || '').trim();
   if (!schema || request?.machineJson !== true) return null;
@@ -586,25 +606,36 @@ export function machineJsonSchemaForRequest(request = {}) {
     };
   }
   if (schema === 'recursion.editorialVerification.v1') {
+    const mode = ['recompose', 'redirect'].includes(String(request?.mode || '').trim())
+      ? String(request.mode).trim()
+      : '';
     const sourceHash = String(request?.sourceHash || '').trim();
     const snapshotHash = String(request?.snapshotHash || '').trim();
     const diagnosisHash = String(request?.diagnosisHash || '').trim();
+    const candidateHash = String(request?.candidateHash || '').trim();
     const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
+    const properties = {
+      schema: { const: schema },
+      mode: mode ? { const: mode } : { enum: ['recompose', 'redirect'] },
+      sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
+      snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
+      diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' },
+      candidateHash: candidateHash ? { const: candidateHash } : { type: 'string' },
+      decision: { enum: ['accept', 'reject'] },
+      evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds),
+      reason: { type: 'string' },
+      ...(mode === 'redirect' ? { checks: editorialVerificationChecksSchema(validEvidenceIds) } : {})
+    };
     return {
       name: schemaSafeName(schema),
       schema: {
         type: 'object',
-        properties: {
-          schema: { const: schema },
-          sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
-          snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
-          diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' },
-          decision: { enum: ['accept', 'reject'] },
-          evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds),
-          reason: { type: 'string' }
-        },
-        required: ['schema', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'decision'],
-        additionalProperties: true
+        properties,
+        required: [
+          'schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash', 'decision',
+          ...(mode === 'redirect' ? ['checks'] : [])
+        ],
+        additionalProperties: false
       }
     };
   }
@@ -654,13 +685,15 @@ function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
       const trusted = String(request?.[field] || '').trim();
       if (trusted) normalized[field] = trusted;
     }
-    if (roleId !== 'editorialVerifier') {
-      const mode = String(request?.mode || '').trim();
-      if (mode) normalized.mode = mode;
-    }
+    const mode = String(request?.mode || '').trim();
+    if (mode) normalized.mode = mode;
     if (roleId !== 'editorialDiagnostician') {
       const diagnosisHash = String(request?.diagnosisHash || '').trim();
       if (diagnosisHash) normalized.diagnosisHash = diagnosisHash;
+    }
+    if (roleId === 'editorialVerifier') {
+      const candidateHash = String(request?.candidateHash || '').trim();
+      if (candidateHash) normalized.candidateHash = candidateHash;
     }
     return normalized;
   }

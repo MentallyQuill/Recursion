@@ -901,6 +901,7 @@ Also prove:
 - the same helper result is embedded in `editorialPassKey()` before cache lookup;
 - Medium Redirect cannot reuse a previous `direct` cache entry;
 - repeated identical verified Redirect requests reuse only an accepted `verify` entry and do not call the provider again;
+- host cached-swipe lookup returns the persisted marker with the selected index/text, and runtime reuses that marker rather than reconstructing an incomplete marker from the lookup key;
 - a rejected Redirect verifier leaves one original swipe;
 - a malformed verifier result leaves one original swipe;
 - a verifier `accept` containing any `fail` or `unclear` check is rejected as invalid;
@@ -981,6 +982,8 @@ export async function runModelEval({
 4. call the configured independent `judgeModel` with the frozen scenario oracle and produced candidate;
 5. return a structured result without mutating `default-user`.
 
+The live path uses one internal, non-UI provider role named `editorialEffectivenessJudge` with schema `recursion.redirectEffectivenessJudge.v1`. `src/editorial-transform.mjs` owns its request builder and validator; `src/providers.mjs` owns its machine schema/role registration; `src/runtime.mjs` exposes the narrow `evaluateRedirectEffectiveness()` method used by the dedicated live harness. It is not invoked by normal chat generation and does not add a user-facing feature.
+
 The independent output judge is not the production Redirect verifier replayed as a test. Its prompt receives the scenario's expected objective, required and forbidden beats, pressure expectations, frozen evidence, source, and candidate, then returns:
 
 ```js
@@ -1060,17 +1063,20 @@ Implementation should update these existing boundaries in place:
 
 | File | Responsibility |
 | --- | --- |
-| `src/providers.mjs` | Redirect-only diagnosis and verification schemas |
+| `src/providers.mjs` | Redirect-only diagnosis/verification schemas plus the internal effectiveness-judge role and schema |
 | `src/providers/provider-response-normalizer.mjs` | Preserve nested Redirect diagnosis objects; change only if the new parser regression exposes loss |
-| `src/editorial-transform.mjs` | Shared Redirect constants and verification policy, brief/pressure validation, prompt rules, candidate ledger validation, exact verifier-check validation |
-| `src/runtime.mjs` | Use shared verification policy for cache identity and execution, persist private marker metadata, enforce terminal settlement |
+| `src/editorial-transform.mjs` | Shared Redirect constants and verification policy, brief/pressure validation, prompt rules, candidate ledger validation, exact verifier-check validation, effectiveness-judge request/validation |
+| `src/runtime.mjs` | Use shared verification policy for cache identity and execution, persist/reuse private marker metadata, enforce terminal settlement, expose the narrow live-harness effectiveness judge method |
+| `src/hosts/sillytavern/host.mjs` | Return the persisted enhancement marker from cached-swipe lookup so verified Redirect identity survives reuse |
 | `src/ui.mjs` and `src/ui/view-model.mjs` | Remain unaware of private pressure content; change only if deterministic privacy tests expose a leak |
 | `tools/scripts/test-providers.mjs` | Complete Redirect diagnosis/verifier machine schemas and Recompose non-regression |
 | `tools/scripts/test-provider-response-parser.mjs` | Nested Redirect structured-response round trip |
 | `tools/scripts/test-editorial-transform.mjs` | Diagnosis, evidence authority, character coverage, and candidate negative controls |
 | `tools/scripts/test-editorial-runtime.mjs` | Verification/cache policy, private marker and next-prompt boundaries, host mutation behavior, terminal status |
+| `tools/scripts/test-host.mjs` | Cached-swipe lookup returns the exact persisted Redirect marker with index/text |
 | `tools/scripts/test-ui.mjs` and `tools/scripts/test-runtime.mjs` | Private-data absence from visible state and status surfaces |
 | `tools/scripts/lib/model-eval-harness.mjs` | Execute tagged Redirect output-judge scenarios; strict mode rejects skipped or empty effectiveness evidence |
+| Create `tools/scripts/lib/live-editorial-effectiveness.mjs` | Reusable dedicated-user Playwright runner for scenario seeding, real Redirect execution, and independent output judging |
 | `tools/scripts/test-model-eval-harness.mjs` | Deterministic pass/fail/skipped/malformed/empty-corpus harness controls |
 | `tools/scripts/prove-live-enhancements.mjs` | Mode-specific Redirect semantic acceptance |
 | Create `tests/evaluation/scenarios/core/redirect-*.json` | Fixed Redirect and pressure scenarios loaded through the harness's supported `core` pack |
@@ -1092,7 +1098,8 @@ The implementation is complete only when:
 6. Redirect verification cannot accept a missing, duplicate, failed, unclear, or bad-evidence required check.
 7. The OV-1 condensation candidate fails Redirect and creates no swipe.
 8. A valid materially redirected candidate creates and selects exactly one swipe.
-9. Private pressure metadata never appears in visible UI, final prose, Last Brief, the next host prompt, or journal details.
-10. The core-pack Redirect effectiveness corpus executes a real output judge; skipped or empty judge evidence fails strict mode.
-11. Focused tests, `npm.cmd test`, the model-effectiveness Redirect corpus, and the dedicated live Playwright proof pass.
-12. The served or installed SillyTavern extension copy is hash-checked before any live success claim.
+9. Reusing a verified Redirect selects the existing swipe and returns its persisted accepted marker without provider calls.
+10. Private pressure metadata never appears in visible UI, final prose, Last Brief, the next host prompt, or journal details.
+11. The core-pack Redirect effectiveness corpus executes a real output judge; skipped or empty judge evidence fails strict mode.
+12. Focused tests, `npm.cmd test`, the model-effectiveness Redirect corpus, and the dedicated live Playwright proof pass.
+13. The served or installed SillyTavern extension copy is hash-checked before any live success claim.

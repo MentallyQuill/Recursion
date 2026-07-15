@@ -186,6 +186,90 @@ function validateClaimList(value, known, { allowSourceDraft = false } = {}) {
   });
 }
 
+function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
+  const data = object(brief);
+  const known = evidenceMap(evidence);
+  const isSource = (id) => ['source-draft', 'source-negative'].includes(known.get(id)?.authority);
+  const list = (value) => Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+  const authoritative = (value) => {
+    const ids = list(value);
+    return ids.length > 0 && ids.length <= 8 && ids.every((id) => known.has(id) && !isSource(id));
+  };
+  const sourceOnly = (value) => {
+    const ids = list(value);
+    return ids.length > 0 && ids.length <= 8 && ids.every((id) => known.has(id) && isSource(id));
+  };
+  if (data.mode !== 'redirect') {
+    return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect diagnosis used the wrong brief mode.');
+  }
+  if (!Array.isArray(data.requiredBeats) || data.requiredBeats.length > 8
+    || !Array.isArray(data.forbiddenSourceBeats) || data.forbiddenSourceBeats.length > 8
+    || !Array.isArray(data.sceneCharacters) || data.sceneCharacters.length < 1 || data.sceneCharacters.length > 16
+    || !Array.isArray(data.characterPressure) || data.characterPressure.length < 1 || data.characterPressure.length > 16) {
+    return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect diagnosis collections are invalid.');
+  }
+
+  if (decision === 'no-change') {
+    if (data.sourceFailure !== null || data.replacementObjective !== null
+      || data.requiredBeats.length || data.forbiddenSourceBeats.length) {
+      return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect no-change cannot carry a replacement.');
+    }
+  } else {
+    if (!object(data.sourceFailure).category
+      || !REDIRECT_FAILURE_CATEGORIES.includes(data.sourceFailure.category)
+      || !safeText(data.sourceFailure.problem, MAX_CLAIM)
+      || !object(data.replacementObjective).summary
+      || !safeText(data.replacementObjective.summary, MAX_CLAIM)
+      || !data.requiredBeats.length
+      || !data.forbiddenSourceBeats.length
+      || data.requiredBeats.some((beat) => !safeText(beat?.summary, MAX_CLAIM))
+      || data.forbiddenSourceBeats.some((beat) => !safeText(beat?.summary, MAX_CLAIM))) {
+      return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a complete turn-level correction.');
+    }
+    if (!authoritative(data.sourceFailure.establishedEvidenceRefs)
+      || !sourceOnly(data.sourceFailure.conflictingSourceRefs)
+      || !authoritative(data.replacementObjective.evidenceRefs)
+      || data.requiredBeats.some((beat) => !authoritative(beat?.evidenceRefs))
+      || data.forbiddenSourceBeats.some((beat) => !sourceOnly(beat?.sourceRefs))) {
+      return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect evidence authority is invalid.');
+    }
+  }
+
+  const characters = data.sceneCharacters.map((entry) => safeText(entry?.character, 120));
+  const pressureCharacters = data.characterPressure.map((entry) => safeText(entry?.character, 120));
+  if (characters.some((name) => !name)
+    || pressureCharacters.some((name) => !name)
+    || new Set(characters).size !== characters.length
+    || new Set(pressureCharacters).size !== pressureCharacters.length
+    || hashJson([...characters].sort()) !== hashJson([...pressureCharacters].sort())) {
+    return fail(REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID, 'Redirect character coverage is invalid.');
+  }
+  if (data.sceneCharacters.some((entry) => !authoritative(entry?.evidenceRefs))) {
+    return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect scene character cited invalid evidence.');
+  }
+
+  for (const row of data.characterPressure) {
+    if (!safeText(row?.pressureReason, MAX_CLAIM) || !REDIRECT_PRESSURE_EFFECTS.includes(row?.sourcePressureEffect)) {
+      return fail(REDIRECT_ERROR_CODES.PRESSURE_INVALID, 'Redirect character pressure is invalid.');
+    }
+    if (row.immediateWant === null) {
+      if (list(row.wantEvidenceRefs).length
+        || list(row.sourceEvidenceRefs).length
+        || row.sourcePressureEffect !== 'unclear') {
+        return fail(REDIRECT_ERROR_CODES.PRESSURE_INVALID, 'Unclear character pressure cannot claim concrete evidence or effect.');
+      }
+      continue;
+    }
+    if (!safeText(row.immediateWant, MAX_CLAIM)) {
+      return fail(REDIRECT_ERROR_CODES.PRESSURE_INVALID, 'Redirect immediate want is invalid.');
+    }
+    if (!authoritative(row.wantEvidenceRefs) || !sourceOnly(row.sourceEvidenceRefs)) {
+      return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect character pressure cited invalid evidence.');
+    }
+  }
+  return { ok: true, value: data };
+}
+
 function canonicalDiagnosis(result) {
   return {
     schema: result.schema,
@@ -223,9 +307,14 @@ export function validateEditorialDiagnosis(result = {}, { mode = '', sourceText 
   if (data.schema !== EDITORIAL_DIAGNOSIS_SCHEMA) return fail('RECURSION_EDITORIAL_DIAGNOSIS_SCHEMA_MISMATCH', 'Editorial diagnosis returned the wrong schema.');
   if (data.mode !== mode || data.sourceHash !== sourceHash || data.snapshotHash !== snapshotHash) return fail('RECURSION_EDITORIAL_DIAGNOSIS_STALE', 'Editorial diagnosis does not match the frozen source.');
   if (!DIAGNOSIS_DECISIONS[data.mode]?.has(data.decision)) return fail('RECURSION_EDITORIAL_DIAGNOSIS_DECISION_INVALID', 'Editorial diagnosis returned an invalid decision for this mode.');
-  const briefResult = validateEditorialBrief(data.brief, buildEditorialEvidence(snapshot, sourceText));
+  const evidence = buildEditorialEvidence(snapshot, sourceText);
+  const briefResult = validateEditorialBrief(data.brief, evidence);
   if (!briefResult.ok) return briefResult;
-  return { ok: true, value: { ...data, brief: briefResult.value }, hash: editorialDiagnosisHash({ ...data, brief: briefResult.value }) };
+  const redirectResult = data.mode === 'redirect'
+    ? validateRedirectBrief(briefResult.value, evidence, data.decision)
+    : briefResult;
+  if (!redirectResult.ok) return redirectResult;
+  return { ok: true, value: { ...data, brief: redirectResult.value }, hash: editorialDiagnosisHash({ ...data, brief: redirectResult.value }) };
 }
 
 function cardOutcomeValidation(cardOutcomes, installedHand, known) {
@@ -322,6 +411,15 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
         'Return one complete corrected diagnosis object; do not discuss the correction.'
       ]
     : [];
+  const redirectRules = mode === 'redirect'
+    ? [
+        'Redirect is a turn-level correction, not a more aggressive Recompose.',
+        'Pair established non-source evidence with the conflicting source passages.',
+        'Define one supported replacement objective, required beats, and forbidden source beats.',
+        'List every character established as present by frozen evidence. Use null and unclear when an immediate want cannot be supported.',
+        'Character pressure is advisory evidence; do not require every character to speak or act.'
+      ]
+    : [];
   const prompt = [
     'Return only one valid Recursion Editorial Diagnosis JSON object.',
     `Selected mode: ${mode}.`,
@@ -331,6 +429,7 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
     'Repair changes only bounded spans. Recompose can replace the entire response while preserving its supported intent and direction. Redirect replaces an unsupported core intent or direction.',
     'For selected Recompose, choose proceed for repetition, slop, pacing, voice, phrasing, scene execution, or any defect fixable by a full rewrite that keeps the supported intent.',
     'Never choose requires-redirect only for repetition, verbosity, awkward execution, or other quality defects that Recompose can remove.',
+    ...redirectRules,
     ...(presentationEnvelope ? ['Preserve the presentation envelope exactly: keep the leading scene header unchanged and retain a blank line before body prose.'] : []),
     ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,

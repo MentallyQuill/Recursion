@@ -2,6 +2,7 @@ import {
   EDITORIAL_DIAGNOSIS_SCHEMA,
   EDITORIAL_PASS_SCHEMA,
   EDITORIAL_VERIFICATION_SCHEMA,
+  REDIRECT_ERROR_CODES,
   buildEditorialEvidence,
   buildEditorialDiagnosisRequest,
   buildEditorialPassRequest,
@@ -84,6 +85,103 @@ assertEqual(sourcePreservation.ok, false, 'source-draft cannot preserve a fact')
 const staleDiagnosis = validateEditorialDiagnosis(diagnosis, { mode: 'recompose', sourceText, sourceHash: 'stale', snapshotHash, snapshot });
 assertEqual(staleDiagnosis.error.code, 'RECURSION_EDITORIAL_DIAGNOSIS_STALE', 'stale diagnosis rejected');
 
+const validRedirectBrief = {
+  ...diagnosis.brief,
+  mode: 'redirect',
+  sourceFailure: {
+    category: 'turn-fulfillment',
+    problem: 'The source postpones the requested response.',
+    establishedEvidenceRefs: ['user:0', 'card:relationship'],
+    conflictingSourceRefs: ['source:0']
+  },
+  replacementObjective: {
+    summary: 'Answer the supported question in the current scene.',
+    evidenceRefs: ['user:0']
+  },
+  requiredBeats: [{ summary: 'Visibly engage the supported question.', evidenceRefs: ['user:0'] }],
+  forbiddenSourceBeats: [{ summary: 'Do not postpone the answer.', sourceRefs: ['source:0'] }],
+  sceneCharacters: [{ character: 'She', evidenceRefs: ['user:0'] }],
+  characterPressure: [{
+    character: 'She',
+    immediateWant: 'Learn who sent him.',
+    wantEvidenceRefs: ['user:0'],
+    sourcePressureEffect: 'increasing',
+    sourceEvidenceRefs: ['source:0'],
+    pressureReason: 'The source evades her explicit question.'
+  }]
+};
+const redirectDiagnosis = (brief = validRedirectBrief, decision = 'proceed') => ({
+  ...diagnosis,
+  mode: 'redirect',
+  decision,
+  brief
+});
+const redirectFixture = { mode: 'redirect', sourceText, sourceHash, snapshotHash, snapshot };
+const validRedirectDiagnosis = validateEditorialDiagnosis(redirectDiagnosis(), redirectFixture);
+assertEqual(validRedirectDiagnosis.ok, true, 'complete Redirect diagnosis passes');
+const missingRedirectObjective = validateEditorialDiagnosis(redirectDiagnosis({ ...validRedirectBrief, replacementObjective: null }), redirectFixture);
+assertEqual(missingRedirectObjective.error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires replacement objective');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({ ...validRedirectBrief, requiredBeats: [] }), redirectFixture).error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a supported beat');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({ ...validRedirectBrief, forbiddenSourceBeats: [] }), redirectFixture).error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a forbidden source beat');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  sourceFailure: { ...validRedirectBrief.sourceFailure, establishedEvidenceRefs: ['source:0'] }
+}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'source draft cannot establish the source failure truth');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  sourceFailure: { ...validRedirectBrief.sourceFailure, conflictingSourceRefs: ['user:0'] }
+}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'source failure conflict must cite source evidence');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  replacementObjective: { ...validRedirectBrief.replacementObjective, evidenceRefs: ['source:0'] }
+}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'source draft cannot establish a replacement objective');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  sceneCharacters: [...validRedirectBrief.sceneCharacters, { character: 'She', evidenceRefs: ['user:0'] }]
+}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID, 'Redirect character coverage rejects duplicate characters');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  characterPressure: [{ ...validRedirectBrief.characterPressure[0], character: 'He' }]
+}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID, 'Redirect pressure coverage must match scene characters');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  sceneCharacters: [{ character: ' ', evidenceRefs: ['user:0'] }],
+  characterPressure: [{ ...validRedirectBrief.characterPressure[0], character: ' ' }]
+}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID, 'Redirect character names cannot be empty');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  characterPressure: [{ ...validRedirectBrief.characterPressure[0], wantEvidenceRefs: ['source:0'] }]
+}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'source draft cannot establish a character want');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  characterPressure: [{ ...validRedirectBrief.characterPressure[0], sourceEvidenceRefs: ['user:0'] }]
+}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'pressure effect must cite source evidence');
+const unclearPressureBrief = {
+  ...validRedirectBrief,
+  characterPressure: [{
+    character: 'She',
+    immediateWant: null,
+    wantEvidenceRefs: [],
+    sourcePressureEffect: 'unclear',
+    sourceEvidenceRefs: [],
+    pressureReason: 'Frozen evidence does not establish an immediate want.'
+  }]
+};
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis(unclearPressureBrief), redirectFixture).ok, true, 'unclear want remains valid without invention');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+  ...unclearPressureBrief,
+  characterPressure: [{ ...unclearPressureBrief.characterPressure[0], sourcePressureEffect: 'increasing' }]
+}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.PRESSURE_INVALID, 'unclear want cannot claim a concrete pressure effect');
+const noChangeRedirectBrief = {
+  ...unclearPressureBrief,
+  sourceFailure: null,
+  replacementObjective: null,
+  requiredBeats: [],
+  forbiddenSourceBeats: []
+};
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis(noChangeRedirectBrief, 'no-change'), redirectFixture).ok, true, 'Redirect no-change permits an unclear pressure map');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({ ...noChangeRedirectBrief, sourceFailure: validRedirectBrief.sourceFailure }, 'no-change'), redirectFixture).error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect no-change cannot carry a source failure');
+
 const passValidation = validateEditorialPass(candidate, { mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot });
 assertEqual(passValidation.ok, true, 'full Recompose candidate passes without edit ratio cap');
 const repairCandidate = validateEditorialPass({ ...candidate, mode: 'repair' }, { mode: 'repair', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot, targets: {} });
@@ -136,6 +234,11 @@ assert(diagnosisRequest.prompt.includes('Recompose can replace the entire respon
 assert(diagnosisRequest.prompt.includes('Never choose requires-redirect only for repetition'), 'diagnosis prompt prevents slop-only redirect misclassification');
 assertEqual(diagnosisRequest.responseLength, undefined, 'diagnosis inherits the selected provider lane max tokens');
 assertDeepEqual(diagnosisRequest.validEvidenceIds, evidence.map((entry) => entry.id), 'diagnosis request exposes the frozen evidence ids as structured provider fields');
+const redirectDiagnosisRequest = buildEditorialDiagnosisRequest({ mode: 'redirect', sourceText, sourceHash, snapshotHash, snapshot, lane: 'reasoner' });
+assert(redirectDiagnosisRequest.prompt.includes('Redirect is a turn-level correction, not a more aggressive Recompose.'), 'Redirect diagnosis prompt distinguishes trajectory from prose quality');
+assert(redirectDiagnosisRequest.prompt.includes('Pair established non-source evidence with the conflicting source passages.'), 'Redirect diagnosis prompt requires paired evidence');
+assert(redirectDiagnosisRequest.prompt.includes('Use null and unclear when an immediate want cannot be supported.'), 'Redirect diagnosis prompt forbids invented wants');
+assert(redirectDiagnosisRequest.prompt.includes('Character pressure is advisory evidence'), 'Redirect diagnosis prompt keeps pressure advisory');
 const passRequest = buildEditorialPassRequest({ mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosis, evidence, snapshot, lane: 'reasoner' });
 assert(passRequest.prompt.includes('The diagnosis below is authoritative.'), 'transform prompt pins diagnosis');
 assert(passRequest.prompt.includes('one complete candidate'), 'transform prompt allows full rewrite');

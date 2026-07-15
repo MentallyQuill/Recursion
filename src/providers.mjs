@@ -17,6 +17,8 @@ import {
 } from './providers/structured-output-parser.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 import {
+  EDITORIAL_EFFECTIVENESS_SCHEMA,
+  REDIRECT_EFFECTIVENESS_CRITERIA,
   REDIRECT_FAILURE_CATEGORIES,
   REDIRECT_PRESSURE_EFFECTS,
   REDIRECT_VERIFICATION_CHECKS
@@ -55,10 +57,11 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'editorialDiagnostician',
   'editorialTransformer',
   'editorialVerifier',
+  'editorialEffectivenessJudge',
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
-export const PROVIDER_CONTRACT_VERSION = 3;
+export const PROVIDER_CONTRACT_VERSION = 4;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.card.v1',
@@ -80,6 +83,7 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   editorialDiagnostician: 'recursion.editorialDiagnosis.v1',
   editorialTransformer: 'recursion.editorialPass.v1',
   editorialVerifier: 'recursion.editorialVerification.v1',
+  editorialEffectivenessJudge: EDITORIAL_EFFECTIVENESS_SCHEMA,
   reasonerComposer: 'recursion.reasonerComposer.v1',
   providerTest: 'recursion.providerTest.v1'
 });
@@ -639,6 +643,41 @@ export function machineJsonSchemaForRequest(request = {}) {
       }
     };
   }
+  if (schema === EDITORIAL_EFFECTIVENESS_SCHEMA) {
+    const scenarioId = String(request?.scenarioId || '').trim();
+    const sourceHash = String(request?.sourceHash || '').trim();
+    const candidateHash = String(request?.candidateHash || '').trim();
+    return {
+      name: schemaSafeName(schema),
+      schema: {
+        type: 'object',
+        properties: {
+          schema: { const: schema },
+          scenarioId: scenarioId ? { const: scenarioId } : { type: 'string' },
+          sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
+          candidateHash: candidateHash ? { const: candidateHash } : { type: 'string' },
+          decision: { enum: ['pass', 'fail'] },
+          criteria: {
+            type: 'array',
+            minItems: REDIRECT_EFFECTIVENESS_CRITERIA.length,
+            maxItems: REDIRECT_EFFECTIVENESS_CRITERIA.length,
+            items: {
+              type: 'object',
+              properties: {
+                criterion: { enum: [...REDIRECT_EFFECTIVENESS_CRITERIA] },
+                status: { enum: ['pass', 'fail'] },
+                reason: { type: 'string' }
+              },
+              required: ['criterion', 'status', 'reason'],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ['schema', 'scenarioId', 'sourceHash', 'candidateHash', 'decision', 'criteria'],
+        additionalProperties: false
+      }
+    };
+  }
   const properties = {
     schema: { const: schema }
   };
@@ -679,6 +718,14 @@ function validateRoleResponseSchema(roleId, data) {
 
 function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
   if (!plainObject(data)) return data;
+  if (roleId === 'editorialEffectivenessJudge') {
+    return {
+      ...data,
+      scenarioId: String(request?.scenarioId || '').trim(),
+      sourceHash: String(request?.sourceHash || '').trim(),
+      candidateHash: String(request?.candidateHash || '').trim()
+    };
+  }
   if (['editorialDiagnostician', 'editorialTransformer', 'editorialVerifier'].includes(roleId)) {
     const normalized = { ...data };
     for (const field of ['sourceHash', 'snapshotHash']) {

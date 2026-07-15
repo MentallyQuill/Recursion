@@ -1,6 +1,7 @@
 import {
   REASONER_ROLE_IDS,
   UTILITY_ROLE_IDS,
+  PROVIDER_CONTRACT_VERSION,
   createGenerationRouter,
   createProviderClient,
   fetchOpenAICompatibleModels,
@@ -87,11 +88,13 @@ const expectedUtilityRoles = [
   'editorialDiagnostician',
   'editorialTransformer',
   'editorialVerifier',
+  'editorialEffectivenessJudge',
   'providerTest'
 ];
 assertDeepEqual(UTILITY_ROLE_IDS, expectedUtilityRoles, 'utility role catalog exactly matches Task 6 plan');
 assert(!UTILITY_ROLE_IDS.includes('briefUtilityComposer'), 'old brief utility composer role is removed');
 assertDeepEqual(REASONER_ROLE_IDS, ['reasonerComposer'], 'reasoner role catalog exactly matches Task 6 plan');
+assertEqual(PROVIDER_CONTRACT_VERSION, 4, 'provider contract version advances for the effectiveness judge role');
 for (const utilityRole of expectedUtilityRoles) {
   assertEqual(roleLane(utilityRole), 'utility', `${utilityRole} uses utility lane`);
 }
@@ -242,6 +245,9 @@ await router.generate('editorialTransformer', { prompt: 'Editorial transform' })
 assertEqual(calls.at(-1).responseSchema, 'recursion.editorialPass.v1', 'editorialTransformer request carries pass schema');
 await router.generate('editorialVerifier', { prompt: 'Editorial verify' });
 assertEqual(calls.at(-1).responseSchema, 'recursion.editorialVerification.v1', 'editorialVerifier request carries verifier schema');
+await router.generate('editorialEffectivenessJudge', { prompt: 'Redirect effectiveness' });
+assertEqual(calls.at(-1).lane, 'utility', 'editorialEffectivenessJudge uses Utility lane');
+assertEqual(calls.at(-1).responseSchema, 'recursion.redirectEffectivenessJudge.v1', 'editorialEffectivenessJudge request carries independent judge schema');
 await router.generate('fusedCardBundle', { prompt: 'Fused card bundle', snapshotHash: 'fused-provider-hash' });
 assertEqual(calls.at(-1).lane, 'utility', 'fusedCardBundle uses utility lane by default');
 assertEqual(calls.at(-1).responseSchema, 'recursion.cardBundle.v1', 'fusedCardBundle request carries card-bundle response schema');
@@ -389,6 +395,26 @@ assertDeepEqual(
   'Redirect verifier schema freezes the eight semantic checks'
 );
 assertEqual(redirectVerifierMachineSchema.schema.additionalProperties, false, 'Redirect verifier rejects undeclared output fields');
+const redirectEffectivenessMachineSchema = machineJsonSchemaForRequest({
+  responseSchema: 'recursion.redirectEffectivenessJudge.v1',
+  machineJson: true,
+  scenarioId: 'redirect-turn-deferral',
+  sourceHash: 'effectiveness-source-hash',
+  candidateHash: 'effectiveness-candidate-hash'
+});
+assertDeepEqual(
+  redirectEffectivenessMachineSchema.schema.required,
+  ['schema', 'scenarioId', 'sourceHash', 'candidateHash', 'decision', 'criteria'],
+  'effectiveness judge schema requires frozen identity and criteria'
+);
+assertEqual(redirectEffectivenessMachineSchema.schema.properties.criteria.minItems, 4, 'effectiveness judge requires all four criteria');
+assertEqual(redirectEffectivenessMachineSchema.schema.properties.criteria.maxItems, 4, 'effectiveness judge cannot add criteria');
+assertDeepEqual(
+  redirectEffectivenessMachineSchema.schema.properties.criteria.items.properties.criterion.enum,
+  ['replacement-objective', 'forbidden-source-beats', 'character-pressure', 'evidence-and-constraints'],
+  'effectiveness judge schema freezes independent criterion names'
+);
+assertEqual(redirectEffectivenessMachineSchema.schema.additionalProperties, false, 'effectiveness judge rejects undeclared fields');
 
 const editorialIdentityRouter = createGenerationRouter({
   client: {

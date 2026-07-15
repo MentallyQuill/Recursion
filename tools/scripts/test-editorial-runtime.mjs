@@ -726,4 +726,53 @@ await missingDirectionRedirect.runtime.updateSettings({ reasoningLevel: 'medium'
 const missingDirectionResult = await missingDirectionRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-missing-direction-test' });
 assertEqual(missingDirectionResult.error?.code, REDIRECT_ERROR_CODES.CHANGE_MISSING, 'runtime preserves missing Redirect trajectory error code');
 assertEqual(missingDirectionRedirect.state.appended.length, 0, 'missing Redirect trajectory adds no swipe');
+
+const effectivenessCalls = [];
+const effectivenessRuntime = createRecursionRuntime({
+  host: {},
+  settingsStore: createSettingsStore({ root: {} }),
+  storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
+  activity: createActivityReporter(),
+  generationRouter: {
+    async generate(roleId, request) {
+      effectivenessCalls.push({ roleId, request });
+      return {
+        ok: true,
+        data: {
+          schema: 'recursion.redirectEffectivenessJudge.v1',
+          scenarioId: request.scenarioId,
+          sourceHash: request.sourceHash,
+          candidateHash: request.candidateHash,
+          decision: 'pass',
+          criteria: ['replacement-objective', 'forbidden-source-beats', 'character-pressure', 'evidence-and-constraints'].map((criterion) => ({
+            criterion,
+            status: 'pass',
+            reason: 'Independent criterion passed.'
+          }))
+        },
+        diagnostics: { providerId: 'judge-provider', model: 'judge-model' }
+      };
+    }
+  }
+});
+assertEqual(typeof effectivenessRuntime.evaluateRedirectEffectiveness, 'function', 'runtime exposes narrow Redirect effectiveness method');
+const effectivenessResult = await effectivenessRuntime.evaluateRedirectEffectiveness({
+  scenarioId: 'redirect-turn-deferral',
+  oracle: {
+    expectedDecision: 'proceed',
+    replacementObjective: 'Begin the test now.',
+    requiredBeats: ['Carter engages the test.'],
+    forbiddenSourceBeats: ['Postpone the test.'],
+    pressureExpectations: [{ character: 'Carter', effect: 'increasing', responseRequired: false }]
+  },
+  sourceText: redirectSource,
+  candidateText: redirectCandidateText,
+  marker: acceptedRedirectResult.marker
+});
+assertEqual(effectivenessCalls.length, 1, 'runtime makes exactly one independent judge call');
+assertEqual(effectivenessCalls[0].roleId, 'editorialEffectivenessJudge', 'runtime routes independent judge through its internal role');
+assertEqual(effectivenessCalls[0].request.lane, 'utility', 'runtime routes effectiveness judge through Utility');
+assertEqual(effectivenessResult.ok, true, 'runtime validates independent judge result');
+assertEqual(effectivenessResult.diagnostics.providerId, 'judge-provider', 'runtime returns judge provider diagnostics');
+assertEqual(effectivenessResult.diagnostics.model, 'judge-model', 'runtime returns judge model diagnostics');
 console.log('[pass] editorial runtime');

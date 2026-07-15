@@ -61,6 +61,7 @@ import {
 } from './generation-review.mjs';
 import {
   applyEditorialArtifact,
+  buildRedirectEffectivenessRequest,
   buildEditorialDiagnosisRequest,
   buildEditorialEvidence,
   buildEditorialPassRequest,
@@ -69,7 +70,8 @@ import {
   editorialVerificationRequired,
   validateEditorialDiagnosis,
   validateEditorialPass,
-  validateEditorialVerification
+  validateEditorialVerification,
+  validateRedirectEffectiveness
 } from './editorial-transform.mjs';
 import { buildDiagnosticsPayload } from './runtime/diagnostics.mjs';
 import {
@@ -6846,6 +6848,49 @@ export function createRecursionRuntime({
     }
   }
 
+  async function evaluateRedirectEffectiveness(input = {}) {
+    if (!generationRouter || typeof generationRouter.generate !== 'function') {
+      return {
+        ok: false,
+        error: { code: 'RECURSION_REDIRECT_EFFECTIVENESS_UNAVAILABLE', message: 'Redirect effectiveness judge is unavailable.' },
+        diagnostics: {}
+      };
+    }
+    const request = buildRedirectEffectivenessRequest({ ...asObject(input), lane: 'utility' });
+    const runId = safeText(input?.runId || makeId('redirect-eval'), 180);
+    try {
+      const response = await generationRouter.generate('editorialEffectivenessJudge', request, {
+        runId,
+        timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
+        retryCount: 0
+      });
+      const diagnostics = {
+        providerId: safeText(response?.diagnostics?.providerId || response?.providerId || '', 160),
+        model: safeText(response?.diagnostics?.model || response?.model || '', 160)
+      };
+      if (response?.ok !== true) {
+        return {
+          ok: false,
+          error: response?.error || { code: 'RECURSION_REDIRECT_EFFECTIVENESS_FAILED', message: 'Redirect effectiveness judge failed.' },
+          diagnostics
+        };
+      }
+      return {
+        ...validateRedirectEffectiveness(response.data, request),
+        diagnostics
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: safeText(error?.code || 'RECURSION_REDIRECT_EFFECTIVENESS_FAILED', 120),
+          message: safeText(error?.message || error || 'Redirect effectiveness judge failed.', 300)
+        },
+        diagnostics: {}
+      };
+    }
+  }
+
   return {
     storage,
     prepareForGeneration,
@@ -6878,6 +6923,7 @@ export function createRecursionRuntime({
     clearProviderKey,
     fetchProviderModels,
     testProvider,
+    evaluateRedirectEffectiveness,
     recommendCardDraft,
     listProviderConnectionProfiles: listProviderConnectionProfilesForUi,
     resetSceneCache,

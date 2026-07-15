@@ -3,6 +3,7 @@ import { compact, hashJson, truncate } from './core.mjs';
 export const EDITORIAL_DIAGNOSIS_SCHEMA = 'recursion.editorialDiagnosis.v1';
 export const EDITORIAL_PASS_SCHEMA = 'recursion.editorialPass.v1';
 export const EDITORIAL_VERIFICATION_SCHEMA = 'recursion.editorialVerification.v1';
+export const EDITORIAL_EFFECTIVENESS_SCHEMA = 'recursion.redirectEffectivenessJudge.v1';
 export const EDITORIAL_EVIDENCE_VERSION = 'v1';
 export const REDIRECT_FAILURE_CATEGORIES = Object.freeze([
   'turn-fulfillment',
@@ -27,6 +28,12 @@ export const REDIRECT_VERIFICATION_CHECKS = Object.freeze([
   'hard-constraints-preserved',
   'user-turn-answered',
   'unsupported-facts-absent'
+]);
+export const REDIRECT_EFFECTIVENESS_CRITERIA = Object.freeze([
+  'replacement-objective',
+  'forbidden-source-beats',
+  'character-pressure',
+  'evidence-and-constraints'
 ]);
 export const REDIRECT_ERROR_CODES = Object.freeze({
   BRIEF_INVALID: 'RECURSION_EDITORIAL_REDIRECT_BRIEF_INVALID',
@@ -610,6 +617,109 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
 export function editorialVerificationRequired(mode = '', reasoningLevel = '') {
   if (mode === 'redirect') return true;
   return mode === 'recompose' && ['high', 'ultra'].includes(String(reasoningLevel || '').toLowerCase());
+}
+
+export function buildRedirectEffectivenessRequest({
+  scenarioId = '',
+  oracle = {},
+  snapshot = {},
+  evidence = [],
+  sourceText = '',
+  candidateText = '',
+  marker = {},
+  lane = 'utility'
+} = {}) {
+  const source = preservedText(sourceText, MAX_SOURCE);
+  const candidate = preservedText(candidateText, MAX_CANDIDATE);
+  const sourceHash = hashJson(source);
+  const candidateHash = hashJson(candidate);
+  const markerSummary = {
+    mode: safeText(marker?.mode, 40),
+    verification: safeText(marker?.verification, 40),
+    sourceHash: safeText(marker?.sourceHash, 180),
+    snapshotHash: safeText(marker?.snapshotHash, 180),
+    diagnosisHash: safeText(marker?.diagnosisHash, 180),
+    candidateHash: safeText(marker?.candidateHash, 180),
+    changeLedger: array(marker?.changeLedger).map((entry) => ({
+      kind: safeText(entry?.kind, 80),
+      summary: safeText(entry?.summary, MAX_CLAIM),
+      evidenceRefs: array(entry?.evidenceRefs).map((id) => safeText(id, 120)).filter(Boolean)
+    }))
+  };
+  const prompt = [
+    'Act as an independent effectiveness judge for one Recursion Redirect result.',
+    'Evaluate trajectory and frozen evidence, not lexical edit distance or prose polish.',
+    'Do not trust the production marker, verifier, or ledger self-report; use them only as identity and audit context.',
+    'Return each required criterion exactly once. Decision pass requires every criterion to pass.',
+    `<scenario_id>${safeText(scenarioId, 180)}</scenario_id>`,
+    `<source_hash>${sourceHash}</source_hash>`,
+    `<candidate_hash>${candidateHash}</candidate_hash>`,
+    `<oracle>${JSON.stringify(object(oracle))}</oracle>`,
+    `<frozen_snapshot>${JSON.stringify(object(snapshot))}</frozen_snapshot>`,
+    `<frozen_evidence>${JSON.stringify(array(evidence))}</frozen_evidence>`,
+    `<production_marker_summary>${JSON.stringify(markerSummary)}</production_marker_summary>`,
+    `<source_json>${JSON.stringify(source)}</source_json>`,
+    `<candidate_json>${JSON.stringify(candidate)}</candidate_json>`
+  ].join('\n');
+  return {
+    ...requestBase(EDITORIAL_EFFECTIVENESS_SCHEMA, prompt, lane),
+    reasoningCategory: 'editorial-effectiveness',
+    scenarioId: safeText(scenarioId, 180),
+    sourceHash,
+    candidateHash,
+    oracle: object(oracle),
+    snapshot: object(snapshot),
+    evidence: array(evidence),
+    sourceText: source,
+    candidateText: candidate,
+    marker: markerSummary
+  };
+}
+
+export function validateRedirectEffectiveness(result = {}, {
+  scenarioId = '', sourceHash = '', candidateHash = ''
+} = {}) {
+  const data = object(result);
+  if (data.schema !== EDITORIAL_EFFECTIVENESS_SCHEMA
+    || data.scenarioId !== scenarioId
+    || data.sourceHash !== sourceHash
+    || data.candidateHash !== candidateHash) {
+    return fail('RECURSION_REDIRECT_EFFECTIVENESS_STALE', 'Redirect effectiveness result does not match the judged candidate.');
+  }
+  if (!['pass', 'fail'].includes(data.decision)) {
+    return fail('RECURSION_REDIRECT_EFFECTIVENESS_INVALID', 'Redirect effectiveness decision must be pass or fail.');
+  }
+  if (!Array.isArray(data.criteria) || data.criteria.length !== REDIRECT_EFFECTIVENESS_CRITERIA.length) {
+    return fail('RECURSION_REDIRECT_EFFECTIVENESS_CRITERIA_INVALID', 'Redirect effectiveness criterion coverage is incomplete.');
+  }
+  const byName = new Map();
+  for (const entry of data.criteria) {
+    if (!REDIRECT_EFFECTIVENESS_CRITERIA.includes(entry?.criterion)
+      || byName.has(entry.criterion)
+      || !['pass', 'fail'].includes(entry?.status)
+      || !safeText(entry?.reason, 600)) {
+      return fail('RECURSION_REDIRECT_EFFECTIVENESS_CRITERIA_INVALID', 'Redirect effectiveness returned an invalid or duplicate criterion.');
+    }
+    byName.set(entry.criterion, {
+      criterion: entry.criterion,
+      status: entry.status,
+      reason: safeText(entry.reason, 600)
+    });
+  }
+  if (REDIRECT_EFFECTIVENESS_CRITERIA.some((criterion) => !byName.has(criterion))) {
+    return fail('RECURSION_REDIRECT_EFFECTIVENESS_CRITERIA_INVALID', 'Redirect effectiveness omitted a required criterion.');
+  }
+  if (data.decision === 'pass' && [...byName.values()].some((entry) => entry.status !== 'pass')) {
+    return fail('RECURSION_REDIRECT_EFFECTIVENESS_ACCEPT_INVALID', 'Redirect effectiveness cannot pass a failed criterion.');
+  }
+  return {
+    ok: true,
+    scenarioId: data.scenarioId,
+    sourceHash: data.sourceHash,
+    candidateHash: data.candidateHash,
+    decision: data.decision,
+    criteria: [...byName.values()]
+  };
 }
 
 export function editorialPassKey({ chatKey = '', messageId = '', swipeId = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', mode = '', applyMode = '', verificationRequired = false } = {}) {

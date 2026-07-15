@@ -366,6 +366,52 @@ const rejectedRedirectVerification = validateEditorialVerification({ ...redirect
 assertEqual(rejectedRedirectVerification.ok, true, 'structurally valid Redirect rejection remains a valid verifier result');
 assertEqual(rejectedRedirectVerification.decision, 'reject', 'Redirect rejection preserves verifier decision');
 
+assertEqual(editorialTransform.EDITORIAL_EFFECTIVENESS_SCHEMA, 'recursion.redirectEffectivenessJudge.v1', 'Redirect effectiveness schema is stable');
+assertDeepEqual(
+  editorialTransform.REDIRECT_EFFECTIVENESS_CRITERIA,
+  ['replacement-objective', 'forbidden-source-beats', 'character-pressure', 'evidence-and-constraints'],
+  'Redirect effectiveness judge uses four independent criteria'
+);
+assertEqual(typeof editorialTransform.buildRedirectEffectivenessRequest, 'function', 'Redirect effectiveness request builder is exported');
+assertEqual(typeof editorialTransform.validateRedirectEffectiveness, 'function', 'Redirect effectiveness validator is exported');
+const effectivenessRequest = editorialTransform.buildRedirectEffectivenessRequest({
+  scenarioId: 'redirect-turn-deferral',
+  oracle: {
+    expectedDecision: 'proceed',
+    replacementObjective: 'Begin the supported test now.',
+    requiredBeats: ['Carter engages the test.'],
+    forbiddenSourceBeats: ['Postpone the test.'],
+    pressureExpectations: [{ character: 'Carter', effect: 'increasing', responseRequired: false }]
+  },
+  snapshot,
+  evidence,
+  sourceText,
+  candidateText: redirectCandidate.candidate.text,
+  marker: { mode: 'redirect', verification: 'accept', candidateHash: redirectCandidateHash }
+});
+assertEqual(effectivenessRequest.sourceHash, hashJson(sourceText), 'effectiveness request hashes the frozen source');
+assertEqual(effectivenessRequest.candidateHash, redirectCandidateHash, 'effectiveness request hashes the judged candidate');
+assert(effectivenessRequest.prompt.includes('independent effectiveness judge'), 'effectiveness prompt does not replay the production verifier');
+assert(effectivenessRequest.prompt.includes('Do not trust the production marker'), 'effectiveness prompt treats marker claims as untrusted evidence');
+const passingEffectivenessCriteria = editorialTransform.REDIRECT_EFFECTIVENESS_CRITERIA.map((criterion) => ({
+  criterion,
+  status: 'pass',
+  reason: 'The candidate meets this independent criterion.'
+}));
+const validEffectiveness = {
+  schema: editorialTransform.EDITORIAL_EFFECTIVENESS_SCHEMA,
+  scenarioId: effectivenessRequest.scenarioId,
+  sourceHash: effectivenessRequest.sourceHash,
+  candidateHash: effectivenessRequest.candidateHash,
+  decision: 'pass',
+  criteria: passingEffectivenessCriteria
+};
+assertEqual(editorialTransform.validateRedirectEffectiveness(validEffectiveness, effectivenessRequest).ok, true, 'complete independent judge result passes');
+assertEqual(editorialTransform.validateRedirectEffectiveness({ ...validEffectiveness, criteria: passingEffectivenessCriteria.slice(1) }, effectivenessRequest).ok, false, 'missing effectiveness criterion fails');
+assertEqual(editorialTransform.validateRedirectEffectiveness({ ...validEffectiveness, candidateHash: 'stale' }, effectivenessRequest).ok, false, 'effectiveness judge binds candidate hash');
+assertEqual(editorialTransform.validateRedirectEffectiveness({ ...validEffectiveness, criteria: [...passingEffectivenessCriteria.slice(0, -1), passingEffectivenessCriteria[0]] }, effectivenessRequest).ok, false, 'duplicate effectiveness criterion fails');
+assertEqual(editorialTransform.validateRedirectEffectiveness({ ...validEffectiveness, criteria: passingEffectivenessCriteria.map((entry, index) => index ? entry : { ...entry, status: 'fail' }) }, effectivenessRequest).ok, false, 'judge cannot report pass with a failed criterion');
+
 assertDeepEqual(applyEditorialArtifact(sourceText, { kind: 'candidate', mode: 'recompose', text: candidate.candidate.text }), candidate.candidate.text, 'candidate application returns full text');
 assert(editorialPassKey({ chatKey: 'chat', messageId: 1, sourceHash, snapshotHash, mode: 'recompose' }) !== editorialPassKey({ chatKey: 'chat', messageId: 1, sourceHash, snapshotHash, mode: 'repair' }), 'mode changes cache identity');
 

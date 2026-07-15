@@ -138,6 +138,42 @@ function normalizeLastBriefStatus(value, hasCards = false, hasPacket = false) {
   return hasCards || hasPacket ? 'ready' : 'empty';
 }
 
+function publicEditorialResult(value) {
+  const source = asObject(value);
+  if (!Object.keys(source).length) return null;
+  const claimLedger = (entries) => (Array.isArray(entries) ? entries : []).map((entry) => ({
+    claim: cleanText(entry?.claim),
+    evidenceRefs: (Array.isArray(entry?.evidenceRefs) ? entry.evidenceRefs : []).map((id) => cleanText(id)).filter(Boolean)
+  }));
+  const changeLedger = (Array.isArray(source.changeLedger) ? source.changeLedger : []).map((entry) => ({
+    kind: cleanText(entry?.kind),
+    summary: cleanText(entry?.summary),
+    evidenceRefs: (Array.isArray(entry?.evidenceRefs) ? entry.evidenceRefs : []).map((id) => cleanText(id)).filter(Boolean)
+  }));
+  const cardOutcomes = (Array.isArray(source.cardOutcomes) ? source.cardOutcomes : []).map((entry) => ({
+    cardId: cleanText(entry?.cardId),
+    status: cleanText(entry?.status),
+    evidenceRefs: (Array.isArray(entry?.evidenceRefs) ? entry.evidenceRefs : []).map((id) => cleanText(id)).filter(Boolean)
+  }));
+  return {
+    mode: cleanText(source.mode),
+    status: cleanText(source.status),
+    outcome: cleanText(source.outcome),
+    applyMode: cleanText(source.applyMode),
+    verification: cleanText(source.verification),
+    decision: cleanText(source.decision),
+    errorCode: cleanText(source.errorCode),
+    candidateHash: cleanText(source.candidateHash),
+    diagnosisHash: cleanText(source.diagnosisHash),
+    redirectCharacterCount: Math.max(0, Math.floor(Number(source.redirectCharacterCount) || 0)),
+    redirectRequiredBeatCount: Math.max(0, Math.floor(Number(source.redirectRequiredBeatCount) || 0)),
+    preservationLedger: claimLedger(source.preservationLedger),
+    changeLedger,
+    riskFlags: (Array.isArray(source.riskFlags) ? source.riskFlags : []).map((flag) => cleanText(flag)).filter(Boolean),
+    cardOutcomes
+  };
+}
+
 function integerInRange(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
@@ -288,7 +324,7 @@ export function createRecursionViewModel(view = {}) {
     lastBriefCoverageStatus: cleanText(source.lastBrief?.coverageStatus || 'none', 'none'),
     lastBriefMissingSourceCardCount: Math.max(0, Math.floor(Number(source.lastBrief?.missingSourceCardCount) || 0)),
     lastCacheDecision: source.lastCacheDecision || null,
-    editorialResult: source.editorialResult || null,
+    editorialResult: publicEditorialResult(source.editorialResult),
     contextContract: source.contextContract || null,
     enabled,
     modeLabel: modeLabel(mode),

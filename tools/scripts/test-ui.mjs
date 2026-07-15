@@ -100,6 +100,29 @@ assertEqual(model.lastBriefCoverageStatus, 'missing', 'Last Brief exposes source
 assertEqual(model.lastBriefMissingSourceCardCount, 1, 'Last Brief exposes missing source count');
 assertEqual(model.composerLabel, 'Utility', 'composer label built');
 assertEqual(model.tooltipsEnabled, true, 'view model defaults tooltip hover help on');
+const privateRedirectSentinel = 'PRIVATE_REDIRECT_PRESSURE_SENTINEL';
+const privateRedirectModel = createRecursionViewModel({
+  settings: { mode: 'auto' },
+  editorialResult: {
+    mode: 'redirect',
+    status: 'success',
+    outcome: 'applied',
+    verification: 'accept',
+    candidateHash: 'candidate-safe-hash',
+    diagnosisHash: 'diagnosis-safe-hash',
+    preservationLedger: [],
+    changeLedger: [{ kind: 'redirect', summary: 'Safe public ledger summary.', evidenceRefs: ['user:0'] }],
+    cardOutcomes: [],
+    redirect: {
+      characterPressure: [{ character: 'Carter', pressureReason: privateRedirectSentinel }]
+    }
+  },
+  activity: { phase: 'settled', severity: 'success' }
+});
+assertEqual(privateRedirectModel.editorialResult.mode, 'redirect', 'UI projection preserves safe Editorial status fields');
+assertEqual(privateRedirectModel.editorialResult.candidateHash, 'candidate-safe-hash', 'UI projection preserves safe Editorial hashes');
+assertEqual(Object.prototype.hasOwnProperty.call(privateRedirectModel.editorialResult, 'redirect'), false, 'UI projection removes private Redirect audit fields');
+assert(!JSON.stringify(privateRedirectModel).includes(privateRedirectSentinel), 'UI view model cannot expose private Redirect pressure text');
 const retainedBriefModel = createRecursionViewModel({
   settings: { mode: 'auto' },
   lastHand: { cards: [] },

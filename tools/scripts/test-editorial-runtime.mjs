@@ -486,6 +486,7 @@ assertEqual(noChangeMessage.text, noChangeSource, 'validated no-change diagnosis
 
 const redirectSource = 'Carter considered the request, but postponed the test until later.';
 const redirectCandidateText = 'Carter tightened her grip on the mug. "Then we test it here," she said, holding Will to the immediate question.';
+const privateRedirectSentinel = 'PRIVATE_REDIRECT_PRESSURE_SENTINEL';
 function createRedirectHarness({
   verifierDecision = 'accept',
   verifierChecks = null,
@@ -493,7 +494,8 @@ function createRedirectHarness({
   changeSourceAfterVerifier = false,
   cachedMarkerFactory = null,
   diagnosisOverride = null,
-  candidateOverride = null
+  candidateOverride = null,
+  pressureReason = 'The source blocks the immediate test.'
 } = {}) {
   const state = {
     calls: [],
@@ -584,7 +586,7 @@ function createRedirectHarness({
               wantEvidenceRefs: ['message:47'],
               sourcePressureEffect: 'increasing',
               sourceEvidenceRefs: ['source:0'],
-              pressureReason: 'The source blocks the immediate test.'
+              pressureReason
             }]
           }
         };
@@ -641,7 +643,7 @@ function createRedirectHarness({
   return { runtime, state, storage };
 }
 
-const acceptedRedirect = createRedirectHarness();
+const acceptedRedirect = createRedirectHarness({ pressureReason: privateRedirectSentinel });
 await acceptedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'replace' } });
 const acceptedRedirectResult = await acceptedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-runtime-test' });
 assertEqual(acceptedRedirectResult.ok, true, 'Medium Redirect succeeds after mandatory verification');
@@ -651,12 +653,17 @@ assertEqual(redirectVerifierCalls[0].request.candidateHash, hashJson(redirectCan
 assertEqual(acceptedRedirectResult.marker.applyMode, 'as-swipe', 'Redirect forces swipe application');
 assertEqual(acceptedRedirectResult.marker.verification, 'accept', 'accepted verifier status persists');
 assertEqual(acceptedRedirectResult.marker.redirect.characterPressure[0].character, 'Carter', 'private pressure audit persists in the marker');
+assert(JSON.stringify(acceptedRedirectResult.marker).includes(privateRedirectSentinel), 'private pressure sentinel persists in Recursion-owned marker metadata');
+assert(!acceptedRedirect.state.appended[0].text.includes(privateRedirectSentinel), 'private pressure sentinel is absent from assistant prose');
+assert(!JSON.stringify(acceptedRedirect.runtime.view()).includes(privateRedirectSentinel), 'private pressure sentinel is absent from runtime view state');
+assert(!JSON.stringify(acceptedRedirect.runtime.view().lastBrief || {}).includes(privateRedirectSentinel), 'private pressure sentinel is absent from Last Brief');
+assert(!JSON.stringify(acceptedRedirect.runtime.view().lastPacket || {}).includes(privateRedirectSentinel), 'private pressure sentinel is absent from Prompt Packet state');
 assertEqual(acceptedRedirect.state.appended.length, 1, 'accepted Redirect appends exactly one swipe');
 const acceptedRedirectJournal = await acceptedRedirect.storage.loadRunJournal(acceptedRedirect.state.message.chatKey);
 const acceptedRedirectSettlement = acceptedRedirectJournal.entries.find((entry) => entry.event === 'editorial.run.settled');
 assertEqual(acceptedRedirectSettlement.details.redirectCharacterCount, 1, 'Redirect journal records character count only');
 assertEqual(acceptedRedirectSettlement.details.redirectRequiredBeatCount, 1, 'Redirect journal records required-beat count only');
-assert(!JSON.stringify(acceptedRedirectSettlement).includes('Test the transport method now.'), 'Redirect journal excludes private want text');
+assert(!JSON.stringify(acceptedRedirectSettlement).includes(privateRedirectSentinel), 'Redirect journal excludes private pressure text');
 
 acceptedRedirect.state.reusePersisted = true;
 acceptedRedirect.state.calls.length = 0;

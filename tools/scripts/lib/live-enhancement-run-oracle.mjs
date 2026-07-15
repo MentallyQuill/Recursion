@@ -4,6 +4,7 @@ const UNHEALTHY_JOURNAL_EVENTS = new Set(['provider.call.failed', 'prompt.instal
 const REQUIRED_EDITORIAL_LABELS = Object.freeze([
   'editorial diagnosis',
   'editorial candidate',
+  'editorial verification',
   'recursion prompt ready'
 ]);
 

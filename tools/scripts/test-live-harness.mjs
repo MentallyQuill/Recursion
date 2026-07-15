@@ -23,6 +23,108 @@ import {
 } from './lib/sillytavern-live-harness.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
+const liveEditorialModule = await import('./lib/live-editorial-effectiveness.mjs').catch(() => ({}));
+const evaluateLiveRedirectScenarioArtifacts = liveEditorialModule.evaluateLiveRedirectScenarioArtifacts;
+const runLiveEditorialEffectiveness = liveEditorialModule.runLiveEditorialEffectiveness;
+assertEqual(typeof evaluateLiveRedirectScenarioArtifacts, 'function', 'live harness exposes strict Redirect scenario evaluator');
+assertEqual(typeof runLiveEditorialEffectiveness, 'function', 'live harness exposes reusable Redirect effectiveness runner');
+
+const redirectChecks = [
+  'source-failure-removed', 'replacement-objective-fulfilled', 'required-beats-satisfied',
+  'forbidden-source-beats-excluded', 'character-pressure-coherent', 'hard-constraints-preserved',
+  'user-turn-answered', 'unsupported-facts-absent'
+].map((check) => ({ check, status: 'pass', evidenceRefs: ['user:0'], note: 'Passed.' }));
+const judgeCriteria = [
+  'replacement-objective', 'forbidden-source-beats', 'character-pressure', 'evidence-and-constraints'
+].map((criterion) => ({ criterion, status: 'pass', reason: 'Passed.' }));
+const redirectScenario = {
+  id: 'redirect-turn-deferral',
+  oracle: { editorialRedirect: { expectedDecision: 'proceed' } }
+};
+const healthyRedirectArtifacts = {
+  scenario: redirectScenario,
+  before: { swipeCount: 1, swipeId: 0, text: 'Postpone the test.' },
+  after: { swipeCount: 2, swipeId: 1, text: 'Begin the test now.' },
+  enhancementResult: {
+    ok: true,
+    mode: 'redirect',
+    marker: {
+      mode: 'redirect',
+      verification: 'accept',
+      candidateHash: 'candidate-hash',
+      changeLedger: [{ kind: 'redirect' }],
+      redirect: { characterPressure: [{ pressureReason: 'PRIVATE_REDIRECT_PRESSURE_SENTINEL' }] }
+    },
+    verification: { decision: 'accept', checks: redirectChecks },
+    artifact: { kind: 'candidate', text: 'Begin the test now.' }
+  },
+  candidateText: 'Begin the test now.',
+  oracle: { verdict: { ok: true, failures: [] }, observation: { transitions: [], journalDelta: [] } },
+  judge: { ok: true, decision: 'pass', criteria: judgeCriteria, diagnostics: { providerId: 'judge-provider', model: 'judge-model' } },
+  provider: { targetModel: 'target-model', judgeModel: 'judge-model' },
+  expectedModels: { targetModel: 'target-model', judgeModel: 'judge-model' },
+  visibleText: 'Redirect applied.',
+  runtimeView: { editorialResult: { mode: 'redirect', status: 'success' } },
+  promptPacket: { packetId: 'packet-safe' },
+  journalDelta: []
+};
+assertEqual(evaluateLiveRedirectScenarioArtifacts(healthyRedirectArtifacts).ok, true, 'strict Redirect evaluator accepts complete healthy artifacts');
+for (const [name, patch] of [
+  ['unhealthy progress', { oracle: { verdict: { ok: false, failures: ['progress-observed-unhealthy'] }, observation: { transitions: [{ state: 'caution' }], journalDelta: [] } } }],
+  ['missing swipe', { after: { swipeCount: 1, swipeId: 0, text: 'Postpone the test.' } }],
+  ['unaccepted marker', { enhancementResult: { ...healthyRedirectArtifacts.enhancementResult, marker: { ...healthyRedirectArtifacts.enhancementResult.marker, verification: 'not-required' } } }],
+  ['incomplete verifier', { enhancementResult: { ...healthyRedirectArtifacts.enhancementResult, verification: { decision: 'accept', checks: redirectChecks.slice(1) } } }],
+  ['failed judge', { judge: { ...healthyRedirectArtifacts.judge, decision: 'fail', criteria: judgeCriteria.map((entry, index) => index ? entry : { ...entry, status: 'fail' }) } }],
+  ['model mismatch', { provider: { targetModel: 'wrong-target', judgeModel: 'judge-model' } }],
+  ['private visible leak', { visibleText: 'PRIVATE_REDIRECT_PRESSURE_SENTINEL' }]
+]) {
+  assertEqual(evaluateLiveRedirectScenarioArtifacts({ ...healthyRedirectArtifacts, ...patch }).ok, false, `strict Redirect evaluator rejects ${name}`);
+}
+
+const healthyNoChangeArtifacts = {
+  ...healthyRedirectArtifacts,
+  scenario: { id: 'redirect-insufficient-want-evidence', oracle: { editorialRedirect: { expectedDecision: 'no-change' } } },
+  after: { swipeCount: 1, swipeId: 0, text: 'Postpone the test.' },
+  enhancementResult: {
+    ok: true,
+    skipped: true,
+    mode: 'redirect',
+    validation: { value: { decision: 'no-change' } }
+  },
+  candidateText: 'Postpone the test.',
+  oracle: {
+    verdict: { ok: false, failures: ['enhancement-skipped', 'enhancement-result-missing'] },
+    observation: { transitions: [{ label: 'Editorial diagnosis', state: 'done' }], journalDelta: [] }
+  },
+  visibleText: 'Editorial complete; no changes needed.'
+};
+assertEqual(evaluateLiveRedirectScenarioArtifacts(healthyNoChangeArtifacts).ok, true, 'expected no-change passes without a swipe or verifier');
+
+let unsafeScenarioExecutions = 0;
+const unsafeEditorialRun = await runLiveEditorialEffectiveness({
+  scenarios: [redirectScenario],
+  user: 'default-user',
+  scenarioExecutor: async () => { unsafeScenarioExecutions += 1; return healthyRedirectArtifacts; }
+});
+assertEqual(unsafeEditorialRun.status, 'unsafe-user', 'live Redirect runner rejects default-user before browser work');
+assertEqual(unsafeScenarioExecutions, 0, 'unsafe live Redirect user executes no scenario');
+const emptyEditorialRun = await runLiveEditorialEffectiveness({
+  scenarios: [],
+  user: 'recursion-soak-a',
+  scenarioExecutor: async () => healthyRedirectArtifacts
+});
+assertEqual(emptyEditorialRun.status, 'fail', 'live Redirect runner rejects an empty scenario list');
+assertEqual(emptyEditorialRun.result, 'redirect-effectiveness-empty-corpus', 'empty live Redirect corpus has an explicit result');
+const injectedEditorialRun = await runLiveEditorialEffectiveness({
+  scenarios: [redirectScenario],
+  user: 'recursion-soak-a',
+  targetModel: 'target-model',
+  judgeModel: 'judge-model',
+  scenarioExecutor: async () => healthyRedirectArtifacts
+});
+assertEqual(injectedEditorialRun.status, 'pass', 'live Redirect runner derives pass from the strict scenario evaluator');
+assertEqual(injectedEditorialRun.scenarios.length, 1, 'live Redirect runner retains scenario result evidence');
+
 assertDeepEqual(
   inspectRecursionPromptRequest({
     type: 'swipe',

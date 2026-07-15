@@ -307,8 +307,9 @@ async function defaultLiveSmokeRunner(options) {
   return runSillyTavernLiveSmoke(options);
 }
 
-async function defaultEditorialEffectivenessRunner() {
-  return { status: 'skipped', result: 'redirect-effectiveness-runner-unavailable', scenarios: [] };
+async function defaultEditorialEffectivenessRunner(options) {
+  const { runLiveEditorialEffectiveness } = await import('./live-editorial-effectiveness.mjs');
+  return runLiveEditorialEffectiveness(options);
 }
 
 function createRunId() {

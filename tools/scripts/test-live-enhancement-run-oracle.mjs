@@ -25,6 +25,7 @@ assertDeepEqual(
 const doneRows = [
   { label: 'Editorial diagnosis', state: 'done' },
   { label: 'Editorial candidate', state: 'done' },
+  { label: 'Editorial verification', state: 'done' },
   { label: 'Recursion prompt ready', state: 'done' }
 ];
 const mutation = { kind: 'swipe', recursionOwned: true, validated: true };
@@ -95,6 +96,8 @@ const healthy = evaluate({
     { label: 'Editorial diagnosis', state: 'done' },
     { label: 'Editorial candidate', state: 'running' },
     { label: 'Editorial candidate', state: 'done' },
+    { label: 'Editorial verification', state: 'running' },
+    { label: 'Editorial verification', state: 'done' },
     { label: 'Recursion prompt ready', state: 'done' }
   ],
   finalRows: doneRows,
@@ -123,13 +126,13 @@ assert(oracleSource.includes('attributeOldValue: true'), 'browser oracle request
 assert(oracleSource.includes('mutation.oldValue'), 'browser oracle records transient progress states from mutation old values');
 
 for (const scriptPath of [
-  'tools/scripts/prove-live-enhancements.mjs',
+  'tools/scripts/lib/live-editorial-effectiveness.mjs',
   'tools/scripts/prove-live-card-progress.mjs'
 ]) {
   const source = readFileSync(scriptPath, 'utf8');
   assert(source.includes('installLiveEnhancementRunOracle'), `${scriptPath} installs the strict live enhancement oracle before generation`);
   assert(source.includes('collectLiveEnhancementRunOracle'), `${scriptPath} collects the strict live enhancement oracle before reporting pass`);
-  assert(source.includes('oracle.verdict.ok'), `${scriptPath} gates its pass result on the strict oracle verdict`);
+  assert(/oracle(?:\?\.|\.)verdict(?:\?\.|\.)ok/.test(source), `${scriptPath} gates its pass result on the strict oracle verdict`);
 }
 
 console.log('[pass] live enhancement run oracle');

@@ -101,6 +101,26 @@ assertEqual(extractProviderResponseText({
 assertEqual(extractProviderResponseText({ response: '{"ok":true}' }), '{"ok":true}', 'direct response text extracted');
 assertEqual(extractProviderResponseText({ schema: 'recursion.providerTest.v1', ok: true }), '{"schema":"recursion.providerTest.v1","ok":true}', 'object-shaped structured response is serialized');
 
+const nestedRedirect = {
+  schema: 'recursion.editorialDiagnosis.v1',
+  mode: 'redirect',
+  brief: {
+    characterPressure: [{
+      character: 'Carter',
+      immediateWant: 'Test the transport method.',
+      wantEvidenceRefs: ['user:0'],
+      sourcePressureEffect: 'increasing',
+      sourceEvidenceRefs: ['source:0'],
+      pressureReason: 'The source postpones the test.'
+    }]
+  }
+};
+assertDeepEqual(
+  JSON.parse(extractProviderResponseText(nestedRedirect)),
+  nestedRedirect,
+  'provider response normalization preserves nested Redirect fields'
+);
+
 const reasoningOnly = {
   choices: [{
     message: {

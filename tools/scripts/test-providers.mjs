@@ -280,6 +280,54 @@ assertDeepEqual(
   ['user:0', 'message:17', 'source:0'],
   'Editorial diagnosis machine schema keeps source-draft evidence available to discard claims'
 );
+const redirectDiagnosisMachineSchema = machineJsonSchemaForRequest({
+  responseSchema: 'recursion.editorialDiagnosis.v1',
+  machineJson: true,
+  mode: 'redirect',
+  sourceHash: 'redirect-source-hash',
+  snapshotHash: 'redirect-snapshot-hash',
+  validEvidenceIds: ['user:0', 'card:active-cast', 'source:0'],
+  validPreservationEvidenceIds: ['user:0', 'card:active-cast']
+});
+assertDeepEqual(
+  redirectDiagnosisMachineSchema.schema.properties.brief.required,
+  [
+    'mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges',
+    'sourceFailure', 'replacementObjective', 'requiredBeats', 'forbiddenSourceBeats',
+    'sceneCharacters', 'characterPressure'
+  ],
+  'Redirect machine schema requires its complete turn-level diagnosis contract'
+);
+assertDeepEqual(
+  redirectDiagnosisMachineSchema.schema.properties.brief.properties.sourceFailure.anyOf[1].properties.category.enum,
+  ['turn-fulfillment', 'core-direction', 'hard-constraint', 'unsupported-outcome', 'temporal-causal', 'character-epistemic'],
+  'Redirect source failures use the frozen category contract'
+);
+assertDeepEqual(
+  redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.properties.wantEvidenceRefs.items.enum,
+  ['user:0', 'card:active-cast'],
+  'Redirect wants cannot cite source-draft evidence'
+);
+assertDeepEqual(
+  redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.properties.sourceEvidenceRefs.items.enum,
+  ['user:0', 'card:active-cast', 'source:0'],
+  'Redirect pressure effects may cite supplied source evidence for semantic validation'
+);
+assertDeepEqual(
+  redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.properties.sourcePressureEffect.enum,
+  ['increasing', 'decreasing', 'unchanged', 'unclear'],
+  'Redirect pressure effects use the frozen vocabulary'
+);
+assertEqual(
+  redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.properties.wantEvidenceRefs.minItems,
+  0,
+  'Redirect pressure schema permits empty want evidence for an unclear want'
+);
+assertEqual(
+  redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.properties.sourceEvidenceRefs.minItems,
+  0,
+  'Redirect pressure schema permits empty source evidence for an unclear effect'
+);
 const editorialPassMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialPass.v1',
   machineJson: true,

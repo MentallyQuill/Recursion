@@ -16,6 +16,10 @@ import {
   parseStructuredJsonText
 } from './providers/structured-output-parser.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
+import {
+  REDIRECT_FAILURE_CATEGORIES,
+  REDIRECT_PRESSURE_EFFECTS
+} from './editorial-transform.mjs';
 
 const LANES = new Set(['utility', 'reasoner']);
 const HOST_SOURCES = new Set(['host-current-model', 'host-connection-profile']);
@@ -255,7 +259,112 @@ function editorialClaimSchema(validEvidenceIds) {
   };
 }
 
+function redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds) {
+  const optionalEvidenceRefs = (values) => ({
+    ...editorialEvidenceRefsSchema(values),
+    minItems: 0
+  });
+  return {
+    type: 'object',
+    properties: {
+      character: { type: 'string' },
+      immediateWant: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      wantEvidenceRefs: optionalEvidenceRefs(validPreservationEvidenceIds),
+      sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
+      sourceEvidenceRefs: optionalEvidenceRefs(validEvidenceIds),
+      pressureReason: { type: 'string' }
+    },
+    required: [
+      'character',
+      'immediateWant',
+      'wantEvidenceRefs',
+      'sourcePressureEffect',
+      'sourceEvidenceRefs',
+      'pressureReason'
+    ],
+    additionalProperties: false
+  };
+}
+
+function redirectBriefProperties(validEvidenceIds, validPreservationEvidenceIds) {
+  const evidenceRefs = editorialEvidenceRefsSchema(validEvidenceIds);
+  const authoritativeRefs = editorialEvidenceRefsSchema(validPreservationEvidenceIds);
+  return {
+    sourceFailure: {
+      anyOf: [
+        { type: 'null' },
+        {
+          type: 'object',
+          properties: {
+            category: { enum: [...REDIRECT_FAILURE_CATEGORIES] },
+            problem: { type: 'string' },
+            establishedEvidenceRefs: authoritativeRefs,
+            conflictingSourceRefs: evidenceRefs
+          },
+          required: ['category', 'problem', 'establishedEvidenceRefs', 'conflictingSourceRefs'],
+          additionalProperties: false
+        }
+      ]
+    },
+    replacementObjective: {
+      anyOf: [
+        { type: 'null' },
+        {
+          type: 'object',
+          properties: {
+            summary: { type: 'string' },
+            evidenceRefs: authoritativeRefs
+          },
+          required: ['summary', 'evidenceRefs'],
+          additionalProperties: false
+        }
+      ]
+    },
+    requiredBeats: {
+      type: 'array',
+      maxItems: 8,
+      items: {
+        type: 'object',
+        properties: { summary: { type: 'string' }, evidenceRefs: authoritativeRefs },
+        required: ['summary', 'evidenceRefs'],
+        additionalProperties: false
+      }
+    },
+    forbiddenSourceBeats: {
+      type: 'array',
+      maxItems: 8,
+      items: {
+        type: 'object',
+        properties: { summary: { type: 'string' }, sourceRefs: evidenceRefs },
+        required: ['summary', 'sourceRefs'],
+        additionalProperties: false
+      }
+    },
+    sceneCharacters: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 16,
+      items: {
+        type: 'object',
+        properties: { character: { type: 'string' }, evidenceRefs: authoritativeRefs },
+        required: ['character', 'evidenceRefs'],
+        additionalProperties: false
+      }
+    },
+    characterPressure: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 16,
+      items: redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds)
+    }
+  };
+}
+
 function editorialBriefSchema(mode, validEvidenceIds, validPreservationEvidenceIds = validEvidenceIds) {
+  const redirectProperties = mode === 'redirect'
+    ? redirectBriefProperties(validEvidenceIds, validPreservationEvidenceIds)
+    : {};
+  const redirectRequired = mode === 'redirect' ? Object.keys(redirectProperties) : [];
   return {
     type: 'object',
     properties: {
@@ -277,9 +386,10 @@ function editorialBriefSchema(mode, validEvidenceIds, validPreservationEvidenceI
       preserve: { type: 'array', maxItems: 12, items: editorialClaimSchema(validPreservationEvidenceIds) },
       discard: { type: 'array', maxItems: 12, items: editorialClaimSchema(validEvidenceIds) },
       allowedChanges: { type: 'array', maxItems: 12, items: { type: 'string' } },
-      forbiddenChanges: { type: 'array', maxItems: 12, items: { type: 'string' } }
+      forbiddenChanges: { type: 'array', maxItems: 12, items: { type: 'string' } },
+      ...redirectProperties
     },
-    required: ['mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges'],
+    required: ['mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges', ...redirectRequired],
     additionalProperties: false
   };
 }

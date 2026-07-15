@@ -4,6 +4,40 @@ export const EDITORIAL_DIAGNOSIS_SCHEMA = 'recursion.editorialDiagnosis.v1';
 export const EDITORIAL_PASS_SCHEMA = 'recursion.editorialPass.v1';
 export const EDITORIAL_VERIFICATION_SCHEMA = 'recursion.editorialVerification.v1';
 export const EDITORIAL_EVIDENCE_VERSION = 'v1';
+export const REDIRECT_FAILURE_CATEGORIES = Object.freeze([
+  'turn-fulfillment',
+  'core-direction',
+  'hard-constraint',
+  'unsupported-outcome',
+  'temporal-causal',
+  'character-epistemic'
+]);
+export const REDIRECT_PRESSURE_EFFECTS = Object.freeze([
+  'increasing',
+  'decreasing',
+  'unchanged',
+  'unclear'
+]);
+export const REDIRECT_VERIFICATION_CHECKS = Object.freeze([
+  'source-failure-removed',
+  'replacement-objective-fulfilled',
+  'required-beats-satisfied',
+  'forbidden-source-beats-excluded',
+  'character-pressure-coherent',
+  'hard-constraints-preserved',
+  'user-turn-answered',
+  'unsupported-facts-absent'
+]);
+export const REDIRECT_ERROR_CODES = Object.freeze({
+  BRIEF_INVALID: 'RECURSION_EDITORIAL_REDIRECT_BRIEF_INVALID',
+  EVIDENCE_INVALID: 'RECURSION_EDITORIAL_REDIRECT_EVIDENCE_INVALID',
+  CHARACTER_COVERAGE_INVALID: 'RECURSION_EDITORIAL_REDIRECT_CHARACTER_COVERAGE_INVALID',
+  PRESSURE_INVALID: 'RECURSION_EDITORIAL_REDIRECT_PRESSURE_INVALID',
+  CHANGE_MISSING: 'RECURSION_EDITORIAL_REDIRECT_MISSING',
+  VERIFICATION_CHECKS_INVALID: 'RECURSION_EDITORIAL_REDIRECT_VERIFICATION_CHECKS_INVALID',
+  VERIFICATION_ACCEPT_INVALID: 'RECURSION_EDITORIAL_REDIRECT_VERIFICATION_ACCEPT_INVALID',
+  VERIFICATION_REJECTED: 'RECURSION_EDITORIAL_VERIFICATION_REJECTED'
+});
 
 const MODES = new Set(['repair', 'recompose', 'redirect']);
 const FULL_MODES = new Set(['recompose', 'redirect']);

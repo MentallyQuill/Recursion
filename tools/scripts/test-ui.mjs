@@ -100,6 +100,16 @@ assertEqual(model.lastBriefCoverageStatus, 'missing', 'Last Brief exposes source
 assertEqual(model.lastBriefMissingSourceCardCount, 1, 'Last Brief exposes missing source count');
 assertEqual(model.composerLabel, 'Utility', 'composer label built');
 assertEqual(model.tooltipsEnabled, true, 'view model defaults tooltip hover help on');
+const retainedBriefModel = createRecursionViewModel({
+  settings: { mode: 'auto' },
+  lastHand: { cards: [] },
+  lastPacket: null,
+  lastBriefHand: { cards: [{ id: 'retained-card' }] },
+  lastBriefPacket: { packetId: 'retained-packet', diagnostics: { composerLane: 'utility' } },
+  lastBrief: { status: 'ready', packetId: 'retained-packet', cardCount: 1 },
+  activity: { phase: 'settled', severity: 'success' }
+});
+assertEqual(retainedBriefModel.handCount, 1, 'Last Brief view uses the retained review hand after reusable state is invalidated');
 assertEqual(createRecursionViewModel({ settings: { ui: { tooltipsEnabled: false } } }).tooltipsEnabled, false, 'view model can disable tooltip hover help');
 assertEqual(
   createRecursionViewModel({

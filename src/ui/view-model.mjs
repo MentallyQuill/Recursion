@@ -251,10 +251,12 @@ export function createRecursionViewModel(view = {}) {
   const cardScope = normalizeCardScope(activeCardDeckRuntimeScope(deckSettings));
   const activeCardDeck = getActiveCardDeck({ ...settings, cardDecks });
   const cardDeckList = Object.values(getAllCardDecks({ ...settings, cardDecks }));
-  const rawCards = Array.isArray(source.lastHand?.cards) ? source.lastHand.cards : [];
-  const lastBriefStatus = normalizeLastBriefStatus(source.lastBrief?.status, rawCards.length > 0, Boolean(source.lastPacket));
+  const reviewHand = source.lastBriefHand === undefined ? source.lastHand : source.lastBriefHand;
+  const reviewPacket = source.lastBriefPacket === undefined ? source.lastPacket : source.lastBriefPacket;
+  const rawCards = Array.isArray(reviewHand?.cards) ? reviewHand.cards : [];
+  const lastBriefStatus = normalizeLastBriefStatus(source.lastBrief?.status, rawCards.length > 0, Boolean(reviewPacket));
   const cards = lastBriefStatus === 'ready' ? rawCards : [];
-  const composerLane = source.lastPacket?.diagnostics?.composerLane || activity.composerLane || activity.providerLane || 'utility';
+  const composerLane = reviewPacket?.diagnostics?.composerLane || activity.composerLane || activity.providerLane || 'utility';
   const progressRun = createProgressRunModel(source);
   const heroPixelBlocks = createHeroPixelBlocks(progressRun);
   const freshNextGeneration = asObject(source.freshNextGeneration);

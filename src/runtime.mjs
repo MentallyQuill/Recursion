@@ -2088,6 +2088,8 @@ export function createRecursionRuntime({
   let recursionStopRequest = null;
   let lastPacket = null;
   let lastHand = { cards: [], omitted: [] };
+  let lastBriefPacket = null;
+  let lastBriefHand = { cards: [], omitted: [] };
   let lastPlan = null;
   let lastSnapshot = null;
   let lastCacheDecision = null;
@@ -2499,6 +2501,8 @@ export function createRecursionRuntime({
 
   function readyLastBrief(packet = lastPacket, hand = lastHand, { runId = '', reason = 'packet-ready' } = {}) {
     const cards = Array.isArray(hand?.cards) ? hand.cards : [];
+    lastBriefPacket = packet || null;
+    lastBriefHand = hand || { cards: [], omitted: [] };
     const sourceCardIds = new Set(cards.flatMap((card) => Array.isArray(card?.sourceCardIds) ? card.sourceCardIds : []));
     const missingSourceCardCount = cards.reduce((count, card) => (
       count + (Array.isArray(card?.omittedSourceCardIds) ? card.omittedSourceCardIds.length : 0)
@@ -2521,7 +2525,9 @@ export function createRecursionRuntime({
   }
 
   function clearLastBrief({ status = 'clearing', reason = 'generation-started', runId = '' } = {}) {
-    const previousCards = Array.isArray(lastHand?.cards) ? lastHand.cards : [];
+    const previousCards = Array.isArray(lastBriefHand?.cards) ? lastBriefHand.cards : [];
+    lastBriefPacket = null;
+    lastBriefHand = { cards: [], omitted: [] };
     lastBrief = {
       status: ['clearing', 'empty'].includes(status) ? status : 'clearing',
       reason: safeText(reason, 120),
@@ -2626,7 +2632,7 @@ export function createRecursionRuntime({
     return lastSnapshot;
   }
 
-  function clearVolatileSceneState() {
+  function clearVolatileSceneState({ preserveLastBrief = false } = {}) {
     abortActiveRapidWarmRun('stale');
     clearPendingProseEnhancement();
     lastPacket = null;
@@ -2637,7 +2643,7 @@ export function createRecursionRuntime({
     runState.clearLatestAssistantSwipeRetry();
     runState.clearAttempt?.();
     runState.clearFreshNextGeneration();
-    clearLastBrief({ status: 'empty', reason: 'source-cleared' });
+    if (!preserveLastBrief) clearLastBrief({ status: 'empty', reason: 'source-cleared' });
   }
 
   function supersededResult(runId) {
@@ -3007,6 +3013,8 @@ export function createRecursionRuntime({
       activeAttempt: state.activeAttempt,
       lastPacket,
       lastHand,
+      lastBriefPacket,
+      lastBriefHand,
       lastPlan,
       lastCacheDecision,
       lastSnapshot: viewSnapshot(lastSnapshot),
@@ -3250,6 +3258,7 @@ export function createRecursionRuntime({
     outcome = 'success',
     settleSeverity = 'success',
     clearVolatileState = true,
+    preserveLastBrief = false,
     invalidateCache = true,
     clearSwipeRetry = true
   }) {
@@ -3268,7 +3277,7 @@ export function createRecursionRuntime({
         chips
       });
       if (invalidateCache) await invalidateActiveSceneCacheBestEffort(reason, invalidationDetails);
-      if (clearVolatileState) clearVolatileSceneState();
+      if (clearVolatileState) clearVolatileSceneState({ preserveLastBrief });
       const clear = await runPromptMutationSection(null, async () => {
         const clearResult = await clearPromptBestEffort(host);
         await appendPromptClearedJournal(runId, clearContext, clearResult, reason);
@@ -3315,7 +3324,8 @@ export function createRecursionRuntime({
       },
       startLabel: 'Clearing Recursion prompt after source message change...',
       successLabel: 'Source messages changed. Recursion prompt cleared.',
-      chips: ['Source', 'Prompt']
+      chips: ['Source', 'Prompt'],
+      preserveLastBrief: true
     });
   }
 

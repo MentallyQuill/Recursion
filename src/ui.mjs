@@ -1847,8 +1847,8 @@ function renderHandDropdown(panel, view, model, options = {}) {
   const cards = model.cards;
   const lastBriefStatus = model.lastBriefStatus || 'empty';
   const clearingBrief = lastBriefStatus === 'clearing' || lastBriefStatus === 'preparing';
-  const briefPacket = clearingBrief ? null : view.lastPacket;
-  const briefHand = clearingBrief ? { cards: [] } : view.lastHand;
+  const briefPacket = clearingBrief ? null : (view.lastBriefPacket ?? view.lastPacket);
+  const briefHand = clearingBrief ? { cards: [] } : (view.lastBriefHand ?? view.lastHand);
   const packetPreview = promptPacketPreview(briefPacket, briefHand);
   const packetText = promptPacketText(briefPacket, briefHand);
   const packetMeta = promptPacketMeta(packetPreview);
@@ -3504,6 +3504,8 @@ function promptPacketMeta(preview) {
 }
 
 function renderViewer(viewer, view, model) {
+  const reviewHand = view.lastBriefHand ?? view.lastHand ?? { cards: [] };
+  const reviewPacket = view.lastBriefPacket ?? view.lastPacket;
   viewer.replaceChildren();
   const header = el('div', { className: 'recursion-viewer-header' }, [
     el('h2', { text: 'Recursion Viewer' }),
@@ -3517,9 +3519,9 @@ function renderViewer(viewer, view, model) {
     reasoner: model.reasonerState,
     activity: model.activityLabel
   });
-  appendViewerDeckSection(viewer, view.lastHand ?? { cards: [] });
+  appendViewerDeckSection(viewer, reviewHand);
   appendViewerSection(viewer, 'Activity', view.activity ?? null);
-  appendViewerSection(viewer, 'Prompt Packet', promptPacketPreview(view.lastPacket, view.lastHand), {
+  appendViewerSection(viewer, 'Prompt Packet', promptPacketPreview(reviewPacket, reviewHand), {
     dataset: { recursionPromptPacket: '' },
     maxString: 5000
   });
@@ -3934,8 +3936,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       model.mode || '',
       model.pipelineMode || '',
       model.handCount ?? '',
-      cleanText(view.lastHand?.handId),
-      cleanText(view.lastPacket?.packetId),
+      cleanText((view.lastBriefHand ?? view.lastHand)?.handId),
+      cleanText((view.lastBriefPacket ?? view.lastPacket)?.packetId),
       cleanText(view.lastSnapshot?.chatKey || view.lastSnapshot?.chatId),
       cleanText(view.lastSnapshot?.sceneKey),
       activity.runId || '',
@@ -5624,7 +5626,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     if (control('recursionCopyPromptPacket')) {
       const view = currentView();
-      const packetText = promptPacketText(view.lastPacket, view.lastHand);
+      const packetText = promptPacketText(view.lastBriefPacket ?? view.lastPacket, view.lastBriefHand ?? view.lastHand);
       runAction(globalThis.navigator?.clipboard?.writeText?.(packetText), null, 'Copy prompt failed.');
     }
     const settingsDisclosure = control('recursionSettingsSectionToggle');

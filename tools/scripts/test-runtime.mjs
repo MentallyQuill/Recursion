@@ -4223,6 +4223,9 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
     }
   ]);
   await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped', messageId: 21 });
+  assertEqual(runtime.view().lastBrief?.status, 'clearing', 'real latest-assistant swipe consumes the visible Last Brief');
+  assertEqual(runtime.view().lastBriefHand?.cards.length, 0, 'real latest-assistant swipe clears retained Last Brief cards');
+  assertEqual(runtime.view().lastBriefPacket, null, 'real latest-assistant swipe clears the retained Last Brief packet');
   const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
   assertEqual(queued.ok, true, 'fresh latest assistant queues after swipe marker');
   assertEqual(runtime.view().lastBrief?.reason, 'latest-assistant-swipe', 'fresh latest assistant arming does not spend another Last Brief clear before generation');
@@ -4456,12 +4459,23 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   assert(firstView.lastBrief?.packetId, 'Last Brief ready state includes packet id');
   assertEqual(firstView.lastBrief?.cardCount, firstView.lastHand.cards.length, 'Last Brief ready state records card count');
 
+  const sourceChange = await runtime.handleSourceChanged({ eventName: 'message_updated', messageId: 4 });
+  assertEqual(sourceChange.ok, true, 'source-change cleanup succeeds before the next user generation');
+  const retainedReview = runtime.view();
+  assertEqual(retainedReview.lastPacket, null, 'source-change cleanup invalidates the reusable packet');
+  assertEqual(retainedReview.lastHand.cards.length, 0, 'source-change cleanup invalidates the reusable hand');
+  assertEqual(retainedReview.lastBrief?.status, 'ready', 'source-change cleanup keeps Last Brief reviewable while idle');
+  assertEqual(retainedReview.lastBriefPacket?.packetId, firstView.lastBrief.packetId, 'source-change cleanup retains the reviewed packet snapshot');
+  assertEqual(retainedReview.lastBriefHand?.cards.length, firstView.lastHand.cards.length, 'source-change cleanup retains the reviewed cards');
+
   const second = runtime.prepareForGeneration({ userMessage: 'Start next turn and clear visible Last Brief.' });
   await waitUntil(() => typeof releaseSecondArbiter === 'function', 'second Last Brief lifecycle run did not enter Arbiter');
   const during = runtime.view();
   assertEqual(during.lastBrief?.status, 'clearing', 'Last Brief enters clearing state as soon as a new send starts');
   assertEqual(during.lastBrief?.reason, 'generation-started', 'new send records generation-started clear reason');
   assertEqual(during.lastBrief?.previousPacketId, firstView.lastBrief.packetId, 'clearing state points at the packet being cleared');
+  assertEqual(during.lastBriefHand?.cards.length, 0, 'new send consumes the retained Last Brief cards');
+  assertEqual(during.lastBriefPacket, null, 'new send consumes the retained Last Brief packet');
   releaseSecondArbiter();
   const secondResult = await second;
   assertEqual(secondResult.ok, true, 'second Last Brief lifecycle run installs');

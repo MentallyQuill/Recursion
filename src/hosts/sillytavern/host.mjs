@@ -865,7 +865,11 @@ async function sendViaConnectionProfile(context, request = {}) {
       temperature: requestTemperature(request),
       top_p: requestTopP(request),
       ...(requestJsonSchema(request) ? { json_schema: requestJsonSchema(request) } : {}),
-      ...(reasoning ? { reasoning } : {}),
+      ...(reasoning ? {
+        reasoning,
+        reasoning_effort: reasoning.intent,
+        include_reasoning: !reasoning.exclude
+      } : {}),
       signal: request.signal
     }
   ));

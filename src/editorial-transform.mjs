@@ -51,7 +51,7 @@ const FULL_MODES = new Set(['recompose', 'redirect']);
 const DIAGNOSIS_DECISIONS = Object.freeze({
   repair: new Set(['proceed', 'no-change', 'requires-recompose', 'requires-redirect']),
   recompose: new Set(['proceed', 'no-change', 'requires-redirect']),
-  redirect: new Set(['proceed', 'no-change'])
+  redirect: new Set(['proceed'])
 });
 const CARD_STATUSES = new Set(['honored', 'repaired', 'not-applicable', 'partially-reflected', 'violated']);
 const RISK_FLAGS = new Set(['none', 'continuity-risk', 'voice-risk', 'card-interpretation-risk']);
@@ -216,30 +216,23 @@ function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
     return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect diagnosis collections are invalid.');
   }
 
-  if (decision === 'no-change') {
-    if (data.sourceFailure !== null || data.replacementObjective !== null
-      || data.requiredBeats.length || data.forbiddenSourceBeats.length) {
-      return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect no-change cannot carry a replacement.');
-    }
-  } else {
-    if (!object(data.sourceFailure).category
-      || !REDIRECT_FAILURE_CATEGORIES.includes(data.sourceFailure.category)
-      || !safeText(data.sourceFailure.problem, MAX_CLAIM)
-      || !object(data.replacementObjective).summary
-      || !safeText(data.replacementObjective.summary, MAX_CLAIM)
-      || !data.requiredBeats.length
-      || !data.forbiddenSourceBeats.length
-      || data.requiredBeats.some((beat) => !safeText(beat?.summary, MAX_CLAIM))
-      || data.forbiddenSourceBeats.some((beat) => !safeText(beat?.summary, MAX_CLAIM))) {
-      return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a complete turn-level correction.');
-    }
-    if (!authoritative(data.sourceFailure.establishedEvidenceRefs)
-      || !sourceOnly(data.sourceFailure.conflictingSourceRefs)
-      || !authoritative(data.replacementObjective.evidenceRefs)
-      || data.requiredBeats.some((beat) => !authoritative(beat?.evidenceRefs))
-      || data.forbiddenSourceBeats.some((beat) => !sourceOnly(beat?.sourceRefs))) {
-      return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect evidence authority is invalid.');
-    }
+  if (!object(data.sourceFailure).category
+    || !REDIRECT_FAILURE_CATEGORIES.includes(data.sourceFailure.category)
+    || !safeText(data.sourceFailure.problem, MAX_CLAIM)
+    || !object(data.replacementObjective).summary
+    || !safeText(data.replacementObjective.summary, MAX_CLAIM)
+    || !data.requiredBeats.length
+    || !data.forbiddenSourceBeats.length
+    || data.requiredBeats.some((beat) => !safeText(beat?.summary, MAX_CLAIM))
+    || data.forbiddenSourceBeats.some((beat) => !safeText(beat?.summary, MAX_CLAIM))) {
+    return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a complete turn-level correction.');
+  }
+  if (!authoritative(data.sourceFailure.establishedEvidenceRefs)
+    || !sourceOnly(data.sourceFailure.conflictingSourceRefs)
+    || !authoritative(data.replacementObjective.evidenceRefs)
+    || data.requiredBeats.some((beat) => !authoritative(beat?.evidenceRefs))
+    || data.forbiddenSourceBeats.some((beat) => !sourceOnly(beat?.sourceRefs))) {
+    return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect evidence authority is invalid.');
   }
 
   const characters = data.sceneCharacters.map((entry) => safeText(entry?.character, 120));
@@ -484,6 +477,8 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
   const redirectRules = mode === 'redirect'
     ? [
         'Redirect is a turn-level correction, not a more aggressive Recompose.',
+        'An explicit Redirect must return decision proceed. Never return no-change; identify the strongest evidence-supported turn-level correction.',
+        'Treat the latest user-turn evidence as completed player-authored action or dialogue that the assistant response must answer. Never replay, paraphrase, or assign that completed user content to the candidate response.',
         'Pair established non-source evidence with the conflicting source passages.',
         'Define one supported replacement objective, required beats, and forbidden source beats.',
         'List every character established as present by frozen evidence.',

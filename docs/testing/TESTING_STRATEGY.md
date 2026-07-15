@@ -80,7 +80,7 @@ The gate calls the focused local suite rather than duplicating test logic. Cover
 - Rapid background warm provider calls, no prompt install, foreground warm-v2 install, warm-miss Standard escalation, hedged Utility winner selection, invalid-output Standard escalation, and mandatory-gap Standard escalation;
 - activity event normalization and user-safe status text.
 
-Focused contract tests should use deterministic fixtures and fake provider responses before live providers. `tools/scripts/test-provider-response-parser.mjs` owns provider-envelope extraction and syntax-repair cases. `tools/scripts/test-host.mjs` proves Connection Manager preserves raw responses for `machineJson` rather than collapsing malformed structured content to an extracted `{}`. `tools/scripts/test-providers.mjs` owns router integration, sanitized repair diagnostics, stable failure codes, retry behavior, and the reviewer-only recovery that may restore omitted request-known schema/source metadata without accepting a wrong nonempty source hash. `tools/scripts/test-generation-review.mjs` owns the second semantic boundary: source hashes, exact target text, non-overlapping patches, installed-card outcome coverage, allowed status values and aliases, safe partial results, and the single shared correction budget. `tools/scripts/test-runtime.mjs` must exercise semantic correction with a populated installed hand in Standard, Rapid, and Fused, including an invalid status followed by a complete corrected ledger. Runtime/card tests own the remaining semantic boundary: repaired JSON still fails when it lacks the expected schema, snapshot hash, role, family, or valid evidence. If a live smoke finds a defect, add a focused contract regression where the behavior can be isolated without browser control.
+Focused contract tests should use deterministic fixtures and fake provider responses before live providers. `tools/scripts/test-provider-response-parser.mjs` owns provider-envelope extraction and syntax-repair cases. `tools/scripts/test-host.mjs` proves Connection Manager preserves raw responses for `machineJson` rather than collapsing malformed structured content to an extracted `{}`, and maps normalized low reasoning to SillyTavern's native `reasoning_effort: minimal` with private reasoning excluded. `tools/scripts/test-providers.mjs` owns router integration, sanitized repair diagnostics, stable failure codes, retry behavior, and the reviewer-only recovery that may restore omitted request-known schema/source metadata without accepting a wrong nonempty source hash. `tools/scripts/test-generation-review.mjs` owns the second semantic boundary: source hashes, exact target text, non-overlapping patches, installed-card outcome coverage, allowed status values and aliases, safe partial results, and the single shared correction budget. `tools/scripts/test-runtime.mjs` must exercise semantic correction with a populated installed hand in Standard, Rapid, and Fused, including an invalid status followed by a complete corrected ledger. Runtime/card tests own the remaining semantic boundary: repaired JSON still fails when it lacks the expected schema, snapshot hash, role, family, or valid evidence. If a live smoke finds a defect, add a focused contract regression where the behavior can be isolated without browser control.
 
 Generation Review regressions additionally prove that SillyTavern streaming remains visible while review is pending and that exhausted invalid-target and invalid-card-outcome corrections are isolated to a red `Generation review` row. Standard, Rapid, and Fused fixtures must retain the original message and the successful prompt-ready state in that case; no invalid review may append a swipe or downgrade an already-installed prompt. The live enhancement proof must first prepare each pipeline's real installed hand and then require complete valid card-outcome coverage from the reviewer.
 
@@ -90,13 +90,13 @@ Editorial regressions must cover both provider and semantic boundaries. Diagnosi
 
 The checked-in `core` evaluation pack contains six Redirect cases covering turn
 deferral, wrong focus, unsupported outcome, character pressure, supported
-restraint, and insufficient want evidence. Strict live evaluation requires every
-non-no-change case to append exactly one verified swipe and pass both the production
+restraint, and unclear character-want evidence. Every explicit Redirect case must
+return `proceed`, append exactly one verified swipe, and pass both the production
 eight-check verifier and the independent four-criterion effectiveness judge.
-`no-change` is tested separately: it is healthy only when the diagnosis explicitly
-returns `no-change`, host swipe state is unchanged, and no unhealthy progress or
-journal event occurred. A skipped result never counts as an Enhancement-success
-pass.
+Provider-authored `no-change` must receive one semantic correction; a repeated
+`no-change` fails red with unchanged host swipe state. Machine-JSON token exhaustion
+may receive one compact retry, while a second exhaustion fails with no third call.
+A skipped result never counts as Redirect success.
 
 Run the focused deterministic gates before the real-model proof:
 

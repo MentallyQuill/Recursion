@@ -15,16 +15,6 @@ import {
   installLiveEnhancementRunOracle
 } from './live-enhancement-run-oracle.mjs';
 
-const UNHEALTHY_STATES = new Set(['caution', 'warning', 'warn', 'failed', 'failure', 'error']);
-const UNHEALTHY_JOURNAL = new Set(['warning', 'warn', 'error', 'fatal']);
-const ALLOWED_NO_CHANGE_ORACLE_FAILURES = new Set([
-  'enhancement-skipped',
-  'missing-editorial-candidate',
-  'missing-editorial-verification',
-  'enhancement-result-missing',
-  'enhancement-result-not-recursion-owned',
-  'enhancement-result-not-validated'
-]);
 const REQUIRED_LIVE_RUNTIME_METHODS = Object.freeze([
   'enhanceLatestAssistantMessage',
   'evaluateRedirectEffectiveness',
@@ -60,19 +50,6 @@ function exactCoverage(entries, names, nameKey, { requirePass = true } = {}) {
   return names.every((name) => seen.has(name));
 }
 
-function noChangeOracleHealthy(oracle = {}) {
-  const observation = oracle?.observation && typeof oracle.observation === 'object' ? oracle.observation : {};
-  const transitions = Array.isArray(observation.transitions) ? observation.transitions : [];
-  const journalDelta = Array.isArray(observation.journalDelta) ? observation.journalDelta : [];
-  if (transitions.some((entry) => UNHEALTHY_STATES.has(text(entry?.state).toLowerCase()))) return false;
-  if (journalDelta.some((entry) => (
-    UNHEALTHY_JOURNAL.has(text(entry?.severity).toLowerCase())
-    || ['provider.call.failed', 'prompt.install_skipped'].includes(text(entry?.event))
-  ))) return false;
-  const failures = Array.isArray(oracle?.verdict?.failures) ? oracle.verdict.failures : [];
-  return failures.every((failure) => ALLOWED_NO_CHANGE_ORACLE_FAILURES.has(text(failure)));
-}
-
 const PRIVATE_REDIRECT_FIELD_PATTERN = /"(?:redirect|characterPressure|immediateWant|pressureReason|wantEvidenceRefs|sourcePressureEffect|sourceEvidenceRefs)"\s*:/;
 const PRIVATE_REDIRECT_SENTINEL = 'PRIVATE_REDIRECT_PRESSURE_SENTINEL';
 
@@ -85,7 +62,6 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
   const failures = [];
   const scenario = artifacts.scenario && typeof artifacts.scenario === 'object' ? artifacts.scenario : {};
   const expectedDecision = text(scenario?.oracle?.editorialRedirect?.expectedDecision || 'proceed').toLowerCase();
-  const noChange = expectedDecision === 'no-change';
   const result = artifacts.enhancementResult && typeof artifacts.enhancementResult === 'object'
     ? artifacts.enhancementResult
     : {};
@@ -93,30 +69,21 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
   const after = artifacts.after && typeof artifacts.after === 'object' ? artifacts.after : {};
   const marker = result.marker && typeof result.marker === 'object' ? result.marker : {};
 
-  if (noChange) {
-    if (result.ok !== true || result.skipped !== true || result.validation?.value?.decision !== 'no-change') {
-      failures.push('no-change-decision-missing');
-    }
-    if (Number(after.swipeCount) !== Number(before.swipeCount) || Number(after.swipeId) !== Number(before.swipeId)) {
-      failures.push('no-change-mutated-host');
-    }
-    if (!noChangeOracleHealthy(artifacts.oracle)) failures.push('no-change-oracle-unhealthy');
-  } else {
-    if (artifacts.oracle?.verdict?.ok !== true) failures.push('strict-oracle-failed');
-    if (result.ok !== true || result.skipped === true || result.mode !== 'redirect') failures.push('redirect-result-invalid');
-    if (Number(after.swipeCount) !== Number(before.swipeCount) + 1 || Number(after.swipeId) !== Number(after.swipeCount) - 1) {
-      failures.push('redirect-swipe-missing');
-    }
-    if (marker.mode !== 'redirect' || marker.verification !== 'accept' || !text(marker.candidateHash)) {
-      failures.push('redirect-marker-unverified');
-    }
-    if (!Array.isArray(marker.changeLedger) || !marker.changeLedger.some((entry) => entry?.kind === 'redirect')) {
-      failures.push('redirect-ledger-missing');
-    }
-    if (result.verification?.decision !== 'accept'
-      || !exactCoverage(result.verification?.checks, REDIRECT_VERIFICATION_CHECKS, 'check')) {
-      failures.push('redirect-verifier-incomplete');
-    }
+  if (expectedDecision !== 'proceed') failures.push('redirect-expected-decision-invalid');
+  if (artifacts.oracle?.verdict?.ok !== true) failures.push('strict-oracle-failed');
+  if (result.ok !== true || result.skipped === true || result.mode !== 'redirect') failures.push('redirect-result-invalid');
+  if (Number(after.swipeCount) !== Number(before.swipeCount) + 1 || Number(after.swipeId) !== Number(after.swipeCount) - 1) {
+    failures.push('redirect-swipe-missing');
+  }
+  if (marker.mode !== 'redirect' || marker.verification !== 'accept' || !text(marker.candidateHash)) {
+    failures.push('redirect-marker-unverified');
+  }
+  if (!Array.isArray(marker.changeLedger) || !marker.changeLedger.some((entry) => entry?.kind === 'redirect')) {
+    failures.push('redirect-ledger-missing');
+  }
+  if (result.verification?.decision !== 'accept'
+    || !exactCoverage(result.verification?.checks, REDIRECT_VERIFICATION_CHECKS, 'check')) {
+    failures.push('redirect-verifier-incomplete');
   }
 
   const judge = artifacts.judge && typeof artifacts.judge === 'object' ? artifacts.judge : {};
@@ -145,11 +112,11 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
     status: failures.length === 0 ? 'pass' : 'fail',
     scenarioId: text(scenario.id),
     expectedDecision,
-    decision: noChange ? text(result.validation?.value?.decision) : text(result.verification?.decision),
+    decision: text(result.verification?.decision),
     sourceHash: text(result.sourceHash || marker.sourceHash),
     candidateHash: text(marker.candidateHash || judge.candidateHash),
-    productionVerification: noChange ? 'not-required' : text(marker.verification),
-    verifierChecks: noChange ? [] : (Array.isArray(result.verification?.checks) ? result.verification.checks : []),
+    productionVerification: text(marker.verification),
+    verifierChecks: Array.isArray(result.verification?.checks) ? result.verification.checks : [],
     judge,
     provider: artifacts.provider || {},
     oracle: artifacts.oracle?.verdict || {},
@@ -261,8 +228,7 @@ async function executeScenarioInPage(input) {
   const before = state();
   const enhancementResult = await runStage('enhance', () => runtime.enhanceLatestAssistantMessage({ reason: `live-redirect-${scenario.id}` }));
   const after = state();
-  const expectedNoChange = String(redirectOracle.expectedDecision || '').toLowerCase() === 'no-change';
-  const candidateText = expectedNoChange ? sourceText : String(after.text || '');
+  const candidateText = String(after.text || '');
   const runtimeView = runtime.view?.() || {};
   globalThis.__recursionLiveRedirectProofStage = 'complete';
   return {

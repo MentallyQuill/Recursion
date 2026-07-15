@@ -40,7 +40,8 @@ Repair and Recompose retain their existing `no-change` behavior.
 
 ## Token-Limit Recovery
 
-`RECURSION_PROVIDER_TOKEN_LIMIT` is eligible for one structured recovery only
+Editorial diagnosis requests use low reasoning intent from their first attempt so
+structured output retains the configured response budget. `RECURSION_PROVIDER_TOKEN_LIMIT` is eligible for one structured recovery only
 for machine-JSON calls and only while `allowStructuredRecovery` is true. The
 retry uses the same frozen source, snapshot, lane, provider configuration, and
 provider max-token ceiling. It must not silently switch models.
@@ -53,6 +54,13 @@ The retry prompt must:
 - preserve all schema and frozen identity constraints;
 - request low reasoning effort through existing request metadata where the host
   supports it.
+
+For SillyTavern Connection Manager profiles, the host adapter must also map that
+normalized intent to `reasoning_effort` and set `include_reasoning: false`.
+Passing only Recursion's nested reasoning metadata is insufficient because the
+OpenRouter backend does not consume that private shape; a `:thinking` model would
+otherwise use its default extended reasoning and exhaust the configured output
+ceiling before completing the diagnosis JSON.
 
 The retry remains bounded to the provider router's existing two-attempt loop.
 If it also reaches the token limit, the call fails with
@@ -93,4 +101,3 @@ The live Redirect proof must use the exact turn-deferral failure class seen in
 SG-1, require `proceed`, require exactly one verified swipe, and fail on every
 skipped, caution, warning, or failed observation through the shared live
 Enhancement oracle.
-

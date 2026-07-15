@@ -408,7 +408,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
   }
 }
 
-function createProviderJournal(storage, currentHost) {
+export function createProviderJournal(storage, currentHost) {
   return {
     async append(entry = {}) {
       try {
@@ -434,6 +434,14 @@ function createProviderJournal(storage, currentHost) {
             responseId: entry.responseId,
             schema: entry.schema,
             retryCount: entry.retryCount,
+            structuredOutputRecovery: entry.structuredOutputRecovery,
+            effectiveMaxTokens: entry.effectiveMaxTokens,
+            finishReason: entry.finishReason,
+            promptTokens: entry.promptTokens,
+            completionTokens: entry.completionTokens,
+            reasoningTokens: entry.reasoningTokens,
+            totalTokens: entry.totalTokens,
+            visibleContentLength: entry.visibleContentLength,
             latencyMs: entry.latencyMs,
             status: entry.status,
             error: entry.error

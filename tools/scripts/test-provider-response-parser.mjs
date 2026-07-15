@@ -135,12 +135,24 @@ assertEqual(extractProviderResponseReasoning(reasoningOnly), 'hidden chain of th
 assertEqual(getProviderResponseFailure(reasoningOnly, { providerTitle: 'Utility' }).code, PROVIDER_RESPONSE_ERROR_CODES.REASONING_ONLY, 'reasoning-only failure classified');
 
 const tokenLimited = {
+  model: 'structured-thinking-model',
+  usage: {
+    prompt_tokens: 1000,
+    completion_tokens: 512,
+    total_tokens: 1512,
+    completion_tokens_details: { reasoning_tokens: 480 }
+  },
   choices: [{ message: { content: '{"schema":"partial"' }, stopReason: 'max_completion_tokens' }]
 };
 assertDeepEqual(collectProviderResponseFinishReasons(tokenLimited), ['max_completion_tokens'], 'finish reason collected from message stopReason');
 assertEqual(isProviderResponseTokenLimitFinishReason('token_limit_reached'), true, 'token-limit variants classified');
 const tokenFailure = getProviderResponseFailure(tokenLimited, { providerTitle: 'Utility', maxTokens: 512 });
 assertEqual(tokenFailure.code, PROVIDER_RESPONSE_ERROR_CODES.TOKEN_LIMIT, 'token-limit failure classified before parsing');
+assertEqual(tokenFailure.model, 'structured-thinking-model', 'token-limit diagnostic includes model');
+assertEqual(tokenFailure.promptTokens, 1000, 'token-limit diagnostic includes prompt usage');
+assertEqual(tokenFailure.completionTokens, 512, 'token-limit diagnostic includes completion usage');
+assertEqual(tokenFailure.reasoningTokens, 480, 'token-limit diagnostic includes reasoning usage');
+assertEqual(tokenFailure.totalTokens, 1512, 'token-limit diagnostic includes total usage');
 assertEqual(tokenFailure.reasoningLength, 0, 'token-limit diagnostic includes reasoning length');
 
 const emptyFailure = getProviderResponseFailure({ choices: [{ message: { content: '   ' } }] }, { providerTitle: 'Utility' });

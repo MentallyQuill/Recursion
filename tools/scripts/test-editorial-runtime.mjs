@@ -499,6 +499,7 @@ function createRedirectHarness({
 } = {}) {
   const state = {
     calls: [],
+    diagnosisAttempts: 0,
     appended: [],
     selected: [],
     persistedMarker: null,
@@ -557,6 +558,7 @@ function createRedirectHarness({
     async generate(roleId, request) {
       state.calls.push({ roleId, request });
       if (roleId === 'editorialDiagnostician') {
+        state.diagnosisAttempts += 1;
         const diagnosis = {
           schema: 'recursion.editorialDiagnosis.v1',
           mode: 'redirect',
@@ -590,7 +592,12 @@ function createRedirectHarness({
             }]
           }
         };
-        return { ok: true, data: typeof diagnosisOverride === 'function' ? diagnosisOverride(diagnosis) : diagnosis };
+        return {
+          ok: true,
+          data: typeof diagnosisOverride === 'function'
+            ? diagnosisOverride(diagnosis, state.diagnosisAttempts)
+            : diagnosis
+        };
       }
       if (roleId === 'editorialTransformer') {
         const pass = {
@@ -648,6 +655,8 @@ await acceptedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhanc
 const acceptedRedirectResult = await acceptedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-runtime-test' });
 assertEqual(acceptedRedirectResult.ok, true, 'Medium Redirect succeeds after mandatory verification');
 const redirectVerifierCalls = acceptedRedirect.state.calls.filter((call) => call.roleId === 'editorialVerifier');
+const redirectDiagnosisCall = acceptedRedirect.state.calls.find((call) => call.roleId === 'editorialDiagnostician');
+assertEqual(redirectDiagnosisCall.request.reasoningIntent, 'low', 'Redirect diagnosis starts with low reasoning to protect its structured output budget');
 assertEqual(redirectVerifierCalls.length, 1, 'Medium Redirect always calls the verifier');
 assertEqual(redirectVerifierCalls[0].request.candidateHash, hashJson(redirectCandidateText), 'runtime verifier binds the exact candidate hash');
 assert(redirectVerifierCalls[0].request.diagnosis?.brief, 'runtime verifier request retains the validated Redirect diagnosis');
@@ -675,6 +684,28 @@ const acceptedRedirectSettlement = acceptedRedirectJournal.entries.find((entry) 
 assertEqual(acceptedRedirectSettlement.details.redirectCharacterCount, 1, 'Redirect journal records character count only');
 assertEqual(acceptedRedirectSettlement.details.redirectRequiredBeatCount, 1, 'Redirect journal records required-beat count only');
 assert(!JSON.stringify(acceptedRedirectSettlement).includes(privateRedirectSentinel), 'Redirect journal excludes private pressure text');
+
+const correctedNoChangeRedirect = createRedirectHarness({
+  diagnosisOverride: (value, attempt) => attempt === 1 ? { ...value, decision: 'no-change' } : value
+});
+await correctedNoChangeRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const correctedNoChangeResult = await correctedNoChangeRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-no-change-correction-test' });
+assertEqual(correctedNoChangeResult.ok, true, 'Redirect corrects a provider-authored no-change diagnosis');
+assertEqual(correctedNoChangeRedirect.state.diagnosisAttempts, 2, 'Redirect spends exactly one correction on no-change');
+assert(correctedNoChangeRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician')[1].request.prompt.includes('Editorial diagnosis correction required'), 'Redirect correction identifies the invalid diagnosis');
+assertEqual(correctedNoChangeRedirect.state.appended.length, 1, 'corrected Redirect appends exactly one verified swipe');
+
+const repeatedNoChangeRedirect = createRedirectHarness({
+  diagnosisOverride: (value) => ({ ...value, decision: 'no-change' })
+});
+await repeatedNoChangeRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const repeatedNoChangeResult = await repeatedNoChangeRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-no-change-failure-test' });
+assertEqual(repeatedNoChangeResult.ok, false, 'Redirect fails when diagnosis remains no-change after correction');
+assertEqual(repeatedNoChangeResult.error?.code, 'RECURSION_EDITORIAL_DIAGNOSIS_DECISION_INVALID', 'repeated Redirect no-change preserves the semantic error code');
+assertEqual(repeatedNoChangeRedirect.runtime.view().editorialResult?.status, 'error', 'repeated Redirect no-change settles visibly unhealthy');
+assertEqual(repeatedNoChangeRedirect.state.diagnosisAttempts, 2, 'Redirect never makes a third diagnosis attempt');
+assertEqual(repeatedNoChangeRedirect.state.appended.length, 0, 'invalid Redirect diagnosis never mutates host swipe state');
+assertEqual(Boolean(repeatedNoChangeResult.skipped), false, 'invalid Redirect diagnosis never reports skipped success');
 
 acceptedRedirect.state.reusePersisted = true;
 acceptedRedirect.state.calls.length = 0;

@@ -181,8 +181,11 @@ const noChangeRedirectBrief = {
   requiredBeats: [],
   forbiddenSourceBeats: []
 };
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis(noChangeRedirectBrief, 'no-change'), redirectFixture).ok, true, 'Redirect no-change permits an unclear pressure map');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({ ...noChangeRedirectBrief, sourceFailure: validRedirectBrief.sourceFailure }, 'no-change'), redirectFixture).error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect no-change cannot carry a source failure');
+assertEqual(
+  validateEditorialDiagnosis(redirectDiagnosis(noChangeRedirectBrief, 'no-change'), redirectFixture).error?.code,
+  'RECURSION_EDITORIAL_DIAGNOSIS_DECISION_INVALID',
+  'explicit Redirect rejects no-change before brief validation'
+);
 
 const passValidation = validateEditorialPass(candidate, { mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot });
 assertEqual(passValidation.ok, true, 'full Recompose candidate passes without edit ratio cap');
@@ -288,6 +291,10 @@ assertEqual(diagnosisRequest.responseLength, undefined, 'diagnosis inherits the 
 assertDeepEqual(diagnosisRequest.validEvidenceIds, evidence.map((entry) => entry.id), 'diagnosis request exposes the frozen evidence ids as structured provider fields');
 const redirectDiagnosisRequest = buildEditorialDiagnosisRequest({ mode: 'redirect', sourceText, sourceHash, snapshotHash, snapshot, lane: 'reasoner' });
 assert(redirectDiagnosisRequest.prompt.includes('Redirect is a turn-level correction, not a more aggressive Recompose.'), 'Redirect diagnosis prompt distinguishes trajectory from prose quality');
+assert(
+  redirectDiagnosisRequest.prompt.includes('Treat the latest user-turn evidence as completed player-authored action or dialogue that the assistant response must answer'),
+  'Redirect diagnosis prompt forbids replaying the completed user turn as candidate content'
+);
 assert(redirectDiagnosisRequest.prompt.includes('Pair established non-source evidence with the conflicting source passages.'), 'Redirect diagnosis prompt requires paired evidence');
 assert(
   redirectDiagnosisRequest.prompt.includes('immediateWant must be null, wantEvidenceRefs and sourceEvidenceRefs must both be empty arrays, and sourcePressureEffect must be unclear'),

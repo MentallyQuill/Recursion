@@ -115,7 +115,7 @@ The Providers settings pane shows a compact route summary derived from Reasoning
 
 Machine JSON calls carry the expected response schema as provider request metadata. Host connection profile calls pass a minimal JSON schema constraint to `ConnectionManagerRequestService.sendRequest` when available and suppress host preset/instruct wrapping for those machine-readable Recursion jobs. The schema constrains the response `schema` field and, when the request has a frozen `snapshotHash`, the response `snapshotHash` field. This keeps saved SillyTavern profiles useful for routing while avoiding accidental roleplay preset text around strict JSON contracts. Human-facing SillyTavern generation remains outside Recursion's provider-job wrapper.
 
-Host current-model calls pass normalized `reasoningIntent`, `reasoningCategory`, and nested `reasoning` metadata to raw host adapters when a caller provides reasoning intent. Host connection-profile calls pass `parameters.reasoning = { intent, category, exclude: true }` so SillyTavern/provider integrations for Claude, Gemini, OpenRouter, and other profile-backed models can map intent to their native reasoning controls without Recursion storing or exposing hidden reasoning content.
+Host current-model calls pass normalized `reasoningIntent`, `reasoningCategory`, and nested `reasoning` metadata to raw host adapters when a caller provides reasoning intent. Host connection-profile calls pass both Recursion's normalized `parameters.reasoning = { intent, category, exclude: true }` metadata and SillyTavern's native `reasoning_effort` plus `include_reasoning: false` fields. The native fields are required for Connection Manager's OpenRouter backend to apply the requested effort instead of silently using a `:thinking` model's default reasoning budget. Recursion never stores or exposes hidden reasoning content.
 
 Utility must always have an enabled settings object. If Utility is misconfigured or unhealthy, Recursion degrades to cached/local behavior and does not block the user's normal SillyTavern generation.
 
@@ -181,7 +181,7 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 Card names should align with [Card System Spec](../design/CARD_SYSTEM_SPEC.md). Prompt installation and depth decisions belong to [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md), not provider routing.
 
-The literal `compose-brief` Arbiter action is retained as a V1 enum name, but it now means compose the V3 Guidance/Card Evidence/Guardrails packet. The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Fused card bundles use `recursion.cardBundle.v1`, Rapid foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses `recursion.guidanceComposer.v1`, Card Authoring Assist uses `recursion.cardAuthoringAssist.v1`, Generation Reviewer uses `recursion.generationReview.v1`, Editorial Diagnostician uses `recursion.editorialDiagnosis.v1`, Editorial Transformer uses `recursion.editorialPass.v1`, Editorial Verifier uses `recursion.editorialVerification.v1`, Editorial Effectiveness Judge uses `recursion.redirectEffectivenessJudge.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`. Editorial machine-JSON requests constrain the selected mode, frozen source/snapshot and diagnosis identities, complete nested brief or candidate/patch shape, installed-card IDs, repair-target IDs, and every evidence reference before a response can reach runtime semantic validation. Preservation references use a narrower evidence set that excludes source-draft and source-negative evidence. Because not every host provider enforces JSON Schema `const`, the provider boundary replaces Editorial mode and identity echoes with the trusted request values before semantic validation; provider output remains authoritative only for the diagnosis, candidate, ledgers, and evidence references. Diagnosis and Transform share one operation-scoped correction token: if an otherwise structured response fails semantic validation, Recursion may request one complete corrected object, and the original invalid object remains rejected. Editorial Diagnostician, Transformer, and Verifier inherit the selected Utility or Reasoner lane's configured max-token ceiling instead of imposing private role-level limits. The bounded transcript is exposed as `message:N` evidence alongside packet, card, brief, story-form, and source evidence; providers may cite only the frozen request-known ID set.
+The literal `compose-brief` Arbiter action is retained as a V1 enum name, but it now means compose the V3 Guidance/Card Evidence/Guardrails packet. The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Fused card bundles use `recursion.cardBundle.v1`, Rapid foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses `recursion.guidanceComposer.v1`, Card Authoring Assist uses `recursion.cardAuthoringAssist.v1`, Generation Reviewer uses `recursion.generationReview.v1`, Editorial Diagnostician uses `recursion.editorialDiagnosis.v1`, Editorial Transformer uses `recursion.editorialPass.v1`, Editorial Verifier uses `recursion.editorialVerification.v1`, Editorial Effectiveness Judge uses `recursion.redirectEffectivenessJudge.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`. Editorial machine-JSON requests constrain the selected mode, frozen source/snapshot and diagnosis identities, complete nested brief or candidate/patch shape, installed-card IDs, repair-target IDs, and every evidence reference before a response can reach runtime semantic validation. Preservation references use a narrower evidence set that excludes source-draft and source-negative evidence. Because not every host provider enforces JSON Schema `const`, the provider boundary replaces Editorial mode and identity echoes with the trusted request values before semantic validation; provider output remains authoritative only for the diagnosis, candidate, ledgers, and evidence references. Diagnosis and Transform share one operation-scoped correction token: if an otherwise structured response fails semantic validation, Recursion may request one complete corrected object, and the original invalid object remains rejected. Machine-JSON token-limit responses may spend that same token on one compact low-reasoning retry with the same frozen request, provider, model, and configured max-token ceiling. Editorial Diagnostician, Transformer, and Verifier inherit the selected Utility or Reasoner lane's configured max-token ceiling instead of imposing private role-level limits. The bounded transcript is exposed as `message:N` evidence alongside packet, card, brief, story-form, and source evidence; providers may cite only the frozen request-known ID set.
 
 ### Redirect contract
 
@@ -193,6 +193,13 @@ authoritative frozen evidence. An `unclear` want carries no want/source evidence
 and has an `unclear` pressure effect. Pressure is advisory: it can make a strong
 response more likely, but never mechanically requires speech, action, or rising
 pressure.
+
+`proceed` is Redirect's only valid diagnosis decision. Editorial diagnosis uses
+low reasoning intent from the first request to protect the structured response
+budget. Provider-authored
+`no-change` is a semantic contract failure and may receive one correction request.
+If correction remains invalid, Redirect fails visibly and preserves the original;
+it never reports a skipped success.
 
 Required beats remain authoritative independently of pressure. When a validated
 beat requires visible speech or action, the transformer and verifier cannot replace
@@ -496,6 +503,11 @@ Normalized provider error codes include:
 - `RECURSION_PROVIDER_EMPTY_RESPONSE`: the provider returned no visible content.
 - `RECURSION_PROVIDER_REASONING_ONLY`: the provider returned hidden reasoning without visible JSON content.
 - `RECURSION_PROVIDER_TOKEN_LIMIT`: the provider stopped at a token limit before returning complete visible JSON.
+
+Machine-JSON token exhaustion receives at most one compact structured recovery.
+Sanitized failure diagnostics retain the provider model, effective output ceiling,
+finish reason, token usage, visible response size, retry count, and recovery kind
+when the provider supplies them. They never retain provider text or reasoning.
 
 Journal entries must not include:
 

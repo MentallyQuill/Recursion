@@ -1368,7 +1368,7 @@ const connectionProfileResult = await createGenerationRouter({ client: connectio
   systemPrompt: 'System profile service.',
   snapshotHash: 'profile-snapshot-hash',
   reasoningCategory: 'final-brief',
-  reasoningIntent: 'medium',
+  reasoningIntent: 'low',
   signal: connectionProfileSignal
 });
 assertEqual(connectionProfileResult.ok, true, 'host connection profile routes through ConnectionManagerRequestService when available');
@@ -1392,9 +1392,11 @@ assertEqual(connectionProfileCalls[0].parameters.json_schema.value.properties.sn
 assert(connectionProfileCalls[0].parameters.json_schema.value.required.includes('snapshotHash'), 'connection profile service requires snapshot hash');
 assertDeepEqual(
   connectionProfileCalls[0].parameters.reasoning,
-  { intent: 'medium', category: 'final-brief', exclude: true },
+  { intent: 'minimal', category: 'final-brief', exclude: true },
   'connection profile service receives sanitized reasoning intent'
 );
+assertEqual(connectionProfileCalls[0].parameters.reasoning_effort, 'minimal', 'connection profile service maps low reasoning intent to SillyTavern reasoning_effort');
+assertEqual(connectionProfileCalls[0].parameters.include_reasoning, false, 'connection profile service excludes private reasoning from the provider response');
 assertEqual(connectionProfileCalls[0].parameters.temperature, 0.15, 'connection profile service receives configured temperature');
 assertEqual(connectionProfileCalls[0].parameters.top_p, 0.7, 'connection profile service receives configured top p');
 const cappedConnectionProfileResult = await createGenerationRouter({ client: connectionProfileHost.providerClient }).generate('utilityArbiter', {

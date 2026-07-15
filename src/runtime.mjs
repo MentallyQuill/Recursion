@@ -3949,7 +3949,8 @@ export function createRecursionRuntime({
       stageRuntimeActivity({ runId, phase: 'editorialDiagnosing', label: 'Diagnosing response...', providerLane: lane, composerLane: lane, chips: ['Enhancement', editorialMode] });
       const diagnosisRequest = {
         ...buildEditorialDiagnosisRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot, lane }),
-        ...reasonerRequestMetadata(settings, 'editorial-transform', lane)
+        ...reasonerRequestMetadata(settings, 'editorial-transform', lane),
+        reasoningIntent: 'low'
       };
       let diagnosisResponse = await generateEditorialRole('editorialDiagnostician', diagnosisRequest);
       if (enhancementSignal?.aborted) return canceledEditorialResult();
@@ -3968,7 +3969,8 @@ export function createRecursionRuntime({
             lane,
             retry: diagnosisValidation.error
           }),
-          ...reasonerRequestMetadata(settings, 'editorial-transform', lane)
+          ...reasonerRequestMetadata(settings, 'editorial-transform', lane),
+          reasoningIntent: 'low'
         }, { allowStructuredRecovery: false });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
         diagnosisValidation = diagnosisResponse.result?.ok === true

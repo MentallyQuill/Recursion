@@ -7,7 +7,56 @@ const RECURSION_PROMPT_KEYS = [
   'recursion.guardrails'
 ];
 
-await import('../../src/extension/index.js');
+const extensionModule = await import('../../src/extension/index.js');
+
+assertEqual(typeof extensionModule.createProviderJournal, 'function', 'extension exposes its provider journal adapter for contract testing');
+const providerJournalEntries = [];
+const providerJournal = extensionModule.createProviderJournal({
+  async appendJournal(_chatKey, entry) { providerJournalEntries.push(entry); }
+}, {
+  async snapshot() { return { chatKey: 'provider-journal-chat', sceneKey: 'provider-journal-scene' }; }
+});
+await providerJournal.append({
+  runId: 'provider-journal-run',
+  roleId: 'editorialDiagnostician',
+  lane: 'utility',
+  status: 'success',
+  model: 'structured-thinking-model',
+  retryCount: 1,
+  structuredOutputRecovery: 'token_limit_compact_retry',
+  effectiveMaxTokens: 8192,
+  finishReason: 'length',
+  promptTokens: 1200,
+  completionTokens: 8192,
+  reasoningTokens: 7600,
+  totalTokens: 9392,
+  visibleContentLength: 48
+});
+assertDeepEqual(
+  providerJournalEntries[0].details,
+  {
+    roleId: 'editorialDiagnostician',
+    lane: 'utility',
+    providerSource: undefined,
+    providerId: undefined,
+    model: 'structured-thinking-model',
+    responseId: undefined,
+    schema: undefined,
+    retryCount: 1,
+    structuredOutputRecovery: 'token_limit_compact_retry',
+    effectiveMaxTokens: 8192,
+    finishReason: 'length',
+    promptTokens: 1200,
+    completionTokens: 8192,
+    reasoningTokens: 7600,
+    totalTokens: 9392,
+    visibleContentLength: 48,
+    latencyMs: undefined,
+    status: 'success',
+    error: undefined
+  },
+  'provider journal adapter preserves sanitized recovery and token diagnostics'
+);
 
 async function waitUntil(predicate, message, { attempts = 50 } = {}) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {

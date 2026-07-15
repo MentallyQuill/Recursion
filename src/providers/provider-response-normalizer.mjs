@@ -17,6 +17,37 @@ function cleanText(value = '', maxLength = 1000) {
   return text.length <= maxLength ? text : text.slice(0, maxLength).trim();
 }
 
+function tokenCount(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number) : undefined;
+}
+
+export function describeProviderUsage(value = {}) {
+  const usage = isObject(value?.usage)
+    ? value.usage
+    : (isObject(value?.usage_metadata) ? value.usage_metadata : (isObject(value?.usageMetadata) ? value.usageMetadata : {}));
+  const completionDetails = usage.completion_tokens_details
+    || usage.completionTokensDetails
+    || usage.output_tokens_details
+    || usage.outputTokensDetails
+    || {};
+  const promptTokens = tokenCount(usage.prompt_tokens ?? usage.promptTokens ?? usage.input_tokens ?? usage.inputTokens);
+  const completionTokens = tokenCount(usage.completion_tokens ?? usage.completionTokens ?? usage.output_tokens ?? usage.outputTokens);
+  const reasoningTokens = tokenCount(
+    completionDetails.reasoning_tokens
+      ?? completionDetails.reasoningTokens
+      ?? usage.reasoning_tokens
+      ?? usage.reasoningTokens
+  );
+  const totalTokens = tokenCount(usage.total_tokens ?? usage.totalTokens);
+  return {
+    ...(promptTokens !== undefined ? { promptTokens } : {}),
+    ...(completionTokens !== undefined ? { completionTokens } : {}),
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {})
+  };
+}
+
 function hasStructuredResponseShape(value) {
   if (!isObject(value)) return false;
   return [
@@ -208,9 +239,11 @@ export function describeProviderResponse(value = '', options = {}) {
   const sampleLimit = Math.max(0, Math.min(1000, Number(options.sampleLimit ?? 160) || 160));
   return {
     resultType: value === null ? 'null' : (Array.isArray(value) ? 'array' : typeof value),
+    model: cleanText(value?.model || '', 180),
     finishReason: finishReasons[0] || '',
     visibleContentLength: text.length,
     reasoningLength: reasoning.length,
+    ...describeProviderUsage(value),
     sample: sampleLimit ? text.slice(0, sampleLimit) : ''
   };
 }

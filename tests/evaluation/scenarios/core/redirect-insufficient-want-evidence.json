@@ -10,15 +10,15 @@
       { "mesid": 1, "role": "assistant", "text": "A quiet diner patron sat in a distant booth; no goal or relationship had been established for them." }
     ]
   },
-  "pendingUserMessage": "The nearby conversation pauses for a moment.",
+  "pendingUserMessage": "Will asks the unidentified patron whether they saw anyone draw chalk marks, but nothing establishes what the patron wants or why they are present.",
   "settingsProfile": "auto-normal",
   "oracle": {
     "editorialRedirect": {
-      "sourceResponse": "The patron remained seated and said nothing.",
-      "expectedDecision": "no-change",
-      "replacementObjective": "Retain the source and report no-change because no supported immediate want establishes a Redirect.",
-      "requiredBeats": ["Represent the patron's immediate want as unclear rather than inventing one."],
-      "forbiddenSourceBeats": ["Invent a motive, allegiance, fear, or plan for the patron."],
+      "sourceResponse": "The patron remained seated and said nothing, and everyone moved on as though Will had not asked the question.",
+      "expectedDecision": "proceed",
+      "replacementObjective": "Keep the direct question consequential while preserving uncertainty about the patron's immediate want.",
+      "requiredBeats": ["The silence, refusal, or another supported response keeps Will's chalk-mark question active without assigning the patron a motive."],
+      "forbiddenSourceBeats": ["Discard the direct question without consequence.", "Invent a motive, allegiance, fear, or plan for the patron."],
       "pressureExpectations": [
         { "character": "Diner patron", "effect": "unclear", "responseRequired": false }
       ]

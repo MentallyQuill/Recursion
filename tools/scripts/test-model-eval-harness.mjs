@@ -64,6 +64,7 @@ const coreRedirectScenarios = loadScenarioPack('core');
 assertEqual(coreRedirectScenarios.length, 6, 'core pack ships six Redirect effectiveness scenarios');
 assert(coreRedirectScenarios.every((scenario) => scenario.tags.includes('editorial') && scenario.tags.includes('redirect')), 'every Redirect core scenario carries both routing tags');
 assert(coreRedirectScenarios.every((scenario) => scenario.oracle.editorialRedirect.sourceResponse), 'every Redirect core scenario freezes a flawed source response');
+assert(coreRedirectScenarios.every((scenario) => scenario.oracle.editorialRedirect.expectedDecision === 'proceed'), 'every explicit Redirect scenario requires a directional replacement');
 assert(coreRedirectScenarios.every((scenario) => scenario.oracle.editorialRedirect.replacementObjective), 'every Redirect core scenario defines a replacement objective');
 assert(coreRedirectScenarios.every((scenario) => scenario.oracle.editorialRedirect.pressureExpectations.length > 0), 'every Redirect core scenario defines pressure expectations');
 

@@ -119,12 +119,13 @@ function cloneSafe(value, fallback = undefined) {
   }
 }
 
-function providerError(code, message, { retryable = false, status = undefined, cause = undefined } = {}) {
+function providerError(code, message, { retryable = false, status = undefined, cause = undefined, providerDiagnostics = undefined } = {}) {
   const error = new Error(message);
   error.code = code;
   error.retryable = retryable;
   if (status !== undefined) error.status = status;
   if (cause !== undefined) error.cause = cause;
+  if (providerDiagnostics !== undefined) error.providerDiagnostics = providerDiagnostics;
   return error;
 }
 
@@ -561,7 +562,7 @@ export function machineJsonSchemaForRequest(request = {}) {
     const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
     const validPreservationEvidenceIds = uniqueRequestStrings(request?.validPreservationEvidenceIds);
     const decisions = mode === 'redirect'
-      ? ['proceed', 'no-change']
+      ? ['proceed']
       : mode === 'recompose'
         ? ['proceed', 'no-change', 'requires-redirect']
         : ['proceed', 'no-change', 'requires-recompose', 'requires-redirect'];
@@ -1206,12 +1207,25 @@ function chatMessages(request = {}) {
   return [{ role: 'user', content: String(request.prompt ?? '') }];
 }
 
-function providerResponseFailureError(error) {
+function providerResponseFailureError(error, enriched = {}) {
   const code = String(error?.code || '');
   const details = error?.details || {};
+  const providerDiagnostics = sanitize({
+    providerSource: enriched.providerSource,
+    model: details.model || enriched.providerConfig?.resolvedModelLabel || enriched.providerConfig?.openAICompatible?.model || '',
+    effectiveMaxTokens: Number(details.maxTokens || providerRequestMaxTokens(enriched) || 0) || 0,
+    finishReason: details.finishReason,
+    promptTokens: details.promptTokens,
+    completionTokens: details.completionTokens,
+    reasoningTokens: details.reasoningTokens,
+    totalTokens: details.totalTokens,
+    visibleContentLength: details.visibleContentLength,
+    reasoningLength: details.reasoningLength
+  }, 300);
   if (code === PROVIDER_RESPONSE_ERROR_CODES.TOKEN_LIMIT) {
     throw providerError('RECURSION_PROVIDER_TOKEN_LIMIT', 'Provider response stopped at the token limit before returning complete visible JSON.', {
-      retryable: false
+      retryable: false,
+      providerDiagnostics
     });
   }
   if (code === PROVIDER_RESPONSE_ERROR_CODES.REASONING_ONLY) {
@@ -1236,7 +1250,7 @@ function providerVisibleText(value, enriched = {}) {
       maxTokens: providerRequestMaxTokens(enriched)
     });
   } catch (error) {
-    providerResponseFailureError(error);
+    providerResponseFailureError(error, enriched);
   }
 }
 
@@ -1370,11 +1384,17 @@ function actionableError(error) {
   return chain.at(-1) || error;
 }
 
-function structuredOutputRetryableError(error) {
+function structuredOutputRecoveryKind(error, request = {}) {
   const code = String(error?.code || '');
-  return code === 'RECURSION_JSON_PARSE_FAILED'
+  if (code === 'RECURSION_PROVIDER_TOKEN_LIMIT' && request?.machineJson === true) return 'token_limit_compact_retry';
+  if (code === 'RECURSION_JSON_PARSE_FAILED'
     || code === 'RECURSION_JSON_OBJECT_REQUIRED'
-    || code === 'RECURSION_PROVIDER_SCHEMA_MISMATCH';
+    || code === 'RECURSION_PROVIDER_SCHEMA_MISMATCH') return 'slot_correction_retry';
+  return '';
+}
+
+function structuredOutputRetryableError(error, request = {}) {
+  return Boolean(structuredOutputRecoveryKind(error, request));
 }
 
 function structuredOutputFieldHint(roleId, request = {}) {
@@ -1390,7 +1410,14 @@ function structuredOutputFieldHint(roleId, request = {}) {
 
 function requestWithStructuredRetryPrompt(request = {}, { roleId = '', error = null } = {}) {
   const expected = expectedResponseSchema(roleId);
-  const correction = [
+  const tokenLimit = String(error?.code || '') === 'RECURSION_PROVIDER_TOKEN_LIMIT';
+  const correction = tokenLimit ? [
+    '',
+    'Previous response stopped at the provider token limit.',
+    `Return exactly one complete compact JSON object with schema "${expected}".`,
+    structuredOutputFieldHint(roleId, request),
+    'Use concise claims and evidence references. Do not include markdown, prose, comments, analysis, hidden reasoning, or alternate schemas.'
+  ].join('\n') : [
     '',
     'Previous response was rejected by Recursion structured-output validation.',
     `Return exactly one JSON object with schema "${expected}".`,
@@ -1400,7 +1427,8 @@ function requestWithStructuredRetryPrompt(request = {}, { roleId = '', error = n
   ].join('\n');
   return {
     ...request,
-    prompt: `${String(request?.prompt ?? '')}${correction}`
+    prompt: `${String(request?.prompt ?? '')}${correction}`,
+    ...(tokenLimit ? { reasoningIntent: 'low' } : {})
   };
 }
 
@@ -1447,8 +1475,26 @@ function sanitizedError(error, request = {}) {
     code: scrubKnownRequestText(rawCode, request),
     message: truncate(compact(message), 300),
     retryable: retryableError(error),
+    ...providerFailureDiagnostics(error),
     ...(actualSchema ? { actualSchema: truncate(compact(actualSchema), 120) } : {}),
     ...(responseFields.length ? { responseFields } : {})
+  }, 300);
+}
+
+function providerFailureDiagnostics(error) {
+  const chain = errorChain(error);
+  const source = chain.map((entry) => entry?.providerDiagnostics).find((entry) => plainObject(entry)) || {};
+  return sanitize({
+    providerSource: source.providerSource,
+    model: source.model,
+    effectiveMaxTokens: source.effectiveMaxTokens,
+    finishReason: source.finishReason,
+    promptTokens: source.promptTokens,
+    completionTokens: source.completionTokens,
+    reasoningTokens: source.reasoningTokens,
+    totalTokens: source.totalTokens,
+    visibleContentLength: source.visibleContentLength,
+    reasoningLength: source.reasoningLength
   }, 300);
 }
 
@@ -2136,7 +2182,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
             recoverySpent: structuredRecoverySpent
           };
         } catch (error) {
-          const structuredRetry = structuredOutputRetryableError(error);
+          const structuredRecoveryKind = structuredOutputRecoveryKind(error, attemptRequest);
+          const structuredRetry = Boolean(structuredRecoveryKind);
           const canRetry = attempt === 0 && (retryableError(error) || (structuredRetry && options.allowStructuredRecovery !== false));
           let retrySkippedReason = '';
           const latencyMs = Date.now() - started;
@@ -2156,7 +2203,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
               retryFormatError = structuredRetry ? error : null;
               if (structuredRetry) {
                 structuredRecoverySpent = true;
-                structuredOutputRecovery = 'slot_correction_retry';
+                structuredOutputRecovery = structuredRecoveryKind;
               }
               continue;
             }
@@ -2164,6 +2211,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
           }
           lastDiagnostics = sanitize({
             ...lastDiagnostics,
+            ...providerFailureDiagnostics(error),
             retryCount,
             latencyMs,
             error: sanitizedError(error, request),
@@ -2576,8 +2624,9 @@ export function createGenerationRouter({ client, activity = null, journal = null
         results[entry.index] = await successResult(entry, raw, batchRetryCount);
         emitSlotSettledActivity(entry, raw, batchRetryCount);
       } catch (error) {
-        if (structuredOutputRetryableError(error) && options.allowStructuredRecovery !== false && entry.request.signal?.aborted !== true) {
-          retryCandidates.push({ entry, error, raw });
+        const structuredOutputRecovery = structuredOutputRecoveryKind(error, entry.request);
+        if (structuredOutputRecovery && options.allowStructuredRecovery !== false && entry.request.signal?.aborted !== true) {
+          retryCandidates.push({ entry, error, raw, structuredOutputRecovery });
           continue;
         }
         results[entry.index] = await failureResult(entry, error, batchRetryCount, batchDiagnosticsFromResponse(raw));
@@ -2614,26 +2663,33 @@ export function createGenerationRouter({ client, activity = null, journal = null
             throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Provider correction batch response shape did not match its request batch.', { retryable: false });
           }
           for (let index = 0; index < retryCandidates.length; index += 1) {
-            const { entry } = retryCandidates[index];
+            const { entry, structuredOutputRecovery } = retryCandidates[index];
             const raw = retriedRaw[index];
             try {
-              results[entry.index] = await successResult(entry, raw, 1, { structuredOutputRecovery: 'slot_correction_retry' });
+              results[entry.index] = await successResult(entry, raw, 1, { structuredOutputRecovery });
               emitSlotSettledActivity(entry, raw, 1);
             } catch (error) {
-              results[entry.index] = await failureResult(entry, error, 1, batchDiagnosticsFromResponse(raw));
+              results[entry.index] = await failureResult(entry, error, 1, {
+                ...batchDiagnosticsFromResponse(raw),
+                structuredOutputRecovery
+              });
               emitSlotFailureActivity(entry, error, raw, 1, { force: true });
             }
           }
         } catch (error) {
-          for (const { entry, raw } of retryCandidates) {
-            results[entry.index] = await failureResult(entry, error, 1, batchDiagnosticsFromResponse(raw));
+          for (const { entry, raw, structuredOutputRecovery } of retryCandidates) {
+            results[entry.index] = await failureResult(entry, error, 1, {
+              ...batchDiagnosticsFromResponse(raw),
+              structuredOutputRecovery
+            });
             emitSlotFailureActivity(entry, error, raw, 1, { force: true });
           }
         }
       } else {
-        for (const { entry, error, raw } of retryCandidates) {
+        for (const { entry, error, raw, structuredOutputRecovery } of retryCandidates) {
           results[entry.index] = await failureResult(entry, error, batchRetryCount, {
             ...batchDiagnosticsFromResponse(raw),
+            structuredOutputRecovery,
             retrySkippedReason: retryFreshness.reason
           });
           emitSlotFailureActivity(entry, error, raw, batchRetryCount, { force: true });

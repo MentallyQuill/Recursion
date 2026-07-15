@@ -10,15 +10,15 @@
       { "mesid": 1, "role": "assistant", "text": "Carter remained seated across from Will in the public diner." }
     ]
   },
-  "pendingUserMessage": "Carter wants to test the transport method now and asks Will to explain the first step.",
+  "pendingUserMessage": "\"Both good questions. So far as our tests have gone, I'm still transported to the intended destination. And The Doctor wasn't able to recreate the effect--but that's not saying one of you couldn't. We should test it,\" Will replied.",
   "settingsProfile": "auto-normal",
   "oracle": {
     "editorialRedirect": {
-      "sourceResponse": "Carter nodded, but suggested they postpone the test until they reached the parking lot.",
+      "sourceResponse": "Carter asks Will what happened when the Doctor tried. The Doctor gives a long explanation of his failed reproductions. O'Neill agrees to test the method, but postpones it until they are outside in the parking lot and have settled the check.",
       "expectedDecision": "proceed",
-      "replacementObjective": "Engage the proposed transport test in the current diner turn.",
-      "requiredBeats": ["Carter visibly presses Will on beginning or explaining the test now."],
-      "forbiddenSourceBeats": ["Postpone the test until the parking lot or another later location."],
+      "replacementObjective": "Respond to Will's answers by moving the present diner turn into the supported test discussion instead of asking him to repeat them or postponing the payoff.",
+      "requiredBeats": ["Carter or O'Neill directly engages how the team will begin or evaluate the proposed test now."],
+      "forbiddenSourceBeats": ["Ask Will to repeat what happened when the Doctor tried.", "Postpone the test until the parking lot, after the check, or another later beat."],
       "pressureExpectations": [
         { "character": "Carter", "effect": "increasing", "responseRequired": false }
       ]

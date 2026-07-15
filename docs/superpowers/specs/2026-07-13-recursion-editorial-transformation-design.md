@@ -227,7 +227,7 @@ Its decision has exact behavior:
 | --- | --- | --- |
 | `Repair` | `proceed`, `no-change`, `requires-recompose`, `requires-redirect` | Only `proceed` invokes the transformer. Escalation is shown as an available next action; it is never run automatically. |
 | `Recompose` | `proceed`, `no-change`, `requires-redirect` | Only `proceed` invokes the transformer. `requires-redirect` keeps the original and tells the user why a stronger turn-level correction is needed. |
-| `Redirect` | `proceed`, `no-change` | Only `proceed` invokes the transformer. Insufficient evidence is `no-change`, never invented replacement content. |
+| `Redirect` | `proceed` | An explicit Redirect must identify an evidence-supported turn-level replacement. Invalid or insufficient diagnosis fails visibly after one correction attempt; it never reports skipped success. |
 
 `requires-recompose` and `requires-redirect` are operation outcomes, not card
 outcomes and not aliases for host regeneration. They have stable marker,

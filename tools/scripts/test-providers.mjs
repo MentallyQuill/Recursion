@@ -296,6 +296,11 @@ const redirectDiagnosisMachineSchema = machineJsonSchemaForRequest({
   validPreservationEvidenceIds: ['user:0', 'card:active-cast']
 });
 assertDeepEqual(
+  redirectDiagnosisMachineSchema.schema.properties.decision.enum,
+  ['proceed'],
+  'Redirect machine schema permits only a directional diagnosis'
+);
+assertDeepEqual(
   redirectDiagnosisMachineSchema.schema.properties.brief.required,
   [
     'mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges',
@@ -907,6 +912,36 @@ assertEqual(slotRecovered[0].diagnostics.retryCount, 0, 'initial valid batch sib
 assertEqual(slotRecovered[1].ok, true, 'corrected batch slot succeeds');
 assertEqual(slotRecovered[1].diagnostics.retryCount, 1, 'corrected batch slot records one retry');
 assertEqual(slotRecovered[1].diagnostics.structuredOutputRecovery, 'slot_correction_retry', 'corrected batch slot records structured recovery');
+
+const tokenLimitedBatchCalls = [];
+const tokenLimitedBatch = await createGenerationRouter({
+  client: {
+    async generate() {
+      throw new Error('single generation is not expected');
+    },
+    async batch(requests) {
+      tokenLimitedBatchCalls.push(requests);
+      if (tokenLimitedBatchCalls.length === 1) {
+        return [{
+          slotError: {
+            code: 'RECURSION_PROVIDER_TOKEN_LIMIT',
+            message: 'Provider response stopped at the token limit.',
+            retryable: false
+          }
+        }];
+      }
+      return [{ text: responseTextForRole('sceneFrameCard'), providerId: 'fake-host', model: 'fake-model' }];
+    }
+  }
+}).batch([{
+  roleId: 'sceneFrameCard',
+  prompt: 'Compact Scene Frame JSON.',
+  machineJson: true
+}]);
+assertEqual(tokenLimitedBatchCalls.length, 2, 'token-limited batch slot receives one compact recovery batch');
+assert(tokenLimitedBatchCalls[1][0].prompt.includes('token limit'), 'token-limited batch retry uses the compact recovery prompt');
+assertEqual(tokenLimitedBatch[0].ok, true, 'token-limited batch slot can recover');
+assertEqual(tokenLimitedBatch[0].diagnostics.structuredOutputRecovery, 'token_limit_compact_retry', 'token-limited batch slot records the token recovery kind');
 
 let retryAttempts = 0;
 const retryHost = {
@@ -1941,6 +1976,12 @@ async function openAiProviderFailure(payload, prompt = 'OpenAI provider failure'
 
 const tokenLimitFailure = await openAiProviderFailure((marker) => ({
   model: 'normalizer-model',
+  usage: {
+    prompt_tokens: 1200,
+    completion_tokens: 8192,
+    total_tokens: 9392,
+    completion_tokens_details: { reasoning_tokens: 7600 }
+  },
   choices: [{
     finish_reason: 'length',
     message: { content: `{"schema":"${marker}` }
@@ -1949,6 +1990,85 @@ const tokenLimitFailure = await openAiProviderFailure((marker) => ({
 assertEqual(tokenLimitFailure.result.ok, false, 'token-limit provider response returns failure result');
 assertEqual(tokenLimitFailure.result.error.code, 'RECURSION_PROVIDER_TOKEN_LIMIT', 'token-limit response exposes stable code');
 assertEqual(tokenLimitFailure.result.diagnostics.status, 'provider-failed', 'token-limit response is a provider failure, not a JSON parse failure');
+assertEqual(tokenLimitFailure.result.diagnostics.model, 'normalizer-model', 'token-limit diagnostics retain the provider model');
+assertEqual(tokenLimitFailure.result.diagnostics.effectiveMaxTokens, 8192, 'token-limit diagnostics retain the effective output ceiling');
+assertEqual(tokenLimitFailure.result.diagnostics.finishReason, 'length', 'token-limit diagnostics retain the finish reason');
+assertEqual(tokenLimitFailure.result.diagnostics.completionTokens, 8192, 'token-limit diagnostics retain completion usage');
+assertEqual(tokenLimitFailure.result.diagnostics.reasoningTokens, 7600, 'token-limit diagnostics retain reasoning usage');
+assertEqual(tokenLimitFailure.result.diagnostics.totalTokens, 9392, 'token-limit diagnostics retain total usage');
+assertEqual(typeof tokenLimitFailure.result.diagnostics.visibleContentLength, 'number', 'token-limit diagnostics retain visible response size');
+const tokenLimitJournalEntry = tokenLimitFailure.journal.find((entry) => entry.status === 'provider-failed');
+assert(tokenLimitJournalEntry, 'token-limit failure records a terminal provider journal entry');
+assertEqual(tokenLimitJournalEntry.model, 'normalizer-model', 'token-limit journal retains the provider model');
+assertEqual(tokenLimitJournalEntry.effectiveMaxTokens, 8192, 'token-limit journal retains the effective output ceiling');
+assertEqual(tokenLimitJournalEntry.finishReason, 'length', 'token-limit journal retains the finish reason');
+assertEqual(tokenLimitJournalEntry.reasoningTokens, 7600, 'token-limit journal retains reasoning usage');
+assertEqual(tokenLimitJournalEntry.visibleContentLength, tokenLimitFailure.result.diagnostics.visibleContentLength, 'token-limit journal retains visible response size');
+
+function tokenLimitPayload(marker = 'TOKEN_LIMIT_RETRY_MARKER') {
+  return {
+    model: 'normalizer-model',
+    usage: {
+      prompt_tokens: 1200,
+      completion_tokens: 8192,
+      total_tokens: 9392,
+      completion_tokens_details: { reasoning_tokens: 7600 }
+    },
+    choices: [{ finish_reason: 'length', message: { content: `{"schema":"${marker}` } }]
+  };
+}
+
+async function createTokenRecoveryResult({ alwaysFail = false, machineJson = true } = {}) {
+  const store = createStore();
+  store.updateProvider('utility', {
+    source: 'openai-compatible',
+    apiKey: 'session-key',
+    maxTokens: 8192,
+    openAICompatible: { baseUrl: 'https://token-recovery.test/v1', model: 'normalizer-model' }
+  });
+  const calls = [];
+  const result = await createGenerationRouter({
+    client: createProviderClient({
+      settingsStore: store,
+      fetchImpl: async (_url, options) => {
+        calls.push(JSON.parse(options.body));
+        const payload = calls.length === 1 || alwaysFail
+          ? tokenLimitPayload()
+          : {
+              model: 'normalizer-model',
+              usage: { prompt_tokens: 1200, completion_tokens: 42, total_tokens: 1242 },
+              choices: [{ finish_reason: 'stop', message: { content: responseTextForRole('utilityArbiter') } }]
+            };
+        return { ok: true, status: 200, json: async () => payload };
+      }
+    })
+  }).generate('utilityArbiter', {
+    prompt: 'Return compact Utility Arbiter JSON.',
+    responseSchema: 'recursion.utilityArbiter.v1',
+    machineJson,
+    snapshotHash: 'token-recovery-snapshot'
+  });
+  return { result, calls };
+}
+
+const tokenRecovered = await createTokenRecoveryResult();
+assertEqual(tokenRecovered.result.ok, true, 'machine-JSON token limit receives one compact recovery attempt');
+assertEqual(tokenRecovered.calls.length, 2, 'token-limit recovery makes exactly two provider calls');
+assertEqual(tokenRecovered.result.recoverySpent, true, 'token-limit recovery spends the shared structured recovery token');
+assertEqual(tokenRecovered.result.diagnostics.structuredOutputRecovery, 'token_limit_compact_retry', 'token-limit recovery records stable recovery metadata');
+assert(tokenRecovered.calls[1].messages[0].content.includes('token limit'), 'token-limit retry prompt explains the compact recovery requirement');
+assertEqual(tokenRecovered.calls[1].max_tokens, tokenRecovered.calls[0].max_tokens, 'token-limit recovery preserves the configured output ceiling');
+
+const tokenRecoveryFailed = await createTokenRecoveryResult({ alwaysFail: true });
+assertEqual(tokenRecoveryFailed.result.ok, false, 'two token-limit responses preserve a hard provider failure');
+assertEqual(tokenRecoveryFailed.result.error.code, 'RECURSION_PROVIDER_TOKEN_LIMIT', 'exhausted token recovery keeps the stable error code');
+assertEqual(tokenRecoveryFailed.calls.length, 2, 'token-limit recovery never makes a third call');
+assertEqual(tokenRecoveryFailed.result.diagnostics.retryCount, 1, 'exhausted token recovery records one retry');
+assertEqual(tokenRecoveryFailed.result.diagnostics.structuredOutputRecovery, 'token_limit_compact_retry', 'exhausted token recovery records its recovery kind');
+
+const nonMachineTokenLimit = await createTokenRecoveryResult({ alwaysFail: true, machineJson: false });
+assertEqual(nonMachineTokenLimit.result.ok, false, 'non-machine token exhaustion remains a provider failure');
+assertEqual(nonMachineTokenLimit.calls.length, 1, 'non-machine token exhaustion is not retried');
 
 const reasoningOnlyFailure = await openAiProviderFailure((marker) => ({
   model: 'normalizer-model',

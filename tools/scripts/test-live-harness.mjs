@@ -118,7 +118,7 @@ const healthyNoChangeArtifacts = {
   },
   visibleText: 'Editorial complete; no changes needed.'
 };
-assertEqual(evaluateLiveRedirectScenarioArtifacts(healthyNoChangeArtifacts).ok, true, 'expected no-change passes without a swipe or verifier');
+assertEqual(evaluateLiveRedirectScenarioArtifacts(healthyNoChangeArtifacts).ok, false, 'explicit Redirect rejects no-change even when the tree is otherwise healthy');
 
 let unsafeScenarioExecutions = 0;
 const unsafeEditorialRun = await runLiveEditorialEffectiveness({

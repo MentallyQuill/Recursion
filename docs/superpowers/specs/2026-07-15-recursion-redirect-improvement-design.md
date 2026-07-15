@@ -17,9 +17,9 @@ This document supplements the [Editorial Transformation Design](2026-07-13-recur
 Implementation clarification: when a character's immediate want is `unclear`, the
 provider must return empty `wantEvidenceRefs` and `sourceEvidenceRefs`, and the
 pressure effect must also be `unclear`. This prevents an uncertainty finding from
-claiming evidence it does not possess. The `no-change` decision remains a healthy
-Redirect result only when no host swipe is added and the progress/journal history is
-otherwise clean; strict live success scenarios still reject skipped Enhancements.
+claiming evidence it does not possess. An explicit Redirect accepts only `proceed`;
+an invalid or insufficient diagnosis receives one correction attempt and then fails
+visibly without mutating the host response.
 
 ## Problem
 
@@ -175,9 +175,9 @@ const redirectBrief = {
 };
 ```
 
-### Proceed and no-change
+### Proceed-only Redirect
 
-For `decision: "proceed"`:
+Every valid Redirect diagnosis uses `decision: "proceed"`:
 
 - `sourceFailure` and `replacementObjective` are non-null.
 - `requiredBeats` and `forbiddenSourceBeats` are non-empty.
@@ -185,13 +185,11 @@ For `decision: "proceed"`:
 - Every concrete want has authoritative evidence.
 - Every claimed source pressure effect cites source-draft evidence.
 
-For `decision: "no-change"`:
-
-- `sourceFailure` and `replacementObjective` are `null`.
-- `requiredBeats` and `forbiddenSourceBeats` are empty.
-- The pressure map may still contain `unclear` entries that explain why no supported turn-level replacement can be established.
-
-Insufficient evidence produces `no-change`. It never licenses the transformer to invent a more dramatic alternative.
+The provider may still mark a character's immediate want and pressure effect as
+`unclear`, but that uncertainty does not cancel the explicit Redirect. The diagnosis
+must identify the strongest evidence-supported correction elsewhere in the frozen
+turn. If it cannot satisfy the contract after one correction request, runtime fails
+red and preserves the original response rather than inventing unsupported content.
 
 ## Character-pressure analysis
 
@@ -247,9 +245,9 @@ Actionable Redirect diagnosis
 
 This keeps `sourceFailure` auditable and separates continuity evidence from editable prose. The source can prove what went wrong; it cannot prove what must remain true.
 
-The design also adopts an explicit insufficient-evidence state. It does not adopt the paper's full multi-stage checker, abandoned-plot detection, or category-per-call architecture.
+The design keeps uncertainty explicit at the character-pressure field level. It does not adopt the paper's full multi-stage checker, abandoned-plot detection, or category-per-call architecture.
 
-[MemCoT](https://arxiv.org/html/2604.08216v1)'s bounded narrow-to-wide evidence lens remains a possible future improvement when a character want depends on older in-scene evidence outside the provider snapshot. It is not part of this Redirect change. Redirect must use the frozen evidence it receives and return `no-change` when that evidence is insufficient.
+[MemCoT](https://arxiv.org/html/2604.08216v1)'s bounded narrow-to-wide evidence lens remains a possible future improvement when a character want depends on older in-scene evidence outside the provider snapshot. It is not part of this Redirect change. Redirect must use the frozen evidence it receives; unresolved character wants remain `unclear`, while an unsatisfied overall diagnosis contract fails visibly after correction.
 
 ## Provider schema integration
 

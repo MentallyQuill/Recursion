@@ -1,0 +1,28 @@
+{
+  "id": "redirect-character-pressure",
+  "title": "Let rising pressure shape a stronger response",
+  "pack": "core",
+  "tags": ["editorial", "redirect"],
+  "snapshot": {
+    "chatId": "eval-redirect-character-pressure",
+    "sceneKey": "diner-pressure",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "Carter wanted a testable explanation; O'Neill wanted a reason to trust Will before committing the team." }
+    ]
+  },
+  "pendingUserMessage": "Will says they must trust him without asking any more questions.",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "editorialRedirect": {
+      "sourceResponse": "Carter and O'Neill accepted the demand with mild nods, and the conversation moved on to breakfast.",
+      "expectedDecision": "proceed",
+      "replacementObjective": "Keep the trust demand under active pressure instead of dissolving it.",
+      "requiredBeats": ["At least one supported response makes the trust conflict remain consequential."],
+      "forbiddenSourceBeats": ["Have the team casually accept blind trust and move on."],
+      "pressureExpectations": [
+        { "character": "Carter", "effect": "increasing", "responseRequired": false },
+        { "character": "O'Neill", "effect": "increasing", "responseRequired": false }
+      ]
+    }
+  }
+}

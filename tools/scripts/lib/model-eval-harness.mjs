@@ -107,7 +107,21 @@ function normalizeScenario(source, filePath) {
       mustUseFacts: normalizeStringArray(oracle.mustUseFacts),
       mustNotReveal: normalizeStringArray(oracle.mustNotReveal),
       mustAvoid: normalizeStringArray(oracle.mustAvoid),
-      successCriteria: normalizeStringArray(oracle.successCriteria)
+      successCriteria: normalizeStringArray(oracle.successCriteria),
+      editorialRedirect: {
+        sourceResponse: String(oracle.editorialRedirect?.sourceResponse || ''),
+        expectedDecision: String(oracle.editorialRedirect?.expectedDecision || ''),
+        replacementObjective: String(oracle.editorialRedirect?.replacementObjective || ''),
+        requiredBeats: normalizeStringArray(oracle.editorialRedirect?.requiredBeats),
+        forbiddenSourceBeats: normalizeStringArray(oracle.editorialRedirect?.forbiddenSourceBeats),
+        pressureExpectations: (Array.isArray(oracle.editorialRedirect?.pressureExpectations)
+          ? oracle.editorialRedirect.pressureExpectations
+          : []).map((entry) => ({
+          character: String(entry?.character || '').trim(),
+          effect: String(entry?.effect || '').trim(),
+          responseRequired: entry?.responseRequired === true
+        })).filter((entry) => entry.character && entry.effect)
+      }
     },
     sourceFile: filePath
   };
@@ -293,6 +307,10 @@ async function defaultLiveSmokeRunner(options) {
   return runSillyTavernLiveSmoke(options);
 }
 
+async function defaultEditorialEffectivenessRunner() {
+  return { status: 'skipped', result: 'redirect-effectiveness-runner-unavailable', scenarios: [] };
+}
+
 function createRunId() {
   return `model-eval-${Date.now().toString(36)}-${hashText(Math.random()).slice(0, 6)}`;
 }
@@ -399,7 +417,13 @@ function modelEvalSummary(report) {
   ].join('\n');
 }
 
-export async function runModelEval({ argv = [], env = process.env, artifactRoot = null, liveSmokeRunner = defaultLiveSmokeRunner } = {}) {
+export async function runModelEval({
+  argv = [],
+  env = process.env,
+  artifactRoot = null,
+  liveSmokeRunner = defaultLiveSmokeRunner,
+  editorialEffectivenessRunner = defaultEditorialEffectivenessRunner
+} = {}) {
   const args = parseEvalArgs(argv);
   if (env.SILLYTAVERN_BASE_URL && !args.baseUrl) args.baseUrl = env.SILLYTAVERN_BASE_URL;
   if (env.RECURSION_SILLYTAVERN_USER && !args.user) args.user = env.RECURSION_SILLYTAVERN_USER;
@@ -428,6 +452,7 @@ export async function runModelEval({ argv = [], env = process.env, artifactRoot 
     callEstimate: estimateModelCalls({ scenarioCount: scenarios.length, runs: args.runs, profile: args.profile, judgeTasks: JUDGE_TASKS }),
     metrics: {},
     judgeSummary: {},
+    modelEffectiveness: {},
     defects: [],
     failures: [],
     warnings: []
@@ -459,6 +484,17 @@ export async function runModelEval({ argv = [], env = process.env, artifactRoot 
   }
 
   if (args.live && !args.dryRun) {
+    const redirectScenarios = scenarios.filter((scenario) => (
+      scenario.tags.includes('editorial') && scenario.tags.includes('redirect')
+    ));
+    if (args.strict && args.pack === 'core' && redirectScenarios.length === 0) {
+      report.failures.push({
+        name: 'redirect-effectiveness-corpus',
+        status: 'fail',
+        summary: 'Strict Redirect effectiveness requires a non-empty tagged core corpus.'
+      });
+      return reportStatus(report, 'fail', 'redirect-effectiveness-empty-corpus');
+    }
     const smokeEnv = {
       ...env,
       SILLYTAVERN_BASE_URL: args.baseUrl,
@@ -493,6 +529,43 @@ export async function runModelEval({ argv = [], env = process.env, artifactRoot 
         summary: `Live Playwright traversal failed: ${smoke?.result || 'unknown'}`
       });
       reportStatus(report, smoke?.status || 'fail', smoke?.result || 'playwright-traversal-failed');
+    } else if (redirectScenarios.length > 0) {
+      const redirectEffectiveness = await editorialEffectivenessRunner({
+        scenarios: redirectScenarios,
+        task: 'output',
+        baseUrl: args.baseUrl,
+        user: args.user,
+        targetModel: args.targetModel,
+        judgeModel: args.judgeModel,
+        strict: args.strict,
+        failFast: args.failFast,
+        timeoutMs: parsePositiveInt(smokeEnv.RECURSION_LIVE_TIMEOUT_MS, 120000),
+        env: smokeEnv,
+        artifactRoot
+      });
+      report.modelEffectiveness.redirect = redirectEffectiveness;
+      const resultObject = redirectEffectiveness && typeof redirectEffectiveness === 'object'
+        ? redirectEffectiveness
+        : null;
+      const resultScenarios = Array.isArray(resultObject?.scenarios) ? resultObject.scenarios : null;
+      if (!resultObject || !resultScenarios) {
+        report.failures.push({ name: 'redirect-effectiveness', status: 'fail', summary: 'Redirect effectiveness output was malformed.' });
+        reportStatus(report, 'fail', 'redirect-effectiveness-malformed');
+      } else if (resultObject.status === 'skipped') {
+        report.failures.push({ name: 'redirect-effectiveness', status: 'fail', summary: 'Redirect effectiveness judge was skipped.' });
+        reportStatus(report, 'fail', 'redirect-effectiveness-skipped');
+      } else if (resultObject.status !== 'pass') {
+        report.failures.push({ name: 'redirect-effectiveness', status: 'fail', summary: `Redirect effectiveness failed: ${resultObject.result || 'unknown'}.` });
+        reportStatus(report, 'fail', resultObject.result || 'redirect-model-effectiveness-failed');
+      } else if (resultScenarios.length === 0) {
+        report.failures.push({ name: 'redirect-effectiveness', status: 'fail', summary: 'Redirect effectiveness returned no scenario evidence.' });
+        reportStatus(report, 'fail', 'redirect-effectiveness-empty');
+      } else if (resultScenarios.length !== redirectScenarios.length) {
+        report.failures.push({ name: 'redirect-effectiveness', status: 'fail', summary: 'Redirect effectiveness omitted scenario evidence.' });
+        reportStatus(report, 'fail', 'redirect-effectiveness-incomplete');
+      } else {
+        reportStatus(report, 'pass', resultObject.result || 'redirect-effectiveness-passed');
+      }
     } else {
       report.warnings.push({
         name: 'model-effectiveness',

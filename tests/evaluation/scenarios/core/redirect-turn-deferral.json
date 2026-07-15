@@ -1,0 +1,27 @@
+{
+  "id": "redirect-turn-deferral",
+  "title": "Begin the requested test instead of postponing it",
+  "pack": "core",
+  "tags": ["editorial", "redirect"],
+  "snapshot": {
+    "chatId": "eval-redirect-turn-deferral",
+    "sceneKey": "diner-test",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "Carter remained seated across from Will in the public diner." }
+    ]
+  },
+  "pendingUserMessage": "Carter wants to test the transport method now and asks Will to explain the first step.",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "editorialRedirect": {
+      "sourceResponse": "Carter nodded, but suggested they postpone the test until they reached the parking lot.",
+      "expectedDecision": "proceed",
+      "replacementObjective": "Engage the proposed transport test in the current diner turn.",
+      "requiredBeats": ["Carter visibly presses Will on beginning or explaining the test now."],
+      "forbiddenSourceBeats": ["Postpone the test until the parking lot or another later location."],
+      "pressureExpectations": [
+        { "character": "Carter", "effect": "increasing", "responseRequired": false }
+      ]
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "redirect-insufficient-want-evidence",
+  "title": "Return no-change instead of inventing motivation",
+  "pack": "core",
+  "tags": ["editorial", "redirect"],
+  "snapshot": {
+    "chatId": "eval-redirect-insufficient-want-evidence",
+    "sceneKey": "diner-unclear",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "A quiet diner patron sat in a distant booth; no goal or relationship had been established for them." }
+    ]
+  },
+  "pendingUserMessage": "The nearby conversation pauses for a moment.",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "editorialRedirect": {
+      "sourceResponse": "The patron remained seated and said nothing.",
+      "expectedDecision": "no-change",
+      "replacementObjective": "Retain the source and report no-change because no supported immediate want establishes a Redirect.",
+      "requiredBeats": ["Represent the patron's immediate want as unclear rather than inventing one."],
+      "forbiddenSourceBeats": ["Invent a motive, allegiance, fear, or plan for the patron."],
+      "pressureExpectations": [
+        { "character": "Diner patron", "effect": "unclear", "responseRequired": false }
+      ]
+    }
+  }
+}

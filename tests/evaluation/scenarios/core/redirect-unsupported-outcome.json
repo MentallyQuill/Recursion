@@ -1,0 +1,28 @@
+{
+  "id": "redirect-unsupported-outcome",
+  "title": "Remove an unsupported transport outcome",
+  "pack": "core",
+  "tags": ["editorial", "redirect"],
+  "snapshot": {
+    "chatId": "eval-redirect-unsupported-outcome",
+    "sceneKey": "diner-outcome",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "No transport pattern had been drawn and the team had not agreed to use it." }
+    ]
+  },
+  "pendingUserMessage": "Daniel asks what could go wrong if Will's pattern is inaccurate.",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "editorialRedirect": {
+      "sourceResponse": "Will drew the pattern perfectly, and the team arrived home without incident. Daniel admitted the method was safe.",
+      "expectedDecision": "proceed",
+      "replacementObjective": "Answer Daniel's risk question without drawing the pattern or resolving transport.",
+      "requiredBeats": ["The response discusses uncertainty or consequences of an inaccurate pattern."],
+      "forbiddenSourceBeats": ["Draw the pattern, transport the team, or establish that the method is safe."],
+      "pressureExpectations": [
+        { "character": "Daniel", "effect": "increasing", "responseRequired": false },
+        { "character": "Will", "effect": "increasing", "responseRequired": false }
+      ]
+    }
+  }
+}

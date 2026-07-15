@@ -1,0 +1,28 @@
+{
+  "id": "redirect-wrong-focus",
+  "title": "Answer the user's action instead of atmosphere",
+  "pack": "core",
+  "tags": ["editorial", "redirect"],
+  "snapshot": {
+    "chatId": "eval-redirect-wrong-focus",
+    "sceneKey": "diner-focus",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "Will had just offered to explain the chalk-drawn portal while everyone stayed seated." }
+    ]
+  },
+  "pendingUserMessage": "O'Neill asks Will exactly why they should trust his transport method.",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "editorialRedirect": {
+      "sourceResponse": "Rain dimmed the diner windows while the waitress topped up a nearby coffee cup. The room stayed quiet.",
+      "expectedDecision": "proceed",
+      "replacementObjective": "Make the turn respond to O'Neill's trust challenge.",
+      "requiredBeats": ["Will or the team directly engages the risk of trusting the transport method."],
+      "forbiddenSourceBeats": ["Spend the response only on diner atmosphere without answering the challenge."],
+      "pressureExpectations": [
+        { "character": "O'Neill", "effect": "increasing", "responseRequired": false },
+        { "character": "Will", "effect": "increasing", "responseRequired": false }
+      ]
+    }
+  }
+}

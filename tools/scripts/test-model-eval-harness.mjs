@@ -60,6 +60,13 @@ assertDeepEqual(
 );
 assert(smokeScenarios.every((scenario) => scenario.oracle.mustNotReveal.length > 0), 'each smoke scenario has forbidden reveal metadata');
 
+const coreRedirectScenarios = loadScenarioPack('core');
+assertEqual(coreRedirectScenarios.length, 6, 'core pack ships six Redirect effectiveness scenarios');
+assert(coreRedirectScenarios.every((scenario) => scenario.tags.includes('editorial') && scenario.tags.includes('redirect')), 'every Redirect core scenario carries both routing tags');
+assert(coreRedirectScenarios.every((scenario) => scenario.oracle.editorialRedirect.sourceResponse), 'every Redirect core scenario freezes a flawed source response');
+assert(coreRedirectScenarios.every((scenario) => scenario.oracle.editorialRedirect.replacementObjective), 'every Redirect core scenario defines a replacement objective');
+assert(coreRedirectScenarios.every((scenario) => scenario.oracle.editorialRedirect.pressureExpectations.length > 0), 'every Redirect core scenario defines pressure expectations');
+
 const callEstimate = estimateModelCalls({
   scenarioCount: smokeScenarios.length,
   runs: 2,
@@ -252,5 +259,84 @@ assert(traversalFailure.defects[0].regressionTarget.includes('test-live-harness'
 assertEqual(traversalFailure.defects[0].evidence.visibleSend.inputValueLength, 73, 'defect includes visible-send diagnostic evidence');
 assertEqual(traversalFailure.defects[0].evidence.visibleSend.acceptedAfter, '', 'defect records that visible send was not accepted');
 assertEqual(traversalFailure.repairSummary.openDefects, 1, 'live eval summarizes open defects');
+
+const passingTraversalRunner = async () => ({
+  status: 'pass',
+  result: 'generation-live-smoke',
+  checks: [{ name: 'generation-live-smoke', status: 'pass' }],
+  browser: {
+    snapshot: {
+      served: { status: 'served-extension-match' },
+      generation: { triggerSource: 'ui-send', promptInstalled: true }
+    }
+  }
+});
+const coreLiveArgs = [
+  '--live', '--strict', '--pack', 'core', '--user', 'recursion-soak-a',
+  '--base-url', 'http://127.0.0.1:8000', '--target-model', 'target-model', '--judge-model', 'judge-model',
+  '--max-provider-calls', '100'
+];
+let effectivenessOptions = null;
+const passingEffectiveness = await runModelEval({
+  argv: coreLiveArgs,
+  env: {},
+  liveSmokeRunner: passingTraversalRunner,
+  editorialEffectivenessRunner: async (options) => {
+    effectivenessOptions = options;
+    return {
+      status: 'pass',
+      result: 'redirect-effectiveness-passed',
+      scenarios: options.scenarios.map((scenario) => ({ scenarioId: scenario.id, status: 'pass' }))
+    };
+  }
+});
+assertEqual(passingEffectiveness.status, 'pass', 'strict core eval passes only with healthy Redirect effectiveness evidence');
+assertEqual(passingEffectiveness.result, 'redirect-effectiveness-passed', 'strict core eval exposes Redirect effectiveness result');
+assertEqual(passingEffectiveness.modelEffectiveness.redirect.scenarios.length, 6, 'strict core eval retains per-scenario effectiveness evidence');
+assertEqual(effectivenessOptions.user, 'recursion-soak-a', 'effectiveness runner receives dedicated user');
+assertEqual(effectivenessOptions.targetModel, 'target-model', 'effectiveness runner receives expected target model');
+assertEqual(effectivenessOptions.judgeModel, 'judge-model', 'effectiveness runner receives expected judge model');
+
+for (const control of [
+  { name: 'skipped', result: { status: 'skipped', result: 'judge-not-run', scenarios: [] }, expected: 'redirect-effectiveness-skipped' },
+  { name: 'malformed', result: null, expected: 'redirect-effectiveness-malformed' },
+  { name: 'empty', result: { status: 'pass', result: 'redirect-effectiveness-passed', scenarios: [] }, expected: 'redirect-effectiveness-empty' },
+  { name: 'semantic failure', result: { status: 'fail', result: 'redirect-semantic-failure', scenarios: [{ scenarioId: 'redirect-turn-deferral', status: 'fail' }] }, expected: 'redirect-semantic-failure' }
+]) {
+  const report = await runModelEval({
+    argv: coreLiveArgs,
+    env: {},
+    liveSmokeRunner: passingTraversalRunner,
+    editorialEffectivenessRunner: async () => control.result
+  });
+  assertEqual(report.status, 'fail', `strict core eval rejects ${control.name} effectiveness output`);
+  assertEqual(report.result, control.expected, `strict core eval records ${control.name} result`);
+}
+
+let emptyCorpusRunnerCalls = 0;
+const emptyCorpus = await runModelEval({
+  argv: [...coreLiveArgs, '--scenario', 'missing-redirect-scenario'],
+  env: {},
+  liveSmokeRunner: passingTraversalRunner,
+  editorialEffectivenessRunner: async () => {
+    emptyCorpusRunnerCalls += 1;
+    return { status: 'pass', result: 'redirect-effectiveness-passed', scenarios: [] };
+  }
+});
+assertEqual(emptyCorpus.status, 'fail', 'strict core eval rejects an empty tagged corpus');
+assertEqual(emptyCorpus.result, 'redirect-effectiveness-empty-corpus', 'empty core corpus has an explicit result');
+assertEqual(emptyCorpusRunnerCalls, 0, 'empty core corpus fails before launching effectiveness runner');
+
+let failFastForwarded = false;
+await runModelEval({
+  argv: [...coreLiveArgs, '--fail-fast'],
+  env: {},
+  liveSmokeRunner: passingTraversalRunner,
+  editorialEffectivenessRunner: async (options) => {
+    failFastForwarded = options.failFast === true;
+    return { status: 'fail', result: 'redirect-semantic-failure', scenarios: [{ scenarioId: 'redirect-turn-deferral', status: 'fail' }] };
+  }
+});
+assertEqual(failFastForwarded, true, 'model eval forwards fail-fast policy to Redirect effectiveness runner');
 
 console.log('[pass] model eval harness');

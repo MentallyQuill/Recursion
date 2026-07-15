@@ -1,0 +1,27 @@
+{
+  "id": "redirect-supported-restraint",
+  "title": "Allow restraint to carry rising pressure",
+  "pack": "core",
+  "tags": ["editorial", "redirect"],
+  "snapshot": {
+    "chatId": "eval-redirect-supported-restraint",
+    "sceneKey": "diner-restraint",
+    "messages": [
+      { "mesid": 1, "role": "assistant", "text": "Teal'c remained watchful and characteristically restrained while Will described the portal." }
+    ]
+  },
+  "pendingUserMessage": "Will insists the fake gate is useless and he alone can send them home.",
+  "settingsProfile": "auto-normal",
+  "oracle": {
+    "editorialRedirect": {
+      "sourceResponse": "Teal'c launched into an angry speech and threatened Will until every patron turned to stare.",
+      "expectedDecision": "proceed",
+      "replacementObjective": "Keep the trust pressure visible through evidence-supported restraint in the public diner.",
+      "requiredBeats": ["Teal'c's response or deliberate silence communicates scrutiny without forced aggression."],
+      "forbiddenSourceBeats": ["Invent an angry public threat or mandatory speech for Teal'c."],
+      "pressureExpectations": [
+        { "character": "Teal'c", "effect": "increasing", "responseRequired": false }
+      ]
+    }
+  }
+}

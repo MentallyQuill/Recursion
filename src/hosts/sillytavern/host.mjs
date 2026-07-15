@@ -1333,7 +1333,7 @@ export function createSillyTavernHost({
       for (let index = 0; index < markers.length; index += 1) {
         const text = Array.isArray(found.raw.swipes) ? stringValue(found.raw.swipes[index]) : '';
         if (markerMatchesSwipeText(markers[index], text) && markerMatches(markers[index], marker)) {
-          return { index, text };
+          return { index, text, marker: cloneJsonSafe(markers[index]) };
         }
       }
       return null;

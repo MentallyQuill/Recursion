@@ -66,6 +66,7 @@ import {
   buildEditorialPassRequest,
   buildEditorialVerificationRequest,
   editorialPassKey,
+  editorialVerificationRequired,
   validateEditorialDiagnosis,
   validateEditorialPass,
   validateEditorialVerification
@@ -3774,6 +3775,7 @@ export function createRecursionRuntime({
     const publicSnapshot = publicGenerationReviewSnapshot(reviewSnapshot);
     const snapshotHash = generationReviewSnapshotHash(publicSnapshot);
     const applyMode = editorialMode === 'redirect' ? 'as-swipe' : enhancementApplyMode(settings);
+    const verificationRequired = editorialVerificationRequired(editorialMode, settings.reasoningLevel);
     const key = editorialPassKey({
       chatKey: identity.chatKey,
       messageId,
@@ -3782,7 +3784,7 @@ export function createRecursionRuntime({
       snapshotHash,
       mode: editorialMode,
       applyMode,
-      verificationRequired: (settings.reasoningLevel === 'high' || settings.reasoningLevel === 'ultra') && editorialMode !== 'repair'
+      verificationRequired
     });
     const markerBase = {
       schema: 'recursion.editorialMarker.v1',
@@ -3824,7 +3826,9 @@ export function createRecursionRuntime({
           reasonCode: safeText(editorialSettlement.errorCode || '', 120),
           verification: safeText(editorialSettlement.verification || '', 80),
           candidateHash: safeText(editorialSettlement.candidateHash || '', 180),
-          diagnosisHash: safeText(editorialSettlement.diagnosisHash || '', 180)
+          diagnosisHash: safeText(editorialSettlement.diagnosisHash || '', 180),
+          redirectCharacterCount: Number(editorialSettlement.redirectCharacterCount || 0),
+          redirectRequiredBeatCount: Number(editorialSettlement.redirectRequiredBeatCount || 0)
         }
       });
     }
@@ -3874,11 +3878,26 @@ export function createRecursionRuntime({
     }
     const existing = await messages.findEnhancedSwipe?.(messageId, markerBase);
     if (existing && applyMode === 'as-swipe' && typeof messages.selectAssistantMessageSwipe === 'function') {
-      await messages.selectAssistantMessageSwipe(messageId, existing.index, { marker: markerBase });
-      setEditorialResult({ mode: editorialMode, status: 'success', outcome: 'cached', applyMode, verification: markerBase.verification || 'cached', candidateHash: markerBase.candidateHash || '' });
-      settleRuntimeActivity({ runId, phase: 'settled', severity: 'success', label: `${editorialMode} reused from cache.`, chips: ['Enhancement', 'Cached'] });
-      await appendEditorialSettlement();
-      return { ok: true, cached: true, mode: editorialMode, messageId, sourceHash, marker: markerBase };
+      const persistedMarker = asObject(existing.marker);
+      const verifiedForMode = editorialMode !== 'redirect'
+        || (persistedMarker.verification === 'accept' && safeText(persistedMarker.candidateHash, 180));
+      if (verifiedForMode) {
+        await messages.selectAssistantMessageSwipe(messageId, existing.index, { marker: persistedMarker });
+        setEditorialResult({
+          mode: editorialMode,
+          status: 'success',
+          outcome: 'cached',
+          applyMode,
+          verification: persistedMarker.verification || 'cached',
+          candidateHash: persistedMarker.candidateHash || '',
+          diagnosisHash: persistedMarker.diagnosisHash || '',
+          redirectCharacterCount: Array.isArray(persistedMarker.redirect?.characterPressure) ? persistedMarker.redirect.characterPressure.length : 0,
+          redirectRequiredBeatCount: Array.isArray(persistedMarker.redirect?.requiredBeats) ? persistedMarker.redirect.requiredBeats.length : 0
+        });
+        settleRuntimeActivity({ runId, phase: 'settled', severity: 'success', label: `${editorialMode} reused from cache.`, chips: ['Enhancement', 'Cached'] });
+        await appendEditorialSettlement();
+        return { ok: true, cached: true, mode: editorialMode, messageId, sourceHash, marker: persistedMarker };
+      }
     }
     if (!generationRouter || typeof generationRouter.generate !== 'function') {
       const unavailable = failEditorial({ code: 'RECURSION_EDITORIAL_UNAVAILABLE', message: 'Editorial provider is unavailable.' });
@@ -3954,7 +3973,14 @@ export function createRecursionRuntime({
           ? validateEditorialDiagnosis(diagnosisResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot })
           : { ok: false, error: diagnosisResponse.result?.error || { code: 'RECURSION_EDITORIAL_DIAGNOSIS_FAILED', message: 'Editorial diagnosis failed.' } };
       }
-      if (!diagnosisValidation.ok || diagnosisValidation.value?.decision !== 'proceed') {
+      if (!diagnosisValidation.ok) {
+        if (held && typeof messages.revealAssistantMessage === 'function') { await messages.revealAssistantMessage(messageId); held = false; }
+        return {
+          ...failEditorial(diagnosisValidation.error, 'Editorial diagnosis failed. Original kept.'),
+          validation: diagnosisValidation
+        };
+      }
+      if (diagnosisValidation.value?.decision !== 'proceed') {
         if (held && typeof messages.revealAssistantMessage === 'function') { await messages.revealAssistantMessage(messageId); held = false; }
         const reason = diagnosisValidation.value?.decision || diagnosisValidation.error?.message || 'editorial-diagnosis-failed';
         const noChange = diagnosisValidation.value?.decision === 'no-change';
@@ -4004,15 +4030,26 @@ export function createRecursionRuntime({
           : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
       }
       if (!validation.ok) return { ...failEditorial(validation.error), validation };
-      if ((settings.reasoningLevel === 'high' || settings.reasoningLevel === 'ultra') && editorialMode !== 'repair') {
+      const candidateHash = validation.artifact?.kind === 'candidate'
+        ? hashJson(String(validation.artifact.candidate?.text || validation.artifact.text || ''))
+        : '';
+      if (verificationRequired) {
         stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: lane, composerLane: lane, chips: ['Enhancement', 'Verify'] });
+        const verificationRequest = buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, evidence, candidate: validation.artifact.candidate, lane });
         const verifierResponse = await generateEditorialRole('editorialVerifier', {
-          ...buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, evidence, candidate: validation.artifact.candidate, lane }),
+          ...verificationRequest,
           ...reasonerRequestMetadata(settings, 'editorial-verify', lane)
         }, { allowStructuredRecovery: false });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
         verificationResult = verifierResponse.result?.ok === true
-          ? validateEditorialVerification(verifierResponse.result.data, { sourceHash, snapshotHash, diagnosisHash, evidence })
+          ? validateEditorialVerification(verifierResponse.result.data, {
+              mode: editorialMode,
+              sourceHash,
+              snapshotHash,
+              diagnosisHash,
+              candidateHash: verificationRequest.candidateHash,
+              evidence
+            })
           : { ok: false, decision: 'reject', error: verifierResponse.result?.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_FAILED', message: 'Editorial verification failed.' } };
         if (!verificationResult.ok || verificationResult.decision !== 'accept') {
           return {
@@ -4028,13 +4065,24 @@ export function createRecursionRuntime({
       const marker = {
         ...markerBase,
         diagnosisHash,
-        candidateHash: hashJson(transformedText),
+        candidateHash: candidateHash || hashJson(transformedText),
         producerLane: transformResponse.lane,
         verification: verificationResult.decision,
         cardOutcomes: validation.cardOutcomes,
         preservationLedger: validation.artifact.candidate?.preservationLedger || [],
         changeLedger: validation.artifact.candidate?.changeLedger || [],
-        riskFlags: validation.artifact.candidate?.riskFlags || []
+        riskFlags: validation.artifact.candidate?.riskFlags || [],
+        ...(editorialMode === 'redirect'
+          ? {
+              redirect: {
+                sourceFailure: diagnosisValidation.value.brief.sourceFailure,
+                replacementObjective: diagnosisValidation.value.brief.replacementObjective,
+                requiredBeats: diagnosisValidation.value.brief.requiredBeats,
+                forbiddenSourceBeats: diagnosisValidation.value.brief.forbiddenSourceBeats,
+                characterPressure: diagnosisValidation.value.brief.characterPressure
+              }
+            }
+          : {})
       };
       if (enhancementSignal?.aborted) return canceledEditorialResult();
       const currentIdentity = messages.activeAssistantMessageIdentity();
@@ -4060,7 +4108,21 @@ export function createRecursionRuntime({
         const append = await messages.appendAssistantMessageSwipe?.(messageId, transformedText, { marker, select: true });
         if (append?.ok === false) return failEditorial(append.error);
       }
-      setEditorialResult({ mode: editorialMode, status: 'success', outcome: 'applied', applyMode, verification: verificationResult.decision, candidateHash: marker.candidateHash, diagnosisHash: marker.diagnosisHash, preservationLedger: marker.preservationLedger, changeLedger: marker.changeLedger, riskFlags: marker.riskFlags, cardOutcomes: marker.cardOutcomes });
+      setEditorialResult({
+        mode: editorialMode,
+        status: 'success',
+        outcome: 'applied',
+        applyMode,
+        verification: verificationResult.decision,
+        candidateHash: marker.candidateHash,
+        diagnosisHash: marker.diagnosisHash,
+        preservationLedger: marker.preservationLedger,
+        changeLedger: marker.changeLedger,
+        riskFlags: marker.riskFlags,
+        cardOutcomes: marker.cardOutcomes,
+        redirectCharacterCount: Array.isArray(marker.redirect?.characterPressure) ? marker.redirect.characterPressure.length : 0,
+        redirectRequiredBeatCount: Array.isArray(marker.redirect?.requiredBeats) ? marker.redirect.requiredBeats.length : 0
+      });
       enhanced = true;
       settleRuntimeActivity({ runId, phase: 'settled', severity: 'success', label: `${editorialMode} applied.`, chips: ['Enhancement', editorialMode], detail: { mode: editorialMode, applyMode, verification: verificationResult.decision } });
       return { ok: true, mode: editorialMode, messageId, sourceHash, enhancedHash: marker.candidateHash, marker, artifact: validation.artifact, verification: verificationResult };

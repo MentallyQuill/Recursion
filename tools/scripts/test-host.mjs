@@ -339,7 +339,10 @@ assertEqual(mutationContext.chat[0].swipe_id, 1, 'enhanced swipe auto-selected')
 assertEqual(mutationContext.chat[0].mes, 'Polished assistant text.', 'active message text follows enhanced swipe');
 assert(messageMutationCalls.some((entry) => entry.refresh === true && entry.updateCounters === true), 'enhanced swipe refreshes SillyTavern swipe controls and counter');
 assertEqual(mutationHost.messages.activeAssistantMessageIdentity().enhancementOwned, true, 'genuine enhanced swipe identity is Recursion-owned');
-assertEqual((await mutationHost.messages.findEnhancedSwipe(4, { originalHash: 'hash-a' })).index, 1, 'host finds existing enhanced swipe marker');
+const foundEnhancedSwipe = await mutationHost.messages.findEnhancedSwipe(4, { originalHash: 'hash-a' });
+assertEqual(foundEnhancedSwipe.index, 1, 'host finds existing enhanced swipe marker');
+assertEqual(foundEnhancedSwipe.text, 'Polished assistant text.', 'host returns cached enhanced swipe text');
+assertDeepEqual(foundEnhancedSwipe.marker, validEnhancementMarker, 'host returns the exact persisted enhancement marker');
 assertEqual((await mutationHost.messages.replaceAssistantMessageText(4, 'Replacement text.', { marker: { originalHash: 'hash-b' } })).ok, true, 'host replaces active assistant text');
 assertEqual(mutationContext.chat[0].swipes[1], 'Replacement text.', 'replace updates selected swipe text');
 mutationContext.chat[0].swipes.push('');

@@ -4,7 +4,8 @@ import { createMemoryStorageAdapter, createStorageRepository } from '../../src/s
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createGenerationRouter } from '../../src/providers.mjs';
 import { hashJson } from '../../src/core.mjs';
-import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
+import { REDIRECT_ERROR_CODES, REDIRECT_VERIFICATION_CHECKS } from '../../src/editorial-transform.mjs';
+import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const source = 'She smiled. "Who sent you?" He told her the sender name, then reached for the latch.';
 const message = { messageId: 8, chatKey: 'editorial-chat', swipeId: 0, text: source, swipes: [source] };
@@ -482,4 +483,240 @@ assertEqual(noChangeRuntime.view().activity.outcome, 'skipped', 'validated no-ch
 assertEqual(noChangeRuntime.view().activity.label, 'Editorial complete; no changes needed.', 'validated no-change diagnosis explains why no swipe was added');
 assertEqual(noChangeTransformerCalls, 0, 'validated no-change diagnosis does not call transformer');
 assertEqual(noChangeMessage.text, noChangeSource, 'validated no-change diagnosis preserves original assistant text');
+
+const redirectSource = 'Carter considered the request, but postponed the test until later.';
+const redirectCandidateText = 'Carter tightened her grip on the mug. "Then we test it here," she said, holding Will to the immediate question.';
+function createRedirectHarness({
+  verifierDecision = 'accept',
+  verifierChecks = null,
+  appendFailure = false,
+  changeSourceAfterVerifier = false,
+  cachedMarkerFactory = null,
+  diagnosisOverride = null,
+  candidateOverride = null
+} = {}) {
+  const state = {
+    calls: [],
+    appended: [],
+    selected: [],
+    persistedMarker: null,
+    reusePersisted: false,
+    verifierFinished: false,
+    message: { messageId: 48, chatKey: `redirect-runtime-${Math.random()}`, swipeId: 0, text: redirectSource, swipes: [redirectSource] }
+  };
+  const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
+  const activity = createActivityReporter();
+  const host = {
+    async snapshot() {
+      return {
+        chatId: state.message.chatKey,
+        chatKey: state.message.chatKey,
+        sceneKey: 'diner',
+        sceneFingerprint: 'diner-fp',
+        turnFingerprint: 'turn-fp',
+        latestMesId: state.message.messageId,
+        messages: [
+          { mesid: 47, role: 'user', text: 'Carter wants to test the transport method now and needs Will to answer directly.', visible: true },
+          { mesid: 48, role: 'assistant', text: redirectSource, visible: true }
+        ]
+      };
+    },
+    messages: {
+      activeAssistantMessageIdentity() {
+        return {
+          ...state.message,
+          swipeId: changeSourceAfterVerifier && state.verifierFinished ? 1 : state.message.swipeId,
+          originalHash: hashJson(redirectSource)
+        };
+      },
+      async holdAssistantMessage() { return { ok: true }; },
+      async revealAssistantMessage() { return { ok: true }; },
+      async appendAssistantMessageSwipe(_id, text, options) {
+        state.appended.push({ text, options });
+        if (appendFailure) return { ok: false, error: { code: 'RECURSION_TEST_APPEND_FAILED', message: 'Swipe append failed.' } };
+        state.persistedMarker = options.marker;
+        return { ok: true, index: 1, text };
+      },
+      async findEnhancedSwipe(_id, marker) {
+        if (typeof cachedMarkerFactory === 'function') {
+          return { index: 1, text: redirectCandidateText, marker: cachedMarkerFactory(marker) };
+        }
+        if (!state.reusePersisted || !state.persistedMarker) return null;
+        return { index: 1, text: redirectCandidateText, marker: state.persistedMarker };
+      },
+      async selectAssistantMessageSwipe(_id, index, options) {
+        state.selected.push({ index, options });
+        return { ok: true, index };
+      }
+    },
+    prompt: { async install() { return { ok: true }; }, async clear() { return { ok: true }; } }
+  };
+  const generationRouter = {
+    async generate(roleId, request) {
+      state.calls.push({ roleId, request });
+      if (roleId === 'editorialDiagnostician') {
+        const diagnosis = {
+          schema: 'recursion.editorialDiagnosis.v1',
+          mode: 'redirect',
+          sourceHash: request.sourceHash,
+          snapshotHash: request.snapshotHash,
+          decision: 'proceed',
+          brief: {
+            mode: 'redirect',
+            diagnosis: [{ dimension: 'turn-fulfillment', problem: 'The source postpones the requested test.', evidenceRefs: ['source:0'] }],
+            preserve: [],
+            discard: [{ claim: 'The test is postponed.', evidenceRefs: ['source:0'] }],
+            allowedChanges: ['Replace the turn trajectory.'],
+            forbiddenChanges: ['Do not invent a transport result.'],
+            sourceFailure: {
+              category: 'turn-fulfillment',
+              problem: 'The source postpones the requested test.',
+              establishedEvidenceRefs: ['message:47'],
+              conflictingSourceRefs: ['source:0']
+            },
+            replacementObjective: { summary: 'Engage the proposed test now.', evidenceRefs: ['message:47'] },
+            requiredBeats: [{ summary: 'Carter presses for the immediate test.', evidenceRefs: ['message:47'] }],
+            forbiddenSourceBeats: [{ summary: 'Do not postpone the test.', sourceRefs: ['source:0'] }],
+            sceneCharacters: [{ character: 'Carter', evidenceRefs: ['message:47'] }],
+            characterPressure: [{
+              character: 'Carter',
+              immediateWant: 'Test the transport method now.',
+              wantEvidenceRefs: ['message:47'],
+              sourcePressureEffect: 'increasing',
+              sourceEvidenceRefs: ['source:0'],
+              pressureReason: 'The source blocks the immediate test.'
+            }]
+          }
+        };
+        return { ok: true, data: typeof diagnosisOverride === 'function' ? diagnosisOverride(diagnosis) : diagnosis };
+      }
+      if (roleId === 'editorialTransformer') {
+        const pass = {
+          schema: 'recursion.editorialPass.v1',
+          mode: 'redirect',
+          sourceHash: request.sourceHash,
+          snapshotHash: request.snapshotHash,
+          diagnosisHash: request.diagnosisHash,
+          cardOutcomes: [],
+          candidate: {
+            text: redirectCandidateText,
+            preservationLedger: [],
+            changeLedger: [{ kind: 'redirect', summary: 'Engaged the test in the present turn.', evidenceRefs: ['message:47'] }],
+            riskFlags: []
+          }
+        };
+        return { ok: true, data: typeof candidateOverride === 'function' ? candidateOverride(pass) : pass };
+      }
+      if (roleId === 'editorialVerifier') {
+        state.verifierFinished = true;
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.editorialVerification.v1',
+            mode: 'redirect',
+            sourceHash: request.sourceHash,
+            snapshotHash: request.snapshotHash,
+            diagnosisHash: request.diagnosisHash,
+            candidateHash: request.candidateHash,
+            decision: verifierDecision,
+            checks: verifierChecks || REDIRECT_VERIFICATION_CHECKS.map((check) => ({
+              check,
+              status: verifierDecision === 'accept' ? 'pass' : 'unclear',
+              evidenceRefs: ['message:47'],
+              note: 'Bound to frozen evidence.'
+            }))
+          }
+        };
+      }
+      throw new Error(`Unexpected Redirect role ${roleId}`);
+    }
+  };
+  const runtime = createRecursionRuntime({
+    host,
+    settingsStore: createSettingsStore({ root: {} }),
+    storage,
+    activity,
+    generationRouter
+  });
+  return { runtime, state, storage };
+}
+
+const acceptedRedirect = createRedirectHarness();
+await acceptedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'replace' } });
+const acceptedRedirectResult = await acceptedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-runtime-test' });
+assertEqual(acceptedRedirectResult.ok, true, 'Medium Redirect succeeds after mandatory verification');
+const redirectVerifierCalls = acceptedRedirect.state.calls.filter((call) => call.roleId === 'editorialVerifier');
+assertEqual(redirectVerifierCalls.length, 1, 'Medium Redirect always calls the verifier');
+assertEqual(redirectVerifierCalls[0].request.candidateHash, hashJson(redirectCandidateText), 'runtime verifier binds the exact candidate hash');
+assertEqual(acceptedRedirectResult.marker.applyMode, 'as-swipe', 'Redirect forces swipe application');
+assertEqual(acceptedRedirectResult.marker.verification, 'accept', 'accepted verifier status persists');
+assertEqual(acceptedRedirectResult.marker.redirect.characterPressure[0].character, 'Carter', 'private pressure audit persists in the marker');
+assertEqual(acceptedRedirect.state.appended.length, 1, 'accepted Redirect appends exactly one swipe');
+const acceptedRedirectJournal = await acceptedRedirect.storage.loadRunJournal(acceptedRedirect.state.message.chatKey);
+const acceptedRedirectSettlement = acceptedRedirectJournal.entries.find((entry) => entry.event === 'editorial.run.settled');
+assertEqual(acceptedRedirectSettlement.details.redirectCharacterCount, 1, 'Redirect journal records character count only');
+assertEqual(acceptedRedirectSettlement.details.redirectRequiredBeatCount, 1, 'Redirect journal records required-beat count only');
+assert(!JSON.stringify(acceptedRedirectSettlement).includes('Test the transport method now.'), 'Redirect journal excludes private want text');
+
+acceptedRedirect.state.reusePersisted = true;
+acceptedRedirect.state.calls.length = 0;
+const cachedRedirectResult = await acceptedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-cache-test' });
+assertEqual(cachedRedirectResult.cached, true, 'verified Redirect reuses its cached swipe');
+assertEqual(acceptedRedirect.state.calls.length, 0, 'verified Redirect cache reuse makes no provider calls');
+assertDeepEqual(cachedRedirectResult.marker, acceptedRedirect.state.persistedMarker, 'cached Redirect returns the persisted accepted marker');
+assertDeepEqual(acceptedRedirect.state.selected.at(-1).options.marker, acceptedRedirect.state.persistedMarker, 'cached Redirect selects with the persisted accepted marker');
+assert(acceptedRedirect.state.persistedMarker.key.endsWith('::verify'), 'Redirect cache identity always records mandatory verification');
+
+const directCachedRedirect = createRedirectHarness({
+  cachedMarkerFactory: (marker) => ({ ...marker, verification: 'not-required', candidateHash: 'direct-candidate' })
+});
+await directCachedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const directCachedResult = await directCachedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-direct-cache-test' });
+assertEqual(directCachedResult.cached, undefined, 'Redirect does not reuse an unverified direct marker');
+assertEqual(directCachedRedirect.state.calls.filter((call) => call.roleId === 'editorialVerifier').length, 1, 'unverified cache falls through to a fresh verified run');
+
+const rejectedRedirect = createRedirectHarness({ verifierDecision: 'reject' });
+await rejectedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const rejectedRedirectResult = await rejectedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-rejected-test' });
+assertEqual(rejectedRedirectResult.ok, false, 'verifier rejection keeps the original');
+assertEqual(rejectedRedirectResult.error?.code, REDIRECT_ERROR_CODES.VERIFICATION_REJECTED, 'verifier rejection has a stable error code');
+assertEqual(rejectedRedirect.state.appended.length, 0, 'verifier rejection adds no swipe');
+assertEqual(rejectedRedirect.runtime.view().editorialResult?.status, 'error', 'verifier rejection settles visibly unhealthy');
+
+const malformedRedirect = createRedirectHarness({ verifierChecks: [] });
+await malformedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const malformedRedirectResult = await malformedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-malformed-verifier-test' });
+assertEqual(malformedRedirectResult.error?.code, REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'malformed verifier result preserves its stable error code');
+assertEqual(malformedRedirect.state.appended.length, 0, 'malformed verifier result adds no swipe');
+
+const staleRedirect = createRedirectHarness({ changeSourceAfterVerifier: true });
+await staleRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const staleRedirectResult = await staleRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-source-race-test' });
+assertEqual(staleRedirectResult.error?.code, 'RECURSION_EDITORIAL_SOURCE_CHANGED', 'Redirect rejects a source change after verification');
+assertEqual(staleRedirect.state.appended.length, 0, 'source race adds no Redirect swipe');
+
+const appendFailedRedirect = createRedirectHarness({ appendFailure: true });
+await appendFailedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const appendFailedRedirectResult = await appendFailedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-append-failure-test' });
+assertEqual(appendFailedRedirectResult.error?.code, 'RECURSION_TEST_APPEND_FAILED', 'Redirect reports host append failure');
+assertEqual(appendFailedRedirect.runtime.view().editorialResult?.status, 'error', 'append failure settles visibly unhealthy');
+
+const invalidBriefRedirect = createRedirectHarness({
+  diagnosisOverride: (value) => ({ ...value, brief: { ...value.brief, replacementObjective: null } })
+});
+await invalidBriefRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const invalidBriefResult = await invalidBriefRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-invalid-brief-test' });
+assertEqual(invalidBriefResult.error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'runtime preserves Redirect diagnosis error code');
+assertEqual(invalidBriefRedirect.state.appended.length, 0, 'invalid Redirect diagnosis adds no swipe');
+
+const missingDirectionRedirect = createRedirectHarness({
+  candidateOverride: (value) => ({
+    ...value,
+    candidate: { ...value.candidate, changeLedger: [{ kind: 'rewrite', summary: 'Minor rewrite.', evidenceRefs: ['source:0'] }] }
+  })
+});
+await missingDirectionRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const missingDirectionResult = await missingDirectionRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-missing-direction-test' });
+assertEqual(missingDirectionResult.error?.code, REDIRECT_ERROR_CODES.CHANGE_MISSING, 'runtime preserves missing Redirect trajectory error code');
+assertEqual(missingDirectionRedirect.state.appended.length, 0, 'missing Redirect trajectory adds no swipe');
 console.log('[pass] editorial runtime');

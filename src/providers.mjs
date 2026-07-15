@@ -269,25 +269,50 @@ function redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds) 
     ...editorialEvidenceRefsSchema(values),
     minItems: 0
   });
-  return {
+  const properties = {
+    character: { type: 'string' },
+    immediateWant: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    wantEvidenceRefs: optionalEvidenceRefs(validPreservationEvidenceIds),
+    sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
+    sourceEvidenceRefs: optionalEvidenceRefs(validEvidenceIds),
+    pressureReason: { type: 'string' }
+  };
+  const required = [
+    'character',
+    'immediateWant',
+    'wantEvidenceRefs',
+    'sourcePressureEffect',
+    'sourceEvidenceRefs',
+    'pressureReason'
+  ];
+  const variant = (overrides) => ({
     type: 'object',
     properties: {
-      character: { type: 'string' },
-      immediateWant: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-      wantEvidenceRefs: optionalEvidenceRefs(validPreservationEvidenceIds),
-      sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
-      sourceEvidenceRefs: optionalEvidenceRefs(validEvidenceIds),
-      pressureReason: { type: 'string' }
+      ...properties,
+      ...overrides
     },
-    required: [
-      'character',
-      'immediateWant',
-      'wantEvidenceRefs',
-      'sourcePressureEffect',
-      'sourceEvidenceRefs',
-      'pressureReason'
-    ],
+    required,
     additionalProperties: false
+  });
+  return {
+    type: 'object',
+    properties,
+    required,
+    additionalProperties: false,
+    anyOf: [
+      variant({
+        immediateWant: { type: 'null' },
+        wantEvidenceRefs: { ...optionalEvidenceRefs(validPreservationEvidenceIds), maxItems: 0 },
+        sourcePressureEffect: { const: 'unclear' },
+        sourceEvidenceRefs: { ...optionalEvidenceRefs(validEvidenceIds), maxItems: 0 }
+      }),
+      variant({
+        immediateWant: { type: 'string' },
+        wantEvidenceRefs: editorialEvidenceRefsSchema(validPreservationEvidenceIds),
+        sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
+        sourceEvidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds)
+      })
+    ]
   };
 }
 
@@ -417,7 +442,7 @@ function editorialCardOutcomesSchema(installedCardIds, validEvidenceIds) {
   };
 }
 
-function editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds = validEvidenceIds, requiredPreservationLedger = null) {
+function editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds = validEvidenceIds, requiredPreservationLedger = null, mode = '') {
   const preservationLedger = {
     type: 'array',
     maxItems: 12,
@@ -431,11 +456,14 @@ function editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds
       preservationLedger,
       changeLedger: {
         type: 'array',
+        ...(mode === 'redirect' ? { minItems: 1 } : {}),
         maxItems: 12,
         items: {
           type: 'object',
           properties: {
-            kind: { enum: ['remove', 'rewrite', 'reorder', 'add-supported-detail', 'redirect'] },
+            kind: mode === 'redirect'
+              ? { const: 'redirect' }
+              : { enum: ['remove', 'rewrite', 'reorder', 'add-supported-detail', 'redirect'] },
             summary: { type: 'string' },
             evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds)
           },
@@ -596,7 +624,7 @@ export function machineJsonSchemaForRequest(request = {}) {
       };
       required.push('patches');
     } else {
-      properties.candidate = editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds, requiredPreservationLedger);
+      properties.candidate = editorialCandidateSchema(validEvidenceIds, validPreservationEvidenceIds, requiredPreservationLedger, mode);
       required.push('candidate');
     }
     return {

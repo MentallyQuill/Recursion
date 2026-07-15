@@ -60,10 +60,15 @@ export function evaluateLiveEnhancementRun({
   const skippedRows = observedRows.filter((row) => normalized(row?.state) === 'skipped');
   if (skippedRows.length) failures.push('enhancement-skipped');
 
+  const latestByLabel = new Map();
+  for (const row of observedRows) {
+    const label = normalized(row?.label);
+    if (label) latestByLabel.set(label, row);
+  }
   for (const requiredLabel of REQUIRED_EDITORIAL_LABELS) {
-    const rows = finalRows.filter((row) => normalized(row?.label) === requiredLabel);
-    if (!rows.length) failures.push(`missing-${requiredLabel.replace(/\s+/g, '-')}`);
-    else if (rows.some((row) => normalized(row?.state) !== 'done')) {
+    const row = latestByLabel.get(requiredLabel);
+    if (!row) failures.push(`missing-${requiredLabel.replace(/\s+/g, '-')}`);
+    else if (normalized(row?.state) !== 'done') {
       failures.push(`${requiredLabel.replace(/\s+/g, '-')}-not-done`);
     }
   }

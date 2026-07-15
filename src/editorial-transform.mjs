@@ -486,7 +486,9 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
         'Redirect is a turn-level correction, not a more aggressive Recompose.',
         'Pair established non-source evidence with the conflicting source passages.',
         'Define one supported replacement objective, required beats, and forbidden source beats.',
-        'List every character established as present by frozen evidence. Use null and unclear when an immediate want cannot be supported.',
+        'List every character established as present by frozen evidence.',
+        'When an immediate want is unsupported, immediateWant must be null, wantEvidenceRefs and sourceEvidenceRefs must both be empty arrays, and sourcePressureEffect must be unclear.',
+        'When an immediate want is supported, immediateWant must be a non-empty string, wantEvidenceRefs must cite established non-source evidence, and sourceEvidenceRefs must cite source-draft evidence.',
         'Character pressure is advisory evidence; do not require every character to speak or act.'
       ]
     : [];
@@ -546,10 +548,12 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
         'The validated Redirect diagnosis is authoritative.',
         'Rebuild the response around diagnosis.brief.replacementObjective.',
         'Include the supported substance of every required beat.',
+        'Do not weaken an active required beat into passive attention, agreement, observation, or internal feeling.',
         'Do not preserve any forbidden source beat, even with different wording.',
         'Use diagnosis.brief.characterPressure as advisory dramatic evidence. Rising pressure makes a stronger response more likely but never mandatory.',
         'Silence, restraint, refusal, and delayed action remain valid when supported.',
         'Do not distribute dialogue or action as a checklist, and do not invent a want for an unclear character.',
+        'candidate.changeLedger must contain at least one entry with kind redirect, and each Redirect ledger entry must cite the replacement objective or a required beat.',
         'A lexical rewrite that preserves the source objective or beat plan is not a Redirect.'
       ]
     : [];
@@ -589,16 +593,25 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
   };
 }
 
-export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', evidence = [], candidate = {}, lane = '' } = {}) {
+export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', diagnosis = null, evidence = [], candidate = {}, lane = '' } = {}) {
   const candidateHash = hashJson(String(candidate?.text || ''));
+  const redirectRules = mode === 'redirect'
+    ? [
+        'Evaluate every required check against the validated diagnosis below; do not infer or replace its objective, beats, or character-pressure findings.',
+        'Required beats must be materially explicit in the candidate; adjacent or passive behavior is not equivalent to a required action.',
+        'Reject if the candidate omits any required beat, retains any forbidden source beat, or contradicts the advisory character-pressure map.'
+      ]
+    : [];
   const prompt = [
     'Return only accept or reject for this one editorial candidate.',
     'Do not rewrite, score, compare, rank, or propose another candidate.',
     `Mode: ${mode}.`,
+    ...redirectRules,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
     `<diagnosis_hash>${safeText(diagnosisHash, 180)}</diagnosis_hash>`,
     `<candidate_hash>${safeText(candidateHash, 180)}</candidate_hash>`,
+    ...(mode === 'redirect' ? [`<diagnosis>${JSON.stringify(object(diagnosis))}</diagnosis>`] : []),
     `<evidence>${JSON.stringify(evidence)}</evidence>`,
     `<candidate>${JSON.stringify(candidate)}</candidate>`
   ].join('\n');
@@ -610,6 +623,7 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
     candidateHash,
     mode,
     candidate,
+    ...(mode === 'redirect' ? { diagnosis: object(diagnosis) } : {}),
     validEvidenceIds: array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean)
   };
 }

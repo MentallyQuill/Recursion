@@ -2,9 +2,24 @@
 
 ## Status
 
-**Approved design direction; implementation pending.**
+**Implemented.** The provider contract, semantic validators, runtime/cache integration,
+private marker boundary, core evaluation corpus, independent effectiveness judge, and
+strict dedicated-user Playwright proof now implement this design.
+
+Implementation and deterministic verification are complete. Live certification is
+still an execution gate, not a status inferred from this heading: a release proof
+must produce one clean strict run on the configured provider. Individual clean mode
+runs do not override token-limit, timeout, malformed-output, or semantic failures in
+another strict run.
 
 This document supplements the [Editorial Transformation Design](2026-07-13-recursion-editorial-transformation-design.md). Where the two documents conflict, this document supersedes only the diagnosis, transformation, validation, verification, persistence, and test contracts for `Redirect`. `Repair` and `Recompose` remain unchanged.
+
+Implementation clarification: when a character's immediate want is `unclear`, the
+provider must return empty `wantEvidenceRefs` and `sourceEvidenceRefs`, and the
+pressure effect must also be `unclear`. This prevents an uncertainty finding from
+claiming evidence it does not possess. The `no-change` decision remains a healthy
+Redirect result only when no host swipe is added and the progress/journal history is
+otherwise clean; strict live success scenarios still reject skipped Enhancements.
 
 ## Problem
 
@@ -242,25 +257,47 @@ The design also adopts an explicit insufficient-evidence state. It does not adop
 
 ```js
 function redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds) {
+  const optionalEvidenceRefs = (values) => ({
+    ...editorialEvidenceRefsSchema(values),
+    minItems: 0
+  });
+  const properties = {
+    character: { type: 'string' },
+    immediateWant: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    wantEvidenceRefs: optionalEvidenceRefs(validPreservationEvidenceIds),
+    sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
+    sourceEvidenceRefs: optionalEvidenceRefs(validEvidenceIds),
+    pressureReason: { type: 'string' }
+  };
+  const required = [
+    'character', 'immediateWant', 'wantEvidenceRefs',
+    'sourcePressureEffect', 'sourceEvidenceRefs', 'pressureReason'
+  ];
+  const variant = (overrides) => ({
+    type: 'object',
+    properties: { ...properties, ...overrides },
+    required,
+    additionalProperties: false
+  });
   return {
     type: 'object',
-    properties: {
-      character: { type: 'string' },
-      immediateWant: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-      wantEvidenceRefs: editorialEvidenceRefsSchema(validPreservationEvidenceIds),
-      sourcePressureEffect: { enum: ['increasing', 'decreasing', 'unchanged', 'unclear'] },
-      sourceEvidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds),
-      pressureReason: { type: 'string' }
-    },
-    required: [
-      'character',
-      'immediateWant',
-      'wantEvidenceRefs',
-      'sourcePressureEffect',
-      'sourceEvidenceRefs',
-      'pressureReason'
-    ],
-    additionalProperties: false
+    properties,
+    required,
+    additionalProperties: false,
+    anyOf: [
+      variant({
+        immediateWant: { type: 'null' },
+        wantEvidenceRefs: { ...optionalEvidenceRefs(validPreservationEvidenceIds), maxItems: 0 },
+        sourcePressureEffect: { const: 'unclear' },
+        sourceEvidenceRefs: { ...optionalEvidenceRefs(validEvidenceIds), maxItems: 0 }
+      }),
+      variant({
+        immediateWant: { type: 'string' },
+        wantEvidenceRefs: editorialEvidenceRefsSchema(validPreservationEvidenceIds),
+        sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
+        sourceEvidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds)
+      })
+    ]
   };
 }
 
@@ -405,6 +442,11 @@ const redirectRules = [
 
 Redirect may retain an unaffected sentence when the diagnosis permits it. It does not need to maximize edit distance. It does need to produce the replacement turn described by the diagnosis.
 
+An active required beat must remain active: passive attention, agreement,
+observation, or internal feeling is not an equivalent substitute for required
+speech or action. This follows the validated beat, not the advisory pressure map;
+pressure alone still never forces visible action.
+
 ## Candidate validation
 
 The existing full-candidate checks remain necessary but are not sufficient for Redirect.
@@ -419,6 +461,11 @@ Deterministic Redirect validation additionally requires:
 - exact preservation ledger identity;
 - complete installed-card outcome coverage;
 - mandatory verifier execution before host mutation.
+
+The Redirect machine schema also makes `changeLedger` non-empty and constrains its
+item `kind` to `redirect`. This prevents a provider response from satisfying
+structured output with an empty or Recompose-style ledger and then failing only at
+semantic validation. Other modes retain their broader change-kind vocabulary.
 
 ```js
 if (mode === 'redirect') {
@@ -482,7 +529,13 @@ const key = editorialPassKey({
 
 This prevents Medium Redirect from reusing a `direct` pass produced under the old High/Ultra-only policy. The helper belongs in `src/editorial-transform.mjs` beside `editorialPassKey()` so policy and identity cannot drift apart.
 
-The verifier returns no prose and cannot request another candidate. It evaluates these checks exactly once each:
+The verifier returns no prose and cannot request another candidate. For Redirect,
+`buildEditorialVerificationRequest()` includes the complete validated diagnosis in
+the private provider prompt and request object. A diagnosis hash alone is not
+sufficient because the verifier must inspect the replacement objective, required
+beats, forbidden source beats, and advisory character-pressure map. The diagnosis
+remains absent from public runtime/UI projection. The verifier evaluates these
+checks exactly once each:
 
 ```js
 export const REDIRECT_VERIFICATION_CHECKS = Object.freeze([
@@ -647,9 +700,13 @@ export function validateEditorialVerification(result = {}, {
 }
 ```
 
-`buildEditorialVerificationRequest()` computes `candidateHash` from the validated candidate text, includes it in the structured request and prompt identity, and runtime passes the same value to `validateEditorialVerification()`. The persisted marker and model-effectiveness artifact use that exact hash.
+`buildEditorialVerificationRequest()` computes `candidateHash` from the validated candidate text, includes it in the structured request and prompt identity, and runtime passes the same value to `validateEditorialVerification()`. Redirect also receives `diagnosisValidation.value` as private verifier evidence. The persisted marker and model-effectiveness artifact use that exact hash.
 
 An `accept` result is valid only when every required check is present exactly once and has `status: "pass"`. Any `fail`, `unclear`, missing check, unknown evidence reference, or malformed result rejects the candidate and preserves the original.
+
+For `required-beats-satisfied`, the verifier treats a beat as satisfied only when
+its supported substance is materially explicit in the candidate. Adjacent context
+or passive behavior cannot stand in for a diagnosed active beat.
 
 `character-pressure-coherent` does **not** require visible action. It asks whether the candidate used, preserved, or intentionally withheld response in a way consistent with the evidence-backed wants and pressure map.
 

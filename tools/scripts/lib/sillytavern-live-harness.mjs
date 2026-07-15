@@ -28,7 +28,8 @@ export function inspectRecursionPromptRequest(body = {}) {
     }
     return content;
   });
-  const content = serializedMessages.join('\n');
+  const serializedPrompt = typeof body?.prompt === 'string' ? body.prompt : '';
+  const content = [serializedMessages.join('\n'), serializedPrompt].filter(Boolean).join('\n');
   const guidance = content.includes('Guidance:');
   const cardEvidence = content.includes('Private Recursion card evidence for the next assistant message.')
     && content.includes('Card evidence:');
@@ -52,6 +53,10 @@ export function inspectRecursionPromptRequest(body = {}) {
     && recursionMessageIndexes.length > 0
     && recursionMessageRoles.length === 1
     && recursionMessageRoles[0] === 'system';
+  const textPromptInjected = serializedPrompt.includes('Guidance:')
+    && serializedPrompt.includes('Private Recursion card evidence for the next assistant message.')
+    && serializedPrompt.includes('Card evidence:')
+    && serializedPrompt.includes('Guardrails:');
   return {
     type: String(body?.type || ''),
     messageCount: messages.length,
@@ -61,7 +66,7 @@ export function inspectRecursionPromptRequest(body = {}) {
     recursionMessageIndexes,
     recursionMessageRoles,
     systemInjected,
-    complete: systemInjected
+    complete: systemInjected || textPromptInjected
   };
 }
 
@@ -2741,7 +2746,12 @@ async function runBrowserUiSmoke({
     }
     page = await context.newPage();
     page.on('request', (request) => {
-      if (!String(request.url?.() || '').includes('/api/backends/chat-completions/generate')) return;
+      const requestUrl = String(request.url?.() || '');
+      const generationEndpoints = [
+        '/api/backends/chat-completions/generate',
+        '/api/backends/text-completions/generate'
+      ];
+      if (!generationEndpoints.some((endpoint) => requestUrl.includes(endpoint))) return;
       try {
         const body = JSON.parse(String(request.postData?.() || ''));
         serializedPromptRequests.push(inspectRecursionPromptRequest(body));

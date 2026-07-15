@@ -650,6 +650,17 @@ assertEqual(acceptedRedirectResult.ok, true, 'Medium Redirect succeeds after man
 const redirectVerifierCalls = acceptedRedirect.state.calls.filter((call) => call.roleId === 'editorialVerifier');
 assertEqual(redirectVerifierCalls.length, 1, 'Medium Redirect always calls the verifier');
 assertEqual(redirectVerifierCalls[0].request.candidateHash, hashJson(redirectCandidateText), 'runtime verifier binds the exact candidate hash');
+assert(redirectVerifierCalls[0].request.diagnosis?.brief, 'runtime verifier request retains the validated Redirect diagnosis');
+assertEqual(
+  redirectVerifierCalls[0].request.diagnosis.brief.requiredBeats[0].summary,
+  'Carter presses for the immediate test.',
+  'runtime verifier receives the required beat it must judge'
+);
+assertEqual(
+  redirectVerifierCalls[0].request.diagnosis.brief.characterPressure[0].sourcePressureEffect,
+  'increasing',
+  'runtime verifier receives the private character-pressure finding it must judge'
+);
 assertEqual(acceptedRedirectResult.marker.applyMode, 'as-swipe', 'Redirect forces swipe application');
 assertEqual(acceptedRedirectResult.marker.verification, 'accept', 'accepted verifier status persists');
 assertEqual(acceptedRedirectResult.marker.redirect.characterPressure[0].character, 'Carter', 'private pressure audit persists in the marker');

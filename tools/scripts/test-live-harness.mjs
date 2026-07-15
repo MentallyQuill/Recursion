@@ -26,8 +26,27 @@ import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests
 const liveEditorialModule = await import('./lib/live-editorial-effectiveness.mjs').catch(() => ({}));
 const evaluateLiveRedirectScenarioArtifacts = liveEditorialModule.evaluateLiveRedirectScenarioArtifacts;
 const runLiveEditorialEffectiveness = liveEditorialModule.runLiveEditorialEffectiveness;
+const validateLiveEditorialRuntime = liveEditorialModule.validateLiveEditorialRuntime;
+const liveEditorialStageTimeoutMs = liveEditorialModule.liveEditorialStageTimeoutMs;
 assertEqual(typeof evaluateLiveRedirectScenarioArtifacts, 'function', 'live harness exposes strict Redirect scenario evaluator');
 assertEqual(typeof runLiveEditorialEffectiveness, 'function', 'live harness exposes reusable Redirect effectiveness runner');
+assertEqual(typeof validateLiveEditorialRuntime, 'function', 'live harness exposes served runtime capability validation');
+assertEqual(typeof liveEditorialStageTimeoutMs, 'function', 'live harness exposes bounded Redirect proof stage deadlines');
+assertEqual(liveEditorialStageTimeoutMs('settings', 180000), 15000, 'settings transition has a short fail-fast deadline');
+assertEqual(liveEditorialStageTimeoutMs('warm', 180000), 540000, 'Rapid warm allows its sequential provider deadlines');
+assertEqual(liveEditorialStageTimeoutMs('prepare', 180000), 180000, 'preparation uses one configured live timeout');
+assertEqual(liveEditorialStageTimeoutMs('enhance', 180000), 540000, 'Enhancement allows three sequential provider deadlines');
+assertEqual(liveEditorialStageTimeoutMs('judge', 180000), 180000, 'independent judge uses one configured live timeout');
+assertDeepEqual(
+  validateLiveEditorialRuntime({ enhanceLatestAssistantMessage() {}, evaluateRedirectEffectiveness() {}, view() {} }),
+  { ok: true, missing: [] },
+  'served runtime capability validation accepts the current live Redirect API'
+);
+assertDeepEqual(
+  validateLiveEditorialRuntime({ enhanceLatestAssistantMessage() {}, view() {} }),
+  { ok: false, missing: ['evaluateRedirectEffectiveness'] },
+  'served runtime capability validation rejects a stale runtime before model calls'
+);
 
 const redirectChecks = [
   'source-failure-removed', 'replacement-objective-fulfilled', 'required-beats-satisfied',
@@ -76,7 +95,8 @@ for (const [name, patch] of [
   ['incomplete verifier', { enhancementResult: { ...healthyRedirectArtifacts.enhancementResult, verification: { decision: 'accept', checks: redirectChecks.slice(1) } } }],
   ['failed judge', { judge: { ...healthyRedirectArtifacts.judge, decision: 'fail', criteria: judgeCriteria.map((entry, index) => index ? entry : { ...entry, status: 'fail' }) } }],
   ['model mismatch', { provider: { targetModel: 'wrong-target', judgeModel: 'judge-model' } }],
-  ['private visible leak', { visibleText: 'PRIVATE_REDIRECT_PRESSURE_SENTINEL' }]
+  ['private visible leak', { visibleText: 'PRIVATE_REDIRECT_PRESSURE_SENTINEL' }],
+  ['private runtime field', { runtimeView: { editorialResult: { characterPressure: [] } } }]
 ]) {
   assertEqual(evaluateLiveRedirectScenarioArtifacts({ ...healthyRedirectArtifacts, ...patch }).ok, false, `strict Redirect evaluator rejects ${name}`);
 }
@@ -172,6 +192,29 @@ assertEqual(
   inspectRecursionPromptRequest({ messages: [{ role: 'system', content: 'Unrelated system prompt.' }] }).complete,
   false,
   'serialized prompt inspection rejects setter-only evidence without Recursion content'
+);
+assertDeepEqual(
+  inspectRecursionPromptRequest({
+    type: 'normal',
+    prompt: 'Guidance:\nKeep moving.\nPrivate Recursion card evidence for the next assistant message.\nCard evidence:\n- Evidence.\nGuardrails:\n- Honor facts.'
+  }),
+  {
+    type: 'normal',
+    messageCount: 0,
+    guidance: true,
+    cardEvidence: true,
+    guardrails: true,
+    recursionMessageIndexes: [],
+    recursionMessageRoles: [],
+    systemInjected: false,
+    complete: true
+  },
+  'serialized prompt inspection detects a complete Recursion packet in text-completion prompt bodies'
+);
+const liveHarnessSource = readFileSync('tools/scripts/lib/sillytavern-live-harness.mjs', 'utf8');
+assert(
+  liveHarnessSource.includes("'/api/backends/text-completions/generate'"),
+  'live outbound recorder observes SillyTavern text-completion generation requests'
 );
 
 function createJsonResponse(status, value, headers = {}) {

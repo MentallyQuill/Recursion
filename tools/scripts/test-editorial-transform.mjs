@@ -289,8 +289,26 @@ assertDeepEqual(diagnosisRequest.validEvidenceIds, evidence.map((entry) => entry
 const redirectDiagnosisRequest = buildEditorialDiagnosisRequest({ mode: 'redirect', sourceText, sourceHash, snapshotHash, snapshot, lane: 'reasoner' });
 assert(redirectDiagnosisRequest.prompt.includes('Redirect is a turn-level correction, not a more aggressive Recompose.'), 'Redirect diagnosis prompt distinguishes trajectory from prose quality');
 assert(redirectDiagnosisRequest.prompt.includes('Pair established non-source evidence with the conflicting source passages.'), 'Redirect diagnosis prompt requires paired evidence');
-assert(redirectDiagnosisRequest.prompt.includes('Use null and unclear when an immediate want cannot be supported.'), 'Redirect diagnosis prompt forbids invented wants');
+assert(
+  redirectDiagnosisRequest.prompt.includes('immediateWant must be null, wantEvidenceRefs and sourceEvidenceRefs must both be empty arrays, and sourcePressureEffect must be unclear'),
+  'Redirect diagnosis prompt states the complete unknown-pressure tuple'
+);
 assert(redirectDiagnosisRequest.prompt.includes('Character pressure is advisory evidence'), 'Redirect diagnosis prompt keeps pressure advisory');
+const redirectDiagnosisCorrectionRequest = buildEditorialDiagnosisRequest({
+  mode: 'redirect',
+  sourceText,
+  sourceHash,
+  snapshotHash,
+  snapshot,
+  retry: {
+    code: REDIRECT_ERROR_CODES.PRESSURE_INVALID,
+    message: 'Unclear character pressure cannot claim concrete evidence or effect.'
+  }
+});
+assert(
+  redirectDiagnosisCorrectionRequest.prompt.includes('immediateWant must be null, wantEvidenceRefs and sourceEvidenceRefs must both be empty arrays, and sourcePressureEffect must be unclear'),
+  'Redirect diagnosis correction repeats the complete unknown-pressure tuple'
+);
 const passRequest = buildEditorialPassRequest({ mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosis, evidence, snapshot, lane: 'reasoner' });
 assert(passRequest.prompt.includes('The diagnosis below is authoritative.'), 'transform prompt pins diagnosis');
 assert(passRequest.prompt.includes('one complete candidate'), 'transform prompt allows full rewrite');
@@ -309,6 +327,14 @@ assert(redirectRequest.prompt.includes('Rebuild the response around diagnosis.br
 assert(redirectRequest.prompt.includes('Do not preserve any forbidden source beat'), 'Redirect transformer prompt excludes forbidden source beats');
 assert(redirectRequest.prompt.includes('Silence, restraint, refusal, and delayed action remain valid'), 'Redirect transformer prompt preserves supported restraint');
 assert(redirectRequest.prompt.includes('A lexical rewrite that preserves the source objective or beat plan is not a Redirect.'), 'Redirect transformer prompt rejects minor rewrites');
+assert(
+  redirectRequest.prompt.includes('candidate.changeLedger must contain at least one entry with kind redirect'),
+  'Redirect transformer prompt states the required directional ledger contract'
+);
+assert(
+  redirectRequest.prompt.includes('Do not weaken an active required beat into passive attention, agreement, observation, or internal feeling'),
+  'Redirect transformer preserves the action strength of an active required beat'
+);
 assertEqual(typeof editorialTransform.editorialVerificationRequired, 'function', 'shared editorial verification policy is exported');
 for (const level of ['low', 'medium', 'high', 'ultra']) {
   assertEqual(editorialTransform.editorialVerificationRequired('redirect', level), true, `Redirect verifies at ${level}`);
@@ -323,6 +349,27 @@ assert(verifierRequest.prompt.includes('Return only accept or reject'), 'verifie
 assertEqual(verifierRequest.responseLength, undefined, 'verifier inherits the selected provider lane max tokens');
 assertEqual(verifierRequest.candidateHash, candidateHash, 'verifier request binds exact candidate text');
 assert(verifierRequest.prompt.includes(`<candidate_hash>${candidateHash}</candidate_hash>`), 'verifier prompt includes candidate identity');
+const redirectVerifierRequest = buildEditorialVerificationRequest({
+  mode: 'redirect',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash: redirectDiagnosisHash,
+  diagnosis: validRedirectDiagnosis.value,
+  evidence,
+  candidate: redirectCandidate.candidate
+});
+assert(
+  redirectVerifierRequest.prompt.includes(`<diagnosis>${JSON.stringify(validRedirectDiagnosis.value)}</diagnosis>`),
+  'Redirect verifier receives the complete validated diagnosis it must enforce'
+);
+assert(
+  redirectVerifierRequest.prompt.includes('Evaluate every required check against the validated diagnosis below'),
+  'Redirect verifier is instructed to use the diagnosis rather than infer its requirements'
+);
+assert(
+  redirectVerifierRequest.prompt.includes('Required beats must be materially explicit in the candidate; adjacent or passive behavior is not equivalent to a required action'),
+  'Redirect verifier rejects passive substitutes for active required beats'
+);
 
 const verification = validateEditorialVerification({ schema: EDITORIAL_VERIFICATION_SCHEMA, mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, decision: 'accept', evidenceRefs: ['packet:constraint'] }, { mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, evidence });
 assertEqual(verification.ok, true, 'accepted verifier result passes');

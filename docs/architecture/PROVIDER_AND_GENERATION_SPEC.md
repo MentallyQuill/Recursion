@@ -181,7 +181,59 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 Card names should align with [Card System Spec](../design/CARD_SYSTEM_SPEC.md). Prompt installation and depth decisions belong to [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md), not provider routing.
 
-The literal `compose-brief` Arbiter action is retained as a V1 enum name, but it now means compose the V3 Guidance/Card Evidence/Guardrails packet. The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Fused card bundles use `recursion.cardBundle.v1`, Rapid foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses `recursion.guidanceComposer.v1`, Card Authoring Assist uses `recursion.cardAuthoringAssist.v1`, Generation Reviewer uses `recursion.generationReview.v1`, Editorial Diagnostician uses `recursion.editorialDiagnosis.v1`, Editorial Transformer uses `recursion.editorialPass.v1`, Editorial Verifier uses `recursion.editorialVerification.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`. Editorial machine-JSON requests constrain the selected mode, frozen source/snapshot and diagnosis identities, complete nested brief or candidate/patch shape, installed-card IDs, repair-target IDs, and every evidence reference before a response can reach runtime semantic validation. Preservation references use a narrower evidence set that excludes source-draft and source-negative evidence. Because not every host provider enforces JSON Schema `const`, the provider boundary replaces Editorial mode and identity echoes with the trusted request values before semantic validation; provider output remains authoritative only for the diagnosis, candidate, ledgers, and evidence references. Diagnosis and Transform share one operation-scoped correction token: if an otherwise structured response fails semantic validation, Recursion may request one complete corrected object, and the original invalid object remains rejected. Editorial Diagnostician, Transformer, and Verifier inherit the selected Utility or Reasoner lane's configured max-token ceiling instead of imposing private role-level limits. The bounded transcript is exposed as `message:N` evidence alongside packet, card, brief, story-form, and source evidence; providers may cite only the frozen request-known ID set.
+The literal `compose-brief` Arbiter action is retained as a V1 enum name, but it now means compose the V3 Guidance/Card Evidence/Guardrails packet. The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Fused card bundles use `recursion.cardBundle.v1`, Rapid foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses `recursion.guidanceComposer.v1`, Card Authoring Assist uses `recursion.cardAuthoringAssist.v1`, Generation Reviewer uses `recursion.generationReview.v1`, Editorial Diagnostician uses `recursion.editorialDiagnosis.v1`, Editorial Transformer uses `recursion.editorialPass.v1`, Editorial Verifier uses `recursion.editorialVerification.v1`, Editorial Effectiveness Judge uses `recursion.redirectEffectivenessJudge.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`. Editorial machine-JSON requests constrain the selected mode, frozen source/snapshot and diagnosis identities, complete nested brief or candidate/patch shape, installed-card IDs, repair-target IDs, and every evidence reference before a response can reach runtime semantic validation. Preservation references use a narrower evidence set that excludes source-draft and source-negative evidence. Because not every host provider enforces JSON Schema `const`, the provider boundary replaces Editorial mode and identity echoes with the trusted request values before semantic validation; provider output remains authoritative only for the diagnosis, candidate, ledgers, and evidence references. Diagnosis and Transform share one operation-scoped correction token: if an otherwise structured response fails semantic validation, Recursion may request one complete corrected object, and the original invalid object remains rejected. Editorial Diagnostician, Transformer, and Verifier inherit the selected Utility or Reasoner lane's configured max-token ceiling instead of imposing private role-level limits. The bounded transcript is exposed as `message:N` evidence alongside packet, card, brief, story-form, and source evidence; providers may cite only the frozen request-known ID set.
+
+### Redirect contract
+
+Redirect is a trajectory correction, not a stronger Recompose. A `proceed`
+diagnosis requires `sourceFailure`, `replacementObjective`, non-empty
+`requiredBeats`, non-empty `forbiddenSourceBeats`, complete `sceneCharacters`,
+and one `characterPressure` row per scene character. Concrete wants require
+authoritative frozen evidence. An `unclear` want carries no want/source evidence
+and has an `unclear` pressure effect. Pressure is advisory: it can make a strong
+response more likely, but never mechanically requires speech, action, or rising
+pressure.
+
+Required beats remain authoritative independently of pressure. When a validated
+beat requires visible speech or action, the transformer and verifier cannot replace
+it with passive attention, agreement, observation, or internal feeling.
+
+The transformer returns one complete candidate with at least one evidence-backed
+`changeLedger` entry whose `kind` is `redirect`. Every Redirect is independently
+verified at every reasoning level. Cache identity and execution use the same
+`editorialVerificationRequired()` result, so a direct or stale candidate cannot be
+reused as verified. An accepted verifier result is bound to the candidate hash and
+contains each of these checks exactly once:
+
+The Redirect provider schema requires a non-empty `changeLedger` and constrains its
+entries to `kind: "redirect"`; Recompose retains the broader change-kind enum.
+
+- `source-failure-removed`
+- `replacement-objective-fulfilled`
+- `required-beats-satisfied`
+- `forbidden-source-beats-excluded`
+- `character-pressure-coherent`
+- `hard-constraints-preserved`
+- `user-turn-answered`
+- `unsupported-facts-absent`
+
+The Redirect verifier request includes the complete validated diagnosis, not only
+its hash, so those checks are evaluated against the authoritative replacement
+objective, required and forbidden beats, and private character-pressure map. The
+hash still binds identity; it is not a substitute for the semantic input.
+
+Missing, duplicate, failed, unclear, or invalid-evidence checks reject the candidate
+before host mutation. Accepted Redirects always append/select one Recursion-owned
+swipe and persist `sourceHash`, `candidateHash`, `verification: "accept"`, the
+Redirect ledger, and private diagnosis evidence in that swipe marker. Cached reuse
+requires that persisted accepted marker and performs no provider call. Visible UI,
+assistant prose, prompt packets, and journal details expose no private character-want
+or pressure text; journals retain only hashes, counts, status, and stable error codes.
+
+`editorialEffectivenessJudge` exists only for dedicated live evaluation. It judges
+the produced candidate independently on exact criteria `replacement-objective`,
+`forbidden-source-beats`, `character-pressure`, and `evidence-and-constraints`.
+Normal chat generation never invokes it.
 
 `generationReviewer` first follows the global Structured Output Recovery contract. Its request carries the frozen source hash, eligible patch target IDs, and installed card IDs as structured fields so the provider machine schema can bind `sourceHash` and constrain patch, evidence, and outcome identifiers before semantic validation. Once its JSON and role schema pass, its role validator confirms the frozen source hash, exact eligible dialogue/prose target text, non-overlap, installed card IDs, outcome labels, and evidence target IDs. Parser/schema correction, raw JSON reformat, and semantic review correction are mutually exclusive uses of one external correction request. A correction always preserves lane, provider source, model configuration, frozen snapshot, and pipeline provenance; raw provider text and hidden reasoning never reach review state, cache, journals, or UI details.
 

@@ -4037,7 +4037,7 @@ export function createRecursionRuntime({
         : '';
       if (verificationRequired) {
         stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: lane, composerLane: lane, chips: ['Enhancement', 'Verify'] });
-        const verificationRequest = buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, evidence, candidate: validation.artifact.candidate, lane });
+        const verificationRequest = buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, evidence, candidate: validation.artifact.candidate, lane });
         const verifierResponse = await generateEditorialRole('editorialVerifier', {
           ...verificationRequest,
           ...reasonerRequestMetadata(settings, 'editorial-verify', lane)

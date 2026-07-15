@@ -86,7 +86,44 @@ Generation Review regressions additionally prove that SillyTavern streaming rema
 
 Generation Review requests must expose the frozen `sourceHash`, eligible target IDs, and installed card IDs as structured request fields, not prompt prose alone. Provider machine JSON schemas must bind the source hash and constrain patch IDs, evidence target IDs, and card-outcome IDs to those frozen sets before runtime semantic validation.
 
-Editorial regressions must cover both provider and semantic boundaries. Diagnosis, Transform, and Verification requests expose frozen evidence IDs as structured fields; Transform also exposes installed-card and repair-target IDs. Provider tests assert the complete nested schemas, exclude source-draft evidence from preservation references, and prove model-authored mode/source/snapshot/diagnosis identities are replaced by the frozen request identity before semantic validation. The active assistant draft must not also appear as authoritative `message:N` context evidence. Runtime tests must prove a bounded earlier `message:N` transcript reference survives Diagnosis into Transform and that Diagnosis/Transform share exactly one semantic correction request. Card lifecycle tests must also recreate repeated cached/generated same-role waves and prove that only the newest card for each fixed generated role remains active before hand selection; the live enhancement proof rejects same-family `max-cards` omissions. `npm.cmd run prove:enhancements-live` is the dedicated Playwright gate with real configured model calls; it is intentionally separate from deterministic `npm.cmd test` and must require a `recursion-soak-*` user. Every live proof that claims Editorial Enhancement success must use the shared live-enhancement-run oracle. The oracle captures the run-journal baseline and every rendered progress transition before generation, including removed or replaced rows. It fails on any observed caution, warning, failure, warning/error journal entry, `provider.call.failed`, `prompt.install_skipped`, unmatched provider start, or skipped Enhancement. Success additionally requires final `Editorial diagnosis`, `Editorial candidate`, and `Recursion prompt ready` rows to be `done` plus a validated Recursion-owned swipe or replacement marker.
+Editorial regressions must cover both provider and semantic boundaries. Diagnosis, Transform, and Verification requests expose frozen evidence IDs as structured fields; Transform also exposes installed-card and repair-target IDs. Provider tests assert the complete nested schemas, exclude source-draft evidence from preservation references, and prove model-authored mode/source/snapshot/diagnosis identities are replaced by the frozen request identity before semantic validation. The active assistant draft must not also appear as authoritative `message:N` context evidence. Runtime tests must prove a bounded earlier `message:N` transcript reference survives Diagnosis into Transform and that Diagnosis/Transform share exactly one semantic correction request. Redirect tests additionally require a complete directional diagnosis, advisory evidence-backed character pressure, a non-empty machine-schema-constrained `redirect` ledger, candidate-hash binding, all eight verifier checks, accepted-marker cache reuse, and absence of private diagnosis text from prose, prompt, UI, and journal surfaces. The verifier-request regression must prove runtime sends the complete validated Redirect diagnosis, including required beats and character pressure; a hash-only verifier request fails because it cannot evaluate those checks. Card lifecycle tests must also recreate repeated cached/generated same-role waves and prove that only the newest card for each fixed generated role remains active before hand selection; the live enhancement proof rejects same-family `max-cards` omissions. `npm.cmd run prove:enhancements-live` is the dedicated Playwright gate with real configured model calls; it is intentionally separate from deterministic `npm.cmd test` and must require a `recursion-soak-*` user. Every live proof that claims Editorial Enhancement success must use the shared live-enhancement-run oracle. The oracle captures the run-journal baseline and every rendered progress transition before generation, including removed or replaced rows. It fails on any observed caution, warning, failure, warning/error journal entry, `provider.call.failed`, `prompt.install_skipped`, unmatched provider start, or skipped Enhancement. Success additionally requires final `Editorial diagnosis`, `Editorial candidate`, `Editorial verification`, and `Recursion prompt ready` rows to be `done` plus a validated Recursion-owned swipe or replacement marker.
+
+The checked-in `core` evaluation pack contains six Redirect cases covering turn
+deferral, wrong focus, unsupported outcome, character pressure, supported
+restraint, and insufficient want evidence. Strict live evaluation requires every
+non-no-change case to append exactly one verified swipe and pass both the production
+eight-check verifier and the independent four-criterion effectiveness judge.
+`no-change` is tested separately: it is healthy only when the diagnosis explicitly
+returns `no-change`, host swipe state is unchanged, and no unhealthy progress or
+journal event occurred. A skipped result never counts as an Enhancement-success
+pass.
+
+Run the focused deterministic gates before the real-model proof:
+
+```powershell
+npm.cmd run test:providers
+node tools\scripts\test-provider-response-parser.mjs
+node tools\scripts\test-editorial-transform.mjs
+node tools\scripts\test-editorial-runtime.mjs
+npm.cmd run test:runtime
+npm.cmd run test:ui
+npm.cmd run test:model-eval
+npm.cmd run test:live-harness
+node tools\scripts\test-live-enhancement-run-oracle.mjs
+```
+
+Then deploy the checkout only to a dedicated `recursion-soak-*` installation,
+hash-check the served files, and run `npm.cmd run prove:enhancements-live`. Its exit
+code comes exclusively from the shared strict oracle and semantic effectiveness
+evaluation. Screenshots under `artifacts/live-redirect/<run-id>/` are supporting
+visual evidence, not a substitute for the machine verdict. Automated proof must
+never mutate `default-user`.
+
+For the full live `core` pack, run `tools/scripts/eval-recursion-models.mjs`
+directly with `--live --strict`; `npm.cmd run test:model-eval` is the deterministic
+harness regression and does not forward CLI arguments into a live evaluation. The
+live command must also name an existing dedicated-soak `--character-name` and
+`--chat-file`, because its preliminary visible-send traversal is not synthetic.
 
 `npm.cmd run prove:card-progress-live` is the real-model visual health gate for the rendered progress tree. It uses a dedicated `recursion-soak-*` user, selects Fused + Auto + Redirect through the mounted controls, installs the shared live-enhancement-run oracle, sends a real host turn, waits for rendered Editorial rows to become terminal, reopens the popover, and captures desktop and phone screenshots. The proof fails when the tree is empty or closed, when prompt readiness is not `done`, when any current or historical row is caution/warning/failed/skipped, when the run journal is unhealthy or incomplete, or when no validated Recursion-owned Enhancement mutation exists. Valid Recompose/Repair escalation is tested separately because it is intentionally a caution/no-write outcome rather than an Enhancement-success fixture.
 

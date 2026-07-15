@@ -2,11 +2,16 @@
 
 ## Status
 
-**Approved direction, pending implementation.** This document supersedes the
+**Implemented baseline.** This document supersedes the
 patch-only product boundary in [Generation Review and Enhancement
 Design](2026-07-12-recursion-generation-review-and-enhancement-design.md) and
 the bounded-write limitation in the [Generation Review and Enhancement
 Contract](../../architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md).
+
+The diagnosis, candidate, verification, persistence, privacy, and test contracts for
+`Redirect` are superseded by the implemented
+[Redirect Improvement Design](2026-07-15-recursion-redirect-improvement-design.md).
+The `Repair` and `Recompose` contracts in this document remain authoritative.
 
 Recursion will no longer treat a material editorial improvement as inherently
 unsafe merely because it cannot be expressed as a handful of source patches.

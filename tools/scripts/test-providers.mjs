@@ -334,6 +334,43 @@ assertEqual(
   0,
   'Redirect pressure schema permits empty source evidence for an unclear effect'
 );
+const redirectPressureVariants = redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.anyOf;
+assertEqual(redirectPressureVariants.length, 2, 'Redirect pressure schema exposes only concrete and unknown pressure variants');
+assertEqual(
+  redirectPressureVariants[0].properties.immediateWant.type,
+  'null',
+  'Redirect unknown pressure variant requires a null immediate want'
+);
+assertEqual(
+  redirectPressureVariants[0].properties.wantEvidenceRefs.maxItems,
+  0,
+  'Redirect unknown pressure variant forbids invented want evidence'
+);
+assertEqual(
+  redirectPressureVariants[0].properties.sourcePressureEffect.const,
+  'unclear',
+  'Redirect unknown pressure variant requires an unclear source effect'
+);
+assertEqual(
+  redirectPressureVariants[0].properties.sourceEvidenceRefs.maxItems,
+  0,
+  'Redirect unknown pressure variant forbids invented source evidence'
+);
+assertEqual(
+  redirectPressureVariants[1].properties.immediateWant.type,
+  'string',
+  'Redirect concrete pressure variant requires a concrete immediate want'
+);
+assertEqual(
+  redirectPressureVariants[1].properties.wantEvidenceRefs.minItems,
+  1,
+  'Redirect concrete pressure variant requires authoritative want evidence'
+);
+assertEqual(
+  redirectPressureVariants[1].properties.sourceEvidenceRefs.minItems,
+  1,
+  'Redirect concrete pressure variant requires source evidence for its effect'
+);
 const editorialPassMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialPass.v1',
   machineJson: true,
@@ -351,6 +388,29 @@ assertDeepEqual(editorialPassMachineSchema.schema.properties.cardOutcomes.items.
 assertDeepEqual(editorialPassMachineSchema.schema.properties.candidate.required, ['text', 'preservationLedger', 'changeLedger', 'riskFlags'], 'Editorial full-candidate schema requires every semantically validated field');
 assertDeepEqual(editorialPassMachineSchema.schema.properties.candidate.properties.preservationLedger.const, [{ claim: 'Keep the guarded posture.', evidenceRefs: ['message:17'] }], 'Editorial candidate schema freezes the validated diagnosis preservation ledger');
 assertDeepEqual(editorialPassMachineSchema.schema.properties.candidate.properties.preservationLedger.items.properties.evidenceRefs.items.enum, ['user:0', 'message:17'], 'Editorial candidate schema excludes source-draft evidence from preservation claims');
+const redirectPassMachineSchema = machineJsonSchemaForRequest({
+  responseSchema: 'recursion.editorialPass.v1',
+  machineJson: true,
+  mode: 'redirect',
+  sourceHash: 'redirect-source-hash',
+  snapshotHash: 'redirect-snapshot-hash',
+  diagnosisHash: 'redirect-diagnosis-hash',
+  validEvidenceIds: ['user:0', 'source:0'],
+  validPreservationEvidenceIds: ['user:0'],
+  requiredPreservationLedger: [],
+  installedCardIds: [],
+  validTargetIds: []
+});
+assertEqual(
+  redirectPassMachineSchema.schema.properties.candidate.properties.changeLedger.minItems,
+  1,
+  'Redirect machine schema requires a non-empty directional ledger'
+);
+assertEqual(
+  redirectPassMachineSchema.schema.properties.candidate.properties.changeLedger.items.properties.kind.const,
+  'redirect',
+  'Redirect machine schema requires every reported directional ledger entry to use the Redirect kind'
+);
 const editorialVerifierMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialVerification.v1',
   machineJson: true,

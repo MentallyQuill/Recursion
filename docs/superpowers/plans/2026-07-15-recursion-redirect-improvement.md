@@ -1193,13 +1193,13 @@ Expected: repo and installed-copy hashes match for every served source file.
 
 - [ ] **Step 5: Run the real-model Redirect proof**
 
-Prerequisites: SillyTavern is running at `http://127.0.0.1:8000`, `recursion-soak-a` exists, and `RECURSION_MODEL_EVAL_TARGET_MODEL` / `RECURSION_MODEL_EVAL_JUDGE_MODEL` name the models configured in that user's live providers.
+Prerequisites: SillyTavern is running at `http://127.0.0.1:8000`, `recursion-soak-a` exists, `RECURSION_MODEL_EVAL_TARGET_MODEL` / `RECURSION_MODEL_EVAL_JUDGE_MODEL` name the models configured in that user's live providers, and `RECURSION_LIVE_CHARACTER_NAME` / `RECURSION_LIVE_CHAT_FILE` identify an existing dedicated-soak seed chat for the preliminary visible-send traversal.
 
 ```powershell
 $env:SILLYTAVERN_BASE_URL='http://127.0.0.1:8000'
 $env:RECURSION_SILLYTAVERN_USER='recursion-soak-a'
 npm.cmd run prove:enhancements-live
-npm.cmd run test:model-eval -- --live --strict --pack core --user recursion-soak-a --base-url http://127.0.0.1:8000 --target-model $env:RECURSION_MODEL_EVAL_TARGET_MODEL --judge-model $env:RECURSION_MODEL_EVAL_JUDGE_MODEL
+node tools/scripts/eval-recursion-models.mjs --live --strict --pack core --user recursion-soak-a --base-url http://127.0.0.1:8000 --character-name $env:RECURSION_LIVE_CHARACTER_NAME --chat-file $env:RECURSION_LIVE_CHAT_FILE --target-model $env:RECURSION_MODEL_EVAL_TARGET_MODEL --judge-model $env:RECURSION_MODEL_EVAL_JUDGE_MODEL
 ```
 
 Expected:

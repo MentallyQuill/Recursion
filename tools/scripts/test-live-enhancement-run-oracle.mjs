@@ -122,6 +122,21 @@ const healthy = evaluate({
   enhancementMutation: mutation
 });
 assertEqual(healthy.ok, true, 'strict live enhancement oracle accepts a fully healthy concrete enhancement');
+
+const healthyReplacedTree = evaluate({
+  transitions: doneRows.map((row) => ({ ...row, source: 'removed' })),
+  finalRows: [
+    { label: 'Utility card batch', state: 'done' },
+    { label: 'Recursion prompt ready', state: 'done' }
+  ],
+  journalDelta: [],
+  enhancementMutation: mutation
+});
+assertEqual(
+  healthyReplacedTree.ok,
+  true,
+  'strict live enhancement oracle accepts required done rows that were later replaced while retaining historical health'
+);
 assert(oracleSource.includes('attributeOldValue: true'), 'browser oracle requests progress attribute old values');
 assert(oracleSource.includes('mutation.oldValue'), 'browser oracle records transient progress states from mutation old values');
 
@@ -134,5 +149,39 @@ for (const scriptPath of [
   assert(source.includes('collectLiveEnhancementRunOracle'), `${scriptPath} collects the strict live enhancement oracle before reporting pass`);
   assert(/oracle(?:\?\.|\.)verdict(?:\?\.|\.)ok/.test(source), `${scriptPath} gates its pass result on the strict oracle verdict`);
 }
+
+const effectivenessSource = readFileSync('tools/scripts/lib/live-editorial-effectiveness.mjs', 'utf8');
+assert(
+  !effectivenessSource.includes('page.waitForFunction((expectedDecision)'),
+  'live Redirect proof uses historical oracle transitions instead of requiring replaced preparation and Editorial rows to coexist'
+);
+assert(
+  effectivenessSource.indexOf('const oracle = await collectLiveEnhancementRunOracle(page)')
+    < effectivenessSource.indexOf('page.evaluate(executeJudgeInPage'),
+  'live Redirect proof settles and collects production progress before the test-only effectiveness judge can replace it'
+);
+assert(
+  effectivenessSource.includes("document.querySelector('[data-recursion-status-popover]')?.hidden === false"),
+  'live Redirect proof opens the progress popover before visual capture'
+);
+assert(effectivenessSource.includes('phoneScreenshotPath'), 'live Redirect proof records a compact-phone visual confirmation');
+assert(
+  /catch \(error\) \{\s*await browser\.close\(\)\.catch/.test(effectivenessSource),
+  'live Redirect proof closes Chromium when browser setup or provider preflight fails'
+);
+const rapidWarmCall = "runtime.warmRapidScene({ reason: `live-redirect-warm-${scenario.id}` })";
+assert(effectivenessSource.includes(rapidWarmCall), 'live Redirect proof explicitly primes Rapid background warm');
+assert(
+  effectivenessSource.indexOf(rapidWarmCall)
+    < effectivenessSource.indexOf("runtime.prepareForGeneration({ userMessage: pendingUserMessage })"),
+  'live Redirect proof awaits Rapid background warm before the strict foreground preparation'
+);
+const preparationCallIndex = effectivenessSource.indexOf("runtime.prepareForGeneration({ userMessage: pendingUserMessage })");
+const preparationRenderIndex = effectivenessSource.indexOf('live-prompt-ready-not-rendered', preparationCallIndex);
+const enhancementCallIndex = effectivenessSource.indexOf("runtime.enhanceLatestAssistantMessage({ reason: `live-redirect-${scenario.id}` })");
+assert(
+  preparationCallIndex >= 0 && preparationRenderIndex > preparationCallIndex && preparationRenderIndex < enhancementCallIndex,
+  'live Redirect proof gives prompt-ready one browser render boundary before post-generation Enhancement begins'
+);
 
 console.log('[pass] live enhancement run oracle');

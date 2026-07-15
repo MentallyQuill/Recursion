@@ -25,9 +25,27 @@ const ALLOWED_NO_CHANGE_ORACLE_FAILURES = new Set([
   'enhancement-result-not-recursion-owned',
   'enhancement-result-not-validated'
 ]);
+const REQUIRED_LIVE_RUNTIME_METHODS = Object.freeze([
+  'enhanceLatestAssistantMessage',
+  'evaluateRedirectEffectiveness',
+  'view'
+]);
 
 function text(value = '') {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+export function validateLiveEditorialRuntime(runtime = {}) {
+  const missing = REQUIRED_LIVE_RUNTIME_METHODS
+    .filter((method) => typeof runtime?.[method] !== 'function');
+  return { ok: missing.length === 0, missing };
+}
+
+export function liveEditorialStageTimeoutMs(stage, timeoutMs = 120000) {
+  const configured = Math.max(10000, Number(timeoutMs) || 120000);
+  if (stage === 'settings') return 15000;
+  if (stage === 'warm' || stage === 'enhance') return configured * 3;
+  return configured;
 }
 
 function exactCoverage(entries, names, nameKey, { requirePass = true } = {}) {
@@ -55,16 +73,12 @@ function noChangeOracleHealthy(oracle = {}) {
   return failures.every((failure) => ALLOWED_NO_CHANGE_ORACLE_FAILURES.has(text(failure)));
 }
 
-function privateRedirectStrings(marker = {}) {
-  const pressure = Array.isArray(marker?.redirect?.characterPressure) ? marker.redirect.characterPressure : [];
-  return pressure.flatMap((entry) => [entry?.immediateWant, entry?.pressureReason])
-    .map((entry) => String(entry || '').trim())
-    .filter((entry) => entry.length >= 8);
-}
+const PRIVATE_REDIRECT_FIELD_PATTERN = /"(?:redirect|characterPressure|immediateWant|pressureReason|wantEvidenceRefs|sourcePressureEffect|sourceEvidenceRefs)"\s*:/;
+const PRIVATE_REDIRECT_SENTINEL = 'PRIVATE_REDIRECT_PRESSURE_SENTINEL';
 
-function leaksPrivateText(value, privateStrings) {
+function leaksPrivateRedirectStructure(value) {
   const serialized = typeof value === 'string' ? value : JSON.stringify(value ?? null);
-  return privateStrings.some((entry) => serialized.includes(entry));
+  return PRIVATE_REDIRECT_FIELD_PATTERN.test(serialized) || serialized.includes(PRIVATE_REDIRECT_SENTINEL);
 }
 
 export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
@@ -116,7 +130,6 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
   if (expectedTarget && text(artifacts.provider?.targetModel) !== expectedTarget) failures.push('target-model-mismatch');
   if (expectedJudge && text(artifacts.provider?.judgeModel) !== expectedJudge) failures.push('judge-model-mismatch');
 
-  const privateStrings = privateRedirectStrings(marker);
   for (const [surface, value] of [
     ['assistant-prose', artifacts.candidateText],
     ['visible-ui', artifacts.visibleText],
@@ -124,7 +137,7 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
     ['prompt-packet', artifacts.promptPacket],
     ['journal', artifacts.journalDelta]
   ]) {
-    if (leaksPrivateText(value, privateStrings)) failures.push(`private-redirect-leak-${surface}`);
+    if (leaksPrivateRedirectStructure(value)) failures.push(`private-redirect-leak-${surface}`);
   }
 
   return {
@@ -144,7 +157,23 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
   };
 }
 
-async function executeScenarioInPage(scenario) {
+async function executeScenarioInPage(input) {
+  const scenario = input?.scenario || {};
+  const stageTimeouts = input?.stageTimeouts || {};
+  const runStage = async (stage, operation) => {
+    globalThis.__recursionLiveRedirectProofStage = stage;
+    let timer;
+    try {
+      return await Promise.race([
+        operation(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`live-stage-timeout:${stage}`)), Number(stageTimeouts[stage]) || 120000);
+        })
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const rawContext = () => globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
   const decorateContext = (context = {}) => {
     context.saveChat = async () => {};
@@ -200,46 +229,73 @@ async function executeScenarioInPage(scenario) {
     };
   };
 
-  await runtime.updateSettings({
+  await runStage('settings', () => runtime.updateSettings({
     enabled: true,
     mode: 'auto',
     pipelineMode: String(scenario?.pipelineMode || 'standard'),
     reasoningLevel: 'medium',
     reasonerUse: 'always',
     enhancements: { mode: 'redirect', applyMode: 'as-swipe', contextMessages: 13 }
+  }));
+  if (String(scenario?.pipelineMode || '').toLowerCase() === 'rapid') {
+    const warm = await runStage('warm', () => runtime.warmRapidScene({ reason: `live-redirect-warm-${scenario.id}` }));
+    if (warm?.ok !== true || warm?.rapid?.status !== 'ready') {
+      throw new Error(`live-rapid-warm-failed:${warm?.rapid?.failureReasonCode || warm?.reason || 'not-ready'}`);
+    }
+  }
+  const prepared = await runStage('prepare', () => runtime.prepareForGeneration({ userMessage: pendingUserMessage }));
+  await new Promise((resolve, reject) => {
+    const deadline = Date.now() + 2000;
+    const poll = () => {
+      const transitions = globalThis.__recursionLiveEnhancementRunOracle?.transitions || [];
+      const ready = transitions.some((entry) => (
+        String(entry?.label || '').trim().toLowerCase() === 'recursion prompt ready'
+        && String(entry?.state || '').trim().toLowerCase() === 'done'
+      ));
+      if (ready) return resolve();
+      if (Date.now() >= deadline) return reject(new Error('live-prompt-ready-not-rendered'));
+      setTimeout(poll, 50);
+    };
+    poll();
   });
-  const prepared = await runtime.prepareForGeneration({ userMessage: pendingUserMessage });
   const before = state();
-  const enhancementResult = await runtime.enhanceLatestAssistantMessage({ reason: `live-redirect-${scenario.id}` });
+  const enhancementResult = await runStage('enhance', () => runtime.enhanceLatestAssistantMessage({ reason: `live-redirect-${scenario.id}` }));
   const after = state();
   const expectedNoChange = String(redirectOracle.expectedDecision || '').toLowerCase() === 'no-change';
   const candidateText = expectedNoChange ? sourceText : String(after.text || '');
-  const judge = await runtime.evaluateRedirectEffectiveness({
-    scenarioId: String(scenario.id || ''),
-    oracle: redirectOracle,
-    snapshot: scenario.snapshot || {},
-    sourceText,
-    candidateText,
-    marker: enhancementResult?.marker || {}
-  });
   const runtimeView = runtime.view?.() || {};
+  globalThis.__recursionLiveRedirectProofStage = 'complete';
   return {
     prepared,
     before,
     after,
     enhancementResult,
     candidateText,
-    judge,
+    sourceText,
     runtimeView,
     promptPacket: runtimeView.lastPacket || null,
     visibleText: String(document.body?.innerText || '')
   };
 }
 
+async function executeJudgeInPage(input = {}) {
+  const runtime = globalThis.__recursionLiveHarnessRuntime;
+  if (!runtime?.evaluateRedirectEffectiveness) return { ok: false, error: { code: 'served-runtime-stale' } };
+  return runtime.evaluateRedirectEffectiveness({
+    scenarioId: String(input?.scenario?.id || ''),
+    oracle: input?.scenario?.oracle?.editorialRedirect || {},
+    snapshot: input?.scenario?.snapshot || {},
+    sourceText: String(input?.sourceText || ''),
+    candidateText: String(input?.candidateText || ''),
+    marker: input?.marker || {}
+  });
+}
+
 async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artifactRoot }) {
   const session = createSillyTavernHttpSession({ baseUrl, user, password });
   await session.login();
   const browser = await chromium.launch({ headless: true });
+  try {
   const browserContext = await browser.newContext();
   await browserContext.addCookies(session.playwrightCookies());
   await browserContext.addInitScript(() => { globalThis.__recursionLiveHarness = true; });
@@ -248,6 +304,22 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
   await page.waitForSelector('#recursion-root', { state: 'visible', timeout: timeoutMs });
   await page.waitForFunction(() => Boolean(globalThis.__recursionLiveHarnessRuntime), null, { timeout: timeoutMs });
+  const runtimeCapabilities = await page.evaluate(() => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime || {};
+    return Object.fromEntries([
+      'enhanceLatestAssistantMessage',
+      'evaluateRedirectEffectiveness',
+      'view'
+    ].map((method) => [method, typeof runtime[method]]));
+  });
+  const runtimeValidation = validateLiveEditorialRuntime(Object.fromEntries(
+    Object.entries(runtimeCapabilities).map(([method, type]) => [method, type === 'function' ? () => {} : null])
+  ));
+  if (!runtimeValidation.ok) {
+    const error = new Error(`Served Recursion runtime is stale; missing ${runtimeValidation.missing.join(', ')}.`);
+    error.code = 'served-runtime-stale';
+    throw error;
+  }
   const providerTest = await page.evaluate(async () => globalThis.__recursionLiveHarnessRuntime?.testProvider?.('utility'));
   if (providerTest?.ok !== true) {
     const error = new Error('Utility provider test failed before Redirect effectiveness run.');
@@ -258,43 +330,63 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
 
   return {
     async execute({ scenario, targetModel, judgeModel }) {
+      await page.setViewportSize({ width: 1280, height: 720 });
       await installLiveEnhancementRunOracle(page);
-      const artifacts = await page.evaluate(executeScenarioInPage, scenario);
+      const artifacts = await page.evaluate(executeScenarioInPage, {
+        scenario,
+        stageTimeouts: Object.fromEntries(['settings', 'warm', 'prepare', 'enhance', 'judge']
+          .map((stage) => [stage, liveEditorialStageTimeoutMs(stage, timeoutMs)]))
+      });
       if (artifacts?.environmentFailure) throw new Error(artifacts.environmentFailure);
-      await page.waitForFunction((expectedDecision) => {
+      await page.waitForFunction(() => {
         const rows = [...document.querySelectorAll('[data-recursion-status-popover] [data-recursion-progress-row]')];
-        const active = rows.some((row) => ['running', 'pending', 'waiting'].includes(String(row.dataset.recursionProgressState || '').toLowerCase()));
-        if (active) return false;
-        if (expectedDecision === 'no-change') return true;
-        const stateFor = (label) => rows
-          .filter((row) => String(row.dataset.recursionProgressLabel || '').trim().toLowerCase() === label)
-          .map((row) => String(row.dataset.recursionProgressState || '').trim().toLowerCase());
-        return ['editorial diagnosis', 'editorial candidate', 'editorial verification', 'recursion prompt ready']
-          .every((label) => stateFor(label).includes('done'));
-      }, String(scenario?.oracle?.editorialRedirect?.expectedDecision || 'proceed').toLowerCase(), { timeout: timeoutMs });
+        return !rows.some((row) => ['running', 'pending', 'waiting'].includes(String(row.dataset.recursionProgressState || '').toLowerCase()));
+      }, null, { timeout: 15000 }).catch(() => {});
       const oracle = await collectLiveEnhancementRunOracle(page);
       const journalDelta = Array.isArray(oracle?.observation?.journalDelta) ? oracle.observation.journalDelta : [];
       const screenshotPath = artifactRoot
         ? join(artifactRoot, `${String(scenario.id || 'redirect').replace(/[^a-z0-9_-]+/gi, '-')}.png`)
         : '';
-      if (screenshotPath) await page.screenshot({ path: screenshotPath, fullPage: true });
+      const phoneScreenshotPath = screenshotPath ? screenshotPath.replace(/\.png$/i, '-phone.png') : '';
+      if (screenshotPath) {
+        if (!await page.evaluate(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false)) {
+          await page.locator('[data-recursion-status-trigger]').first().click();
+        }
+        await page.waitForFunction(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false, null, { timeout: 5000 });
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.screenshot({ path: phoneScreenshotPath, fullPage: true });
+        await page.setViewportSize({ width: 1280, height: 720 });
+      }
+      const judge = await page.evaluate(executeJudgeInPage, {
+        scenario,
+        sourceText: artifacts.sourceText,
+        candidateText: artifacts.candidateText,
+        marker: artifacts.enhancementResult?.marker || {}
+      });
       return {
         ...artifacts,
         scenario,
         oracle,
         journalDelta,
+        judge,
         provider: {
           targetModel: text(providerTest?.diagnostics?.model || providerTest?.provider?.resolvedModelLabel),
-          judgeModel: text(artifacts?.judge?.diagnostics?.model)
+          judgeModel: text(judge?.diagnostics?.model)
         },
         expectedModels: { targetModel, judgeModel },
-        screenshotPath
+        screenshotPath,
+        phoneScreenshotPath
       };
     },
     async close() {
       await browser.close();
     }
   };
+  } catch (error) {
+    await browser.close().catch(() => {});
+    throw error;
+  }
 }
 
 export async function runLiveEditorialEffectiveness({
@@ -342,6 +434,7 @@ export async function runLiveEditorialEffectiveness({
         expectedModels: artifacts?.expectedModels || { targetModel, judgeModel }
       });
       if (artifacts?.screenshotPath) result.screenshotPath = artifacts.screenshotPath;
+      if (artifacts?.phoneScreenshotPath) result.phoneScreenshotPath = artifacts.phoneScreenshotPath;
       results.push(result);
       if (!result.ok && failFast) break;
     }

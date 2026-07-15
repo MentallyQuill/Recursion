@@ -449,19 +449,43 @@ This deterministic check blocks the OV-1 candidate's all-`reorder` ledger. It do
 Every Redirect receives one independent verifier call. Recompose retains its existing High/Ultra-only verification policy.
 
 ```js
-const verificationRequired = editorialMode === 'redirect'
-  || ((settings.reasoningLevel === 'high' || settings.reasoningLevel === 'ultra')
-    && editorialMode === 'recompose');
+export function editorialVerificationRequired(mode = '', reasoningLevel = '') {
+  if (mode === 'redirect') return true;
+  return mode === 'recompose' && ['high', 'ultra'].includes(reasoningLevel);
+}
+
+const verificationRequired = editorialVerificationRequired(
+  editorialMode,
+  settings.reasoningLevel
+);
 
 if (verificationRequired) {
   // Existing one-candidate accept/reject verification path.
 }
 ```
 
+The same `verificationRequired` value must be calculated once before cache lookup and used by both `editorialPassKey()` and the execution branch:
+
+```js
+const verificationRequired = editorialVerificationRequired(editorialMode, settings.reasoningLevel);
+const key = editorialPassKey({
+  chatKey: identity.chatKey,
+  messageId,
+  swipeId: identity.swipeId ?? 0,
+  sourceHash,
+  snapshotHash,
+  mode: editorialMode,
+  applyMode,
+  verificationRequired
+});
+```
+
+This prevents Medium Redirect from reusing a `direct` pass produced under the old High/Ultra-only policy. The helper belongs in `src/editorial-transform.mjs` beside `editorialPassKey()` so policy and identity cannot drift apart.
+
 The verifier returns no prose and cannot request another candidate. It evaluates these checks exactly once each:
 
 ```js
-const REDIRECT_VERIFICATION_CHECKS = Object.freeze([
+export const REDIRECT_VERIFICATION_CHECKS = Object.freeze([
   'source-failure-removed',
   'replacement-objective-fulfilled',
   'required-beats-satisfied',
@@ -474,6 +498,11 @@ const REDIRECT_VERIFICATION_CHECKS = Object.freeze([
 
 const verification = {
   schema: 'recursion.editorialVerification.v1',
+  mode: 'redirect',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  candidateHash,
   decision: 'accept',
   checks: REDIRECT_VERIFICATION_CHECKS.map((check) => ({
     check,
@@ -483,6 +512,142 @@ const verification = {
   }))
 };
 ```
+
+### Verification provider schema
+
+`src/providers.mjs` must require the exact check array for Redirect. Mode and candidate identity are strengthened for both full-candidate modes, but Recompose does not receive Redirect's check array or mandatory-verification policy:
+
+```js
+import {
+  EDITORIAL_VERIFICATION_SCHEMA,
+  REDIRECT_VERIFICATION_CHECKS
+} from './editorial-transform.mjs';
+
+function editorialVerificationChecksSchema(validEvidenceIds) {
+  return {
+    type: 'array',
+    minItems: REDIRECT_VERIFICATION_CHECKS.length,
+    maxItems: REDIRECT_VERIFICATION_CHECKS.length,
+    items: {
+      type: 'object',
+      properties: {
+        check: { enum: [...REDIRECT_VERIFICATION_CHECKS] },
+        status: { enum: ['pass', 'fail', 'unclear'] },
+        evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds),
+        note: { type: 'string' }
+      },
+      required: ['check', 'status', 'evidenceRefs', 'note'],
+      additionalProperties: false
+    }
+  };
+}
+
+if (schema === EDITORIAL_VERIFICATION_SCHEMA) {
+  const mode = String(request?.mode || '').trim();
+  const properties = {
+    schema: { const: schema },
+    mode: mode ? { const: mode } : { enum: ['recompose', 'redirect'] },
+    sourceHash: { const: String(request.sourceHash) },
+    snapshotHash: { const: String(request.snapshotHash) },
+    diagnosisHash: { const: String(request.diagnosisHash) },
+    candidateHash: { const: String(request.candidateHash) },
+    decision: { enum: ['accept', 'reject'] },
+    evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds),
+    reason: { type: 'string' },
+    ...(mode === 'redirect'
+      ? { checks: editorialVerificationChecksSchema(validEvidenceIds) }
+      : {})
+  };
+  return {
+    name: schemaSafeName(schema),
+    schema: {
+      type: 'object',
+      properties,
+      required: [
+        'schema',
+        'mode',
+        'sourceHash',
+        'snapshotHash',
+        'diagnosisHash',
+        'candidateHash',
+        'decision',
+        ...(mode === 'redirect' ? ['checks'] : [])
+      ],
+      additionalProperties: false
+    }
+  };
+}
+```
+
+### Verification semantic validation
+
+`validateEditorialVerification()` receives `mode` and enforces exact Redirect coverage. A structurally valid `reject` remains a valid verifier result; runtime then rejects the candidate. An `accept` with any non-pass check is itself invalid.
+
+```js
+function validateRedirectVerificationChecks(checks, known, decision) {
+  if (!Array.isArray(checks) || checks.length !== REDIRECT_VERIFICATION_CHECKS.length) {
+    return fail('RECURSION_EDITORIAL_REDIRECT_VERIFICATION_CHECKS_INVALID', 'Redirect verification check coverage is incomplete.');
+  }
+  const byName = new Map();
+  for (const entry of checks) {
+    if (!REDIRECT_VERIFICATION_CHECKS.includes(entry?.check) || byName.has(entry.check)) {
+      return fail('RECURSION_EDITORIAL_REDIRECT_VERIFICATION_CHECKS_INVALID', 'Redirect verification returned an unknown or duplicate check.');
+    }
+    if (!['pass', 'fail', 'unclear'].includes(entry?.status) || !refs(entry?.evidenceRefs, known)) {
+      return fail('RECURSION_EDITORIAL_REDIRECT_VERIFICATION_CHECKS_INVALID', 'Redirect verification returned an invalid status or evidence reference.');
+    }
+    byName.set(entry.check, entry);
+  }
+  if (REDIRECT_VERIFICATION_CHECKS.some((check) => !byName.has(check))) {
+    return fail('RECURSION_EDITORIAL_REDIRECT_VERIFICATION_CHECKS_INVALID', 'Redirect verification omitted a required check.');
+  }
+  if (decision === 'accept' && [...byName.values()].some((entry) => entry.status !== 'pass')) {
+    return fail('RECURSION_EDITORIAL_REDIRECT_VERIFICATION_ACCEPT_INVALID', 'Redirect verification cannot accept a failed or unclear check.');
+  }
+  return { ok: true, checks: [...byName.values()] };
+}
+
+export function validateEditorialVerification(result = {}, {
+  mode = '',
+  sourceHash = '',
+  snapshotHash = '',
+  diagnosisHash = '',
+  candidateHash = '',
+  evidence = []
+} = {}) {
+  const data = object(result);
+  if (
+    data.schema !== EDITORIAL_VERIFICATION_SCHEMA
+    || data.mode !== mode
+    || data.sourceHash !== sourceHash
+    || data.snapshotHash !== snapshotHash
+    || data.diagnosisHash !== diagnosisHash
+    || data.candidateHash !== candidateHash
+  ) {
+    return fail('RECURSION_EDITORIAL_VERIFICATION_STALE', 'Editorial verification does not match the candidate.');
+  }
+  if (!['accept', 'reject'].includes(data.decision)) {
+    return fail('RECURSION_EDITORIAL_VERIFICATION_INVALID', 'Editorial verifier must return accept or reject.');
+  }
+  const known = evidenceMap(evidence);
+  if (data.evidenceRefs !== undefined && !refs(data.evidenceRefs, known)) {
+    return fail('RECURSION_EDITORIAL_EVIDENCE_INVALID', 'Editorial verification cited unknown evidence.');
+  }
+  const redirectChecks = mode === 'redirect'
+    ? validateRedirectVerificationChecks(data.checks, known, data.decision)
+    : { ok: true, checks: [] };
+  if (!redirectChecks.ok) return redirectChecks;
+  return {
+    ok: true,
+    decision: data.decision,
+    checks: redirectChecks.checks,
+    evidenceRefs: array(data.evidenceRefs).map(String),
+    reason: safeText(data.reason || '', 600)
+  };
+}
+```
+
+`buildEditorialVerificationRequest()` computes `candidateHash` from the validated candidate text, includes it in the structured request and prompt identity, and runtime passes the same value to `validateEditorialVerification()`. The persisted marker and model-effectiveness artifact use that exact hash.
 
 An `accept` result is valid only when every required check is present exactly once and has `status: "pass"`. Any `fail`, `unclear`, missing check, unknown evidence reference, or malformed result rejects the candidate and preserves the original.
 
@@ -521,6 +686,20 @@ Private means:
 
 The run journal should record hashes, counts, and terminal status rather than duplicate the full private map.
 
+Private handling is a deterministic contract, not only a visual expectation. Runtime and UI tests must capture the next prompt packet, rendered view model, assistant text, swipe metadata, and journal delta after an accepted Redirect:
+
+```js
+const privateText = JSON.stringify(marker.redirect.characterPressure);
+
+assertEqual(message.swipe_info[1].extra.recursion.enhancement.redirect.characterPressure.length, 1, 'private pressure audit persists with the Recursion swipe marker');
+assert(!message.swipes[1].includes(privateText), 'private pressure audit never enters assistant prose');
+assert(!JSON.stringify(nextPromptPacket).includes(privateText), 'private pressure audit never enters the next installed host prompt');
+assert(!JSON.stringify(runtime.view()).includes(privateText), 'private pressure audit is absent from the visible runtime view model');
+assert(!JSON.stringify(journalDelta).includes(privateText), 'run journal records only Redirect hashes, counts, and status');
+```
+
+`tools/scripts/test-provider-response-parser.mjs` must also prove that a provider-returned diagnosis containing nested `characterPressure` survives structured-response extraction unchanged. The normalizer may serialize the whole structured object; it must not flatten or omit the nested Redirect fields.
+
 ## UI and progress
 
 No new visible control or panel is added.
@@ -544,6 +723,32 @@ A rejected verifier is a failed Redirect, not a caution followed by a green succ
 
 ## Error behavior
 
+Redirect-specific semantic failures use stable codes so provider failures, status text, journal entries, and tests refer to the same condition:
+
+```js
+export const REDIRECT_ERROR_CODES = Object.freeze({
+  BRIEF_INVALID: 'RECURSION_EDITORIAL_REDIRECT_BRIEF_INVALID',
+  EVIDENCE_INVALID: 'RECURSION_EDITORIAL_REDIRECT_EVIDENCE_INVALID',
+  CHARACTER_COVERAGE_INVALID: 'RECURSION_EDITORIAL_REDIRECT_CHARACTER_COVERAGE_INVALID',
+  PRESSURE_INVALID: 'RECURSION_EDITORIAL_REDIRECT_PRESSURE_INVALID',
+  CHANGE_MISSING: 'RECURSION_EDITORIAL_REDIRECT_MISSING',
+  VERIFICATION_CHECKS_INVALID: 'RECURSION_EDITORIAL_REDIRECT_VERIFICATION_CHECKS_INVALID',
+  VERIFICATION_ACCEPT_INVALID: 'RECURSION_EDITORIAL_REDIRECT_VERIFICATION_ACCEPT_INVALID',
+  VERIFICATION_REJECTED: 'RECURSION_EDITORIAL_VERIFICATION_REJECTED'
+});
+```
+
+User-visible settlement is intentionally compact:
+
+| Failure boundary | Activity/status text | Terminal state |
+| --- | --- | --- |
+| Diagnosis schema, evidence, character coverage, or pressure | `Redirect diagnosis failed. Original kept.` | `failed` |
+| Candidate lacks an evidence-backed directional change | `Redirect candidate failed. Original kept.` | `failed` |
+| Verifier malformed, incomplete, unclear, or rejecting | `Redirect verification failed. Original kept.` | `failed` |
+| Host swipe commit fails | `Redirect could not add the new swipe. Original kept.` | `failed` |
+
+None of these paths may settle as caution followed by success, retain a green Redirect candidate row, or emit `editorial.run.settled` with `status: "success"`.
+
 | Condition | Result |
 | --- | --- |
 | Diagnosis has insufficient evidence | `no-change`; original kept; no transformer call |
@@ -559,7 +764,50 @@ Verifier rejection does not trigger another writer call. Redirect remains one ca
 
 ## Test design
 
-### 1. Diagnosis schema and semantic validation
+### 1. Provider machine schemas and response normalization
+
+Extend `tools/scripts/test-providers.mjs` with separate Redirect and Recompose requests. These tests assert the full nested machine schema rather than checking only prompt text:
+
+```js
+const redirectDiagnosisSchema = machineJsonSchemaForRequest({
+  responseSchema: EDITORIAL_DIAGNOSIS_SCHEMA,
+  machineJson: true,
+  mode: 'redirect',
+  sourceHash,
+  snapshotHash,
+  validEvidenceIds: ['user:0', 'card:active-cast', 'source:0'],
+  validPreservationEvidenceIds: ['user:0', 'card:active-cast']
+});
+
+assertDeepEqual(
+  redirectDiagnosisSchema.schema.properties.brief.required,
+  [
+    'mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges',
+    'sourceFailure', 'replacementObjective', 'requiredBeats', 'forbiddenSourceBeats',
+    'sceneCharacters', 'characterPressure'
+  ],
+  'Redirect diagnosis schema requires the complete turn-level contract'
+);
+
+assert(
+  !machineJsonSchemaForRequest({ ...redirectRequest, mode: 'recompose' })
+    .schema.properties.brief.required.includes('characterPressure'),
+  'Recompose machine schema remains free of Redirect-only fields'
+);
+```
+
+Provider tests must additionally prove:
+
+- `sourceFailure` and `replacementObjective` permit `null` for `no-change`;
+- preservation, objective, required-beat, presence, and want evidence enums exclude `source:N`;
+- conflicting and pressure source fields can cite `source:N` and are semantically source-only;
+- Redirect verification requires exactly the eight named checks;
+- Recompose verification does not require Redirect checks;
+- verifier source, snapshot, diagnosis, mode, and candidate hash fields are frozen from the request;
+- `additionalProperties: false` prevents a model-authored alternate contract;
+- `test-provider-response-parser.mjs` round-trips nested pressure data without flattening or loss.
+
+### 2. Diagnosis schema and semantic validation
 
 Extend `tools/scripts/test-editorial-transform.mjs` with focused Redirect cases:
 
@@ -593,10 +841,11 @@ Required negative controls:
 - duplicate or mismatched character coverage;
 - concrete want without authoritative evidence;
 - unclear want paired with a concrete pressure effect.
+- `sceneCharacters` omits a character clearly named by frozen Active Cast evidence; the mandatory verifier must fail `character-pressure-coherent` and runtime must add no swipe.
 
 Recompose fixtures must continue to validate without Redirect-only fields.
 
-### 2. Candidate distinction
+### 3. Candidate distinction
 
 The latest OV-1 behavior becomes a deterministic regression fixture:
 
@@ -620,7 +869,7 @@ assertEqual(
 
 Add a lying-ledger negative control whose candidate uses `kind: "redirect"` but preserves the same deferral. Deterministic validation may accept its structure; the mandatory verifier fixture must reject `forbidden-source-beats-excluded` and runtime must not append a swipe.
 
-### 3. Pressure remains advisory
+### 4. Pressure remains advisory
 
 Add fixtures proving:
 
@@ -633,7 +882,7 @@ Add fixtures proving:
 
 The acceptance condition is coherence with evidence, not maximum visible reaction.
 
-### 4. Runtime verification policy
+### 5. Runtime verification, identity, and settlement policy
 
 Extend `tools/scripts/test-editorial-runtime.mjs`:
 
@@ -648,15 +897,25 @@ assertEqual(message.swipeId, 1, 'accepted Redirect selects the appended swipe');
 
 Also prove:
 
+- `editorialVerificationRequired('redirect', level)` is true for `low`, `medium`, `high`, and `ultra`;
+- the same helper result is embedded in `editorialPassKey()` before cache lookup;
+- Medium Redirect cannot reuse a previous `direct` cache entry;
+- repeated identical verified Redirect requests reuse only an accepted `verify` entry and do not call the provider again;
 - a rejected Redirect verifier leaves one original swipe;
 - a malformed verifier result leaves one original swipe;
+- a verifier `accept` containing any `fail` or `unclear` check is rejected as invalid;
+- unknown, duplicate, missing, and bad-evidence verifier checks fail independently;
+- a verifier response carrying a different candidate hash fails as stale;
 - success is not visible before host append settlement;
 - Recompose at Medium does not gain mandatory verification;
 - Redirect never honors a requested Replace apply mode.
+- a source swipe change while verification is pending prevents commit;
+- each Redirect error code settles the progress tree as failed, records no successful editorial settlement, and adds no swipe;
+- a `no-change` diagnosis makes no transformer or verifier call.
 
-### 5. Model-effectiveness corpus
+### 6. Model-effectiveness corpus and executable judge
 
-Add fixed Redirect scenarios under `tests/evaluation/scenarios/editorial/`:
+The existing harness accepts only `smoke`, `core`, and `stress` pack names, while the repository currently contains only the `smoke/` scenario directory. Create `tests/evaluation/scenarios/core/` and add fixed Redirect scenarios there with tags `editorial` and `redirect`; do not create an unloaded `editorial/` directory:
 
 - `redirect-turn-deferral.json`: the OV-1 test-now versus postpone failure;
 - `redirect-wrong-focus.json`: source answers atmosphere instead of the user's action;
@@ -667,7 +926,85 @@ Add fixed Redirect scenarios under `tests/evaluation/scenarios/editorial/`:
 
 The judge must evaluate trajectory and evidence, not lexical distance. The same minor rewrite may be a possible Recompose but must fail the Redirect objective.
 
-### 6. Live Playwright proof
+Extend `normalizeScenario()` with an optional `oracle.editorialRedirect` object:
+
+```js
+editorialRedirect: {
+  sourceResponse: String(oracle.editorialRedirect?.sourceResponse || ''),
+  expectedDecision: String(oracle.editorialRedirect?.expectedDecision || ''),
+  replacementObjective: String(oracle.editorialRedirect?.replacementObjective || ''),
+  requiredBeats: normalizeStringArray(oracle.editorialRedirect?.requiredBeats),
+  forbiddenSourceBeats: normalizeStringArray(oracle.editorialRedirect?.forbiddenSourceBeats),
+  pressureExpectations: Array.isArray(oracle.editorialRedirect?.pressureExpectations)
+    ? oracle.editorialRedirect.pressureExpectations
+    : []
+}
+```
+
+`tools/scripts/lib/model-eval-harness.mjs` currently emits `model-effectiveness-not-implemented`. Redirect cannot claim corpus success until tagged scenarios execute the existing `output` judge and produce a non-skipped verdict:
+
+```js
+const redirectScenarios = scenarios.filter((scenario) =>
+  scenario.tags.includes('editorial') && scenario.tags.includes('redirect')
+);
+const redirectEffectiveness = await editorialEffectivenessRunner({
+  scenarios: redirectScenarios,
+  task: 'output',
+  judgeModel: args.judgeModel,
+  strict: args.strict
+});
+report.modelEffectiveness.redirect = redirectEffectiveness;
+if (redirectEffectiveness.status !== 'pass') {
+  reportStatus(report, 'fail', redirectEffectiveness.result || 'redirect-model-effectiveness-failed');
+}
+```
+
+The harness entry point takes an injected runner for deterministic tests and a real default runner for strict/live execution:
+
+```js
+export async function runModelEval({
+  argv = [],
+  env = process.env,
+  artifactRoot = null,
+  liveSmokeRunner = defaultLiveSmokeRunner,
+  editorialEffectivenessRunner = defaultEditorialEffectivenessRunner
+} = {}) {
+  // Existing argument, budget, scenario, traversal, redaction, and report logic.
+}
+```
+
+`defaultEditorialEffectivenessRunner` must, for each tagged scenario:
+
+1. seed the scenario's user turn and flawed source response into a dedicated `recursion-soak-*` chat through the existing Playwright harness;
+2. select Redirect and execute the real configured diagnosis, transformer, and mandatory verifier calls;
+3. capture the resulting candidate, marker, journal delta, and strict progress oracle;
+4. call the configured independent `judgeModel` with the frozen scenario oracle and produced candidate;
+5. return a structured result without mutating `default-user`.
+
+The independent output judge is not the production Redirect verifier replayed as a test. Its prompt receives the scenario's expected objective, required and forbidden beats, pressure expectations, frozen evidence, source, and candidate, then returns:
+
+```js
+{
+  scenarioId: 'redirect-turn-deferral',
+  sourceHash,
+  candidateHash,
+  decision: 'pass',
+  criteria: [
+    { criterion: 'replacement-objective', status: 'pass', reason: 'The test begins in the replacement turn.' },
+    { criterion: 'forbidden-source-beats', status: 'pass', reason: 'The parking-lot deferral is absent.' },
+    { criterion: 'character-pressure', status: 'pass', reason: 'Rising pressure informs Carter without forcing every character to act.' },
+    { criterion: 'evidence-and-constraints', status: 'pass', reason: 'No unsupported fact or motivation was introduced.' }
+  ],
+  providerId: 'configured-judge-provider',
+  model: 'configured-judge-model'
+}
+```
+
+All four criteria are required exactly once. `decision: "pass"` requires all four to pass. This judge contract is implemented and machine-schema tested alongside the harness; it is not inferred from edit distance, slop reduction, progress color, or the production marker's self-reported card outcomes.
+
+The result artifact must retain, per scenario, the candidate hash, decision, eight verifier checks, failed criteria, provider/model identity, and pass/fail status. `skipped`, missing judge output, or an empty Redirect scenario set is a failure in strict mode. `tools/scripts/test-model-eval-harness.mjs` must inject a deterministic `editorialEffectivenessRunner` and prove pass, semantic fail, skipped, malformed, empty-corpus, and fail-fast behavior before the live runner is trusted.
+
+### 7. Live Playwright proof
 
 The dedicated live Enhancement proof should use a `recursion-soak-*` account and a fixed user turn whose source visibly defers a required action. A successful Redirect requires:
 
@@ -680,6 +1017,43 @@ The dedicated live Enhancement proof should use a `recursion-soak-*` account and
 
 The script exit code must derive from the strict live-enhancement oracle plus the Redirect semantic judge. A green progress tree alone is not proof of a successful Redirect.
 
+### 8. Private-data boundary tests
+
+Deterministic privacy assertions run before Playwright:
+
+- `test-editorial-runtime.mjs` proves private Redirect metadata persists only on the Recursion-owned swipe marker and never enters the next prompt packet or assistant text.
+- `test-ui.mjs` and `test-runtime.mjs` prove `characterPressure`, immediate wants, and pressure reasons do not enter the visible view model, inspector, Last Brief, tooltips, or status text.
+- `test-provider-response-parser.mjs` proves nested diagnosis fields survive provider normalization intact.
+- journal assertions prove only diagnosis/candidate hashes, character count, verification status, and error code are recorded.
+- a literal unique sentinel inside a pressure reason is used for absence assertions so tests cannot pass by checking only field names.
+
+```js
+const privateSentinel = 'PRIVATE_REDIRECT_PRESSURE_SENTINEL';
+assert(!message.swipes[1].includes(privateSentinel), 'private pressure sentinel is absent from prose');
+assert(!JSON.stringify(nextPromptPacket).includes(privateSentinel), 'private pressure sentinel is absent from the next prompt');
+assert(!JSON.stringify(runtime.view()).includes(privateSentinel), 'private pressure sentinel is absent from the visible view model');
+assert(!JSON.stringify(journalDelta).includes(privateSentinel), 'private pressure sentinel is absent from journal details');
+assert(JSON.stringify(message.swipe_info[1]).includes(privateSentinel), 'private pressure sentinel remains in Recursion-owned swipe metadata');
+```
+
+## Verification sequence
+
+Implementation follows red-green TDD. Run focused gates first, then the broad and live gates:
+
+```powershell
+npm.cmd run test:providers
+node tools/scripts/test-provider-response-parser.mjs
+node tools/scripts/test-editorial-transform.mjs
+node tools/scripts/test-editorial-runtime.mjs
+npm.cmd run test:runtime
+npm.cmd run test:ui
+npm.cmd run test:model-eval
+npm.cmd test
+npm.cmd run prove:enhancements-live
+```
+
+The first run of each new focused regression must fail for the missing Redirect behavior before production code is changed. `prove:enhancements-live` runs only against a configured `recursion-soak-*` account with real model calls; it is not replaced by mocked browser state.
+
 ## Integration map
 
 Implementation should update these existing boundaries in place:
@@ -687,12 +1061,19 @@ Implementation should update these existing boundaries in place:
 | File | Responsibility |
 | --- | --- |
 | `src/providers.mjs` | Redirect-only diagnosis and verification schemas |
-| `src/editorial-transform.mjs` | Redirect brief validation, pressure validation, prompt rules, candidate ledger validation |
-| `src/runtime.mjs` | Mandatory Redirect verification, private marker persistence, terminal settlement |
+| `src/providers/provider-response-normalizer.mjs` | Preserve nested Redirect diagnosis objects; change only if the new parser regression exposes loss |
+| `src/editorial-transform.mjs` | Shared Redirect constants and verification policy, brief/pressure validation, prompt rules, candidate ledger validation, exact verifier-check validation |
+| `src/runtime.mjs` | Use shared verification policy for cache identity and execution, persist private marker metadata, enforce terminal settlement |
+| `src/ui.mjs` and `src/ui/view-model.mjs` | Remain unaware of private pressure content; change only if deterministic privacy tests expose a leak |
+| `tools/scripts/test-providers.mjs` | Complete Redirect diagnosis/verifier machine schemas and Recompose non-regression |
+| `tools/scripts/test-provider-response-parser.mjs` | Nested Redirect structured-response round trip |
 | `tools/scripts/test-editorial-transform.mjs` | Diagnosis, evidence authority, character coverage, and candidate negative controls |
-| `tools/scripts/test-editorial-runtime.mjs` | Verification policy and host mutation behavior |
+| `tools/scripts/test-editorial-runtime.mjs` | Verification/cache policy, private marker and next-prompt boundaries, host mutation behavior, terminal status |
+| `tools/scripts/test-ui.mjs` and `tools/scripts/test-runtime.mjs` | Private-data absence from visible state and status surfaces |
+| `tools/scripts/lib/model-eval-harness.mjs` | Execute tagged Redirect output-judge scenarios; strict mode rejects skipped or empty effectiveness evidence |
+| `tools/scripts/test-model-eval-harness.mjs` | Deterministic pass/fail/skipped/malformed/empty-corpus harness controls |
 | `tools/scripts/prove-live-enhancements.mjs` | Mode-specific Redirect semantic acceptance |
-| `tests/evaluation/scenarios/editorial/*.json` | Fixed Redirect and pressure scenarios |
+| Create `tests/evaluation/scenarios/core/redirect-*.json` | Fixed Redirect and pressure scenarios loaded through the harness's supported `core` pack |
 | `docs/architecture/PROVIDER_AND_GENERATION_SPEC.md` | Provider-role and verification contract |
 | `docs/testing/TESTING_STRATEGY.md` | Redirect semantic and live gates |
 | `docs/superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md` | Cross-reference this superseding Redirect contract |
@@ -707,9 +1088,11 @@ The implementation is complete only when:
 2. Every concrete character want is backed by non-source frozen evidence.
 3. Character pressure guides generation but does not require action, speech, or increased pressure.
 4. A Redirect candidate without an evidence-backed `redirect` ledger entry fails before host mutation.
-5. Every Redirect receives an independent verifier call at all reasoning levels.
-6. The OV-1 condensation candidate fails Redirect and creates no swipe.
-7. A valid materially redirected candidate creates and selects exactly one swipe.
-8. Private pressure metadata never appears in visible UI, final prose, Last Brief, or the next host prompt.
-9. Focused tests, `npm.cmd test`, the model-effectiveness Redirect corpus, and the dedicated live Playwright proof pass.
-10. The served or installed SillyTavern extension copy is hash-checked before any live success claim.
+5. One shared policy makes Redirect verification mandatory in both cache identity and runtime execution at all reasoning levels.
+6. Redirect verification cannot accept a missing, duplicate, failed, unclear, or bad-evidence required check.
+7. The OV-1 condensation candidate fails Redirect and creates no swipe.
+8. A valid materially redirected candidate creates and selects exactly one swipe.
+9. Private pressure metadata never appears in visible UI, final prose, Last Brief, the next host prompt, or journal details.
+10. The core-pack Redirect effectiveness corpus executes a real output judge; skipped or empty judge evidence fails strict mode.
+11. Focused tests, `npm.cmd test`, the model-effectiveness Redirect corpus, and the dedicated live Playwright proof pass.
+12. The served or installed SillyTavern extension copy is hash-checked before any live success claim.

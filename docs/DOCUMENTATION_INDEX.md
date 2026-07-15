@@ -52,6 +52,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Turn Context Compiler Seed Note](design/RECURSION_TURN_CONTEXT_COMPILER.md) - Historical seed note superseded by the V1 spec family.
 - [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - Approved product and UX direction for the unified Enhancement feature.
 - [Editorial Transformation Design](superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md) - Approved Repair, Recompose, and Redirect direction for evidence-led editorial transformation; supersedes the patch-only product boundary.
+- [Redirect Improvement Design](superpowers/specs/2026-07-15-recursion-redirect-improvement-design.md) - Supplemental Redirect contract for evidence-paired source failures, replacement objectives, character-pressure guidance, mandatory verification, and semantic regressions.
 - [Editorial Transformation Implementation Plan](superpowers/plans/2026-07-13-recursion-editorial-transformation.md) - V1 implementation sequence, real module contracts, tests, UI behavior, and verification for Repair, Recompose, and Redirect.
 - [Design Folder Guide](design/README.md)
 

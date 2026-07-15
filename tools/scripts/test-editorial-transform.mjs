@@ -184,6 +184,56 @@ assertEqual(validateEditorialDiagnosis(redirectDiagnosis({ ...noChangeRedirectBr
 
 const passValidation = validateEditorialPass(candidate, { mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot });
 assertEqual(passValidation.ok, true, 'full Recompose candidate passes without edit ratio cap');
+const redirectDiagnosisHash = validRedirectDiagnosis.hash;
+const redirectCandidate = {
+  ...candidate,
+  mode: 'redirect',
+  diagnosisHash: redirectDiagnosisHash,
+  candidate: {
+    ...candidate.candidate,
+    text: 'She blocked the latch with one hand. "Who sent you?" she repeated, holding his gaze until he answered.',
+    changeLedger: [{
+      kind: 'redirect',
+      summary: 'Rebuilt the turn around answering the supported question now.',
+      evidenceRefs: ['user:0']
+    }]
+  }
+};
+const redirectPassFixture = {
+  mode: 'redirect',
+  sourceText,
+  sourceHash,
+  snapshotHash,
+  diagnosisHash: redirectDiagnosisHash,
+  diagnosis: validRedirectDiagnosis.value,
+  snapshot
+};
+assertEqual(validateEditorialPass(redirectCandidate, redirectPassFixture).ok, true, 'evidence-backed directional Redirect candidate passes');
+const ov1MinorRewrite = {
+  ...redirectCandidate,
+  candidate: {
+    ...redirectCandidate.candidate,
+    text: 'She smiled. "Who sent you?" He delayed the answer and kept one hand on the latch.',
+    changeLedger: [{ kind: 'reorder', summary: 'Condensed the same source direction.', evidenceRefs: ['source:0'] }]
+  }
+};
+assertEqual(
+  validateEditorialPass(ov1MinorRewrite, redirectPassFixture).error?.code,
+  REDIRECT_ERROR_CODES.CHANGE_MISSING,
+  'Redirect rejects a Recompose-style condensation with no directional ledger'
+);
+const sourceOnlyRedirectLedger = {
+  ...redirectCandidate,
+  candidate: {
+    ...redirectCandidate.candidate,
+    changeLedger: [{ kind: 'redirect', summary: 'Claims a redirect using only the source.', evidenceRefs: ['source:0'] }]
+  }
+};
+assertEqual(
+  validateEditorialPass(sourceOnlyRedirectLedger, redirectPassFixture).error?.code,
+  REDIRECT_ERROR_CODES.EVIDENCE_INVALID,
+  'Redirect ledger must cite the replacement objective or required beats'
+);
 const repairCandidate = validateEditorialPass({ ...candidate, mode: 'repair' }, { mode: 'repair', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot, targets: {} });
 assertEqual(repairCandidate.ok, false, 'Repair rejects full candidate');
 const badEvidence = validateEditorialPass({ ...candidate, candidate: { ...candidate.candidate, changeLedger: [{ kind: 'rewrite', summary: 'bad', evidenceRefs: ['missing'] }] } }, { mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot });
@@ -251,8 +301,12 @@ const formattedPassRequest = buildEditorialPassRequest({ mode: 'recompose', sour
 assertEqual(formattedPassRequest.sourceText, formattedSourceText, 'Editorial request preserves source whitespace as structured data');
 assert(formattedPassRequest.prompt.includes(JSON.stringify(formattedSourceText)), 'Editorial prompt preserves source line breaks in a JSON string');
 assert(formattedPassRequest.prompt.includes('Preserve the presentation envelope exactly'), 'Editorial prompt freezes the leading scene-header boundary');
-const redirectRequest = buildEditorialPassRequest({ mode: 'redirect', sourceText, sourceHash, snapshotHash, diagnosis: { ...diagnosis, mode: 'redirect' }, evidence, snapshot });
+const redirectRequest = buildEditorialPassRequest({ mode: 'redirect', sourceText, sourceHash, snapshotHash, diagnosis: validRedirectDiagnosis.value, evidence, snapshot });
 assert(redirectRequest.prompt.includes('source may be negative evidence'), 'Redirect prompt allows source-negative evidence');
+assert(redirectRequest.prompt.includes('Rebuild the response around diagnosis.brief.replacementObjective.'), 'Redirect transformer prompt requires a replacement trajectory');
+assert(redirectRequest.prompt.includes('Do not preserve any forbidden source beat'), 'Redirect transformer prompt excludes forbidden source beats');
+assert(redirectRequest.prompt.includes('Silence, restraint, refusal, and delayed action remain valid'), 'Redirect transformer prompt preserves supported restraint');
+assert(redirectRequest.prompt.includes('A lexical rewrite that preserves the source objective or beat plan is not a Redirect.'), 'Redirect transformer prompt rejects minor rewrites');
 const verifierRequest = buildEditorialVerificationRequest({ mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, evidence, candidate: candidate.candidate });
 assert(verifierRequest.prompt.includes('Return only accept or reject'), 'verifier cannot write candidate');
 assertEqual(verifierRequest.responseLength, undefined, 'verifier inherits the selected provider lane max tokens');

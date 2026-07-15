@@ -355,6 +355,19 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
       return fail('RECURSION_EDITORIAL_PRESERVATION_LEDGER_MISMATCH', 'Candidate preservation ledger must exactly match the validated diagnosis preservation ledger.');
     }
     if (!Array.isArray(data.candidate.changeLedger) || data.candidate.changeLedger.length > 12 || data.candidate.changeLedger.some((entry) => !CHANGE_KINDS.has(entry?.kind) || !safeText(entry?.summary, MAX_CLAIM) || !refs(entry?.evidenceRefs, known))) return fail('RECURSION_EDITORIAL_EVIDENCE_INVALID', 'Candidate change ledger cited invalid evidence.');
+    if (mode === 'redirect') {
+      const redirects = data.candidate.changeLedger.filter((entry) => entry.kind === 'redirect');
+      if (!redirects.length) {
+        return fail(REDIRECT_ERROR_CODES.CHANGE_MISSING, 'Redirect candidate did not report a turn-level directional change.');
+      }
+      const objectiveRefs = new Set([
+        ...array(diagnosis?.brief?.replacementObjective?.evidenceRefs).map(String),
+        ...array(diagnosis?.brief?.requiredBeats).flatMap((beat) => array(beat?.evidenceRefs).map(String))
+      ]);
+      if (redirects.some((entry) => !array(entry.evidenceRefs).some((id) => objectiveRefs.has(String(id))))) {
+        return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect ledger did not cite its replacement objective.');
+      }
+    }
     if (!Array.isArray(data.candidate.riskFlags) || data.candidate.riskFlags.some((flag) => !RISK_FLAGS.has(flag))) return fail('RECURSION_EDITORIAL_CANDIDATE_INVALID', 'Candidate risk flags are invalid.');
     return { ok: true, artifact: { kind: 'candidate', mode, text, candidate: data.candidate }, cardOutcomes: data.cardOutcomes, evidence };
   }
@@ -471,6 +484,18 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
         'Return one complete corrected editorial pass object; do not discuss the correction.'
       ]
     : [];
+  const redirectRules = mode === 'redirect'
+    ? [
+        'The validated Redirect diagnosis is authoritative.',
+        'Rebuild the response around diagnosis.brief.replacementObjective.',
+        'Include the supported substance of every required beat.',
+        'Do not preserve any forbidden source beat, even with different wording.',
+        'Use diagnosis.brief.characterPressure as advisory dramatic evidence. Rising pressure makes a stronger response more likely but never mandatory.',
+        'Silence, restraint, refusal, and delayed action remain valid when supported.',
+        'Do not distribute dialogue or action as a checklist, and do not invent a want for an unclear character.',
+        'A lexical rewrite that preserves the source objective or beat plan is not a Redirect.'
+      ]
+    : [];
   const prompt = [
     'Return only one valid Recursion Editorial Pass JSON object.',
     `Selected mode: ${mode}.`,
@@ -479,6 +504,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     'The diagnosis below is authoritative. Do not add a new diagnosis or revise its preservation/discard decisions.',
     `Copy diagnosis.brief.preserve exactly into candidate.preservationLedger: ${JSON.stringify(requiredPreservationLedger)}. Do not add, remove, or rewrite preservation claims or evidence IDs.`,
     'Every preservation claim, major change, patch, and card outcome must cite only supplied evidence IDs.',
+    ...redirectRules,
     ...(presentationEnvelope ? ['Preserve the presentation envelope exactly: keep the leading scene header unchanged and retain a blank line before body prose.'] : []),
     ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,

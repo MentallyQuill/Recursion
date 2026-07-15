@@ -665,6 +665,71 @@ if (lifecycleFailures.length) {
 }
 
 {
+  const fake = createFakeSillyTavernContext('editorial-one-shot-generation-event');
+  const eventSource = createFakeEventSource();
+  let pending = true;
+  let enhancementCalls = 0;
+  let generationEndCalls = 0;
+  let releaseFirstGenerationEnd;
+  const firstGenerationEndGate = new Promise((resolve) => { releaseFirstGenerationEnd = resolve; });
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    GENERATION_ENDED: 'generation_ended'
+  };
+  fake.context.chat = [
+    { mesid: 0, is_user: true, mes: 'Generate one reply.' }
+  ];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasonerUse: 'off',
+      enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  assertEqual(await globalThis.recursionOnActivate(), true, 'one-shot Enhancement event setup activates');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  activeRuntime.proseEnhancementPending = () => pending;
+  activeRuntime.proseEnhancementRunning = () => false;
+  activeRuntime.holdPendingProseEnhancementMessage = async () => ({ ok: true });
+  activeRuntime.enhanceLatestAssistantMessage = async () => {
+    enhancementCalls += 1;
+    pending = false;
+    return { ok: true };
+  };
+  activeRuntime.handleHostGenerationEnded = async () => {
+    generationEndCalls += 1;
+    if (generationEndCalls === 1) await firstGenerationEndGate;
+    return { ok: true };
+  };
+  fake.context.chat.push({
+    mesid: 1,
+    is_user: false,
+    mes: 'The generated reply.',
+    swipe_id: 0,
+    swipes: ['The generated reply.']
+  });
+
+  const firstEnded = eventSource.emit('generation_ended', { mesid: 1 });
+  await waitUntil(() => enhancementCalls === 1 && generationEndCalls === 1, 'first Enhancement did not reach generation settlement gate');
+  await eventSource.emit('generation_ended', { mesid: 1 });
+  assertEqual(enhancementCalls, 1, 'a delayed duplicate generation-ended event cannot start a second Enhancement');
+  releaseFirstGenerationEnd();
+  await firstEnded;
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const fake = createFakeSillyTavernContext('generation-stopped-event');
   const eventSource = createFakeEventSource();
   fake.context.eventSource = eventSource;
@@ -846,7 +911,13 @@ if (lifecycleFailures.length) {
     swipe: {
       hide() {
         context.controlEvents.push('hide-swipes');
+      },
+      refresh(updateCounters) {
+        context.controlEvents.push(`refresh-swipes:${updateCounters}`);
       }
+    },
+    saveChat() {
+      context.controlEvents.push('save');
     },
     async generateRaw(request = {}) {
       if (interceptorComplete) {
@@ -931,7 +1002,7 @@ if (lifecycleFailures.length) {
   await landed;
   assertEqual(context.chat[2].mes, 'Mara crossed the room. "Keep the door shut," she said.', 'assistant-landed prose enhancement replaces held text');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().hostGenerationActive, false, 'assistant-landed prose enhancement clears host generation after provider settles');
-  assertDeepEqual(context.controlEvents, ['lock', 'hide-swipes', 'unlock'], 'assistant-landed enhancement unlocks SillyTavern controls only after settlement');
+  assertDeepEqual(context.controlEvents, ['lock', 'hide-swipes', 'save', 'unlock'], 'assistant-landed replacement saves before unlocking SillyTavern controls');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.status, 'ready', 'assistant-landed prose enhancement leaves Last Brief ready');
   const prosePacketId = globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId;
   await eventSource.emit('message_updated', { mesid: 2 });

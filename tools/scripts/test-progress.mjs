@@ -754,11 +754,40 @@ for (const [roleId, expectedId, expectedLabel] of [
   ['editorialVerifier', 'editorial-verification', 'Editorial verification']
 ]) {
   const editorialProgress = createProgressRunModel({
+    settings: { enabled: true },
+    lastPlan: { cardJobs: [{ roleId: 'sceneFrameCard', family: 'Scene Frame' }] },
     activity: { runId: `editorial-${roleId}`, phase: 'providerCallRunning', label: expectedLabel, providerLane: 'utility', detail: { roleId }, recordedAt: '1' }
   });
+  assertEqual(editorialProgress.steps.length, 1, `${roleId} renders only its active Editorial stage`);
   assertEqual(editorialProgress.steps[0].id, expectedId, `${roleId} maps to editorial progress row`);
   assertEqual(editorialProgress.steps[0].label, expectedLabel, `${roleId} uses product-facing editorial label`);
+  assertEqual(editorialProgress.steps[0].children?.length || 0, 0, `${roleId} does not repeat its label as a provider-call child`);
+  assert(
+    !editorialProgress.steps.some((step) => ['selecting-turn-hand', 'saving-scene-cache', 'composing-prompt-packet', 'installing-recursion-prompt'].includes(step.id)),
+    `${roleId} does not inherit pending pre-generation pipeline rows`
+  );
 }
+
+const editorialNoChangeProgress = createProgressRunModel({
+  settings: { enabled: true },
+  lastPlan: { cardJobs: [{ roleId: 'sceneFrameCard', family: 'Scene Frame' }] },
+  activityHistory: [
+    { runId: 'editorial-no-change-progress', phase: 'providerCallRunning', label: 'Editorial diagnosis', providerLane: 'utility', detail: { roleId: 'editorialDiagnostician' }, recordedAt: '1' },
+    { runId: 'editorial-no-change-progress', phase: 'providerCallSettled', outcome: 'success', severity: 'success', label: 'Editorial diagnosis', providerLane: 'utility', detail: { roleId: 'editorialDiagnostician' }, recordedAt: '2' }
+  ],
+  activity: {
+    runId: 'editorial-no-change-progress',
+    phase: 'settled',
+    outcome: 'skipped',
+    severity: 'info',
+    label: 'Editorial complete; no changes needed.',
+    detail: { mode: 'redirect', decision: 'no-change' },
+    recordedAt: '3'
+  }
+});
+assertEqual(editorialNoChangeProgress.heroPixelState, 'skipped', 'Editorial no-change is visibly distinct from an applied Enhancement');
+assert(editorialNoChangeProgress.steps.some((step) => step.id === 'editorial-result' && step.state === 'skipped'), 'Editorial no-change renders a skipped terminal result');
+assert(!editorialNoChangeProgress.steps.some((step) => ['selecting-turn-hand', 'saving-scene-cache', 'composing-prompt-packet', 'installing-recursion-prompt', 'recursion-prompt-ready'].includes(step.id)), 'Editorial no-change renders no pre-generation or prompt-ready rows');
 
 const hostStoppedProgress = createProgressRunModel({
   activityHistory: [

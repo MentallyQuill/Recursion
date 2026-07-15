@@ -108,6 +108,62 @@ assert(transformCall.request.validEvidenceIds.includes('message:7'), 'runtime tr
 assert(Array.isArray(transformCall.request.installedCardIds), 'runtime transform request exposes the frozen installed-card identity set');
 assertEqual(runtime.view().activity.severity, 'success', 'successful Editorial transform settles success');
 assertEqual(runtime.view().editorialResult?.status, 'success', 'successful Editorial transform records a success result');
+const callsAfterEditorialSettlement = calls.length;
+const duplicateAssistantLanded = await runtime.enhanceLatestAssistantMessage({ reason: 'assistant-message-landed' });
+assertEqual(duplicateAssistantLanded.reason, 'enhancement-not-armed', 'runtime rejects an assistant-landed Enhancement without a generation authorization');
+assertEqual(calls.length, callsAfterEditorialSettlement, 'unarmed assistant-landed Enhancement makes no provider call');
+
+const pendingCommitSource = 'Mara kept her answer brief and watched the sealed door.';
+const pendingCommitMessage = { messageId: 10, chatKey: 'editorial-pending-commit-chat', swipeId: 0, text: pendingCommitSource, swipes: [pendingCommitSource] };
+let signalAppendEntered;
+let releaseAppend;
+const appendEntered = new Promise((resolve) => { signalAppendEntered = resolve; });
+const pendingCommitRuntime = createRecursionRuntime({
+  host: {
+    async snapshot() {
+      return {
+        chatId: pendingCommitMessage.chatKey,
+        chatKey: pendingCommitMessage.chatKey,
+        sceneKey: 'scene',
+        sceneFingerprint: 'scene-fp',
+        turnFingerprint: 'turn-fp',
+        latestMesId: pendingCommitMessage.messageId,
+        messages: [
+          { mesid: 9, role: 'user', text: 'Keep the sender unidentified.', visible: true },
+          { mesid: pendingCommitMessage.messageId, role: 'assistant', text: pendingCommitSource, visible: true }
+        ]
+      };
+    },
+    messages: {
+      activeAssistantMessageIdentity() { return { ...pendingCommitMessage, originalHash: hashJson(pendingCommitSource) }; },
+      async holdAssistantMessage() { return { ok: true }; },
+      async revealAssistantMessage() { return { ok: true }; },
+      async appendAssistantMessageSwipe(_id, text) {
+        signalAppendEntered();
+        return await new Promise((resolve) => {
+          releaseAppend = () => {
+            pendingCommitMessage.text = text;
+            pendingCommitMessage.swipes.push(text);
+            resolve({ ok: true });
+          };
+        });
+      },
+      async findEnhancedSwipe() { return null; }
+    },
+    prompt: { async install() { return { ok: true }; }, async clear() { return { ok: true }; } }
+  },
+  settingsStore: createSettingsStore({ root: {} }),
+  storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
+  activity: createActivityReporter(),
+  generationRouter
+});
+await pendingCommitRuntime.updateSettings({ enhancements: { mode: 'recompose', applyMode: 'as-swipe' } });
+const pendingCommitRun = pendingCommitRuntime.enhanceLatestAssistantMessage({ reason: 'editorial-pending-commit-test' });
+await appendEntered;
+assert(pendingCommitRuntime.view().editorialResult?.status !== 'success', 'Editorial success is not observable before the host swipe append settles');
+releaseAppend();
+assertEqual((await pendingCommitRun).ok, true, 'Editorial run succeeds after the host swipe append settles');
+assertEqual(pendingCommitRuntime.view().editorialResult?.status, 'success', 'Editorial success becomes visible after the host swipe append settles');
 
 const concurrentSource = 'Mara kept one hand on the latch.';
 const concurrentMessage = { messageId: 12, chatKey: 'editorial-concurrent-chat', swipeId: 0, text: concurrentSource, swipes: [concurrentSource] };
@@ -421,8 +477,9 @@ await noChangeRuntime.updateSettings({ enhancements: { mode: 'recompose', applyM
 const noChangeResult = await noChangeRuntime.enhanceLatestAssistantMessage({ reason: 'editorial-no-change-test' });
 assertEqual(noChangeResult.ok, true, 'validated no-change diagnosis is a successful skip');
 assertEqual(noChangeResult.skipped, true, 'validated no-change diagnosis does not mutate the response');
-assertEqual(noChangeRuntime.view().editorialResult?.status, 'success', 'validated no-change diagnosis settles Editorial green');
-assertEqual(noChangeRuntime.view().activity.severity, 'success', 'validated no-change diagnosis keeps prompt readiness green');
+assertEqual(noChangeRuntime.view().editorialResult?.status, 'skipped', 'validated no-change diagnosis records a skipped Editorial outcome');
+assertEqual(noChangeRuntime.view().activity.outcome, 'skipped', 'validated no-change diagnosis does not masquerade as an applied Enhancement');
+assertEqual(noChangeRuntime.view().activity.label, 'Editorial complete; no changes needed.', 'validated no-change diagnosis explains why no swipe was added');
 assertEqual(noChangeTransformerCalls, 0, 'validated no-change diagnosis does not call transformer');
 assertEqual(noChangeMessage.text, noChangeSource, 'validated no-change diagnosis preserves original assistant text');
 console.log('[pass] editorial runtime');

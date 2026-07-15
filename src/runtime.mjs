@@ -3726,6 +3726,10 @@ export function createRecursionRuntime({
     if (typeof messages.activeAssistantMessageIdentity !== 'function') return { ok: true, skipped: true, reason: 'host-message-api-unavailable' };
     const identity = messages.activeAssistantMessageIdentity();
     if (!identity?.text) return { ok: true, skipped: true, reason: 'assistant-message-unavailable' };
+    if (safeText(details.reason || '', 80) === 'assistant-message-landed' && identity.enhancementOwned === true) {
+      clearPendingProseEnhancement();
+      return { ok: true, skipped: true, reason: 'enhancement-owned-source' };
+    }
     const runId = makeId('editorial');
     const messageId = identity.messageId;
     const sourceText = String(identity.text || '');
@@ -3946,10 +3950,10 @@ export function createRecursionRuntime({
         const noChange = diagnosisValidation.value?.decision === 'no-change';
         const severity = noChange ? 'success' : (diagnosisValidation.value ? 'warning' : 'error');
         stageRuntimeActivity({ runId, phase: 'editorialDiagnosing', severity, label: noChange ? 'Editorial diagnosis complete.' : `Editorial diagnosis ${reason}.`, providerLane: diagnosisResponse.lane, detail: { mode: editorialMode, decision: reason } });
-        settleRuntimeActivity({ runId, phase: 'settled', severity, label: noChange ? 'Editorial complete; no changes needed.' : (diagnosisValidation.value ? `Editorial ${reason}; original kept.` : 'Editorial diagnosis failed. Original kept.'), chips: ['Enhancement', noChange ? 'Complete' : (diagnosisValidation.value ? 'Review' : 'Failed')], detail: { mode: editorialMode, decision: reason } });
+        settleRuntimeActivity({ runId, phase: 'settled', outcome: noChange ? 'skipped' : undefined, severity: noChange ? 'info' : severity, label: noChange ? 'Editorial complete; no changes needed.' : (diagnosisValidation.value ? `Editorial ${reason}; original kept.` : 'Editorial diagnosis failed. Original kept.'), chips: ['Enhancement', noChange ? 'No change' : (diagnosisValidation.value ? 'Review' : 'Failed')], detail: { mode: editorialMode, decision: reason } });
         setEditorialResult({
           mode: editorialMode,
-          status: noChange ? 'success' : (diagnosisValidation.value ? 'warning' : 'error'),
+          status: noChange ? 'skipped' : (diagnosisValidation.value ? 'warning' : 'error'),
           outcome: 'original-kept',
           decision: reason,
           errorCode: diagnosisValidation.error?.code || '',
@@ -4038,7 +4042,6 @@ export function createRecursionRuntime({
           'Editorial source changed. Original kept.'
         );
       }
-      setEditorialResult({ mode: editorialMode, status: 'success', outcome: 'applied', applyMode, verification: verificationResult.decision, candidateHash: marker.candidateHash, diagnosisHash: marker.diagnosisHash, preservationLedger: marker.preservationLedger, changeLedger: marker.changeLedger, riskFlags: marker.riskFlags, cardOutcomes: marker.cardOutcomes });
       if (applyMode === 'replace') {
         const replace = await messages.replaceAssistantMessageText?.(messageId, transformedText, { marker });
         if (replace?.ok === false) return failEditorial(replace.error);
@@ -4047,6 +4050,7 @@ export function createRecursionRuntime({
         const append = await messages.appendAssistantMessageSwipe?.(messageId, transformedText, { marker, select: true });
         if (append?.ok === false) return failEditorial(append.error);
       }
+      setEditorialResult({ mode: editorialMode, status: 'success', outcome: 'applied', applyMode, verification: verificationResult.decision, candidateHash: marker.candidateHash, diagnosisHash: marker.diagnosisHash, preservationLedger: marker.preservationLedger, changeLedger: marker.changeLedger, riskFlags: marker.riskFlags, cardOutcomes: marker.cardOutcomes });
       enhanced = true;
       settleRuntimeActivity({ runId, phase: 'settled', severity: 'success', label: `${editorialMode} applied.`, chips: ['Enhancement', editorialMode], detail: { mode: editorialMode, applyMode, verification: verificationResult.decision } });
       return { ok: true, mode: editorialMode, messageId, sourceHash, enhancedHash: marker.candidateHash, marker, artifact: validation.artifact, verification: verificationResult };
@@ -4064,6 +4068,9 @@ export function createRecursionRuntime({
   }
 
   async function enhanceLatestAssistantMessageImpl(details = {}) {
+    if (safeText(details.reason || '', 80) === 'assistant-message-landed' && !pendingProseEnhancement) {
+      return { ok: true, skipped: true, reason: 'enhancement-not-armed' };
+    }
     if (['repair', 'recompose', 'redirect'].includes(safeText(settingsStore.get()?.enhancements?.mode || '', 32))) {
       return runEditorialTransform(details);
     }

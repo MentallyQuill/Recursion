@@ -11,6 +11,18 @@ const HERO_CONTROL_ONLY_STEP_IDS = new Set([
   'recursion-prompt-ready',
   'provider-test'
 ]);
+const ENHANCEMENT_STEP_IDS = new Set([
+  'generation-review',
+  'editorial-diagnosis',
+  'editorial-candidate',
+  'editorial-verification',
+  'editorial-result'
+]);
+const EDITORIAL_ROLE_IDS = new Set([
+  'editorialDiagnostician',
+  'editorialTransformer',
+  'editorialVerifier'
+]);
 const VALID_CHILD_SOURCES = new Set(['generated', 'included', 'cache', 'fallback', 'provider', 'local', 'fused-repair']);
 const MODEL_CALL_ROLE_IDS = new Set([
   'sceneFrameCard',
@@ -57,6 +69,7 @@ const STEP_ORDER = [
   'editorial-diagnosis',
   'editorial-candidate',
   'editorial-verification',
+  'editorial-result',
   'fused-card-bundle',
   'utility-card-batch',
   'validating-cards',
@@ -89,6 +102,7 @@ const STEP_DEFINITIONS = Object.freeze({
   'editorial-diagnosis': { label: 'Editorial diagnosis', currentLabel: 'Diagnosing response', providerLane: 'utility' },
   'editorial-candidate': { label: 'Editorial candidate', currentLabel: 'Transforming response', providerLane: 'utility' },
   'editorial-verification': { label: 'Editorial verification', currentLabel: 'Verifying candidate', providerLane: 'reasoner' },
+  'editorial-result': { label: 'Editorial result', providerLane: 'utility' },
   'fused-card-bundle': { label: 'Fused card bundle', providerLane: 'utility' },
   'utility-card-batch': { label: 'Utility card batch', providerLane: 'utility' },
   'validating-cards': { label: 'Validating cards', providerLane: 'utility' },
@@ -356,6 +370,7 @@ function providerTestStepLabel(event) {
 
 function stepLabelForEvent(id, event, definition = {}) {
   if (id === 'provider-test') return providerTestStepLabel(event);
+  if (id === 'editorial-result') return activityLabelText(event);
   return definition.label || activityLabelText(event);
 }
 
@@ -379,6 +394,7 @@ function isProviderSettledEvent(event) {
 function eventStepId(event) {
   const phase = cleanText(event.phase);
   const detail = asObject(event.detail);
+  if (phase === 'settled' && cleanText(event.runId).toLowerCase().startsWith('editorial-')) return 'editorial-result';
   if (phase === 'cardProgress') return cleanText(detail.parentStepId, 'utility-card-batch');
   if (isProviderTestEvent(event)) return 'provider-test';
   if (phase.startsWith('providerCall')) return roleStepId(event) || 'utility-card-batch';
@@ -486,7 +502,7 @@ function childStepFromEvent(event, state, order = 0) {
   if (phase.startsWith('providerCall') || isProviderSettledEvent(event)) {
     const roleId = cleanText(detail.roleId || event.roleId);
     if (!roleId) return null;
-    if (roleId === 'fusedCardBundle') return null;
+    if (roleId === 'fusedCardBundle' || EDITORIAL_ROLE_IDS.has(roleId)) return null;
     return normalizeChildStep({
       label: roleLabel(roleId, activityLabelText(event)),
       providerLane: event.providerLane || detail.lane,
@@ -985,7 +1001,7 @@ function deriveProgressRun(view) {
   }
   appendRapidWarmStatusStep(steps, source, order++);
   const beforePlanSteps = [...steps.values()];
-  const hasEnhancementStep = steps.has('generation-review');
+  const hasEnhancementStep = [...ENHANCEMENT_STEP_IDS].some((id) => steps.has(id));
   if (!isControlOnlyProgress(runId, beforePlanSteps) && !hasEnhancementStep) {
     appendPendingPlanSteps(steps, view, order);
     appendPendingChildSteps(steps, view, order);

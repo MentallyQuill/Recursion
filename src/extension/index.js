@@ -61,15 +61,6 @@ function clearEnhancementOwnedMutationWindow() {
   enhancementOwnedMutationUntilMs = 0;
 }
 
-function runtimeEnhancementEnabled(activeRuntime = runtime) {
-  try {
-    const mode = String(activeRuntime?.view?.()?.settings?.enhancements?.mode || 'off').toLowerCase();
-    return mode !== 'off';
-  } catch {
-    return false;
-  }
-}
-
 async function lockEnhancementControls(currentHost = host) {
   if (enhancementControlsLocked) return { ok: true, locked: true, unchanged: true };
   enhancementControlsLocked = true;
@@ -407,18 +398,10 @@ function registerHostEvents(nextRuntime, currentHost = host) {
           .finally(() => setEnhancementCaptureActive(false));
       }
       lastAssistantIdentity = nextAssistantIdentity;
-      const enhancementEnabled = runtimeEnhancementEnabled(nextRuntime);
       return sanitizeEnhancementMarker()
-        .then(() => (enhancementEnabled ? lockEnhancementControls(currentHost) : null))
         .then(() => generationEnded())
-        .then(() => {
-          if (enhancementEnabled) markEnhancementOwnedMutationWindow();
-          return invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Enhancement failed.', { reason: 'assistant-message-landed' });
-        })
-        .finally(() => unlockEnhancementControls(currentHost))
         .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }))
         .finally(() => {
-          if (enhancementEnabled) markEnhancementOwnedMutationWindow();
           setEnhancementCaptureActive(false);
         });
     });

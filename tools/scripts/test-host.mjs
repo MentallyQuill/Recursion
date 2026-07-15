@@ -302,6 +302,11 @@ const mutationContext = {
   saveChat() {
     messageMutationCalls.push({ save: true });
   },
+  swipe: {
+    refresh(updateCounters, fade) {
+      messageMutationCalls.push({ refresh: true, updateCounters, fade });
+    }
+  },
   reloadCurrentChat() {
     messageMutationCalls.push({ reload: true });
   }
@@ -313,6 +318,7 @@ assertEqual(activeIdentity.messageId, 4, 'host active assistant identity include
 assertEqual(activeIdentity.swipeId, 0, 'host active assistant identity includes active swipe id');
 assertEqual(activeIdentity.text, 'Original assistant text.', 'host active assistant identity includes active swipe text');
 assertEqual(typeof activeIdentity.originalHash, 'string', 'host active assistant identity includes text hash');
+assertEqual(activeIdentity.enhancementOwned, false, 'ordinary assistant identity is not Recursion-owned');
 assertEqual((await mutationHost.messages.holdAssistantMessage(4)).ok, true, 'host can hold assistant text');
 assertEqual(mutationContext.chat[0].mes, 'Original assistant text.', 'hold captures without destructively clearing assistant text');
 assertEqual(mutationContext.chat[0].swipes[0], 'Original assistant text.', 'hold captures without destructively clearing active swipe text');
@@ -331,6 +337,8 @@ assertEqual(mutationContext.chat[0].swipe_info.length, 2, 'enhanced swipe metada
 assertEqual(typeof mutationContext.chat[0].swipe_info[1].send_date, 'string', 'enhanced swipe metadata includes send date');
 assertEqual(mutationContext.chat[0].swipe_id, 1, 'enhanced swipe auto-selected');
 assertEqual(mutationContext.chat[0].mes, 'Polished assistant text.', 'active message text follows enhanced swipe');
+assert(messageMutationCalls.some((entry) => entry.refresh === true && entry.updateCounters === true), 'enhanced swipe refreshes SillyTavern swipe controls and counter');
+assertEqual(mutationHost.messages.activeAssistantMessageIdentity().enhancementOwned, true, 'genuine enhanced swipe identity is Recursion-owned');
 assertEqual((await mutationHost.messages.findEnhancedSwipe(4, { originalHash: 'hash-a' })).index, 1, 'host finds existing enhanced swipe marker');
 assertEqual((await mutationHost.messages.replaceAssistantMessageText(4, 'Replacement text.', { marker: { originalHash: 'hash-b' } })).ok, true, 'host replaces active assistant text');
 assertEqual(mutationContext.chat[0].swipes[1], 'Replacement text.', 'replace updates selected swipe text');
@@ -347,6 +355,67 @@ assertEqual(mutationContext.chat[0].swipe_id, 1, 'empty swipe cleanup restores t
 assertEqual(mutationContext.chat[0].mes, 'Replacement text.', 'empty swipe cleanup restores substantive assistant text');
 assert(messageMutationCalls.some((entry) => entry.save === true), 'message mutation saves chat');
 assertEqual(messageMutationCalls.some((entry) => entry.reload === true), false, 'self-authored swipe mutation does not reload the chat and emit CHAT_CHANGED');
+
+{
+  const saveFailureContext = {
+    chatId: 'enhancement-save-failure-chat',
+    chat: [{
+      mesid: 6,
+      is_user: false,
+      mes: 'Original persisted response.',
+      swipe_id: 0,
+      swipes: ['Original persisted response.'],
+      swipe_info: [{ extra: { api: 'native' } }]
+    }],
+    updateMessageBlock() {},
+    saveChat() { throw new Error('save failed'); },
+    swipe: { refresh() {} }
+  };
+  const saveFailureHost = createSillyTavernHost({ contextFactory: () => saveFailureContext, settingsRoot: {} });
+  const saveFailureResult = await saveFailureHost.messages.appendAssistantMessageSwipe(6, 'Unpersisted enhancement.', {
+    marker: { schema: 'recursion.editorialMarker.v1', candidateHash: hashJson('Unpersisted enhancement.') },
+    select: true
+  });
+  assertEqual(saveFailureResult.ok, false, 'enhanced swipe append reports a host save failure');
+  assertEqual(saveFailureResult.error?.code, 'RECURSION_CHAT_SAVE_FAILED', 'enhanced swipe append exposes a specific save failure code');
+  assertDeepEqual(saveFailureContext.chat[0].swipes, ['Original persisted response.'], 'failed enhanced swipe save restores the original swipe array');
+  assertEqual(saveFailureContext.chat[0].mes, 'Original persisted response.', 'failed enhanced swipe save restores the original active text');
+  const replaceFailureResult = await saveFailureHost.messages.replaceAssistantMessageText(6, 'Unpersisted replacement.', {
+    marker: { schema: 'recursion.editorialMarker.v1', candidateHash: hashJson('Unpersisted replacement.') }
+  });
+  assertEqual(replaceFailureResult.ok, false, 'enhanced replacement reports a host save failure');
+  assertEqual(replaceFailureResult.error?.code, 'RECURSION_CHAT_SAVE_FAILED', 'enhanced replacement exposes a specific save failure code');
+  assertDeepEqual(saveFailureContext.chat[0].swipes, ['Original persisted response.'], 'failed enhanced replacement restores the original swipe array');
+  assertEqual(saveFailureContext.chat[0].mes, 'Original persisted response.', 'failed enhanced replacement restores the original active text');
+}
+
+{
+  const interiorContext = {
+    chatId: 'interior-empty-swipe-chat',
+    chat: [{
+      mesid: 5,
+      is_user: false,
+      mes: 'Later valid swipe.',
+      swipe_id: 2,
+      swipes: ['First valid swipe.', '', 'Later valid swipe.'],
+      swipe_info: [
+        { extra: { model: 'first' } },
+        { extra: {} },
+        { extra: { model: 'later' } }
+      ],
+      __recursionGenerationReviewSwipes: [{ id: 'first' }, null, { id: 'later' }]
+    }],
+    saveChat() {}
+  };
+  const interiorHost = createSillyTavernHost({ contextFactory: () => interiorContext, settingsRoot: {} });
+  const interiorCleanup = await interiorHost.messages.removeEmptyAssistantSwipePlaceholders(5);
+  assertEqual(interiorCleanup.removed, 1, 'empty swipe cleanup removes an interior placeholder');
+  assertDeepEqual(interiorContext.chat[0].swipes, ['First valid swipe.', 'Later valid swipe.'], 'interior cleanup preserves substantive swipes in order');
+  assertEqual(interiorContext.chat[0].swipe_info[1].extra.model, 'later', 'interior cleanup keeps swipe metadata aligned');
+  assertEqual(interiorContext.chat[0].__recursionGenerationReviewSwipes[1].id, 'later', 'interior cleanup keeps Enhancement markers aligned');
+  assertEqual(interiorContext.chat[0].swipe_id, 1, 'interior cleanup remaps the active swipe index');
+  assertEqual(interiorContext.chat[0].mes, 'Later valid swipe.', 'interior cleanup preserves the active assistant text');
+}
 
 {
   const sourceText = 'Recursion-owned enhanced response.';
@@ -387,6 +456,41 @@ assertEqual(messageMutationCalls.some((entry) => entry.reload === true), false, 
   assertEqual(markerContext.chat[0].extra.recursion?.enhancement, undefined, 'active message metadata loses inherited Enhancement marker');
   assertEqual(markerContext.chat[0].__recursionGenerationReviewSwipes[1], undefined, 'parallel marker index loses inherited Enhancement marker');
   assert(markerContext.chat[0].swipe_info[0].extra.recursion.enhancement, 'genuine earlier Enhancement marker remains intact');
+}
+
+{
+  const sourceText = 'Recursion-owned enhanced response.';
+  const nativeText = 'A later native SillyTavern swipe.';
+  const marker = {
+    schema: 'recursion.editorialMarker.v1',
+    mode: 'recompose',
+    candidateHash: hashJson(sourceText)
+  };
+  const copiedExtra = {
+    api: 'nanogpt',
+    model: 'native-model',
+    recursion: { enhancement: marker }
+  };
+  const backfillContext = {
+    chatId: 'inherited-marker-backfill-chat',
+    chat: [{
+      mesid: 7,
+      is_user: false,
+      mes: nativeText,
+      swipe_id: 1,
+      swipes: [sourceText, nativeText],
+      swipe_info: [
+        { extra: { api: 'recursion', model: 'enhancement', recursion: { enhancement: marker } } }
+      ],
+      extra: JSON.parse(JSON.stringify(copiedExtra))
+    }],
+    saveChat() {}
+  };
+  const backfillHost = createSillyTavernHost({ contextFactory: () => backfillContext, settingsRoot: {} });
+  const nextMarker = { ...marker, candidateHash: hashJson('Next enhanced response.') };
+  await backfillHost.messages.appendAssistantMessageSwipe(7, 'Next enhanced response.', { marker: nextMarker, select: true });
+  assertEqual(backfillContext.chat[0].swipe_info[1].extra.recursion?.enhancement, undefined, 'native swipe-info backfill does not inherit a prior Enhancement marker');
+  assertEqual(backfillContext.chat[0].swipe_info[1].extra.api, 'nanogpt', 'native swipe-info backfill preserves native provider metadata');
 }
 
 const latestMutationContext = {

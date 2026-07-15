@@ -28,6 +28,27 @@ function safeText(value, limit = MAX_CLAIM) {
   return truncate(compact(String(value ?? '').replace(SECRET_PATTERN, '[redacted]')), limit);
 }
 
+function preservedText(value, limit = MAX_SOURCE) {
+  return truncate(String(value ?? '').replace(SECRET_PATTERN, '[redacted]'), limit);
+}
+
+function leadingPresentationEnvelope(value) {
+  const source = String(value ?? '');
+  const match = source.match(/^([^\r\n]+)\r?\n\r?\n/);
+  if (!match) return null;
+  const line = match[1];
+  if (!/^\*[^*\r\n]+\*$/.test(line) && !/^_[^_\r\n]+_$/.test(line)) return null;
+  return { leadingLine: line, boundary: 'blank-line' };
+}
+
+function preservesPresentationEnvelope(sourceText, candidateText) {
+  const envelope = leadingPresentationEnvelope(sourceText);
+  if (!envelope) return true;
+  const candidate = String(candidateText ?? '');
+  return candidate.startsWith(`${envelope.leadingLine}\n\n`)
+    || candidate.startsWith(`${envelope.leadingLine}\r\n\r\n`);
+}
+
 function fail(code, message, details = {}) {
   return { ok: false, error: { code, message }, ...details };
 }
@@ -205,6 +226,7 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
     const normalizedSource = compact(sourceText).replace(/\s+/g, ' ');
     if (compact(text).replace(/\s+/g, ' ') === normalizedSource) return fail('RECURSION_EDITORIAL_NO_EFFECT', 'Editorial candidate did not change the source.');
     if (text.length > maxCandidateLength(String(sourceText).length)) return fail('RECURSION_EDITORIAL_CANDIDATE_TOO_LARGE', 'Editorial candidate exceeded its bounded output budget.');
+    if (!preservesPresentationEnvelope(sourceText, text)) return fail('RECURSION_EDITORIAL_PRESENTATION_INVALID', 'Editorial candidate changed or collapsed the leading presentation envelope.');
     if (!validateClaimList(data.candidate.preservationLedger, known)) return fail('RECURSION_EDITORIAL_EVIDENCE_INVALID', 'Candidate preservation ledger cited invalid evidence.');
     if (hashJson(data.candidate.preservationLedger) !== hashJson(array(diagnosis?.brief?.preserve))) {
       return fail('RECURSION_EDITORIAL_PRESERVATION_LEDGER_MISMATCH', 'Candidate preservation ledger must exactly match the validated diagnosis preservation ledger.');
@@ -225,6 +247,9 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
     return { id: entry.id, domain: patch.domain, before: entry.before, after: String(patch.after), evidenceRefs };
   });
   if (patches.some((patch) => !patch)) return fail('RECURSION_EDITORIAL_REPAIR_INVALID', 'Repair returned an unknown, duplicate, or invalid patch target.');
+  if (!preservesPresentationEnvelope(sourceText, applyEditorialArtifact(sourceText, { kind: 'patches', mode: 'repair', patches }, targets))) {
+    return fail('RECURSION_EDITORIAL_PRESENTATION_INVALID', 'Editorial repair changed or collapsed the leading presentation envelope.');
+  }
   return { ok: true, artifact: { kind: 'patches', mode: 'repair', patches }, cardOutcomes: data.cardOutcomes, evidence };
 }
 
@@ -250,6 +275,8 @@ function requestBase(schema, prompt, lane = '') {
 
 export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', snapshot = {}, lane = '', retry = null } = {}) {
   const evidence = buildEditorialEvidence(snapshot, sourceText);
+  const preservedSource = preservedText(sourceText, MAX_SOURCE);
+  const presentationEnvelope = leadingPresentationEnvelope(sourceText);
   const validPreservationEvidenceIds = evidence
     .filter((entry) => !['source-draft', 'source-negative'].includes(entry.authority))
     .map((entry) => entry.id);
@@ -270,17 +297,21 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
     'Repair changes only bounded spans. Recompose can replace the entire response while preserving its supported intent and direction. Redirect replaces an unsupported core intent or direction.',
     'For selected Recompose, choose proceed for repetition, slop, pacing, voice, phrasing, scene execution, or any defect fixable by a full rewrite that keeps the supported intent.',
     'Never choose requires-redirect only for repetition, verbosity, awkward execution, or other quality defects that Recompose can remove.',
+    ...(presentationEnvelope ? ['Preserve the presentation envelope exactly: keep the leading scene header unchanged and retain a blank line before body prose.'] : []),
     ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
     `<evidence>${JSON.stringify(evidence)}</evidence>`,
-    `<source>${safeText(sourceText, MAX_SOURCE)}</source>`
+    `<presentation_envelope>${JSON.stringify(presentationEnvelope)}</presentation_envelope>`,
+    `<source_json>${JSON.stringify(preservedSource)}</source_json>`
   ].join('\n');
   return {
     ...requestBase(EDITORIAL_DIAGNOSIS_SCHEMA, prompt, lane),
     sourceHash,
     snapshotHash,
     mode,
+    sourceText: preservedSource,
+    presentationEnvelope,
     validEvidenceIds: evidence.map((entry) => entry.id),
     validPreservationEvidenceIds
   };
@@ -288,6 +319,8 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
 
 export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', diagnosis = {}, evidence = [], snapshot = {}, targets = {}, lane = '', retry = null } = {}) {
   const full = FULL_MODES.has(mode);
+  const preservedSource = preservedText(sourceText, MAX_SOURCE);
+  const presentationEnvelope = leadingPresentationEnvelope(sourceText);
   const targetList = Object.values(targets || {}).flat().map((entry) => ({ id: entry.id, domain: entry.domain, before: entry.before })).slice(0, 120);
   const validPreservationEvidenceIds = array(evidence)
     .filter((entry) => !['source-draft', 'source-negative'].includes(entry?.authority))
@@ -313,6 +346,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     'The diagnosis below is authoritative. Do not add a new diagnosis or revise its preservation/discard decisions.',
     `Copy diagnosis.brief.preserve exactly into candidate.preservationLedger: ${JSON.stringify(requiredPreservationLedger)}. Do not add, remove, or rewrite preservation claims or evidence IDs.`,
     'Every preservation claim, major change, patch, and card outcome must cite only supplied evidence IDs.',
+    ...(presentationEnvelope ? ['Preserve the presentation envelope exactly: keep the leading scene header unchanged and retain a blank line before body prose.'] : []),
     ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
@@ -320,13 +354,16 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     `<evidence>${JSON.stringify(evidence)}</evidence>`,
     `<snapshot>${JSON.stringify(snapshot)}</snapshot>`,
     `<targets>${JSON.stringify(targetList)}</targets>`,
-    `<source>${safeText(sourceText, MAX_SOURCE)}</source>`
+    `<presentation_envelope>${JSON.stringify(presentationEnvelope)}</presentation_envelope>`,
+    `<source_json>${JSON.stringify(preservedSource)}</source_json>`
   ].join('\n');
   return {
     ...requestBase(EDITORIAL_PASS_SCHEMA, prompt, lane),
     sourceHash,
     snapshotHash,
     mode,
+    sourceText: preservedSource,
+    presentationEnvelope,
     diagnosisHash: editorialDiagnosisHash(diagnosis),
     validEvidenceIds: array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean),
     validPreservationEvidenceIds,

@@ -195,6 +195,16 @@ function validateClaimList(value, known, { allowSourceDraft = false } = {}) {
   });
 }
 
+function supportedRedirectPreservationClaims(value, evidence = []) {
+  const known = evidenceMap(evidence);
+  return array(value).filter((entry) => {
+    const claim = safeText(entry?.claim || '', MAX_CLAIM);
+    const evidenceRefs = refs(entry?.evidenceRefs, known);
+    return Boolean(claim && evidenceRefs
+      && evidenceRefs.every((id) => !['source-draft', 'source-negative'].includes(known.get(id)?.authority)));
+  });
+}
+
 function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
   const data = object(brief);
   const known = evidenceMap(evidence);
@@ -305,12 +315,20 @@ export function validateEditorialBrief(brief = {}, evidence = []) {
 }
 
 export function validateEditorialDiagnosis(result = {}, { mode = '', sourceText = '', sourceHash = '', snapshotHash = '', snapshot = {} } = {}) {
-  const data = object(result);
-  if (data.schema !== EDITORIAL_DIAGNOSIS_SCHEMA) return fail('RECURSION_EDITORIAL_DIAGNOSIS_SCHEMA_MISMATCH', 'Editorial diagnosis returned the wrong schema.');
-  if (data.mode !== mode || data.sourceHash !== sourceHash || data.snapshotHash !== snapshotHash) return fail('RECURSION_EDITORIAL_DIAGNOSIS_STALE', 'Editorial diagnosis does not match the frozen source.');
+  const raw = object(result);
+  if (raw.schema !== EDITORIAL_DIAGNOSIS_SCHEMA) return fail('RECURSION_EDITORIAL_DIAGNOSIS_SCHEMA_MISMATCH', 'Editorial diagnosis returned the wrong schema.');
+  if (raw.mode !== mode || raw.sourceHash !== sourceHash || raw.snapshotHash !== snapshotHash) return fail('RECURSION_EDITORIAL_DIAGNOSIS_STALE', 'Editorial diagnosis does not match the frozen source.');
+  const data = mode === 'redirect' ? { ...raw, decision: 'proceed' } : raw;
   if (!DIAGNOSIS_DECISIONS[data.mode]?.has(data.decision)) return fail('RECURSION_EDITORIAL_DIAGNOSIS_DECISION_INVALID', 'Editorial diagnosis returned an invalid decision for this mode.');
   const evidence = buildEditorialEvidence(snapshot, sourceText);
-  const briefResult = validateEditorialBrief(data.brief, evidence);
+  const diagnosisBrief = mode === 'redirect'
+    ? {
+        ...object(data.brief),
+        diagnosis: [],
+        preserve: supportedRedirectPreservationClaims(data.brief?.preserve, evidence)
+      }
+    : data.brief;
+  const briefResult = validateEditorialBrief(diagnosisBrief, evidence);
   if (!briefResult.ok) return briefResult;
   const redirectResult = data.mode === 'redirect'
     ? validateRedirectBrief(briefResult.value, evidence, data.decision)
@@ -489,12 +507,15 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
         'Character pressure is advisory evidence; do not require every character to speak or act.'
       ]
     : [];
+  const decisionRule = mode === 'redirect'
+    ? 'Decision must be proceed because Redirect is already selected.'
+    : 'Choose proceed, no-change, requires-recompose, or requires-redirect according to the selected mode.';
   const prompt = [
     'Return only one valid Recursion Editorial Diagnosis JSON object.',
     `Selected mode: ${mode}.`,
     'Diagnose the completed response against frozen evidence before any candidate is written.',
     'Return no candidate text. Use source-draft evidence only to identify discardable material, never to preserve a fact.',
-    'Choose proceed, no-change, requires-recompose, or requires-redirect according to the selected mode.',
+    decisionRule,
     'Repair changes only bounded spans. Recompose can replace the entire response while preserving its supported intent and direction. Redirect replaces an unsupported core intent or direction.',
     'For selected Recompose, choose proceed for repetition, slop, pacing, voice, phrasing, scene execution, or any defect fixable by a full rewrite that keeps the supported intent.',
     'Never choose requires-redirect only for repetition, verbosity, awkward execution, or other quality defects that Recompose can remove.',

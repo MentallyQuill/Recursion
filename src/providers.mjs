@@ -763,6 +763,12 @@ function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
     }
     const mode = String(request?.mode || '').trim();
     if (mode) normalized.mode = mode;
+    if (roleId === 'editorialDiagnostician' && mode && plainObject(normalized.brief)) {
+      normalized.brief = { ...normalized.brief, mode };
+    }
+    if (roleId === 'editorialDiagnostician' && mode && String(data.schema || '').trim() === mode) {
+      normalized.schema = expectedResponseSchema(roleId);
+    }
     if (roleId !== 'editorialDiagnostician') {
       const diagnosisHash = String(request?.diagnosisHash || '').trim();
       if (diagnosisHash) normalized.diagnosisHash = diagnosisHash;

@@ -1419,6 +1419,7 @@ const deepSeekProfileHost = createSillyTavernHost({
         return [{
           id: 'deepseek-thinking-profile',
           name: 'DeepSeek Thinking',
+          api: 'nanogpt',
           model: 'deepseek/deepseek-v4-pro-cheaper:thinking'
         }];
       },
@@ -1459,6 +1460,58 @@ assertDeepEqual(
   deepSeekProfileCalls.map((call) => call.parameters.reasoning.intent),
   ['minimal', 'medium', 'high'],
   'DeepSeek thinking profile preserves Recursion semantic reasoning metadata'
+);
+
+const nemotronProfileCalls = [];
+const nemotronProfileHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'nemotron-profile-chat',
+    chat: [],
+    ConnectionManagerRequestService: {
+      getSupportedProfiles() {
+        return [{
+          id: 'nemotron-thinking-profile',
+          name: 'Nemotron Thinking',
+          api: 'nanogpt',
+          model: 'nvidia/nemotron-3-ultra-550b-a55b:thinking'
+        }];
+      },
+      async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
+        nemotronProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
+        return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
+      }
+    }
+  }),
+  settingsRoot: {
+    recursion: {
+      providers: {
+        utility: {
+          source: 'host-connection-profile',
+          hostConnectionProfileId: 'nemotron-thinking-profile',
+          maxTokens: 512
+        }
+      }
+    }
+  }
+});
+for (const reasoningIntent of ['minimal', 'medium', 'high']) {
+  const result = await createGenerationRouter({ client: nemotronProfileHost.providerClient }).generate('utilityArbiter', {
+    prompt: `Nemotron ${reasoningIntent} reasoning.`,
+    snapshotHash: `nemotron-${reasoningIntent}-snapshot`,
+    reasoningCategory: 'enhancement',
+    reasoningIntent
+  });
+  assertEqual(result.ok, true, `Nemotron NanoGPT profile accepts ${reasoningIntent} reasoning intent`);
+}
+assertDeepEqual(
+  nemotronProfileCalls.map((call) => call.parameters.reasoning_effort),
+  ['min', 'min', 'min'],
+  'Nemotron thinking profile disables hidden reasoning so machine JSON retains its output budget'
+);
+assertDeepEqual(
+  nemotronProfileCalls.map((call) => call.parameters.reasoning.intent),
+  ['minimal', 'medium', 'high'],
+  'Nemotron NanoGPT profile preserves Recursion semantic reasoning metadata'
 );
 
 const currentModelRawCalls = [];

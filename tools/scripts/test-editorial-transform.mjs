@@ -172,6 +172,26 @@ const redirectDiagnosis = (brief = validRedirectBrief, decision = 'proceed') => 
 const redirectFixture = { mode: 'redirect', sourceText, sourceHash, snapshotHash, snapshot };
 const validRedirectDiagnosis = validateEditorialDiagnosis(redirectDiagnosis(), redirectFixture);
 assertEqual(validRedirectDiagnosis.ok, true, 'complete Redirect diagnosis passes');
+const unsafeRedirectPreservation = validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  preserve: [{ claim: 'Preserve a source-authored beat.', evidenceRefs: ['source:0'] }]
+}), redirectFixture);
+assertEqual(unsafeRedirectPreservation.ok, true, 'Redirect drops preservation claims that rely on source-draft evidence');
+assertDeepEqual(unsafeRedirectPreservation.value?.brief?.preserve, [], 'Redirect never forwards an unsupported preservation claim to candidate generation');
+const redundantRedirectDiagnosisList = validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  diagnosis: [{ problem: '', evidenceRefs: ['missing:evidence'] }]
+}), redirectFixture);
+assertEqual(redundantRedirectDiagnosisList.ok, true, 'Redirect ignores the redundant generic diagnosis list');
+assertDeepEqual(redundantRedirectDiagnosisList.value?.brief?.diagnosis, [], 'Redirect relies on the stricter sourceFailure contract instead of generic diagnosis entries');
+const redundantRedirectDecision = validateEditorialDiagnosis(redirectDiagnosis(validRedirectBrief, 'requires-redirect'), redirectFixture);
+assertEqual(redundantRedirectDecision.ok, true, 'explicit Redirect accepts requires-redirect as a proceed synonym');
+assertEqual(redundantRedirectDecision.value?.decision, 'proceed', 'explicit Redirect canonicalizes requires-redirect to proceed');
+for (const noisyDecision of ['no-change', 'requires-recompose', 'unexpected-value']) {
+  const normalizedDecision = validateEditorialDiagnosis(redirectDiagnosis(validRedirectBrief, noisyDecision), redirectFixture);
+  assertEqual(normalizedDecision.ok, true, `explicit Redirect ignores noisy diagnosis decision ${noisyDecision}`);
+  assertEqual(normalizedDecision.value?.decision, 'proceed', `explicit Redirect freezes ${noisyDecision} to proceed`);
+}
 const missingRedirectObjective = validateEditorialDiagnosis(redirectDiagnosis({ ...validRedirectBrief, replacementObjective: null }), redirectFixture);
 assertEqual(missingRedirectObjective.error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires replacement objective');
 assertEqual(validateEditorialDiagnosis(redirectDiagnosis({ ...validRedirectBrief, requiredBeats: [] }), redirectFixture).error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a supported beat');
@@ -234,8 +254,8 @@ const noChangeRedirectBrief = {
 };
 assertEqual(
   validateEditorialDiagnosis(redirectDiagnosis(noChangeRedirectBrief, 'no-change'), redirectFixture).error?.code,
-  'RECURSION_EDITORIAL_DIAGNOSIS_DECISION_INVALID',
-  'explicit Redirect rejects no-change before brief validation'
+  REDIRECT_ERROR_CODES.BRIEF_INVALID,
+  'explicit Redirect rejects an empty no-change brief through required Redirect semantics'
 );
 
 const passValidation = validateEditorialPass(candidate, { mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot });
@@ -342,6 +362,8 @@ assertEqual(diagnosisRequest.responseLength, undefined, 'diagnosis inherits the 
 assertDeepEqual(diagnosisRequest.validEvidenceIds, evidence.map((entry) => entry.id), 'diagnosis request exposes the frozen evidence ids as structured provider fields');
 const redirectDiagnosisRequest = buildEditorialDiagnosisRequest({ mode: 'redirect', sourceText, sourceHash, snapshotHash, snapshot, lane: 'reasoner' });
 assert(redirectDiagnosisRequest.prompt.includes('Redirect is a turn-level correction, not a more aggressive Recompose.'), 'Redirect diagnosis prompt distinguishes trajectory from prose quality');
+assert(redirectDiagnosisRequest.prompt.includes('Decision must be proceed because Redirect is already selected.'), 'Redirect diagnosis prompt gives one unambiguous valid decision');
+assert(!redirectDiagnosisRequest.prompt.includes('Choose proceed, no-change, requires-recompose, or requires-redirect according to the selected mode.'), 'Redirect diagnosis prompt omits the contradictory generic decision list');
 assert(
   redirectDiagnosisRequest.prompt.includes('Treat the latest user-turn evidence as completed player-authored action or dialogue that the assistant response must answer'),
   'Redirect diagnosis prompt forbids replaying the completed user turn as candidate content'

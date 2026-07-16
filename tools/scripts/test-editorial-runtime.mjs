@@ -495,6 +495,7 @@ function createRedirectHarness({
   cachedMarkerFactory = null,
   diagnosisOverride = null,
   candidateOverride = null,
+  reasonerAvailable = false,
   pressureReason = 'The source blocks the immediate test.'
 } = {}) {
   const state = {
@@ -640,9 +641,18 @@ function createRedirectHarness({
       throw new Error(`Unexpected Redirect role ${roleId}`);
     }
   };
+  const settingsStore = createSettingsStore({ root: {} });
+  if (reasonerAvailable) {
+    settingsStore.updateProvider('reasoner', {
+      enabled: true,
+      source: 'host-connection-profile',
+      hostConnectionProfileId: 'reasoner-test-profile'
+    });
+    settingsStore.updateProvider('reasoner', { lastTest: { status: 'pass', checkedAt: new Date().toISOString() } });
+  }
   const runtime = createRecursionRuntime({
     host,
-    settingsStore: createSettingsStore({ root: {} }),
+    settingsStore,
     storage,
     activity,
     generationRouter
@@ -690,19 +700,45 @@ const correctedNoChangeRedirect = createRedirectHarness({
 });
 await correctedNoChangeRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const correctedNoChangeResult = await correctedNoChangeRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-no-change-correction-test' });
-assertEqual(correctedNoChangeResult.ok, true, 'Redirect corrects a provider-authored no-change diagnosis');
-assertEqual(correctedNoChangeRedirect.state.diagnosisAttempts, 2, 'Redirect spends exactly one correction on no-change');
-assert(correctedNoChangeRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician')[1].request.prompt.includes('Editorial diagnosis correction required'), 'Redirect correction identifies the invalid diagnosis');
-assertEqual(correctedNoChangeRedirect.state.appended.length, 1, 'corrected Redirect appends exactly one verified swipe');
+assertEqual(correctedNoChangeResult.ok, true, 'Redirect canonicalizes a provider-authored no-change decision when the brief is complete');
+assertEqual(correctedNoChangeRedirect.state.diagnosisAttempts, 1, 'Redirect does not spend a correction on a noisy decision token');
+assertEqual(correctedNoChangeRedirect.state.appended.length, 1, 'canonicalized Redirect appends exactly one verified swipe');
+
+const reasonerCorrectedRedirect = createRedirectHarness({
+  reasonerAvailable: true,
+  diagnosisOverride: (value, attempt) => attempt === 1
+    ? { ...value, brief: { ...value.brief, sceneCharacters: null } }
+    : value
+});
+await reasonerCorrectedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const reasonerCorrectedResult = await reasonerCorrectedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-reasoner-correction-test' });
+assertEqual(reasonerCorrectedResult.ok, true, 'Redirect escalates an invalid Utility diagnosis correction to the healthy Reasoner lane');
+assertDeepEqual(
+  reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician').map((call) => call.request.lane),
+  ['utility', 'reasoner'],
+  'Redirect diagnosis uses Utility first and Reasoner for its single semantic correction'
+);
+assert(reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician')[1].request.prompt.includes('Editorial diagnosis correction required'), 'Reasoner correction receives the semantic validation failure');
+assertEqual(reasonerCorrectedRedirect.state.appended.length, 1, 'Reasoner-corrected Redirect appends one verified swipe');
 
 const repeatedNoChangeRedirect = createRedirectHarness({
-  diagnosisOverride: (value) => ({ ...value, decision: 'no-change' })
+  diagnosisOverride: (value) => ({
+    ...value,
+    decision: 'no-change',
+    brief: {
+      ...value.brief,
+      sourceFailure: null,
+      replacementObjective: null,
+      requiredBeats: [],
+      forbiddenSourceBeats: []
+    }
+  })
 });
 await repeatedNoChangeRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const repeatedNoChangeResult = await repeatedNoChangeRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-no-change-failure-test' });
-assertEqual(repeatedNoChangeResult.ok, false, 'Redirect fails when diagnosis remains no-change after correction');
-assertEqual(repeatedNoChangeResult.error?.code, 'RECURSION_EDITORIAL_DIAGNOSIS_DECISION_INVALID', 'repeated Redirect no-change preserves the semantic error code');
-assertEqual(repeatedNoChangeRedirect.runtime.view().editorialResult?.status, 'error', 'repeated Redirect no-change settles visibly unhealthy');
+assertEqual(repeatedNoChangeResult.ok, false, 'Redirect fails when the provider repeatedly returns an empty no-change brief');
+assertEqual(repeatedNoChangeResult.error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'empty Redirect no-change preserves the brief error code');
+assertEqual(repeatedNoChangeRedirect.runtime.view().editorialResult?.status, 'error', 'empty Redirect no-change settles visibly unhealthy');
 assertEqual(repeatedNoChangeRedirect.state.diagnosisAttempts, 2, 'Redirect never makes a third diagnosis attempt');
 assertEqual(repeatedNoChangeRedirect.state.appended.length, 0, 'invalid Redirect diagnosis never mutates host swipe state');
 assertEqual(Boolean(repeatedNoChangeResult.skipped), false, 'invalid Redirect diagnosis never reports skipped success');

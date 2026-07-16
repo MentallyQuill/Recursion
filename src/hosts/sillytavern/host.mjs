@@ -821,21 +821,35 @@ function requestMessages(request = {}) {
   ];
 }
 
-function requestConnectionProfileModel(context, request = {}) {
+function requestConnectionProfileDetails(context, request = {}) {
   const profileId = stringValue(requestHostConnectionProfileId(request)).trim();
-  const profileModel = profileId
-    ? stringValue(listSillyTavernConnectionProfiles({ context })
-      .find((profile) => profile.id === profileId)?.model).trim()
-    : '';
-  return profileModel || stringValue(request.providerConfig?.resolvedModelLabel).trim();
+  const profile = profileId
+    ? listSillyTavernConnectionProfiles({ context }).find((entry) => entry.id === profileId)
+    : null;
+  return {
+    model: stringValue(profile?.model || request.providerConfig?.resolvedModelLabel).trim(),
+    api: stringValue(profile?.raw?.api).trim().toLowerCase()
+  };
 }
 
-function connectionProfileReasoningEffort(intent, model = '') {
-  const normalizedModel = stringValue(model).trim().toLowerCase();
-  if (normalizedModel.includes('deepseek') && normalizedModel.includes('thinking')) {
+function connectionProfileReasoningEffort(intent, profile = {}) {
+  const normalizedModel = stringValue(profile.model).trim().toLowerCase();
+  if (profile.api === 'nanogpt' && normalizedModel.includes('nemotron') && normalizedModel.includes('thinking')) {
+    // Nemotron can spend the entire structured-output budget on hidden reasoning,
+    // including at low effort. Recursion requires the visible machine JSON instead.
+    return 'min';
+  }
+  if (profile.api === 'nanogpt' && normalizedModel.includes('deepseek') && normalizedModel.includes('thinking')) {
     // SillyTavern's NanoGPT adapter maps min -> none and max -> high.
     // DeepSeek thinking models reject the adapter's low/minimal outputs.
     return intent === 'minimal' ? 'min' : 'max';
+  }
+  if (profile.api === 'nanogpt') {
+    // Recursion uses provider-facing intents; SillyTavern expects UI effort
+    // controls and maps low/high/max -> minimal/medium/high for NanoGPT.
+    if (intent === 'high') return 'max';
+    if (intent === 'medium') return 'high';
+    return 'low';
   }
   return intent;
 }
@@ -868,7 +882,7 @@ async function sendViaConnectionProfile(context, request = {}) {
   if (!service) throw hostProfileUnsupportedError();
   const reasoning = requestReasoning(request);
   const reasoningEffort = reasoning
-    ? connectionProfileReasoningEffort(reasoning.intent, requestConnectionProfileModel(context, request))
+    ? connectionProfileReasoningEffort(reasoning.intent, requestConnectionProfileDetails(context, request))
     : '';
   return normalizeGenerationResponse(await service.sendRequest(
     profileId,

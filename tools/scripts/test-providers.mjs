@@ -545,6 +545,37 @@ const normalizedDiagnosis = await editorialIdentityRouter.generate('editorialDia
 assertEqual(normalizedDiagnosis.data.mode, trustedEditorialIdentity.mode, 'Editorial diagnosis mode comes from the frozen request');
 assertEqual(normalizedDiagnosis.data.sourceHash, trustedEditorialIdentity.sourceHash, 'Editorial diagnosis source identity comes from the frozen request');
 assertEqual(normalizedDiagnosis.data.snapshotHash, trustedEditorialIdentity.snapshotHash, 'Editorial diagnosis snapshot identity comes from the frozen request');
+const modeAsSchemaDiagnosisRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'redirect',
+          mode: 'redirect',
+          sourceHash: 'model-authored-source-hash',
+          snapshotHash: 'model-authored-snapshot-hash',
+          decision: 'requires-redirect',
+          brief: {
+            mode: 'repair',
+            diagnosis: [],
+            preserve: [],
+            discard: [],
+            allowedChanges: [],
+            forbiddenChanges: []
+          }
+        })
+      };
+    }
+  }
+});
+const normalizedModeAsSchemaDiagnosis = await modeAsSchemaDiagnosisRouter.generate('editorialDiagnostician', {
+  mode: 'redirect',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash'
+});
+assertEqual(normalizedModeAsSchemaDiagnosis.ok, true, 'Editorial diagnosis repairs a schema field that redundantly contains the frozen selected mode');
+assertEqual(normalizedModeAsSchemaDiagnosis.data.schema, 'recursion.editorialDiagnosis.v1', 'Editorial diagnosis restores the requested schema identifier from the frozen role contract');
+assertEqual(normalizedModeAsSchemaDiagnosis.data.brief.mode, 'redirect', 'Editorial diagnosis restores nested brief mode from the frozen request');
 const normalizedTransform = await editorialIdentityRouter.generate('editorialTransformer', trustedEditorialIdentity);
 assertEqual(normalizedTransform.data.mode, trustedEditorialIdentity.mode, 'Editorial transform mode comes from the frozen request');
 assertEqual(normalizedTransform.data.sourceHash, trustedEditorialIdentity.sourceHash, 'Editorial transform source identity comes from the frozen request');

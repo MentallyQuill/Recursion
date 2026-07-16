@@ -3911,6 +3911,7 @@ export function createRecursionRuntime({
     const recoveryToken = { spent: false };
     let held = false;
     let enhanced = false;
+    let editorialLane = lane;
     let verificationResult = { decision: 'not-required' };
     async function generateEditorialRole(roleId, request, options = {}) {
       if (enhancementSignal?.aborted) {
@@ -3946,10 +3947,10 @@ export function createRecursionRuntime({
         const hold = await messages.holdAssistantMessage(messageId);
         held = hold?.ok !== false;
       }
-      stageRuntimeActivity({ runId, phase: 'editorialDiagnosing', label: 'Diagnosing response...', providerLane: lane, composerLane: lane, chips: ['Enhancement', editorialMode] });
+      stageRuntimeActivity({ runId, phase: 'editorialDiagnosing', label: 'Diagnosing response...', providerLane: editorialLane, composerLane: editorialLane, chips: ['Enhancement', editorialMode] });
       const diagnosisRequest = {
-        ...buildEditorialDiagnosisRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot, lane }),
-        ...reasonerRequestMetadata(settings, 'editorial-transform', lane),
+        ...buildEditorialDiagnosisRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot, lane: editorialLane }),
+        ...reasonerRequestMetadata(settings, 'editorial-transform', editorialLane),
         reasoningIntent: 'low'
       };
       let diagnosisResponse = await generateEditorialRole('editorialDiagnostician', diagnosisRequest);
@@ -3959,6 +3960,11 @@ export function createRecursionRuntime({
         : { ok: false, error: diagnosisResponse.result?.error || { code: 'RECURSION_EDITORIAL_DIAGNOSIS_FAILED', message: 'Editorial diagnosis failed.' } };
       if (!diagnosisValidation.ok && diagnosisResponse.result?.ok === true && recoveryToken.spent !== true) {
         recoveryToken.spent = true;
+        const correctionLane = editorialMode === 'redirect'
+          && diagnosisResponse.lane === 'utility'
+          && reasonerLaneAvailable(settings)
+          ? 'reasoner'
+          : editorialLane;
         diagnosisResponse = await generateEditorialRole('editorialDiagnostician', {
           ...buildEditorialDiagnosisRequest({
             mode: editorialMode,
@@ -3966,10 +3972,10 @@ export function createRecursionRuntime({
             sourceHash,
             snapshotHash,
             snapshot: publicSnapshot,
-            lane,
+            lane: correctionLane,
             retry: diagnosisValidation.error
           }),
-          ...reasonerRequestMetadata(settings, 'editorial-transform', lane),
+          ...reasonerRequestMetadata(settings, 'editorial-transform', correctionLane),
           reasoningIntent: 'low'
         }, { allowStructuredRecovery: false });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
@@ -3984,6 +3990,7 @@ export function createRecursionRuntime({
           validation: diagnosisValidation
         };
       }
+      editorialLane = diagnosisResponse.lane;
       if (diagnosisValidation.value?.decision !== 'proceed') {
         if (held && typeof messages.revealAssistantMessage === 'function') { await messages.revealAssistantMessage(messageId); held = false; }
         const reason = diagnosisValidation.value?.decision || diagnosisValidation.error?.message || 'editorial-diagnosis-failed';
@@ -4002,10 +4009,10 @@ export function createRecursionRuntime({
         return { ok: Boolean(diagnosisValidation.value), skipped: Boolean(diagnosisValidation.value), mode: editorialMode, reason, validation: diagnosisValidation };
       }
       const diagnosisHash = diagnosisValidation.hash;
-      stageRuntimeActivity({ runId, phase: 'editorialTransforming', label: editorialMode === 'repair' ? 'Applying grounded repairs...' : `${editorialMode === 'redirect' ? 'Redirecting' : 'Recomposing'} response...`, providerLane: lane, composerLane: lane, chips: ['Enhancement', editorialMode] });
+      stageRuntimeActivity({ runId, phase: 'editorialTransforming', label: editorialMode === 'repair' ? 'Applying grounded repairs...' : `${editorialMode === 'redirect' ? 'Redirecting' : 'Recomposing'} response...`, providerLane: editorialLane, composerLane: editorialLane, chips: ['Enhancement', editorialMode] });
       let transformResponse = await generateEditorialRole('editorialTransformer', {
-        ...buildEditorialPassRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosis: diagnosisValidation.value, evidence, snapshot: publicSnapshot, targets, lane }),
-        ...reasonerRequestMetadata(settings, 'editorial-transform', lane)
+        ...buildEditorialPassRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosis: diagnosisValidation.value, evidence, snapshot: publicSnapshot, targets, lane: editorialLane }),
+        ...reasonerRequestMetadata(settings, 'editorial-transform', editorialLane)
       });
       if (enhancementSignal?.aborted) return canceledEditorialResult();
       let validation = transformResponse.result?.ok === true
@@ -4023,10 +4030,10 @@ export function createRecursionRuntime({
             evidence,
             snapshot: publicSnapshot,
             targets,
-            lane,
+            lane: editorialLane,
             retry: validation.error
           }),
-          ...reasonerRequestMetadata(settings, 'editorial-transform', lane)
+          ...reasonerRequestMetadata(settings, 'editorial-transform', editorialLane)
         }, { allowStructuredRecovery: false });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
         validation = transformResponse.result?.ok === true
@@ -4034,15 +4041,16 @@ export function createRecursionRuntime({
           : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
       }
       if (!validation.ok) return { ...failEditorial(validation.error), validation };
+      editorialLane = transformResponse.lane;
       const candidateHash = validation.artifact?.kind === 'candidate'
         ? hashJson(String(validation.artifact.candidate?.text || validation.artifact.text || ''))
         : '';
       if (verificationRequired) {
-        stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: lane, composerLane: lane, chips: ['Enhancement', 'Verify'] });
-        const verificationRequest = buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, evidence, candidate: validation.artifact.candidate, lane });
+        stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: editorialLane, composerLane: editorialLane, chips: ['Enhancement', 'Verify'] });
+        const verificationRequest = buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, evidence, candidate: validation.artifact.candidate, lane: editorialLane });
         const verifierResponse = await generateEditorialRole('editorialVerifier', {
           ...verificationRequest,
-          ...reasonerRequestMetadata(settings, 'editorial-verify', lane)
+          ...reasonerRequestMetadata(settings, 'editorial-verify', editorialLane)
         }, { allowStructuredRecovery: false });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
         verificationResult = verifierResponse.result?.ok === true

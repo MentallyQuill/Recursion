@@ -1409,6 +1409,58 @@ assertEqual(connectionProfileCalls[1].maxTokens, 512, 'host connection profile r
 assert(typeof connectionProfileCalls[0].parameters.signal?.addEventListener === 'function', 'connection profile service receives abort-capable provider signal');
 assertEqual(connectionProfileCalls[0].parameters.signal.aborted, false, 'connection profile service receives active provider signal');
 
+const deepSeekProfileCalls = [];
+const deepSeekProfileHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'deepseek-profile-chat',
+    chat: [],
+    ConnectionManagerRequestService: {
+      getSupportedProfiles() {
+        return [{
+          id: 'deepseek-thinking-profile',
+          name: 'DeepSeek Thinking',
+          model: 'deepseek/deepseek-v4-pro-cheaper:thinking'
+        }];
+      },
+      async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
+        deepSeekProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
+        return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
+      }
+    }
+  }),
+  settingsRoot: {
+    recursion: {
+      providers: {
+        utility: {
+          source: 'host-connection-profile',
+          hostConnectionProfileId: 'deepseek-thinking-profile',
+          resolvedModelLabel: 'stale-openai-model',
+          maxTokens: 512
+        }
+      }
+    }
+  }
+});
+for (const reasoningIntent of ['minimal', 'medium', 'high']) {
+  const result = await createGenerationRouter({ client: deepSeekProfileHost.providerClient }).generate('utilityArbiter', {
+    prompt: `DeepSeek ${reasoningIntent} reasoning.`,
+    snapshotHash: `deepseek-${reasoningIntent}-snapshot`,
+    reasoningCategory: 'enhancement',
+    reasoningIntent
+  });
+  assertEqual(result.ok, true, `DeepSeek connection profile accepts ${reasoningIntent} reasoning intent`);
+}
+assertDeepEqual(
+  deepSeekProfileCalls.map((call) => call.parameters.reasoning_effort),
+  ['min', 'max', 'max'],
+  'DeepSeek thinking profile uses SillyTavern NanoGPT efforts that become provider none or high'
+);
+assertDeepEqual(
+  deepSeekProfileCalls.map((call) => call.parameters.reasoning.intent),
+  ['minimal', 'medium', 'high'],
+  'DeepSeek thinking profile preserves Recursion semantic reasoning metadata'
+);
+
 const currentModelRawCalls = [];
 const currentModelProfileCalls = [];
 const currentModelHost = createSillyTavernHost({

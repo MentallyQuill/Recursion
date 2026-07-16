@@ -821,6 +821,25 @@ function requestMessages(request = {}) {
   ];
 }
 
+function requestConnectionProfileModel(context, request = {}) {
+  const profileId = stringValue(requestHostConnectionProfileId(request)).trim();
+  const profileModel = profileId
+    ? stringValue(listSillyTavernConnectionProfiles({ context })
+      .find((profile) => profile.id === profileId)?.model).trim()
+    : '';
+  return profileModel || stringValue(request.providerConfig?.resolvedModelLabel).trim();
+}
+
+function connectionProfileReasoningEffort(intent, model = '') {
+  const normalizedModel = stringValue(model).trim().toLowerCase();
+  if (normalizedModel.includes('deepseek') && normalizedModel.includes('thinking')) {
+    // SillyTavern's NanoGPT adapter maps min -> none and max -> high.
+    // DeepSeek thinking models reject the adapter's low/minimal outputs.
+    return intent === 'minimal' ? 'min' : 'max';
+  }
+  return intent;
+}
+
 function requestReasoning(request = {}) {
   const intent = normalizeReasoningIntent(request.reasoningIntent);
   if (!intent) return null;
@@ -848,6 +867,9 @@ async function sendViaConnectionProfile(context, request = {}) {
   const service = connectionProfileService(context);
   if (!service) throw hostProfileUnsupportedError();
   const reasoning = requestReasoning(request);
+  const reasoningEffort = reasoning
+    ? connectionProfileReasoningEffort(reasoning.intent, requestConnectionProfileModel(context, request))
+    : '';
   return normalizeGenerationResponse(await service.sendRequest(
     profileId,
     requestMessages(request),
@@ -867,7 +889,7 @@ async function sendViaConnectionProfile(context, request = {}) {
       ...(requestJsonSchema(request) ? { json_schema: requestJsonSchema(request) } : {}),
       ...(reasoning ? {
         reasoning,
-        reasoning_effort: reasoning.intent,
+        reasoning_effort: reasoningEffort,
         include_reasoning: !reasoning.exclude
       } : {}),
       signal: request.signal

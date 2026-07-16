@@ -319,10 +319,12 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
           await page.locator('[data-recursion-status-trigger]').first().click();
         }
         await page.waitForFunction(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false, null, { timeout: 5000 });
-        await page.screenshot({ path: screenshotPath, fullPage: true });
         await page.setViewportSize({ width: 390, height: 844 });
+        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         await page.screenshot({ path: phoneScreenshotPath, fullPage: true });
         await page.setViewportSize({ width: 1280, height: 720 });
+        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        await page.screenshot({ path: screenshotPath, fullPage: true });
       }
       const judge = await page.evaluate(executeJudgeInPage, {
         scenario,

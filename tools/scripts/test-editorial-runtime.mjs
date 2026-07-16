@@ -489,11 +489,13 @@ const redirectCandidateText = 'Carter tightened her grip on the mug. "Then we te
 const privateRedirectSentinel = 'PRIVATE_REDIRECT_PRESSURE_SENTINEL';
 function createRedirectHarness({
   verifierDecision = 'accept',
+  verifierDecisions = null,
   verifierChecks = null,
   appendFailure = false,
   changeSourceAfterVerifier = false,
   cachedMarkerFactory = null,
   diagnosisOverride = null,
+  diagnosisProviderFailureOnFirst = false,
   candidateOverride = null,
   reasonerAvailable = false,
   pressureReason = 'The source blocks the immediate test.'
@@ -501,6 +503,8 @@ function createRedirectHarness({
   const state = {
     calls: [],
     diagnosisAttempts: 0,
+    transformAttempts: 0,
+    verifierAttempts: 0,
     appended: [],
     selected: [],
     persistedMarker: null,
@@ -556,10 +560,20 @@ function createRedirectHarness({
     prompt: { async install() { return { ok: true }; }, async clear() { return { ok: true }; } }
   };
   const generationRouter = {
-    async generate(roleId, request) {
-      state.calls.push({ roleId, request });
+    async generate(roleId, request, options) {
+      state.calls.push({ roleId, request, options });
       if (roleId === 'editorialDiagnostician') {
         state.diagnosisAttempts += 1;
+        if (diagnosisProviderFailureOnFirst && state.diagnosisAttempts === 1) {
+          return {
+            ok: false,
+            recoverySpent: true,
+            error: {
+              code: 'RECURSION_PROVIDER_RESPONSE_INVALID',
+              message: 'Editorial diagnosis response failed structured-output validation.'
+            }
+          };
+        }
         const diagnosis = {
           schema: 'recursion.editorialDiagnosis.v1',
           mode: 'redirect',
@@ -601,6 +615,7 @@ function createRedirectHarness({
         };
       }
       if (roleId === 'editorialTransformer') {
+        state.transformAttempts += 1;
         const pass = {
           schema: 'recursion.editorialPass.v1',
           mode: 'redirect',
@@ -615,10 +630,19 @@ function createRedirectHarness({
             riskFlags: []
           }
         };
-        return { ok: true, data: typeof candidateOverride === 'function' ? candidateOverride(pass) : pass };
+        return {
+          ok: true,
+          data: typeof candidateOverride === 'function'
+            ? candidateOverride(pass, state.transformAttempts)
+            : pass
+        };
       }
       if (roleId === 'editorialVerifier') {
+        state.verifierAttempts += 1;
         state.verifierFinished = true;
+        const currentVerifierDecision = Array.isArray(verifierDecisions)
+          ? verifierDecisions[state.verifierAttempts - 1] || verifierDecisions.at(-1)
+          : verifierDecision;
         return {
           ok: true,
           data: {
@@ -628,12 +652,14 @@ function createRedirectHarness({
             snapshotHash: request.snapshotHash,
             diagnosisHash: request.diagnosisHash,
             candidateHash: request.candidateHash,
-            decision: verifierDecision,
+            decision: currentVerifierDecision,
             checks: verifierChecks || REDIRECT_VERIFICATION_CHECKS.map((check) => ({
               check,
-              status: verifierDecision === 'accept' ? 'pass' : 'unclear',
+              status: currentVerifierDecision === 'accept' ? 'pass' : 'unclear',
               evidenceRefs: ['message:47'],
-              note: 'Bound to frozen evidence.'
+              note: currentVerifierDecision === 'accept'
+                ? 'Bound to frozen evidence.'
+                : `Candidate still fails ${check}.`
             }))
           }
         };
@@ -706,17 +732,20 @@ assertEqual(correctedNoChangeRedirect.state.appended.length, 1, 'canonicalized R
 
 const reasonerCorrectedRedirect = createRedirectHarness({
   reasonerAvailable: true,
-  diagnosisOverride: (value, attempt) => attempt === 1
-    ? { ...value, brief: { ...value.brief, sceneCharacters: null } }
-    : value
+  diagnosisProviderFailureOnFirst: true
 });
 await reasonerCorrectedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const reasonerCorrectedResult = await reasonerCorrectedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-reasoner-correction-test' });
-assertEqual(reasonerCorrectedResult.ok, true, 'Redirect escalates an invalid Utility diagnosis correction to the healthy Reasoner lane');
+assertEqual(reasonerCorrectedResult.ok, true, 'Redirect escalates a structurally invalid Utility diagnosis correction to the healthy Reasoner lane');
 assertDeepEqual(
   reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician').map((call) => call.request.lane),
   ['utility', 'reasoner'],
-  'Redirect diagnosis uses Utility first and Reasoner for its single semantic correction'
+  'Redirect diagnosis uses Utility first and Reasoner for its single runtime-owned correction'
+);
+assertEqual(
+  reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician')[0].options.allowStructuredRecovery,
+  false,
+  'Redirect prevents the provider layer from consuming its correction on the original Utility lane'
 );
 assert(reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician')[1].request.prompt.includes('Editorial diagnosis correction required'), 'Reasoner correction receives the semantic validation failure');
 assertEqual(reasonerCorrectedRedirect.state.appended.length, 1, 'Reasoner-corrected Redirect appends one verified swipe');
@@ -768,6 +797,30 @@ assertEqual(rejectedRedirectResult.error?.code, REDIRECT_ERROR_CODES.VERIFICATIO
 assertEqual(rejectedRedirect.state.appended.length, 0, 'verifier rejection adds no swipe');
 assertEqual(rejectedRedirect.runtime.view().editorialResult?.status, 'error', 'verifier rejection settles visibly unhealthy');
 
+const correctedCandidateRedirect = createRedirectHarness({
+  verifierDecisions: ['reject', 'accept'],
+  candidateOverride: (value, attempt) => attempt === 1
+    ? value
+    : {
+        ...value,
+        candidate: {
+          ...value.candidate,
+          text: 'Carter set the scanner beside the pattern. "Then we test it now," she said.',
+          changeLedger: [{ kind: 'redirect', summary: 'Removed the deferral and began the test now.', evidenceRefs: ['message:47'] }]
+        }
+      }
+});
+await correctedCandidateRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const correctedCandidateResult = await correctedCandidateRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-candidate-correction-test' });
+assertEqual(correctedCandidateResult.ok, true, 'Redirect revises one verifier-rejected candidate and applies only the accepted revision');
+assertEqual(correctedCandidateRedirect.state.transformAttempts, 2, 'Redirect makes exactly one bounded candidate revision');
+assertEqual(correctedCandidateRedirect.state.verifierAttempts, 2, 'Redirect verifies the original and revised candidates');
+assert(
+  correctedCandidateRedirect.state.calls.filter((call) => call.roleId === 'editorialTransformer')[1].request.prompt.includes('forbidden-source-beats'),
+  'Redirect candidate revision receives failed verifier check feedback'
+);
+assertEqual(correctedCandidateRedirect.state.appended.length, 1, 'only the accepted revised candidate becomes a swipe');
+
 const malformedRedirect = createRedirectHarness({ verifierChecks: [] });
 await malformedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const malformedRedirectResult = await malformedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-malformed-verifier-test' });
@@ -806,9 +859,18 @@ assertEqual(missingDirectionResult.error?.code, REDIRECT_ERROR_CODES.CHANGE_MISS
 assertEqual(missingDirectionRedirect.state.appended.length, 0, 'missing Redirect trajectory adds no swipe');
 
 const effectivenessCalls = [];
+const effectivenessSettings = createSettingsStore({ root: {} });
+effectivenessSettings.updateProvider('reasoner', {
+  enabled: true,
+  source: 'host-connection-profile',
+  hostConnectionProfileId: 'effectiveness-reasoner-profile'
+});
+effectivenessSettings.updateProvider('reasoner', {
+  lastTest: { status: 'pass', checkedAt: new Date().toISOString() }
+});
 const effectivenessRuntime = createRecursionRuntime({
   host: {},
-  settingsStore: createSettingsStore({ root: {} }),
+  settingsStore: effectivenessSettings,
   storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity: createActivityReporter(),
   generationRouter: {
@@ -849,7 +911,7 @@ const effectivenessResult = await effectivenessRuntime.evaluateRedirectEffective
 });
 assertEqual(effectivenessCalls.length, 1, 'runtime makes exactly one independent judge call');
 assertEqual(effectivenessCalls[0].roleId, 'editorialEffectivenessJudge', 'runtime routes independent judge through its internal role');
-assertEqual(effectivenessCalls[0].request.lane, 'utility', 'runtime routes effectiveness judge through Utility');
+assertEqual(effectivenessCalls[0].request.lane, 'reasoner', 'runtime routes effectiveness judge through a healthy Reasoner');
 assertEqual(effectivenessResult.ok, true, 'runtime validates independent judge result');
 assertEqual(effectivenessResult.diagnostics.providerId, 'judge-provider', 'runtime returns judge provider diagnostics');
 assertEqual(effectivenessResult.diagnostics.model, 'judge-model', 'runtime returns judge model diagnostics');

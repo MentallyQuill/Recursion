@@ -60,6 +60,7 @@ import {
   validateGenerationReviewResult
 } from './generation-review.mjs';
 import {
+  REDIRECT_ERROR_CODES,
   applyEditorialArtifact,
   buildRedirectEffectivenessRequest,
   buildEditorialDiagnosisRequest,
@@ -3927,9 +3928,13 @@ export function createRecursionRuntime({
         signal: enhancementSignal,
         allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true
       });
-      if (primary?.recoverySpent === true) recoveryToken.spent = true;
-      if (primary?.ok === true || primaryLane !== 'reasoner') return { result: primary, lane: primaryLane };
-      if (primary?.recoverySpent === true) return { result: primary, lane: primaryLane };
+      const primaryRecoverySpent = primary?.recoverySpent === true
+        && !(options.allowStructuredRecovery === false && options.preserveRecoveryBudget === true);
+      if (primaryRecoverySpent) recoveryToken.spent = true;
+      if (primary?.ok === true || primaryLane !== 'reasoner' || options.allowLaneFallback === false) {
+        return { result: primary, lane: primaryLane };
+      }
+      if (primaryRecoverySpent) return { result: primary, lane: primaryLane };
       const fallbackRequest = { ...request, lane: 'utility' };
       delete fallbackRequest.reasoningCategory;
       delete fallbackRequest.reasoningIntent;
@@ -3953,12 +3958,20 @@ export function createRecursionRuntime({
         ...reasonerRequestMetadata(settings, 'editorial-transform', editorialLane),
         reasoningIntent: 'low'
       };
-      let diagnosisResponse = await generateEditorialRole('editorialDiagnostician', diagnosisRequest);
+      let diagnosisResponse = await generateEditorialRole(
+        'editorialDiagnostician',
+        diagnosisRequest,
+        {
+          allowStructuredRecovery: editorialMode !== 'redirect',
+          preserveRecoveryBudget: editorialMode === 'redirect'
+        }
+      );
       if (enhancementSignal?.aborted) return canceledEditorialResult();
       let diagnosisValidation = diagnosisResponse.result?.ok === true
         ? validateEditorialDiagnosis(diagnosisResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot })
         : { ok: false, error: diagnosisResponse.result?.error || { code: 'RECURSION_EDITORIAL_DIAGNOSIS_FAILED', message: 'Editorial diagnosis failed.' } };
-      if (!diagnosisValidation.ok && diagnosisResponse.result?.ok === true && recoveryToken.spent !== true) {
+      const runtimeCorrectionAvailable = diagnosisResponse.result?.ok === true || editorialMode === 'redirect';
+      if (!diagnosisValidation.ok && runtimeCorrectionAvailable && recoveryToken.spent !== true) {
         recoveryToken.spent = true;
         const correctionLane = editorialMode === 'redirect'
           && diagnosisResponse.lane === 'utility'
@@ -3977,7 +3990,7 @@ export function createRecursionRuntime({
           }),
           ...reasonerRequestMetadata(settings, 'editorial-transform', correctionLane),
           reasoningIntent: 'low'
-        }, { allowStructuredRecovery: false });
+        }, { allowStructuredRecovery: false, allowLaneFallback: false });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
         diagnosisValidation = diagnosisResponse.result?.ok === true
           ? validateEditorialDiagnosis(diagnosisResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot })
@@ -4042,27 +4055,72 @@ export function createRecursionRuntime({
       }
       if (!validation.ok) return { ...failEditorial(validation.error), validation };
       editorialLane = transformResponse.lane;
-      const candidateHash = validation.artifact?.kind === 'candidate'
+      let candidateHash = validation.artifact?.kind === 'candidate'
         ? hashJson(String(validation.artifact.candidate?.text || validation.artifact.text || ''))
         : '';
       if (verificationRequired) {
-        stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: editorialLane, composerLane: editorialLane, chips: ['Enhancement', 'Verify'] });
-        const verificationRequest = buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, evidence, candidate: validation.artifact.candidate, lane: editorialLane });
-        const verifierResponse = await generateEditorialRole('editorialVerifier', {
-          ...verificationRequest,
-          ...reasonerRequestMetadata(settings, 'editorial-verify', editorialLane)
-        }, { allowStructuredRecovery: false });
-        if (enhancementSignal?.aborted) return canceledEditorialResult();
-        verificationResult = verifierResponse.result?.ok === true
-          ? validateEditorialVerification(verifierResponse.result.data, {
+        const verifyCandidate = async () => {
+          stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: editorialLane, composerLane: editorialLane, chips: ['Enhancement', 'Verify'] });
+          const verificationRequest = buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, evidence, candidate: validation.artifact.candidate, lane: editorialLane });
+          const verifierResponse = await generateEditorialRole('editorialVerifier', {
+            ...verificationRequest,
+            ...reasonerRequestMetadata(settings, 'editorial-verify', editorialLane)
+          }, { allowStructuredRecovery: false });
+          if (enhancementSignal?.aborted) return { canceled: true };
+          return {
+            result: verifierResponse.result?.ok === true
+              ? validateEditorialVerification(verifierResponse.result.data, {
+                  mode: editorialMode,
+                  sourceHash,
+                  snapshotHash,
+                  diagnosisHash,
+                  candidateHash: verificationRequest.candidateHash,
+                  evidence
+                })
+              : { ok: false, decision: 'reject', error: verifierResponse.result?.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_FAILED', message: 'Editorial verification failed.' } }
+          };
+        };
+        let verified = await verifyCandidate();
+        if (verified.canceled) return canceledEditorialResult();
+        verificationResult = verified.result;
+        if (editorialMode === 'redirect' && verificationResult.ok && verificationResult.decision === 'reject') {
+          const failedChecks = (Array.isArray(verificationResult.checks) ? verificationResult.checks : [])
+            .filter((entry) => entry?.status !== 'pass')
+            .map((entry) => `${safeText(entry?.check || 'check', 80)}: ${safeText(entry?.note || 'failed', 240)}`)
+            .filter(Boolean);
+          const correctionError = {
+            code: REDIRECT_ERROR_CODES.VERIFICATION_REJECTED,
+            message: failedChecks.length
+              ? `Redirect verifier rejected the candidate. Failed checks: ${failedChecks.join(' | ')}`
+              : 'Redirect verifier rejected the candidate.'
+          };
+          stageRuntimeActivity({ runId, phase: 'editorialTransforming', label: 'Revising Redirect candidate...', providerLane: editorialLane, composerLane: editorialLane, chips: ['Enhancement', 'Redirect'] });
+          transformResponse = await generateEditorialRole('editorialTransformer', {
+            ...buildEditorialPassRequest({
               mode: editorialMode,
+              sourceText,
               sourceHash,
               snapshotHash,
-              diagnosisHash,
-              candidateHash: verificationRequest.candidateHash,
-              evidence
-            })
-          : { ok: false, decision: 'reject', error: verifierResponse.result?.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_FAILED', message: 'Editorial verification failed.' } };
+              diagnosis: diagnosisValidation.value,
+              evidence,
+              snapshot: publicSnapshot,
+              targets,
+              lane: editorialLane,
+              retry: correctionError
+            }),
+            ...reasonerRequestMetadata(settings, 'editorial-transform', editorialLane)
+          }, { allowStructuredRecovery: false, allowLaneFallback: false });
+          if (enhancementSignal?.aborted) return canceledEditorialResult();
+          validation = transformResponse.result?.ok === true
+            ? validateEditorialPass(transformResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, snapshot: publicSnapshot, targets })
+            : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
+          if (!validation.ok) return { ...failEditorial(validation.error), validation };
+          editorialLane = transformResponse.lane;
+          candidateHash = hashJson(String(validation.artifact.candidate?.text || validation.artifact.text || ''));
+          verified = await verifyCandidate();
+          if (verified.canceled) return canceledEditorialResult();
+          verificationResult = verified.result;
+        }
         if (!verificationResult.ok || verificationResult.decision !== 'accept') {
           return {
             ...failEditorial(verificationResult.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_REJECTED', message: 'Editorial verifier rejected candidate.' }, 'Editorial verification failed. Original kept.'),
@@ -6866,7 +6924,13 @@ export function createRecursionRuntime({
         diagnostics: {}
       };
     }
-    const request = buildRedirectEffectivenessRequest({ ...asObject(input), lane: 'utility' });
+    const settings = settingsStore.get();
+    const lane = reasonerLaneAvailable(settings) ? 'reasoner' : 'utility';
+    const request = buildRedirectEffectivenessRequest({
+      ...asObject(input),
+      lane,
+      ...reasonerRequestMetadata(settings, 'editorial-effectiveness', lane)
+    });
     const runId = safeText(input?.runId || makeId('redirect-eval'), 180);
     try {
       const response = await generationRouter.generate('editorialEffectivenessJudge', request, {

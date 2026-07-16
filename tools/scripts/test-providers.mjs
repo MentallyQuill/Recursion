@@ -271,6 +271,7 @@ assertDeepEqual(
 assertEqual(editorialDiagnosisMachineSchema.schema.properties.sourceHash.const, 'editorial-source-hash', 'Editorial diagnosis machine schema freezes source identity');
 assertEqual(editorialDiagnosisMachineSchema.schema.properties.snapshotHash.const, 'editorial-snapshot-hash', 'Editorial diagnosis machine schema freezes snapshot identity');
 assertEqual(editorialDiagnosisMachineSchema.schema.properties.mode.const, 'recompose', 'Editorial diagnosis machine schema freezes selected mode');
+assertEqual(editorialDiagnosisMachineSchema.schema.additionalProperties, false, 'Editorial diagnosis machine schema rejects undeclared top-level fields');
 assertDeepEqual(
   editorialDiagnosisMachineSchema.schema.properties.brief.required,
   ['mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges'],

@@ -579,7 +579,7 @@ export function machineJsonSchemaForRequest(request = {}) {
           brief: editorialBriefSchema(mode, validEvidenceIds, validPreservationEvidenceIds)
         },
         required: ['schema', 'mode', 'sourceHash', 'snapshotHash', 'decision', 'brief'],
-        additionalProperties: true
+        additionalProperties: false
       }
     };
   }

@@ -126,7 +126,21 @@ assert(
 );
 assert(evidence.some((item) => item.id === 'message:17' && item.excerpt === 'Who sent you?'), 'bounded transcript messages receive provider-citable evidence ids');
 assert(!evidence.some((item) => item.id === 'message:18'), 'active assistant draft cannot re-enter preservation evidence as an authoritative context message');
-assert(!evidence.find((item) => item.id === 'context:0')?.excerpt.includes(sourceText), 'aggregate context evidence excludes the active assistant draft');
+assert(!evidence.some((item) => item.id === 'context:0'), 'Editorial evidence does not duplicate bounded transcript messages inside an aggregate context blob');
+
+const longActiveDraft = `*Tuesday Morning | Diner | Overcast*\n\n${'Will continued drawing while Carter watched the pattern. '.repeat(80)}`;
+const truncatedActiveDraftEvidence = buildEditorialEvidence({
+  context: {
+    messages: [
+      { mesid: 31, role: 'user', text: 'We should test it.' },
+      { mesid: 32, role: 'assistant', text: longActiveDraft.slice(0, 1800) }
+    ]
+  }
+}, longActiveDraft);
+assert(
+  !truncatedActiveDraftEvidence.some((item) => item.id === 'message:32'),
+  'a bounded prefix of the active assistant draft cannot re-enter authoritative context evidence'
+);
 
 const diagnosisValidation = validateEditorialDiagnosis(diagnosis, { mode: 'recompose', sourceText, sourceHash, snapshotHash, snapshot });
 assertEqual(diagnosisValidation.ok, true, 'valid diagnosis passes');
@@ -370,6 +384,10 @@ assert(
 );
 assert(redirectDiagnosisRequest.prompt.includes('Pair established non-source evidence with the conflicting source passages.'), 'Redirect diagnosis prompt requires paired evidence');
 assert(
+  redirectDiagnosisRequest.prompt.includes('moving it behind another task, location change, check, conversation, or future beat is a deferral'),
+  'Redirect diagnosis prompt treats renamed prerequisites as continued deferral'
+);
+assert(
   redirectDiagnosisRequest.prompt.includes('immediateWant must be null, wantEvidenceRefs and sourceEvidenceRefs must both be empty arrays, and sourcePressureEffect must be unclear'),
   'Redirect diagnosis prompt states the complete unknown-pressure tuple'
 );
@@ -408,6 +426,10 @@ assert(redirectRequest.prompt.includes('Do not preserve any forbidden source bea
 assert(redirectRequest.prompt.includes('Silence, restraint, refusal, and delayed action remain valid'), 'Redirect transformer prompt preserves supported restraint');
 assert(redirectRequest.prompt.includes('A lexical rewrite that preserves the source objective or beat plan is not a Redirect.'), 'Redirect transformer prompt rejects minor rewrites');
 assert(
+  redirectRequest.prompt.includes('Planning to act after another task, check, location change, or future beat still preserves a forbidden deferral'),
+  'Redirect transformer prompt forbids paraphrased postponement'
+);
+assert(
   redirectRequest.prompt.includes('candidate.changeLedger must contain at least one entry with kind redirect'),
   'Redirect transformer prompt states the required directional ledger contract'
 );
@@ -443,8 +465,12 @@ assert(
   'Redirect verifier receives the complete validated diagnosis it must enforce'
 );
 assert(
-  redirectVerifierRequest.prompt.includes('Evaluate every required check against the validated diagnosis below'),
-  'Redirect verifier is instructed to use the diagnosis rather than infer its requirements'
+  redirectVerifierRequest.prompt.includes('Cross-check the diagnosis against frozen evidence and the source failure'),
+  'Redirect verifier independently checks that the diagnosis and candidate reverse the frozen source failure'
+);
+assert(
+  redirectVerifierRequest.prompt.includes('A plan to act after another task, check, location change, or future beat still retains a forbidden deferral'),
+  'Redirect verifier rejects renamed prerequisites and delayed-action paraphrases'
 );
 assert(
   redirectVerifierRequest.prompt.includes('Required beats must be materially explicit in the candidate; adjacent or passive behavior is not equivalent to a required action'),

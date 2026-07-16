@@ -135,7 +135,13 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
   const normalizedSource = compact(source).replace(/\s+/g, ' ');
   const isActiveAssistantDraft = (message) => (
     message?.role === 'assistant'
-    && compact(messageText(message)).replace(/\s+/g, ' ') === normalizedSource
+    && (() => {
+      const normalizedMessage = compact(messageText(message)).replace(/\s+/g, ' ');
+      if (!normalizedMessage) return false;
+      if (normalizedMessage === normalizedSource) return true;
+      return normalizedMessage.length >= 200
+        && (normalizedSource.startsWith(normalizedMessage) || normalizedMessage.startsWith(normalizedSource));
+    })()
   );
   const authoritativeContextMessages = contextMessages.filter((message) => !isActiveAssistantDraft(message));
   const userTurn = brief.userTurn || brief.userMessage || messageText(latestUserMessage);
@@ -160,12 +166,6 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
   if (brief.userTurn || brief.userMessage) addEvidence(entries, 'brief:turn', 'last-brief', 'continuity-fact', brief.userTurn || brief.userMessage);
   if (Object.keys(storyForm).length) addEvidence(entries, 'story-form:0', 'story-form', 'hard-constraint', JSON.stringify(storyForm));
   for (const [index, sentence] of sourceSentences(source).entries()) addEvidence(entries, `source:${index}`, 'source-draft', 'source-draft', sentence);
-  if (Object.keys(context).length) {
-    addEvidence(entries, 'context:0', 'context', 'continuity-fact', JSON.stringify({
-      ...context,
-      messages: authoritativeContextMessages
-    }));
-  }
   let total = 0;
   return entries.filter((entry) => {
     if (entries.indexOf(entry) >= MAX_EVIDENCE) return false;
@@ -489,7 +489,7 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
   const correction = retry
     ? [
         'Editorial diagnosis correction required.',
-        `The previous diagnosis failed semantic validation: ${safeText(retry?.code || 'RECURSION_EDITORIAL_DIAGNOSIS_INVALID', 120)} - ${safeText(retry?.message || 'Invalid diagnosis.', 360)}`,
+        `The previous diagnosis could not be accepted: ${safeText(retry?.code || 'RECURSION_EDITORIAL_DIAGNOSIS_INVALID', 120)} - ${safeText(retry?.message || 'Invalid diagnosis.', 360)}`,
         `Preservation claims may cite only these evidence IDs: ${JSON.stringify(validPreservationEvidenceIds)}.`,
         'Return one complete corrected diagnosis object; do not discuss the correction.'
       ]
@@ -501,6 +501,8 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
         'Treat the latest user-turn evidence as completed player-authored action or dialogue that the assistant response must answer. Never replay, paraphrase, or assign that completed user content to the candidate response.',
         'Pair established non-source evidence with the conflicting source passages.',
         'Define one supported replacement objective, required beats, and forbidden source beats.',
+        'If the latest user turn proposes or requests an action, moving it behind another task, location change, check, conversation, or future beat is a deferral unless frozen non-source evidence independently requires that delay.',
+        'When the source defers an evidence-supported immediate want, identify the deferral in sourceFailure and forbiddenSourceBeats; the replacement objective and required beats must engage the request in the current turn.',
         'List every character established as present by frozen evidence.',
         'When an immediate want is unsupported, immediateWant must be null, wantEvidenceRefs and sourceEvidenceRefs must both be empty arrays, and sourcePressureEffect must be unclear.',
         'When an immediate want is supported, immediateWant must be a non-empty string, wantEvidenceRefs must cite established non-source evidence, and sourceEvidenceRefs must cite source-draft evidence.',
@@ -568,6 +570,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
         'Include the supported substance of every required beat.',
         'Do not weaken an active required beat into passive attention, agreement, observation, or internal feeling.',
         'Do not preserve any forbidden source beat, even with different wording.',
+        'Planning to act after another task, check, location change, or future beat still preserves a forbidden deferral; engage a current-turn required beat directly.',
         'Use diagnosis.brief.characterPressure as advisory dramatic evidence. Rising pressure makes a stronger response more likely but never mandatory.',
         'Silence, restraint, refusal, and delayed action remain valid when supported.',
         'Do not distribute dialogue or action as a checklist, and do not invent a want for an unclear character.',
@@ -615,10 +618,12 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
   const candidateHash = hashJson(String(candidate?.text || ''));
   const redirectRules = mode === 'redirect'
     ? [
-        'Evaluate every required check against the validated diagnosis below; do not infer or replace its objective, beats, or character-pressure findings.',
+        'Cross-check the diagnosis against frozen evidence and the source failure; reject if its objective or beats merely rename, soften, or preserve the failed trajectory.',
+        'Evaluate every required check against both the validated diagnosis and frozen evidence; do not invent a different objective.',
         `Return exactly ${REDIRECT_VERIFICATION_CHECKS.length} check results, one for each name below, in this order.`,
         ...REDIRECT_VERIFICATION_CHECKS.map((check, index) => `${index + 1}. ${check}`),
         'Required beats must be materially explicit in the candidate; adjacent or passive behavior is not equivalent to a required action.',
+        'A plan to act after another task, check, location change, or future beat still retains a forbidden deferral, even when the wording differs from the source.',
         'Reject if the candidate omits any required beat, retains any forbidden source beat, or contradicts the advisory character-pressure map.'
       ]
     : [];

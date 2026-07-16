@@ -113,20 +113,138 @@ function publicInstalledHand(value = []) {
   })).filter((card) => card.cardId && card.promptText);
 }
 
+function object(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function textList(value, limit = 16, itemLimit = 160) {
+  return (Array.isArray(value) ? value : [])
+    .map((entry) => safeText(entry, itemLimit))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function publicPacketCardEvidence(value = []) {
+  return (Array.isArray(value) ? value : []).slice(0, 16).map((card) => ({
+    id: safeText(card?.id || '', 160),
+    family: safeText(card?.family || card?.name || '', 120),
+    promptText: safeText(card?.promptText || '', 1600),
+    emphasis: safeText(card?.emphasis || '', 40),
+    tokenEstimate: Math.max(0, Math.round(Number(card?.tokenEstimate || 0) || 0)),
+    detailProfile: safeText(card?.detailProfile || '', 40),
+    evidenceRefs: textList(card?.evidenceRefs, 16, 160)
+  })).filter((card) => card.id && card.promptText);
+}
+
+function publicPromptPacket(value = {}) {
+  const packet = object(value);
+  const guidance = object(packet.guidance);
+  const guardrails = object(packet.packetGuardrails);
+  return {
+    packetId: safeText(packet.packetId || '', 180),
+    packetVersion: Math.max(0, Math.round(Number(packet.packetVersion || 0) || 0)),
+    packetKind: safeText(packet.packetKind || '', 80),
+    snapshotHash: safeText(packet.snapshotHash || '', 180),
+    footprint: safeText(packet.footprint || '', 40),
+    pipelineMode: safeText(packet.pipelineMode || '', 40),
+    guidance: {
+      status: safeText(guidance.status || '', 40),
+      text: safeText(guidance.text || '', 3000),
+      sourceCardIds: textList(guidance.sourceCardIds, 16, 160),
+      guardrailCardIds: textList(guidance.guardrailCardIds, 16, 160)
+    },
+    cardEvidence: publicPacketCardEvidence(packet.cardEvidence),
+    packetGuardrails: {
+      staticText: safeText(guardrails.staticText || '', 1600),
+      sourceCardIds: textList(guardrails.sourceCardIds, 16, 160)
+    },
+    constraints: textList(packet.constraints || packet.hardConstraints, 16, 600)
+  };
+}
+
+function publicLastBrief(value = {}) {
+  const brief = object(value);
+  return {
+    status: safeText(brief.status || '', 40),
+    reason: safeText(brief.reason || '', 120),
+    packetId: safeText(brief.packetId || '', 180),
+    handId: safeText(brief.handId || '', 180),
+    userTurn: safeText(brief.userTurn || brief.userMessage || '', 2400)
+  };
+}
+
+function publicStoryForm(value = {}) {
+  const story = object(value);
+  const result = {
+    schema: safeText(story.schema || '', 120),
+    tense: safeText(story.tense || '', 40),
+    pov: safeText(story.pov || '', 80),
+    confidence: safeText(story.confidence || '', 40),
+    evidenceRefs: textList(story.evidenceRefs, 16, 160),
+    reason: safeText(story.reason || '', 600)
+  };
+  return result.schema || result.tense || result.pov || result.confidence || result.evidenceRefs.length || result.reason
+    ? result
+    : {};
+}
+
+function publicContext(value = {}) {
+  const context = object(value);
+  const sourceMessages = Array.isArray(context.messages)
+    ? context.messages
+    : (Array.isArray(context.contextMessages) ? context.contextMessages : []);
+  const messages = [];
+  let remaining = 6000;
+  for (let index = sourceMessages.length - 1; index >= 0 && messages.length < 16; index -= 1) {
+    const message = sourceMessages[index] || {};
+    const text = safeText(message.text ?? message.mes ?? message.content ?? '', Math.min(1800, remaining));
+    if (!text) continue;
+    remaining -= text.length;
+    messages.push({
+      id: safeText(message.id ?? '', 80),
+      mesid: Number.isFinite(Number(message.mesid)) ? Number(message.mesid) : undefined,
+      role: safeText(message.role || '', 40),
+      sender: safeText(message.sender || message.name || '', 120),
+      text
+    });
+    if (remaining <= 0) break;
+  }
+  return { messages: messages.reverse() };
+}
+
 export function publicGenerationReviewSnapshot(snapshot = {}) {
   const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const promptPacket = publicPromptPacket(source.promptPacket);
+  const generatedHand = promptPacket.cardEvidence.map((card) => ({
+    cardId: card.id,
+    categoryId: '',
+    name: card.family,
+    description: '',
+    promptText: card.promptText,
+    kind: 'generated-card',
+    selectionState: 'active',
+    packetRefs: [card.id],
+    sourceCardIds: []
+  }));
   return {
     deck: {
       id: safeText(source?.deck?.id || '', 160),
       name: safeText(source?.deck?.name || '', 160),
       revisionHash: safeText(source?.deck?.revisionHash || '', 180)
     },
-    installedHand: publicInstalledHand(source.installedHand),
-    promptPacket: safeText(JSON.stringify(source.promptPacket || {}), 6000),
-    lastBrief: safeText(JSON.stringify(source.lastBrief || {}), 1800),
-    storyForm: safeText(JSON.stringify(source.storyForm || {}), 600),
+    installedHand: generatedHand.length ? generatedHand : publicInstalledHand(source.installedHand),
+    promptPacket,
+    lastBrief: publicLastBrief(source.lastBrief),
+    storyForm: publicStoryForm(source.storyForm),
     pipeline: safeText(source.pipeline || '', 32),
-    context: safeText(JSON.stringify(source.context || {}), 6000),
+    context: publicContext(source.context),
     antiSlopProfileVersion: safeText(source.antiSlopProfileVersion || ANTI_SLOP_PROFILE_VERSION, 80)
   };
 }

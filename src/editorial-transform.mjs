@@ -149,7 +149,9 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
     addEvidence(entries, `packet:constraint${index ? `:${index}` : ''}`, 'prompt-packet', 'hard-constraint', constraint);
   }
   if (packet.story || packet.scene || packet.summary) addEvidence(entries, 'packet:scene', 'prompt-packet', 'scene-support', packet.story || packet.scene || packet.summary);
-  for (const [index, card] of array(data.installedHand).slice(0, 48).entries()) {
+  const packetCards = array(packet.cardEvidence);
+  const installedCards = packetCards.length ? packetCards : array(data.installedHand);
+  for (const [index, card] of installedCards.slice(0, 48).entries()) {
     const cardId = String(card?.cardId || card?.id || '').trim();
     if (!cardId) continue;
     addEvidence(entries, `card:${cardId}`, 'installed-card', card?.hardConstraint ? 'hard-constraint' : 'scene-support', card.promptText || card.description || card.name);
@@ -593,6 +595,8 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
   const redirectRules = mode === 'redirect'
     ? [
         'Evaluate every required check against the validated diagnosis below; do not infer or replace its objective, beats, or character-pressure findings.',
+        `Return exactly ${REDIRECT_VERIFICATION_CHECKS.length} check results, one for each name below, in this order.`,
+        ...REDIRECT_VERIFICATION_CHECKS.map((check, index) => `${index + 1}. ${check}`),
         'Required beats must be materially explicit in the candidate; adjacent or passive behavior is not equivalent to a required action.',
         'Reject if the candidate omits any required beat, retains any forbidden source beat, or contradicts the advisory character-pressure map.'
       ]

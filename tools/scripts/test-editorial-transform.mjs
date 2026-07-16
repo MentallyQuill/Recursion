@@ -17,6 +17,7 @@ import {
 } from '../../src/editorial-transform.mjs';
 import { assert, assertEqual, assertDeepEqual } from '../../tests/helpers/assert.mjs';
 import { hashJson } from '../../src/core.mjs';
+import { publicGenerationReviewSnapshot } from '../../src/generation-review.mjs';
 
 const sourceText = 'She smiled. “Who sent you?” He told her the sender’s name, then reached for the latch.';
 const snapshot = {
@@ -34,6 +35,38 @@ const snapshot = {
   antiSlopProfileVersion: 'v1'
 };
 const evidence = buildEditorialEvidence(snapshot, sourceText);
+const longReviewSnapshot = publicGenerationReviewSnapshot({
+  installedHand: [{
+    cardId: 'source-template-card',
+    name: 'Present characters',
+    promptText: 'Who can act, observe, interrupt, or be addressed.'
+  }],
+  promptPacket: {
+    packetId: 'packet-sg1-regression',
+    cardEvidence: [{
+      id: 'card-Active-Cast-generated',
+      family: 'Active Cast',
+      promptText: "Keep Carter, O'Neill, Daniel, Teal'c, Will, and the EMH seated in the diner booth.",
+      evidenceRefs: ['message:31']
+    }],
+    padding: 'packet-padding-'.repeat(800)
+  },
+  context: {
+    messages: [
+      ...Array.from({ length: 12 }, (_, index) => ({
+        mesid: index + 10,
+        role: index % 2 ? 'assistant' : 'user',
+        text: `Bounded SG-1 context ${index} ${'context-padding '.repeat(80)}`
+      })),
+      {
+        mesid: 32,
+        role: 'user',
+        text: 'Both good questions. The transport still reaches the intended destination.'
+      }
+    ]
+  }
+});
+const longReviewEvidence = buildEditorialEvidence(longReviewSnapshot, sourceText);
 const sourceHash = 'source-a';
 const snapshotHash = 'snapshot-a';
 const diagnosis = {
@@ -73,6 +106,24 @@ assertEqual(EDITORIAL_VERIFICATION_SCHEMA, 'recursion.editorialVerification.v1',
 assert(evidence.some((item) => item.id === 'source:0' && item.authority === 'source-draft'), 'source evidence has editable authority');
 assert(evidence.some((item) => item.id === 'packet:constraint' && item.authority === 'hard-constraint'), 'packet constraint has hard authority');
 assert(evidence.some((item) => item.id === 'user:0' && item.excerpt === 'She closes the door and asks who sent him.'), 'latest user-turn evidence keeps the explicit brief turn');
+assertEqual(typeof longReviewSnapshot.context, 'object', 'public review snapshot keeps bounded context structurally parseable');
+assertEqual(typeof longReviewSnapshot.promptPacket, 'object', 'public review snapshot keeps prompt packet evidence structurally parseable');
+assert(
+  longReviewEvidence.some((item) => item.id === 'user:0' && item.excerpt.includes('Both good questions')),
+  'long Editorial context preserves the actual latest user turn instead of the no-user fallback'
+);
+assert(
+  longReviewEvidence.some((item) => item.id === 'card:card-Active-Cast-generated' && item.excerpt.includes("Keep Carter, O'Neill")),
+  'Editorial evidence uses generated packet card content'
+);
+assert(
+  !longReviewEvidence.some((item) => item.excerpt.includes('Who can act, observe, interrupt')),
+  'generated packet evidence prevents generic source-card templates from poisoning Editorial diagnosis'
+);
+assert(
+  !longReviewEvidence.some((item) => item.id === 'story-form:0'),
+  'an absent story-form contract does not become empty authoritative evidence'
+);
 assert(evidence.some((item) => item.id === 'message:17' && item.excerpt === 'Who sent you?'), 'bounded transcript messages receive provider-citable evidence ids');
 assert(!evidence.some((item) => item.id === 'message:18'), 'active assistant draft cannot re-enter preservation evidence as an authoritative context message');
 assert(!evidence.find((item) => item.id === 'context:0')?.excerpt.includes(sourceText), 'aggregate context evidence excludes the active assistant draft');
@@ -377,6 +428,16 @@ assert(
   redirectVerifierRequest.prompt.includes('Required beats must be materially explicit in the candidate; adjacent or passive behavior is not equivalent to a required action'),
   'Redirect verifier rejects passive substitutes for active required beats'
 );
+assert(
+  redirectVerifierRequest.prompt.includes(`Return exactly ${REDIRECT_VERIFICATION_CHECKS.length} check results, one for each name below, in this order.`),
+  'Redirect verifier makes the schema check cardinality explicit'
+);
+for (const [index, check] of REDIRECT_VERIFICATION_CHECKS.entries()) {
+  assert(
+    redirectVerifierRequest.prompt.includes(`${index + 1}. ${check}`),
+    `Redirect verifier explicitly names required check ${check}`
+  );
+}
 
 const verification = validateEditorialVerification({ schema: EDITORIAL_VERIFICATION_SCHEMA, mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, decision: 'accept', evidenceRefs: ['packet:constraint'] }, { mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, evidence });
 assertEqual(verification.ok, true, 'accepted verifier result passes');

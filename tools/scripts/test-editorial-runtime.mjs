@@ -686,6 +686,7 @@ const acceptedRedirect = createRedirectHarness({ pressureReason: privateRedirect
 await acceptedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'replace' } });
 const acceptedRedirectResult = await acceptedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-runtime-test' });
 assertEqual(acceptedRedirectResult.ok, true, 'Medium Redirect succeeds after mandatory verification');
+assertEqual(acceptedRedirect.state.calls.length, 3, 'successful Redirect uses exactly diagnosis, transform, and verifier calls');
 const redirectVerifierCalls = acceptedRedirect.state.calls.filter((call) => call.roleId === 'editorialVerifier');
 const redirectDiagnosisCall = acceptedRedirect.state.calls.find((call) => call.roleId === 'editorialDiagnostician');
 assertEqual(redirectDiagnosisCall.request.reasoningIntent, 'low', 'Redirect diagnosis starts with low reasoning to protect its structured output budget');
@@ -849,6 +850,9 @@ assertEqual(rejectedRedirectResult.ok, false, 'verifier rejection keeps the orig
 assertEqual(rejectedRedirectResult.error?.code, REDIRECT_ERROR_CODES.VERIFICATION_REJECTED, 'verifier rejection has a stable error code');
 assertEqual(rejectedRedirect.state.appended.length, 0, 'verifier rejection adds no swipe');
 assertEqual(rejectedRedirect.runtime.view().editorialResult?.status, 'error', 'verifier rejection settles visibly unhealthy');
+assertEqual(rejectedRedirect.state.calls.length, 3, 'semantic verifier rejection ends after the normal three calls');
+assertEqual(rejectedRedirect.state.transformAttempts, 1, 'semantic rejection does not launch an unverified rewrite');
+assertEqual(rejectedRedirect.state.verifierAttempts, 1, 'semantic rejection does not launch a second verifier call');
 
 const correctedCandidateRedirect = createRedirectHarness({
   verifierDecisions: ['reject', 'accept'],
@@ -865,14 +869,10 @@ const correctedCandidateRedirect = createRedirectHarness({
 });
 await correctedCandidateRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const correctedCandidateResult = await correctedCandidateRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-candidate-correction-test' });
-assertEqual(correctedCandidateResult.ok, true, 'Redirect revises one verifier-rejected candidate and applies only the accepted revision');
-assertEqual(correctedCandidateRedirect.state.transformAttempts, 2, 'Redirect makes exactly one bounded candidate revision');
-assertEqual(correctedCandidateRedirect.state.verifierAttempts, 2, 'Redirect verifies the original and revised candidates');
-assert(
-  correctedCandidateRedirect.state.calls.filter((call) => call.roleId === 'editorialTransformer')[1].request.prompt.includes('forbidden-source-beats'),
-  'Redirect candidate revision receives failed verifier check feedback'
-);
-assertEqual(correctedCandidateRedirect.state.appended.length, 1, 'only the accepted revised candidate becomes a swipe');
+assertEqual(correctedCandidateResult.ok, false, 'Redirect keeps the original after semantic rejection instead of revising automatically');
+assertEqual(correctedCandidateRedirect.state.transformAttempts, 1, 'Redirect does not make a semantic candidate revision');
+assertEqual(correctedCandidateRedirect.state.verifierAttempts, 1, 'Redirect does not verify a second candidate');
+assertEqual(correctedCandidateRedirect.state.appended.length, 0, 'semantic rejection creates no swipe');
 
 const correctedMalformedVerifierRedirect = createRedirectHarness({
   verifierChecksByAttempt: [
@@ -903,6 +903,18 @@ const malformedRedirectResult = await malformedRedirect.runtime.enhanceLatestAss
 assertEqual(malformedRedirectResult.error?.code, REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'malformed verifier result preserves its stable error code');
 assertEqual(malformedRedirect.state.verifierAttempts, 2, 'repeated malformed verifier output stops after one correction');
 assertEqual(malformedRedirect.state.appended.length, 0, 'malformed verifier result adds no swipe');
+
+const exhaustedRecoveryRedirect = createRedirectHarness({
+  diagnosisProviderFailureOnFirst: true,
+  verifierChecks: []
+});
+await exhaustedRecoveryRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const exhaustedRecoveryResult = await exhaustedRecoveryRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-shared-recovery-budget-test' });
+assertEqual(exhaustedRecoveryResult.ok, false, 'Redirect keeps the original when malformed verification follows diagnosis recovery');
+assertEqual(exhaustedRecoveryRedirect.state.calls.length, 4, 'Redirect permits at most one additional model call across the complete operation');
+assertEqual(exhaustedRecoveryRedirect.state.diagnosisAttempts, 2, 'diagnosis consumes the one operation recovery call');
+assertEqual(exhaustedRecoveryRedirect.state.verifierAttempts, 1, 'verifier cannot claim a second recovery call after diagnosis correction');
+assertEqual(exhaustedRecoveryRedirect.state.appended.length, 0, 'exhausted recovery budget never mutates swipe state');
 
 const staleRedirect = createRedirectHarness({ changeSourceAfterVerifier: true });
 await staleRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });

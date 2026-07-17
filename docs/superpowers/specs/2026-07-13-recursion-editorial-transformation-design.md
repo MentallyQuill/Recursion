@@ -383,21 +383,21 @@ second writer and never supplies an alternate candidate. It can only return
 original and records the reason; it does not trigger a rewrite retry or a
 tournament.
 
-The whole editorial operation has **one shared structured-output correction
-token**. Diagnosis may spend it first; if it does, Transform runs with
-structured recovery disabled. If Diagnosis does not spend it, Transform may
-spend it. Verification receives no correction request. This preserves the
-existing one-correction safety/cost ceiling while yielding two normal calls
-(Diagnosis + Transform), or three normal calls for High/Ultra full candidates
-(+ Verification).
+The whole editorial operation has **one shared malformed-output correction
+token**. Diagnosis, Transform, or Verification may spend it first; all later
+stages then run with recovery disabled. Semantic disagreement never spends the
+token: a Redirect verifier rejection preserves the original and ends the run.
+This yields exactly three normal Redirect calls and at most one additional
+recovery call.
 
 Provider lane selection follows the existing enhancement policy. When a
 Reasoner role fails before the shared recovery token is spent, Recursion may
 make one same-role Utility fallback; that fallback does not create another
 candidate, diagnosis, or correction token.
 
-At Low and Medium levels, the deterministic gates are the confidence mechanism
-and the validated candidate is applied directly. A disabled or failed Reasoner
+Repair and non-verified Recompose retain their existing deterministic mechanical
+application checks. Redirect always uses the model Verifier as its semantic
+confidence mechanism at every reasoning level. A disabled or failed Reasoner
 follows the existing lane fallback rules; the result is marked with the actual
 lane and verification state.
 

@@ -50,8 +50,9 @@ A Redirect may be similar in length or wording to its source. Its required diffe
 Redirect remains:
 
 - one diagnosis;
-- one candidate, with one existing semantic correction attempt if structurally invalid;
+- one candidate;
 - one accept/reject verifier;
+- one shared malformed-output recovery call across Diagnosis, Transform, and Verify;
 - always applied as a new swipe;
 - non-destructive to the original assistant response.
 
@@ -114,13 +115,6 @@ const REDIRECT_FAILURE_CATEGORIES = new Set([
   'unsupported-outcome',
   'temporal-causal',
   'character-epistemic'
-]);
-
-const REDIRECT_PRESSURE_EFFECTS = new Set([
-  'increasing',
-  'decreasing',
-  'unchanged',
-  'unclear'
 ]);
 
 // Shape documented as JavaScript because Recursion is implemented as .mjs.
@@ -255,185 +249,88 @@ The design keeps uncertainty explicit at the character-pressure field level. It 
 
 The provider-facing Redirect diagnosis is now flat and mode-specific. It returns the frozen identity fields plus `sourceFailure`, `replacementObjective`, `requiredBeats`, `forbiddenSourceBeats`, `sceneCharacters`, and `characterPressure` at the top level. It does not return `brief`, `diagnosis`, `preserve`, `discard`, `allowedChanges`, or `forbiddenChanges`. Runtime validates the flat result and then constructs the private canonical `diagnosis.brief` used by Transform, Verify, markers, and audit logic. Recompose and Repair retain the generic nested brief contract.
 
-Redirect source-reference fields are also machine-constrained separately from authoritative evidence: `conflictingSourceRefs`, forbidden-beat `sourceRefs`, and pressure `sourceEvidenceRefs` may cite only source-draft/source-negative IDs.
+> Semantic-boundary amendment, 2026-07-16: deterministic authority filtering was removed after repeated live failures showed that citation placement was being treated as editorial truth. Every Redirect citation field now permits any request-known evidence ID. Runtime preserves those known citations unchanged and rejects only fabricated IDs, stale identity, malformed shape, and unsafe bounds. Authority labels remain attached to the frozen evidence so the mandatory production Verifier can judge whether a diagnosis claim is actually supported, whether source prose was mistaken for canon, and whether the proposed trajectory is feasible.
 
-When a provider mixes authorities inside a required Redirect evidence list, semantic validation keeps the request-known refs with the correct authority and drops the stray refs. The field still fails when no valid ref remains, so this normalization removes provider noise without inventing grounding.
+Scene-character coverage and character pressure are likewise semantic evidence. Runtime requires usable bounded rows but does not recover, drop, or rewrite known citations and pressure claims before verification.
 
-Scene-character citations are advisory. If a returned character row has no valid authoritative citation, runtime may recover citations from frozen non-source evidence whose excerpt explicitly names that character. Rows with no such evidence are dropped, and Redirect still fails character coverage when no evidence-backed scene character remains.
-
-The Redirect transform provider contract is flat and mode-specific. It returns only `schema`, `mode`, `sourceHash`, `snapshotHash`, `diagnosisHash`, and top-level `text`. It does not return the shared nested `candidate`, `patches`, `changeLedger`, `cardOutcomes`, `preservationLedger`, or `riskFlags` fields. The provider boundary constructs the private canonical candidate with empty Redirect preservation and risk lists plus one deterministic `redirect` ledger entry grounded in the validated replacement-objective and required-beat evidence. Runtime reconstructs exactly one audit row per frozen installed card with `status: "partially-reflected"` and the matching `card:<id>` evidence reference. Repair and Recompose retain their existing nested pass contract and strict card-outcome coverage. Locally constructed ledger and audit fields do not weaken candidate validation or verification: the complete candidate must still satisfy the validated Redirect diagnosis and pass the independent eight-check verifier before a swipe can be added.
+The Redirect transform provider contract is flat and mode-specific. It returns only `schema`, `mode`, `sourceHash`, `snapshotHash`, `diagnosisHash`, and top-level `text`. It does not return the shared nested `candidate`, `patches`, `changeLedger`, `cardOutcomes`, `preservationLedger`, or `riskFlags` fields. The provider boundary constructs the private canonical candidate with empty Redirect preservation and risk lists plus one deterministic `redirect` ledger entry grounded in the proposed replacement-objective and required-beat evidence. Runtime reconstructs exactly one audit row per frozen installed card with `status: "partially-reflected"` and the matching `card:<id>` evidence reference. Repair and Recompose retain their existing nested pass contract and strict card-outcome coverage. Locally constructed ledger and audit fields do not authorize the prose: the complete diagnosis and candidate must pass the independent nine-check model Verifier before a swipe can be added.
 
 ```js
-function redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds) {
-  const optionalEvidenceRefs = (values) => ({
-    ...editorialEvidenceRefsSchema(values),
+function redirectPressureSchema(validEvidenceIds) {
+  const optionalEvidenceRefs = {
+    ...editorialEvidenceRefsSchema(validEvidenceIds),
     minItems: 0
-  });
-  const properties = {
-    character: { type: 'string' },
-    immediateWant: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    wantEvidenceRefs: optionalEvidenceRefs(validPreservationEvidenceIds),
-    sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
-    sourceEvidenceRefs: optionalEvidenceRefs(validEvidenceIds),
-    pressureReason: { type: 'string' }
   };
-  const required = [
-    'character', 'immediateWant', 'wantEvidenceRefs',
-    'sourcePressureEffect', 'sourceEvidenceRefs', 'pressureReason'
-  ];
-  const variant = (overrides) => ({
-    type: 'object',
-    properties: { ...properties, ...overrides },
-    required,
-    additionalProperties: false
-  });
   return {
     type: 'object',
-    properties,
-    required,
-    additionalProperties: false,
-    anyOf: [
-      variant({
-        immediateWant: { type: 'null' },
-        wantEvidenceRefs: { ...optionalEvidenceRefs(validPreservationEvidenceIds), maxItems: 0 },
-        sourcePressureEffect: { const: 'unclear' },
-        sourceEvidenceRefs: { ...optionalEvidenceRefs(validEvidenceIds), maxItems: 0 }
-      }),
-      variant({
-        immediateWant: { type: 'string' },
-        wantEvidenceRefs: editorialEvidenceRefsSchema(validPreservationEvidenceIds),
-        sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
-        sourceEvidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds)
-      })
-    ]
+    properties: {
+      character: { type: 'string' },
+      immediateWant: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      wantEvidenceRefs: optionalEvidenceRefs,
+      sourcePressureEffect: { type: 'string' },
+      sourceEvidenceRefs: optionalEvidenceRefs,
+      pressureReason: { type: 'string' }
+    },
+    required: [
+      'character', 'immediateWant', 'wantEvidenceRefs',
+      'sourcePressureEffect', 'sourceEvidenceRefs', 'pressureReason'
+    ],
+    additionalProperties: false
   };
 }
 
-function redirectBriefProperties(validEvidenceIds, validPreservationEvidenceIds) {
+function redirectDiagnosisProperties(validEvidenceIds) {
   const evidenceRefs = editorialEvidenceRefsSchema(validEvidenceIds);
-  const authoritativeRefs = editorialEvidenceRefsSchema(validPreservationEvidenceIds);
+  const optionalEvidenceRefs = { ...evidenceRefs, minItems: 0 };
   return {
-    sourceFailure: {
-      anyOf: [
-        { type: 'null' },
-        {
-          type: 'object',
-          properties: {
-            category: { enum: [...REDIRECT_FAILURE_CATEGORIES] },
-            problem: { type: 'string' },
-            establishedEvidenceRefs: authoritativeRefs,
-            conflictingSourceRefs: evidenceRefs
-          },
-          required: ['category', 'problem', 'establishedEvidenceRefs', 'conflictingSourceRefs'],
-          additionalProperties: false
-        }
-      ]
-    },
-    replacementObjective: {
-      anyOf: [
-        { type: 'null' },
-        {
-          type: 'object',
-          properties: { summary: { type: 'string' }, evidenceRefs: authoritativeRefs },
-          required: ['summary', 'evidenceRefs'],
-          additionalProperties: false
-        }
-      ]
-    },
-    requiredBeats: {
-      type: 'array',
-      maxItems: 8,
-      items: {
-        type: 'object',
-        properties: { summary: { type: 'string' }, evidenceRefs: authoritativeRefs },
-        required: ['summary', 'evidenceRefs'],
-        additionalProperties: false
-      }
-    },
-    forbiddenSourceBeats: {
-      type: 'array',
-      maxItems: 8,
-      items: {
-        type: 'object',
-        properties: { summary: { type: 'string' }, sourceRefs: evidenceRefs },
-        required: ['summary', 'sourceRefs'],
-        additionalProperties: false
-      }
-    },
-    sceneCharacters: {
-      type: 'array',
-      minItems: 1,
-      maxItems: 16,
-      items: {
-        type: 'object',
-        properties: { character: { type: 'string' }, evidenceRefs: authoritativeRefs },
-        required: ['character', 'evidenceRefs'],
-        additionalProperties: false
-      }
-    },
+    sourceFailure: redirectSourceFailureSchema(evidenceRefs),
+    replacementObjective: redirectObjectiveSchema(evidenceRefs),
+    requiredBeats: redirectRequiredBeatsSchema(evidenceRefs),
+    forbiddenSourceBeats: redirectForbiddenBeatsSchema(evidenceRefs),
+    sceneCharacters: redirectSceneCharactersSchema(optionalEvidenceRefs),
     characterPressure: {
       type: 'array',
       minItems: 1,
       maxItems: 16,
-      items: redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds)
+      items: redirectPressureSchema(validEvidenceIds)
     }
   };
 }
 ```
 
-Provider JSON Schema constrains shape and permitted references. Runtime semantic validation remains authoritative for reference authority, proceed/no-change consistency, character coverage, and source-only fields.
+Provider JSON Schema constrains shape, frozen identity, bounds, and references to request-known IDs. The production Verifier remains authoritative for reference relevance, evidence authority, character coverage, pressure coherence, and Redirect trajectory.
 
 ## Diagnosis validation
 
-`src/editorial-transform.mjs` should add Redirect-only semantic validation after the existing general brief validation.
+`src/editorial-transform.mjs` performs Redirect-only structural and provenance validation. It must not decide semantic citation authority.
 
 ```js
-function validateRedirectBrief(brief, evidence, decision) {
+function validateRedirectBrief(brief, evidence) {
   const known = evidenceMap(evidence);
-  const isSource = (id) => ['source-draft', 'source-negative'].includes(known.get(id)?.authority);
-  const authoritative = (ids) => ids.length > 0 && ids.every((id) => known.has(id) && !isSource(id));
-  const sourceOnly = (ids) => ids.length > 0 && ids.every((id) => known.has(id) && isSource(id));
+  const knownRefs = (ids, allowEmpty = false) =>
+    Array.isArray(ids)
+    && ids.length <= 8
+    && (allowEmpty || ids.length > 0)
+    && ids.every((id) => known.has(String(id)));
 
-  if (decision === 'no-change') {
-    if (brief.sourceFailure !== null || brief.replacementObjective !== null) return failRedirectBrief();
-    if (brief.requiredBeats.length || brief.forbiddenSourceBeats.length) return failRedirectBrief();
-  } else {
-    if (!brief.sourceFailure || !brief.replacementObjective) return failRedirectBrief();
-    if (!authoritative(brief.sourceFailure.establishedEvidenceRefs)) return failRedirectEvidence();
-    if (!sourceOnly(brief.sourceFailure.conflictingSourceRefs)) return failRedirectEvidence();
-    if (!authoritative(brief.replacementObjective.evidenceRefs)) return failRedirectEvidence();
-    if (!brief.requiredBeats.length || !brief.forbiddenSourceBeats.length) return failRedirectBrief();
-    if (brief.requiredBeats.some((beat) => !authoritative(beat.evidenceRefs))) return failRedirectEvidence();
-    if (brief.forbiddenSourceBeats.some((beat) => !sourceOnly(beat.sourceRefs))) return failRedirectEvidence();
-  }
-
-  const characters = brief.sceneCharacters.map((entry) => entry.character.trim());
-  const pressureCharacters = brief.characterPressure.map((entry) => entry.character.trim());
-  if (characters.some((character) => !character)) return failRedirectCharacters();
-  if (brief.sceneCharacters.some((entry) => !authoritative(entry.evidenceRefs))) return failRedirectEvidence();
-  if (new Set(characters).size !== characters.length) return failRedirectCharacters();
-  if (hashJson([...characters].sort()) !== hashJson([...pressureCharacters].sort())) return failRedirectCharacters();
-
-  for (const row of brief.characterPressure) {
-    if (row.immediateWant === null) {
-      if (row.wantEvidenceRefs.length || row.sourceEvidenceRefs.length || row.sourcePressureEffect !== 'unclear') {
-        return failRedirectPressure();
-      }
-      continue;
-    }
-    if (!authoritative(row.wantEvidenceRefs)) return failRedirectEvidence();
-    if (!sourceOnly(row.sourceEvidenceRefs)) return failRedirectEvidence();
-  }
-
+  if (!brief.sourceFailure?.problem || !brief.replacementObjective?.summary) return failRedirectBrief();
+  if (!brief.requiredBeats?.length || !brief.forbiddenSourceBeats?.length) return failRedirectBrief();
+  if (!knownRefs(brief.sourceFailure.establishedEvidenceRefs)) return failRedirectEvidence();
+  if (!knownRefs(brief.sourceFailure.conflictingSourceRefs)) return failRedirectEvidence();
+  if (!knownRefs(brief.replacementObjective.evidenceRefs)) return failRedirectEvidence();
+  if (brief.requiredBeats.some((beat) => !knownRefs(beat.evidenceRefs))) return failRedirectEvidence();
+  if (brief.forbiddenSourceBeats.some((beat) => !knownRefs(beat.sourceRefs))) return failRedirectEvidence();
+  if (brief.sceneCharacters.some((row) => !row.character || !knownRefs(row.evidenceRefs, true))) return failRedirectCharacters();
+  if (brief.characterPressure.some((row) => !row.character || !knownRefs(row.wantEvidenceRefs, true) || !knownRefs(row.sourceEvidenceRefs, true))) return failRedirectPressure();
   return { ok: true, value: brief };
 }
 ```
 
-The exact helper names may follow local conventions, but these checks are required behavior, not illustrative optionality.
+Known citations remain unchanged for Transform and Verify. The Verifier receives the complete proposal and full frozen evidence.
 
 ## Transformer contract
 
-The Redirect transformer receives the validated diagnosis unchanged and writes one complete candidate. Its prompt must distinguish trajectory from prose variance.
+The Redirect transformer receives the structurally valid diagnosis proposal unchanged and writes one complete candidate. Its prompt must distinguish trajectory from prose variance.
 
 The provider-facing output is intentionally minimal:
 
@@ -562,7 +459,7 @@ const key = editorialPassKey({
 This prevents Medium Redirect from reusing a `direct` pass produced under the old High/Ultra-only policy. The helper belongs in `src/editorial-transform.mjs` beside `editorialPassKey()` so policy and identity cannot drift apart.
 
 The verifier returns no candidate prose and cannot request another candidate. For
-Redirect, `buildEditorialVerificationRequest()` includes the complete validated
+Redirect, `buildEditorialVerificationRequest()` includes the complete proposed
 diagnosis in the private provider prompt and request object. A diagnosis hash alone
 is not sufficient because the verifier must inspect the replacement objective,
 required beats, forbidden source beats, and advisory character-pressure map. The
@@ -571,6 +468,7 @@ these checks and returns only the names that fail or remain unclear:
 
 ```js
 export const REDIRECT_VERIFICATION_CHECKS = Object.freeze([
+  'diagnosis-evidence-grounded',
   'source-failure-removed',
   'replacement-objective-fulfilled',
   'required-beats-satisfied',
@@ -633,10 +531,10 @@ if (schema === EDITORIAL_VERIFICATION_SCHEMA && mode === 'redirect') {
 ### Verification semantic validation
 
 The provider boundary validates `failedChecks`, derives `decision`, and constructs
-all eight canonical rows with frozen evidence references. An empty failed-check list
+all nine canonical rows with frozen evidence references. An empty failed-check list
 becomes `accept`; any listed check becomes `reject`. Unknown, duplicate, or malformed
-names produce an invalid canonical decision so the normal semantic validator and
-single verifier-only correction path remain authoritative.
+names produce an invalid canonical decision. One correction is available only when
+the shared operation recovery token was not spent by Diagnosis or Transform.
 
 `validateEditorialVerification()` still receives the canonical internal result and
 enforces exact Redirect coverage. A structurally valid `reject` remains a valid
@@ -862,16 +760,16 @@ assert(
 
 Provider tests must additionally prove:
 
-- `sourceFailure` and `replacementObjective` permit `null` for `no-change`;
-- preservation, objective, required-beat, presence, and want evidence enums exclude `source:N`;
-- conflicting and pressure source fields can cite `source:N` and are semantically source-only;
-- Redirect verification requires exactly the eight named checks;
+- Redirect requires a usable source failure, replacement objective, and non-empty required/forbidden beats;
+- every Redirect citation field permits all request-known evidence IDs;
+- scene-character and pressure citations may be empty for model review;
+- Redirect verification requires exactly the nine named checks;
 - Recompose verification does not require Redirect checks;
 - verifier source, snapshot, diagnosis, mode, and candidate hash fields are frozen from the request;
 - `additionalProperties: false` prevents a model-authored alternate contract;
 - `test-provider-response-parser.mjs` round-trips nested pressure data without flattening or loss.
 
-### 2. Diagnosis schema and semantic validation
+### 2. Diagnosis schema and semantic verification
 
 Extend `tools/scripts/test-editorial-transform.mjs` with focused Redirect cases:
 
@@ -884,8 +782,8 @@ assertEqual(
 
 assertEqual(
   validateEditorialDiagnosis(redirectWithSourceBackedWant, redirectFixture).ok,
-  false,
-  'Redirect cannot derive a character want from the editable source draft'
+  true,
+  'known source-backed semantic claims reach the mandatory verifier'
 );
 
 assertEqual(
@@ -895,17 +793,16 @@ assertEqual(
 );
 ```
 
-Required negative controls:
+Required deterministic negative controls:
 
 - missing `sourceFailure`;
 - missing `replacementObjective`;
 - empty required or forbidden beats on `proceed`;
-- authoritative claim citing `source:N`;
-- conflicting source passage citing non-source evidence;
-- duplicate or mismatched character coverage;
-- concrete want without authoritative evidence;
-- unclear want paired with a concrete pressure effect.
-- `sceneCharacters` omits a character clearly named by frozen Active Cast evidence; the mandatory verifier must fail `character-pressure-coherent` and runtime must add no swipe.
+- fabricated or out-of-snapshot evidence IDs;
+- stale source, snapshot, diagnosis, or candidate identity;
+- empty character names or unusable pressure rows.
+
+Semantic negative controls send mixed-authority citations, mismatched character coverage, unsupported wants, impossible beats, and source-only invented canon through Transform to the mandatory Verifier. The Verifier must fail `diagnosis-evidence-grounded` or the relevant downstream check, and runtime must add no swipe.
 
 Recompose fixtures must continue to validate without Redirect-only fields.
 
@@ -1145,7 +1042,7 @@ Implementation should update these existing boundaries in place:
 | `src/ui.mjs` and `src/ui/view-model.mjs` | Remain unaware of private pressure content; change only if deterministic privacy tests expose a leak |
 | `tools/scripts/test-providers.mjs` | Complete Redirect diagnosis/verifier machine schemas and Recompose non-regression |
 | `tools/scripts/test-provider-response-parser.mjs` | Nested Redirect structured-response round trip |
-| `tools/scripts/test-editorial-transform.mjs` | Diagnosis, evidence authority, character coverage, and candidate negative controls |
+| `tools/scripts/test-editorial-transform.mjs` | Mechanical diagnosis provenance, verifier-owned evidence semantics, and candidate negative controls |
 | `tools/scripts/test-editorial-runtime.mjs` | Verification/cache policy, private marker and next-prompt boundaries, host mutation behavior, terminal status |
 | `tools/scripts/test-host.mjs` | Cached-swipe lookup returns the exact persisted Redirect marker with index/text |
 | `tools/scripts/test-ui.mjs` and `tools/scripts/test-runtime.mjs` | Private-data absence from visible state and status surfaces |
@@ -1164,16 +1061,17 @@ No compatibility shim is required. Recursion is pre-alpha; schemas, fixtures, do
 
 The implementation is complete only when:
 
-1. Redirect `proceed` cannot validate without a source failure, replacement objective, required beats, forbidden source beats, and complete character-pressure map.
-2. Every concrete character want is backed by non-source frozen evidence.
-3. Character pressure guides generation but does not require action, speech, or increased pressure.
+1. Redirect `proceed` cannot validate without a usable source failure, replacement objective, required beats, forbidden source beats, and bounded character-pressure data.
+2. Runtime rejects fabricated evidence IDs but preserves every request-known citation unchanged for the model Verifier.
+3. The mandatory Verifier judges diagnosis grounding, character pressure, feasibility, and evidence authority; pressure does not require action, speech, or increased pressure.
 4. A Redirect candidate without an evidence-backed `redirect` ledger entry fails before host mutation.
 5. One shared policy makes Redirect verification mandatory in both cache identity and runtime execution at all reasoning levels.
-6. Redirect verification cannot accept a missing, duplicate, failed, unclear, or bad-evidence required check.
+6. Redirect verification cannot accept a missing, duplicate, failed, unclear, or malformed required check.
 7. The OV-1 condensation candidate fails Redirect and creates no swipe.
 8. A valid materially redirected candidate creates and selects exactly one swipe.
 9. Reusing a verified Redirect selects the existing swipe and returns its persisted accepted marker without provider calls.
 10. Private pressure metadata never appears in visible UI, final prose, Last Brief, the next host prompt, or journal details.
 11. The core-pack Redirect effectiveness corpus executes a real output judge; skipped or empty judge evidence fails strict mode.
-12. Focused tests, `npm.cmd test`, the model-effectiveness Redirect corpus, and the dedicated live Playwright proof pass.
-13. The served or installed SillyTavern extension copy is hash-checked before any live success claim.
+12. Successful and semantically rejected Redirect runs make exactly three model calls; one shared malformed-output recovery token caps every run at four.
+13. Focused tests, `npm.cmd test`, the model-effectiveness Redirect corpus, and the dedicated live Playwright proof pass.
+14. The served or installed SillyTavern extension copy is hash-checked before any live success claim.

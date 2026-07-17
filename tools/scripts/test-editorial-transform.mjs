@@ -238,18 +238,28 @@ const missingSourceFailureProblem = validateEditorialDiagnosis(redirectDiagnosis
 }), redirectFixture);
 assertEqual(missingSourceFailureProblem.error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect still rejects a source failure without substantive problem text');
 assert(missingSourceFailureProblem.error?.message.includes('sourceFailure.problem'), 'Redirect source-failure error identifies missing problem text');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+const sourceGroundedFailure = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   sourceFailure: { ...validRedirectBrief.sourceFailure, establishedEvidenceRefs: ['source:0'] }
-}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'source draft cannot establish the source failure truth');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+}), redirectFixture);
+assertEqual(sourceGroundedFailure.ok, true, 'known source evidence reaches the semantic verifier instead of failing deterministically');
+assertDeepEqual(sourceGroundedFailure.value?.brief?.sourceFailure?.establishedEvidenceRefs, ['source:0'], 'diagnosis preserves source-grounded claims for verifier review');
+const authoritativeConflict = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   sourceFailure: { ...validRedirectBrief.sourceFailure, conflictingSourceRefs: ['user:0'] }
-}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'source failure conflict must cite source evidence');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+}), redirectFixture);
+assertEqual(authoritativeConflict.ok, true, 'known authoritative evidence in a conflict field reaches the semantic verifier');
+assertDeepEqual(authoritativeConflict.value?.brief?.sourceFailure?.conflictingSourceRefs, ['user:0'], 'diagnosis does not rewrite conflict citations before verification');
+const sourceGroundedObjective = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   replacementObjective: { ...validRedirectBrief.replacementObjective, evidenceRefs: ['source:0'] }
-}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'source draft cannot establish a replacement objective');
+}), redirectFixture);
+assertEqual(sourceGroundedObjective.ok, true, 'source-grounded replacement objective reaches the semantic verifier');
+assertDeepEqual(sourceGroundedObjective.value?.brief?.replacementObjective?.evidenceRefs, ['source:0'], 'diagnosis preserves objective citations for verifier judgment');
+assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  replacementObjective: { ...validRedirectBrief.replacementObjective, evidenceRefs: ['fabricated:0'] }
+}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'fabricated evidence ids still fail mechanical provenance validation');
 const mixedAuthorityRedirect = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   sourceFailure: {
@@ -274,36 +284,36 @@ const mixedAuthorityRedirect = validateEditorialDiagnosis(redirectDiagnosis({
     evidenceRefs: ['user:0', 'source:0']
   }]
 }), redirectFixture);
-assertEqual(mixedAuthorityRedirect.ok, true, 'Redirect retains valid grounding refs when a provider adds stray refs from the wrong authority');
+assertEqual(mixedAuthorityRedirect.ok, true, 'Redirect preserves known mixed-authority citations for semantic verification');
 assertDeepEqual(
   mixedAuthorityRedirect.value?.brief?.sourceFailure?.establishedEvidenceRefs,
-  ['user:0'],
-  'Redirect source failure keeps only authoritative established evidence'
+  ['user:0', 'source:0'],
+  'Redirect source failure citations remain unfiltered'
 );
 assertDeepEqual(
   mixedAuthorityRedirect.value?.brief?.sourceFailure?.conflictingSourceRefs,
-  ['source:0'],
-  'Redirect source failure keeps only source-side conflict evidence'
+  ['source:0', 'user:0'],
+  'Redirect source conflict citations remain unfiltered'
 );
 assertDeepEqual(
   mixedAuthorityRedirect.value?.brief?.replacementObjective?.evidenceRefs,
-  ['user:0'],
-  'Redirect objective keeps only authoritative evidence'
+  ['user:0', 'source:0'],
+  'Redirect objective citations remain unfiltered'
 );
 assertDeepEqual(
   mixedAuthorityRedirect.value?.brief?.requiredBeats[0]?.evidenceRefs,
-  ['user:0'],
-  'Redirect required beat keeps only authoritative evidence'
+  ['user:0', 'source:0'],
+  'Redirect required-beat citations remain unfiltered'
 );
 assertDeepEqual(
   mixedAuthorityRedirect.value?.brief?.forbiddenSourceBeats[0]?.sourceRefs,
-  ['source:0'],
-  'Redirect forbidden beat keeps only source evidence'
+  ['source:0', 'user:0'],
+  'Redirect forbidden-beat citations remain unfiltered'
 );
 assertDeepEqual(
   mixedAuthorityRedirect.value?.brief?.sceneCharacters[0]?.evidenceRefs,
-  ['user:0'],
-  'Redirect scene character keeps only authoritative evidence'
+  ['user:0', 'source:0'],
+  'Redirect scene-character citations remain unfiltered'
 );
 const recoveredSceneCharacterEvidence = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
@@ -312,11 +322,11 @@ const recoveredSceneCharacterEvidence = validateEditorialDiagnosis(redirectDiagn
     evidenceRefs: ['source:0']
   }]
 }), redirectFixture);
-assertEqual(recoveredSceneCharacterEvidence.ok, true, 'Redirect recovers an advisory scene-character citation from frozen evidence that names the character');
+assertEqual(recoveredSceneCharacterEvidence.ok, true, 'Redirect leaves a known scene-character citation for semantic verification');
 assertDeepEqual(
   recoveredSceneCharacterEvidence.value?.brief?.sceneCharacters[0]?.evidenceRefs,
-  ['user:0', 'brief:turn'],
-  'Redirect scene-character recovery cites the matching authoritative frozen evidence'
+  ['source:0'],
+  'Redirect does not replace provider-authored scene-character evidence'
 );
 const unsupportedSceneCharacter = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
@@ -329,32 +339,21 @@ const unsupportedSceneCharacter = validateEditorialDiagnosis(redirectDiagnosis({
     character: 'Unmentioned Character'
   }]
 }), redirectFixture);
-assertEqual(unsupportedSceneCharacter.ok, false, 'Redirect still rejects a scene-character set with no evidence-backed character');
-assertEqual(
-  unsupportedSceneCharacter.error?.code,
-  REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID,
-  'ungrounded scene-character coverage reports the character-coverage error'
-);
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+assertEqual(unsupportedSceneCharacter.ok, true, 'scene-character relevance is judged by the verifier rather than deterministic name matching');
+const duplicateSceneCharacter = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   sceneCharacters: [...validRedirectBrief.sceneCharacters, { character: 'She', evidenceRefs: ['user:0'] }]
-}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID, 'Redirect character coverage rejects duplicate characters');
+}), redirectFixture);
+assertEqual(duplicateSceneCharacter.ok, true, 'duplicate semantic character coverage reaches the verifier');
 const mismatchedPressureCharacter = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   characterPressure: [{ ...validRedirectBrief.characterPressure[0], character: 'He' }]
 }), redirectFixture);
-assertEqual(mismatchedPressureCharacter.ok, true, 'Redirect replaces a mismatched advisory pressure row instead of failing the core diagnosis');
+assertEqual(mismatchedPressureCharacter.ok, true, 'Redirect preserves a mismatched advisory pressure row for verifier judgment');
 assertDeepEqual(
   mismatchedPressureCharacter.value?.brief?.characterPressure[0],
-  {
-    character: 'She',
-    immediateWant: null,
-    wantEvidenceRefs: [],
-    sourcePressureEffect: 'unclear',
-    sourceEvidenceRefs: [],
-    pressureReason: 'Frozen evidence did not establish a validated immediate want or pressure effect.'
-  },
-  'Redirect creates an explicit unknown pressure row for the evidence-backed scene character'
+  { ...validRedirectBrief.characterPressure[0], character: 'He' },
+  'Redirect does not deterministically rewrite semantic pressure evidence'
 );
 assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
@@ -365,14 +364,14 @@ const unsupportedWantPressure = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   characterPressure: [{ ...validRedirectBrief.characterPressure[0], wantEvidenceRefs: ['source:0'] }]
 }), redirectFixture);
-assertEqual(unsupportedWantPressure.ok, true, 'unsupported advisory want evidence falls back to an unknown pressure row');
-assertEqual(unsupportedWantPressure.value?.brief?.characterPressure[0].immediateWant, null, 'unsupported advisory want is removed');
+assertEqual(unsupportedWantPressure.ok, true, 'known source-side want evidence reaches the verifier');
+assertEqual(unsupportedWantPressure.value?.brief?.characterPressure[0].immediateWant, 'Learn who sent him.', 'runtime preserves the provider-authored immediate want');
 const unsupportedEffectPressure = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   characterPressure: [{ ...validRedirectBrief.characterPressure[0], sourceEvidenceRefs: ['user:0'] }]
 }), redirectFixture);
-assertEqual(unsupportedEffectPressure.ok, true, 'unsupported advisory pressure-effect evidence falls back to unknown');
-assertEqual(unsupportedEffectPressure.value?.brief?.characterPressure[0].sourcePressureEffect, 'unclear', 'unsupported advisory pressure effect is removed');
+assertEqual(unsupportedEffectPressure.ok, true, 'known authoritative pressure-effect evidence reaches the verifier');
+assertEqual(unsupportedEffectPressure.value?.brief?.characterPressure[0].sourcePressureEffect, 'increasing', 'runtime preserves the provider-authored pressure effect');
 const unclearPressureBrief = {
   ...validRedirectBrief,
   characterPressure: [{
@@ -389,8 +388,8 @@ const noisyUnknownPressure = validateEditorialDiagnosis(redirectDiagnosis({
   ...unclearPressureBrief,
   characterPressure: [{ ...unclearPressureBrief.characterPressure[0], sourcePressureEffect: 'increasing' }]
 }), redirectFixture);
-assertEqual(noisyUnknownPressure.ok, true, 'invalid advisory unknown-pressure tuple is canonicalized');
-assertEqual(noisyUnknownPressure.value?.brief?.characterPressure[0].sourcePressureEffect, 'unclear', 'canonical advisory pressure remains unclear');
+assertEqual(noisyUnknownPressure.ok, true, 'inconsistent advisory pressure reaches semantic verification');
+assertEqual(noisyUnknownPressure.value?.brief?.characterPressure[0].sourcePressureEffect, 'increasing', 'runtime does not canonicalize semantic pressure claims');
 const noChangeRedirectBrief = {
   ...unclearPressureBrief,
   sourceFailure: null,
@@ -670,6 +669,14 @@ assert(
   redirectDiagnosisCorrectionRequest.prompt.includes('Never put diagnosis prose, arrays, or Redirect content in schema, mode, sourceHash, snapshotHash, or decision.'),
   'Redirect diagnosis correction repeats the identity-field protection'
 );
+assert(
+  redirectDiagnosisCorrectionRequest.prompt.includes(`Every Redirect citation field may use these frozen evidence IDs: ${JSON.stringify(evidence.map((entry) => entry.id))}.`),
+  'Redirect diagnosis correction exposes one complete known-id provenance set'
+);
+assert(
+  !redirectDiagnosisCorrectionRequest.prompt.includes('Established evidenceRefs may use only these IDs:'),
+  'Redirect diagnosis correction does not restore deterministic authority partitioning'
+);
 const passRequest = buildEditorialPassRequest({ mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosis, evidence, snapshot, lane: 'reasoner' });
 assert(passRequest.prompt.includes('The diagnosis below is authoritative.'), 'transform prompt pins diagnosis');
 assert(passRequest.prompt.includes('one complete candidate'), 'transform prompt allows full rewrite');
@@ -720,8 +727,12 @@ assert(
   'Redirect transformer prompt forbids paraphrased postponement'
 );
 assert(
-  redirectRequest.prompt.includes('Recursion constructs the Redirect change ledger locally from the validated diagnosis.'),
+  redirectRequest.prompt.includes('Recursion constructs the Redirect change ledger locally from the proposed diagnosis.'),
   'Redirect transformer prompt excludes provider-authored audit ledger work'
+);
+assert(
+  redirectRequest.prompt.includes('the independent Verifier will judge whether it is supported'),
+  'Redirect transformer executes the proposal without treating it as established semantic truth'
 );
 assert(
   redirectRequest.prompt.includes('Do not weaken an active required beat into passive attention, agreement, observation, or internal feeling'),
@@ -769,6 +780,14 @@ assert(
 assert(
   redirectVerifierRequest.prompt.includes('Return failedChecks as the list of every required check that fails or remains unclear. Return an empty list only when every check passes.'),
   'Redirect verifier prompt defines the compact failed-check contract'
+);
+assert(
+  redirectVerifierRequest.prompt.includes('Treat the diagnosis as a proposal, not as established truth.'),
+  'Redirect verifier owns semantic judgment over the proposed diagnosis'
+);
+assert(
+  redirectVerifierRequest.prompt.includes('Fail diagnosis-evidence-grounded'),
+  'Redirect verifier explicitly judges diagnosis evidence, feasibility, and user intent'
 );
 assertDeepEqual(
   redirectVerifierRequest.verificationEvidenceRefs,

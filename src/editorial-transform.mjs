@@ -13,13 +13,8 @@ export const REDIRECT_FAILURE_CATEGORIES = Object.freeze([
   'temporal-causal',
   'character-epistemic'
 ]);
-export const REDIRECT_PRESSURE_EFFECTS = Object.freeze([
-  'increasing',
-  'decreasing',
-  'unchanged',
-  'unclear'
-]);
 export const REDIRECT_VERIFICATION_CHECKS = Object.freeze([
+  'diagnosis-evidence-grounded',
   'source-failure-removed',
   'replacement-objective-fulfilled',
   'required-beats-satisfied',
@@ -207,18 +202,12 @@ function validateClaimList(value, known, { allowSourceDraft = false } = {}) {
 function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
   const data = { ...object(brief) };
   const known = evidenceMap(evidence);
-  const isSource = (id) => ['source-draft', 'source-negative'].includes(known.get(id)?.authority);
-  const list = (value) => Array.isArray(value) ? value.map(String).filter(Boolean) : [];
-  const filteredRefs = (value, predicate) => [...new Set(list(value).filter((id) => known.has(id) && predicate(id)))].slice(0, 8);
-  const authoritativeRefs = (value) => filteredRefs(value, (id) => !isSource(id));
-  const sourceRefs = (value) => filteredRefs(value, isSource);
-  const authoritative = (value) => {
+  const list = (value) => Array.isArray(value) ? value.map(String) : [];
+  const knownRefs = (value, { allowEmpty = false } = {}) => {
     const ids = list(value);
-    return ids.length > 0 && ids.length <= 8 && ids.every((id) => known.has(id) && !isSource(id));
-  };
-  const sourceOnly = (value) => {
-    const ids = list(value);
-    return ids.length > 0 && ids.length <= 8 && ids.every((id) => known.has(id) && isSource(id));
+    return ids.length <= 8
+      && (allowEmpty || ids.length > 0)
+      && ids.every((id) => id && known.has(id));
   };
   if (data.mode !== 'redirect') {
     return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect diagnosis used the wrong brief mode.');
@@ -259,107 +248,57 @@ function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
   }
   data.sourceFailure = {
     ...data.sourceFailure,
-    establishedEvidenceRefs: authoritativeRefs(data.sourceFailure.establishedEvidenceRefs),
-    conflictingSourceRefs: sourceRefs(data.sourceFailure.conflictingSourceRefs)
+    establishedEvidenceRefs: list(data.sourceFailure.establishedEvidenceRefs),
+    conflictingSourceRefs: list(data.sourceFailure.conflictingSourceRefs)
   };
   data.replacementObjective = {
     ...data.replacementObjective,
-    evidenceRefs: authoritativeRefs(data.replacementObjective.evidenceRefs)
+    evidenceRefs: list(data.replacementObjective.evidenceRefs)
   };
   data.requiredBeats = data.requiredBeats.map((beat) => ({
     ...beat,
-    evidenceRefs: authoritativeRefs(beat?.evidenceRefs)
+    evidenceRefs: list(beat?.evidenceRefs)
   }));
   data.forbiddenSourceBeats = data.forbiddenSourceBeats.map((beat) => ({
     ...beat,
-    sourceRefs: sourceRefs(beat?.sourceRefs)
+    sourceRefs: list(beat?.sourceRefs)
   }));
-  const characterEvidenceRefs = (character) => {
-    const escaped = String(character || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (!escaped) return [];
-    const pattern = new RegExp(`\\b${escaped}\\b`, 'i');
-    return [...known.values()]
-      .filter((entry) => !isSource(entry.id) && pattern.test(String(entry.excerpt || '')))
-      .map((entry) => entry.id)
-      .slice(0, 8);
-  };
-  data.sceneCharacters = data.sceneCharacters.map((entry) => {
-    const character = safeText(entry?.character, 120);
-    const evidenceRefs = authoritativeRefs(entry?.evidenceRefs);
-    return {
-      ...entry,
-      character,
-      evidenceRefs: evidenceRefs.length ? evidenceRefs : characterEvidenceRefs(character)
-    };
-  }).filter((entry) => entry.character && entry.evidenceRefs.length);
-  if (!authoritative(data.sourceFailure.establishedEvidenceRefs)
-    || !sourceOnly(data.sourceFailure.conflictingSourceRefs)
-    || !authoritative(data.replacementObjective.evidenceRefs)
-    || data.requiredBeats.some((beat) => !authoritative(beat?.evidenceRefs))
-    || data.forbiddenSourceBeats.some((beat) => !sourceOnly(beat?.sourceRefs))) {
-    return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect evidence authority is invalid.');
+  data.sceneCharacters = data.sceneCharacters.map((entry) => ({
+    ...entry,
+    character: safeText(entry?.character, 120),
+    evidenceRefs: list(entry?.evidenceRefs)
+  }));
+  data.characterPressure = data.characterPressure.map((row) => ({
+    ...row,
+    character: safeText(row?.character, 120),
+    immediateWant: row?.immediateWant === null ? null : safeText(row?.immediateWant, MAX_CLAIM),
+    wantEvidenceRefs: list(row?.wantEvidenceRefs),
+    sourcePressureEffect: safeText(row?.sourcePressureEffect, 80),
+    sourceEvidenceRefs: list(row?.sourceEvidenceRefs),
+    pressureReason: safeText(row?.pressureReason, MAX_CLAIM)
+  }));
+  if (!knownRefs(data.sourceFailure.establishedEvidenceRefs)
+    || !knownRefs(data.sourceFailure.conflictingSourceRefs)
+    || !knownRefs(data.replacementObjective.evidenceRefs)
+    || data.requiredBeats.some((beat) => !knownRefs(beat?.evidenceRefs))
+    || data.forbiddenSourceBeats.some((beat) => !knownRefs(beat?.sourceRefs))
+    || data.sceneCharacters.some((entry) => !knownRefs(entry?.evidenceRefs, { allowEmpty: true }))
+    || data.characterPressure.some((row) =>
+      !knownRefs(row?.wantEvidenceRefs, { allowEmpty: true })
+      || !knownRefs(row?.sourceEvidenceRefs, { allowEmpty: true }))) {
+    return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect diagnosis cited unknown evidence.');
   }
 
   const characters = data.sceneCharacters.map((entry) => safeText(entry?.character, 120));
-  if (!characters.length
-    || characters.some((name) => !name)
-    || new Set(characters).size !== characters.length) {
+  if (!characters.length || characters.some((name) => !name)) {
     return fail(REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID, 'Redirect character coverage is invalid.');
   }
-  if (data.sceneCharacters.some((entry) => !authoritative(entry?.evidenceRefs))) {
-    return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect scene character cited invalid evidence.');
+  if (data.characterPressure.some((row) =>
+    !row.character
+    || (row.immediateWant !== null && !row.immediateWant)
+    || !row.sourcePressureEffect)) {
+    return fail(REDIRECT_ERROR_CODES.PRESSURE_INVALID, 'Redirect character-pressure structure is invalid.');
   }
-
-  const pressureByCharacter = new Map();
-  for (const row of data.characterPressure) {
-    const character = safeText(row?.character, 120);
-    if (character && !pressureByCharacter.has(character)) pressureByCharacter.set(character, row);
-  }
-  const unknownPressure = (character) => ({
-    character,
-    immediateWant: null,
-    wantEvidenceRefs: [],
-    sourcePressureEffect: 'unclear',
-    sourceEvidenceRefs: [],
-    pressureReason: 'Frozen evidence did not establish a validated immediate want or pressure effect.'
-  });
-  data.characterPressure = characters.map((character) => {
-    const row = pressureByCharacter.get(character);
-    if (!row) return unknownPressure(character);
-    const pressureReason = safeText(row.pressureReason, MAX_CLAIM);
-    if (row.immediateWant === null) {
-      if (pressureReason
-        && list(row.wantEvidenceRefs).length === 0
-        && list(row.sourceEvidenceRefs).length === 0
-        && row.sourcePressureEffect === 'unclear') {
-        return {
-          character,
-          immediateWant: null,
-          wantEvidenceRefs: [],
-          sourcePressureEffect: 'unclear',
-          sourceEvidenceRefs: [],
-          pressureReason
-        };
-      }
-      return unknownPressure(character);
-    }
-    const immediateWant = safeText(row.immediateWant, MAX_CLAIM);
-    if (!immediateWant
-      || !pressureReason
-      || !REDIRECT_PRESSURE_EFFECTS.includes(row.sourcePressureEffect)
-      || !authoritative(row.wantEvidenceRefs)
-      || !sourceOnly(row.sourceEvidenceRefs)) {
-      return unknownPressure(character);
-    }
-    return {
-      character,
-      immediateWant,
-      wantEvidenceRefs: list(row.wantEvidenceRefs),
-      sourcePressureEffect: row.sourcePressureEffect,
-      sourceEvidenceRefs: list(row.sourceEvidenceRefs),
-      pressureReason
-    };
-  });
   return { ok: true, value: data };
 }
 
@@ -634,13 +573,14 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
   const validSourceEvidenceIds = evidence
     .filter((entry) => ['source-draft', 'source-negative'].includes(entry.authority))
     .map((entry) => entry.id);
+  const validEvidenceIds = evidence.map((entry) => entry.id);
   const correction = retry
     ? mode === 'redirect'
       ? [
           'Editorial diagnosis correction required.',
           `The previous diagnosis could not be accepted: ${safeText(retry?.code || 'RECURSION_EDITORIAL_DIAGNOSIS_INVALID', 120)} - ${safeText(retry?.message || 'Invalid diagnosis.', 360)}`,
-          `Established evidenceRefs may use only these IDs: ${JSON.stringify(validPreservationEvidenceIds)}.`,
-          `conflictingSourceRefs, sourceRefs, and sourceEvidenceRefs may use only these source IDs: ${JSON.stringify(validSourceEvidenceIds)}.`,
+          `Every Redirect citation field may use these frozen evidence IDs: ${JSON.stringify(validEvidenceIds)}.`,
+          'Use each evidence authority label as semantic context. The independent Verifier, not citation placement, decides whether a claim is supported.',
           'Return one complete corrected flat Redirect diagnosis object; do not discuss the correction.'
         ]
       : [
@@ -707,7 +647,7 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
     mode,
     sourceText: preservedSource,
     presentationEnvelope,
-    validEvidenceIds: evidence.map((entry) => entry.id),
+    validEvidenceIds,
     validPreservationEvidenceIds,
     validSourceEvidenceIds
   };
@@ -742,7 +682,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     : [];
   const redirectRules = mode === 'redirect'
     ? [
-        'The validated Redirect diagnosis is authoritative.',
+        'Treat the Redirect diagnosis as the proposal to execute in this candidate; the independent Verifier will judge whether it is supported.',
         'Rebuild the response around diagnosis.brief.replacementObjective.',
         'Include the supported substance of every required beat.',
         'Do not weaken an active required beat into passive attention, agreement, observation, or internal feeling.',
@@ -751,7 +691,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
         'Use diagnosis.brief.characterPressure as advisory dramatic evidence. Rising pressure makes a stronger response more likely but never mandatory.',
         'Silence, restraint, refusal, and delayed action remain valid when supported.',
         'Do not distribute dialogue or action as a checklist, and do not invent a want for an unclear character.',
-        'Recursion constructs the Redirect change ledger locally from the validated diagnosis.',
+        'Recursion constructs the Redirect change ledger locally from the proposed diagnosis.',
         'A lexical rewrite that preserves the source objective or beat plan is not a Redirect.'
       ]
     : [];
@@ -760,7 +700,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
         'Return exactly these Redirect top-level keys: schema, mode, sourceHash, snapshotHash, diagnosisHash, text.',
         'Do not return candidate, patches, changeLedger, cardOutcomes, preservationLedger, or riskFlags.',
         'Return candidate prose only in the top-level text field.',
-        'Recursion constructs preservation, change-ledger, and audit metadata locally after semantic validation.'
+        'Recursion constructs preservation, change-ledger, and audit metadata locally after structural validation.'
       ]
     : [
         `Copy diagnosis.brief.preserve exactly into candidate.preservationLedger: ${JSON.stringify(requiredPreservationLedger)}. Do not add, remove, or rewrite preservation claims or evidence IDs.`,
@@ -771,11 +711,13 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     `Selected mode: ${mode}.`,
     full
       ? mode === 'redirect'
-        ? 'Return one complete rewritten response in the top-level text field. You may replace every source sentence when the validated diagnosis supports it.'
+        ? 'Return one complete rewritten response in the top-level text field. You may replace every source sentence when the proposed diagnosis calls for it.'
         : 'Return one complete candidate. You may replace every source sentence when the validated diagnosis supports it.'
       : 'Return only exact non-overlapping replacements for supplied targets.',
     mode === 'redirect' ? 'The source may be negative evidence. Preserve only facts supported by frozen evidence.' : 'Preserve supported facts, commitments, constraints, and the user turn while improving execution.',
-    'The diagnosis below is authoritative. Do not add a new diagnosis or revise its preservation/discard decisions.',
+    mode === 'redirect'
+      ? 'Do not rediagnose inside candidate prose; execute the proposal and leave semantic acceptance to the Verifier.'
+      : 'The diagnosis below is authoritative. Do not add a new diagnosis or revise its preservation/discard decisions.',
     ...providerShapeRules,
     ...redirectRules,
     ...(presentationEnvelope ? ['Preserve the presentation envelope exactly: keep the leading scene header unchanged and retain a blank line before body prose.'] : []),
@@ -830,8 +772,12 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
     : [];
   const redirectRules = mode === 'redirect'
     ? [
+        'Treat the diagnosis as a proposal, not as established truth.',
+        'First judge every diagnosis claim against the complete frozen evidence. Evidence authority labels inform your judgment but do not decide it automatically.',
+        'Fail diagnosis-evidence-grounded when the source failure, replacement objective, required beats, forbidden beats, scene cast, or character pressure are unsupported, physically impossible, temporally impossible, or conflict with user intent.',
+        'A source-draft citation may identify what the source did, but source prose alone does not make an invented fact canonical. Judge support from the complete evidence rather than citation placement.',
         'Cross-check the diagnosis against frozen evidence and the source failure; reject if its objective or beats merely rename, soften, or preserve the failed trajectory.',
-        'Evaluate every required check against both the validated diagnosis and frozen evidence; do not invent a different objective.',
+        'Evaluate every required check against both the proposed diagnosis and frozen evidence; do not invent a different objective.',
         `Evaluate all ${REDIRECT_VERIFICATION_CHECKS.length} required checks below.`,
         ...REDIRECT_VERIFICATION_CHECKS.map((check, index) => `${index + 1}. ${check}`),
         'Return failedChecks as the list of every required check that fails or remains unclear. Return an empty list only when every check passes.',

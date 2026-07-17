@@ -55,7 +55,7 @@ assertDeepEqual(
 );
 
 const redirectChecks = [
-  'source-failure-removed', 'replacement-objective-fulfilled', 'required-beats-satisfied',
+  'diagnosis-evidence-grounded', 'source-failure-removed', 'replacement-objective-fulfilled', 'required-beats-satisfied',
   'forbidden-source-beats-excluded', 'character-pressure-coherent', 'hard-constraints-preserved',
   'user-turn-answered', 'unsupported-facts-absent'
 ].map((check) => ({ check, status: 'pass', evidenceRefs: ['user:0'], note: 'Passed.' }));

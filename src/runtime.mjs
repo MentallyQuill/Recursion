@@ -4062,7 +4062,6 @@ export function createRecursionRuntime({
         const verifierLane = editorialMode === 'redirect' && reasonerLaneAvailable(settings)
           ? 'reasoner'
           : editorialLane;
-        let verificationCorrectionSpent = false;
         const verifyCandidate = async () => {
           const runVerifier = async (retry = null) => {
             const verificationRequest = buildEditorialVerificationRequest({
@@ -4097,8 +4096,8 @@ export function createRecursionRuntime({
           stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: verifierLane, composerLane: verifierLane, chips: ['Enhancement', 'Verify'] });
           let verified = await runVerifier();
           if (verified.canceled) return verified;
-          if (editorialMode === 'redirect' && !verified.result.ok && !verificationCorrectionSpent) {
-            verificationCorrectionSpent = true;
+          if (editorialMode === 'redirect' && !verified.result.ok && recoveryToken.spent !== true) {
+            recoveryToken.spent = true;
             stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Correcting editorial verification...', providerLane: verifierLane, composerLane: verifierLane, chips: ['Enhancement', 'Verify'] });
             verified = await runVerifier(verified.result.error);
           }
@@ -4107,44 +4106,6 @@ export function createRecursionRuntime({
         let verified = await verifyCandidate();
         if (verified.canceled) return canceledEditorialResult();
         verificationResult = verified.result;
-        if (editorialMode === 'redirect' && verificationResult.ok && verificationResult.decision === 'reject') {
-          const failedChecks = (Array.isArray(verificationResult.checks) ? verificationResult.checks : [])
-            .filter((entry) => entry?.status !== 'pass')
-            .map((entry) => `${safeText(entry?.check || 'check', 80)}: ${safeText(entry?.note || 'failed', 240)}`)
-            .filter(Boolean);
-          const correctionError = {
-            code: REDIRECT_ERROR_CODES.VERIFICATION_REJECTED,
-            message: failedChecks.length
-              ? `Redirect verifier rejected the candidate. Failed checks: ${failedChecks.join(' | ')}`
-              : 'Redirect verifier rejected the candidate.'
-          };
-          stageRuntimeActivity({ runId, phase: 'editorialTransforming', label: 'Revising Redirect candidate...', providerLane: editorialLane, composerLane: editorialLane, chips: ['Enhancement', 'Redirect'] });
-          transformResponse = await generateEditorialRole('editorialTransformer', {
-            ...buildEditorialPassRequest({
-              mode: editorialMode,
-              sourceText,
-              sourceHash,
-              snapshotHash,
-              diagnosis: diagnosisValidation.value,
-              evidence,
-              snapshot: publicSnapshot,
-              targets,
-              lane: editorialLane,
-              retry: correctionError
-            }),
-            ...reasonerRequestMetadata(settings, 'editorial-transform', editorialLane)
-          }, { allowStructuredRecovery: false, allowLaneFallback: false });
-          if (enhancementSignal?.aborted) return canceledEditorialResult();
-          validation = transformResponse.result?.ok === true
-            ? validateEditorialPass(transformResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, snapshot: publicSnapshot, targets })
-            : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
-          if (!validation.ok) return { ...failEditorial(validation.error), validation };
-          editorialLane = transformResponse.lane;
-          candidateHash = hashJson(String(validation.artifact.candidate?.text || validation.artifact.text || ''));
-          verified = await verifyCandidate();
-          if (verified.canceled) return canceledEditorialResult();
-          verificationResult = verified.result;
-        }
         if (!verificationResult.ok || verificationResult.decision !== 'accept') {
           return {
             ...failEditorial(verificationResult.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_REJECTED', message: 'Editorial verifier rejected candidate.' }, 'Editorial verification failed. Original kept.'),

@@ -323,28 +323,28 @@ assertDeepEqual(
 );
 assertDeepEqual(
   redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.properties.wantEvidenceRefs.items.enum,
-  ['user:0', 'card:active-cast'],
-  'Redirect wants cannot cite source-draft evidence'
+  ['user:0', 'card:active-cast', 'source:0'],
+  'Redirect want citations expose every frozen evidence id to the semantic verifier'
 );
 assertDeepEqual(
   redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.properties.sourceEvidenceRefs.items.enum,
-  ['source:0'],
-  'Redirect pressure effects can cite only source-draft evidence'
+  ['user:0', 'card:active-cast', 'source:0'],
+  'Redirect pressure-effect citations expose every frozen evidence id to the semantic verifier'
 );
 assertDeepEqual(
   redirectDiagnosisMachineSchema.schema.properties.sourceFailure.properties.conflictingSourceRefs.items.enum,
-  ['source:0'],
-  'Redirect source failures constrain conflicting refs to source-draft evidence'
+  ['user:0', 'card:active-cast', 'source:0'],
+  'Redirect conflict citations are structurally constrained only to frozen evidence ids'
 );
 assertDeepEqual(
   redirectDiagnosisMachineSchema.schema.properties.forbiddenSourceBeats.items.properties.sourceRefs.items.enum,
-  ['source:0'],
-  'Redirect forbidden beats constrain refs to source-draft evidence'
+  ['user:0', 'card:active-cast', 'source:0'],
+  'Redirect forbidden-beat citations are structurally constrained only to frozen evidence ids'
 );
-assertDeepEqual(
-  redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.properties.sourcePressureEffect.enum,
-  ['increasing', 'decreasing', 'unchanged', 'unclear'],
-  'Redirect pressure effects use the frozen vocabulary'
+assertEqual(
+  redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.properties.sourcePressureEffect.type,
+  'string',
+  'Redirect pressure labels remain semantic model evidence rather than a deterministic enum gate'
 );
 assertEqual(
   redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.properties.wantEvidenceRefs.minItems,
@@ -356,42 +356,15 @@ assertEqual(
   0,
   'Redirect pressure schema permits empty source evidence for an unclear effect'
 );
-const redirectPressureVariants = redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.anyOf;
-assertEqual(redirectPressureVariants.length, 2, 'Redirect pressure schema exposes only concrete and unknown pressure variants');
 assertEqual(
-  redirectPressureVariants[0].properties.immediateWant.type,
-  'null',
-  'Redirect unknown pressure variant requires a null immediate want'
+  Object.prototype.hasOwnProperty.call(redirectDiagnosisMachineSchema.schema.properties.characterPressure.items, 'anyOf'),
+  false,
+  'Redirect pressure schema does not deterministically adjudicate concrete versus unknown semantic claims'
 );
 assertEqual(
-  redirectPressureVariants[0].properties.wantEvidenceRefs.maxItems,
+  redirectDiagnosisMachineSchema.schema.properties.sceneCharacters.items.properties.evidenceRefs.minItems,
   0,
-  'Redirect unknown pressure variant forbids invented want evidence'
-);
-assertEqual(
-  redirectPressureVariants[0].properties.sourcePressureEffect.const,
-  'unclear',
-  'Redirect unknown pressure variant requires an unclear source effect'
-);
-assertEqual(
-  redirectPressureVariants[0].properties.sourceEvidenceRefs.maxItems,
-  0,
-  'Redirect unknown pressure variant forbids invented source evidence'
-);
-assertEqual(
-  redirectPressureVariants[1].properties.immediateWant.type,
-  'string',
-  'Redirect concrete pressure variant requires a concrete immediate want'
-);
-assertEqual(
-  redirectPressureVariants[1].properties.wantEvidenceRefs.minItems,
-  1,
-  'Redirect concrete pressure variant requires authoritative want evidence'
-);
-assertEqual(
-  redirectPressureVariants[1].properties.sourceEvidenceRefs.minItems,
-  1,
-  'Redirect concrete pressure variant requires source evidence for its effect'
+  'Redirect permits the verifier to judge scene-character grounding when the diagnostician leaves citations empty'
 );
 const editorialPassMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialPass.v1',
@@ -476,11 +449,11 @@ assertDeepEqual(
   'Redirect verifier uses the compact failed-check contract'
 );
 assertEqual(redirectVerifierMachineSchema.schema.properties.failedChecks.minItems, 0, 'Redirect verifier may report no failed checks');
-assertEqual(redirectVerifierMachineSchema.schema.properties.failedChecks.maxItems, 8, 'Redirect verifier cannot report more than the eight required checks');
+assertEqual(redirectVerifierMachineSchema.schema.properties.failedChecks.maxItems, 9, 'Redirect verifier cannot report more than the nine required checks');
 assertDeepEqual(
   redirectVerifierMachineSchema.schema.properties.failedChecks.items.enum,
   [
-    'source-failure-removed', 'replacement-objective-fulfilled', 'required-beats-satisfied',
+    'diagnosis-evidence-grounded', 'source-failure-removed', 'replacement-objective-fulfilled', 'required-beats-satisfied',
     'forbidden-source-beats-excluded', 'character-pressure-coherent', 'hard-constraints-preserved',
     'user-turn-answered', 'unsupported-facts-absent'
   ],
@@ -735,7 +708,7 @@ const normalizedCompactRedirectVerification = await compactRedirectVerifierRoute
 });
 assertEqual(normalizedCompactRedirectVerification.ok, true, 'compact Redirect verifier response normalizes into the internal verification contract');
 assertEqual(normalizedCompactRedirectVerification.data.decision, 'reject', 'any reported failed check derives a reject decision');
-assertEqual(normalizedCompactRedirectVerification.data.checks.length, 8, 'Redirect verifier normalization constructs all eight canonical checks');
+assertEqual(normalizedCompactRedirectVerification.data.checks.length, 9, 'Redirect verifier normalization constructs all nine canonical checks');
 assertEqual(
   normalizedCompactRedirectVerification.data.checks.find((entry) => entry.check === 'required-beats-satisfied')?.status,
   'fail',

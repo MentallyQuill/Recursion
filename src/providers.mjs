@@ -20,7 +20,6 @@ import {
   EDITORIAL_EFFECTIVENESS_SCHEMA,
   REDIRECT_EFFECTIVENESS_CRITERIA,
   REDIRECT_FAILURE_CATEGORIES,
-  REDIRECT_PRESSURE_EFFECTS,
   REDIRECT_VERIFICATION_CHECKS
 } from './editorial-transform.mjs';
 
@@ -265,7 +264,7 @@ function editorialClaimSchema(validEvidenceIds) {
   };
 }
 
-function redirectPressureSchema(validPreservationEvidenceIds, validSourceEvidenceIds) {
+function redirectPressureSchema(validEvidenceIds) {
   const optionalEvidenceRefs = (values) => ({
     ...editorialEvidenceRefsSchema(values),
     minItems: 0
@@ -273,9 +272,9 @@ function redirectPressureSchema(validPreservationEvidenceIds, validSourceEvidenc
   const properties = {
     character: { type: 'string' },
     immediateWant: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    wantEvidenceRefs: optionalEvidenceRefs(validPreservationEvidenceIds),
-    sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
-    sourceEvidenceRefs: optionalEvidenceRefs(validSourceEvidenceIds),
+    wantEvidenceRefs: optionalEvidenceRefs(validEvidenceIds),
+    sourcePressureEffect: { type: 'string' },
+    sourceEvidenceRefs: optionalEvidenceRefs(validEvidenceIds),
     pressureReason: { type: 'string' }
   };
   const required = [
@@ -286,48 +285,25 @@ function redirectPressureSchema(validPreservationEvidenceIds, validSourceEvidenc
     'sourceEvidenceRefs',
     'pressureReason'
   ];
-  const variant = (overrides) => ({
-    type: 'object',
-    properties: {
-      ...properties,
-      ...overrides
-    },
-    required,
-    additionalProperties: false
-  });
   return {
     type: 'object',
     properties,
     required,
-    additionalProperties: false,
-    anyOf: [
-      variant({
-        immediateWant: { type: 'null' },
-        wantEvidenceRefs: { ...optionalEvidenceRefs(validPreservationEvidenceIds), maxItems: 0 },
-        sourcePressureEffect: { const: 'unclear' },
-        sourceEvidenceRefs: { ...optionalEvidenceRefs(validSourceEvidenceIds), maxItems: 0 }
-      }),
-      variant({
-        immediateWant: { type: 'string' },
-        wantEvidenceRefs: editorialEvidenceRefsSchema(validPreservationEvidenceIds),
-        sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
-        sourceEvidenceRefs: editorialEvidenceRefsSchema(validSourceEvidenceIds)
-      })
-    ]
+    additionalProperties: false
   };
 }
 
-function redirectDiagnosisProperties(validEvidenceIds, validPreservationEvidenceIds, validSourceEvidenceIds) {
-  const sourceRefs = editorialEvidenceRefsSchema(validSourceEvidenceIds);
-  const authoritativeRefs = editorialEvidenceRefsSchema(validPreservationEvidenceIds);
+function redirectDiagnosisProperties(validEvidenceIds) {
+  const evidenceRefs = editorialEvidenceRefsSchema(validEvidenceIds);
+  const optionalEvidenceRefs = { ...evidenceRefs, minItems: 0 };
   return {
     sourceFailure: {
       type: 'object',
       properties: {
         category: { enum: [...REDIRECT_FAILURE_CATEGORIES] },
         problem: { type: 'string' },
-        establishedEvidenceRefs: authoritativeRefs,
-        conflictingSourceRefs: sourceRefs
+        establishedEvidenceRefs: evidenceRefs,
+        conflictingSourceRefs: evidenceRefs
       },
       required: ['category', 'problem', 'establishedEvidenceRefs', 'conflictingSourceRefs'],
       additionalProperties: false
@@ -336,7 +312,7 @@ function redirectDiagnosisProperties(validEvidenceIds, validPreservationEvidence
       type: 'object',
       properties: {
         summary: { type: 'string' },
-        evidenceRefs: authoritativeRefs
+        evidenceRefs
       },
       required: ['summary', 'evidenceRefs'],
       additionalProperties: false
@@ -347,7 +323,7 @@ function redirectDiagnosisProperties(validEvidenceIds, validPreservationEvidence
       maxItems: 8,
       items: {
         type: 'object',
-        properties: { summary: { type: 'string' }, evidenceRefs: authoritativeRefs },
+        properties: { summary: { type: 'string' }, evidenceRefs },
         required: ['summary', 'evidenceRefs'],
         additionalProperties: false
       }
@@ -358,7 +334,7 @@ function redirectDiagnosisProperties(validEvidenceIds, validPreservationEvidence
       maxItems: 8,
       items: {
         type: 'object',
-        properties: { summary: { type: 'string' }, sourceRefs },
+        properties: { summary: { type: 'string' }, sourceRefs: evidenceRefs },
         required: ['summary', 'sourceRefs'],
         additionalProperties: false
       }
@@ -369,7 +345,7 @@ function redirectDiagnosisProperties(validEvidenceIds, validPreservationEvidence
       maxItems: 16,
       items: {
         type: 'object',
-        properties: { character: { type: 'string' }, evidenceRefs: authoritativeRefs },
+        properties: { character: { type: 'string' }, evidenceRefs: optionalEvidenceRefs },
         required: ['character', 'evidenceRefs'],
         additionalProperties: false
       }
@@ -378,7 +354,7 @@ function redirectDiagnosisProperties(validEvidenceIds, validPreservationEvidence
       type: 'array',
       minItems: 1,
       maxItems: 16,
-      items: redirectPressureSchema(validPreservationEvidenceIds, validSourceEvidenceIds)
+      items: redirectPressureSchema(validEvidenceIds)
     }
   };
 }
@@ -562,11 +538,7 @@ export function machineJsonSchemaForRequest(request = {}) {
       decision: { enum: decisions }
     };
     if (mode === 'redirect') {
-      const redirectProperties = redirectDiagnosisProperties(
-        validEvidenceIds,
-        validPreservationEvidenceIds,
-        validSourceEvidenceIds
-      );
+      const redirectProperties = redirectDiagnosisProperties(validEvidenceIds);
       return {
         name: schemaSafeName(schema),
         schema: {

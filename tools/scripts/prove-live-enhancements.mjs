@@ -15,6 +15,8 @@ const password = envValue('SILLYTAVERN_PASSWORD');
 const targetModel = envValue('RECURSION_TARGET_MODEL', envValue('RECURSION_MODEL_EVAL_TARGET_MODEL'));
 const judgeModel = envValue('RECURSION_JUDGE_MODEL', envValue('RECURSION_MODEL_EVAL_JUDGE_MODEL', targetModel));
 const selectedCase = envValue('RECURSION_ENHANCEMENT_PROOF_CASE');
+const forceUtilityEnhancement = ['1', 'true', 'yes', 'on']
+  .includes(envValue('RECURSION_FORCE_UTILITY_ENHANCEMENT').toLowerCase());
 const timeoutMs = Math.max(10000, Number(envValue('RECURSION_LIVE_TIMEOUT_MS', '120000')) || 120000);
 const runId = createRunId('prove-live-enhancements');
 const artifactRoot = join('artifacts', 'live-redirect', runId);
@@ -43,6 +45,7 @@ const result = await runLiveEditorialEffectiveness({
   password,
   targetModel,
   judgeModel,
+  forceUtilityEnhancement,
   timeoutMs,
   failFast: false,
   artifactRoot

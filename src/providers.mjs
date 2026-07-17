@@ -265,7 +265,7 @@ function editorialClaimSchema(validEvidenceIds) {
   };
 }
 
-function redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds) {
+function redirectPressureSchema(validPreservationEvidenceIds, validSourceEvidenceIds) {
   const optionalEvidenceRefs = (values) => ({
     ...editorialEvidenceRefsSchema(values),
     minItems: 0
@@ -275,7 +275,7 @@ function redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds) 
     immediateWant: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     wantEvidenceRefs: optionalEvidenceRefs(validPreservationEvidenceIds),
     sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
-    sourceEvidenceRefs: optionalEvidenceRefs(validEvidenceIds),
+    sourceEvidenceRefs: optionalEvidenceRefs(validSourceEvidenceIds),
     pressureReason: { type: 'string' }
   };
   const required = [
@@ -305,54 +305,45 @@ function redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds) 
         immediateWant: { type: 'null' },
         wantEvidenceRefs: { ...optionalEvidenceRefs(validPreservationEvidenceIds), maxItems: 0 },
         sourcePressureEffect: { const: 'unclear' },
-        sourceEvidenceRefs: { ...optionalEvidenceRefs(validEvidenceIds), maxItems: 0 }
+        sourceEvidenceRefs: { ...optionalEvidenceRefs(validSourceEvidenceIds), maxItems: 0 }
       }),
       variant({
         immediateWant: { type: 'string' },
         wantEvidenceRefs: editorialEvidenceRefsSchema(validPreservationEvidenceIds),
         sourcePressureEffect: { enum: [...REDIRECT_PRESSURE_EFFECTS] },
-        sourceEvidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds)
+        sourceEvidenceRefs: editorialEvidenceRefsSchema(validSourceEvidenceIds)
       })
     ]
   };
 }
 
-function redirectBriefProperties(validEvidenceIds, validPreservationEvidenceIds) {
-  const evidenceRefs = editorialEvidenceRefsSchema(validEvidenceIds);
+function redirectDiagnosisProperties(validEvidenceIds, validPreservationEvidenceIds, validSourceEvidenceIds) {
+  const sourceRefs = editorialEvidenceRefsSchema(validSourceEvidenceIds);
   const authoritativeRefs = editorialEvidenceRefsSchema(validPreservationEvidenceIds);
   return {
     sourceFailure: {
-      anyOf: [
-        { type: 'null' },
-        {
-          type: 'object',
-          properties: {
-            category: { enum: [...REDIRECT_FAILURE_CATEGORIES] },
-            problem: { type: 'string' },
-            establishedEvidenceRefs: authoritativeRefs,
-            conflictingSourceRefs: evidenceRefs
-          },
-          required: ['category', 'problem', 'establishedEvidenceRefs', 'conflictingSourceRefs'],
-          additionalProperties: false
-        }
-      ]
+      type: 'object',
+      properties: {
+        category: { enum: [...REDIRECT_FAILURE_CATEGORIES] },
+        problem: { type: 'string' },
+        establishedEvidenceRefs: authoritativeRefs,
+        conflictingSourceRefs: sourceRefs
+      },
+      required: ['category', 'problem', 'establishedEvidenceRefs', 'conflictingSourceRefs'],
+      additionalProperties: false
     },
     replacementObjective: {
-      anyOf: [
-        { type: 'null' },
-        {
-          type: 'object',
-          properties: {
-            summary: { type: 'string' },
-            evidenceRefs: authoritativeRefs
-          },
-          required: ['summary', 'evidenceRefs'],
-          additionalProperties: false
-        }
-      ]
+      type: 'object',
+      properties: {
+        summary: { type: 'string' },
+        evidenceRefs: authoritativeRefs
+      },
+      required: ['summary', 'evidenceRefs'],
+      additionalProperties: false
     },
     requiredBeats: {
       type: 'array',
+      minItems: 1,
       maxItems: 8,
       items: {
         type: 'object',
@@ -363,10 +354,11 @@ function redirectBriefProperties(validEvidenceIds, validPreservationEvidenceIds)
     },
     forbiddenSourceBeats: {
       type: 'array',
+      minItems: 1,
       maxItems: 8,
       items: {
         type: 'object',
-        properties: { summary: { type: 'string' }, sourceRefs: evidenceRefs },
+        properties: { summary: { type: 'string' }, sourceRefs },
         required: ['summary', 'sourceRefs'],
         additionalProperties: false
       }
@@ -386,16 +378,12 @@ function redirectBriefProperties(validEvidenceIds, validPreservationEvidenceIds)
       type: 'array',
       minItems: 1,
       maxItems: 16,
-      items: redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds)
+      items: redirectPressureSchema(validPreservationEvidenceIds, validSourceEvidenceIds)
     }
   };
 }
 
 function editorialBriefSchema(mode, validEvidenceIds, validPreservationEvidenceIds = validEvidenceIds) {
-  const redirectProperties = mode === 'redirect'
-    ? redirectBriefProperties(validEvidenceIds, validPreservationEvidenceIds)
-    : {};
-  const redirectRequired = mode === 'redirect' ? Object.keys(redirectProperties) : [];
   return {
     type: 'object',
     properties: {
@@ -417,10 +405,9 @@ function editorialBriefSchema(mode, validEvidenceIds, validPreservationEvidenceI
       preserve: { type: 'array', maxItems: 12, items: editorialClaimSchema(validPreservationEvidenceIds) },
       discard: { type: 'array', maxItems: 12, items: editorialClaimSchema(validEvidenceIds) },
       allowedChanges: { type: 'array', maxItems: 12, items: { type: 'string' } },
-      forbiddenChanges: { type: 'array', maxItems: 12, items: { type: 'string' } },
-      ...redirectProperties
+      forbiddenChanges: { type: 'array', maxItems: 12, items: { type: 'string' } }
     },
-    required: ['mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges', ...redirectRequired],
+    required: ['mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges'],
     additionalProperties: false
   };
 }
@@ -561,21 +548,51 @@ export function machineJsonSchemaForRequest(request = {}) {
       : '';
     const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
     const validPreservationEvidenceIds = uniqueRequestStrings(request?.validPreservationEvidenceIds);
+    const validSourceEvidenceIds = uniqueRequestStrings(request?.validSourceEvidenceIds);
     const decisions = mode === 'redirect'
       ? ['proceed']
       : mode === 'recompose'
         ? ['proceed', 'no-change', 'requires-redirect']
         : ['proceed', 'no-change', 'requires-recompose', 'requires-redirect'];
+    const identityProperties = {
+      schema: { const: schema },
+      mode: mode ? { const: mode } : { enum: ['repair', 'recompose', 'redirect'] },
+      sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
+      snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
+      decision: { enum: decisions }
+    };
+    if (mode === 'redirect') {
+      const redirectProperties = redirectDiagnosisProperties(
+        validEvidenceIds,
+        validPreservationEvidenceIds,
+        validSourceEvidenceIds
+      );
+      return {
+        name: schemaSafeName(schema),
+        schema: {
+          type: 'object',
+          properties: {
+            ...identityProperties,
+            ...redirectProperties
+          },
+          required: [
+            'schema',
+            'mode',
+            'sourceHash',
+            'snapshotHash',
+            'decision',
+            ...Object.keys(redirectProperties)
+          ],
+          additionalProperties: false
+        }
+      };
+    }
     return {
       name: schemaSafeName(schema),
       schema: {
         type: 'object',
         properties: {
-          schema: { const: schema },
-          mode: mode ? { const: mode } : { enum: ['repair', 'recompose', 'redirect'] },
-          sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
-          snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
-          decision: { enum: decisions },
+          ...identityProperties,
           brief: editorialBriefSchema(mode, validEvidenceIds, validPreservationEvidenceIds)
         },
         required: ['schema', 'mode', 'sourceHash', 'snapshotHash', 'decision', 'brief'],
@@ -597,12 +614,29 @@ export function machineJsonSchemaForRequest(request = {}) {
       : null;
     const installedCardIds = uniqueRequestStrings(request?.installedCardIds);
     const validTargetIds = uniqueRequestStrings(request?.validTargetIds);
-    const properties = {
+    const identityProperties = {
       schema: { const: schema },
       mode: mode ? { const: mode } : { enum: ['repair', 'recompose', 'redirect'] },
       sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
       snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
-      diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' },
+      diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' }
+    };
+    if (mode === 'redirect') {
+      return {
+        name: schemaSafeName(schema),
+        schema: {
+          type: 'object',
+          properties: {
+            ...identityProperties,
+            text: { type: 'string' }
+          },
+          required: ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'text'],
+          additionalProperties: false
+        }
+      };
+    }
+    const properties = {
+      ...identityProperties,
       cardOutcomes: editorialCardOutcomesSchema(installedCardIds, validEvidenceIds)
     };
     const required = ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'cardOutcomes'];
@@ -647,17 +681,40 @@ export function machineJsonSchemaForRequest(request = {}) {
     const diagnosisHash = String(request?.diagnosisHash || '').trim();
     const candidateHash = String(request?.candidateHash || '').trim();
     const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
-    const properties = {
+    const identityProperties = {
       schema: { const: schema },
       mode: mode ? { const: mode } : { enum: ['recompose', 'redirect'] },
       sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
       snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
       diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' },
-      candidateHash: candidateHash ? { const: candidateHash } : { type: 'string' },
+      candidateHash: candidateHash ? { const: candidateHash } : { type: 'string' }
+    };
+    if (mode === 'redirect') {
+      return {
+        name: schemaSafeName(schema),
+        schema: {
+          type: 'object',
+          properties: {
+            ...identityProperties,
+            failedChecks: {
+              type: 'array',
+              minItems: 0,
+              maxItems: REDIRECT_VERIFICATION_CHECKS.length,
+              uniqueItems: true,
+              items: { enum: [...REDIRECT_VERIFICATION_CHECKS] }
+            },
+            reason: { type: 'string' }
+          },
+          required: ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash', 'failedChecks', 'reason'],
+          additionalProperties: false
+        }
+      };
+    }
+    const properties = {
+      ...identityProperties,
       decision: { enum: ['accept', 'reject'] },
       evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds),
-      reason: { type: 'string' },
-      ...(mode === 'redirect' ? { checks: editorialVerificationChecksSchema(validEvidenceIds) } : {})
+      reason: { type: 'string' }
     };
     return {
       name: schemaSafeName(schema),
@@ -665,8 +722,7 @@ export function machineJsonSchemaForRequest(request = {}) {
         type: 'object',
         properties,
         required: [
-          'schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash', 'decision',
-          ...(mode === 'redirect' ? ['checks'] : [])
+          'schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash', 'decision'
         ],
         additionalProperties: false
       }
@@ -763,11 +819,77 @@ function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
     }
     const mode = String(request?.mode || '').trim();
     if (mode) normalized.mode = mode;
-    if (roleId === 'editorialDiagnostician' && mode && plainObject(normalized.brief)) {
-      normalized.brief = { ...normalized.brief, mode };
-    }
-    if (roleId === 'editorialDiagnostician' && mode && String(data.schema || '').trim() === mode) {
+    if (roleId === 'editorialDiagnostician') {
       normalized.schema = expectedResponseSchema(roleId);
+      if (mode && mode !== 'redirect' && plainObject(normalized.brief)) {
+        normalized.brief = { ...normalized.brief, mode };
+      }
+      if (mode === 'redirect') {
+        const flat = {
+          schema: normalized.schema,
+          mode,
+          sourceHash: normalized.sourceHash,
+          snapshotHash: normalized.snapshotHash,
+          decision: 'proceed'
+        };
+        for (const field of ['sourceFailure', 'replacementObjective', 'requiredBeats', 'forbiddenSourceBeats', 'sceneCharacters', 'characterPressure']) {
+          if (Object.prototype.hasOwnProperty.call(data, field)) flat[field] = data[field];
+        }
+        return flat;
+      }
+    }
+    if (roleId === 'editorialTransformer' && mode === 'redirect') {
+      const redirectChangeEvidenceRefs = uniqueRequestStrings(request?.redirectChangeEvidenceRefs).slice(0, 8);
+      return {
+        schema: expectedResponseSchema(roleId),
+        mode,
+        sourceHash: normalized.sourceHash,
+        snapshotHash: normalized.snapshotHash,
+        diagnosisHash: String(request?.diagnosisHash || '').trim(),
+        cardOutcomes: [],
+        candidate: {
+          text: data.text,
+          preservationLedger: [],
+          changeLedger: redirectChangeEvidenceRefs.length
+            ? [{
+                kind: 'redirect',
+                summary: 'Rebuilt the response around the validated replacement objective.',
+                evidenceRefs: redirectChangeEvidenceRefs
+              }]
+            : [],
+          riskFlags: []
+        }
+      };
+    }
+    if (roleId === 'editorialVerifier' && mode === 'redirect') {
+      const failedChecks = Array.isArray(data.failedChecks) ? data.failedChecks.map(String) : null;
+      const validFailedChecks = failedChecks !== null
+        && new Set(failedChecks).size === failedChecks.length
+        && failedChecks.every((check) => REDIRECT_VERIFICATION_CHECKS.includes(check));
+      const evidenceRefs = uniqueRequestStrings(request?.verificationEvidenceRefs).slice(0, 8);
+      const failed = new Set(validFailedChecks ? failedChecks : []);
+      const reason = String(data.reason || '').trim();
+      return {
+        schema: expectedResponseSchema(roleId),
+        mode,
+        sourceHash: normalized.sourceHash,
+        snapshotHash: normalized.snapshotHash,
+        diagnosisHash: String(request?.diagnosisHash || '').trim(),
+        candidateHash: String(request?.candidateHash || '').trim(),
+        decision: validFailedChecks ? (failed.size ? 'reject' : 'accept') : 'invalid',
+        evidenceRefs,
+        reason,
+        checks: validFailedChecks
+          ? REDIRECT_VERIFICATION_CHECKS.map((check) => ({
+              check,
+              status: failed.has(check) ? 'fail' : 'pass',
+              evidenceRefs,
+              note: failed.has(check)
+                ? (reason || 'Provider reported this required check as failed.')
+                : 'Provider reported no failure for this required check.'
+            }))
+          : []
+      };
     }
     if (roleId !== 'editorialDiagnostician') {
       const diagnosisHash = String(request?.diagnosisHash || '').trim();

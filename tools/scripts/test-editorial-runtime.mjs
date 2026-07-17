@@ -491,6 +491,7 @@ function createRedirectHarness({
   verifierDecision = 'accept',
   verifierDecisions = null,
   verifierChecks = null,
+  verifierChecksByAttempt = null,
   appendFailure = false,
   changeSourceAfterVerifier = false,
   cachedMarkerFactory = null,
@@ -580,32 +581,24 @@ function createRedirectHarness({
           sourceHash: request.sourceHash,
           snapshotHash: request.snapshotHash,
           decision: 'proceed',
-          brief: {
-            mode: 'redirect',
-            diagnosis: [{ dimension: 'turn-fulfillment', problem: 'The source postpones the requested test.', evidenceRefs: ['source:0'] }],
-            preserve: [],
-            discard: [{ claim: 'The test is postponed.', evidenceRefs: ['source:0'] }],
-            allowedChanges: ['Replace the turn trajectory.'],
-            forbiddenChanges: ['Do not invent a transport result.'],
-            sourceFailure: {
-              category: 'turn-fulfillment',
-              problem: 'The source postpones the requested test.',
-              establishedEvidenceRefs: ['message:47'],
-              conflictingSourceRefs: ['source:0']
-            },
-            replacementObjective: { summary: 'Engage the proposed test now.', evidenceRefs: ['message:47'] },
-            requiredBeats: [{ summary: 'Carter presses for the immediate test.', evidenceRefs: ['message:47'] }],
-            forbiddenSourceBeats: [{ summary: 'Do not postpone the test.', sourceRefs: ['source:0'] }],
-            sceneCharacters: [{ character: 'Carter', evidenceRefs: ['message:47'] }],
-            characterPressure: [{
-              character: 'Carter',
-              immediateWant: 'Test the transport method now.',
-              wantEvidenceRefs: ['message:47'],
-              sourcePressureEffect: 'increasing',
-              sourceEvidenceRefs: ['source:0'],
-              pressureReason
-            }]
-          }
+          sourceFailure: {
+            category: 'turn-fulfillment',
+            problem: 'The source postpones the requested test.',
+            establishedEvidenceRefs: ['message:47'],
+            conflictingSourceRefs: ['source:0']
+          },
+          replacementObjective: { summary: 'Engage the proposed test now.', evidenceRefs: ['message:47'] },
+          requiredBeats: [{ summary: 'Carter presses for the immediate test.', evidenceRefs: ['message:47'] }],
+          forbiddenSourceBeats: [{ summary: 'Do not postpone the test.', sourceRefs: ['source:0'] }],
+          sceneCharacters: [{ character: 'Carter', evidenceRefs: ['message:47'] }],
+          characterPressure: [{
+            character: 'Carter',
+            immediateWant: 'Test the transport method now.',
+            wantEvidenceRefs: ['message:47'],
+            sourcePressureEffect: 'increasing',
+            sourceEvidenceRefs: ['source:0'],
+            pressureReason
+          }]
         };
         return {
           ok: true,
@@ -643,6 +636,9 @@ function createRedirectHarness({
         const currentVerifierDecision = Array.isArray(verifierDecisions)
           ? verifierDecisions[state.verifierAttempts - 1] || verifierDecisions.at(-1)
           : verifierDecision;
+        const currentVerifierChecks = Array.isArray(verifierChecksByAttempt)
+          ? verifierChecksByAttempt[state.verifierAttempts - 1] || verifierChecksByAttempt.at(-1)
+          : verifierChecks;
         return {
           ok: true,
           data: {
@@ -653,7 +649,7 @@ function createRedirectHarness({
             diagnosisHash: request.diagnosisHash,
             candidateHash: request.candidateHash,
             decision: currentVerifierDecision,
-            checks: verifierChecks || REDIRECT_VERIFICATION_CHECKS.map((check) => ({
+            checks: currentVerifierChecks || REDIRECT_VERIFICATION_CHECKS.map((check) => ({
               check,
               status: currentVerifierDecision === 'accept' ? 'pass' : 'unclear',
               evidenceRefs: ['message:47'],
@@ -721,6 +717,26 @@ assertEqual(acceptedRedirectSettlement.details.redirectCharacterCount, 1, 'Redir
 assertEqual(acceptedRedirectSettlement.details.redirectRequiredBeatCount, 1, 'Redirect journal records required-beat count only');
 assert(!JSON.stringify(acceptedRedirectSettlement).includes(privateRedirectSentinel), 'Redirect journal excludes private pressure text');
 
+const reasonerVerifiedRedirect = createRedirectHarness({ reasonerAvailable: true });
+await reasonerVerifiedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const reasonerVerifiedResult = await reasonerVerifiedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-reasoner-verifier-test' });
+assertEqual(reasonerVerifiedResult.ok, true, 'Medium Redirect succeeds with an independent healthy Reasoner verifier');
+assertEqual(
+  reasonerVerifiedRedirect.state.calls.find((call) => call.roleId === 'editorialDiagnostician')?.request?.lane,
+  'utility',
+  'Medium Redirect diagnosis remains on Utility'
+);
+assertEqual(
+  reasonerVerifiedRedirect.state.calls.find((call) => call.roleId === 'editorialTransformer')?.request?.lane,
+  'utility',
+  'Medium Redirect transformation remains on Utility'
+);
+assertEqual(
+  reasonerVerifiedRedirect.state.calls.find((call) => call.roleId === 'editorialVerifier')?.request?.lane,
+  'reasoner',
+  'Redirect verification prefers a healthy independent Reasoner'
+);
+
 const correctedNoChangeRedirect = createRedirectHarness({
   diagnosisOverride: (value, attempt) => attempt === 1 ? { ...value, decision: 'no-change' } : value
 });
@@ -750,17 +766,54 @@ assertEqual(
 assert(reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician')[1].request.prompt.includes('Editorial diagnosis correction required'), 'Reasoner correction receives the semantic validation failure');
 assertEqual(reasonerCorrectedRedirect.state.appended.length, 1, 'Reasoner-corrected Redirect appends one verified swipe');
 
+const utilityCorrectedRedirect = createRedirectHarness({
+  diagnosisOverride: (value, attempt) => attempt === 1
+    ? {
+        schema: value.schema,
+        mode: value.mode,
+        sourceHash: value.sourceHash,
+        snapshotHash: value.snapshotHash,
+        decision: value.decision,
+        brief: {
+          mode: 'The source postpones the requested test.',
+          diagnosis: [{}, {}],
+          preserve: [{}],
+          discard: [{}],
+          allowedChanges: ['message:47'],
+          forbiddenChanges: ['source:0'],
+          sourceFailure: 'Engage the proposed test now.',
+          replacementObjective: { Carter: 'Test the transport method now.' },
+          requiredBeats: [],
+          forbiddenSourceBeats: [],
+          sceneCharacters: [],
+          characterPressure: []
+        }
+      }
+    : value
+});
+await utilityCorrectedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const utilityCorrectedResult = await utilityCorrectedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-utility-correction-test' });
+assertEqual(utilityCorrectedResult.ok, true, 'Redirect recovers from a semantically empty diagnosis when only Utility is available');
+const utilityDiagnosisCalls = utilityCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician');
+assertDeepEqual(
+  utilityDiagnosisCalls.map((call) => call.request.lane),
+  ['utility', 'utility'],
+  'Utility-only Redirect keeps its single semantic correction on Utility'
+);
+assert(
+  utilityDiagnosisCalls[1].request.prompt.includes(REDIRECT_ERROR_CODES.LAYOUT_INVALID),
+  'Utility-only Redirect correction receives the precise flat-layout error'
+);
+assertEqual(utilityCorrectedRedirect.state.appended.length, 1, 'Utility-corrected Redirect appends one verified swipe');
+
 const repeatedNoChangeRedirect = createRedirectHarness({
   diagnosisOverride: (value) => ({
     ...value,
     decision: 'no-change',
-    brief: {
-      ...value.brief,
-      sourceFailure: null,
-      replacementObjective: null,
-      requiredBeats: [],
-      forbiddenSourceBeats: []
-    }
+    sourceFailure: null,
+    replacementObjective: null,
+    requiredBeats: [],
+    forbiddenSourceBeats: []
   })
 });
 await repeatedNoChangeRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
@@ -821,10 +874,34 @@ assert(
 );
 assertEqual(correctedCandidateRedirect.state.appended.length, 1, 'only the accepted revised candidate becomes a swipe');
 
+const correctedMalformedVerifierRedirect = createRedirectHarness({
+  verifierChecksByAttempt: [
+    [],
+    REDIRECT_VERIFICATION_CHECKS.map((check) => ({
+      check,
+      status: 'pass',
+      evidenceRefs: ['message:47'],
+      note: 'Bound to frozen evidence.'
+    }))
+  ]
+});
+await correctedMalformedVerifierRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const correctedMalformedVerifierResult = await correctedMalformedVerifierRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-malformed-verifier-correction-test' });
+assertEqual(correctedMalformedVerifierResult.ok, true, 'Redirect retries one malformed verifier response without rewriting a valid candidate');
+assertEqual(correctedMalformedVerifierRedirect.state.verifierAttempts, 2, 'malformed Redirect verifier receives exactly one correction');
+assertEqual(correctedMalformedVerifierRedirect.state.transformAttempts, 1, 'verifier format correction does not regenerate the candidate');
+const correctedMalformedVerifierCalls = correctedMalformedVerifierRedirect.state.calls.filter((call) => call.roleId === 'editorialVerifier');
+assert(
+  correctedMalformedVerifierCalls[1].request.prompt.includes(REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID),
+  'verifier correction receives the precise check validation error'
+);
+assertEqual(correctedMalformedVerifierRedirect.state.appended.length, 1, 'corrected verifier result permits one validated swipe');
+
 const malformedRedirect = createRedirectHarness({ verifierChecks: [] });
 await malformedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const malformedRedirectResult = await malformedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-malformed-verifier-test' });
 assertEqual(malformedRedirectResult.error?.code, REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID, 'malformed verifier result preserves its stable error code');
+assertEqual(malformedRedirect.state.verifierAttempts, 2, 'repeated malformed verifier output stops after one correction');
 assertEqual(malformedRedirect.state.appended.length, 0, 'malformed verifier result adds no swipe');
 
 const staleRedirect = createRedirectHarness({ changeSourceAfterVerifier: true });
@@ -840,7 +917,7 @@ assertEqual(appendFailedRedirectResult.error?.code, 'RECURSION_TEST_APPEND_FAILE
 assertEqual(appendFailedRedirect.runtime.view().editorialResult?.status, 'error', 'append failure settles visibly unhealthy');
 
 const invalidBriefRedirect = createRedirectHarness({
-  diagnosisOverride: (value) => ({ ...value, brief: { ...value.brief, replacementObjective: null } })
+  diagnosisOverride: (value) => ({ ...value, replacementObjective: null })
 });
 await invalidBriefRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const invalidBriefResult = await invalidBriefRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-invalid-brief-test' });

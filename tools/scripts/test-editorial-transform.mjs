@@ -153,8 +153,12 @@ const staleDiagnosis = validateEditorialDiagnosis(diagnosis, { mode: 'recompose'
 assertEqual(staleDiagnosis.error.code, 'RECURSION_EDITORIAL_DIAGNOSIS_STALE', 'stale diagnosis rejected');
 
 const validRedirectBrief = {
-  ...diagnosis.brief,
   mode: 'redirect',
+  diagnosis: [],
+  preserve: [],
+  discard: [],
+  allowedChanges: [],
+  forbiddenChanges: [],
   sourceFailure: {
     category: 'turn-fulfillment',
     problem: 'The source postpones the requested response.',
@@ -178,10 +182,17 @@ const validRedirectBrief = {
   }]
 };
 const redirectDiagnosis = (brief = validRedirectBrief, decision = 'proceed') => ({
-  ...diagnosis,
+  schema: diagnosis.schema,
   mode: 'redirect',
+  sourceHash: diagnosis.sourceHash,
+  snapshotHash: diagnosis.snapshotHash,
   decision,
-  brief
+  sourceFailure: brief.sourceFailure,
+  replacementObjective: brief.replacementObjective,
+  requiredBeats: brief.requiredBeats,
+  forbiddenSourceBeats: brief.forbiddenSourceBeats,
+  sceneCharacters: brief.sceneCharacters,
+  characterPressure: brief.characterPressure
 });
 const redirectFixture = { mode: 'redirect', sourceText, sourceHash, snapshotHash, snapshot };
 const validRedirectDiagnosis = validateEditorialDiagnosis(redirectDiagnosis(), redirectFixture);
@@ -208,8 +219,25 @@ for (const noisyDecision of ['no-change', 'requires-recompose', 'unexpected-valu
 }
 const missingRedirectObjective = validateEditorialDiagnosis(redirectDiagnosis({ ...validRedirectBrief, replacementObjective: null }), redirectFixture);
 assertEqual(missingRedirectObjective.error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires replacement objective');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({ ...validRedirectBrief, requiredBeats: [] }), redirectFixture).error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a supported beat');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({ ...validRedirectBrief, forbiddenSourceBeats: [] }), redirectFixture).error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a forbidden source beat');
+assert(missingRedirectObjective.error?.message.includes('replacementObjective'), 'Redirect objective failure names the exact invalid field');
+const missingRequiredBeats = validateEditorialDiagnosis(redirectDiagnosis({ ...validRedirectBrief, requiredBeats: [] }), redirectFixture);
+assertEqual(missingRequiredBeats.error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a supported beat');
+assert(missingRequiredBeats.error?.message.includes('requiredBeats'), 'Redirect required-beat failure names the exact invalid field');
+const missingForbiddenBeats = validateEditorialDiagnosis(redirectDiagnosis({ ...validRedirectBrief, forbiddenSourceBeats: [] }), redirectFixture);
+assertEqual(missingForbiddenBeats.error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a forbidden source beat');
+assert(missingForbiddenBeats.error?.message.includes('forbiddenSourceBeats'), 'Redirect forbidden-beat failure names the exact invalid field');
+const normalizedRedirectCategory = validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  sourceFailure: { ...validRedirectBrief.sourceFailure, category: 'immediate-test-deferred' }
+}), redirectFixture);
+assertEqual(normalizedRedirectCategory.ok, true, 'Redirect accepts an evidence-complete source failure with a noisy audit category');
+assertEqual(normalizedRedirectCategory.value?.brief?.sourceFailure?.category, 'core-direction', 'Redirect canonicalizes an unknown audit category');
+const missingSourceFailureProblem = validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  sourceFailure: { ...validRedirectBrief.sourceFailure, problem: '' }
+}), redirectFixture);
+assertEqual(missingSourceFailureProblem.error?.code, REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect still rejects a source failure without substantive problem text');
+assert(missingSourceFailureProblem.error?.message.includes('sourceFailure.problem'), 'Redirect source-failure error identifies missing problem text');
 assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   sourceFailure: { ...validRedirectBrief.sourceFailure, establishedEvidenceRefs: ['source:0'] }
@@ -222,27 +250,129 @@ assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   replacementObjective: { ...validRedirectBrief.replacementObjective, evidenceRefs: ['source:0'] }
 }), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'source draft cannot establish a replacement objective');
+const mixedAuthorityRedirect = validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  sourceFailure: {
+    ...validRedirectBrief.sourceFailure,
+    establishedEvidenceRefs: ['user:0', 'source:0'],
+    conflictingSourceRefs: ['source:0', 'user:0']
+  },
+  replacementObjective: {
+    ...validRedirectBrief.replacementObjective,
+    evidenceRefs: ['user:0', 'source:0']
+  },
+  requiredBeats: [{
+    ...validRedirectBrief.requiredBeats[0],
+    evidenceRefs: ['user:0', 'source:0']
+  }],
+  forbiddenSourceBeats: [{
+    ...validRedirectBrief.forbiddenSourceBeats[0],
+    sourceRefs: ['source:0', 'user:0']
+  }],
+  sceneCharacters: [{
+    ...validRedirectBrief.sceneCharacters[0],
+    evidenceRefs: ['user:0', 'source:0']
+  }]
+}), redirectFixture);
+assertEqual(mixedAuthorityRedirect.ok, true, 'Redirect retains valid grounding refs when a provider adds stray refs from the wrong authority');
+assertDeepEqual(
+  mixedAuthorityRedirect.value?.brief?.sourceFailure?.establishedEvidenceRefs,
+  ['user:0'],
+  'Redirect source failure keeps only authoritative established evidence'
+);
+assertDeepEqual(
+  mixedAuthorityRedirect.value?.brief?.sourceFailure?.conflictingSourceRefs,
+  ['source:0'],
+  'Redirect source failure keeps only source-side conflict evidence'
+);
+assertDeepEqual(
+  mixedAuthorityRedirect.value?.brief?.replacementObjective?.evidenceRefs,
+  ['user:0'],
+  'Redirect objective keeps only authoritative evidence'
+);
+assertDeepEqual(
+  mixedAuthorityRedirect.value?.brief?.requiredBeats[0]?.evidenceRefs,
+  ['user:0'],
+  'Redirect required beat keeps only authoritative evidence'
+);
+assertDeepEqual(
+  mixedAuthorityRedirect.value?.brief?.forbiddenSourceBeats[0]?.sourceRefs,
+  ['source:0'],
+  'Redirect forbidden beat keeps only source evidence'
+);
+assertDeepEqual(
+  mixedAuthorityRedirect.value?.brief?.sceneCharacters[0]?.evidenceRefs,
+  ['user:0'],
+  'Redirect scene character keeps only authoritative evidence'
+);
+const recoveredSceneCharacterEvidence = validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  sceneCharacters: [{
+    character: 'She',
+    evidenceRefs: ['source:0']
+  }]
+}), redirectFixture);
+assertEqual(recoveredSceneCharacterEvidence.ok, true, 'Redirect recovers an advisory scene-character citation from frozen evidence that names the character');
+assertDeepEqual(
+  recoveredSceneCharacterEvidence.value?.brief?.sceneCharacters[0]?.evidenceRefs,
+  ['user:0', 'brief:turn'],
+  'Redirect scene-character recovery cites the matching authoritative frozen evidence'
+);
+const unsupportedSceneCharacter = validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  sceneCharacters: [{
+    character: 'Unmentioned Character',
+    evidenceRefs: ['source:0']
+  }],
+  characterPressure: [{
+    ...validRedirectBrief.characterPressure[0],
+    character: 'Unmentioned Character'
+  }]
+}), redirectFixture);
+assertEqual(unsupportedSceneCharacter.ok, false, 'Redirect still rejects a scene-character set with no evidence-backed character');
+assertEqual(
+  unsupportedSceneCharacter.error?.code,
+  REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID,
+  'ungrounded scene-character coverage reports the character-coverage error'
+);
 assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   sceneCharacters: [...validRedirectBrief.sceneCharacters, { character: 'She', evidenceRefs: ['user:0'] }]
 }), redirectFixture).error?.code, REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID, 'Redirect character coverage rejects duplicate characters');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+const mismatchedPressureCharacter = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   characterPressure: [{ ...validRedirectBrief.characterPressure[0], character: 'He' }]
-}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID, 'Redirect pressure coverage must match scene characters');
+}), redirectFixture);
+assertEqual(mismatchedPressureCharacter.ok, true, 'Redirect replaces a mismatched advisory pressure row instead of failing the core diagnosis');
+assertDeepEqual(
+  mismatchedPressureCharacter.value?.brief?.characterPressure[0],
+  {
+    character: 'She',
+    immediateWant: null,
+    wantEvidenceRefs: [],
+    sourcePressureEffect: 'unclear',
+    sourceEvidenceRefs: [],
+    pressureReason: 'Frozen evidence did not establish a validated immediate want or pressure effect.'
+  },
+  'Redirect creates an explicit unknown pressure row for the evidence-backed scene character'
+);
 assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   sceneCharacters: [{ character: ' ', evidenceRefs: ['user:0'] }],
   characterPressure: [{ ...validRedirectBrief.characterPressure[0], character: ' ' }]
 }), redirectFixture).error?.code, REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID, 'Redirect character names cannot be empty');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+const unsupportedWantPressure = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   characterPressure: [{ ...validRedirectBrief.characterPressure[0], wantEvidenceRefs: ['source:0'] }]
-}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'source draft cannot establish a character want');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+}), redirectFixture);
+assertEqual(unsupportedWantPressure.ok, true, 'unsupported advisory want evidence falls back to an unknown pressure row');
+assertEqual(unsupportedWantPressure.value?.brief?.characterPressure[0].immediateWant, null, 'unsupported advisory want is removed');
+const unsupportedEffectPressure = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   characterPressure: [{ ...validRedirectBrief.characterPressure[0], sourceEvidenceRefs: ['user:0'] }]
-}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'pressure effect must cite source evidence');
+}), redirectFixture);
+assertEqual(unsupportedEffectPressure.ok, true, 'unsupported advisory pressure-effect evidence falls back to unknown');
+assertEqual(unsupportedEffectPressure.value?.brief?.characterPressure[0].sourcePressureEffect, 'unclear', 'unsupported advisory pressure effect is removed');
 const unclearPressureBrief = {
   ...validRedirectBrief,
   characterPressure: [{
@@ -255,10 +385,12 @@ const unclearPressureBrief = {
   }]
 };
 assertEqual(validateEditorialDiagnosis(redirectDiagnosis(unclearPressureBrief), redirectFixture).ok, true, 'unclear want remains valid without invention');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+const noisyUnknownPressure = validateEditorialDiagnosis(redirectDiagnosis({
   ...unclearPressureBrief,
   characterPressure: [{ ...unclearPressureBrief.characterPressure[0], sourcePressureEffect: 'increasing' }]
-}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.PRESSURE_INVALID, 'unclear want cannot claim a concrete pressure effect');
+}), redirectFixture);
+assertEqual(noisyUnknownPressure.ok, true, 'invalid advisory unknown-pressure tuple is canonicalized');
+assertEqual(noisyUnknownPressure.value?.brief?.characterPressure[0].sourcePressureEffect, 'unclear', 'canonical advisory pressure remains unclear');
 const noChangeRedirectBrief = {
   ...unclearPressureBrief,
   sourceFailure: null,
@@ -282,6 +414,7 @@ const redirectCandidate = {
   candidate: {
     ...candidate.candidate,
     text: 'She blocked the latch with one hand. "Who sent you?" she repeated, holding his gaze until he answered.',
+    preservationLedger: [],
     changeLedger: [{
       kind: 'redirect',
       summary: 'Rebuilt the turn around answering the supported question now.',
@@ -299,6 +432,100 @@ const redirectPassFixture = {
   snapshot
 };
 assertEqual(validateEditorialPass(redirectCandidate, redirectPassFixture).ok, true, 'evidence-backed directional Redirect candidate passes');
+const expandedRedirectCandidate = {
+  ...redirectCandidate,
+  candidate: {
+    ...redirectCandidate.candidate,
+    text: `She answered the supported question directly. ${'The replacement turn advanced the scene with grounded detail. '.repeat(32)}`
+  }
+};
+assert(
+  expandedRedirectCandidate.candidate.text.length > Math.max(1500, Math.ceil(sourceText.length * 1.75)),
+  'expanded Redirect fixture exceeds the proportional Recompose budget'
+);
+assertEqual(
+  validateEditorialPass(expandedRedirectCandidate, redirectPassFixture).ok,
+  true,
+  'Redirect may expand beyond the source-relative Recompose cap while remaining inside the absolute candidate bound'
+);
+const oversizedRedirectCandidate = {
+  ...redirectCandidate,
+  candidate: {
+    ...redirectCandidate.candidate,
+    text: `She answered the supported question directly. ${'Grounded replacement detail. '.repeat(700)}`
+  }
+};
+assertEqual(
+  validateEditorialPass(oversizedRedirectCandidate, redirectPassFixture).error?.code,
+  'RECURSION_EDITORIAL_CANDIDATE_TOO_LARGE',
+  'Redirect still rejects candidates above the absolute candidate bound'
+);
+const redirectWithoutCardOutcomes = validateEditorialPass({
+  ...redirectCandidate,
+  cardOutcomes: []
+}, redirectPassFixture);
+assertEqual(redirectWithoutCardOutcomes.ok, true, 'Redirect does not discard a valid candidate because its audit-only card ledger is missing');
+assertDeepEqual(
+  redirectWithoutCardOutcomes.cardOutcomes,
+  [{
+    cardId: 'relationship',
+    status: 'partially-reflected',
+    evidenceRefs: ['card:relationship']
+  }],
+  'Redirect canonicalizes missing card audit rows from the frozen installed hand'
+);
+const redirectWithInvalidCardOutcome = validateEditorialPass({
+  ...redirectCandidate,
+  cardOutcomes: [{
+    cardId: 'relationship',
+    status: 'invented-status',
+    evidenceRefs: ['missing:evidence']
+  }]
+}, redirectPassFixture);
+assertEqual(redirectWithInvalidCardOutcome.ok, true, 'Redirect replaces an invalid audit-only card row instead of rejecting the verified candidate');
+assertDeepEqual(
+  redirectWithInvalidCardOutcome.cardOutcomes,
+  redirectWithoutCardOutcomes.cardOutcomes,
+  'Redirect uses the same explicit fallback for malformed and missing card audit rows'
+);
+const redirectWithValidCardOutcome = validateEditorialPass(redirectCandidate, redirectPassFixture);
+assertDeepEqual(
+  redirectWithValidCardOutcome.cardOutcomes,
+  redirectCandidate.cardOutcomes,
+  'Redirect preserves valid provider-reported card outcomes unchanged'
+);
+const redirectWithInvalidRiskFlags = validateEditorialPass({
+  ...redirectCandidate,
+  candidate: {
+    ...redirectCandidate.candidate,
+    riskFlags: ['low-risk', 'continuity-risk']
+  }
+}, redirectPassFixture);
+assertEqual(redirectWithInvalidRiskFlags.ok, true, 'invalid audit-only risk labels do not reject an otherwise valid Redirect candidate');
+assertDeepEqual(
+  redirectWithInvalidRiskFlags.artifact.candidate.riskFlags,
+  ['continuity-risk'],
+  'Editorial candidate validation retains recognized risk labels and drops unknown labels'
+);
+const redirectWithoutRiskFlags = validateEditorialPass({
+  ...redirectCandidate,
+  candidate: {
+    ...redirectCandidate.candidate,
+    riskFlags: undefined
+  }
+}, redirectPassFixture);
+assertEqual(redirectWithoutRiskFlags.ok, true, 'missing audit-only risk labels do not reject an otherwise valid Redirect candidate');
+assertDeepEqual(redirectWithoutRiskFlags.artifact.candidate.riskFlags, [], 'missing risk labels canonicalize to an empty audit list');
+const recomposeWithoutCardOutcomes = validateEditorialPass({
+  ...candidate,
+  cardOutcomes: []
+}, { mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot });
+assertEqual(recomposeWithoutCardOutcomes.ok, false, 'Recompose retains strict installed-card coverage');
+assertEqual(
+  recomposeWithoutCardOutcomes.error?.code,
+  'RECURSION_EDITORIAL_CARD_COVERAGE_MISSING',
+  'Recompose still reports missing card coverage as a validation failure'
+);
 const ov1MinorRewrite = {
   ...redirectCandidate,
   candidate: {
@@ -375,9 +602,37 @@ assert(diagnosisRequest.prompt.includes('Never choose requires-redirect only for
 assertEqual(diagnosisRequest.responseLength, undefined, 'diagnosis inherits the selected provider lane max tokens');
 assertDeepEqual(diagnosisRequest.validEvidenceIds, evidence.map((entry) => entry.id), 'diagnosis request exposes the frozen evidence ids as structured provider fields');
 const redirectDiagnosisRequest = buildEditorialDiagnosisRequest({ mode: 'redirect', sourceText, sourceHash, snapshotHash, snapshot, lane: 'reasoner' });
+assertDeepEqual(
+  redirectDiagnosisRequest.validSourceEvidenceIds,
+  evidence.filter((entry) => ['source-draft', 'source-negative'].includes(entry.authority)).map((entry) => entry.id),
+  'Redirect diagnosis request exposes source-only evidence ids separately'
+);
 assert(redirectDiagnosisRequest.prompt.includes('Redirect is a turn-level correction, not a more aggressive Recompose.'), 'Redirect diagnosis prompt distinguishes trajectory from prose quality');
 assert(redirectDiagnosisRequest.prompt.includes('Decision must be proceed because Redirect is already selected.'), 'Redirect diagnosis prompt gives one unambiguous valid decision');
 assert(!redirectDiagnosisRequest.prompt.includes('Choose proceed, no-change, requires-recompose, or requires-redirect according to the selected mode.'), 'Redirect diagnosis prompt omits the contradictory generic decision list');
+const redirectDiagnosisEnvelope = JSON.stringify({
+  schema: 'recursion.editorialDiagnosis.v1',
+  mode: 'redirect',
+  sourceHash,
+  snapshotHash,
+  decision: 'proceed'
+});
+assert(
+  redirectDiagnosisRequest.prompt.includes(redirectDiagnosisEnvelope),
+  'Redirect diagnosis prompt shows the exact frozen top-level identity layout'
+);
+assert(
+  redirectDiagnosisRequest.prompt.includes('Return exactly these Redirect top-level keys: schema, mode, sourceHash, snapshotHash, decision, sourceFailure, replacementObjective, requiredBeats, forbiddenSourceBeats, sceneCharacters, characterPressure.'),
+  'Redirect diagnosis prompt names the complete flat provider contract'
+);
+assert(
+  redirectDiagnosisRequest.prompt.includes('Do not return a brief object or the generic diagnosis, preserve, discard, allowedChanges, or forbiddenChanges fields.'),
+  'Redirect diagnosis prompt excludes the unstable mixed-mode brief fields'
+);
+assert(
+  redirectDiagnosisRequest.prompt.includes('Never put diagnosis prose, arrays, or Redirect content in schema, mode, sourceHash, snapshotHash, or decision.'),
+  'Redirect diagnosis prompt protects frozen identity fields from field-shifted content'
+);
 assert(
   redirectDiagnosisRequest.prompt.includes('Treat the latest user-turn evidence as completed player-authored action or dialogue that the assistant response must answer'),
   'Redirect diagnosis prompt forbids replaying the completed user turn as candidate content'
@@ -407,6 +662,14 @@ assert(
   redirectDiagnosisCorrectionRequest.prompt.includes('immediateWant must be null, wantEvidenceRefs and sourceEvidenceRefs must both be empty arrays, and sourcePressureEffect must be unclear'),
   'Redirect diagnosis correction repeats the complete unknown-pressure tuple'
 );
+assert(
+  redirectDiagnosisCorrectionRequest.prompt.includes(redirectDiagnosisEnvelope),
+  'Redirect diagnosis correction repeats the exact frozen top-level identity layout'
+);
+assert(
+  redirectDiagnosisCorrectionRequest.prompt.includes('Never put diagnosis prose, arrays, or Redirect content in schema, mode, sourceHash, snapshotHash, or decision.'),
+  'Redirect diagnosis correction repeats the identity-field protection'
+);
 const passRequest = buildEditorialPassRequest({ mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosis, evidence, snapshot, lane: 'reasoner' });
 assert(passRequest.prompt.includes('The diagnosis below is authoritative.'), 'transform prompt pins diagnosis');
 assert(passRequest.prompt.includes('one complete candidate'), 'transform prompt allows full rewrite');
@@ -415,6 +678,33 @@ assertDeepEqual(passRequest.validEvidenceIds, evidence.map((entry) => entry.id),
 assertDeepEqual(passRequest.requiredPreservationLedger, diagnosis.brief.preserve, 'transform freezes the validated diagnosis preservation ledger');
 assert(passRequest.prompt.includes('Copy diagnosis.brief.preserve exactly'), 'transform explicitly forbids invented preservation claims or evidence ids');
 assertDeepEqual(passRequest.installedCardIds, ['relationship'], 'transform request exposes frozen installed card ids');
+const redirectPassRequest = buildEditorialPassRequest({
+  mode: 'redirect',
+  sourceText,
+  sourceHash,
+  snapshotHash,
+  diagnosis: validRedirectDiagnosis.value,
+  evidence,
+  snapshot,
+  lane: 'utility'
+});
+assert(
+  redirectPassRequest.prompt.includes('Return exactly these Redirect top-level keys: schema, mode, sourceHash, snapshotHash, diagnosisHash, text.'),
+  'Redirect transform prompt names the minimal flat pass contract'
+);
+assert(
+  redirectPassRequest.prompt.includes('Do not return candidate, patches, changeLedger, cardOutcomes, preservationLedger, or riskFlags.'),
+  'Redirect transform prompt excludes shared-mode and audit fields'
+);
+assert(
+  redirectPassRequest.prompt.includes('Return candidate prose only in the top-level text field.'),
+  'Redirect transform prompt prevents candidate prose from shifting into a nested object'
+);
+assertDeepEqual(
+  redirectPassRequest.redirectChangeEvidenceRefs,
+  ['user:0'],
+  'Redirect transform request freezes objective evidence for the runtime-owned directional ledger'
+);
 const formattedPassRequest = buildEditorialPassRequest({ mode: 'recompose', sourceText: formattedSourceText, sourceHash, snapshotHash, diagnosis, evidence, snapshot, lane: 'reasoner' });
 assertEqual(formattedPassRequest.sourceText, formattedSourceText, 'Editorial request preserves source whitespace as structured data');
 assert(formattedPassRequest.prompt.includes(JSON.stringify(formattedSourceText)), 'Editorial prompt preserves source line breaks in a JSON string');
@@ -430,8 +720,8 @@ assert(
   'Redirect transformer prompt forbids paraphrased postponement'
 );
 assert(
-  redirectRequest.prompt.includes('candidate.changeLedger must contain at least one entry with kind redirect'),
-  'Redirect transformer prompt states the required directional ledger contract'
+  redirectRequest.prompt.includes('Recursion constructs the Redirect change ledger locally from the validated diagnosis.'),
+  'Redirect transformer prompt excludes provider-authored audit ledger work'
 );
 assert(
   redirectRequest.prompt.includes('Do not weaken an active required beat into passive attention, agreement, observation, or internal feeling'),
@@ -477,8 +767,46 @@ assert(
   'Redirect verifier rejects passive substitutes for active required beats'
 );
 assert(
-  redirectVerifierRequest.prompt.includes(`Return exactly ${REDIRECT_VERIFICATION_CHECKS.length} check results, one for each name below, in this order.`),
-  'Redirect verifier makes the schema check cardinality explicit'
+  redirectVerifierRequest.prompt.includes('Return failedChecks as the list of every required check that fails or remains unclear. Return an empty list only when every check passes.'),
+  'Redirect verifier prompt defines the compact failed-check contract'
+);
+assertDeepEqual(
+  redirectVerifierRequest.verificationEvidenceRefs,
+  ['user:0'],
+  'Redirect verifier request freezes authoritative evidence for locally constructed check rows'
+);
+const correctedRedirectVerifierRequest = buildEditorialVerificationRequest({
+  mode: 'redirect',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash: redirectDiagnosisHash,
+  diagnosis: validRedirectDiagnosis.value,
+  evidence,
+  candidate: redirectCandidate.candidate,
+  retry: {
+    code: REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID,
+    message: 'Redirect verification returned an invalid status, evidence reference, or note.'
+  }
+});
+assert(
+  correctedRedirectVerifierRequest.prompt.includes('Editorial verification correction required.'),
+  'Redirect verifier correction explicitly identifies the correction pass'
+);
+assert(
+  correctedRedirectVerifierRequest.prompt.includes(REDIRECT_ERROR_CODES.VERIFICATION_CHECKS_INVALID),
+  'Redirect verifier correction includes the precise validation error'
+);
+assert(
+  correctedRedirectVerifierRequest.prompt.includes('failedChecks may use only the required check names listed below.'),
+  'Redirect verifier correction freezes the allowed failed-check names'
+);
+assert(
+  correctedRedirectVerifierRequest.prompt.includes('Return a corrected verdict for the same candidate; do not rewrite or replace the candidate.'),
+  'Redirect verifier correction cannot mutate candidate content'
+);
+assert(
+  redirectVerifierRequest.prompt.includes(`Evaluate all ${REDIRECT_VERIFICATION_CHECKS.length} required checks below.`),
+  'Redirect verifier makes the semantic check coverage explicit'
 );
 for (const [index, check] of REDIRECT_VERIFICATION_CHECKS.entries()) {
   assert(

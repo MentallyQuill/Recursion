@@ -24,6 +24,7 @@ import {
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
 const liveEditorialModule = await import('./lib/live-editorial-effectiveness.mjs').catch(() => ({}));
+const liveEditorialSource = readFileSync(join(process.cwd(), 'tools', 'scripts', 'lib', 'live-editorial-effectiveness.mjs'), 'utf8');
 const evaluateLiveRedirectScenarioArtifacts = liveEditorialModule.evaluateLiveRedirectScenarioArtifacts;
 const runLiveEditorialEffectiveness = liveEditorialModule.runLiveEditorialEffectiveness;
 const validateLiveEditorialRuntime = liveEditorialModule.validateLiveEditorialRuntime;
@@ -37,6 +38,11 @@ assertEqual(liveEditorialStageTimeoutMs('warm', 180000), 540000, 'Rapid warm all
 assertEqual(liveEditorialStageTimeoutMs('prepare', 180000), 180000, 'preparation uses one configured live timeout');
 assertEqual(liveEditorialStageTimeoutMs('enhance', 180000), 540000, 'Enhancement allows three sequential provider deadlines');
 assertEqual(liveEditorialStageTimeoutMs('judge', 180000), 180000, 'independent judge uses one configured live timeout');
+assert(
+  liveEditorialSource.indexOf("runtime.prepareForGeneration({ userMessage: pendingUserMessage })")
+    < liveEditorialSource.indexOf("ctx.chat.push({ mesid: sourceMesId"),
+  'live Redirect proof freezes the generation-time packet before the flawed assistant source lands'
+);
 assertDeepEqual(
   validateLiveEditorialRuntime({ enhanceLatestAssistantMessage() {}, evaluateRedirectEffectiveness() {}, view() {} }),
   { ok: true, missing: [] },
@@ -88,6 +94,23 @@ const healthyRedirectArtifacts = {
   journalDelta: []
 };
 assertEqual(evaluateLiveRedirectScenarioArtifacts(healthyRedirectArtifacts).ok, true, 'strict Redirect evaluator accepts complete healthy artifacts');
+const failedRedirectDiagnostics = evaluateLiveRedirectScenarioArtifacts({
+  ...healthyRedirectArtifacts,
+  after: healthyRedirectArtifacts.before,
+  enhancementResult: {
+    ok: false,
+    error: {
+      code: 'RECURSION_EDITORIAL_REDIRECT_EVIDENCE_INVALID',
+      message: 'Redirect evidence authority is invalid.'
+    }
+  },
+  oracle: {
+    verdict: { ok: false, failures: ['progress-observed-unhealthy'] },
+    observation: { transitions: [{ state: 'failed' }], journalDelta: [] }
+  }
+});
+assertEqual(failedRedirectDiagnostics.errorCode, 'RECURSION_EDITORIAL_REDIRECT_EVIDENCE_INVALID', 'failed live Redirect report preserves the runtime error code');
+assertEqual(failedRedirectDiagnostics.errorMessage, 'Redirect evidence authority is invalid.', 'failed live Redirect report preserves the runtime error message');
 for (const [name, patch] of [
   ['unhealthy progress', { oracle: { verdict: { ok: false, failures: ['progress-observed-unhealthy'] }, observation: { transitions: [{ state: 'caution' }], journalDelta: [] } } }],
   ['missing swipe', { after: { swipeCount: 1, swipeId: 0, text: 'Postpone the test.' } }],

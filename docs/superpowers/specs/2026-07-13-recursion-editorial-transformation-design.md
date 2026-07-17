@@ -183,8 +183,10 @@ Evidence is deliberately finite and safe to persist:
   allowed/forbidden changes, and 280 visible characters per claim;
 - candidate: at most 12 preservation entries and 12 change entries, each with
   at most 280 visible characters and 8 cited evidence IDs;
-- candidate text: non-empty, different after normalized whitespace, and no more
-  than `min(16000, max(1500, ceil(sourceLength * 1.75)))` characters.
+- candidate text: non-empty and different after normalized whitespace;
+  Recompose is no more than
+  `min(16000, max(1500, ceil(sourceLength * 1.75)))` characters, while Redirect
+  may rebuild a short failed turn up to the absolute 16,000-character bound.
 
 These are output/persistence caps, not an edit-ratio rule. Recompose and
 Redirect may replace every source sentence; they may not become an uncontrolled

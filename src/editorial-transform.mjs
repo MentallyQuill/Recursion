@@ -36,6 +36,7 @@ export const REDIRECT_EFFECTIVENESS_CRITERIA = Object.freeze([
   'evidence-and-constraints'
 ]);
 export const REDIRECT_ERROR_CODES = Object.freeze({
+  LAYOUT_INVALID: 'RECURSION_EDITORIAL_REDIRECT_LAYOUT_INVALID',
   BRIEF_INVALID: 'RECURSION_EDITORIAL_REDIRECT_BRIEF_INVALID',
   EVIDENCE_INVALID: 'RECURSION_EDITORIAL_REDIRECT_EVIDENCE_INVALID',
   CHARACTER_COVERAGE_INVALID: 'RECURSION_EDITORIAL_REDIRECT_CHARACTER_COVERAGE_INVALID',
@@ -47,6 +48,14 @@ export const REDIRECT_ERROR_CODES = Object.freeze({
 });
 
 const MODES = new Set(['repair', 'recompose', 'redirect']);
+const REDIRECT_PROVIDER_FIELDS = Object.freeze([
+  'sourceFailure',
+  'replacementObjective',
+  'requiredBeats',
+  'forbiddenSourceBeats',
+  'sceneCharacters',
+  'characterPressure'
+]);
 const FULL_MODES = new Set(['recompose', 'redirect']);
 const DIAGNOSIS_DECISIONS = Object.freeze({
   repair: new Set(['proceed', 'no-change', 'requires-recompose', 'requires-redirect']),
@@ -195,21 +204,14 @@ function validateClaimList(value, known, { allowSourceDraft = false } = {}) {
   });
 }
 
-function supportedRedirectPreservationClaims(value, evidence = []) {
-  const known = evidenceMap(evidence);
-  return array(value).filter((entry) => {
-    const claim = safeText(entry?.claim || '', MAX_CLAIM);
-    const evidenceRefs = refs(entry?.evidenceRefs, known);
-    return Boolean(claim && evidenceRefs
-      && evidenceRefs.every((id) => !['source-draft', 'source-negative'].includes(known.get(id)?.authority)));
-  });
-}
-
 function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
-  const data = object(brief);
+  const data = { ...object(brief) };
   const known = evidenceMap(evidence);
   const isSource = (id) => ['source-draft', 'source-negative'].includes(known.get(id)?.authority);
   const list = (value) => Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+  const filteredRefs = (value, predicate) => [...new Set(list(value).filter((id) => known.has(id) && predicate(id)))].slice(0, 8);
+  const authoritativeRefs = (value) => filteredRefs(value, (id) => !isSource(id));
+  const sourceRefs = (value) => filteredRefs(value, isSource);
   const authoritative = (value) => {
     const ids = list(value);
     return ids.length > 0 && ids.length <= 8 && ids.every((id) => known.has(id) && !isSource(id));
@@ -228,17 +230,68 @@ function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
     return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect diagnosis collections are invalid.');
   }
 
-  if (!object(data.sourceFailure).category
-    || !REDIRECT_FAILURE_CATEGORIES.includes(data.sourceFailure.category)
-    || !safeText(data.sourceFailure.problem, MAX_CLAIM)
-    || !object(data.replacementObjective).summary
-    || !safeText(data.replacementObjective.summary, MAX_CLAIM)
-    || !data.requiredBeats.length
-    || !data.forbiddenSourceBeats.length
-    || data.requiredBeats.some((beat) => !safeText(beat?.summary, MAX_CLAIM))
-    || data.forbiddenSourceBeats.some((beat) => !safeText(beat?.summary, MAX_CLAIM))) {
-    return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect proceed requires a complete turn-level correction.');
+  const sourceFailure = object(data.sourceFailure);
+  if (safeText(sourceFailure.problem, MAX_CLAIM)
+    && !REDIRECT_FAILURE_CATEGORIES.includes(sourceFailure.category)) {
+    data.sourceFailure = { ...sourceFailure, category: 'core-direction' };
   }
+  const incompleteFields = [];
+  if (!safeText(data.sourceFailure?.problem, MAX_CLAIM)) {
+    incompleteFields.push('sourceFailure.problem');
+  }
+  if (!object(data.replacementObjective).summary
+    || !safeText(data.replacementObjective.summary, MAX_CLAIM)) {
+    incompleteFields.push('replacementObjective');
+  }
+  if (!data.requiredBeats.length
+    || data.requiredBeats.some((beat) => !safeText(beat?.summary, MAX_CLAIM))) {
+    incompleteFields.push('requiredBeats');
+  }
+  if (!data.forbiddenSourceBeats.length
+    || data.forbiddenSourceBeats.some((beat) => !safeText(beat?.summary, MAX_CLAIM))) {
+    incompleteFields.push('forbiddenSourceBeats');
+  }
+  if (incompleteFields.length) {
+    return fail(
+      REDIRECT_ERROR_CODES.BRIEF_INVALID,
+      `Redirect proceed requires complete structured fields: ${incompleteFields.join(', ')}.`
+    );
+  }
+  data.sourceFailure = {
+    ...data.sourceFailure,
+    establishedEvidenceRefs: authoritativeRefs(data.sourceFailure.establishedEvidenceRefs),
+    conflictingSourceRefs: sourceRefs(data.sourceFailure.conflictingSourceRefs)
+  };
+  data.replacementObjective = {
+    ...data.replacementObjective,
+    evidenceRefs: authoritativeRefs(data.replacementObjective.evidenceRefs)
+  };
+  data.requiredBeats = data.requiredBeats.map((beat) => ({
+    ...beat,
+    evidenceRefs: authoritativeRefs(beat?.evidenceRefs)
+  }));
+  data.forbiddenSourceBeats = data.forbiddenSourceBeats.map((beat) => ({
+    ...beat,
+    sourceRefs: sourceRefs(beat?.sourceRefs)
+  }));
+  const characterEvidenceRefs = (character) => {
+    const escaped = String(character || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!escaped) return [];
+    const pattern = new RegExp(`\\b${escaped}\\b`, 'i');
+    return [...known.values()]
+      .filter((entry) => !isSource(entry.id) && pattern.test(String(entry.excerpt || '')))
+      .map((entry) => entry.id)
+      .slice(0, 8);
+  };
+  data.sceneCharacters = data.sceneCharacters.map((entry) => {
+    const character = safeText(entry?.character, 120);
+    const evidenceRefs = authoritativeRefs(entry?.evidenceRefs);
+    return {
+      ...entry,
+      character,
+      evidenceRefs: evidenceRefs.length ? evidenceRefs : characterEvidenceRefs(character)
+    };
+  }).filter((entry) => entry.character && entry.evidenceRefs.length);
   if (!authoritative(data.sourceFailure.establishedEvidenceRefs)
     || !sourceOnly(data.sourceFailure.conflictingSourceRefs)
     || !authoritative(data.replacementObjective.evidenceRefs)
@@ -248,37 +301,65 @@ function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
   }
 
   const characters = data.sceneCharacters.map((entry) => safeText(entry?.character, 120));
-  const pressureCharacters = data.characterPressure.map((entry) => safeText(entry?.character, 120));
-  if (characters.some((name) => !name)
-    || pressureCharacters.some((name) => !name)
-    || new Set(characters).size !== characters.length
-    || new Set(pressureCharacters).size !== pressureCharacters.length
-    || hashJson([...characters].sort()) !== hashJson([...pressureCharacters].sort())) {
+  if (!characters.length
+    || characters.some((name) => !name)
+    || new Set(characters).size !== characters.length) {
     return fail(REDIRECT_ERROR_CODES.CHARACTER_COVERAGE_INVALID, 'Redirect character coverage is invalid.');
   }
   if (data.sceneCharacters.some((entry) => !authoritative(entry?.evidenceRefs))) {
     return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect scene character cited invalid evidence.');
   }
 
+  const pressureByCharacter = new Map();
   for (const row of data.characterPressure) {
-    if (!safeText(row?.pressureReason, MAX_CLAIM) || !REDIRECT_PRESSURE_EFFECTS.includes(row?.sourcePressureEffect)) {
-      return fail(REDIRECT_ERROR_CODES.PRESSURE_INVALID, 'Redirect character pressure is invalid.');
-    }
-    if (row.immediateWant === null) {
-      if (list(row.wantEvidenceRefs).length
-        || list(row.sourceEvidenceRefs).length
-        || row.sourcePressureEffect !== 'unclear') {
-        return fail(REDIRECT_ERROR_CODES.PRESSURE_INVALID, 'Unclear character pressure cannot claim concrete evidence or effect.');
-      }
-      continue;
-    }
-    if (!safeText(row.immediateWant, MAX_CLAIM)) {
-      return fail(REDIRECT_ERROR_CODES.PRESSURE_INVALID, 'Redirect immediate want is invalid.');
-    }
-    if (!authoritative(row.wantEvidenceRefs) || !sourceOnly(row.sourceEvidenceRefs)) {
-      return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect character pressure cited invalid evidence.');
-    }
+    const character = safeText(row?.character, 120);
+    if (character && !pressureByCharacter.has(character)) pressureByCharacter.set(character, row);
   }
+  const unknownPressure = (character) => ({
+    character,
+    immediateWant: null,
+    wantEvidenceRefs: [],
+    sourcePressureEffect: 'unclear',
+    sourceEvidenceRefs: [],
+    pressureReason: 'Frozen evidence did not establish a validated immediate want or pressure effect.'
+  });
+  data.characterPressure = characters.map((character) => {
+    const row = pressureByCharacter.get(character);
+    if (!row) return unknownPressure(character);
+    const pressureReason = safeText(row.pressureReason, MAX_CLAIM);
+    if (row.immediateWant === null) {
+      if (pressureReason
+        && list(row.wantEvidenceRefs).length === 0
+        && list(row.sourceEvidenceRefs).length === 0
+        && row.sourcePressureEffect === 'unclear') {
+        return {
+          character,
+          immediateWant: null,
+          wantEvidenceRefs: [],
+          sourcePressureEffect: 'unclear',
+          sourceEvidenceRefs: [],
+          pressureReason
+        };
+      }
+      return unknownPressure(character);
+    }
+    const immediateWant = safeText(row.immediateWant, MAX_CLAIM);
+    if (!immediateWant
+      || !pressureReason
+      || !REDIRECT_PRESSURE_EFFECTS.includes(row.sourcePressureEffect)
+      || !authoritative(row.wantEvidenceRefs)
+      || !sourceOnly(row.sourceEvidenceRefs)) {
+      return unknownPressure(character);
+    }
+    return {
+      character,
+      immediateWant,
+      wantEvidenceRefs: list(row.wantEvidenceRefs),
+      sourcePressureEffect: row.sourcePressureEffect,
+      sourceEvidenceRefs: list(row.sourceEvidenceRefs),
+      pressureReason
+    };
+  });
   return { ok: true, value: data };
 }
 
@@ -321,36 +402,96 @@ export function validateEditorialDiagnosis(result = {}, { mode = '', sourceText 
   const data = mode === 'redirect' ? { ...raw, decision: 'proceed' } : raw;
   if (!DIAGNOSIS_DECISIONS[data.mode]?.has(data.decision)) return fail('RECURSION_EDITORIAL_DIAGNOSIS_DECISION_INVALID', 'Editorial diagnosis returned an invalid decision for this mode.');
   const evidence = buildEditorialEvidence(snapshot, sourceText);
-  const diagnosisBrief = mode === 'redirect'
-    ? {
-        ...object(data.brief),
-        diagnosis: [],
-        preserve: supportedRedirectPreservationClaims(data.brief?.preserve, evidence)
-      }
-    : data.brief;
+  if (mode === 'redirect') {
+    const hasOwn = (key) => Object.prototype.hasOwnProperty.call(data, key);
+    const objectOrNull = (value) => value === null || (value && typeof value === 'object' && !Array.isArray(value));
+    const flatLayoutValid = !hasOwn('brief')
+      && REDIRECT_PROVIDER_FIELDS.every(hasOwn)
+      && objectOrNull(data.sourceFailure)
+      && objectOrNull(data.replacementObjective)
+      && ['requiredBeats', 'forbiddenSourceBeats', 'sceneCharacters', 'characterPressure'].every((key) => Array.isArray(data[key]));
+    if (!flatLayoutValid) {
+      return fail(
+        REDIRECT_ERROR_CODES.LAYOUT_INVALID,
+        'Redirect diagnosis must use the flat top-level Redirect fields and must not return a brief object.'
+      );
+    }
+    const diagnosisBrief = {
+      mode: 'redirect',
+      diagnosis: [],
+      preserve: [],
+      discard: [],
+      allowedChanges: [],
+      forbiddenChanges: [],
+      sourceFailure: data.sourceFailure,
+      replacementObjective: data.replacementObjective,
+      requiredBeats: data.requiredBeats,
+      forbiddenSourceBeats: data.forbiddenSourceBeats,
+      sceneCharacters: data.sceneCharacters,
+      characterPressure: data.characterPressure
+    };
+    const redirectResult = validateRedirectBrief(diagnosisBrief, evidence, data.decision);
+    if (!redirectResult.ok) return redirectResult;
+    const value = {
+      schema: data.schema,
+      mode: data.mode,
+      sourceHash: data.sourceHash,
+      snapshotHash: data.snapshotHash,
+      decision: data.decision,
+      brief: redirectResult.value
+    };
+    return { ok: true, value, hash: editorialDiagnosisHash(value) };
+  }
+  const diagnosisBrief = data.brief;
   const briefResult = validateEditorialBrief(diagnosisBrief, evidence);
   if (!briefResult.ok) return briefResult;
-  const redirectResult = data.mode === 'redirect'
-    ? validateRedirectBrief(briefResult.value, evidence, data.decision)
-    : briefResult;
-  if (!redirectResult.ok) return redirectResult;
-  return { ok: true, value: { ...data, brief: redirectResult.value }, hash: editorialDiagnosisHash({ ...data, brief: redirectResult.value }) };
+  return { ok: true, value: { ...data, brief: briefResult.value }, hash: editorialDiagnosisHash({ ...data, brief: briefResult.value }) };
 }
 
-function cardOutcomeValidation(cardOutcomes, installedHand, known) {
+function cardOutcomeValidation(cardOutcomes, installedHand, known, { recoverMissing = false } = {}) {
   const cards = array(installedHand).map((card) => String(card?.cardId || card?.id || '')).filter(Boolean);
   const seen = new Set();
-  if (!Array.isArray(cardOutcomes) || cardOutcomes.length !== cards.length) return fail('RECURSION_EDITORIAL_CARD_COVERAGE_MISSING', 'Editorial pass must report every installed card exactly once.');
-  for (const outcome of cardOutcomes) {
+  const validOutcomes = new Map();
+  if (!recoverMissing && (!Array.isArray(cardOutcomes) || cardOutcomes.length !== cards.length)) {
+    return fail('RECURSION_EDITORIAL_CARD_COVERAGE_MISSING', 'Editorial pass must report every installed card exactly once.');
+  }
+  for (const outcome of array(cardOutcomes)) {
     const cardId = String(outcome?.cardId || '');
     const evidenceRefs = refs(outcome?.evidenceRefs, known);
-    if (!cards.includes(cardId) || seen.has(cardId) || !CARD_STATUSES.has(outcome?.status) || !evidenceRefs) return fail('RECURSION_EDITORIAL_CARD_OUTCOME_INVALID', 'Editorial pass returned invalid card outcome coverage.');
+    const valid = cards.includes(cardId)
+      && !seen.has(cardId)
+      && CARD_STATUSES.has(outcome?.status)
+      && evidenceRefs;
+    if (!valid) {
+      if (recoverMissing) continue;
+      return fail('RECURSION_EDITORIAL_CARD_OUTCOME_INVALID', 'Editorial pass returned invalid card outcome coverage.');
+    }
     seen.add(cardId);
+    validOutcomes.set(cardId, {
+      cardId,
+      status: outcome.status,
+      evidenceRefs
+    });
   }
-  return { ok: true };
+  if (recoverMissing) {
+    const recovered = cards.map((cardId) => {
+      const valid = validOutcomes.get(cardId);
+      if (valid) return valid;
+      const evidenceId = `card:${cardId}`;
+      return known.has(evidenceId)
+        ? { cardId, status: 'partially-reflected', evidenceRefs: [evidenceId] }
+        : null;
+    });
+    if (recovered.some((outcome) => !outcome)) {
+      return fail('RECURSION_EDITORIAL_CARD_COVERAGE_MISSING', 'Editorial pass could not recover installed-card audit coverage from frozen evidence.');
+    }
+    return { ok: true, cardOutcomes: recovered };
+  }
+  return { ok: true, cardOutcomes: cards.map((cardId) => validOutcomes.get(cardId)) };
 }
 
-function maxCandidateLength(sourceLength) {
+function maxCandidateLength(sourceLength, mode = '') {
+  if (mode === 'redirect') return MAX_CANDIDATE;
   return Math.min(MAX_CANDIDATE, Math.max(1500, Math.ceil(Math.max(1, sourceLength) * 1.75)));
 }
 
@@ -361,14 +502,14 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
   if (String(data.diagnosisHash || '') !== String(diagnosisHash || '')) return fail('RECURSION_EDITORIAL_DIAGNOSIS_STALE', 'Editorial pass used a different diagnosis.');
   const evidence = buildEditorialEvidence(snapshot, sourceText);
   const known = evidenceMap(evidence);
-  const cards = cardOutcomeValidation(data.cardOutcomes, snapshot.installedHand, known);
+  const cards = cardOutcomeValidation(data.cardOutcomes, snapshot.installedHand, known, { recoverMissing: mode === 'redirect' });
   if (!cards.ok) return cards;
   if (FULL_MODES.has(mode)) {
     if (data.patches !== undefined || !object(data.candidate).text) return fail('RECURSION_EDITORIAL_CANDIDATE_INVALID', 'Full editorial mode requires one complete candidate and no patches.');
     const text = String(data.candidate.text);
     const normalizedSource = compact(sourceText).replace(/\s+/g, ' ');
     if (compact(text).replace(/\s+/g, ' ') === normalizedSource) return fail('RECURSION_EDITORIAL_NO_EFFECT', 'Editorial candidate did not change the source.');
-    if (text.length > maxCandidateLength(String(sourceText).length)) return fail('RECURSION_EDITORIAL_CANDIDATE_TOO_LARGE', 'Editorial candidate exceeded its bounded output budget.');
+    if (text.length > maxCandidateLength(String(sourceText).length, mode)) return fail('RECURSION_EDITORIAL_CANDIDATE_TOO_LARGE', 'Editorial candidate exceeded its bounded output budget.');
     if (!preservesPresentationEnvelope(sourceText, text)) return fail('RECURSION_EDITORIAL_PRESENTATION_INVALID', 'Editorial candidate changed or collapsed the leading presentation envelope.');
     if (!validateClaimList(data.candidate.preservationLedger, known)) return fail('RECURSION_EDITORIAL_EVIDENCE_INVALID', 'Candidate preservation ledger cited invalid evidence.');
     if (hashJson(data.candidate.preservationLedger) !== hashJson(array(diagnosis?.brief?.preserve))) {
@@ -388,8 +529,12 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
         return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect ledger did not cite its replacement objective.');
       }
     }
-    if (!Array.isArray(data.candidate.riskFlags) || data.candidate.riskFlags.some((flag) => !RISK_FLAGS.has(flag))) return fail('RECURSION_EDITORIAL_CANDIDATE_INVALID', 'Candidate risk flags are invalid.');
-    return { ok: true, artifact: { kind: 'candidate', mode, text, candidate: data.candidate }, cardOutcomes: data.cardOutcomes, evidence };
+    const recognizedRiskFlags = [...new Set(array(data.candidate.riskFlags).map(String).filter((flag) => RISK_FLAGS.has(flag)))];
+    const riskFlags = recognizedRiskFlags.length > 1
+      ? recognizedRiskFlags.filter((flag) => flag !== 'none')
+      : recognizedRiskFlags;
+    const candidate = { ...data.candidate, riskFlags };
+    return { ok: true, artifact: { kind: 'candidate', mode, text, candidate }, cardOutcomes: cards.cardOutcomes, evidence };
   }
   if (data.candidate !== undefined || !Array.isArray(data.patches) || data.patches.length === 0) return fail('RECURSION_EDITORIAL_REPAIR_INVALID', 'Repair requires bounded patches and cannot return a full candidate.');
   const targetEntries = Object.values(targets || {}).flat().filter(Boolean);
@@ -406,7 +551,7 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
   if (!preservesPresentationEnvelope(sourceText, applyEditorialArtifact(sourceText, { kind: 'patches', mode: 'repair', patches }, targets))) {
     return fail('RECURSION_EDITORIAL_PRESENTATION_INVALID', 'Editorial repair changed or collapsed the leading presentation envelope.');
   }
-  return { ok: true, artifact: { kind: 'patches', mode: 'repair', patches }, cardOutcomes: data.cardOutcomes, evidence };
+  return { ok: true, artifact: { kind: 'patches', mode: 'repair', patches }, cardOutcomes: cards.cardOutcomes, evidence };
 }
 
 function validateRedirectVerificationChecks(checks, known, decision) {
@@ -486,18 +631,43 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
   const validPreservationEvidenceIds = evidence
     .filter((entry) => !['source-draft', 'source-negative'].includes(entry.authority))
     .map((entry) => entry.id);
+  const validSourceEvidenceIds = evidence
+    .filter((entry) => ['source-draft', 'source-negative'].includes(entry.authority))
+    .map((entry) => entry.id);
   const correction = retry
-    ? [
-        'Editorial diagnosis correction required.',
-        `The previous diagnosis could not be accepted: ${safeText(retry?.code || 'RECURSION_EDITORIAL_DIAGNOSIS_INVALID', 120)} - ${safeText(retry?.message || 'Invalid diagnosis.', 360)}`,
-        `Preservation claims may cite only these evidence IDs: ${JSON.stringify(validPreservationEvidenceIds)}.`,
-        'Return one complete corrected diagnosis object; do not discuss the correction.'
-      ]
+    ? mode === 'redirect'
+      ? [
+          'Editorial diagnosis correction required.',
+          `The previous diagnosis could not be accepted: ${safeText(retry?.code || 'RECURSION_EDITORIAL_DIAGNOSIS_INVALID', 120)} - ${safeText(retry?.message || 'Invalid diagnosis.', 360)}`,
+          `Established evidenceRefs may use only these IDs: ${JSON.stringify(validPreservationEvidenceIds)}.`,
+          `conflictingSourceRefs, sourceRefs, and sourceEvidenceRefs may use only these source IDs: ${JSON.stringify(validSourceEvidenceIds)}.`,
+          'Return one complete corrected flat Redirect diagnosis object; do not discuss the correction.'
+        ]
+      : [
+          'Editorial diagnosis correction required.',
+          `The previous diagnosis could not be accepted: ${safeText(retry?.code || 'RECURSION_EDITORIAL_DIAGNOSIS_INVALID', 120)} - ${safeText(retry?.message || 'Invalid diagnosis.', 360)}`,
+          `Preservation claims may cite only these evidence IDs: ${JSON.stringify(validPreservationEvidenceIds)}.`,
+          'Return one complete corrected diagnosis object; do not discuss the correction.'
+        ]
     : [];
   const redirectRules = mode === 'redirect'
     ? [
         'Redirect is a turn-level correction, not a more aggressive Recompose.',
         'An explicit Redirect must return decision proceed. Never return no-change; identify the strongest evidence-supported turn-level correction.',
+        `Frozen top-level identity object (copy every value exactly): ${JSON.stringify({
+          schema: EDITORIAL_DIAGNOSIS_SCHEMA,
+          mode,
+          sourceHash: safeText(sourceHash, 180),
+          snapshotHash: safeText(snapshotHash, 180),
+          decision: 'proceed'
+        })}`,
+        'Return exactly these Redirect top-level keys: schema, mode, sourceHash, snapshotHash, decision, sourceFailure, replacementObjective, requiredBeats, forbiddenSourceBeats, sceneCharacters, characterPressure.',
+        'Do not return a brief object or the generic diagnosis, preserve, discard, allowedChanges, or forbiddenChanges fields.',
+        'Never put diagnosis prose, arrays, or Redirect content in schema, mode, sourceHash, snapshotHash, or decision.',
+        'sourceFailure must be an object with category, problem, establishedEvidenceRefs, and conflictingSourceRefs.',
+        'replacementObjective must be an object with summary and evidenceRefs. It must never be a character map.',
+        'requiredBeats and forbiddenSourceBeats must be non-empty arrays of structured objects.',
+        'sceneCharacters and characterPressure must be non-empty arrays with exactly one row per established scene character.',
         'Treat the latest user-turn evidence as completed player-authored action or dialogue that the assistant response must answer. Never replay, paraphrase, or assign that completed user content to the candidate response.',
         'Pair established non-source evidence with the conflicting source passages.',
         'Define one supported replacement objective, required beats, and forbidden source beats.',
@@ -538,7 +708,8 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
     sourceText: preservedSource,
     presentationEnvelope,
     validEvidenceIds: evidence.map((entry) => entry.id),
-    validPreservationEvidenceIds
+    validPreservationEvidenceIds,
+    validSourceEvidenceIds
   };
 }
 
@@ -555,6 +726,12 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     claim: String(entry?.claim || ''),
     evidenceRefs: array(entry?.evidenceRefs).map(String)
   }));
+  const redirectChangeEvidenceRefs = mode === 'redirect'
+    ? [...new Set([
+        ...array(diagnosis?.brief?.replacementObjective?.evidenceRefs).map(String),
+        ...array(diagnosis?.brief?.requiredBeats).flatMap((beat) => array(beat?.evidenceRefs).map(String))
+      ].filter(Boolean))].slice(0, 8)
+    : [];
   const correction = retry
     ? [
         'Editorial pass correction required.',
@@ -574,18 +751,32 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
         'Use diagnosis.brief.characterPressure as advisory dramatic evidence. Rising pressure makes a stronger response more likely but never mandatory.',
         'Silence, restraint, refusal, and delayed action remain valid when supported.',
         'Do not distribute dialogue or action as a checklist, and do not invent a want for an unclear character.',
-        'candidate.changeLedger must contain at least one entry with kind redirect, and each Redirect ledger entry must cite the replacement objective or a required beat.',
+        'Recursion constructs the Redirect change ledger locally from the validated diagnosis.',
         'A lexical rewrite that preserves the source objective or beat plan is not a Redirect.'
       ]
     : [];
+  const providerShapeRules = mode === 'redirect'
+    ? [
+        'Return exactly these Redirect top-level keys: schema, mode, sourceHash, snapshotHash, diagnosisHash, text.',
+        'Do not return candidate, patches, changeLedger, cardOutcomes, preservationLedger, or riskFlags.',
+        'Return candidate prose only in the top-level text field.',
+        'Recursion constructs preservation, change-ledger, and audit metadata locally after semantic validation.'
+      ]
+    : [
+        `Copy diagnosis.brief.preserve exactly into candidate.preservationLedger: ${JSON.stringify(requiredPreservationLedger)}. Do not add, remove, or rewrite preservation claims or evidence IDs.`,
+        'Every preservation claim, major change, patch, and card outcome must cite only supplied evidence IDs.'
+      ];
   const prompt = [
     'Return only one valid Recursion Editorial Pass JSON object.',
     `Selected mode: ${mode}.`,
-    full ? 'Return one complete candidate. You may replace every source sentence when the validated diagnosis supports it.' : 'Return only exact non-overlapping replacements for supplied targets.',
+    full
+      ? mode === 'redirect'
+        ? 'Return one complete rewritten response in the top-level text field. You may replace every source sentence when the validated diagnosis supports it.'
+        : 'Return one complete candidate. You may replace every source sentence when the validated diagnosis supports it.'
+      : 'Return only exact non-overlapping replacements for supplied targets.',
     mode === 'redirect' ? 'The source may be negative evidence. Preserve only facts supported by frozen evidence.' : 'Preserve supported facts, commitments, constraints, and the user turn while improving execution.',
     'The diagnosis below is authoritative. Do not add a new diagnosis or revise its preservation/discard decisions.',
-    `Copy diagnosis.brief.preserve exactly into candidate.preservationLedger: ${JSON.stringify(requiredPreservationLedger)}. Do not add, remove, or rewrite preservation claims or evidence IDs.`,
-    'Every preservation claim, major change, patch, and card outcome must cite only supplied evidence IDs.',
+    ...providerShapeRules,
     ...redirectRules,
     ...(presentationEnvelope ? ['Preserve the presentation envelope exactly: keep the leading scene header unchanged and retain a blank line before body prose.'] : []),
     ...correction,
@@ -609,29 +800,55 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     validEvidenceIds: array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean),
     validPreservationEvidenceIds,
     requiredPreservationLedger,
+    redirectChangeEvidenceRefs,
     installedCardIds: array(snapshot?.installedHand).map((card) => String(card?.cardId || card?.id || '')).filter(Boolean),
     validTargetIds: targetList.map((entry) => String(entry.id || '')).filter(Boolean)
   };
 }
 
-export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', diagnosis = null, evidence = [], candidate = {}, lane = '' } = {}) {
+export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', diagnosis = null, evidence = [], candidate = {}, lane = '', retry = null } = {}) {
   const candidateHash = hashJson(String(candidate?.text || ''));
+  const validEvidenceIds = array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean);
+  const verificationEvidenceRefs = mode === 'redirect'
+    ? [...new Set([
+        ...array(diagnosis?.brief?.replacementObjective?.evidenceRefs).map(String),
+        ...array(diagnosis?.brief?.requiredBeats).flatMap((beat) => array(beat?.evidenceRefs).map(String))
+      ].filter((id) => validEvidenceIds.includes(id)))].slice(0, 8)
+    : [];
+  if (mode === 'redirect' && verificationEvidenceRefs.length === 0 && validEvidenceIds.length) {
+    verificationEvidenceRefs.push(validEvidenceIds[0]);
+  }
+  const correction = retry
+    ? [
+        'Editorial verification correction required.',
+        `The previous verification could not be accepted: ${safeText(retry?.code || 'RECURSION_EDITORIAL_VERIFICATION_INVALID', 120)} - ${safeText(retry?.message || 'Invalid verification.', 360)}`,
+        ...(mode === 'redirect'
+          ? ['failedChecks may use only the required check names listed below.']
+          : [`Check evidenceRefs may use only these evidence IDs: ${JSON.stringify(validEvidenceIds)}.`]),
+        'Return a corrected verdict for the same candidate; do not rewrite or replace the candidate.'
+      ]
+    : [];
   const redirectRules = mode === 'redirect'
     ? [
         'Cross-check the diagnosis against frozen evidence and the source failure; reject if its objective or beats merely rename, soften, or preserve the failed trajectory.',
         'Evaluate every required check against both the validated diagnosis and frozen evidence; do not invent a different objective.',
-        `Return exactly ${REDIRECT_VERIFICATION_CHECKS.length} check results, one for each name below, in this order.`,
+        `Evaluate all ${REDIRECT_VERIFICATION_CHECKS.length} required checks below.`,
         ...REDIRECT_VERIFICATION_CHECKS.map((check, index) => `${index + 1}. ${check}`),
+        'Return failedChecks as the list of every required check that fails or remains unclear. Return an empty list only when every check passes.',
+        'Return one short user-safe reason. Do not return decision, checks, evidenceRefs, prose analysis, or a rewritten candidate.',
         'Required beats must be materially explicit in the candidate; adjacent or passive behavior is not equivalent to a required action.',
         'A plan to act after another task, check, location change, or future beat still retains a forbidden deferral, even when the wording differs from the source.',
         'Reject if the candidate omits any required beat, retains any forbidden source beat, or contradicts the advisory character-pressure map.'
       ]
     : [];
   const prompt = [
-    'Return only accept or reject for this one editorial candidate.',
+    mode === 'redirect'
+      ? 'Return only one compact Redirect verification result for this candidate.'
+      : 'Return only accept or reject for this one editorial candidate.',
     'Do not rewrite, score, compare, rank, or propose another candidate.',
     `Mode: ${mode}.`,
     ...redirectRules,
+    ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
     `<diagnosis_hash>${safeText(diagnosisHash, 180)}</diagnosis_hash>`,
@@ -649,7 +866,8 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
     mode,
     candidate,
     ...(mode === 'redirect' ? { diagnosis: object(diagnosis) } : {}),
-    validEvidenceIds: array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean)
+    validEvidenceIds,
+    verificationEvidenceRefs
   };
 }
 

@@ -294,7 +294,8 @@ const redirectDiagnosisMachineSchema = machineJsonSchemaForRequest({
   sourceHash: 'redirect-source-hash',
   snapshotHash: 'redirect-snapshot-hash',
   validEvidenceIds: ['user:0', 'card:active-cast', 'source:0'],
-  validPreservationEvidenceIds: ['user:0', 'card:active-cast']
+  validPreservationEvidenceIds: ['user:0', 'card:active-cast'],
+  validSourceEvidenceIds: ['source:0']
 });
 assertDeepEqual(
   redirectDiagnosisMachineSchema.schema.properties.decision.enum,
@@ -302,45 +303,60 @@ assertDeepEqual(
   'Redirect machine schema permits only a directional diagnosis'
 );
 assertDeepEqual(
-  redirectDiagnosisMachineSchema.schema.properties.brief.required,
+  redirectDiagnosisMachineSchema.schema.required,
   [
-    'mode', 'diagnosis', 'preserve', 'discard', 'allowedChanges', 'forbiddenChanges',
+    'schema', 'mode', 'sourceHash', 'snapshotHash', 'decision',
     'sourceFailure', 'replacementObjective', 'requiredBeats', 'forbiddenSourceBeats',
     'sceneCharacters', 'characterPressure'
   ],
-  'Redirect machine schema requires its complete turn-level diagnosis contract'
+  'Redirect machine schema exposes only its flat turn-level diagnosis contract'
+);
+assertEqual(
+  Object.prototype.hasOwnProperty.call(redirectDiagnosisMachineSchema.schema.properties, 'brief'),
+  false,
+  'Redirect machine schema does not expose the unstable mixed-mode brief wrapper'
 );
 assertDeepEqual(
-  redirectDiagnosisMachineSchema.schema.properties.brief.properties.sourceFailure.anyOf[1].properties.category.enum,
+  redirectDiagnosisMachineSchema.schema.properties.sourceFailure.properties.category.enum,
   ['turn-fulfillment', 'core-direction', 'hard-constraint', 'unsupported-outcome', 'temporal-causal', 'character-epistemic'],
   'Redirect source failures use the frozen category contract'
 );
 assertDeepEqual(
-  redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.properties.wantEvidenceRefs.items.enum,
+  redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.properties.wantEvidenceRefs.items.enum,
   ['user:0', 'card:active-cast'],
   'Redirect wants cannot cite source-draft evidence'
 );
 assertDeepEqual(
-  redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.properties.sourceEvidenceRefs.items.enum,
-  ['user:0', 'card:active-cast', 'source:0'],
-  'Redirect pressure effects may cite supplied source evidence for semantic validation'
+  redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.properties.sourceEvidenceRefs.items.enum,
+  ['source:0'],
+  'Redirect pressure effects can cite only source-draft evidence'
 );
 assertDeepEqual(
-  redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.properties.sourcePressureEffect.enum,
+  redirectDiagnosisMachineSchema.schema.properties.sourceFailure.properties.conflictingSourceRefs.items.enum,
+  ['source:0'],
+  'Redirect source failures constrain conflicting refs to source-draft evidence'
+);
+assertDeepEqual(
+  redirectDiagnosisMachineSchema.schema.properties.forbiddenSourceBeats.items.properties.sourceRefs.items.enum,
+  ['source:0'],
+  'Redirect forbidden beats constrain refs to source-draft evidence'
+);
+assertDeepEqual(
+  redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.properties.sourcePressureEffect.enum,
   ['increasing', 'decreasing', 'unchanged', 'unclear'],
   'Redirect pressure effects use the frozen vocabulary'
 );
 assertEqual(
-  redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.properties.wantEvidenceRefs.minItems,
+  redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.properties.wantEvidenceRefs.minItems,
   0,
   'Redirect pressure schema permits empty want evidence for an unclear want'
 );
 assertEqual(
-  redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.properties.sourceEvidenceRefs.minItems,
+  redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.properties.sourceEvidenceRefs.minItems,
   0,
   'Redirect pressure schema permits empty source evidence for an unclear effect'
 );
-const redirectPressureVariants = redirectDiagnosisMachineSchema.schema.properties.brief.properties.characterPressure.items.anyOf;
+const redirectPressureVariants = redirectDiagnosisMachineSchema.schema.properties.characterPressure.items.anyOf;
 assertEqual(redirectPressureVariants.length, 2, 'Redirect pressure schema exposes only concrete and unknown pressure variants');
 assertEqual(
   redirectPressureVariants[0].properties.immediateWant.type,
@@ -407,15 +423,25 @@ const redirectPassMachineSchema = machineJsonSchemaForRequest({
   installedCardIds: [],
   validTargetIds: []
 });
-assertEqual(
-  redirectPassMachineSchema.schema.properties.candidate.properties.changeLedger.minItems,
-  1,
-  'Redirect machine schema requires a non-empty directional ledger'
+assertDeepEqual(
+  redirectPassMachineSchema.schema.required,
+  ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'text'],
+  'Redirect machine schema uses the minimal flat pass contract'
 );
 assertEqual(
-  redirectPassMachineSchema.schema.properties.candidate.properties.changeLedger.items.properties.kind.const,
-  'redirect',
-  'Redirect machine schema requires every reported directional ledger entry to use the Redirect kind'
+  Object.prototype.hasOwnProperty.call(redirectPassMachineSchema.schema.properties, 'candidate'),
+  false,
+  'Redirect machine schema does not expose the shared nested candidate object'
+);
+assertEqual(
+  Object.prototype.hasOwnProperty.call(redirectPassMachineSchema.schema.properties, 'cardOutcomes'),
+  false,
+  'Redirect machine schema does not ask the provider for audit-only card outcomes'
+);
+assertEqual(
+  Object.prototype.hasOwnProperty.call(redirectPassMachineSchema.schema.properties, 'changeLedger'),
+  false,
+  'Redirect machine schema does not ask the provider for an audit ledger'
 );
 const editorialVerifierMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialVerification.v1',
@@ -446,20 +472,22 @@ const redirectVerifierMachineSchema = machineJsonSchemaForRequest({
 });
 assertDeepEqual(
   redirectVerifierMachineSchema.schema.required,
-  ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash', 'decision', 'checks'],
-  'Redirect verifier requires candidate identity and exact check coverage'
+  ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash', 'failedChecks', 'reason'],
+  'Redirect verifier uses the compact failed-check contract'
 );
-assertEqual(redirectVerifierMachineSchema.schema.properties.checks.minItems, 8, 'Redirect verifier requires all eight checks');
-assertEqual(redirectVerifierMachineSchema.schema.properties.checks.maxItems, 8, 'Redirect verifier cannot add extra checks');
+assertEqual(redirectVerifierMachineSchema.schema.properties.failedChecks.minItems, 0, 'Redirect verifier may report no failed checks');
+assertEqual(redirectVerifierMachineSchema.schema.properties.failedChecks.maxItems, 8, 'Redirect verifier cannot report more than the eight required checks');
 assertDeepEqual(
-  redirectVerifierMachineSchema.schema.properties.checks.items.properties.check.enum,
+  redirectVerifierMachineSchema.schema.properties.failedChecks.items.enum,
   [
     'source-failure-removed', 'replacement-objective-fulfilled', 'required-beats-satisfied',
     'forbidden-source-beats-excluded', 'character-pressure-coherent', 'hard-constraints-preserved',
     'user-turn-answered', 'unsupported-facts-absent'
   ],
-  'Redirect verifier schema freezes the eight semantic checks'
+  'Redirect verifier schema freezes the allowed failed-check names'
 );
+assertEqual(Object.prototype.hasOwnProperty.call(redirectVerifierMachineSchema.schema.properties, 'decision'), false, 'Redirect verifier decision is derived locally');
+assertEqual(Object.prototype.hasOwnProperty.call(redirectVerifierMachineSchema.schema.properties, 'checks'), false, 'Redirect verifier does not author canonical check rows');
 assertEqual(redirectVerifierMachineSchema.schema.additionalProperties, false, 'Redirect verifier rejects undeclared output fields');
 const redirectEffectivenessMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.redirectEffectivenessJudge.v1',
@@ -576,12 +604,149 @@ const normalizedModeAsSchemaDiagnosis = await modeAsSchemaDiagnosisRouter.genera
 });
 assertEqual(normalizedModeAsSchemaDiagnosis.ok, true, 'Editorial diagnosis repairs a schema field that redundantly contains the frozen selected mode');
 assertEqual(normalizedModeAsSchemaDiagnosis.data.schema, 'recursion.editorialDiagnosis.v1', 'Editorial diagnosis restores the requested schema identifier from the frozen role contract');
-assertEqual(normalizedModeAsSchemaDiagnosis.data.brief.mode, 'redirect', 'Editorial diagnosis restores nested brief mode from the frozen request');
+assertEqual(normalizedModeAsSchemaDiagnosis.data.mode, 'redirect', 'Editorial diagnosis restores flat Redirect mode from the frozen request');
+const shiftedEditorialEnvelopeRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'proceed',
+          mode: 'redirect',
+          sourceHash: 'The source deferred the requested action.',
+          snapshotHash: 'Engage the requested action in the current turn.',
+          decision: ['Complete the requested action now.'],
+          brief: {
+            mode: null,
+            diagnosis: [],
+            preserve: [],
+            discard: [],
+            allowedChanges: [],
+            forbiddenChanges: [],
+            sourceFailure: null,
+            replacementObjective: null,
+            requiredBeats: [],
+            forbiddenSourceBeats: [],
+            sceneCharacters: [],
+            characterPressure: []
+          }
+        })
+      };
+    }
+  }
+});
+const normalizedShiftedEditorialEnvelope = await shiftedEditorialEnvelopeRouter.generate('editorialDiagnostician', {
+  mode: 'redirect',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash'
+});
+assertEqual(normalizedShiftedEditorialEnvelope.ok, true, 'Editorial diagnosis restores a field-shifted model envelope before semantic validation');
+assertEqual(normalizedShiftedEditorialEnvelope.data.schema, 'recursion.editorialDiagnosis.v1', 'field-shifted diagnosis restores the frozen schema identifier');
+assertEqual(normalizedShiftedEditorialEnvelope.data.mode, 'redirect', 'field-shifted diagnosis restores the selected mode');
+assertEqual(normalizedShiftedEditorialEnvelope.data.sourceHash, 'trusted-source-hash', 'field-shifted diagnosis restores source identity');
+assertEqual(normalizedShiftedEditorialEnvelope.data.snapshotHash, 'trusted-snapshot-hash', 'field-shifted diagnosis restores snapshot identity');
+assertEqual(normalizedShiftedEditorialEnvelope.data.decision, 'proceed', 'field-shifted Redirect diagnosis restores its only legal decision');
+assertEqual(normalizedShiftedEditorialEnvelope.data.sourceFailure, undefined, 'field-shifted diagnosis does not fabricate missing flat source-failure content');
+assertEqual(normalizedShiftedEditorialEnvelope.data.replacementObjective, undefined, 'field-shifted diagnosis does not fabricate a replacement objective');
 const normalizedTransform = await editorialIdentityRouter.generate('editorialTransformer', trustedEditorialIdentity);
 assertEqual(normalizedTransform.data.mode, trustedEditorialIdentity.mode, 'Editorial transform mode comes from the frozen request');
 assertEqual(normalizedTransform.data.sourceHash, trustedEditorialIdentity.sourceHash, 'Editorial transform source identity comes from the frozen request');
 assertEqual(normalizedTransform.data.snapshotHash, trustedEditorialIdentity.snapshotHash, 'Editorial transform snapshot identity comes from the frozen request');
 assertEqual(normalizedTransform.data.diagnosisHash, trustedEditorialIdentity.diagnosisHash, 'Editorial transform diagnosis identity comes from the frozen request');
+const flatRedirectTransformRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'wrong-schema',
+          mode: 'recompose',
+          sourceHash: 'model-source',
+          snapshotHash: 'model-snapshot',
+          diagnosisHash: 'model-diagnosis',
+          text: 'Carter set her receipt flat. "Then we test it here," she said.',
+          changeLedger: [{ kind: 'redirect', summary: 'ignored provider ledger', evidenceRefs: ['missing:evidence'] }],
+          candidate: { text: 'ignored nested candidate' },
+          patches: [{ id: 'ignored' }],
+          cardOutcomes: [{ cardId: 'ignored' }],
+          riskFlags: ['ignored']
+        })
+      };
+    }
+  }
+});
+const normalizedFlatRedirectTransform = await flatRedirectTransformRouter.generate('editorialTransformer', {
+  mode: 'redirect',
+  sourceHash: 'trusted-source',
+  snapshotHash: 'trusted-snapshot',
+  diagnosisHash: 'trusted-diagnosis',
+  validEvidenceIds: ['user:0'],
+  redirectChangeEvidenceRefs: ['user:0'],
+  installedCardIds: ['scene-frame']
+});
+assertEqual(normalizedFlatRedirectTransform.ok, true, 'flat Redirect transform response normalizes into the internal pass contract');
+assertDeepEqual(
+  normalizedFlatRedirectTransform.data,
+  {
+    schema: 'recursion.editorialPass.v1',
+    mode: 'redirect',
+    sourceHash: 'trusted-source',
+    snapshotHash: 'trusted-snapshot',
+    diagnosisHash: 'trusted-diagnosis',
+    cardOutcomes: [],
+    candidate: {
+      text: 'Carter set her receipt flat. "Then we test it here," she said.',
+      preservationLedger: [],
+      changeLedger: [{
+        kind: 'redirect',
+        summary: 'Rebuilt the response around the validated replacement objective.',
+        evidenceRefs: ['user:0']
+      }],
+      riskFlags: []
+    }
+  },
+  'Redirect provider normalization ignores shared-mode and audit fields and constructs the canonical internal candidate'
+);
+const compactRedirectVerifierRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'wrong-schema',
+          mode: 'recompose',
+          sourceHash: 'model-source',
+          snapshotHash: 'model-snapshot',
+          diagnosisHash: 'model-diagnosis',
+          candidateHash: 'model-candidate',
+          failedChecks: ['required-beats-satisfied'],
+          reason: 'The required action was not explicit.',
+          decision: 'accept',
+          checks: []
+        })
+      };
+    }
+  }
+});
+const normalizedCompactRedirectVerification = await compactRedirectVerifierRouter.generate('editorialVerifier', {
+  mode: 'redirect',
+  sourceHash: 'trusted-source',
+  snapshotHash: 'trusted-snapshot',
+  diagnosisHash: 'trusted-diagnosis',
+  candidateHash: 'trusted-candidate',
+  verificationEvidenceRefs: ['user:0']
+});
+assertEqual(normalizedCompactRedirectVerification.ok, true, 'compact Redirect verifier response normalizes into the internal verification contract');
+assertEqual(normalizedCompactRedirectVerification.data.decision, 'reject', 'any reported failed check derives a reject decision');
+assertEqual(normalizedCompactRedirectVerification.data.checks.length, 8, 'Redirect verifier normalization constructs all eight canonical checks');
+assertEqual(
+  normalizedCompactRedirectVerification.data.checks.find((entry) => entry.check === 'required-beats-satisfied')?.status,
+  'fail',
+  'reported failed check becomes a canonical failed row'
+);
+assert(
+  normalizedCompactRedirectVerification.data.checks
+    .filter((entry) => entry.check !== 'required-beats-satisfied')
+    .every((entry) => entry.status === 'pass'),
+  'unreported checks become canonical pass rows'
+);
 const normalizedVerification = await editorialIdentityRouter.generate('editorialVerifier', trustedEditorialIdentity);
 assertEqual(normalizedVerification.data.sourceHash, trustedEditorialIdentity.sourceHash, 'Editorial verification source identity comes from the frozen request');
 assertEqual(normalizedVerification.data.snapshotHash, trustedEditorialIdentity.snapshotHash, 'Editorial verification snapshot identity comes from the frozen request');

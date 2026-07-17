@@ -251,7 +251,17 @@ The design keeps uncertainty explicit at the character-pressure field level. It 
 
 ## Provider schema integration
 
-`src/providers.mjs` should extend `editorialBriefSchema()` only when `mode === "redirect"`. Recompose retains the current brief shape.
+> Implementation amendment, 2026-07-16: the nested mixed-mode Redirect brief described below was replaced after repeated Utility-only provider failures showed semantic fields being shifted into `brief.mode`, generic diagnosis arrays, and other unrelated slots. The code snippets below remain as design history for the internal canonical brief, not the provider response shape.
+
+The provider-facing Redirect diagnosis is now flat and mode-specific. It returns the frozen identity fields plus `sourceFailure`, `replacementObjective`, `requiredBeats`, `forbiddenSourceBeats`, `sceneCharacters`, and `characterPressure` at the top level. It does not return `brief`, `diagnosis`, `preserve`, `discard`, `allowedChanges`, or `forbiddenChanges`. Runtime validates the flat result and then constructs the private canonical `diagnosis.brief` used by Transform, Verify, markers, and audit logic. Recompose and Repair retain the generic nested brief contract.
+
+Redirect source-reference fields are also machine-constrained separately from authoritative evidence: `conflictingSourceRefs`, forbidden-beat `sourceRefs`, and pressure `sourceEvidenceRefs` may cite only source-draft/source-negative IDs.
+
+When a provider mixes authorities inside a required Redirect evidence list, semantic validation keeps the request-known refs with the correct authority and drops the stray refs. The field still fails when no valid ref remains, so this normalization removes provider noise without inventing grounding.
+
+Scene-character citations are advisory. If a returned character row has no valid authoritative citation, runtime may recover citations from frozen non-source evidence whose excerpt explicitly names that character. Rows with no such evidence are dropped, and Redirect still fails character coverage when no evidence-backed scene character remains.
+
+The Redirect transform provider contract is flat and mode-specific. It returns only `schema`, `mode`, `sourceHash`, `snapshotHash`, `diagnosisHash`, and top-level `text`. It does not return the shared nested `candidate`, `patches`, `changeLedger`, `cardOutcomes`, `preservationLedger`, or `riskFlags` fields. The provider boundary constructs the private canonical candidate with empty Redirect preservation and risk lists plus one deterministic `redirect` ledger entry grounded in the validated replacement-objective and required-beat evidence. Runtime reconstructs exactly one audit row per frozen installed card with `status: "partially-reflected"` and the matching `card:<id>` evidence reference. Repair and Recompose retain their existing nested pass contract and strict card-outcome coverage. Locally constructed ledger and audit fields do not weaken candidate validation or verification: the complete candidate must still satisfy the validated Redirect diagnosis and pass the independent eight-check verifier before a swipe can be added.
 
 ```js
 function redirectPressureSchema(validEvidenceIds, validPreservationEvidenceIds) {
@@ -425,6 +435,21 @@ The exact helper names may follow local conventions, but these checks are requir
 
 The Redirect transformer receives the validated diagnosis unchanged and writes one complete candidate. Its prompt must distinguish trajectory from prose variance.
 
+The provider-facing output is intentionally minimal:
+
+```js
+{
+  schema: 'recursion.editorialPass.v1',
+  mode: 'redirect',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  text: 'Complete rewritten assistant response.'
+}
+```
+
+`normalizeRoleResponseEnvelope()` copies the frozen identity values and converts this into the canonical internal `candidate` object. The runtime-owned `redirect` ledger cites the already validated replacement-objective and required-beat evidence. Extra shared-mode and audit fields are discarded rather than allowed to shift or poison the Redirect pass.
+
 ```js
 const redirectRules = [
   'The validated Redirect diagnosis is authoritative.',
@@ -451,19 +476,23 @@ The existing full-candidate checks remain necessary but are not sufficient for R
 
 Deterministic Redirect validation additionally requires:
 
-- exactly one full candidate and no patches;
+- exactly one normalized full candidate and no patches;
 - a candidate different from the source;
+- candidate text no longer inheriting Recompose's source-relative `1.75x` cap;
+  Redirect may expand a short failed source up to the shared absolute
+  16,000-character bound;
 - a change ledger containing at least one `kind: "redirect"` entry;
 - every Redirect ledger entry citing at least one authoritative objective or required-beat evidence reference;
 - exact diagnosis hash identity;
 - exact preservation ledger identity;
-- complete installed-card outcome coverage;
+- deterministic installed-card audit coverage constructed from the frozen hand;
 - mandatory verifier execution before host mutation.
 
-The Redirect machine schema also makes `changeLedger` non-empty and constrains its
-item `kind` to `redirect`. This prevents a provider response from satisfying
-structured output with an empty or Recompose-style ledger and then failing only at
-semantic validation. Other modes retain their broader change-kind vocabulary.
+The Redirect machine schema does not expose `changeLedger`. Runtime constructs
+one non-empty `kind: "redirect"` entry from the validated replacement objective
+and required-beat evidence. Deterministic validation still requires that
+canonical entry and rejects a missing or wrongly grounded ledger. Other modes
+retain their provider-authored broader change-kind vocabulary.
 
 ```js
 if (mode === 'redirect') {
@@ -492,6 +521,11 @@ This deterministic check blocks the OV-1 candidate's all-`reorder` ledger. It do
 ## Mandatory Redirect verification
 
 Every Redirect receives one independent verifier call. Recompose retains its existing High/Ultra-only verification policy.
+
+Redirect verification prefers a healthy Reasoner at every reasoning level, even
+when Medium diagnosis and transformation remain on Utility. This keeps the semantic
+gate independent from the model that authored the candidate. Utility is used only
+when no healthy Reasoner is available.
 
 ```js
 export function editorialVerificationRequired(mode = '', reasoningLevel = '') {
@@ -527,13 +561,13 @@ const key = editorialPassKey({
 
 This prevents Medium Redirect from reusing a `direct` pass produced under the old High/Ultra-only policy. The helper belongs in `src/editorial-transform.mjs` beside `editorialPassKey()` so policy and identity cannot drift apart.
 
-The verifier returns no prose and cannot request another candidate. For Redirect,
-`buildEditorialVerificationRequest()` includes the complete validated diagnosis in
-the private provider prompt and request object. A diagnosis hash alone is not
-sufficient because the verifier must inspect the replacement objective, required
-beats, forbidden source beats, and advisory character-pressure map. The diagnosis
-remains absent from public runtime/UI projection. The verifier evaluates these
-checks exactly once each:
+The verifier returns no candidate prose and cannot request another candidate. For
+Redirect, `buildEditorialVerificationRequest()` includes the complete validated
+diagnosis in the private provider prompt and request object. A diagnosis hash alone
+is not sufficient because the verifier must inspect the replacement objective,
+required beats, forbidden source beats, and advisory character-pressure map. The
+diagnosis remains absent from public runtime/UI projection. The provider evaluates
+these checks and returns only the names that fail or remain unclear:
 
 ```js
 export const REDIRECT_VERIFICATION_CHECKS = Object.freeze([
@@ -547,82 +581,48 @@ export const REDIRECT_VERIFICATION_CHECKS = Object.freeze([
   'unsupported-facts-absent'
 ]);
 
-const verification = {
+const providerVerification = {
   schema: 'recursion.editorialVerification.v1',
   mode: 'redirect',
   sourceHash,
   snapshotHash,
   diagnosisHash,
   candidateHash,
-  decision: 'accept',
-  checks: REDIRECT_VERIFICATION_CHECKS.map((check) => ({
-    check,
-    status: 'pass',
-    evidenceRefs: ['user:0'],
-    note: 'Concise evidence-bound result.'
-  }))
+  failedChecks: [],
+  reason: 'All required Redirect checks passed.'
 };
 ```
 
 ### Verification provider schema
 
-`src/providers.mjs` must require the exact check array for Redirect. Mode and candidate identity are strengthened for both full-candidate modes, but Recompose does not receive Redirect's check array or mandatory-verification policy:
+`src/providers.mjs` uses a compact Redirect-only provider contract. Recompose keeps
+its direct `decision` contract:
 
 ```js
-import {
-  EDITORIAL_VERIFICATION_SCHEMA,
-  REDIRECT_VERIFICATION_CHECKS
-} from './editorial-transform.mjs';
-
-function editorialVerificationChecksSchema(validEvidenceIds) {
-  return {
-    type: 'array',
-    minItems: REDIRECT_VERIFICATION_CHECKS.length,
-    maxItems: REDIRECT_VERIFICATION_CHECKS.length,
-    items: {
-      type: 'object',
-      properties: {
-        check: { enum: [...REDIRECT_VERIFICATION_CHECKS] },
-        status: { enum: ['pass', 'fail', 'unclear'] },
-        evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds),
-        note: { type: 'string' }
-      },
-      required: ['check', 'status', 'evidenceRefs', 'note'],
-      additionalProperties: false
-    }
-  };
-}
-
-if (schema === EDITORIAL_VERIFICATION_SCHEMA) {
-  const mode = String(request?.mode || '').trim();
-  const properties = {
-    schema: { const: schema },
-    mode: mode ? { const: mode } : { enum: ['recompose', 'redirect'] },
-    sourceHash: { const: String(request.sourceHash) },
-    snapshotHash: { const: String(request.snapshotHash) },
-    diagnosisHash: { const: String(request.diagnosisHash) },
-    candidateHash: { const: String(request.candidateHash) },
-    decision: { enum: ['accept', 'reject'] },
-    evidenceRefs: editorialEvidenceRefsSchema(validEvidenceIds),
-    reason: { type: 'string' },
-    ...(mode === 'redirect'
-      ? { checks: editorialVerificationChecksSchema(validEvidenceIds) }
-      : {})
-  };
+if (schema === EDITORIAL_VERIFICATION_SCHEMA && mode === 'redirect') {
   return {
     name: schemaSafeName(schema),
     schema: {
       type: 'object',
-      properties,
+      properties: {
+        schema: { const: schema },
+        mode: { const: 'redirect' },
+        sourceHash: { const: String(request.sourceHash) },
+        snapshotHash: { const: String(request.snapshotHash) },
+        diagnosisHash: { const: String(request.diagnosisHash) },
+        candidateHash: { const: String(request.candidateHash) },
+        failedChecks: {
+          type: 'array',
+          minItems: 0,
+          maxItems: REDIRECT_VERIFICATION_CHECKS.length,
+          uniqueItems: true,
+          items: { enum: [...REDIRECT_VERIFICATION_CHECKS] }
+        },
+        reason: { type: 'string' }
+      },
       required: [
-        'schema',
-        'mode',
-        'sourceHash',
-        'snapshotHash',
-        'diagnosisHash',
-        'candidateHash',
-        'decision',
-        ...(mode === 'redirect' ? ['checks'] : [])
+        'schema', 'mode', 'sourceHash', 'snapshotHash',
+        'diagnosisHash', 'candidateHash', 'failedChecks', 'reason'
       ],
       additionalProperties: false
     }
@@ -632,7 +632,16 @@ if (schema === EDITORIAL_VERIFICATION_SCHEMA) {
 
 ### Verification semantic validation
 
-`validateEditorialVerification()` receives `mode` and enforces exact Redirect coverage. A structurally valid `reject` remains a valid verifier result; runtime then rejects the candidate. An `accept` with any non-pass check is itself invalid.
+The provider boundary validates `failedChecks`, derives `decision`, and constructs
+all eight canonical rows with frozen evidence references. An empty failed-check list
+becomes `accept`; any listed check becomes `reject`. Unknown, duplicate, or malformed
+names produce an invalid canonical decision so the normal semantic validator and
+single verifier-only correction path remain authoritative.
+
+`validateEditorialVerification()` still receives the canonical internal result and
+enforces exact Redirect coverage. A structurally valid `reject` remains a valid
+verifier result; runtime then rejects the candidate. An `accept` with any non-pass
+check is itself invalid.
 
 ```js
 function validateRedirectVerificationChecks(checks, known, decision) {
@@ -1031,11 +1040,21 @@ export async function runModelEval({
 
 `defaultEditorialEffectivenessRunner` must, for each tagged scenario:
 
-1. seed the scenario's user turn and flawed source response into a dedicated `recursion-soak-*` chat through the existing Playwright harness;
-2. select Redirect and execute the real configured diagnosis, transformer, and mandatory verifier calls;
-3. capture the resulting candidate, marker, journal delta, and strict progress oracle;
-4. call the configured independent `judgeModel` with the frozen scenario oracle and produced candidate;
-5. return a structured result without mutating `default-user`.
+1. seed prior context and the scenario user turn into a dedicated
+   `recursion-soak-*` chat through the existing Playwright harness;
+2. run the real generation-time Recursion pipeline and freeze its Prompt Packet
+   before the flawed assistant source lands;
+3. land the flawed source response, select Redirect, and execute the real
+   configured diagnosis, transformer, and mandatory verifier calls;
+4. capture the resulting candidate, marker, journal delta, and strict progress
+   oracle;
+5. call the configured independent `judgeModel` with the frozen scenario oracle
+   and produced candidate;
+6. return a structured result without mutating `default-user`.
+
+The harness must never include the flawed source response in
+`prepareForGeneration()`. Doing so generates source-derived cards that canonize
+the failure Redirect is meant to replace and invalidates the proof.
 
 The live path uses one internal, non-UI provider role named `editorialEffectivenessJudge` with schema `recursion.redirectEffectivenessJudge.v1`. `src/editorial-transform.mjs` owns its request builder and validator; `src/providers.mjs` owns its machine schema/role registration; `src/runtime.mjs` exposes the narrow `evaluateRedirectEffectiveness()` method used by the dedicated live harness. It is not invoked by normal chat generation and does not add a user-facing feature.
 

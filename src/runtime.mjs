@@ -4059,26 +4059,50 @@ export function createRecursionRuntime({
         ? hashJson(String(validation.artifact.candidate?.text || validation.artifact.text || ''))
         : '';
       if (verificationRequired) {
+        const verifierLane = editorialMode === 'redirect' && reasonerLaneAvailable(settings)
+          ? 'reasoner'
+          : editorialLane;
+        let verificationCorrectionSpent = false;
         const verifyCandidate = async () => {
-          stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: editorialLane, composerLane: editorialLane, chips: ['Enhancement', 'Verify'] });
-          const verificationRequest = buildEditorialVerificationRequest({ mode: editorialMode, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, evidence, candidate: validation.artifact.candidate, lane: editorialLane });
-          const verifierResponse = await generateEditorialRole('editorialVerifier', {
-            ...verificationRequest,
-            ...reasonerRequestMetadata(settings, 'editorial-verify', editorialLane)
-          }, { allowStructuredRecovery: false });
-          if (enhancementSignal?.aborted) return { canceled: true };
-          return {
-            result: verifierResponse.result?.ok === true
-              ? validateEditorialVerification(verifierResponse.result.data, {
-                  mode: editorialMode,
-                  sourceHash,
-                  snapshotHash,
-                  diagnosisHash,
-                  candidateHash: verificationRequest.candidateHash,
-                  evidence
-                })
-              : { ok: false, decision: 'reject', error: verifierResponse.result?.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_FAILED', message: 'Editorial verification failed.' } }
+          const runVerifier = async (retry = null) => {
+            const verificationRequest = buildEditorialVerificationRequest({
+              mode: editorialMode,
+              sourceHash,
+              snapshotHash,
+              diagnosisHash,
+              diagnosis: diagnosisValidation.value,
+              evidence,
+              candidate: validation.artifact.candidate,
+              lane: verifierLane,
+              retry
+            });
+            const verifierResponse = await generateEditorialRole('editorialVerifier', {
+              ...verificationRequest,
+              ...reasonerRequestMetadata(settings, 'editorial-verify', verifierLane)
+            }, { allowStructuredRecovery: false });
+            if (enhancementSignal?.aborted) return { canceled: true };
+            return {
+              result: verifierResponse.result?.ok === true
+                ? validateEditorialVerification(verifierResponse.result.data, {
+                    mode: editorialMode,
+                    sourceHash,
+                    snapshotHash,
+                    diagnosisHash,
+                    candidateHash: verificationRequest.candidateHash,
+                    evidence
+                  })
+                : { ok: false, decision: 'reject', error: verifierResponse.result?.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_FAILED', message: 'Editorial verification failed.' } }
+            };
           };
+          stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: verifierLane, composerLane: verifierLane, chips: ['Enhancement', 'Verify'] });
+          let verified = await runVerifier();
+          if (verified.canceled) return verified;
+          if (editorialMode === 'redirect' && !verified.result.ok && !verificationCorrectionSpent) {
+            verificationCorrectionSpent = true;
+            stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Correcting editorial verification...', providerLane: verifierLane, composerLane: verifierLane, chips: ['Enhancement', 'Verify'] });
+            verified = await runVerifier(verified.result.error);
+          }
+          return verified;
         };
         let verified = await verifyCandidate();
         if (verified.canceled) return canceledEditorialResult();

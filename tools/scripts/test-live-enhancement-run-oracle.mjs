@@ -151,6 +151,7 @@ for (const scriptPath of [
 }
 
 const effectivenessSource = readFileSync('tools/scripts/lib/live-editorial-effectiveness.mjs', 'utf8');
+const proofSource = readFileSync('tools/scripts/prove-live-enhancements.mjs', 'utf8');
 assert(
   !effectivenessSource.includes('page.waitForFunction((expectedDecision)'),
   'live Redirect proof uses historical oracle transitions instead of requiring replaced preparation and Editorial rows to coexist'
@@ -159,6 +160,26 @@ assert(
   effectivenessSource.indexOf('const oracle = await collectLiveEnhancementRunOracle(page)')
     < effectivenessSource.indexOf('page.evaluate(executeJudgeInPage'),
   'live Redirect proof settles and collects production progress before the test-only effectiveness judge can replace it'
+);
+assert(
+  proofSource.includes("envValue('RECURSION_FORCE_UTILITY_ENHANCEMENT'"),
+  'live Redirect proof exposes an explicit Utility-only Enhancement switch'
+);
+assert(
+  effectivenessSource.indexOf("runtime.updateProvider('reasoner', { enabled: false })")
+    < effectivenessSource.indexOf('await installLiveEnhancementRunOracle(page)'),
+  'Utility-only live proof disables Reasoner before installing the production-run oracle'
+);
+assert(
+  effectivenessSource.indexOf('const oracle = await collectLiveEnhancementRunOracle(page)')
+    < effectivenessSource.indexOf("runtime.updateProvider('reasoner', { enabled: true })")
+    && effectivenessSource.indexOf("runtime.updateProvider('reasoner', { enabled: true })")
+      < effectivenessSource.indexOf('page.evaluate(executeJudgeInPage'),
+  'Utility-only live proof restores Reasoner after production evidence capture and before the independent judge'
+);
+assert(
+  /finally\s*\{[\s\S]*restoreReasonerAfterEnhancement/.test(effectivenessSource),
+  'Utility-only live proof restores Reasoner on exceptional exits'
 );
 assert(
   effectivenessSource.includes("document.querySelector('[data-recursion-status-popover]')?.hidden === false"),

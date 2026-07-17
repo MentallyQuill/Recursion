@@ -116,6 +116,8 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
     sourceHash: text(result.sourceHash || marker.sourceHash),
     candidateHash: text(marker.candidateHash || judge.candidateHash),
     productionVerification: text(marker.verification),
+    errorCode: text(result.error?.code || result.validation?.error?.code || artifacts.runtimeView?.editorialResult?.errorCode),
+    errorMessage: text(result.error?.message || result.validation?.error?.message || artifacts.runtimeView?.editorialResult?.reason),
     verifierChecks: Array.isArray(result.verification?.checks) ? result.verification.checks : [],
     judge,
     provider: artifacts.provider || {},
@@ -180,7 +182,6 @@ async function executeScenarioInPage(input) {
   ctx.chat.push({ mesid, is_user: true, name: 'Recursion Redirect Proof User', mes: pendingUserMessage });
   mesid += 1;
   const sourceMesId = mesid;
-  ctx.chat.push({ mesid: sourceMesId, is_user: false, name: 'Story', mes: sourceText, swipe_id: 0, swipes: [sourceText] });
 
   const state = () => {
     const message = (context().chat || []).find((entry, index) => Number(entry?.mesid ?? index) === Number(sourceMesId));
@@ -225,6 +226,7 @@ async function executeScenarioInPage(input) {
     };
     poll();
   });
+  ctx.chat.push({ mesid: sourceMesId, is_user: false, name: 'Story', mes: sourceText, swipe_id: 0, swipes: [sourceText] });
   const before = state();
   const enhancementResult = await runStage('enhance', () => runtime.enhanceLatestAssistantMessage({ reason: `live-redirect-${scenario.id}` }));
   const after = state();
@@ -295,57 +297,90 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
   if (artifactRoot) mkdirSync(artifactRoot, { recursive: true });
 
   return {
-    async execute({ scenario, targetModel, judgeModel }) {
-      await page.setViewportSize({ width: 1280, height: 720 });
-      await installLiveEnhancementRunOracle(page);
-      const artifacts = await page.evaluate(executeScenarioInPage, {
-        scenario,
-        stageTimeouts: Object.fromEntries(['settings', 'warm', 'prepare', 'enhance', 'judge']
-          .map((stage) => [stage, liveEditorialStageTimeoutMs(stage, timeoutMs)]))
-      });
-      if (artifacts?.environmentFailure) throw new Error(artifacts.environmentFailure);
-      await page.waitForFunction(() => {
-        const rows = [...document.querySelectorAll('[data-recursion-status-popover] [data-recursion-progress-row]')];
-        return !rows.some((row) => ['running', 'pending', 'waiting'].includes(String(row.dataset.recursionProgressState || '').toLowerCase()));
-      }, null, { timeout: 15000 }).catch(() => {});
-      const oracle = await collectLiveEnhancementRunOracle(page);
-      const journalDelta = Array.isArray(oracle?.observation?.journalDelta) ? oracle.observation.journalDelta : [];
-      const screenshotPath = artifactRoot
-        ? join(artifactRoot, `${String(scenario.id || 'redirect').replace(/[^a-z0-9_-]+/gi, '-')}.png`)
-        : '';
-      const phoneScreenshotPath = screenshotPath ? screenshotPath.replace(/\.png$/i, '-phone.png') : '';
-      if (screenshotPath) {
-        if (!await page.evaluate(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false)) {
-          await page.locator('[data-recursion-status-trigger]').first().click();
-        }
-        await page.waitForFunction(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false, null, { timeout: 5000 });
-        await page.setViewportSize({ width: 390, height: 844 });
-        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-        await page.screenshot({ path: phoneScreenshotPath, fullPage: true });
+    async execute({ scenario, targetModel, judgeModel, forceUtilityEnhancement = false }) {
+      let restoreReasonerAfterEnhancement = false;
+      try {
         await page.setViewportSize({ width: 1280, height: 720 });
-        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-        await page.screenshot({ path: screenshotPath, fullPage: true });
+        if (forceUtilityEnhancement) {
+          restoreReasonerAfterEnhancement = await page.evaluate(async () => {
+            const runtime = globalThis.__recursionLiveHarnessRuntime;
+            const wasEnabled = runtime?.view?.()?.settings?.providers?.reasoner?.enabled === true;
+            if (wasEnabled) {
+              const result = await runtime.updateProvider('reasoner', { enabled: false });
+              if (result?.ok !== true) throw new Error('live-reasoner-disable-failed');
+            }
+            return wasEnabled;
+          });
+        }
+        await installLiveEnhancementRunOracle(page);
+        const artifacts = await page.evaluate(executeScenarioInPage, {
+          scenario,
+          stageTimeouts: Object.fromEntries(['settings', 'warm', 'prepare', 'enhance', 'judge']
+            .map((stage) => [stage, liveEditorialStageTimeoutMs(stage, timeoutMs)]))
+        });
+        if (artifacts?.environmentFailure) throw new Error(artifacts.environmentFailure);
+        await page.waitForFunction(() => {
+          const rows = [...document.querySelectorAll('[data-recursion-status-popover] [data-recursion-progress-row]')];
+          return !rows.some((row) => ['running', 'pending', 'waiting'].includes(String(row.dataset.recursionProgressState || '').toLowerCase()));
+        }, null, { timeout: 15000 }).catch(() => {});
+        const oracle = await collectLiveEnhancementRunOracle(page);
+        const journalDelta = Array.isArray(oracle?.observation?.journalDelta) ? oracle.observation.journalDelta : [];
+        const screenshotPath = artifactRoot
+          ? join(artifactRoot, `${String(scenario.id || 'redirect').replace(/[^a-z0-9_-]+/gi, '-')}.png`)
+          : '';
+        const phoneScreenshotPath = screenshotPath ? screenshotPath.replace(/\.png$/i, '-phone.png') : '';
+        if (screenshotPath) {
+          if (!await page.evaluate(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false)) {
+            await page.locator('[data-recursion-status-trigger]').first().click();
+          }
+          await page.waitForFunction(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false, null, { timeout: 5000 });
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          await page.screenshot({ path: phoneScreenshotPath, fullPage: true });
+          await page.setViewportSize({ width: 1280, height: 720 });
+          await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          await page.screenshot({ path: screenshotPath, fullPage: true });
+        }
+        if (restoreReasonerAfterEnhancement) {
+          const restored = await page.evaluate(async () => {
+            const runtime = globalThis.__recursionLiveHarnessRuntime;
+            const update = await runtime.updateProvider('reasoner', { enabled: true });
+            const test = update?.ok === true ? await runtime.testProvider('reasoner') : null;
+            return { update, test };
+          });
+          if (restored?.update?.ok !== true || restored?.test?.ok !== true) throw new Error('live-reasoner-restore-failed');
+          restoreReasonerAfterEnhancement = false;
+        }
+        const judge = await page.evaluate(executeJudgeInPage, {
+          scenario,
+          sourceText: artifacts.sourceText,
+          candidateText: artifacts.candidateText,
+          marker: artifacts.enhancementResult?.marker || {}
+        });
+        return {
+          ...artifacts,
+          scenario,
+          oracle,
+          journalDelta,
+          judge,
+          provider: {
+            targetModel: text(providerTest?.diagnostics?.model || providerTest?.provider?.resolvedModelLabel),
+            judgeModel: text(judge?.diagnostics?.model)
+          },
+          expectedModels: { targetModel, judgeModel },
+          screenshotPath,
+          phoneScreenshotPath
+        };
+      } finally {
+        if (restoreReasonerAfterEnhancement) {
+          await page.evaluate(async () => {
+            const runtime = globalThis.__recursionLiveHarnessRuntime;
+            const update = await runtime.updateProvider('reasoner', { enabled: true });
+            if (update?.ok === true) await runtime.testProvider('reasoner');
+            return update;
+          }).catch(() => {});
+        }
       }
-      const judge = await page.evaluate(executeJudgeInPage, {
-        scenario,
-        sourceText: artifacts.sourceText,
-        candidateText: artifacts.candidateText,
-        marker: artifacts.enhancementResult?.marker || {}
-      });
-      return {
-        ...artifacts,
-        scenario,
-        oracle,
-        journalDelta,
-        judge,
-        provider: {
-          targetModel: text(providerTest?.diagnostics?.model || providerTest?.provider?.resolvedModelLabel),
-          judgeModel: text(judge?.diagnostics?.model)
-        },
-        expectedModels: { targetModel, judgeModel },
-        screenshotPath,
-        phoneScreenshotPath
-      };
     },
     async close() {
       await browser.close();
@@ -364,6 +399,7 @@ export async function runLiveEditorialEffectiveness({
   password = '',
   targetModel = '',
   judgeModel = '',
+  forceUtilityEnhancement = false,
   timeoutMs = 120000,
   failFast = false,
   artifactRoot = null,
@@ -395,7 +431,7 @@ export async function runLiveEditorialEffectiveness({
       });
     }
     for (const scenario of scenarioList) {
-      const artifacts = await execute({ scenario, targetModel, judgeModel });
+      const artifacts = await execute({ scenario, targetModel, judgeModel, forceUtilityEnhancement });
       const result = evaluateLiveRedirectScenarioArtifacts({
         ...artifacts,
         scenario: artifacts?.scenario || scenario,

@@ -768,13 +768,13 @@ SG-1-shaped scenario. Confirm:
 - no unmatched provider calls or hidden warning/error journal entries;
 - final candidate materially performs the Redirect objective.
 
-- [ ] **Step 8: Update `default-user` only after certification**
+- [x] **Step 8: Update `default-user` only after certification**
 
 Copy the exact verified repo state into the installed and public
 `default-user` Recursion extension paths. Compare all production file hashes.
 Do not run automated generation in `default-user`.
 
-- [ ] **Step 9: Commit documentation and plan completion**
+- [x] **Step 9: Commit documentation and plan completion**
 
 ```powershell
 git add DESIGN.md docs/design/UI_SPEC.md docs/architecture/PROVIDER_AND_GENERATION_SPEC.md docs/architecture/STORAGE_AND_DIAGNOSTICS.md docs/superpowers/specs/2026-07-17-recursion-layered-failure-recovery-design.md docs/superpowers/plans/2026-07-17-recursion-layered-failure-recovery.md

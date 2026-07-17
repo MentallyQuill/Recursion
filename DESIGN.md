@@ -167,6 +167,11 @@ Recursion inherits SillyTavern theme variables for the real background, foregrou
 - **Warning (#ffd479):** review, fallback, repair, retry, or attention states that are not hard failures. Routine cache inspection after source changes is not a warning by itself.
 - **Error (#ff8a8a):** provider failures, blocked states, and prompt-install failures.
 
+Warning and error colors apply to the corresponding user-facing status message
+text as well as Hero Pixel Array blocks and progress dots. This includes the
+desktop current-step text, mobile status drawer, progress header, and affected
+progress-row labels. Do not recolor normal chrome or assistant prose.
+
 Keep the bar itself mostly neutral. Let the Hero Pixel Array and disclosed menus carry state color. Avoid broad cyan washes, neon styling, purple-blue gradient dominance, and orange status treatment that competes with SillyTavern dialogue.
 
 ## Typography

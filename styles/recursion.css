@@ -635,6 +635,24 @@
   white-space: nowrap;
 }
 
+.recursion-current-step[data-recursion-severity="warning"] {
+  color: var(--recursion-warning);
+}
+
+.recursion-current-step[data-recursion-severity="error"] {
+  color: var(--recursion-error);
+}
+
+.recursion-activity-trigger:hover .recursion-current-step[data-recursion-severity="warning"],
+.recursion-activity-trigger:focus-visible .recursion-current-step[data-recursion-severity="warning"] {
+  color: var(--recursion-warning);
+}
+
+.recursion-activity-trigger:hover .recursion-current-step[data-recursion-severity="error"],
+.recursion-activity-trigger:focus-visible .recursion-current-step[data-recursion-severity="error"] {
+  color: var(--recursion-error);
+}
+
 .recursion-mobile-status-drawer {
   align-items: center;
   background: color-mix(in srgb, var(--recursion-bg) 92%, #050505);
@@ -646,6 +664,14 @@
   min-height: 14px;
   overflow: hidden;
   padding: 1px 9px 1px 2px;
+}
+
+.recursion-mobile-status-drawer[data-recursion-severity="warning"] {
+  color: var(--recursion-warning);
+}
+
+.recursion-mobile-status-drawer[data-recursion-severity="error"] {
+  color: var(--recursion-error);
 }
 
 .recursion-mobile-status-drawer[hidden] {
@@ -1005,8 +1031,26 @@
   color: color-mix(in srgb, var(--recursion-warning) 86%, #8b6b00);
 }
 
+.recursion-step-row.warning > .recursion-step-label {
+  color: var(--recursion-warning);
+}
+
 .recursion-step-row.failed > .recursion-step-meta {
   color: color-mix(in srgb, var(--recursion-error) 86%, #610000);
+}
+
+.recursion-step-row.failed > .recursion-step-label {
+  color: var(--recursion-error);
+}
+
+.recursion-status-popover[data-recursion-severity="warning"] .recursion-status-title,
+.recursion-status-popover[data-recursion-severity="warning"] .recursion-status-subtitle {
+  color: var(--recursion-warning);
+}
+
+.recursion-status-popover[data-recursion-severity="error"] .recursion-status-title,
+.recursion-status-popover[data-recursion-severity="error"] .recursion-status-subtitle {
+  color: var(--recursion-error);
 }
 
 @keyframes recursion-step-row-enter {

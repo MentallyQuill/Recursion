@@ -2474,6 +2474,15 @@ assertEqual(timedOut.error.code, 'RECURSION_PROVIDER_TIMEOUT', 'timeout exposes 
 assertEqual(timeoutAttempts, 2, 'timeout retries once before returning failure');
 assertEqual(timedOut.diagnostics.retryCount, 1, 'failed timeout retry records retry count');
 assertEqual(timeoutSignalAborted, true, 'timeout aborts in-flight provider signal');
+timeoutAttempts = 0;
+const singleAttemptTimeout = await timeoutRouter.generate(
+  'editorialTransformer',
+  { prompt: 'Do not retry inside the provider router', lane: 'utility' },
+  { maxAttempts: 1 }
+);
+assertEqual(singleAttemptTimeout.ok, false, 'single-attempt provider call returns its first failure');
+assertEqual(timeoutAttempts, 1, 'maxAttempts one disables provider-internal retry');
+assertEqual(singleAttemptTimeout.diagnostics.retryCount, 0, 'single-attempt failure records no retry');
 
 let retryableTimeoutAttempts = 0;
 const retryableTimeoutRouter = createGenerationRouter({

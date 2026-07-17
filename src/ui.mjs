@@ -6375,6 +6375,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     setText(root, '[data-recursion-status]', model.runtimeHealthLabel);
     setText(root, '[data-recursion-mode]', model.modeLabel);
     setText(root, '[data-recursion-current-step]', currentStepText);
+    const statusSeverity = model.statusSeverity || 'info';
+    const currentStepNode = root.querySelector('[data-recursion-current-step]');
+    if (currentStepNode) currentStepNode.dataset.recursionSeverity = statusSeverity;
+    if (mobileStatusDrawer) mobileStatusDrawer.dataset.recursionSeverity = statusSeverity;
+    if (statusPopover) statusPopover.dataset.recursionSeverity = statusSeverity;
+    if (statusButton) statusButton.dataset.recursionSeverity = statusSeverity;
     syncMobileStatusDrawer(currentStepText);
     const pipelineButton = root.querySelector('[data-recursion-pipeline-button]');
     if (pipelineButton) {

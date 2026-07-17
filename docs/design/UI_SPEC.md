@@ -241,6 +241,11 @@ Color grammar:
 - Disabled-but-normal states use muted neutral treatment on the power toggle.
 - Player-canceled generation uses muted skipped treatment, not green, amber, or red.
 
+User-facing warning text in the desktop current-step slot, mobile status drawer,
+progress header, and warning rows uses the same amber token as warning pixels.
+User-facing critical or failed text on those surfaces uses the same red token as
+failed pixels. Normal, running, successful, cached, and skipped text stays neutral.
+
 ## Hero Pixel Array Progress Menu
 
 The Hero Pixel Array is both a compact block-based state indicator and the entry point for live generation progress. Clicking it opens a popover that behaves like Codex-style task progress: a compact progress list where each row moves independently from waiting to running to a final outcome.
@@ -252,6 +257,11 @@ The Hero Pixel Array and progress menu must render from the same normalized `pro
 Fused progress treats `Fused card bundle` as the single parent row for the bundle provider call. The bundle provider role must not also appear as a child row. Fused child rows appear only after there is material card-family progress, such as accepted bundle items under `Fused card bundle` or repaired siblings under `Utility card batch`; the menu must not seed speculative pending children for every requested family while the bundle is still unresolved.
 
 Enhancement is one post-generation provider pass with a top-level `Generation review` row. Low and Medium route it through Utility; High and Ultra route it through Reasoner when that lane is available. SillyTavern's original response remains visible while review runs; Recursion never hides or replaces streaming text before the review has produced a validated revision. While running, compact current-step text is `Reviewing generated response...`; it must not reuse `Utility card batch`, seed prompt-install rows, or imply that a card batch is running. The progress tree owns `Card and scene fidelity`, card-outcome children, `Narrative execution`, `Anti-slop`, `Applying revisions`, and `Enhanced swipe`/`Replace` outcome rows. A failed review is a red review row with its reason, while the already installed `Recursion prompt ready` state remains green and the original response stays selected.
+
+Editorial Redirect is the routing exception: Low uses Utility for the final
+Redirect prose, while Medium, High, and Ultra use Reasoner. Medium+ makes at most
+two actual Reasoner writer calls and never falls back to Utility. Two failed writer
+attempts leave the original response selected and surface a failed red status.
 
 An unchanged or unsafe review result must not append a duplicate enhanced swipe. Parser/schema recovery and review-semantic recovery share one external correction budget. A recovered valid result is amber with a compact retry reason; incomplete installed-card coverage after that one budget is `partial-failed`, with red unresolved card children. Validation failures and provider failures are terminal failures, not amber cautions.
 

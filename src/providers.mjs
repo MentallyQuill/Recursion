@@ -2187,6 +2187,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
     const started = Date.now();
     const startedAt = nowIso();
     const effectiveTimeoutMs = options.timeoutMs ?? timeoutMs;
+    const maxAttempts = Number(options.maxAttempts) === 1 ? 1 : 2;
     let runId = String(options.runId || request.runId || makeId('provider'));
     let retryCount = 0;
     let retryFormatError = null;
@@ -2215,7 +2216,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
     const composedExternalSignal = composeAbortSignal([options.signal, request.signal]);
     try {
       let raw = null;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const attemptRequest = attempt === 0
           ? request
           : requestWithStructuredRetryPrompt(request, { roleId, error: retryFormatError });
@@ -2284,7 +2285,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
         } catch (error) {
           const structuredRecoveryKind = structuredOutputRecoveryKind(error, attemptRequest);
           const structuredRetry = Boolean(structuredRecoveryKind);
-          const canRetry = attempt === 0 && (retryableError(error) || (structuredRetry && options.allowStructuredRecovery !== false));
+          const canRetry = attempt + 1 < maxAttempts
+            && (retryableError(error) || (structuredRetry && options.allowStructuredRecovery !== false));
           let retrySkippedReason = '';
           const latencyMs = Date.now() - started;
           if (canRetry) {

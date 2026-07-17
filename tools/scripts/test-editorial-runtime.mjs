@@ -497,8 +497,9 @@ function createRedirectHarness({
   cachedMarkerFactory = null,
   diagnosisOverride = null,
   diagnosisProviderFailureOnFirst = false,
+  transformProviderFailures = 0,
   candidateOverride = null,
-  reasonerAvailable = false,
+  reasonerAvailable = true,
   pressureReason = 'The source blocks the immediate test.'
 } = {}) {
   const state = {
@@ -609,6 +610,15 @@ function createRedirectHarness({
       }
       if (roleId === 'editorialTransformer') {
         state.transformAttempts += 1;
+        if (state.transformAttempts <= transformProviderFailures) {
+          return {
+            ok: false,
+            error: {
+              code: 'RECURSION_PROVIDER_TIMEOUT',
+              message: 'Editorial transformer provider timed out.'
+            }
+          };
+        }
         const pass = {
           schema: 'recursion.editorialPass.v1',
           mode: 'redirect',
@@ -729,14 +739,53 @@ assertEqual(
 );
 assertEqual(
   reasonerVerifiedRedirect.state.calls.find((call) => call.roleId === 'editorialTransformer')?.request?.lane,
-  'utility',
-  'Medium Redirect transformation remains on Utility'
+  'reasoner',
+  'Medium Redirect transformation is written by Reasoner'
 );
 assertEqual(
   reasonerVerifiedRedirect.state.calls.find((call) => call.roleId === 'editorialVerifier')?.request?.lane,
   'reasoner',
   'Redirect verification prefers a healthy independent Reasoner'
 );
+
+const lowUtilityRedirect = createRedirectHarness({ reasonerAvailable: false });
+await lowUtilityRedirect.runtime.updateSettings({ reasoningLevel: 'low', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const lowUtilityResult = await lowUtilityRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-low-utility-writer-test' });
+assertEqual(lowUtilityResult.ok, true, 'Low Redirect succeeds with a Utility writer');
+assertEqual(
+  lowUtilityRedirect.state.calls.find((call) => call.roleId === 'editorialTransformer')?.request?.lane,
+  'utility',
+  'Low Redirect final writing stays on Utility'
+);
+
+for (const reasoningLevel of ['high', 'ultra']) {
+  const reasonerWriterRedirect = createRedirectHarness({ reasonerAvailable: true });
+  await reasonerWriterRedirect.runtime.updateSettings({ reasoningLevel, enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+  const reasonerWriterResult = await reasonerWriterRedirect.runtime.enhanceLatestAssistantMessage({ reason: `redirect-${reasoningLevel}-reasoner-writer-test` });
+  assertEqual(reasonerWriterResult.ok, true, `${reasoningLevel} Redirect succeeds with a Reasoner writer`);
+  assertEqual(
+    reasonerWriterRedirect.state.calls.find((call) => call.roleId === 'editorialTransformer')?.request?.lane,
+    'reasoner',
+    `${reasoningLevel} Redirect final writing uses Reasoner`
+  );
+}
+
+const exhaustedReasonerWriter = createRedirectHarness({
+  reasonerAvailable: true,
+  transformProviderFailures: 2
+});
+await exhaustedReasonerWriter.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const exhaustedReasonerWriterResult = await exhaustedReasonerWriter.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-reasoner-writer-exhausted-test' });
+assertEqual(exhaustedReasonerWriterResult.ok, false, 'Medium Redirect fails after two Reasoner writer failures');
+const exhaustedWriterCalls = exhaustedReasonerWriter.state.calls.filter((call) => call.roleId === 'editorialTransformer');
+assertEqual(exhaustedWriterCalls.length, 2, 'Medium Redirect makes exactly two writer calls');
+assertDeepEqual(exhaustedWriterCalls.map((call) => call.request.lane), ['reasoner', 'reasoner'], 'both Redirect writer attempts stay on Reasoner');
+assert(exhaustedWriterCalls[1].request.prompt.includes('Editorial pass correction required'), 'second Reasoner writer receives correction instructions');
+assert(exhaustedWriterCalls[1].request.prompt.includes('RECURSION_PROVIDER_TIMEOUT'), 'second Reasoner writer receives the first provider failure');
+assert(exhaustedWriterCalls.every((call) => call.options.maxAttempts === 1), 'each Redirect writer wrapper call permits one actual model attempt');
+assertEqual(exhaustedReasonerWriter.state.calls.some((call) => call.roleId === 'editorialVerifier'), false, 'failed Redirect writer never calls verifier');
+assertEqual(exhaustedReasonerWriter.state.appended.length, 0, 'failed Redirect writer adds no swipe');
+assertEqual(exhaustedReasonerWriter.state.message.text, redirectSource, 'failed Redirect writer preserves the original response');
 
 const correctedNoChangeRedirect = createRedirectHarness({
   diagnosisOverride: (value, attempt) => attempt === 1 ? { ...value, decision: 'no-change' } : value
@@ -768,6 +817,7 @@ assert(reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'e
 assertEqual(reasonerCorrectedRedirect.state.appended.length, 1, 'Reasoner-corrected Redirect appends one verified swipe');
 
 const utilityCorrectedRedirect = createRedirectHarness({
+  reasonerAvailable: false,
   diagnosisOverride: (value, attempt) => attempt === 1
     ? {
         schema: value.schema,
@@ -792,14 +842,14 @@ const utilityCorrectedRedirect = createRedirectHarness({
       }
     : value
 });
-await utilityCorrectedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+await utilityCorrectedRedirect.runtime.updateSettings({ reasoningLevel: 'low', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const utilityCorrectedResult = await utilityCorrectedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-utility-correction-test' });
-assertEqual(utilityCorrectedResult.ok, true, 'Redirect recovers from a semantically empty diagnosis when only Utility is available');
+assertEqual(utilityCorrectedResult.ok, true, 'Low Redirect recovers from a semantically empty diagnosis on Utility');
 const utilityDiagnosisCalls = utilityCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician');
 assertDeepEqual(
   utilityDiagnosisCalls.map((call) => call.request.lane),
   ['utility', 'utility'],
-  'Utility-only Redirect keeps its single semantic correction on Utility'
+  'Low Redirect keeps its single semantic correction on Utility'
 );
 assert(
   utilityDiagnosisCalls[1].request.prompt.includes(REDIRECT_ERROR_CODES.LAYOUT_INVALID),

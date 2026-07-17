@@ -1003,6 +1003,14 @@ assert(/max-height:\s*168px;[\s\S]*?overflow-y:\s*auto;/.test(providerProfileLis
 assert(!/position:\s*absolute;/.test(providerProfileListCss), 'connection profile combobox list stays in provider layout flow so settings disclosures do not clip it');
 assert(/width:\s*100%;/.test(providerProfileListCss), 'connection profile combobox list uses the field width when it opens in flow');
 assert(/\.recursion-provider-status\.pass\s*\{[\s\S]*?var\(--recursion-success\)/.test(recursionCss), 'production provider success status uses the defined success token');
+assert(/\.recursion-current-step\[data-recursion-severity="warning"\][\s\S]*?color:\s*var\(--recursion-warning\);/.test(recursionCss), 'desktop warning status text uses the warning token');
+assert(/\.recursion-current-step\[data-recursion-severity="error"\][\s\S]*?color:\s*var\(--recursion-error\);/.test(recursionCss), 'desktop critical status text uses the error token');
+assert(/\.recursion-mobile-status-drawer\[data-recursion-severity="warning"\][\s\S]*?color:\s*var\(--recursion-warning\);/.test(recursionCss), 'mobile warning status text uses the warning token');
+assert(/\.recursion-mobile-status-drawer\[data-recursion-severity="error"\][\s\S]*?color:\s*var\(--recursion-error\);/.test(recursionCss), 'mobile critical status text uses the error token');
+assert(/\.recursion-status-popover\[data-recursion-severity="warning"\][\s\S]*?color:\s*var\(--recursion-warning\);/.test(recursionCss), 'warning progress header uses the warning token');
+assert(/\.recursion-status-popover\[data-recursion-severity="error"\][\s\S]*?color:\s*var\(--recursion-error\);/.test(recursionCss), 'critical progress header uses the error token');
+assert(/\.recursion-step-row\.warning > \.recursion-step-label[\s\S]*?color:\s*var\(--recursion-warning\);/.test(recursionCss), 'warning progress row labels use the warning token');
+assert(/\.recursion-step-row\.failed > \.recursion-step-label[\s\S]*?color:\s*var\(--recursion-error\);/.test(recursionCss), 'failed progress row labels use the error token');
 assert(/const progressTop = Math\.max\(viewportTop,\s*rect\.bottom \+ 3\);/.test(recursionUi), 'production progress popover uses the reference vertical gap with visual viewport top clamping');
 assert(/const settingsTop = Math\.max\(viewportTop,\s*rect\.bottom \+ 5\);/.test(recursionUi), 'production settings and brief popovers use the reference desktop vertical gap with visual viewport top clamping');
 assert(/globalThis\.visualViewport\?\.height/.test(recursionUi), 'production popover geometry clamps to the mobile visual viewport height');
@@ -1098,6 +1106,20 @@ const settledWarningModel = createRecursionViewModel({
   }
 });
 assertEqual(settledWarningModel.runtimeHealthLabel, 'Needs attention', 'settled warning progress is not announced as ready');
+assertEqual(settledWarningModel.statusSeverity, 'warning', 'warning progress produces warning status severity');
+
+const settledErrorModel = createRecursionViewModel({
+  settings: { mode: 'auto' },
+  activity: { phase: 'settled', severity: 'success', label: 'Original kept.' },
+  progressRun: {
+    title: 'Issue',
+    steps: [
+      { id: 'editorial-diagnosis', label: 'Editorial diagnosis', providerLane: 'utility', state: 'done' },
+      { id: 'editorial-candidate', label: 'Editorial candidate', providerLane: 'reasoner', state: 'failed' }
+    ]
+  }
+});
+assertEqual(settledErrorModel.statusSeverity, 'error', 'failed progress takes error precedence over successful settlement activity');
 
 const reasonerAvailable = createRecursionViewModel({
   settings: { mode: 'auto', providers: { reasoner: { enabled: true, lastTest: { status: 'ok' } } } },
@@ -3187,6 +3209,14 @@ try {
   view = { ...view, activity: { phase: 'providerIssue', severity: 'warning', label: 'Provider test failed.' } };
   ui.update();
   assertEqual(root.querySelector('[data-recursion-activity-ribbon]').hidden, false, 'warning ribbon appears immediately and persists');
+  assertEqual(root.querySelector('[data-recursion-current-step]').dataset.recursionSeverity, 'warning', 'desktop status exposes warning severity');
+  assertEqual(root.querySelector('[data-recursion-mobile-status-drawer]').dataset.recursionSeverity, 'warning', 'mobile status exposes warning severity');
+  assertEqual(root.querySelector('[data-recursion-status-popover]').dataset.recursionSeverity, 'warning', 'progress surface exposes warning severity');
+  view = { ...view, activity: { phase: 'providerIssue', severity: 'error', label: 'Reasoner provider failed.' } };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-current-step]').dataset.recursionSeverity, 'error', 'desktop status exposes critical severity');
+  assertEqual(root.querySelector('[data-recursion-mobile-status-drawer]').dataset.recursionSeverity, 'error', 'mobile status exposes critical severity');
+  assertEqual(root.querySelector('[data-recursion-status-popover]').dataset.recursionSeverity, 'error', 'progress surface exposes critical severity');
   root.querySelector('[data-recursion-viewer-close]').click();
   assertEqual(closeCount, 1, 'viewer close listener is not duplicated across updates');
 

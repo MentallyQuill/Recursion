@@ -52,7 +52,8 @@ Redirect remains:
 - one diagnosis;
 - one candidate;
 - one accept/reject verifier;
-- one shared malformed-output recovery call across Diagnosis, Transform, and Verify;
+- one shared malformed-output recovery call across Diagnosis and Verify, plus a
+  dedicated second Reasoner writer attempt for Medium+ Transform;
 - always applied as a new swipe;
 - non-destructive to the original assistant response.
 
@@ -1072,6 +1073,8 @@ The implementation is complete only when:
 9. Reusing a verified Redirect selects the existing swipe and returns its persisted accepted marker without provider calls.
 10. Private pressure metadata never appears in visible UI, final prose, Last Brief, the next host prompt, or journal details.
 11. The core-pack Redirect effectiveness corpus executes a real output judge; skipped or empty judge evidence fails strict mode.
-12. Successful and semantically rejected Redirect runs make exactly three model calls; one shared malformed-output recovery token caps every run at four.
+12. Successful Redirect runs make exactly three model calls; Medium+ Transform
+    permits exactly one additional Reasoner writer attempt, never falls back to
+    Utility, and exceptional runs are capped at five total model calls.
 13. Focused tests, `npm.cmd test`, the model-effectiveness Redirect corpus, and the dedicated live Playwright proof pass.
 14. The served or installed SillyTavern extension copy is hash-checked before any live success claim.

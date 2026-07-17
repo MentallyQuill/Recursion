@@ -234,6 +234,29 @@ function runtimeHealthLabel(activity, progressRun) {
   return 'Ready';
 }
 
+function collectProgressSeverity(steps, severity = 'info') {
+  if (!Array.isArray(steps)) return severity;
+  let nextSeverity = severity;
+  for (const step of steps) {
+    const state = cleanText(step?.state).toLowerCase();
+    if (state === 'failed') return 'error';
+    if (state === 'warning') nextSeverity = 'warning';
+    const childSeverity = collectProgressSeverity(step?.children, nextSeverity);
+    if (childSeverity === 'error') return 'error';
+    if (childSeverity === 'warning') nextSeverity = 'warning';
+  }
+  return nextSeverity;
+}
+
+function statusSeverity(activity, progressRun) {
+  const activitySeverity = normalizeSeverity(activity.severity);
+  if (activitySeverity === 'error' || progressRun?.title === 'Issue') return 'error';
+  const progressSeverity = collectProgressSeverity(progressRun?.steps);
+  if (progressSeverity === 'error') return 'error';
+  if (activitySeverity === 'warning' || progressRun?.title === 'Needs attention' || progressSeverity === 'warning') return 'warning';
+  return activitySeverity;
+}
+
 function rapidWarmStandbyText(rapidWarm, pipelineMode) {
   if (pipelineMode !== 'rapid') return '';
   const source = asObject(rapidWarm);
@@ -342,6 +365,7 @@ export function createRecursionViewModel(view = {}) {
     handCount: cards.length,
     activityLabel: activityLabel(activity),
     activitySeverity: normalizeSeverity(activity.severity),
+    statusSeverity: statusSeverity(activity, progressRun),
     activityChips,
     progressRun,
     generationStopVisible,

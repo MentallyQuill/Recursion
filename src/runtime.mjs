@@ -920,6 +920,10 @@ function enhancementLaneForSettings(settings) {
   return 'utility';
 }
 
+function redirectTransformerLaneForSettings(settings) {
+  return reasoningPolicyForSettings(settings).level === 'low' ? 'utility' : 'reasoner';
+}
+
 function applyReasoningLaneToFusedCardBundleRequest(request, settings) {
   const routedRequest = {
     ...request,
@@ -3926,7 +3930,8 @@ export function createRecursionRuntime({
         runId,
         timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
         signal: enhancementSignal,
-        allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true
+        allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true,
+        ...(options.maxAttempts === 1 ? { maxAttempts: 1 } : {})
       });
       const primaryRecoverySpent = primary?.recoverySpent === true
         && !(options.allowStructuredRecovery === false && options.preserveRecoveryBudget === true);
@@ -4022,17 +4027,26 @@ export function createRecursionRuntime({
         return { ok: Boolean(diagnosisValidation.value), skipped: Boolean(diagnosisValidation.value), mode: editorialMode, reason, validation: diagnosisValidation };
       }
       const diagnosisHash = diagnosisValidation.hash;
-      stageRuntimeActivity({ runId, phase: 'editorialTransforming', label: editorialMode === 'repair' ? 'Applying grounded repairs...' : `${editorialMode === 'redirect' ? 'Redirecting' : 'Recomposing'} response...`, providerLane: editorialLane, composerLane: editorialLane, chips: ['Enhancement', editorialMode] });
+      const transformLane = editorialMode === 'redirect'
+        ? redirectTransformerLaneForSettings(settings)
+        : editorialLane;
+      const strictReasonerWriter = editorialMode === 'redirect' && transformLane === 'reasoner';
+      const transformOptions = strictReasonerWriter
+        ? { allowStructuredRecovery: false, allowLaneFallback: false, maxAttempts: 1 }
+        : {};
+      stageRuntimeActivity({ runId, phase: 'editorialTransforming', label: editorialMode === 'repair' ? 'Applying grounded repairs...' : `${editorialMode === 'redirect' ? 'Redirecting' : 'Recomposing'} response...`, providerLane: transformLane, composerLane: transformLane, chips: ['Enhancement', editorialMode] });
       let transformResponse = await generateEditorialRole('editorialTransformer', {
-        ...buildEditorialPassRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosis: diagnosisValidation.value, evidence, snapshot: publicSnapshot, targets, lane: editorialLane }),
-        ...reasonerRequestMetadata(settings, 'editorial-transform', editorialLane)
-      });
+        ...buildEditorialPassRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosis: diagnosisValidation.value, evidence, snapshot: publicSnapshot, targets, lane: transformLane }),
+        ...reasonerRequestMetadata(settings, 'editorial-transform', transformLane)
+      }, transformOptions);
       if (enhancementSignal?.aborted) return canceledEditorialResult();
       let validation = transformResponse.result?.ok === true
         ? validateEditorialPass(transformResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, snapshot: publicSnapshot, targets })
         : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
-      if (!validation.ok && transformResponse.result?.ok === true && recoveryToken.spent !== true) {
-        recoveryToken.spent = true;
+      const transformCorrectionAvailable = strictReasonerWriter
+        || (transformResponse.result?.ok === true && recoveryToken.spent !== true);
+      if (!validation.ok && transformCorrectionAvailable) {
+        if (!strictReasonerWriter) recoveryToken.spent = true;
         transformResponse = await generateEditorialRole('editorialTransformer', {
           ...buildEditorialPassRequest({
             mode: editorialMode,
@@ -4043,11 +4057,14 @@ export function createRecursionRuntime({
             evidence,
             snapshot: publicSnapshot,
             targets,
-            lane: editorialLane,
+            lane: transformLane,
             retry: validation.error
           }),
-          ...reasonerRequestMetadata(settings, 'editorial-transform', editorialLane)
-        }, { allowStructuredRecovery: false });
+          ...reasonerRequestMetadata(settings, 'editorial-transform', transformLane)
+        }, {
+          allowStructuredRecovery: false,
+          ...(strictReasonerWriter ? { allowLaneFallback: false, maxAttempts: 1 } : {})
+        });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
         validation = transformResponse.result?.ok === true
           ? validateEditorialPass(transformResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, snapshot: publicSnapshot, targets })

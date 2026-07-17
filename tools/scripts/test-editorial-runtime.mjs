@@ -758,6 +758,19 @@ assertEqual(
   'Low Redirect final writing stays on Utility'
 );
 
+const disabledMediumRedirect = createRedirectHarness({ reasonerAvailable: false });
+await disabledMediumRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const disabledMediumResult = await disabledMediumRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-disabled-reasoner-preflight-test' });
+assertEqual(disabledMediumResult.ok, false, 'Medium Redirect fails when its required Reasoner writer is explicitly disabled');
+assertEqual(disabledMediumResult.error?.code, 'RECURSION_REASONER_DISABLED', 'disabled Medium Redirect reports the exact configuration error');
+assertEqual(disabledMediumRedirect.state.calls.length, 0, 'disabled Medium Redirect fails before spending a Utility diagnosis call');
+assertEqual(disabledMediumRedirect.state.appended.length, 0, 'disabled Medium Redirect preserves the original response');
+assertEqual(
+  disabledMediumRedirect.runtime.view().activity?.detail?.failure?.message,
+  'Reasoner provider lane is disabled. Enable Reasoner in Providers or select Low reasoning.',
+  'disabled Medium Redirect gives an actionable visible reason'
+);
+
 for (const reasoningLevel of ['high', 'ultra']) {
   const reasonerWriterRedirect = createRedirectHarness({ reasonerAvailable: true });
   await reasonerWriterRedirect.runtime.updateSettings({ reasoningLevel, enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });

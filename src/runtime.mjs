@@ -3927,6 +3927,18 @@ export function createRecursionRuntime({
       await appendEditorialSettlement();
       return unavailable;
     }
+    if (
+      editorialMode === 'redirect'
+      && reasoningPolicyForSettings(settings).level !== 'low'
+      && asObject(settings?.providers?.reasoner).enabled !== true
+    ) {
+      const disabled = failEditorial({
+        code: 'RECURSION_REASONER_DISABLED',
+        message: 'Reasoner provider lane is disabled. Enable Reasoner in Providers or select Low reasoning.'
+      });
+      await appendEditorialSettlement();
+      return disabled;
+    }
     const evidence = buildEditorialEvidence(publicSnapshot, sourceText);
     const targets = editorialMode === 'repair' ? buildGenerationReviewTargets(sourceText) : {};
     const recoveryToken = { spent: false };

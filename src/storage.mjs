@@ -1,4 +1,5 @@
 import { cloneJson, makeId, nowIso, redact, safeId } from './core.mjs';
+import { failureFrom } from './failures.mjs';
 import { UNKNOWN_STORY_FORM, normalizeStoryForm } from './story-form.mjs';
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 
@@ -581,6 +582,26 @@ function normalizeJournalEntry(entry = {}) {
   const source = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {};
   const severity = ['debug', 'info', 'warn', 'error'].includes(source.severity) ? source.severity : 'info';
   const event = normalizeJournalEvent(source.event);
+  let details = normalizeJournalDetails(event, source.details);
+  if (['warn', 'error'].includes(severity)) {
+    const structuredDetails = details && typeof details === 'object' && !Array.isArray(details)
+      ? details
+      : {};
+    const cause = structuredDetails.failure
+      || structuredDetails.error
+      || structuredDetails.compactError
+      || structuredDetails.reason
+      || structuredDetails.statusReason
+      || structuredDetails.cautionReason;
+    details = {
+      ...structuredDetails,
+      failure: failureFrom(cause, {
+        code: 'RECURSION_JOURNAL_REASON_MISSING',
+        stage: event,
+        category: 'internal'
+      })
+    };
+  }
   return redact({
     id: safeJournalId(source.id),
     recordedAt: timestampValue(source.recordedAt),
@@ -589,7 +610,7 @@ function normalizeJournalEntry(entry = {}) {
     summary: normalizeJournalSummary(source.summary),
     runId: optionalJournalString(source.runId),
     sceneKey: optionalJournalString(source.sceneKey),
-    details: normalizeJournalDetails(event, source.details),
+    details,
     hashes: sanitizedJsonValue(source.hashes, undefined),
     metrics: sanitizedJsonValue(source.metrics, undefined)
   });

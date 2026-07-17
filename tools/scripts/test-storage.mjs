@@ -54,6 +54,41 @@ assertEqual(sceneCacheKey('Chat One', 'Scene/One'), 'recursion-scene-Chat-One-Sc
 assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json', 'journal key sanitized');
 
 {
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  await repo.appendJournal('Failure Contract Chat', {
+    event: 'provider.call.failed',
+    severity: 'error',
+    summary: 'Provider call failed.'
+  });
+  await repo.appendJournal('Failure Contract Chat', {
+    event: 'prompt.install_skipped',
+    severity: 'warn',
+    summary: 'Prompt install skipped.',
+    details: {
+      failure: {
+        code: 'RECURSION_PROMPT_STALE',
+        stage: 'prompt-install',
+        category: 'stale-state',
+        message: 'Host turn changed before prompt installation.',
+        retryable: true
+      }
+    }
+  });
+  const journal = await repo.loadRunJournal('Failure Contract Chat');
+  assertEqual(
+    journal.entries[0].details.failure.message,
+    'Unexpected internal failure (RECURSION_JOURNAL_REASON_MISSING).',
+    'unexplained error journal entries receive an explicit internal descriptor'
+  );
+  assertEqual(
+    journal.entries[1].details.failure.message,
+    'Host turn changed before prompt installation.',
+    'explicit warning journal failure descriptor remains authoritative'
+  );
+}
+
+{
   const privatePlanPayload = 'future branch plan payload must not persist';
   const sessionIdPayload = 'session-live-payload-12345';
   const adapter = createMemoryStorageAdapter();

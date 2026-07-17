@@ -74,6 +74,51 @@ assertDeepEqual(
   [false, false, false, false],
   'strict live enhancement oracle rejects every false-pass negative control'
 );
+assert(
+  negativeControls[0].failures.includes('progress-unhealthy-reason-missing'),
+  'strict live enhancement oracle rejects caution without a visible reason'
+);
+assert(
+  negativeControls[1].failures.includes('progress-unhealthy-reason-missing'),
+  'strict live enhancement oracle rejects a replaced failure without a visible reason'
+);
+assert(
+  negativeControls[2].failures.includes('journal-unhealthy-reason-missing'),
+  'strict live enhancement oracle rejects journal-only failure without a normalized reason'
+);
+
+const explainedUnhealthy = evaluate({
+  transitions: [
+    { label: 'Editorial candidate', state: 'failed', reason: 'Provider call timed out.' },
+    { label: 'Editorial candidate', state: 'done' }
+  ],
+  finalRows: doneRows,
+  journalDelta: [{
+    id: 'journal-explained-failure',
+    runId: 'editorial-explained',
+    severity: 'error',
+    event: 'provider.call.failed',
+    details: {
+      roleId: 'editorialTransformer',
+      failure: {
+        code: 'RECURSION_PROVIDER_TIMEOUT',
+        stage: 'editorial-writer',
+        category: 'provider-timeout',
+        message: 'Provider call timed out.'
+      }
+    }
+  }],
+  enhancementMutation: mutation
+});
+assertEqual(explainedUnhealthy.ok, false, 'explained unhealthy run still cannot pass');
+assert(
+  !explainedUnhealthy.failures.includes('progress-unhealthy-reason-missing'),
+  'concrete progress reason satisfies the explanation contract'
+);
+assert(
+  !explainedUnhealthy.failures.includes('journal-unhealthy-reason-missing'),
+  'normalized journal failure satisfies the explanation contract'
+);
 
 const unmatchedProvider = evaluate({
   transitions: doneRows,
@@ -139,6 +184,7 @@ assertEqual(
 );
 assert(oracleSource.includes('attributeOldValue: true'), 'browser oracle requests progress attribute old values');
 assert(oracleSource.includes('mutation.oldValue'), 'browser oracle records transient progress states from mutation old values');
+assert(oracleSource.includes('data-recursion-progress-reason'), 'browser oracle records visible progress reasons');
 
 for (const scriptPath of [
   'tools/scripts/lib/live-editorial-effectiveness.mjs',

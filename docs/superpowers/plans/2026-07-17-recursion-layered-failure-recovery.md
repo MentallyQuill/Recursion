@@ -575,7 +575,7 @@ node tools/scripts/test-generation-review.mjs
 
 Expected: PASS; no unhealthy progress state is generic or hover-only.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```powershell
 git add src/runtime.mjs src/progress.mjs src/ui.mjs styles/recursion.css tools/scripts/test-progress.mjs tools/scripts/test-ui.mjs tools/scripts/test-runtime.mjs tools/scripts/test-generation-review.mjs
@@ -599,7 +599,7 @@ git commit -m "feat(ui): show failure reasons inline"
 - Produces `assertEveryUnhealthyStateExplainsWhy`.
 - Process success derives exclusively from the strict live oracle.
 
-- [ ] **Step 1: Add false-pass negative controls**
+- [x] **Step 1: Add false-pass negative controls**
 
 Add:
 
@@ -618,7 +618,7 @@ Add:
 
 Every control must produce a nonzero verdict even if the final tree is green.
 
-- [ ] **Step 2: Run and confirm failures**
+- [x] **Step 2: Run and confirm failures**
 
 Run:
 
@@ -630,7 +630,7 @@ node tools/scripts/test-activity.mjs
 
 Expected: FAIL because the oracle does not require visible/journal reasons.
 
-- [ ] **Step 3: Implement the shared unhealthy-state oracle**
+- [x] **Step 3: Implement the shared unhealthy-state oracle**
 
 Require:
 
@@ -645,7 +645,7 @@ if (missingReason.length) failures.push('progress-unhealthy-without-reason');
 Journal warning/error entries require `details.failure.message`, except explicit
 test fixtures for old unrelated records outside the run delta.
 
-- [ ] **Step 4: Make live scripts exit only from oracle verdict**
+- [x] **Step 4: Make live scripts exit only from oracle verdict**
 
 Remove independent `console.log('[pass]')` branches. Set:
 
@@ -655,7 +655,7 @@ process.exitCode = oracle.verdict.ok ? 0 : 1;
 
 Screenshots and artifacts may still be written after failure.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 

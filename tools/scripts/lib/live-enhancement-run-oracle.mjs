@@ -16,6 +16,18 @@ function normalized(value = '') {
   return text(value).toLowerCase();
 }
 
+function usefulReason(value = '') {
+  const reason = normalized(value).replace(/[.!]+$/g, '');
+  return Boolean(reason) && !new Set([
+    'failed',
+    'failure',
+    'warning',
+    'caution',
+    'needs attention',
+    'issue'
+  ]).has(reason);
+}
+
 function providerCallKey(entry = {}) {
   const requestHash = text(entry?.hashes?.requestHash);
   if (requestHash) return `${text(entry.runId)}::${text(entry?.details?.roleId)}::${requestHash}`;
@@ -56,6 +68,8 @@ export function evaluateLiveEnhancementRun({
     || normalized(row?.title) === 'issue'
   ));
   if (unhealthyTransitions.length) failures.push('progress-observed-unhealthy');
+  const unexplainedTransitions = unhealthyTransitions.filter((row) => !usefulReason(row?.reason));
+  if (unexplainedTransitions.length) failures.push('progress-unhealthy-reason-missing');
 
   const skippedRows = observedRows.filter((row) => normalized(row?.state) === 'skipped');
   if (skippedRows.length) failures.push('enhancement-skipped');
@@ -78,6 +92,12 @@ export function evaluateLiveEnhancementRun({
     || UNHEALTHY_JOURNAL_EVENTS.has(text(entry?.event))
   ));
   if (unhealthyJournal.length) failures.push('journal-observed-unhealthy');
+  const unexplainedJournal = unhealthyJournal.filter((entry) => !usefulReason(
+    entry?.details?.failure?.message
+    || entry?.detail?.failure?.message
+    || entry?.failure?.message
+  ));
+  if (unexplainedJournal.length) failures.push('journal-unhealthy-reason-missing');
 
   const started = journalDelta.filter((entry) => entry?.event === 'provider.call.started');
   const settled = journalDelta.filter((entry) => (
@@ -101,7 +121,9 @@ export function evaluateLiveEnhancementRun({
     ok: failures.length === 0,
     failures: [...new Set(failures)],
     unhealthyTransitions,
+    unexplainedTransitions,
     unhealthyJournal,
+    unexplainedJournal,
     unmatchedProviderCalls,
     skippedRows,
     finalRows,
@@ -133,11 +155,16 @@ export async function installLiveEnhancementRunOracle(page) {
       ).replace(/\s+/g, ' ').trim();
       const progressState = String(stateOverride || row.dataset.recursionProgressState || '').trim().toLowerCase();
       if (!label || !progressState) return;
+      const reason = String(
+        row.querySelector('[data-recursion-progress-reason]')?.textContent
+        || ''
+      ).replace(/\s+/g, ' ').trim();
       const parent = String(row.parentElement?.dataset?.recursionProgressParentStep || '');
       const key = `${label}::${parent}`;
-      if (state.lastStateByRow[key] === progressState && source !== 'removed') return;
-      state.lastStateByRow[key] = progressState;
-      state.transitions.push({ label, state: progressState, parent, source, at: new Date().toISOString() });
+      const signature = `${progressState}::${reason}`;
+      if (state.lastStateByRow[key] === signature && source !== 'removed') return;
+      state.lastStateByRow[key] = signature;
+      state.transitions.push({ label, state: progressState, reason, parent, source, at: new Date().toISOString() });
     };
     const captureNode = (node, source) => {
       if (!(node instanceof Element)) return;
@@ -192,6 +219,7 @@ export async function collectLiveEnhancementRunOracle(page) {
       .map((row) => ({
         label: String(row.dataset.recursionProgressLabel || row.querySelector('[data-recursion-progress-label]')?.textContent || '').replace(/\s+/g, ' ').trim(),
         state: String(row.dataset.recursionProgressState || '').trim().toLowerCase(),
+        reason: String(row.querySelector('[data-recursion-progress-reason]')?.textContent || '').replace(/\s+/g, ' ').trim(),
         parent: String(row.parentElement?.dataset?.recursionProgressParentStep || '')
       }))
       .filter((row) => row.label && row.state);

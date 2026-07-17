@@ -170,10 +170,10 @@ The syntax repair layer may repair quoting, commas, delimiters, and surrounding
 fences. It may not add semantic fields, fabricate values, choose decisions, or
 rewrite prose. It returns diagnostics describing whether repair occurred.
 
-Recursion will use a pinned, MIT-licensed browser ESM distribution of
-`jsonrepair` for this layer rather than maintaining ad hoc regular-expression
-repairs. Because the extension is served directly without a bundler, the
-audited distribution and its license notice will be vendored under
+Recursion will use the pinned ISC-licensed browser ESM distribution from
+`jsonrepair@3.15.0` for this layer rather than maintaining ad hoc
+regular-expression repairs. Because the extension is served directly without a
+bundler, the audited distribution and its license notice will be vendored under
 `src/vendor/`. Production code imports that relative module; tests must prove
 that the vendored artifact is the only tolerant parser used.
 

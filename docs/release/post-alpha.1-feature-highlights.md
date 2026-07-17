@@ -30,7 +30,7 @@ After alpha.2-alpha.5, Recursion can also act immediately after the assistant re
 
 The compact bar changed in two operator-facing places. The old post-generation prose affordance is now an icon-only Enhancements menu with an apply control and four target rows. The Tense & PoV selector is now a two-axis correction menu instead of a flat list of combined story-form choices.
 
-![Enhancements menu with As Swipe/Replace and target controls](../../assets/documentation/renders/recursion-operator-enhancements-controls.png)
+![Enhancements menu with Repair, Recompose, experimental Redirect, and verified result state](../../assets/documentation/renders/recursion-operator-editorial-recovery-states.png)
 
 ![Tense & PoV two-axis selector with Auto, tense, and point-of-view controls](../../assets/documentation/renders/recursion-operator-story-form-controls.png)
 

@@ -98,14 +98,9 @@ These assets are promoted live UI documentation renders and may be embedded dire
 
 | Asset | Source Type | Current Primary Doc | Visual Scope |
 | --- | --- | --- | --- |
-| `recursion-bar-desktop.png` | live host | not currently embedded | Recursion Bar mounted in a real SillyTavern desktop viewport with power, Auto/Manual, Cards scope, Hero Pixel Array, Reasoning Level, Last Brief, and options visible. Superseded in the root README by smaller feature renders. |
-| `recursion-progress-menu-auto-pass.png` | live host | not currently embedded | Hero Pixel Array progress menu in a real Auto pass showing Utility planning, card work, prompt composition, prompt install, and ready or fallback rows. Superseded in the root README by smaller feature renders. |
-| `recursion-full-viewer-overview.png` | live host | not currently embedded | Full Viewer in real SillyTavern showing Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics access without redaction leaks. Superseded in the root README by smaller feature renders. |
-| `recursion-bar-mobile.png` | live host | not currently embedded | Recursion Bar in a phone-width real SillyTavern viewport showing touch-safe controls and collapsed menu access. Superseded in the root README by smaller feature renders. |
 | `recursion-operator-install-enable.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Install and enable flow in real SillyTavern with Recursion enabled and the Recursion Bar mounted on the active chat. |
 | `recursion-operator-pipeline-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Standard/Rapid/Fused pipeline dropdown in the compact Recursion Bar, including visible Standard, Rapid, and Fused options. |
 | `recursion-operator-mode-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Auto and Manual mode controls in the compact Recursion Bar, including visible current mode and mode switch interaction. |
-| `recursion-operator-enhancements-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Enhancement menu with On/Off and As Swipe/Replace controls. It must show one card-aware Generation Review operation, not retired Prose/Dialogue target rows. |
 | `recursion-operator-story-form-controls.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Tense & PoV two-axis selector in the compact Recursion Bar showing Auto, Past/Present tense, and first-, second-, third-person, omniscient, and mixed POV choices. |
 | `recursion-operator-bar-states.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Real Recursion Bar state set for Ready, Working, Paused, Issue, Off, provider warning, and prompt-ready behavior. |
 | `recursion-operator-progress-menu-states.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Hero Pixel Array progress menu state set showing top-level rows, child rows, pass, fallback, and ready states from live UI. |
@@ -139,13 +134,7 @@ These assets are promoted live UI documentation renders and may be embedded dire
 
 ## Open Render Inventory
 
-The `.6` card-system pass has these open live-host slots:
-
-- `recursion-card-deck-editor.png` — live host — `docs/user/RECURSION_OPERATOR_MANUAL.md` and `README.md` — editable custom deck with categories, authored cards, eye-state controls, and drag handles.
-- `recursion-card-hand-inspection.png` — live host — `docs/user/RECURSION_OPERATOR_MANUAL.md` and `README.md` — Last Brief or Full Viewer showing selected cards, omissions, and packet metadata.
-- `recursion-card-priority-states.png` — live host — `docs/technical/CARD_DECK_AND_HAND.md` — card rows showing off, active, and priority eye-state controls.
-
-Additional `.6` captures planned by the update brief include Auto/Manual scope, deck overview, category editor, authored-card editor, Card Assist, mobile editor, and fail-soft state. Add each row here when its target document receives the corresponding visible marker.
+All live-host render slots currently tracked by the documentation plan have been promoted and wired into their primary documents. Future captures should add a tracking row and documentation reference in the same change.
 
 ## Verification Commands
 

@@ -68,7 +68,7 @@ Every missing render or screenshot requested by a document must be marked in tha
 Use this format:
 
 ```markdown
-<Render Needed>: assets/documentation/renders/recursion-progress-menu-auto-pass.png - Hero Pixel Array progress menu during an Auto pass, showing Utility planning, card generation, prompt composition, prompt install, and ready state.
+<Render Needed>: assets/documentation/renders/recursion-first-run-auto-pass.png - Hero Pixel Array progress menu during an Auto pass, showing Utility planning, card generation, prompt composition, prompt install, and ready state.
 ```
 
 Rules:
@@ -86,7 +86,7 @@ Replacement example:
 
 ```markdown
 <p align="center">
-  <img src="../../assets/documentation/renders/recursion-progress-menu-auto-pass.png" alt="Recursion Hero Pixel Array progress menu during an Auto pass">
+  <img src="../../assets/documentation/renders/recursion-first-run-auto-pass.png" alt="Recursion Hero Pixel Array progress menu during an Auto pass">
 </p>
 ```
 

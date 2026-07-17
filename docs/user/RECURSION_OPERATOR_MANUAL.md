@@ -12,7 +12,7 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 ![Auto and Manual mode controls](../../assets/documentation/renders/recursion-operator-mode-controls.png)
 
-![Enhancements menu with apply mode and enhancement targets](../../assets/documentation/renders/recursion-operator-enhancements-controls.png)
+![Enhancements menu with Repair, Recompose, Redirect, and editorial result state](../../assets/documentation/renders/recursion-operator-editorial-recovery-states.png)
 
 ![Tense & PoV two-axis selector with Auto, tense, and point-of-view choices](../../assets/documentation/renders/recursion-operator-story-form-controls.png)
 
@@ -46,7 +46,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 - power toggle;
 - icon-only Pipeline control: Standard, Rapid, or Fused;
 - icon-only mode control: Auto or Manual;
-- icon-only Enhancement control: Off or On, applied As Swipe or Replace; On runs one card-aware Generation Review across prose, dialogue, pacing, subtext, scene fidelity, and anti-slop;
+- icon-only Enhancement control: Off, Repair, Recompose, or Redirect, applied As Swipe or Replace; enabled modes run one card-aware Generation Review across pacing, subtext, scene fidelity, and anti-slop;
 - compact Tense & PoV control;
 - Hero Pixel Array plus current-step text;
 - command slot: Stop generation while active, Regenerate icon while idle;

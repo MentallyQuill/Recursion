@@ -54,9 +54,9 @@ Recursion is a scene reasoning layer for the reply in front of you.
   </tr>
   <tr>
     <td width="50%">
-      <div align="center"><img src="assets/documentation/renders/recursion-operator-enhancements-controls.png" alt="Recursion enhancements controls" style="max-width:100%;height:auto"></div><br>
+      <div align="center"><img src="assets/documentation/renders/recursion-operator-editorial-recovery-states.png" alt="Recursion editorial recovery controls" style="max-width:100%;height:auto"></div><br>
       <strong>Enhancements</strong><br>
-      Clean up the reply that just landed by improving prose, dialogue, or both, then keep the improved version as a swipe or replace the original.
+      Review the reply that just landed with one card-aware operation, then apply a validated Repair, Recompose, or Redirect result as a swipe or replacement.
     </td>
     <td width="50%">
       <div align="center"><img src="assets/documentation/renders/recursion-operator-story-form-controls.png" alt="Recursion tense and point of view controls" style="max-width:100%;height:auto"></div><br>
@@ -106,7 +106,7 @@ Pipeline controls decide how Recursion schedules scene work. Auto and Manual dec
 
 ### Cost Shape
 
-Recursion adds provider work before the host model writes: Arbiter planning, card generation or a Fused bundle, Utility guidance composition, optional Reasoner synthesis, and optional post-generation Enhancements for prose, dialogue, or both. It also injects a bounded prompt packet into the normal SillyTavern generation, so Prompt Footprint affects the final host context size.
+Recursion adds provider work before the host model writes: Arbiter planning, card generation or a Fused bundle, Utility guidance composition, optional Reasoner synthesis, and optional post-generation Enhancements for bounded repair, recomposition, or redirect recovery. It also injects a bounded prompt packet into the normal SillyTavern generation, so Prompt Footprint affects the final host context size.
 
 Cost depends most on pipeline, Reasoning Level, card count, footprint, cache reuse, provider hidden reasoning, and any external model multiplier. For the detailed call breakdown and planning estimates, see [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md).
 
@@ -117,6 +117,15 @@ Under the medium-reasoning Standard example in that research, Recursion adds rou
 Enhancements review the assistant reply that just landed against the frozen user turn, bounded visible context, installed card hand, Prompt Packet, story form, character evidence, and anti-slop profile. The menu exposes one operation with four modes: `Off`, `Repair`, `Recompose`, and `Redirect`. `Repair` makes bounded local changes, `Recompose` may restructure a larger passage, and `Redirect` replaces a failed trajectory using an evidence-backed replacement objective. Apply the accepted result `As Swipe` or `Replace`.
 
 Every accepted candidate is checked against its source hash, exact target text, patch bounds, evidence references, installed-card coverage, and semantic verification. Redirect additionally requires a complete verifier result; a rejected or incomplete candidate is never presented as a successful enhancement. The progress surface reports `applied`, `partial-failed`, `validation-failed`, `provider-failed`, `requires-regeneration`, or `skipped` with an inline reason, while the original host generation remains intact.
+
+| Enhancement feature | Function | Use it when |
+| --- | --- | --- |
+| `Off` | Leaves the SillyTavern response unchanged. | The generated response is already usable, or you do not want a post-generation review. |
+| `Repair` | Applies bounded, exact patches to diagnosed spans while preserving the response structure. | The direction is sound but there are local defects such as repetition, awkward phrasing, or unsupported details. |
+| `Recompose` | Produces a complete replacement candidate grounded in the frozen turn, card evidence, and review diagnosis. | The response needs a broader rewrite but its underlying intent and trajectory are still supported. |
+| `Redirect` *(experimental)* | Replaces a drifted trajectory with a new evidence-grounded response and requires independent verification before settlement. | The response followed the wrong objective, beat, or scene direction. Redirect always settles as a new swipe. |
+| `As Swipe` | Keeps the original response and adds the accepted result as a new selected swipe. | You want to compare or return to the original response. |
+| `Replace` | Replaces the active response with the accepted result without adding a sibling swipe. | You want the accepted result to become the active response directly. |
 
 ![Enhancement menu with Repair, Recompose, experimental Redirect, and verified result state](assets/documentation/renders/recursion-operator-editorial-recovery-states.png)
 

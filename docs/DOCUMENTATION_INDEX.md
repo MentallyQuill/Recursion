@@ -82,6 +82,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 
 - [Documentation Expansion Plan](planning/DOCUMENTATION_EXPANSION_PLAN.md)
 - [0.1.0-pre-alpha.6 Documentation Update Brief](planning/2026-07-11-documentation-update-pre-alpha-6.md)
+- [Reasoner Capability and Redirect Readiness Fix-Improvement](planning/2026-07-17-reasoner-capability-and-redirect-readiness-fix-improvement.md) - Permanent replacement for hidden Reasoner enablement, provider-test state races, Redirect readiness drift, and stale installed-copy behavior.
 - [Provider JSON Robustness Pass](planning/PROVIDER_JSON_ROBUSTNESS_PASS.md)
 - [Structured Output Recovery Implementation Plan](superpowers/plans/2026-07-13-recursion-structured-output-recovery.md)
 - [Planning Folder Guide](planning/README.md)

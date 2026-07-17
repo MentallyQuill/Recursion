@@ -667,7 +667,16 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
   };
 }
 
-export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', diagnosis = {}, evidence = [], snapshot = {}, targets = {}, lane = '', retry = null } = {}) {
+function safeDiagnosisDiagnostics(value = {}) {
+  const referenceIssues = array(object(value).referenceIssues).slice(0, 24).map((entry) => ({
+    code: safeText(entry?.code, 120),
+    path: safeText(entry?.path, 240),
+    reference: safeText(entry?.reference, 180)
+  })).filter((entry) => entry.code && entry.path);
+  return referenceIssues.length ? { referenceIssues } : {};
+}
+
+export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', diagnosis = {}, diagnosisDiagnostics = {}, evidence = [], snapshot = {}, targets = {}, lane = '', retry = null } = {}) {
   const full = FULL_MODES.has(mode);
   const preservedSource = preservedText(sourceText, MAX_SOURCE);
   const presentationEnvelope = leadingPresentationEnvelope(sourceText);
@@ -739,6 +748,9 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
     `<diagnosis>${JSON.stringify(diagnosis)}</diagnosis>`,
+    ...(mode === 'redirect' && Object.keys(safeDiagnosisDiagnostics(diagnosisDiagnostics)).length
+      ? [`<diagnosis_diagnostics>${JSON.stringify(safeDiagnosisDiagnostics(diagnosisDiagnostics))}</diagnosis_diagnostics>`]
+      : []),
     `<evidence>${JSON.stringify(evidence)}</evidence>`,
     `<snapshot>${JSON.stringify(snapshot)}</snapshot>`,
     `<targets>${JSON.stringify(targetList)}</targets>`,
@@ -762,7 +774,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
   };
 }
 
-export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', diagnosis = null, evidence = [], candidate = {}, lane = '', retry = null } = {}) {
+export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', diagnosis = null, diagnosisDiagnostics = {}, evidence = [], candidate = {}, lane = '', retry = null } = {}) {
   const candidateHash = hashJson(String(candidate?.text || ''));
   const validEvidenceIds = array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean);
   const verificationEvidenceRefs = mode === 'redirect'
@@ -814,6 +826,9 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
     `<diagnosis_hash>${safeText(diagnosisHash, 180)}</diagnosis_hash>`,
     `<candidate_hash>${safeText(candidateHash, 180)}</candidate_hash>`,
     ...(mode === 'redirect' ? [`<diagnosis>${JSON.stringify(object(diagnosis))}</diagnosis>`] : []),
+    ...(mode === 'redirect' && Object.keys(safeDiagnosisDiagnostics(diagnosisDiagnostics)).length
+      ? [`<diagnosis_diagnostics>${JSON.stringify(safeDiagnosisDiagnostics(diagnosisDiagnostics))}</diagnosis_diagnostics>`]
+      : []),
     `<evidence>${JSON.stringify(evidence)}</evidence>`,
     `<candidate>${JSON.stringify(candidate)}</candidate>`
   ].join('\n');

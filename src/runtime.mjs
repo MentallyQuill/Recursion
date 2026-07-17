@@ -4036,9 +4036,10 @@ export function createRecursionRuntime({
         : {};
       stageRuntimeActivity({ runId, phase: 'editorialTransforming', label: editorialMode === 'repair' ? 'Applying grounded repairs...' : `${editorialMode === 'redirect' ? 'Redirecting' : 'Recomposing'} response...`, providerLane: transformLane, composerLane: transformLane, chips: ['Enhancement', editorialMode] });
       let transformResponse = await generateEditorialRole('editorialTransformer', {
-        ...buildEditorialPassRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosis: diagnosisValidation.value, evidence, snapshot: publicSnapshot, targets, lane: transformLane }),
+        ...buildEditorialPassRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosis: diagnosisValidation.value, diagnosisDiagnostics: diagnosisValidation.diagnostics, evidence, snapshot: publicSnapshot, targets, lane: transformLane }),
         ...reasonerRequestMetadata(settings, 'editorial-transform', transformLane)
       }, transformOptions);
+      let transformAttemptCount = 1;
       if (enhancementSignal?.aborted) return canceledEditorialResult();
       let validation = transformResponse.result?.ok === true
         ? validateEditorialPass(transformResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, snapshot: publicSnapshot, targets })
@@ -4047,6 +4048,7 @@ export function createRecursionRuntime({
         || (transformResponse.result?.ok === true && recoveryToken.spent !== true);
       if (!validation.ok && transformCorrectionAvailable) {
         if (!strictReasonerWriter) recoveryToken.spent = true;
+        transformAttemptCount += 1;
         transformResponse = await generateEditorialRole('editorialTransformer', {
           ...buildEditorialPassRequest({
             mode: editorialMode,
@@ -4054,6 +4056,7 @@ export function createRecursionRuntime({
             sourceHash,
             snapshotHash,
             diagnosis: diagnosisValidation.value,
+            diagnosisDiagnostics: diagnosisValidation.diagnostics,
             evidence,
             snapshot: publicSnapshot,
             targets,
@@ -4087,6 +4090,7 @@ export function createRecursionRuntime({
               snapshotHash,
               diagnosisHash,
               diagnosis: diagnosisValidation.value,
+              diagnosisDiagnostics: diagnosisValidation.diagnostics,
               evidence,
               candidate: validation.artifact.candidate,
               lane: verifierLane,
@@ -4123,6 +4127,76 @@ export function createRecursionRuntime({
         let verified = await verifyCandidate();
         if (verified.canceled) return canceledEditorialResult();
         verificationResult = verified.result;
+        if (editorialMode === 'redirect'
+          && verificationResult.ok
+          && verificationResult.decision === 'reject'
+          && transformAttemptCount < 2) {
+          const failedChecks = (verificationResult.checks || [])
+            .filter((entry) => entry?.status !== 'pass')
+            .map((entry) => entry?.check)
+            .filter(Boolean);
+          const verifierFeedback = {
+            code: REDIRECT_ERROR_CODES.VERIFICATION_REJECTED,
+            message: [
+              'Editorial verifier rejected candidate.',
+              failedChecks.length ? `Failed checks: ${failedChecks.join(', ')}.` : '',
+              verificationResult.reason || ''
+            ].filter(Boolean).join(' ')
+          };
+          transformAttemptCount += 1;
+          stageRuntimeActivity({
+            runId,
+            phase: 'editorialTransforming',
+            label: 'Correcting Redirect candidate...',
+            providerLane: transformLane,
+            composerLane: transformLane,
+            chips: ['Enhancement', 'Redirect']
+          });
+          transformResponse = await generateEditorialRole('editorialTransformer', {
+            ...buildEditorialPassRequest({
+              mode: editorialMode,
+              sourceText,
+              sourceHash,
+              snapshotHash,
+              diagnosis: diagnosisValidation.value,
+              diagnosisDiagnostics: diagnosisValidation.diagnostics,
+              evidence,
+              snapshot: publicSnapshot,
+              targets,
+              lane: transformLane,
+              retry: verifierFeedback
+            }),
+            ...reasonerRequestMetadata(settings, 'editorial-transform', transformLane)
+          }, {
+            allowStructuredRecovery: false,
+            ...(strictReasonerWriter ? { allowLaneFallback: false, maxAttempts: 1 } : {})
+          });
+          if (enhancementSignal?.aborted) return canceledEditorialResult();
+          validation = transformResponse.result?.ok === true
+            ? validateEditorialPass(transformResponse.result.data, {
+                mode: editorialMode,
+                sourceText,
+                sourceHash,
+                snapshotHash,
+                diagnosisHash,
+                diagnosis: diagnosisValidation.value,
+                snapshot: publicSnapshot,
+                targets
+              })
+            : {
+                ok: false,
+                error: transformResponse.result?.error
+                  || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' }
+              };
+          if (!validation.ok) return { ...failEditorial(validation.error), validation };
+          editorialLane = transformResponse.lane;
+          candidateHash = validation.artifact?.kind === 'candidate'
+            ? hashJson(String(validation.artifact.candidate?.text || validation.artifact.text || ''))
+            : '';
+          verified = await verifyCandidate();
+          if (verified.canceled) return canceledEditorialResult();
+          verificationResult = verified.result;
+        }
         if (!verificationResult.ok || verificationResult.decision !== 'accept') {
           return {
             ...failEditorial(verificationResult.error || { code: 'RECURSION_EDITORIAL_VERIFICATION_REJECTED', message: 'Editorial verifier rejected candidate.' }, 'Editorial verification failed. Original kept.'),

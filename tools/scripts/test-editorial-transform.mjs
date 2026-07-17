@@ -729,6 +729,32 @@ assert(
   redirectPassRequest.prompt.includes('Return exactly these Redirect top-level keys: schema, mode, sourceHash, snapshotHash, diagnosisHash, text.'),
   'Redirect transform prompt names the minimal flat pass contract'
 );
+const redirectReferenceDiagnostics = {
+  referenceIssues: [{
+    code: 'RECURSION_EDITORIAL_REDIRECT_REFERENCE_DROPPED',
+    path: 'requiredBeats[0].evidenceRefs[0]',
+    reference: 'missing:beat'
+  }]
+};
+const redirectPassWithReferenceDiagnostics = buildEditorialPassRequest({
+  mode: 'redirect',
+  sourceText,
+  sourceHash,
+  snapshotHash,
+  diagnosis: validRedirectDiagnosis.value,
+  diagnosisDiagnostics: redirectReferenceDiagnostics,
+  evidence,
+  snapshot,
+  lane: 'reasoner'
+});
+assert(
+  redirectPassWithReferenceDiagnostics.prompt.includes('<diagnosis_diagnostics>'),
+  'Redirect writer receives unresolved diagnosis-reference diagnostics'
+);
+assert(
+  redirectPassWithReferenceDiagnostics.prompt.includes('requiredBeats[0].evidenceRefs[0]'),
+  'Redirect writer receives the exact unresolved reference path'
+);
 assert(
   redirectPassRequest.prompt.includes('Do not return candidate, patches, changeLedger, cardOutcomes, preservationLedger, or riskFlags.'),
   'Redirect transform prompt excludes shared-mode and audit fields'
@@ -791,6 +817,20 @@ const redirectVerifierRequest = buildEditorialVerificationRequest({
   evidence,
   candidate: redirectCandidate.candidate
 });
+const redirectVerifierWithReferenceDiagnostics = buildEditorialVerificationRequest({
+  mode: 'redirect',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash: redirectDiagnosisHash,
+  diagnosis: validRedirectDiagnosis.value,
+  diagnosisDiagnostics: redirectReferenceDiagnostics,
+  evidence,
+  candidate: redirectCandidate.candidate
+});
+assert(
+  redirectVerifierWithReferenceDiagnostics.prompt.includes('requiredBeats[0].evidenceRefs[0]'),
+  'Redirect verifier receives unresolved diagnosis-reference diagnostics'
+);
 assert(
   redirectVerifierRequest.prompt.includes(`<diagnosis>${JSON.stringify(validRedirectDiagnosis.value)}</diagnosis>`),
   'Redirect verifier receives the complete validated diagnosis it must enforce'

@@ -796,6 +796,33 @@ assertEqual(correctedNoChangeResult.ok, true, 'Redirect canonicalizes a provider
 assertEqual(correctedNoChangeRedirect.state.diagnosisAttempts, 1, 'Redirect does not spend a correction on a noisy decision token');
 assertEqual(correctedNoChangeRedirect.state.appended.length, 1, 'canonicalized Redirect appends exactly one verified swipe');
 
+const referenceRecoveryRedirect = createRedirectHarness({
+  diagnosisOverride: (value) => ({
+    ...value,
+    requiredBeats: [{
+      ...value.requiredBeats[0],
+      evidenceRefs: ['missing:beat']
+    }]
+  })
+});
+await referenceRecoveryRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const referenceRecoveryResult = await referenceRecoveryRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-reference-recovery-test' });
+assertEqual(referenceRecoveryResult.ok, true, 'Redirect reference bookkeeping reaches semantic verification');
+assertEqual(referenceRecoveryRedirect.state.diagnosisAttempts, 1, 'unknown reference adds no diagnosis correction call');
+assertEqual(referenceRecoveryRedirect.state.transformAttempts, 1, 'unknown reference adds no writer call');
+assertEqual(referenceRecoveryRedirect.state.verifierAttempts, 1, 'unknown reference reaches the mandatory verifier');
+assertEqual(referenceRecoveryRedirect.state.appended.length, 1, 'verifier-accepted reference recovery appends one swipe');
+assert(
+  referenceRecoveryRedirect.state.calls.find((call) => call.roleId === 'editorialTransformer')?.request?.prompt
+    .includes('requiredBeats[0].evidenceRefs[0]'),
+  'Redirect writer receives the unresolved reference path'
+);
+assert(
+  referenceRecoveryRedirect.state.calls.find((call) => call.roleId === 'editorialVerifier')?.request?.prompt
+    .includes('requiredBeats[0].evidenceRefs[0]'),
+  'Redirect verifier receives the unresolved reference path'
+);
+
 const reasonerCorrectedRedirect = createRedirectHarness({
   reasonerAvailable: true,
   diagnosisProviderFailureOnFirst: true
@@ -900,9 +927,9 @@ assertEqual(rejectedRedirectResult.ok, false, 'verifier rejection keeps the orig
 assertEqual(rejectedRedirectResult.error?.code, REDIRECT_ERROR_CODES.VERIFICATION_REJECTED, 'verifier rejection has a stable error code');
 assertEqual(rejectedRedirect.state.appended.length, 0, 'verifier rejection adds no swipe');
 assertEqual(rejectedRedirect.runtime.view().editorialResult?.status, 'error', 'verifier rejection settles visibly unhealthy');
-assertEqual(rejectedRedirect.state.calls.length, 3, 'semantic verifier rejection ends after the normal three calls');
-assertEqual(rejectedRedirect.state.transformAttempts, 1, 'semantic rejection does not launch an unverified rewrite');
-assertEqual(rejectedRedirect.state.verifierAttempts, 1, 'semantic rejection does not launch a second verifier call');
+assertEqual(rejectedRedirect.state.calls.length, 5, 'semantic verifier rejection uses one bounded writer and verifier retry');
+assertEqual(rejectedRedirect.state.transformAttempts, 2, 'semantic rejection launches exactly one corrected writer');
+assertEqual(rejectedRedirect.state.verifierAttempts, 2, 'semantic rejection verifies the corrected candidate');
 
 const correctedCandidateRedirect = createRedirectHarness({
   verifierDecisions: ['reject', 'accept'],
@@ -919,10 +946,20 @@ const correctedCandidateRedirect = createRedirectHarness({
 });
 await correctedCandidateRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const correctedCandidateResult = await correctedCandidateRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-candidate-correction-test' });
-assertEqual(correctedCandidateResult.ok, false, 'Redirect keeps the original after semantic rejection instead of revising automatically');
-assertEqual(correctedCandidateRedirect.state.transformAttempts, 1, 'Redirect does not make a semantic candidate revision');
-assertEqual(correctedCandidateRedirect.state.verifierAttempts, 1, 'Redirect does not verify a second candidate');
-assertEqual(correctedCandidateRedirect.state.appended.length, 0, 'semantic rejection creates no swipe');
+assertEqual(correctedCandidateResult.ok, true, 'Redirect applies a corrected candidate after verifier acceptance');
+assertEqual(correctedCandidateRedirect.state.transformAttempts, 2, 'Redirect makes exactly one semantic candidate revision');
+assertEqual(correctedCandidateRedirect.state.verifierAttempts, 2, 'Redirect verifies the replacement candidate');
+assertEqual(correctedCandidateRedirect.state.appended.length, 1, 'accepted semantic correction creates one swipe');
+const correctedCandidateWriterCalls = correctedCandidateRedirect.state.calls.filter((call) => call.roleId === 'editorialTransformer');
+assertDeepEqual(
+  correctedCandidateWriterCalls.map((call) => call.request.lane),
+  ['reasoner', 'reasoner'],
+  'both Medium Redirect semantic writer attempts stay on Reasoner'
+);
+assert(
+  correctedCandidateWriterCalls[1].request.prompt.includes('Editorial verifier rejected candidate'),
+  'second writer receives the verifier rejection reason'
+);
 
 const correctedMalformedVerifierRedirect = createRedirectHarness({
   verifierChecksByAttempt: [

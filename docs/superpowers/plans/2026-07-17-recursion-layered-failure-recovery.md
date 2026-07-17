@@ -371,7 +371,7 @@ node tools/scripts/test-provider-response-parser.mjs
 Expected: PASS; known references remain unchanged, unknown references are
 diagnosed, and structurally empty Redirects still fail.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/providers.mjs src/editorial-transform.mjs tools/scripts/test-editorial-transform.mjs tools/scripts/test-provider-response-parser.mjs
@@ -392,7 +392,7 @@ git commit -m "fix(redirect): defer evidence judgment"
 - Produces one or two verified writer attempts.
 - Never mutates the host without verifier acceptance.
 
-- [ ] **Step 1: Add failing runtime state-machine tests**
+- [x] **Step 1: Add failing runtime state-machine tests**
 
 Add fixtures asserting:
 
@@ -411,7 +411,7 @@ assertEqual(rejectedTwice.state.appendAttempts, 0, 'repeated rejection preserves
 
 Assert Medium+ attempts both use Reasoner and Low attempts both use Utility.
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run:
 
@@ -422,7 +422,7 @@ node tools/scripts/test-editorial-runtime.mjs
 Expected: FAIL because verifier rejection currently terminates without a
 corrected writer candidate.
 
-- [ ] **Step 3: Pass reference diagnostics into transform and verify prompts**
+- [x] **Step 3: Pass reference diagnostics into transform and verify prompts**
 
 Add bounded diagnostic evidence:
 
@@ -435,7 +435,7 @@ diagnosisDiagnostics: {
 Prompts state that dropped references are unresolved and do not establish
 support.
 
-- [ ] **Step 4: Implement the two-attempt writer loop**
+- [x] **Step 4: Implement the two-attempt writer loop**
 
 Refactor the Redirect writer/verifier sequence:
 
@@ -456,7 +456,7 @@ Reuse the existing writer lane selection. Disable Utility fallback for
 Medium-and-higher Redirect. Recheck cancellation and source identity before
 every call and before mutation.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 

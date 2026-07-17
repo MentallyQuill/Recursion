@@ -483,6 +483,14 @@
   line-height: 1.15;
 }
 
+.recursion-enhancements-choice-qualifier {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 46%, transparent);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  margin-left: 4px;
+}
+
 .recursion-story-form-text {
   border: 0;
   clip: auto;

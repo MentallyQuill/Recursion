@@ -164,6 +164,13 @@ Enhancement is an icon-only upgrade button immediately to the right of Cards and
 - `Off`: leave SillyTavern output unchanged.
 - `On`: run one card-aware Generation Review and Enhancement against the frozen host response. It reviews prose, dialogue, pacing, subtext, scene/card fidelity, and anti-slop together, then returns only validated local dialogue or prose patches.
 
+The Enhancements selector labels the Redirect option as
+`Redirect (Experimental)`. `Redirect` remains the primary 11.5px row label,
+while `Experimental` renders inline at the muted 10px helper scale. The
+qualifier is presentational and accessible copy only; the stored setting
+remains `redirect`, and active-mode status surfaces continue to use
+`Redirect`.
+
 When set to `Off`, the Enhancement icon uses the same muted/grey disabled treatment as the off power toggle. The compact bar does not expose a Recast-style pass editor. The only numeric Enhancement setting belongs in Advanced settings as context message count.
 
 The Tense & PoV selector sits immediately to the right of Enhancements and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `PaM`, `Pr1`, `Pr2`, `Pr3L`, `Pr3O`, or `PrM` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, `Tense & PoV: Present Mixed`, and equivalent options.

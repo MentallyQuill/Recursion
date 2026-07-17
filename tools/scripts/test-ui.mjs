@@ -723,6 +723,15 @@ assert(/\.recursion-reasoning-line-fill\s*\{[\s\S]*?var\(--SmartThemeBodyColor/.
 assert(/assets\/icons\/prose\.svg/.test(recursionCss), 'Enhancements target rows use the prose.svg mask icon');
 assert(/assets\/icons\/dialogue\.svg/.test(recursionCss), 'Enhancements target rows use the dialogue.svg mask icon');
 assert(/\.recursion-enhancements-choice\.is-combo \.recursion-enhancements-choice-icon\s*\{[\s\S]*?height:\s*42px;/.test(recursionCss), 'Prose + Dialogue row centers the full-height combo icon stack in its own slot');
+assert(
+  /\.recursion-enhancements-choice-qualifier\s*\{[\s\S]*?font-size:\s*10px;[\s\S]*?letter-spacing:\s*0;[\s\S]*?margin-left:\s*4px;/.test(recursionCss),
+  'Redirect Experimental qualifier uses the compact helper-text scale and inline spacing'
+);
+assert(
+  /\.recursion-enhancements-choice-qualifier\s*\{[\s\S]*?color:\s*color-mix\(in srgb, var\(--SmartThemeBodyColor/.test(recursionCss),
+  'Redirect Experimental qualifier uses a muted SillyTavern foreground treatment'
+);
+assert(uiSpec.includes('Redirect (Experimental)'), 'UI spec records the experimental Redirect selector label');
 assert(!/recursion-settings-reasoning/.test(recursionCss), 'settings panel does not keep a duplicate reasoning chain stylesheet');
 assert(!/settingsReasoningLevelRow|recursionSettingReasoningChoice|MODE_OPTIONS/.test(recursionUi), 'settings panel does not keep duplicate mode or reasoning handlers');
 assert(/\.reasoning-chain::before/.test(barImplementationReference), 'reasoning nodes are connected by a chain line');
@@ -2089,6 +2098,25 @@ try {
     root.querySelectorAll('[data-recursion-enhancement-target-icon]').map((icon) => icon.dataset.recursionEnhancementTargetIcon),
     ['off', 'repair', 'recompose', 'redirect'],
     'Enhancements selector renders one icon slot for each editorial mode'
+  );
+  const redirectEnhancementChoice = root.querySelector('[data-recursion-enhancement-target-choice-redirect]');
+  const redirectEnhancementQualifier = redirectEnhancementChoice.querySelector('[data-recursion-enhancement-target-choice-qualifier]');
+  assertEqual(
+    fakeDocument.textTree(redirectEnhancementChoice.querySelector('[data-recursion-enhancement-target-choice-name]')).trim(),
+    'Redirect Experimental',
+    'Redirect selector renders its primary label and inline Experimental qualifier'
+  );
+  assertEqual(redirectEnhancementQualifier?.tagName, 'SMALL', 'Redirect Experimental qualifier uses subordinate semantic markup');
+  assertEqual(fakeDocument.textTree(redirectEnhancementQualifier), 'Experimental', 'Redirect selector renders the exact Experimental qualifier');
+  assert(
+    redirectEnhancementQualifier.className.includes('recursion-enhancements-choice-qualifier'),
+    'Redirect Experimental qualifier exposes its subordinate styling class'
+  );
+  assertEqual(redirectEnhancementChoice.getAttribute('aria-label'), 'Redirect (Experimental)', 'Redirect selector exposes its maturity accessibly');
+  assertEqual(
+    root.querySelectorAll('[data-recursion-enhancement-target-choice-qualifier]').length,
+    1,
+    'only Redirect renders an Enhancement maturity qualifier'
   );
   const enhancementTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-recompose]').querySelector('[data-recursion-enhancement-target-icon]');
   assert(enhancementTargetIcon.className.includes('is-on'), 'Recompose mode uses the unified review icon');

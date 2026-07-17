@@ -113,6 +113,7 @@ const ENHANCEMENT_TARGET_OPTIONS = Object.freeze([
   {
     value: 'redirect',
     label: 'Redirect',
+    qualifier: 'Experimental',
     title: 'Replace a drifted response with an evidence-grounded one.',
     tip: 'Treats the source as potentially negative evidence and always keeps the original as a swipe.'
   }
@@ -759,11 +760,22 @@ function enhancementApplyChoice(option) {
 }
 
 function enhancementTargetChoice(option) {
+  const nameChildren = [
+    el('span', { text: option.label })
+  ];
+  if (option.qualifier) {
+    nameChildren.push(el('small', {
+      className: 'recursion-enhancements-choice-qualifier',
+      text: option.qualifier,
+      dataset: { recursionEnhancementTargetChoiceQualifier: '' }
+    }));
+  }
   return el('button', {
     className: 'recursion-enhancements-choice',
     attrs: {
       type: 'button',
       title: option.title,
+      'aria-label': option.qualifier ? `${option.label} (${option.qualifier})` : option.label,
       'aria-current': 'false'
     },
     dataset: {
@@ -780,9 +792,8 @@ function enhancementTargetChoice(option) {
     el('span', { className: 'recursion-enhancements-choice-copy' }, [
       el('span', {
         className: 'recursion-enhancements-choice-name',
-        text: option.label,
         dataset: { recursionEnhancementTargetChoiceName: '' }
-      }),
+      }, nameChildren),
       el('span', {
         className: 'recursion-enhancements-choice-tip',
         text: option.tip,

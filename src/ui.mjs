@@ -115,7 +115,7 @@ const ENHANCEMENT_TARGET_OPTIONS = Object.freeze([
     label: 'Redirect',
     qualifier: 'Experimental',
     title: 'Replace a drifted response with an evidence-grounded one.',
-    tip: 'Treats the source as potentially negative evidence and always keeps the original as a swipe.'
+    tip: 'Uses card-evidence to replace a misaligned trajectory with a stronger, verified response.'
   }
 ]);
 const ENHANCEMENT_APPLY_OPTIONS = Object.freeze([

@@ -198,10 +198,40 @@ const warningRun = outcomeReporter.start({ runId: 'warning-run', label: 'Warning
 outcomeReporter.settle({ runId: warningRun.runId, outcome: 'warning', label: 'Warned' });
 const errorRun = outcomeReporter.start({ runId: 'error-run', label: 'Error run' });
 outcomeReporter.settle({ runId: errorRun.runId, outcome: 'error', label: 'Errored' });
+const explainedRun = outcomeReporter.start({ runId: 'explained-run', label: 'Explained run' });
+outcomeReporter.settle({
+  runId: explainedRun.runId,
+  outcome: 'error',
+  label: 'Provider failed',
+  detail: {
+    failure: {
+      code: 'RECURSION_PROVIDER_TIMEOUT',
+      stage: 'editorial-writer',
+      category: 'provider-timeout',
+      message: 'Provider call timed out.',
+      retryable: true
+    }
+  }
+});
 const skippedRun = outcomeReporter.start({ runId: 'skipped-run', label: 'Skipped run' });
 outcomeReporter.settle({ runId: skippedRun.runId, outcome: 'skipped', label: 'Skipped' });
 assertEqual(outcomes.find((event) => event.runId === 'warning-run' && event.phase === 'settled').severity, 'warning', 'warning outcome maps to warning severity');
 assertEqual(outcomes.find((event) => event.runId === 'error-run' && event.phase === 'settled').severity, 'error', 'error outcome maps to error severity');
+assertEqual(
+  outcomes.find((event) => event.runId === 'warning-run' && event.phase === 'settled').detail.failure.message,
+  'Unexpected internal failure (RECURSION_ACTIVITY_REASON_MISSING).',
+  'warning settlement without a reason receives an explicit internal failure descriptor'
+);
+assertEqual(
+  outcomes.find((event) => event.runId === 'error-run' && event.phase === 'settled').detail.failure.message,
+  'Unexpected internal failure (RECURSION_ACTIVITY_REASON_MISSING).',
+  'error settlement without a reason receives an explicit internal failure descriptor'
+);
+assertEqual(
+  outcomes.find((event) => event.runId === 'explained-run' && event.phase === 'settled').detail.failure.message,
+  'Provider call timed out.',
+  'existing failure descriptor remains authoritative'
+);
 assertEqual(outcomes.find((event) => event.runId === 'skipped-run' && event.phase === 'settled').severity, 'info', 'skipped outcome keeps neutral severity');
 assertEqual(outcomes.find((event) => event.runId === 'skipped-run' && event.phase === 'settled').outcome, 'skipped', 'skipped outcome is preserved');
 

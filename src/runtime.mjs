@@ -74,6 +74,7 @@ import {
   validateEditorialVerification,
   validateRedirectEffectiveness
 } from './editorial-transform.mjs';
+import { failureFrom } from './failures.mjs';
 import { buildDiagnosticsPayload } from './runtime/diagnostics.mjs';
 import {
   clearJournalDetails,
@@ -3835,7 +3836,8 @@ export function createRecursionRuntime({
           candidateHash: safeText(editorialSettlement.candidateHash || '', 180),
           diagnosisHash: safeText(editorialSettlement.diagnosisHash || '', 180),
           redirectCharacterCount: Number(editorialSettlement.redirectCharacterCount || 0),
-          redirectRequiredBeatCount: Number(editorialSettlement.redirectRequiredBeatCount || 0)
+          redirectRequiredBeatCount: Number(editorialSettlement.redirectRequiredBeatCount || 0),
+          ...(editorialSettlement.failure ? { failure: editorialSettlement.failure } : {})
         }
       });
     }
@@ -3865,13 +3867,27 @@ export function createRecursionRuntime({
         code: safeText(error?.code || 'RECURSION_EDITORIAL_FAILED', 120),
         message: safeText(error?.message || 'Editorial transform failed.', 300)
       };
+      const stage = safeError.code.includes('DIAGNOSIS')
+        ? 'editorial-diagnosis'
+        : safeError.code.includes('VERIFICATION')
+          ? 'editorial-verification'
+          : safeError.code.includes('SOURCE_CHANGED')
+            ? 'editorial-commit'
+            : 'editorial-transform';
+      const category = safeError.code.includes('SOURCE_CHANGED')
+        ? 'stale-state'
+        : /APPEND|SWIPE|REPLACE|MUTATION/.test(safeError.code)
+          ? 'host-mutation'
+          : 'model-output';
+      const failure = failureFrom(safeError, { stage, category });
       setEditorialResult({
         mode: editorialMode,
         status: 'error',
         outcome: 'original-kept',
         applyMode,
         decision: safeError.message,
-        errorCode: safeError.code
+        errorCode: safeError.code,
+        failure
       });
       settleRuntimeActivity({
         runId,
@@ -3879,7 +3895,7 @@ export function createRecursionRuntime({
         severity: 'error',
         label,
         chips: ['Enhancement', 'Failed'],
-        detail: { mode: editorialMode, applyMode, reasonCode: safeError.code }
+        detail: { mode: editorialMode, applyMode, reasonCode: safeError.code, failure }
       });
       return { ok: false, mode: editorialMode, error: safeError };
     }

@@ -245,19 +245,37 @@ function safeReasonText(value) {
   return safeDisplayText(value, '', 180);
 }
 
+function usefulReasonText(value) {
+  const reason = safeReasonText(value);
+  if (/^(failed|failure|warning|caution|needs attention|action failed|provider call failed)[.!]?$/i.test(reason)) {
+    return '';
+  }
+  return reason;
+}
+
+function missingReason(source = {}) {
+  const code = safeDisplayText(asObject(source).failure?.code, 'RECURSION_PROGRESS_REASON_MISSING', 120)
+    .replace(/[^A-Z0-9_]+/gi, '_')
+    .toUpperCase();
+  return `Unexpected internal failure (${code || 'RECURSION_PROGRESS_REASON_MISSING'}).`;
+}
+
 function reasonFromSource(source, state, retryCount = 0, childSource = '') {
   const input = asObject(source);
-  const explicit = safeReasonText(
+  const explicit = usefulReasonText(
     input.reason
     || input.statusReason
     || input.cautionReason
     || input.failureReason
     || input.fallbackReason
+    || input.failure?.message
     || input.error?.message
+    || input.compactError
   );
   if (explicit) return explicit;
   if (state === 'warning' && normalizeRetryCount(retryCount) > 0) return retryReason(retryCount);
   if (state === 'warning' && normalizeChildSource(childSource) === 'fallback') return 'Local fallback was used.';
+  if (state === 'warning' || state === 'failed') return missingReason(input);
   return '';
 }
 
@@ -301,17 +319,20 @@ function eventReason(event, state) {
   const phase = cleanText(event.phase);
   const detail = asObject(event.detail);
   const retryCount = eventRetryCount(event);
-  const explicit = safeReasonText(
+  const explicit = usefulReasonText(
     detail.reason
     || detail.statusReason
     || detail.cautionReason
     || detail.failureReason
+    || detail.failure?.message
     || detail.error?.message
+    || detail.compactError
     || event.fallbackReason
   );
   if (explicit) return explicit;
   if (phase === 'providerCallRetrying') return retryReason(retryCount);
   if (state === 'warning' && retryCount > 0) return retryReason(retryCount);
+  if (state === 'warning' || state === 'failed') return missingReason(detail);
   return '';
 }
 
@@ -1046,10 +1067,10 @@ function currentStepText(steps) {
   const running = steps.filter((step) => step.state === 'running');
   if (running.length > 1) return `${running.length} model calls running...`;
   if (running.length === 1) return `${(running[0].currentLabel || running[0].label).replace(/\.+$/g, '')}...`;
-  const warning = steps.find((step) => step.state === 'warning');
-  if (warning) return `${warning.label.replace(/\.+$/g, '')} needs attention`;
   const failed = steps.find((step) => step.state === 'failed');
-  if (failed) return `${failed.label.replace(/\.+$/g, '')} failed`;
+  if (failed) return `${failed.label.replace(/\.+$/g, '')}: ${failed.reason}`;
+  const warning = steps.find((step) => step.state === 'warning');
+  if (warning) return `${warning.label.replace(/\.+$/g, '')}: ${warning.reason}`;
   return '';
 }
 

@@ -904,6 +904,23 @@
   padding: 4px 9px 4px 7px;
 }
 
+.recursion-step-row.child-row.has-reason {
+  height: auto;
+}
+
+.recursion-step-reason {
+  font-size: 10px;
+  grid-column: 4 / -1;
+  line-height: 1.25;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 0 0 1px;
+}
+
+.recursion-step-reason:empty {
+  display: none;
+}
+
 .recursion-step-row.child-row.has-nested {
   height: auto;
   min-height: var(--recursion-progress-child-row-height);
@@ -1035,11 +1052,19 @@
   color: var(--recursion-warning);
 }
 
+.recursion-step-row.warning > .recursion-step-reason {
+  color: var(--recursion-warning);
+}
+
 .recursion-step-row.failed > .recursion-step-meta {
   color: color-mix(in srgb, var(--recursion-error) 86%, #610000);
 }
 
 .recursion-step-row.failed > .recursion-step-label {
+  color: var(--recursion-error);
+}
+
+.recursion-step-row.failed > .recursion-step-reason {
   color: var(--recursion-error);
 }
 

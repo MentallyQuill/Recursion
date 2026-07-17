@@ -927,6 +927,11 @@ assertEqual(rejectedRedirectResult.ok, false, 'verifier rejection keeps the orig
 assertEqual(rejectedRedirectResult.error?.code, REDIRECT_ERROR_CODES.VERIFICATION_REJECTED, 'verifier rejection has a stable error code');
 assertEqual(rejectedRedirect.state.appended.length, 0, 'verifier rejection adds no swipe');
 assertEqual(rejectedRedirect.runtime.view().editorialResult?.status, 'error', 'verifier rejection settles visibly unhealthy');
+assertEqual(
+  rejectedRedirect.runtime.view().activity?.detail?.failure?.message,
+  'Editorial verifier rejected candidate.',
+  'terminal Redirect activity explains the verifier rejection'
+);
 assertEqual(rejectedRedirect.state.calls.length, 5, 'semantic verifier rejection uses one bounded writer and verifier retry');
 assertEqual(rejectedRedirect.state.transformAttempts, 2, 'semantic rejection launches exactly one corrected writer');
 assertEqual(rejectedRedirect.state.verifierAttempts, 2, 'semantic rejection verifies the corrected candidate');

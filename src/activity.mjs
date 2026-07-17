@@ -1,4 +1,5 @@
 import { cloneJson, makeId, nowIso, redact, truncate } from './core.mjs';
+import { failureFrom } from './failures.mjs';
 
 const HISTORY_LIMIT = 100;
 const VALID_MODES = new Set(['foreground', 'background', 'review']);
@@ -55,8 +56,31 @@ function cleanRunId(value) {
   return cleanText(value || makeId('run'), 128);
 }
 
+function ensureUnhealthyFailure(event) {
+  if (!['warning', 'error'].includes(event.severity)) return event;
+  const detail = event.detail && typeof event.detail === 'object' && !Array.isArray(event.detail)
+    ? event.detail
+    : {};
+  const cause = detail.failure
+    || detail.error
+    || detail.compactError
+    || detail.reason
+    || detail.statusReason
+    || detail.cautionReason
+    || event.fallbackReason;
+  const failure = failureFrom(cause, {
+    code: 'RECURSION_ACTIVITY_REASON_MISSING',
+    stage: event.logicalStage || event.phase || 'activity',
+    category: 'internal'
+  });
+  return {
+    ...event,
+    detail: cleanStructured({ ...detail, failure }) ?? { failure }
+  };
+}
+
 function normalizeEvent(input = {}, defaults = {}) {
-  const event = {
+  const event = ensureUnhealthyFailure({
     runId: cleanRunId(input.runId ?? defaults.runId),
     phase: cleanText(input.phase ?? defaults.phase ?? 'activity', 80),
     operationId: cleanText(input.operationId ?? defaults.operationId, 128) ?? null,
@@ -72,7 +96,7 @@ function normalizeEvent(input = {}, defaults = {}) {
     cardCounts: cleanStructured(input.cardCounts ?? defaults.cardCounts) ?? null,
     fallbackReason: cleanText(input.fallbackReason ?? defaults.fallbackReason, 240) ?? null,
     recordedAt: nowIso()
-  };
+  });
 
   return cloneSafe(event, normalizeIdleEvent());
 }

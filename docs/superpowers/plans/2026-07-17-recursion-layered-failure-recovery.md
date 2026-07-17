@@ -469,7 +469,7 @@ node tools/scripts/test-providers.mjs
 Expected: PASS; call counts, lanes, terminal failure, and host mutation are all
 bounded and exact.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/runtime.mjs src/editorial-transform.mjs tools/scripts/test-editorial-runtime.mjs
@@ -493,7 +493,7 @@ git commit -m "fix(redirect): retry rejected writer once"
 - Every warning/failed progress step carries non-generic `reason`.
 - UI renders `[data-recursion-progress-reason]`.
 
-- [ ] **Step 1: Add failing progress and UI tests**
+- [x] **Step 1: Add failing progress and UI tests**
 
 Assert:
 
@@ -511,7 +511,7 @@ assertThrows(
 UI source/DOM tests require a visible reason element, red/amber inherited color,
 wrapping, and concise compact status. Add a long-word mobile fixture.
 
-- [ ] **Step 2: Run and confirm failures**
+- [x] **Step 2: Run and confirm failures**
 
 Run:
 
@@ -523,7 +523,7 @@ node tools/scripts/test-ui.mjs
 Expected: FAIL because reasons are tooltip-only and `failEditorial` emits only
 `reasonCode`.
 
-- [ ] **Step 3: Propagate descriptors from runtime settlements**
+- [x] **Step 3: Propagate descriptors from runtime settlements**
 
 Replace generic terminal details:
 
@@ -541,13 +541,13 @@ detail: {
 Apply the same contract to provider, prompt-install, storage, cache, Generation
 Review, enhancement, and host-mutation failure settlements.
 
-- [ ] **Step 4: Enforce reasons in progress normalization**
+- [x] **Step 4: Enforce reasons in progress normalization**
 
 Use `detail.failure.message` before legacy fields. Throw in tests/development
 when warning/failed state has no reason; production fallback uses the normalized
 internal failure message and code.
 
-- [ ] **Step 5: Render reason sublines**
+- [x] **Step 5: Render reason sublines**
 
 Create rows with:
 
@@ -562,7 +562,7 @@ Update text and hide it for healthy states. CSS must use compact helper type,
 wrap safely, inherit amber/red state color, and avoid changing fixed indicator
 geometry.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run:
 

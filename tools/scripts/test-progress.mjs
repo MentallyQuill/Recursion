@@ -59,6 +59,85 @@ assertEqual(safeProgress.steps[0].label, 'Checking token: a brass coin', 'safe s
 const blocks = createHeroPixelBlocks(safeProgress);
 assertEqual(blocks[0].label, 'Checking token: a brass coin', 'hero blocks inherit safe labels');
 
+const explainedFailureProgress = createProgressRunModel({
+  progressRun: {
+    runId: 'explained-failure',
+    steps: [{
+      id: 'editorial-diagnosis',
+      label: 'Editorial diagnosis',
+      state: 'failed',
+      failure: {
+        code: 'RECURSION_JSON_PARSE_FAILED',
+        stage: 'editorial-diagnosis',
+        category: 'provider-output',
+        message: 'Provider returned malformed JSON.'
+      }
+    }]
+  }
+});
+assertEqual(
+  explainedFailureProgress.steps[0].reason,
+  'Provider returned malformed JSON.',
+  'progress step uses normalized failure message'
+);
+assertEqual(
+  explainedFailureProgress.currentStepText,
+  'Editorial diagnosis: Provider returned malformed JSON.',
+  'compact status reports the failed stage and reason'
+);
+
+const explainedActivityFailureProgress = createProgressRunModel({
+  activityHistory: [{
+    runId: 'explained-activity-failure',
+    phase: 'providerCallSettled',
+    roleId: 'editorialDiagnostician',
+    outcome: 'error',
+    severity: 'error',
+    detail: {
+      failure: {
+        code: 'RECURSION_JSON_PARSE_FAILED',
+        stage: 'editorial-diagnosis',
+        category: 'provider-output',
+        message: 'Provider returned malformed JSON.'
+      }
+    },
+    recordedAt: '1'
+  }],
+  activity: {
+    runId: 'explained-activity-failure',
+    phase: 'providerCallSettled',
+    roleId: 'editorialDiagnostician',
+    outcome: 'error',
+    severity: 'error',
+    detail: {
+      failure: {
+        code: 'RECURSION_JSON_PARSE_FAILED',
+        stage: 'editorial-diagnosis',
+        category: 'provider-output',
+        message: 'Provider returned malformed JSON.'
+      }
+    },
+    recordedAt: '1'
+  }
+});
+assertEqual(
+  explainedActivityFailureProgress.steps.find((step) => step.id === 'editorial-diagnosis')?.reason,
+  'Provider returned malformed JSON.',
+  'activity-derived progress keeps the normalized failure reason'
+);
+
+const unexplainedFailureProgress = createProgressRunModel({
+  progressRun: {
+    runId: 'unexplained-failure',
+    steps: [{ id: 'editorial-diagnosis', label: 'Editorial diagnosis', state: 'failed' }]
+  }
+});
+assertEqual(
+  unexplainedFailureProgress.steps[0].reason,
+  'Unexpected internal failure (RECURSION_PROGRESS_REASON_MISSING).',
+  'unexplained failed progress receives an explicit internal reason'
+);
+
 const renamedCardProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'renamed-card-progress', phase: 'cardBatchRunning', label: 'Utility card batch', providerLane: 'utility', cardCounts: { requested: 1 }, recordedAt: '1' },
@@ -540,7 +619,11 @@ const rapidWarmFailedStep = rapidWarmFailedProgress.steps.find((step) => step.id
 assert(rapidWarmFailedStep, 'rapid warm failed status renders a progress row');
 assertEqual(rapidWarmFailedStep.state, 'failed', 'rapid warm failed row is failed');
 assertEqual(rapidWarmFailedStep.reason, 'Rapid warm provider failed.', 'rapid warm failed row keeps safe failure reason');
-assertEqual(rapidWarmFailedProgress.currentStepText, 'Rapid warm failed', 'rapid warm failure gets compact status text');
+assertEqual(
+  rapidWarmFailedProgress.currentStepText,
+  'Rapid warm: Rapid warm provider failed.',
+  'rapid warm failure compact status includes its reason'
+);
 
 const rapidWarmReadyProgress = createProgressRunModel({
   settings: { pipelineMode: 'rapid' },
@@ -715,7 +798,12 @@ const failedReasonerProviderTestStep = failedReasonerProviderTestProgress.steps.
 assert(failedReasonerProviderTestStep, 'failed provider tests render a provider-test row');
 assertEqual(failedReasonerProviderTestStep.state, 'failed', 'router provider-test errors keep failed provider-test state');
 assertEqual(failedReasonerProviderTestStep.label, 'Reasoner provider test', 'failed reasoner provider tests label the reasoner lane');
-assertEqual(failedReasonerProviderTestProgress.currentStepText, 'Reasoner provider test failed', 'failed provider tests get compact lane-specific failure status');
+assertEqual(failedReasonerProviderTestStep.reason, 'Reasoner test failed.', 'failed provider test keeps the provider reason');
+assertEqual(
+  failedReasonerProviderTestProgress.currentStepText,
+  'Reasoner provider test: Reasoner test failed.',
+  'failed provider tests get compact lane-specific failure status with reason'
+);
 assert(!failedReasonerProviderTestProgress.steps.some((step) => step.id === 'recursion-prompt-ready'), 'failed provider tests are not rendered as prompt-ready failures');
 assertEqual(createHeroPixelBlocks(failedReasonerProviderTestProgress).length, 0, 'provider test failures do not create generation hero pixels');
 

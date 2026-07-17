@@ -1017,6 +1017,10 @@ assert(/\.recursion-status-popover\[data-recursion-severity="warning"\][\s\S]*?c
 assert(/\.recursion-status-popover\[data-recursion-severity="error"\][\s\S]*?color:\s*var\(--recursion-error\);/.test(recursionCss), 'critical progress header uses the error token');
 assert(/\.recursion-step-row\.warning > \.recursion-step-label[\s\S]*?color:\s*var\(--recursion-warning\);/.test(recursionCss), 'warning progress row labels use the warning token');
 assert(/\.recursion-step-row\.failed > \.recursion-step-label[\s\S]*?color:\s*var\(--recursion-error\);/.test(recursionCss), 'failed progress row labels use the error token');
+assert(recursionUi.includes('data-recursion-progress-reason'), 'progress rows render a dedicated visible reason element');
+assert(/\.recursion-step-reason\s*\{[\s\S]*?grid-column:\s*4 \/ -1;[\s\S]*?overflow-wrap:\s*anywhere;/.test(recursionCss), 'progress reasons wrap beneath the row label without resizing indicators');
+assert(/\.recursion-step-row\.warning > \.recursion-step-reason[\s\S]*?color:\s*var\(--recursion-warning\);/.test(recursionCss), 'warning progress reasons use the warning token');
+assert(/\.recursion-step-row\.failed > \.recursion-step-reason[\s\S]*?color:\s*var\(--recursion-error\);/.test(recursionCss), 'failed progress reasons use the error token');
 assert(/const progressTop = Math\.max\(viewportTop,\s*rect\.bottom \+ 3\);/.test(recursionUi), 'production progress popover uses the reference vertical gap with visual viewport top clamping');
 assert(/const settingsTop = Math\.max\(viewportTop,\s*rect\.bottom \+ 5\);/.test(recursionUi), 'production settings and brief popovers use the reference desktop vertical gap with visual viewport top clamping');
 assert(/globalThis\.visualViewport\?\.height/.test(recursionUi), 'production popover geometry clamps to the mobile visual viewport height');

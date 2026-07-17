@@ -1491,6 +1491,11 @@ function createProgressRowShell(step, child = false) {
       className: 'recursion-step-meta',
       text: step.meta || '',
       dataset: { recursionProgressMeta: '' }
+    }),
+    el('span', {
+      className: 'recursion-step-reason',
+      text: step.reason || '',
+      dataset: { recursionProgressReason: '' }
     })
   ]);
 }
@@ -1536,6 +1541,9 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   setText(row, '[data-recursion-progress-provider-mark]', providerMark(providerLane));
   setText(row, '[data-recursion-progress-label]', label);
   setText(row, '[data-recursion-progress-meta]', meta);
+  setText(row, '[data-recursion-progress-reason]', reason);
+  if (reason && ['warning', 'failed'].includes(state)) addClassName(row, 'has-reason');
+  else removeClassName(row, 'has-reason');
   setTooltip(row, tooltipsEnabled, progressStepTooltip({ ...step, label, meta, state, providerLane }, child));
   setTooltip(row.querySelector?.('[data-recursion-progress-provider-mark]'), tooltipsEnabled, `${laneLabel(providerLane)} provider`);
 }

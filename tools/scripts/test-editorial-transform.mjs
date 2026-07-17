@@ -420,6 +420,32 @@ const noisyUnknownPressure = validateEditorialDiagnosis(redirectDiagnosis({
 }), redirectFixture);
 assertEqual(noisyUnknownPressure.ok, true, 'inconsistent advisory pressure reaches semantic verification');
 assertEqual(noisyUnknownPressure.value?.brief?.characterPressure[0].sourcePressureEffect, 'increasing', 'runtime does not canonicalize semantic pressure claims');
+const blankPressureEffect = validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  characterPressure: [{
+    character: 'She',
+    immediateWant: 'Learn who sent him.',
+    wantEvidenceRefs: ['user:0'],
+    sourcePressureEffect: '',
+    sourceEvidenceRefs: [],
+    pressureReason: ''
+  }]
+}), redirectFixture);
+assertEqual(blankPressureEffect.ok, true, 'blank advisory pressure effect does not invalidate an otherwise usable Redirect diagnosis');
+assertEqual(
+  blankPressureEffect.value?.brief?.characterPressure[0].sourcePressureEffect,
+  'unclear',
+  'blank advisory pressure effect normalizes to explicit uncertainty without inventing semantics'
+);
+assertDeepEqual(
+  blankPressureEffect.diagnostics?.structureIssues,
+  [{
+    code: 'RECURSION_EDITORIAL_REDIRECT_PRESSURE_NORMALIZED',
+    path: 'characterPressure[0].sourcePressureEffect',
+    received: ''
+  }],
+  'blank advisory pressure normalization emits a path-specific verifier diagnostic'
+);
 const noChangeRedirectBrief = {
   ...unclearPressureBrief,
   sourceFailure: null,
@@ -676,6 +702,10 @@ assert(
   'Redirect diagnosis prompt states the complete unknown-pressure tuple'
 );
 assert(redirectDiagnosisRequest.prompt.includes('Character pressure is advisory evidence'), 'Redirect diagnosis prompt keeps pressure advisory');
+assert(
+  redirectDiagnosisRequest.prompt.includes('sourcePressureEffect must be exactly increasing, decreasing, unchanged, or unclear'),
+  'Redirect diagnosis prompt enumerates the preferred advisory pressure effects'
+);
 const redirectDiagnosisCorrectionRequest = buildEditorialDiagnosisRequest({
   mode: 'redirect',
   sourceText,

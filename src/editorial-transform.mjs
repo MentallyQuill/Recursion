@@ -204,6 +204,7 @@ function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
   const known = evidenceMap(evidence);
   const list = (value) => Array.isArray(value) ? value.map(String) : [];
   const referenceIssues = [];
+  const structureIssues = [];
   const normalizeKnownRefs = (value, path) => {
     const ids = list(value).slice(0, 8);
     return ids.filter((id, index) => {
@@ -284,15 +285,25 @@ function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
     character: safeText(entry?.character, 120),
     evidenceRefs: normalizeKnownRefs(entry?.evidenceRefs, `sceneCharacters[${index}].evidenceRefs`)
   }));
-  data.characterPressure = data.characterPressure.map((row, index) => ({
-    ...row,
-    character: safeText(row?.character, 120),
-    immediateWant: row?.immediateWant === null ? null : safeText(row?.immediateWant, MAX_CLAIM),
-    wantEvidenceRefs: normalizeKnownRefs(row?.wantEvidenceRefs, `characterPressure[${index}].wantEvidenceRefs`),
-    sourcePressureEffect: safeText(row?.sourcePressureEffect, 80),
-    sourceEvidenceRefs: normalizeKnownRefs(row?.sourceEvidenceRefs, `characterPressure[${index}].sourceEvidenceRefs`),
-    pressureReason: safeText(row?.pressureReason, MAX_CLAIM)
-  }));
+  data.characterPressure = data.characterPressure.map((row, index) => {
+    const sourcePressureEffect = safeText(row?.sourcePressureEffect, 80);
+    if (!sourcePressureEffect) {
+      structureIssues.push({
+        code: 'RECURSION_EDITORIAL_REDIRECT_PRESSURE_NORMALIZED',
+        path: `characterPressure[${index}].sourcePressureEffect`,
+        received: ''
+      });
+    }
+    return {
+      ...row,
+      character: safeText(row?.character, 120),
+      immediateWant: row?.immediateWant === null ? null : safeText(row?.immediateWant, MAX_CLAIM),
+      wantEvidenceRefs: normalizeKnownRefs(row?.wantEvidenceRefs, `characterPressure[${index}].wantEvidenceRefs`),
+      sourcePressureEffect: sourcePressureEffect || 'unclear',
+      sourceEvidenceRefs: normalizeKnownRefs(row?.sourceEvidenceRefs, `characterPressure[${index}].sourceEvidenceRefs`),
+      pressureReason: safeText(row?.pressureReason, MAX_CLAIM)
+    };
+  });
 
   const characters = data.sceneCharacters.map((entry) => safeText(entry?.character, 120));
   if (!characters.length || characters.some((name) => !name)) {
@@ -307,7 +318,14 @@ function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
   return {
     ok: true,
     value: data,
-    ...(referenceIssues.length ? { diagnostics: { referenceIssues } } : {})
+    ...(referenceIssues.length || structureIssues.length
+      ? {
+          diagnostics: {
+            ...(referenceIssues.length ? { referenceIssues } : {}),
+            ...(structureIssues.length ? { structureIssues } : {})
+          }
+        }
+      : {})
   };
 }
 
@@ -628,6 +646,7 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
         'If the latest user turn proposes or requests an action, moving it behind another task, location change, check, conversation, or future beat is a deferral unless frozen non-source evidence independently requires that delay.',
         'When the source defers an evidence-supported immediate want, identify the deferral in sourceFailure and forbiddenSourceBeats; the replacement objective and required beats must engage the request in the current turn.',
         'List every character established as present by frozen evidence.',
+        'sourcePressureEffect must be exactly increasing, decreasing, unchanged, or unclear; never return an empty string.',
         'When an immediate want is unsupported, immediateWant must be null, wantEvidenceRefs and sourceEvidenceRefs must both be empty arrays, and sourcePressureEffect must be unclear.',
         'When an immediate want is supported, immediateWant must be a non-empty string, wantEvidenceRefs must cite established non-source evidence, and sourceEvidenceRefs must cite source-draft evidence.',
         'Character pressure is advisory evidence; do not require every character to speak or act.'
@@ -673,7 +692,15 @@ function safeDiagnosisDiagnostics(value = {}) {
     path: safeText(entry?.path, 240),
     reference: safeText(entry?.reference, 180)
   })).filter((entry) => entry.code && entry.path);
-  return referenceIssues.length ? { referenceIssues } : {};
+  const structureIssues = array(object(value).structureIssues).slice(0, 24).map((entry) => ({
+    code: safeText(entry?.code, 120),
+    path: safeText(entry?.path, 240),
+    received: safeText(entry?.received, 180)
+  })).filter((entry) => entry.code && entry.path);
+  return {
+    ...(referenceIssues.length ? { referenceIssues } : {}),
+    ...(structureIssues.length ? { structureIssues } : {})
+  };
 }
 
 export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', diagnosis = {}, diagnosisDiagnostics = {}, evidence = [], snapshot = {}, targets = {}, lane = '', retry = null } = {}) {

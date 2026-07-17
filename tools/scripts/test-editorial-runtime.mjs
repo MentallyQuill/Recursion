@@ -823,6 +823,35 @@ assert(
   'Redirect verifier receives the unresolved reference path'
 );
 
+const pressureRecoveryRedirect = createRedirectHarness({
+  diagnosisOverride: (value) => ({
+    ...value,
+    characterPressure: value.characterPressure.map((row) => ({
+      ...row,
+      sourcePressureEffect: '',
+      sourceEvidenceRefs: [],
+      pressureReason: ''
+    }))
+  })
+});
+await pressureRecoveryRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const pressureRecoveryResult = await pressureRecoveryRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-pressure-recovery-test' });
+assertEqual(pressureRecoveryResult.ok, true, 'blank advisory pressure bookkeeping reaches semantic verification');
+assertEqual(pressureRecoveryRedirect.state.diagnosisAttempts, 1, 'blank advisory pressure adds no diagnosis correction call');
+assertEqual(pressureRecoveryRedirect.state.transformAttempts, 1, 'blank advisory pressure adds no writer call');
+assertEqual(pressureRecoveryRedirect.state.verifierAttempts, 1, 'blank advisory pressure reaches the mandatory verifier');
+assertEqual(pressureRecoveryRedirect.state.appended.length, 1, 'verifier-accepted pressure recovery appends one swipe');
+assert(
+  pressureRecoveryRedirect.state.calls.find((call) => call.roleId === 'editorialTransformer')?.request?.prompt
+    .includes('characterPressure[0].sourcePressureEffect'),
+  'Redirect writer receives the normalized pressure path'
+);
+assert(
+  pressureRecoveryRedirect.state.calls.find((call) => call.roleId === 'editorialVerifier')?.request?.prompt
+    .includes('characterPressure[0].sourcePressureEffect'),
+  'Redirect verifier receives the normalized pressure path'
+);
+
 const reasonerCorrectedRedirect = createRedirectHarness({
   reasonerAvailable: true,
   diagnosisProviderFailureOnFirst: true

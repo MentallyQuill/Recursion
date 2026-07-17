@@ -219,6 +219,10 @@ Normalization rules:
 - Continue when the diagnosis still has a usable source failure, replacement
   objective, required beats, forbidden beats, scene characters, and pressure
   rows.
+- Normalize a blank `characterPressure[N].sourcePressureEffect` to `unclear`
+  with a path-specific structure diagnostic. This is an explicit unknown, not
+  an inferred pressure direction; preserve the row's immediate want, citations,
+  and pressure reason unchanged.
 
 Unresolved semantic support is passed to the transformer and verifier as an
 explicit diagnostic. The transformer receives the complete frozen evidence and

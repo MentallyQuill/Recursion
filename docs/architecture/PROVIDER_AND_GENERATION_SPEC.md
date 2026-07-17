@@ -195,6 +195,15 @@ the complete frozen evidence. Pressure remains advisory: it can make a strong
 response more likely, but never mechanically requires speech, action, or rising
 pressure.
 
+`sourcePressureEffect` should use `increasing`, `decreasing`, `unchanged`, or
+`unclear`. A blank effect is incomplete advisory bookkeeping, not a terminal
+diagnosis failure: runtime normalizes only that missing value to `unclear`,
+records its exact `characterPressure[N].sourcePressureEffect` path, and passes
+the diagnostic to the writer and mandatory Verifier. It preserves the
+provider-authored immediate want, citations, and reason unchanged and does not
+spend a correction call. Non-empty pressure claims remain model evidence for
+the Verifier rather than a deterministic enum gate.
+
 `proceed` is Redirect's only valid diagnosis decision. Editorial diagnosis uses
 low reasoning intent from the first request to protect the structured response
 budget. Provider-authored

@@ -258,6 +258,8 @@ It must not contain card `promptText`, prompt packet sections, inspector notes, 
 
 Journal entries may record provider name, resolved model, status code, error category, timing, token counts, schema-validity result, request hash, response hash, prompt packet hash, selected card ids, omission reasons, and invalidation reasons.
 
+Every `warn` or `error` journal entry must contain `details.failure` with the normalized fields `code`, `stage`, `category`, `message`, and `retryable`. The message must state a sanitized concrete cause. If a producer emits an unhealthy entry without one, the repository records `RECURSION_JOURNAL_REASON_MISSING` rather than allowing an unexplained failure to look complete. Activity events enforce the same invariant before UI publication. Skipped and player-canceled outcomes remain neutral and do not receive failure descriptors.
+
 Journal entries must not record:
 
 - API keys, authorization headers, cookies, or session tokens;
@@ -418,6 +420,7 @@ Required coverage:
 - scene cache schema accepts valid records and rejects missing version, invalid statuses, and unsafe source refs while preserving safe card text for inspection before prompt-packet budgeting;
 - scene cache writes store source refs/hashes and bounded excerpts only, not full transcript archives;
 - run journal enforces ring-buffer bounds;
+- every warning/error journal event has a normalized, sanitized failure reason, including the explicit missing-reason sentinel;
 - journal redaction strips secrets, raw prompts, raw responses, headers, cookies, and private notes;
 - diagnostic artifacts use the same redaction path as normal diagnostics;
 - invalidation matrix covers chat change, scene shift, message edit/delete, provider/settings changes, schema changes, card catalog changes, and prompt composition contract changes;

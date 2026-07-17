@@ -376,19 +376,21 @@ Every candidate passes these gates before it becomes a SillyTavern message:
 8. **Meaningful result:** candidate cannot equal source, and Repair cannot
    result in no applied patch.
 
-At High and Ultra reasoning levels, Recompose and Redirect also receive one
-**editorial verification** call after deterministic validation. It is not a
-second writer and never supplies an alternate candidate. It can only return
-`accept` or `reject` with cited frozen evidence. A rejection reveals the
-original and records the reason; it does not trigger a rewrite retry or a
-tournament.
+At High and Ultra reasoning levels, Recompose receives an **editorial
+verification** call after deterministic validation. Redirect is verified at
+every reasoning level. The Verifier is not a writer and never supplies an
+alternate candidate. It can only return `accept` or `reject` against frozen
+evidence. The first valid Redirect rejection may trigger the one remaining
+writer attempt and a mandatory second verification; a second rejection reveals
+the original and records the reason.
 
 The whole editorial operation has **one shared malformed-output correction
-token**. Diagnosis, Transform, or Verification may spend it first; all later
-stages then run with recovery disabled. Semantic disagreement never spends the
-token: a Redirect verifier rejection preserves the original and ends the run.
-This yields exactly three normal Redirect calls and at most one additional
-recovery call.
+token** for malformed diagnosis or verification output. Transform has a
+separate operation-wide budget of at most two actual writer calls. A provider
+or schema failure and a verifier-directed correction compete for that same
+second writer slot, so no Redirect can make a third writer call. This yields
+exactly three normal Redirect calls and at most five calls when the first
+candidate is rejected and its corrected replacement is verified.
 
 Provider lane selection follows the existing enhancement policy. When a
 Reasoner role fails before the shared recovery token is spent, Recursion may

@@ -669,7 +669,7 @@ node tools/scripts/test-live-harness.mjs
 Expected: PASS; historical unhealthy states and journal-only failures cannot be
 hidden by later DOM replacement.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add tools/scripts/lib/live-enhancement-run-oracle.mjs tools/scripts/test-live-enhancement-run-oracle.mjs tools/scripts/prove-live-enhancements.mjs tools/scripts/prove-editorial-transformation-ui.mjs tools/scripts/test-diagnostics.mjs tools/scripts/test-activity.mjs tools/scripts/test-live-harness.mjs tools/scripts/run-tests.mjs
@@ -692,13 +692,13 @@ git commit -m "test: reject unexplained unhealthy states"
 - Documents the exact production behavior proven by Tasks 1-6.
 - Produces final repo, Playwright, and installed-copy evidence.
 
-- [ ] **Step 1: Update canonical documentation**
+- [x] **Step 1: Update canonical documentation**
 
 Replace tooltip-only reason guidance with visible reason sublines. Document
 `RecursionFailure`, strict-then-repair parsing, Redirect reference diagnostics,
 writer/verifier call budgets, and journal invariants.
 
-- [ ] **Step 2: Run formatting and contract checks**
+- [x] **Step 2: Run formatting and contract checks**
 
 Run:
 
@@ -710,7 +710,7 @@ rg -n "TBD|TODO|PLACEHOLDER" DESIGN.md docs src tools/scripts
 Expected: no whitespace errors or unfinished contract language introduced by
 this work.
 
-- [ ] **Step 3: Run all focused suites**
+- [x] **Step 3: Run all focused suites**
 
 Run:
 
@@ -727,7 +727,7 @@ node tools/scripts/test-live-enhancement-run-oracle.mjs
 
 Expected: all PASS.
 
-- [ ] **Step 4: Run the full suite**
+- [x] **Step 4: Run the full suite**
 
 Run:
 
@@ -737,14 +737,14 @@ npm.cmd test
 
 Expected: every registered test script passes with exit code 0.
 
-- [ ] **Step 5: Install to the dedicated soak account**
+- [x] **Step 5: Install to the dedicated soak account**
 
 Run the existing `robocopy` deployment into
 `data/recursion-soak-a/extensions/Recursion`, excluding `.git`, `node_modules`,
 tests, artifacts, and temporary files. Confirm the served copy hashes match the
 repo.
 
-- [ ] **Step 6: Run Playwright visual and negative-control proofs**
+- [x] **Step 6: Run Playwright visual and negative-control proofs**
 
 Run:
 
@@ -757,7 +757,7 @@ Expected: visual matrix shows wrapped visible red/amber reasons; strict live
 oracle reports no unhealthy transition for success and nonzero for injected
 failure.
 
-- [ ] **Step 7: Run real-provider SG-1-shaped Redirect certification**
+- [x] **Step 7: Run real-provider SG-1-shaped Redirect certification**
 
 Use `recursion-soak-a`, the actual configured providers, and a copied
 SG-1-shaped scenario. Confirm:

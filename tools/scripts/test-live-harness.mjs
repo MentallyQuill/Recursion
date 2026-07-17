@@ -801,6 +801,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/core.mjs',
     'src/enhancement-context.mjs',
     'src/enhancement-metrics.mjs',
+    'src/failures.mjs',
     'src/generation-review.mjs',
     'src/hosts/sillytavern/host.mjs',
     'src/hosts/sillytavern/provider-profiles.mjs',
@@ -835,7 +836,11 @@ async function createSillyTavernSmokeFixtureServer({
     'src/ui/progress-panel.mjs',
     'src/ui/provider-panel.mjs',
     'src/ui/view-model.mjs',
-    'src/ui.mjs'
+    'src/ui.mjs',
+    'src/vendor/jsonrepair/index.js',
+    'src/vendor/jsonrepair/regular/jsonrepair.js',
+    'src/vendor/jsonrepair/utils/JSONRepairError.js',
+    'src/vendor/jsonrepair/utils/stringUtils.js'
   ];
   for (const relativePath of moduleFiles) {
     const text = readFileSync(relativePath, 'utf8');

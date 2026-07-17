@@ -1,6 +1,6 @@
 # Recursion Release Notes
 
-Release notes capture the current pre-alpha scope, verification posture, live-smoke guardrails, and known documentation/render gaps for each named Recursion checkpoint.
+Release notes capture the current pre-alpha scope, card/editorial recovery contracts, verification posture, live-smoke guardrails, and known documentation/render gaps for each named Recursion checkpoint.
 
 ## Releases
 

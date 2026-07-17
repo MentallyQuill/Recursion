@@ -46,7 +46,11 @@ That path is ignored because it is tooling output. Promotion means copying only 
 
 ## Current Pass Status
 
-The 2026-07-10 render refresh promotes 32 live UI screenshot assets. Explanatory pipeline, storage, provider, redaction, testing, and behavior-policy diagrams now live directly in Markdown as Mermaid graphs or tables instead of promoted PNG assets. UI renders were captured through the local `.recursion-doc-renderer/` harness against the `recursion-soak-ui` SillyTavern render profile. Screenshots use the live-served Recursion UI module plus redaction-safe documentation fixture state, so final assets show the actual mounted UI without provider secrets, raw provider payloads, or private transcripts.
+### Open Slots From The Card-System Contract Pass
+
+All render slots from the card-system documentation pass have now been promoted as reviewed live-host captures. Future gaps should follow the same marker and promotion workflow.
+
+The 2026-07-10 render refresh promoted 32 live UI screenshot assets. The 2026-07-17 card-system refresh updates the live UI family and promotes the new card, hand, editorial, Enhancement, and provider-state captures, for 38 promoted PNG/JPG assets total. Explanatory pipeline, storage, provider, redaction, testing, and behavior-policy diagrams remain text-native in Markdown as Mermaid graphs or tables. UI renders were captured through the local `.recursion-doc-renderer/` harness against the live host with redaction-safe documentation fixture state, so final assets show the actual mounted UI without provider secrets, raw provider payloads, or private transcripts.
 
 State-set renders such as bar states, progress states, Last Brief states, and fail-soft states are contact sheets composed from fresh live-mounted source captures. Their raw source tiles stay in `.recursion-doc-renderer/` and are not promoted separately.
 
@@ -126,8 +130,12 @@ These assets are promoted live UI documentation renders and may be embedded dire
 | `recursion-operator-retention-settings.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Advanced Retention controls showing source-window, provider-message, scene-cache, source-variant, and run-journal caps. |
 | `recursion-provider-test-busy-state.png` | live host | `docs/user/PROVIDER_SETUP.md` | Reasoner Provider disclosure staying open while the clicked Test Provider button shows lane-local `Testing...` busy state. |
 | `recursion-prompt-packet-instruction-card-evidence.png` | live host | `docs/user/PROMPT_PRIVACY_AND_SAFETY.md` | Prompt Packet viewer showing instruction-shaped Card Evidence, Guidance status, selected refs, and sanitized route metadata. |
-| `recursion-card-deck-editor.jpg` | supplied screenshot | `README.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md`, `docs/technical/CARD_DECK_AND_HAND.md` | Card-system dropdown showing a custom deck, categories, card rows, drag handles, and off/active/priority states. |
-| `recursion-card-authored-card-editor.jpg` | supplied screenshot | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Authored-card edit box showing name, description, full card text, Card Assist, and save/cancel controls. |
+| `recursion-card-control.png` | live host | `README.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md`, `docs/technical/CARD_DECK_AND_HAND.md` | Card-system control showing the bundled deck, categories, counts, and state controls. |
+| `recursion-card-authored-card-editor.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Authored-card edit box showing name, description, prompt text, Card Assist, and save/cancel controls. |
+| `recursion-card-hand-inspection.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Last Brief hand inspection showing selected cards, omissions, and packet metadata. |
+| `recursion-first-run-enhancement-result.png` | live host | `docs/user/FIRST_RUN_WORKFLOW.md` | First-session Enhancement progress showing diagnosis, candidate, verification, and swipe settlement. |
+| `recursion-operator-editorial-recovery-states.png` | live host | `README.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md` | Enhancement menu with Repair, Recompose, experimental Redirect, and verified result inspector. |
+| `recursion-provider-failure-reason-inline.png` | live host | `docs/user/PROVIDER_SETUP.md` | Normalized provider failure reason with Utility fallback and redacted status. |
 
 ## Open Render Inventory
 

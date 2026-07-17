@@ -163,6 +163,13 @@ The first run is healthy when:
 - Last Brief and Full Viewer inspection are available.
 - Prompt Packet inspection shows bounded current-scene guidance.
 - Power-off or extension disable removes Recursion from the next prompt path.
+- An optional Enhancement trial reports diagnosis, candidate, verification, and swipe/replace settlement, or a specific safe failure reason without changing the original response.
+
+## 11. Optional Enhancement Trial
+
+After a normal assistant response lands, open Enhancements and start with `Repair` plus `As Swipe`. Confirm that the progress tree shows a diagnosis, candidate, verification, and swipe settlement, or a specific safe failure reason. Try `Redirect` only on a response that clearly missed the requested turn or followed the wrong scene direction; it must show an evidence-backed replacement objective and verified result before it can write a swipe.
+
+![First-session Enhancement result with diagnosis, verification, and swipe settlement](../../assets/documentation/renders/recursion-first-run-enhancement-result.png)
 
 Related docs:
 

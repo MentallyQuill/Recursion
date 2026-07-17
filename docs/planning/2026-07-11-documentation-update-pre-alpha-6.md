@@ -254,7 +254,7 @@ Use contact sheets where the purpose is to show a state family rather than one i
 Each required render must be linked from the document section that explains it. Until captured, place a visible marker in that target document using the existing contract:
 
 ```markdown
-<Render Needed>: assets/documentation/renders/recursion-card-control.png - Live Recursion Bar with the Cards control visible in the ready state.
+![Cards control visible in the ready state](../../assets/documentation/renders/recursion-card-control.png)
 ```
 
 Do not use screenshots to replace Mermaid diagrams. Do not promote fixture-only images as live UI evidence.
@@ -284,4 +284,3 @@ Do not use screenshots to replace Mermaid diagrams. Do not promote fixture-only 
 5. Mermaid diagrams and cross-document links.
 6. Live card-system renders and render tracking promotion.
 7. Documentation verification and stale-wording audit.
-

@@ -475,6 +475,10 @@ if (lifecycleFailures.length) {
     }
   ];
   await eventSource.emit('message_swiped', {});
+  const markedView = globalThis.__recursionLiveHarnessRuntime.view();
+  assertEqual(markedView.lastBrief?.status, 'ready', 'latest assistant host swipe event preserves Last Brief until generation interceptor starts');
+  assertEqual(markedView.lastBrief?.packetId, preparedPacketId, 'latest assistant host swipe event preserves Last Brief packet identity');
+  assert(markedView.lastBriefHand?.cards.length > 0, 'latest assistant host swipe event preserves Last Brief cards');
   const truncatedSwipePayload = [
     { mesid: 1, is_user: true, mes: userText }
   ];
@@ -947,6 +951,7 @@ if (lifecycleFailures.length) {
       CHAT_CHANGED: 'chat_changed',
       GENERATION_ENDED: 'generation_ended',
       MESSAGE_RECEIVED: 'message_received',
+      MESSAGE_SWIPED: 'message_swiped',
       MESSAGE_UPDATED: 'message_updated',
       STREAM_TOKEN_RECEIVED: 'stream_token_received'
     },
@@ -1054,12 +1059,35 @@ if (lifecycleFailures.length) {
   assertDeepEqual(context.controlEvents, ['lock', 'hide-swipes', 'save', 'unlock'], 'assistant-landed replacement saves before unlocking SillyTavern controls');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.status, 'ready', 'assistant-landed prose enhancement leaves Last Brief ready');
   const prosePacketId = globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId;
+  const originalSwipeRetryHandler = globalThis.__recursionLiveHarnessRuntime.handleLatestAssistantSwipeRetry;
+  let enhancementSwipeRetryCalls = 0;
+  globalThis.__recursionLiveHarnessRuntime.handleLatestAssistantSwipeRetry = (...args) => {
+    enhancementSwipeRetryCalls += 1;
+    return originalSwipeRetryHandler(...args);
+  };
+  const originalDateNow = Date.now;
+  Date.now = () => originalDateNow() + 4000;
+  try {
+    await eventSource.emit('message_swiped', { mesid: 2 });
+  } finally {
+    Date.now = originalDateNow;
+  }
+  assertEqual(enhancementSwipeRetryCalls, 0, 'delayed enhancement-owned swipe is not classified as a user swipe retry');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.status, 'ready', 'delayed enhancement-owned swipe preserves Last Brief');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId, prosePacketId, 'delayed enhancement-owned swipe preserves prompt packet id');
   await eventSource.emit('message_updated', { mesid: 2 });
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.status, 'ready', 'late prose-owned message update does not clear Last Brief');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId, prosePacketId, 'late prose-owned message update preserves prompt packet id');
   await eventSource.emit('chat_changed');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.status, 'ready', 'enhancement-owned chat change does not clear Last Brief');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId, prosePacketId, 'enhancement-owned chat change preserves prompt packet id for swipe reuse');
+  context.chat[2].mes = 'Mara stayed beside the door. "Keep it shut," she said.';
+  if (Array.isArray(context.chat[2].swipes)) {
+    context.chat[2].swipes[context.chat[2].swipe_id ?? 0] = context.chat[2].mes;
+  }
+  await eventSource.emit('message_swiped', { mesid: 2 });
+  assertEqual(enhancementSwipeRetryCalls, 1, 'unmarked user swipe is classified as user intent even during the former mutation tail');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.status, 'ready', 'unmarked user swipe marker still preserves Last Brief until generation starts');
   assertEqual(fakeDocumentElement.classList.contains('recursion-enhancement-capture-active'), false, 'generation review leaves capture disabled after it settles');
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;

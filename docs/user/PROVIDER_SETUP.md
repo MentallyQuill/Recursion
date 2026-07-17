@@ -101,14 +101,14 @@ Recursion clears stale provider health after source, profile, base URL, model, m
 
 A safe provider test should:
 
-1. Send a minimal bounded structured request.
+1. Send a structured request using the lane max-token setting configured by the operator.
 2. Validate the response schema.
 3. Record pass or fail status.
 4. Show resolved provider and model labels when available.
 5. Store only compact sanitized diagnostics.
 6. Show a lane-local `Testing...` state and disable that lane's `Test Provider` button while the request is pending.
 
-Provider tests should not store raw prompt bodies, raw responses, API keys, or unbounded error text. Test requests use a small response budget and a bounded timeout; normal generation still uses the configured lane max tokens.
+Provider tests should not store raw prompt bodies, raw responses, API keys, or unbounded error text. Test requests use the configured lane max-token budget and a bounded timeout; the test does not silently impose a smaller response cap than the operator selected.
 
 ```mermaid
 flowchart LR
@@ -144,6 +144,10 @@ Expected fallback behavior:
 - Prompt install failure after provider success: generation continues without Recursion guidance.
 
 Provider failures should degrade Recursion, not block normal SillyTavern generation.
+
+Enhancement recovery is bounded separately from ordinary provider fallback. A malformed or incomplete Generation Review may receive one shared correction request after local JSON repair; parser repair and semantic card-ledger correction consume the same budget. If safe patches remain after the correction but required coverage is unresolved, the result is visibly `partial-failed`. Redirect uses the same bounded recovery policy and then requires its complete verifier checks; it does not retry a rejected semantic result in a loop.
+
+![Provider failure surface with normalized reason, Utility fallback, and redacted status](../../assets/documentation/renders/recursion-provider-failure-reason-inline.png)
 
 ## Common Failures
 

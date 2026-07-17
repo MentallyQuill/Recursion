@@ -1860,11 +1860,10 @@ assertEqual(fetchCalls[0].body.response_format.json_schema.schema.properties.sch
 assertEqual(fetchCalls[0].body.response_format.json_schema.schema.properties.snapshotHash.const, 'openai-snapshot-hash', 'openai-compatible JSON schema constrains snapshot hash');
 assertEqual(fetchCalls[0].body.messages[0].content, 'OpenAI compatible', 'prompt sent as chat message');
 const openAiProviderTestResult = await openAiRouter.generate('providerTest', {
-  prompt: 'OpenAI compatible provider test',
-  responseLength: 256
+  prompt: 'OpenAI compatible provider test'
 });
 assertEqual(openAiProviderTestResult.ok, true, 'openai-compatible provider test route succeeds');
-assertEqual(fetchCalls[1].body.max_tokens, 256, 'openai-compatible provider test request uses responseLength instead of configured max tokens');
+assertEqual(fetchCalls[1].body.max_tokens, 321, 'openai-compatible provider test request uses the configured lane max tokens');
 const openAiCappedResult = await openAiRouter.generate('utilityArbiter', {
   prompt: 'OpenAI compatible capped request',
   snapshotHash: 'openai-capped-snapshot-hash',

@@ -15,12 +15,15 @@ Recursion is a scene reasoning layer for the reply in front of you.
 - Builds scene cards for motivations, social subtext, consequences, knowledge, environment, items, and open threads.
 - Lets you use the bundled card catalog or build custom decks with categories, authored cards, ordering, and card Assist.
 - Gives every editable card `off`, `active`, and `priority` states so you can control focus without rewriting the scene.
+- Lets you duplicate the bundled Default Deck, create categories and authored cards, drag to reorder, and use Card Assist before committing edits.
 - Selects a focused turn hand so the prompt gets what matters now, not every possible note.
 - Uses separate Utility and optional Reasoner lanes, so fast planning and deeper synthesis can be tuned independently.
 - Supports Auto mode for hands-off preparation and Manual mode for explicit operator control.
 - Lets you leave tense and point of view on Auto or force the active story form when the Arbiter needs correction.
 - Installs Recursion-owned SillyTavern prompt entries, then shows exactly what was prepared through Last Brief, progress states, and the Full Viewer.
 - Keeps provider secrets and raw model I/O out of saved settings, prompt packets, run journals, diagnostics, browser storage, and SillyTavern file storage.
+
+![Cards control with the active deck and card-state summary](assets/documentation/renders/recursion-card-control.png)
 
 ## Feature Surfaces
 
@@ -39,7 +42,7 @@ Recursion is a scene reasoning layer for the reply in front of you.
   </tr>
   <tr>
     <td width="50%">
-      <div align="center"><img src="assets/documentation/renders/recursion-card-deck-editor.jpg" alt="Recursion card deck editor with categories and card states" style="max-width:100%;height:auto"></div><br>
+      <div align="center"><img src="assets/documentation/renders/recursion-card-control.png" alt="Recursion card deck control with categories and card states" style="max-width:100%;height:auto"></div><br>
       <strong>Cards &amp; Decks</strong><br>
       Start with the fixed scene-card catalog, then duplicate it into an editable deck with categories, authored cards, drag ordering, priority states, and card Assist.
     </td>
@@ -109,12 +112,21 @@ Cost depends most on pipeline, Reasoning Level, card count, footprint, cache reu
 
 Under the medium-reasoning Standard example in that research, Recursion adds roughly 1-1.5 cents per turn on top of normal SillyTavern generation.
 
+## Enhancements And Recovery
+
+Enhancements review the assistant reply that just landed against the frozen user turn, bounded visible context, installed card hand, Prompt Packet, story form, character evidence, and anti-slop profile. The menu exposes one operation with four modes: `Off`, `Repair`, `Recompose`, and `Redirect`. `Repair` makes bounded local changes, `Recompose` may restructure a larger passage, and `Redirect` replaces a failed trajectory using an evidence-backed replacement objective. Apply the accepted result `As Swipe` or `Replace`.
+
+Every accepted candidate is checked against its source hash, exact target text, patch bounds, evidence references, installed-card coverage, and semantic verification. Redirect additionally requires a complete verifier result; a rejected or incomplete candidate is never presented as a successful enhancement. The progress surface reports `applied`, `partial-failed`, `validation-failed`, `provider-failed`, `requires-regeneration`, or `skipped` with an inline reason, while the original host generation remains intact.
+
+![Enhancement menu with Repair, Recompose, experimental Redirect, and verified result state](assets/documentation/renders/recursion-operator-editorial-recovery-states.png)
+
 ## What You Can Inspect
 
 - Last Brief: the latest selected card hand and prepared prompt packet.
 - Full Viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics.
 - Prompt Packet: guidance, card evidence, guardrails, references, omissions, fallbacks, and metadata.
 - Progress States: live pass status, fallback paths, repair work, install state, and readiness.
+- Enhancement Results: bounded patches, card-outcome coverage, verification checks, swipe/replace settlement, and explicit failure reasons.
 - Tense & PoV: Auto story-form detection or a forced past/present first-, second-, third-person, or mixed POV form for the next prompt contract.
 - Provider Health: Utility and Reasoner tests, session-only direct keys, fallback visibility, and lane status.
 
@@ -126,6 +138,7 @@ Under the medium-reasoning Standard example in that research, Recursion adds rou
 4. Start with the Standard pipeline while you confirm behavior in a scene.
 5. Use Auto for normal hands-off preparation, or Manual when you want explicit control.
 6. Open Last Brief after generation to inspect what Recursion prepared.
+7. If the reply needs cleanup, try Enhancement in `Repair` first; use `Redirect` only when the response followed the wrong trajectory and the replacement objective is clear.
 
 For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md). For the full surface-by-surface guide, use the [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md).
 
@@ -141,6 +154,8 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 - [Technical Manuals](docs/technical/README.md) - Runtime, card, prompt, provider, storage, diagnostics, and host integration manuals.
 - [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md) - Provider call counts, token-budget ranges, example estimates, and cost-tuning levers.
 - [Testing Strategy](docs/testing/TESTING_STRATEGY.md) - Deterministic gates, Playwright readiness, guarded live smoke, artifacts, and documentation render checks.
+- [Cache Use And Reuse Spec](docs/architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-source cache, swipe reuse, invalidation, and fresh-next-generation rules.
+- [Enhancement Review Contract](docs/architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - Card-aware review, bounded edits, Redirect verification, and shared recovery budget.
 
 ## Security And Privacy
 

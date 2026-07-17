@@ -1278,14 +1278,16 @@ export function createSillyTavernHost({
       const indexedMarker = Array.isArray(found.raw?.__recursionGenerationReviewSwipes)
         ? asObject(found.raw.__recursionGenerationReviewSwipes[swipeId])
         : {};
-      const marker = Object.keys(swipeMarker).length ? swipeMarker : indexedMarker;
+      const replacementMarker = asObject(found.raw?.__recursionGenerationReview);
+      const enhancementOwned = [swipeMarker, indexedMarker, replacementMarker]
+        .some((marker) => markerMatchesSwipeText(marker, text));
       return {
         chatKey: stringValue(context?.chatId || context?.chat_id || context?.currentChatId || 'chat'),
         messageId: found.normalized.mesid,
         swipeId,
         text,
         originalHash: hashJson(text),
-        enhancementOwned: markerMatchesSwipeText(marker, text)
+        enhancementOwned
       };
     },
     async holdAssistantMessage(messageId) {

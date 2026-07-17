@@ -12,8 +12,6 @@ let hostEventUnsubscribers = [];
 let settingsBootstrapUnsubscribers = [];
 let settingsLoadEventObserved = false;
 
-const ENHANCEMENT_OWNED_MUTATION_TAIL_MS = 3000;
-let enhancementOwnedMutationUntilMs = 0;
 let enhancementControlsLocked = false;
 
 function hasSillyTavernContext() {
@@ -53,14 +51,6 @@ function refreshEnhancementCaptureState(activeRuntime = runtime) {
   return active;
 }
 
-function markEnhancementOwnedMutationWindow(durationMs = ENHANCEMENT_OWNED_MUTATION_TAIL_MS) {
-  enhancementOwnedMutationUntilMs = Math.max(enhancementOwnedMutationUntilMs, Date.now() + Math.max(0, Number(durationMs) || 0));
-}
-
-function clearEnhancementOwnedMutationWindow() {
-  enhancementOwnedMutationUntilMs = 0;
-}
-
 async function lockEnhancementControls(currentHost = host) {
   if (enhancementControlsLocked) return { ok: true, locked: true, unchanged: true };
   enhancementControlsLocked = true;
@@ -86,11 +76,23 @@ async function unlockEnhancementControls(currentHost = host) {
   }
 }
 
-function enhancementOwnedSourceMutation(details = {}) {
-  if (Date.now() > enhancementOwnedMutationUntilMs) return false;
+function activeAssistantIdentityFromHost(currentHost) {
+  try {
+    return currentHost?.messages?.activeAssistantMessageIdentity?.() || null;
+  } catch {
+    return null;
+  }
+}
+
+function enhancementOwnedSourceMutation(details = {}, currentHost = host) {
   if (details?.deleted) return false;
   if (!details?.latestAssistant) return false;
-  return Boolean(details.edited || details.swiped);
+  if (!details.edited && !details.swiped) return false;
+  const activeIdentity = activeAssistantIdentityFromHost(currentHost);
+  const sameMessage = details.messageId === undefined
+    || details.messageId === null
+    || String(activeIdentity?.messageId ?? '') === String(details.messageId);
+  return activeIdentity?.enhancementOwned === true && sameMessage;
 }
 
 function scheduleHeldEnhancementRecovery(activeRuntime = runtime, reason = 'bootstrap') {
@@ -274,7 +276,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
   const chatChangedEvent = resolveChatChangedEvent(context);
   registerRuntimeHostEvent(eventSource, chatChangedEvent, () => {
     const nextAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
-    const enhancementOwnedChatMutation = Date.now() <= enhancementOwnedMutationUntilMs
+    const enhancementOwnedChatMutation = activeAssistantIdentityFromHost(currentHost)?.enhancementOwned === true
       && Boolean(nextAssistantIdentity)
       && nextAssistantIdentity === lastAssistantIdentity;
     lastAssistantIdentity = nextAssistantIdentity;
@@ -283,7 +285,6 @@ function registerHostEvents(nextRuntime, currentHost = host) {
       setEnhancementCaptureActive(false);
       return { ok: true, skipped: true, reason: 'enhancement-owned-chat-mutation' };
     }
-    clearEnhancementOwnedMutationWindow();
     setEnhancementCaptureActive(false);
     return invokeRuntimeCleanup('handleChatChanged', 'Chat change cleanup failed.');
   });
@@ -302,7 +303,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement streaming hold failed.', details)
           .then(() => ({ ok: true, skipped: true, reason: 'enhancement-streaming-update' }));
       }
-      if (enhancementOwnedSourceMutation(details)) {
+      if (enhancementOwnedSourceMutation(details, currentHost)) {
         return { ok: true, skipped: true, reason: 'enhancement-owned-source-mutation' };
       }
       if (details.swiped && details.latestAssistant) {
@@ -330,7 +331,6 @@ function registerHostEvents(nextRuntime, currentHost = host) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
       refreshAssistantSignature();
       runtime ||= nextRuntime;
-      clearEnhancementOwnedMutationWindow();
       const details = normalizeHostMessageEvent(currentHost, eventName, payload);
       details.enhancementControlsLocked = enhancementControlsLocked;
       return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', details)
@@ -350,7 +350,6 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         && typeof nextRuntime.proseEnhancementRunning === 'function'
         && nextRuntime.proseEnhancementRunning()
       ) {
-        markEnhancementOwnedMutationWindow();
         return { ok: true, skipped: true, reason: 'enhancement-owned-generation-ended' };
       }
       const sanitizeEnhancementMarker = () => {
@@ -376,10 +375,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         return sanitizeEnhancementMarker()
           .then(() => lockEnhancementControls(currentHost))
           .then(() => invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement assistant hold failed.', details))
-          .then(() => {
-            markEnhancementOwnedMutationWindow();
-            return invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Enhancement failed.', { reason: 'assistant-message-landed' });
-          })
+          .then(() => invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Enhancement failed.', { reason: 'assistant-message-landed' }))
           .then(() => generationEnded())
           .finally(() => unlockEnhancementControls(currentHost))
           .then(() => {
@@ -387,7 +383,6 @@ function registerHostEvents(nextRuntime, currentHost = host) {
             return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
           })
           .finally(() => {
-            markEnhancementOwnedMutationWindow();
             setEnhancementCaptureActive(false);
           });
       }
@@ -564,7 +559,6 @@ async function teardownRecursion(label) {
   clearSettingsBootstrapSubscriptions();
   clearHostEventSubscriptions();
   settingsLoadEventObserved = false;
-  clearEnhancementOwnedMutationWindow();
   setEnhancementCaptureActive(false);
   await unlockEnhancementControls(host);
   try {

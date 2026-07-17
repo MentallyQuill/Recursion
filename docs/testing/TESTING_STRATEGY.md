@@ -191,6 +191,8 @@ Primary live scenarios:
 - Rapid foreground evidence for warm-v2 prompt install or warm-miss Standard escalation, with no local fallback card or local brief diagnostics;
 - Rapid mandatory-gap evidence, when fixtureable, proving Standard escalation rather than unsafe install;
 - Last Brief dropdown reflects the cards used for the last prompt packet;
+- Last Brief remains `ready` with the same packet and cards through Repair, Recompose, Redirect, delayed Enhancement-owned `MESSAGE_UPDATED` / `MESSAGE_SWIPED` events, and existing-swipe navigation;
+- Last Brief leaves `ready` only after the native send/swipe/regenerate generation interceptor begins, with explicit swipe generation distinguished from a low-level swipe event;
 - Hero Pixel Array progress menu shows model-call, cache, storage, composition, injection, fallback, and settled states;
 - full viewer opens Now, Deck, Activity, Prompt Packet, Settings, and Providers views;
 - prompt packet clear on power-off, chat change, disable, and teardown;
@@ -239,6 +241,12 @@ Required artifact families are defined in [Artifact Contract](ARTIFACT_CONTRACT.
 Documentation renders are separate from run artifacts. Draft captures, raw traces, browser profiles, and local renderer output stay under `artifacts/` or `.recursion-doc-renderer/`. Only reviewed final assets move into `assets/documentation/renders/` and only then replace visible `<Render Needed>` markers. The open inventory and promotion rules live in [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md).
 
 ## Pass And Fail Semantics
+
+## Card And Editorial Proof Matrix
+
+The focused suite must cover the live-facing contracts added on `card-system`: bundled Default Deck read-only behavior; custom deck/category/card CRUD; authored-card draft gating; `off`/`active`/`priority` cycles; bulk state actions; category/card drag ordering; Manual scope and Auto priority overflow; Card Assist commit boundaries; exact-source Rapid and swipe reuse; Fused partial repair; and visible normalized failure reasons.
+
+Editorial tests must separately prove Repair, Recompose, and Redirect source binding, evidence references, patch bounds, installed-card outcome coverage, shared one-correction recovery, verifier rejection, `As Swipe`, `Replace`, and no-write failure. The live UI matrix must include the experimental Redirect label and red failure rows. Live generation proof remains dedicated-user-only and must verify the mounted/served extension copy before mutation.
 
 Use these result categories:
 

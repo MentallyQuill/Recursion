@@ -52,6 +52,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Turn Context Compiler Seed Note](design/RECURSION_TURN_CONTEXT_COMPILER.md) - Historical seed note superseded by the V1 spec family.
 - [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - Approved product and UX direction for the unified Enhancement feature.
 - [Editorial Transformation Design](superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md) - Approved Repair, Recompose, and Redirect direction for evidence-led editorial transformation; supersedes the patch-only product boundary.
+- [Layered Failure Recovery Design](superpowers/specs/2026-07-17-recursion-layered-failure-recovery-design.md) - Provider repair, semantic correction, safe partial results, and explicit failure severity.
 - [Redirect Improvement Design](superpowers/specs/2026-07-15-recursion-redirect-improvement-design.md) - Supplemental Redirect contract for evidence-paired source failures, replacement objectives, character-pressure guidance, mandatory verification, and semantic regressions.
 - [Editorial Transformation Implementation Plan](superpowers/plans/2026-07-13-recursion-editorial-transformation.md) - V1 implementation sequence, real module contracts, tests, UI behavior, and verification for Repair, Recompose, and Redirect.
 - [Design Folder Guide](design/README.md)
@@ -60,6 +61,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 
 - [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md)
 - [Generation Review and Enhancement Contract](architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - Card-aware response review, bounded patches, anti-slop, cache, progress, and semantic validation under the shared structured-output recovery policy.
+- [Cache Use And Reuse Spec](architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-source reuse, Rapid warm artifacts, swipe variants, invalidation, and fresh-next-generation bypasses.
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md)

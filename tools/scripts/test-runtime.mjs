@@ -4223,12 +4223,12 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
     }
   ]);
   await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped', messageId: 21 });
-  assertEqual(runtime.view().lastBrief?.status, 'clearing', 'real latest-assistant swipe consumes the visible Last Brief');
-  assertEqual(runtime.view().lastBriefHand?.cards.length, 0, 'real latest-assistant swipe clears retained Last Brief cards');
-  assertEqual(runtime.view().lastBriefPacket, null, 'real latest-assistant swipe clears the retained Last Brief packet');
+  assertEqual(runtime.view().lastBrief?.status, 'ready', 'latest-assistant swipe marker preserves the visible Last Brief until generation starts');
+  assert(runtime.view().lastBriefHand?.cards.length > 0, 'latest-assistant swipe marker preserves retained Last Brief cards');
+  assertEqual(runtime.view().lastBriefPacket?.packetId, installed[0].packetId, 'latest-assistant swipe marker preserves the retained Last Brief packet');
   const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
   assertEqual(queued.ok, true, 'fresh latest assistant queues after swipe marker');
-  assertEqual(runtime.view().lastBrief?.reason, 'latest-assistant-swipe', 'fresh latest assistant arming does not spend another Last Brief clear before generation');
+  assertEqual(runtime.view().lastBrief?.status, 'ready', 'fresh latest assistant arming keeps Last Brief ready before generation');
   const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
   assertEqual(second.ok, true, 'fresh latest assistant run succeeds');
   assertEqual(second.reused, undefined, 'fresh latest assistant does not reuse previous packet');
@@ -11244,7 +11244,7 @@ for (const scenario of [
   assertEqual(routerCalls[0].request.lane, 'utility', 'runtime provider test targets selected lane');
   assertEqual(routerCalls[0].request.reasoningCategory, 'provider-test', 'runtime provider test labels diagnostic provider calls');
   assertEqual(routerCalls[0].request.reasoningIntent, 'minimal', 'runtime provider test always uses minimal provider reasoning');
-  assertEqual(routerCalls[0].request.responseLength, 256, 'runtime provider test uses a small bounded response length');
+  assertEqual(routerCalls[0].request.responseLength, 2048, 'runtime provider test uses the configured lane max tokens');
   assertEqual(routerCalls[0].options.timeoutMs, 30000, 'runtime provider test uses a bounded test timeout');
   assertEqual(settingsStore.get().providers.utility.lastTest.status, 'pass', 'runtime provider test records passing provider status');
   assertEqual(settingsStore.get().providers.utility.resolvedModelLabel, 'utility-test-model', 'runtime provider test records resolved model');

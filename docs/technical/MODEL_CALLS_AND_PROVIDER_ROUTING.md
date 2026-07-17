@@ -164,6 +164,12 @@ If a run is no longer active, runtime returns a superseded result and refuses to
 
 ## Operator-Visible Provider States
 
+## Recovery And Editorial Routing
+
+Generation Review follows the selected Enhancement mode and frozen request metadata. Low and Medium Enhancement review use Utility; High and Ultra use Reasoner when enabled and healthy, with Utility fallback for transport or routing failure before a structured result is accepted. Once a structured result exists, semantic correction is not an extra lane fallback: it uses the shared one-request recovery budget and the authoritative validator.
+
+Provider status must distinguish transport/auth failure, malformed structured output, semantic validation failure, token exhaustion, and safe fallback. The UI may show a concise normalized reason, but raw provider payloads, prompts, secrets, and hidden reasoning stay out of progress, diagnostics, journals, and saved artifacts.
+
 The compact UI shows Utility and Reasoner provider details in collapsible lanes with source, profile, endpoint, model, session key state, max tokens, test status, resolved provider, and resolved model. Temperature and top-p remain normalized provider settings with defaults, but they are not visible controls in the compact V1 surface. The Recursion Bar shows current progress, active composition lane, and Reasoning Level bias without exposing raw provider errors.
 
 Visible states are compact: ready, unavailable, disabled, issue, composing, or test failed. Raw provider errors remain out of the bar and progress menu.

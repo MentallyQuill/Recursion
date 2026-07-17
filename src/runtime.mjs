@@ -93,7 +93,6 @@ import { createRuntimeRunState } from './runtime/run-state.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
-const PROVIDER_TEST_RESPONSE_TOKENS = 256;
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
 const GENERATION_REVIEW_TIMEOUT_MS = 120000;
 const GENERATION_REVIEW_BARRIER_TIMEOUT_MS = GENERATION_REVIEW_TIMEOUT_MS + 5000;
@@ -2558,7 +2557,6 @@ export function createRecursionRuntime({
     const source = asObject(details);
     const eventName = safeText(source.eventName || source.event || 'message_swiped', 80);
     const messageId = finiteNumberOrNull(source.messageId ?? source.mesid ?? source.id);
-    clearLastBrief({ status: 'clearing', reason: 'latest-assistant-swipe' });
     runState.setLatestAssistantSwipeRetry({
       eventName,
       ...(messageId !== null ? { messageId } : {}),
@@ -4834,11 +4832,12 @@ export function createRecursionRuntime({
         label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test running.`,
         chips: ['Provider']
       });
+      const configuredMaxTokens = Number(settingsStore.get()?.providers?.[resolvedLane]?.maxTokens) || 0;
       const result = await generationRouter.generate('providerTest', {
         runId,
         lane: resolvedLane,
         ...reasoningRequestMetadata({}, 'provider-test'),
-        responseLength: PROVIDER_TEST_RESPONSE_TOKENS,
+        responseLength: configuredMaxTokens,
         prompt: providerTestPrompt(resolvedLane)
       }, { timeoutMs: PROVIDER_TEST_TIMEOUT_MS });
       if (validProviderTestResult(result)) {

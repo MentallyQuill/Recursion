@@ -192,6 +192,14 @@ The testing strategy covers deterministic contracts for settings, storage, provi
 
 Live smoke is opt-in and must use dedicated `recursion-soak-*` users. Automated mutation through `default-user` is rejected.
 
+## Current Branch Contract Additions
+
+The `card-system` runtime adds three related boundaries that all callers must preserve:
+
+- Card Deck configuration is persistent operator state; the scene deck and turn hand remain disposable runtime artifacts. `off`, `active`, and `priority` cards become runtime scope only when they are runnable and belong to the active deck.
+- Rapid and swipe reuse are exact-source optimizations. A warm artifact, cached hand, or prior swipe may be reused only when source identity, packet contract, pipeline provenance, and invalidation checks match. Regenerate bypasses those reuse paths once for the next send or swipe.
+- Enhancement is a post-generation semantic pipeline, not a generic rewrite. Diagnosis, bounded transformation, verification, and settlement bind to one frozen source. Redirect cannot write without evidence-grounded diagnosis and a passing verifier; failure reasons remain visible and host generation remains safe.
+
 ## Non-Goals
 
 Recursion V1 excludes continuity-extension ownership, durable memory, lore authority, vector recall, transcript summarization, campaign saves, branching, character database extraction, user-defined card families, per-card editing workflows, raw provider logs, hidden chain-of-thought storage, and broad plot planning.

@@ -6,7 +6,7 @@ Start with [Testing Strategy](TESTING_STRATEGY.md).
 
 ## Documents
 
-- [Testing Strategy](TESTING_STRATEGY.md): three-layer verification stack, core invariants, dedicated live-user policy, pass/fail semantics, and V1 non-goals.
+- [Testing Strategy](TESTING_STRATEGY.md): three-layer verification stack, card/editorial proof matrix, core invariants, dedicated live-user policy, pass/fail semantics, and V1 non-goals.
 - [SillyTavern Playwright Harness](SILLYTAVERN_PLAYWRIGHT_HARNESS.md): target harness files, environment variables, dedicated user checks, browser flow, selector rules, and failure categories.
 - [Live Smoke Test Plan](LIVE_SMOKE_TEST_PLAN.md): focused Recursion live scenarios for mount, modes, provider controls, Manual, Auto, prompt cleanup, fallback, and responsive UI.
 - [Artifact Contract](ARTIFACT_CONTRACT.md): report, live-log, screenshot, prompt metadata, storage probe, redaction, and retention rules.

@@ -4,6 +4,7 @@ Use this folder for implementation-facing diagrams, module boundaries, storage c
 
 - [Runtime Architecture](RUNTIME_ARCHITECTURE.md)
 - [Generation Review and Enhancement Contract](ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md)
+- [Cache Use And Reuse Spec](CACHE_USE_AND_REUSE_SPEC.md)
 - [Provider and Generation Spec](PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](STORAGE_AND_DIAGNOSTICS.md)

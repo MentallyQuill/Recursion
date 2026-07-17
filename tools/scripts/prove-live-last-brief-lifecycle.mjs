@@ -1,5 +1,5 @@
-import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
 import { chromium } from 'playwright';
 import {
   createRunId,
@@ -122,11 +122,34 @@ function readLastBriefDomScript() {
   };
 }
 
+async function routeExtensionSource(context, sourceRoot) {
+  if (!sourceRoot) return false;
+  const root = resolve(sourceRoot);
+  if (!existsSync(root)) fail('source-root-missing', 'Recursion source override does not exist.', { root });
+  const routePrefix = '/scripts/extensions/third-party/Recursion/';
+  await context.route('**/scripts/extensions/third-party/Recursion/**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    const relativePath = decodeURIComponent(pathname.slice(pathname.indexOf(routePrefix) + routePrefix.length));
+    const localPath = resolve(root, relativePath);
+    if (localPath !== root && !localPath.startsWith(`${root}${sep}`)) {
+      await route.abort('blockedbyclient');
+      return;
+    }
+    if (!existsSync(localPath)) {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({ path: localPath });
+  });
+  return true;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const env = process.env;
   const user = assertPreflight(argv, env);
   const timeoutMs = Number(env.RECURSION_LIVE_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
+  const sourceRoot = String(env.RECURSION_LIVE_SOURCE_ROOT || '').trim();
   const runId = createRunId('last-brief-proof');
   const artifactDir = resolve('artifacts', 'live-last-brief', runId);
   mkdirSync(artifactDir, { recursive: true });
@@ -140,6 +163,7 @@ async function main() {
   const browser = await chromium.launch({ headless: env.RECURSION_SILLYTAVERN_HEADLESS !== '0' });
   try {
     const context = await browser.newContext({ viewport: { width: 1360, height: 820 } });
+    const sourceOverride = await routeExtensionSource(context, sourceRoot);
     await context.addCookies(session.playwrightCookies());
     await context.addInitScript(() => {
       globalThis.__recursionLiveHarness = true;
@@ -191,55 +215,126 @@ async function main() {
         messageId: mesid
       });
     });
-    await page.waitForFunction(() => globalThis.__recursionLiveHarnessRuntime?.view?.()?.lastBrief?.status === 'clearing', null, { timeout: timeoutMs });
-    await page.waitForFunction(() => {
-      const panel = document.querySelector('[data-recursion-hand-dropdown]');
-      return panel?.hidden === false
-        && panel?.dataset?.recursionLastBriefState === 'clearing'
-        && /Preparing next prompt packet\./.test(String(panel?.textContent || ''))
-        && document.querySelectorAll('[data-recursion-brief-card]').length === 0;
-    }, null, { timeout: timeoutMs });
-    const clearing = await page.evaluate(readLastBriefDomScript());
-    if (clearing.cardRows !== 0 || clearing.runtimeLastBrief?.reason !== 'latest-assistant-swipe' || !clearing.promptButtonDisabled) {
-      fail('clearing-brief-mismatch', 'Last Brief did not visually clear after latest-assistant swipe marker.', { clearing });
-    }
-    const clearingScreenshot = await screenshotPanel(page, artifactDir, '02-cleared-after-swipe', timeoutMs);
-
-    const second = await page.evaluate(() => globalThis.__recursionLiveHarnessRuntime.prepareForGeneration({
-      userMessage: null,
-      hostGeneration: true
-    }));
-    if (!second?.ok || second?.reused !== true || second?.reason !== 'same-turn-swipe-retry') {
-      fail('swipe-reuse-failed', 'Latest-assistant swipe did not reuse the previous packet.', { second });
-    }
-    await page.waitForFunction((packetId) => {
-      const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-      return view.lastBrief?.status === 'ready' && view.lastPacket?.packetId === packetId;
-    }, readyBefore.packetId, { timeout: timeoutMs });
     await page.waitForFunction(() => {
       const panel = document.querySelector('[data-recursion-hand-dropdown]');
       return panel?.hidden === false
         && panel?.dataset?.recursionLastBriefState === 'ready'
         && document.querySelectorAll('[data-recursion-brief-card]').length > 0;
     }, null, { timeout: timeoutMs });
-    const restored = await page.evaluate(readLastBriefDomScript());
-    if (restored.packetId !== readyBefore.packetId || restored.cardRows < 1 || restored.runtimeLastBrief?.status !== 'ready') {
-      fail('restored-brief-mismatch', 'Last Brief did not restore the reused packet and cards.', { readyBefore, restored });
+    const preserved = await page.evaluate(readLastBriefDomScript());
+    if (
+      preserved.cardRows !== readyBefore.cardRows
+      || preserved.packetId !== readyBefore.packetId
+      || preserved.runtimeLastBrief?.status !== 'ready'
+      || preserved.promptButtonDisabled
+    ) {
+      fail('preserved-brief-mismatch', 'Last Brief changed before the swipe generation interceptor started.', {
+        readyBefore,
+        preserved
+      });
     }
-    const restoredScreenshot = await screenshotPanel(page, artifactDir, '03-restored-after-reuse', timeoutMs);
+    const preservedScreenshot = await screenshotPanel(page, artifactDir, '02-preserved-after-swipe-marker', timeoutMs);
+
+    await page.evaluate(() => {
+      const proof = globalThis.__recursionLastBriefProof || {};
+      proof.observedLastBriefStates = [];
+      const panel = document.querySelector('[data-recursion-hand-dropdown]');
+      const recordState = () => {
+        const state = String(panel?.dataset?.recursionLastBriefState || '');
+        if (state && proof.observedLastBriefStates.at(-1) !== state) proof.observedLastBriefStates.push(state);
+      };
+      recordState();
+      proof.lastBriefObserver = new MutationObserver(recordState);
+      proof.lastBriefObserver.observe(panel, {
+        attributes: true,
+        attributeFilter: ['data-recursion-last-brief-state'],
+        childList: true,
+        subtree: true
+      });
+      proof.preparePromise = globalThis.__recursionLiveHarnessRuntime.prepareForGeneration({
+        userMessage: null,
+        hostGeneration: true,
+        generationType: 'swipe'
+      });
+      globalThis.__recursionLastBriefProof = proof;
+    });
+    await page.waitForFunction(() => {
+      const panel = document.querySelector('[data-recursion-hand-dropdown]');
+      return panel?.dataset?.recursionLastBriefState === 'clearing'
+        && document.querySelectorAll('[data-recursion-brief-card]').length === 0;
+    }, null, { timeout: timeoutMs });
+    const clearing = await page.evaluate(readLastBriefDomScript());
+    if (
+      clearing.runtimeLastBrief?.status !== 'clearing'
+      || clearing.cardRows !== 0
+      || !clearing.promptButtonDisabled
+    ) {
+      fail('generation-boundary-clear-mismatch', 'Last Brief did not clear when swipe generation began.', { clearing });
+    }
+    const clearingScreenshot = await screenshotPanel(page, artifactDir, '03-clearing-after-swipe-generation-start', timeoutMs);
+    const second = await page.evaluate(async () => {
+      const proof = globalThis.__recursionLastBriefProof || {};
+      const result = await proof.preparePromise;
+      proof.lastBriefObserver?.disconnect?.();
+      return {
+        ok: result?.ok === true,
+        reused: result?.reused === true,
+        reason: String(result?.reason || ''),
+        observedStates: Array.isArray(proof.observedLastBriefStates) ? proof.observedLastBriefStates : []
+      };
+    });
+    if (!second.ok) {
+      fail('swipe-generation-failed', 'Swipe generation preparation did not settle successfully.', { second });
+    }
+    if (!second.observedStates.includes('clearing')) {
+      fail('clearing-transition-unobserved', 'Live DOM never observed the Last Brief clearing transition.', { second });
+    }
+    await page.waitForFunction(() => {
+      const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+      return view.lastBrief?.status === 'ready' && Boolean(view.lastPacket?.packetId);
+    }, null, { timeout: timeoutMs });
+    await page.waitForFunction(() => {
+      const panel = document.querySelector('[data-recursion-hand-dropdown]');
+      return panel?.hidden === false
+        && panel?.dataset?.recursionLastBriefState === 'ready'
+        && document.querySelectorAll('[data-recursion-brief-card]').length > 0;
+    }, null, { timeout: timeoutMs });
+    const readyAfter = await page.evaluate(readLastBriefDomScript());
+    if (readyAfter.cardRows < 1 || readyAfter.runtimeLastBrief?.status !== 'ready' || !readyAfter.packetId) {
+      fail('ready-after-swipe-mismatch', 'Last Brief did not become ready after swipe generation preparation settled.', {
+        readyBefore,
+        readyAfter,
+        second
+      });
+    }
+    if (second.reused && readyAfter.packetId !== readyBefore.packetId) {
+      fail('reused-packet-identity-mismatch', 'Same-turn swipe reuse changed packet identity.', {
+        before: readyBefore.packetId,
+        after: readyAfter.packetId
+      });
+    }
+    const readyAfterScreenshot = await screenshotPanel(page, artifactDir, '04-ready-after-swipe-generation', timeoutMs);
 
     console.log(JSON.stringify({
       status: 'pass',
       result: 'live-last-brief-lifecycle-pass',
       user,
       runId,
+      sourceOverride,
+      sourceRoot: sourceOverride ? resolve(sourceRoot) : '',
       first: { ok: first.ok === true },
-      second: { ok: second.ok === true, reused: second.reused === true, reason: second.reason || '' },
+      second,
       packetId: readyBefore.packetId,
       readyBefore: {
         state: readyBefore.panelState,
         cards: readyBefore.cardRows,
         handText: readyBefore.handText
+      },
+      preserved: {
+        state: preserved.panelState,
+        cards: preserved.cardRows,
+        promptButtonDisabled: preserved.promptButtonDisabled,
+        reason: preserved.runtimeLastBrief?.reason || ''
       },
       clearing: {
         state: clearing.panelState,
@@ -247,15 +342,17 @@ async function main() {
         promptButtonDisabled: clearing.promptButtonDisabled,
         reason: clearing.runtimeLastBrief?.reason || ''
       },
-      restored: {
-        state: restored.panelState,
-        cards: restored.cardRows,
-        handText: restored.handText
+      readyAfter: {
+        state: readyAfter.panelState,
+        cards: readyAfter.cardRows,
+        handText: readyAfter.handText,
+        packetId: readyAfter.packetId
       },
       screenshots: {
         ready: readyScreenshot,
+        preserved: preservedScreenshot,
         clearing: clearingScreenshot,
-        restored: restoredScreenshot
+        readyAfter: readyAfterScreenshot
       }
     }, null, 2));
   } finally {

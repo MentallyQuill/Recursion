@@ -166,6 +166,15 @@ Last Brief is an in-memory representation of the most recent packet and hand.
 It is an inspection surface and a source for same-turn packet reuse, but it is
 not an independent generation cache.
 
+The committed Last Brief remains reviewable until the next user-initiated host
+generation is accepted. Repair, Recompose, Redirect, Enhancement-owned message
+replacement or swipe selection, host save/reload events, Fresh Next arming,
+and navigation among existing swipes do not consume it. Send, swipe generation,
+and regenerate consume it at the `prepareForGeneration({ hostGeneration: true
+})` boundary; the next successful prompt installation then atomically becomes
+the new Last Brief. Explicit disable, scene-cache reset, chat change, teardown,
+and page reload may clear the in-memory inspection snapshot.
+
 ### 9. Storage index and run journal
 
 The storage index and run journal are diagnostic persistence. They record cache

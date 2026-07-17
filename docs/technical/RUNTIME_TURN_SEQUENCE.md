@@ -274,6 +274,12 @@ flowchart LR
 
 ## Failure Branches
 
+### Editorial Recovery Branches
+
+After host generation, Enhancement captures one immutable source and review snapshot. `Repair` and `Recompose` may produce bounded patches; `Redirect` produces a replacement proposal only after a supported source-failure diagnosis. All candidates pass local source-hash, target, overlap, evidence, and installed-card coverage checks, then semantic verification. A rejected candidate creates no swipe and no replacement. A safe partial result is reported as `partial-failed`, never silently promoted to success.
+
+Malformed provider output may use local JSON repair and at most one shared correction request. That budget is shared across parser/schema recovery and semantic card-ledger correction. The host adapter preserves raw machine-JSON response text for Recursion-owned parsing; it must not collapse malformed reviewer output to an empty extracted object.
+
 | Failure | Runtime branch |
 | --- | --- |
 | Utility provider unavailable | Reuse valid cache when safe; otherwise clear Recursion prompt and skip Recursion injection. |

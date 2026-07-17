@@ -343,8 +343,15 @@ const foundEnhancedSwipe = await mutationHost.messages.findEnhancedSwipe(4, { or
 assertEqual(foundEnhancedSwipe.index, 1, 'host finds existing enhanced swipe marker');
 assertEqual(foundEnhancedSwipe.text, 'Polished assistant text.', 'host returns cached enhanced swipe text');
 assertDeepEqual(foundEnhancedSwipe.marker, validEnhancementMarker, 'host returns the exact persisted enhancement marker');
-assertEqual((await mutationHost.messages.replaceAssistantMessageText(4, 'Replacement text.', { marker: { originalHash: 'hash-b' } })).ok, true, 'host replaces active assistant text');
+const validReplacementMarker = {
+  schema: 'recursion.editorialMarker.v1',
+  mode: 'redirect',
+  originalHash: 'hash-b',
+  candidateHash: hashJson('Replacement text.')
+};
+assertEqual((await mutationHost.messages.replaceAssistantMessageText(4, 'Replacement text.', { marker: validReplacementMarker })).ok, true, 'host replaces active assistant text');
 assertEqual(mutationContext.chat[0].swipes[1], 'Replacement text.', 'replace updates selected swipe text');
+assertEqual(mutationHost.messages.activeAssistantMessageIdentity().enhancementOwned, true, 'genuine enhanced replacement identity is Recursion-owned');
 mutationContext.chat[0].swipes.push('');
 mutationContext.chat[0].swipe_info.push({ send_date: '2026-07-14T00:00:00.000Z', extra: {} });
 mutationContext.chat[0].swipe_id = 2;

@@ -52,7 +52,7 @@ flowchart TD
     Jobs --> Hand[Select and order turn hand]
 ```
 
-![Card deck dropdown showing categories, cards, and off/active/priority eye states](../../assets/documentation/renders/recursion-card-deck-editor.jpg)
+![Card deck control showing categories, cards, and off/active/priority eye states](../../assets/documentation/renders/recursion-card-control.png)
 
 The card system is Recursion's scene-local reasoning cache. It is implemented by `src/cards.mjs`, coordinated by `src/runtime.mjs`, persisted by `src/storage.mjs`, and inspected through `src/ui.mjs`.
 
@@ -206,6 +206,12 @@ They must not include first-person internal monologue, secret thoughts as truth,
 The card runner enforces this twice: Motivation card requests include the safety instruction, and normalized Motivation cards with obvious internal-thought wording are rejected before they can enter the scene deck or prompt hand.
 
 ## Inspector Visibility
+
+## Editable Deck Contract
+
+The bundled Default Deck is read-only. Duplicating it creates a custom deck with editable categories, authored cards, card order, category order, and `Card Assist`; each edit is committed explicitly. Grip handles are the only drag affordance, and dragging may reorder a category or move a card between categories. Draft cards are not runnable until they have a real name and prompt text.
+
+Deck order is deterministic selection priority, not a second prompt. In Auto, `priority` cards are selected before `active` cards and overflow is reported when `Max Cards` is exceeded. In Manual, selected rows are forced and the priority state does not add another card. Disabled cards are excluded from planning, reuse, hand selection, composition, and injection.
 
 The UI can show:
 

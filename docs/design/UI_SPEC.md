@@ -848,6 +848,8 @@ Provider setup lives in the Providers tab. Detailed activity and prompt inspecti
 
 The Last Brief dropdown is the lightweight trust surface. It opens from the dedicated dropdown-arrow button on the right side of the Recursion Bar. It does not open from the ellipsis options button.
 
+The displayed packet and cards remain available for unhurried review after Repair, Recompose, or Redirect settles, including when the Enhancement appends, replaces, selects, saves, or reuses a SillyTavern swipe. They remain visible until the user starts the next send, swipe generation, or regenerate action. Navigating to an already existing swipe does not clear the panel because no next prompt packet is being prepared. Once a new host generation is accepted, the old rows may transition to `Preparing next prompt packet`; the next successful installation replaces them with the new committed Last Brief.
+
 The dropdown uses the full width of the Recursion Bar so card text has room to breathe. It should remain visually attached to the bar and use SillyTavern-native popup styling: dark surface, hairline border, subtle elevation, compact rows, and restrained hover/focus states.
 
 Example:
@@ -1300,6 +1302,10 @@ Avoid:
 - Marketing/landing-page composition.
 
 ## Empty, Error, And Provider States
+
+## Editorial Maturity And Failure States
+
+The Enhancement menu must label `Redirect` as experimental while the contract is pre-alpha. The label is explanatory, not decorative: Redirect has stricter evidence and verification requirements than Repair or Recompose and may legitimately end with no write. Progress rows use severity consistently: green for verified completion, purple for validated reuse, gray for skipped/not applicable, yellow only for recoverable caution, and red for a failure with a concise reason. Do not hide a red reason behind a generic "Enhancement failed" label.
 
 Empty states should be short and action-oriented.
 

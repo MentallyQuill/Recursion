@@ -167,11 +167,28 @@ Auto lets the Arbiter choose relevant cards from the active deck. Manual lets yo
 
 Last Brief shows the latest selected hand, card families, state/emphasis, concise evidence, omissions, and packet metadata. The Full Viewer expands the deck/hand relationship and shows why cards were omitted. Use Regenerate when the current hand is stale; do not treat the hand as durable memory.
 
-![Editable card deck with categories, authored cards, eye-state controls, and drag handles](../../assets/documentation/renders/recursion-card-deck-editor.jpg)
+![Card deck control with categories, card counts, and eye-state controls](../../assets/documentation/renders/recursion-card-control.png)
 
-![Authored card edit box with Card Assist and save/cancel controls](../../assets/documentation/renders/recursion-card-authored-card-editor.jpg)
+![Authored card edit box with Card Assist and save/cancel controls](../../assets/documentation/renders/recursion-card-authored-card-editor.png)
 
-<Render Needed>: assets/documentation/renders/recursion-card-hand-inspection.png - Live Last Brief or Full Viewer showing selected cards, omissions, and packet metadata.
+![Last Brief hand inspection with selected cards, omissions, and packet metadata](../../assets/documentation/renders/recursion-card-hand-inspection.png)
+
+## Enhancements
+
+Enhancement is a post-generation review of the assistant response that just landed. It uses the frozen response source, bounded visible context, generation-time Prompt Packet, installed card lineage, story form, character evidence, and anti-slop profile. It does not ask the provider to rewrite an entire message blindly.
+
+The menu offers:
+
+- `Off`: do not review the response.
+- `Repair`: apply bounded local patches when the response is mostly sound.
+- `Recompose`: allow a larger evidence-backed restructuring while preserving the source contract.
+- `Redirect`: replace a failed trajectory only when diagnosis can establish a supported source failure and a concrete replacement objective.
+
+Choose `As Swipe` to keep the original and select the accepted enhancement, or `Replace` to replace the active assistant text after validation. A successful operation requires exact source/target binding, safe non-overlapping patches, valid evidence references, and complete installed-card outcomes. Redirect also requires all verification checks to pass. A provider result with safe patches but unresolved card coverage is `partial-failed`, not success; unsafe or stale patches are discarded.
+
+The progress menu shows the editorial diagnosis, candidate, verification, and settlement rows. Red rows include a user-safe reason such as `provider-failed`, `validation-failed`, `partial-failed`, `requires-regeneration`, or `skipped/no-eligible-target`. These states describe Recursion's review; they do not erase or downgrade the original SillyTavern generation.
+
+![Enhancement menu with experimental Redirect and verified editorial result](../../assets/documentation/renders/recursion-operator-editorial-recovery-states.png)
 
 ## Modes
 

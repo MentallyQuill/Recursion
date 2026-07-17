@@ -1,3 +1,5 @@
+import { jsonrepair } from '../vendor/jsonrepair/index.js';
+
 export const STRUCTURED_OUTPUT_PARSE_ERROR_CODES = Object.freeze({
   JSON_INVALID: 'json_invalid',
   JSON_NOT_OBJECT: 'json_not_object',
@@ -183,12 +185,25 @@ export function repairCommonJson(text = '') {
 function uniqueCandidates(values = []) {
   const seen = new Set();
   return values
-    .map((value) => String(value || '').trim())
-    .filter((value) => {
-      if (!value || seen.has(value)) return false;
-      seen.add(value);
+    .map((entry) => ({
+      value: String(entry?.value || '').trim(),
+      repairKind: String(entry?.repairKind || '')
+    }))
+    .filter((entry) => {
+      if (!entry.value || seen.has(entry.value)) return false;
+      seen.add(entry.value);
       return true;
     });
+}
+
+function repairWithJsonRepair(text = '') {
+  const source = String(text || '').trim();
+  if (!source.startsWith('{') || !source.endsWith('}')) return '';
+  try {
+    return jsonrepair(source);
+  } catch {
+    return '';
+  }
 }
 
 export function parseStructuredJsonText(text = '', options = {}) {
@@ -206,14 +221,16 @@ export function parseStructuredJsonText(text = '', options = {}) {
   const stripped = stripMarkdownFence(source);
   const balanced = extractBalancedJsonObject(source);
   const candidates = uniqueCandidates([
-    stripped,
-    balanced,
-    repairCommonJson(balanced),
-    repairCommonJson(stripped)
+    { value: stripped },
+    { value: balanced },
+    { value: repairCommonJson(balanced), repairKind: 'common-json-repair' },
+    { value: repairCommonJson(stripped), repairKind: 'common-json-repair' },
+    { value: repairWithJsonRepair(balanced), repairKind: 'local-json-repair' }
   ]);
   let lastError = null;
 
-  for (const candidate of candidates) {
+  for (const candidateEntry of candidates) {
+    const candidate = candidateEntry.value;
     try {
       const parsed = JSON.parse(candidate);
       if (options.requireObject !== false && !isObject(parsed)) {
@@ -229,7 +246,8 @@ export function parseStructuredJsonText(text = '', options = {}) {
       return {
         ok: true,
         value: parsed,
-        repaired: candidate !== candidates[0],
+        repaired: Boolean(candidateEntry.repairKind),
+        repairKind: candidateEntry.repairKind,
         candidate,
         visibleContentLength: source.length
       };

@@ -72,7 +72,7 @@ SillyTavern host adapter, Node test scripts, Playwright, PowerShell.
   `structuredOutputRecovery`, `originalResponseHash`, and
   `repairedResponseHash`.
 
-- [ ] **Step 1: Fetch and audit the pinned package**
+- [x] **Step 1: Fetch and audit the pinned package**
 
 Run:
 
@@ -84,7 +84,7 @@ tar -tf .tmp/jsonrepair-3.15.0.tgz
 Expected: package contains `lib/esm`, `LICENSE.md`, and package metadata showing
 version `3.15.0` and license `ISC`.
 
-- [ ] **Step 2: Add failing captured-response tests**
+- [x] **Step 2: Add failing captured-response tests**
 
 Add a sanitized fixture matching the SG-1 defect:
 
@@ -103,7 +103,7 @@ assertEqual(repaired.diagnostics.structuredOutputRecovery, 'local-json-repair', 
 Add negative controls for blank text, whitespace, prose-only text, and
 irreparable oversized output. Assert none are fabricated into semantic objects.
 
-- [ ] **Step 3: Run parser tests and confirm failure**
+- [x] **Step 3: Run parser tests and confirm failure**
 
 Run:
 
@@ -115,7 +115,7 @@ node tools/scripts/test-providers.mjs
 Expected: FAIL because strict parsing rejects the unquoted key and no local
 repair diagnostics exist.
 
-- [ ] **Step 4: Vendor the ESM distribution**
+- [x] **Step 4: Vendor the ESM distribution**
 
 Copy the package's browser ESM files and license into
 `src/vendor/jsonrepair/`. Add `package.json` metadata:
@@ -132,7 +132,7 @@ Copy the package's browser ESM files and license into
 }
 ```
 
-- [ ] **Step 5: Integrate strict-then-repair parsing**
+- [x] **Step 5: Integrate strict-then-repair parsing**
 
 In `src/providers.mjs`, keep strict parse first:
 
@@ -162,7 +162,7 @@ function parseProviderStructuredOutput(text) {
 
 Apply existing maximum response-size limits before invoking repair.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run:
 
@@ -780,4 +780,3 @@ Do not run automated generation in `default-user`.
 git add DESIGN.md docs/design/UI_SPEC.md docs/architecture/PROVIDER_AND_GENERATION_SPEC.md docs/architecture/STORAGE_AND_DIAGNOSTICS.md docs/superpowers/specs/2026-07-17-recursion-layered-failure-recovery-design.md docs/superpowers/plans/2026-07-17-recursion-layered-failure-recovery.md
 git commit -m "docs: finalize failure recovery contract"
 ```
-

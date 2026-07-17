@@ -995,6 +995,23 @@ assertNoProviderMarker(repairedRouterResult, repairedMarker, 'repaired result do
 assertNoProviderMarker(repairedActivity.history(), repairedMarker, 'repaired activity does not expose raw malformed provider text');
 assertNoProviderMarker(repairedJournal, repairedMarker, 'repaired journal does not expose raw malformed provider text');
 
+const localRepairRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: '{"schema":"recursion.utilityArbiter.v1",ok:true}',
+        providerId: 'fake-host',
+        model: 'fake-model'
+      };
+    }
+  }
+});
+const localRepairResult = await localRepairRouter.generate('utilityArbiter', { prompt: 'Repair one unquoted key.' });
+assertEqual(localRepairResult.ok, true, 'router locally repairs a complete object with an unquoted key');
+assertEqual(localRepairResult.diagnostics.structuredOutputRecovery, 'local-json-repair', 'router identifies local tolerant repair');
+assertEqual(typeof localRepairResult.diagnostics.originalResponseHash, 'string', 'local repair records original response hash');
+assertEqual(typeof localRepairResult.diagnostics.repairedResponseHash, 'string', 'local repair records repaired response hash');
+
 let repairedMissingSchemaAttempts = 0;
 const repairedMissingSchemaRouter = createGenerationRouter({
   client: {

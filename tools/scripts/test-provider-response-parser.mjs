@@ -67,6 +67,23 @@ const missingSchema = parseStructuredJsonText('{"ok":true,}');
 assertEqual(missingSchema.ok, true, 'repair does not reject syntactically repairable object');
 assertEqual(Object.prototype.hasOwnProperty.call(missingSchema.value, 'schema'), false, 'repair does not fabricate missing schema');
 
+const malformedRedirectRole = parseStructuredJsonText(`{
+  "schema": "recursion.editorialDiagnosis.v1",
+  "sceneCharacters": [
+    {
+      "name": "Daniel",
+      role: "Documenting, probing magical system implications"
+    }
+  ]
+}`);
+assertEqual(malformedRedirectRole.ok, true, 'captured Redirect response repairs an unquoted object key');
+assertEqual(malformedRedirectRole.repaired, true, 'unquoted object-key repair is diagnosed');
+assertEqual(
+  malformedRedirectRole.value.sceneCharacters[0].role,
+  'Documenting, probing magical system implications',
+  'unquoted object-key repair preserves the model value'
+);
+
 const arrayResult = parseStructuredJsonText('[]');
 assertEqual(arrayResult.ok, false, 'array rejects when object required');
 assertEqual(arrayResult.diagnostic.code, STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_NOT_OBJECT, 'array rejection has not-object code');

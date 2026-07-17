@@ -1857,6 +1857,11 @@ function parseProviderStructuredOutput(text) {
     diagnostics: {
       structuredOutputRepaired: parsed.repaired === true,
       ...(parsed.repaired ? { structuredOutputRepairCode: 'json_repaired' } : {}),
+      ...(parsed.repairKind ? {
+        structuredOutputRecovery: parsed.repairKind,
+        originalResponseHash: responseTextHash(text),
+        repairedResponseHash: responseTextHash(parsed.candidate)
+      } : {}),
       visibleContentLength: parsed.visibleContentLength
     }
   };

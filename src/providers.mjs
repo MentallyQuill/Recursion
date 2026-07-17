@@ -22,6 +22,7 @@ import {
   REDIRECT_FAILURE_CATEGORIES,
   REDIRECT_VERIFICATION_CHECKS
 } from './editorial-transform.mjs';
+import { providerFailure } from './failures.mjs';
 
 const LANES = new Set(['utility', 'reasoner']);
 const HOST_SOURCES = new Set(['host-current-model', 'host-connection-profile']);
@@ -1616,6 +1617,15 @@ function statusForError(error) {
   return 'provider-failed';
 }
 
+function failureStageForRole(roleId = '') {
+  if (roleId === 'editorialDiagnostician') return 'editorial-diagnosis';
+  if (roleId === 'editorialTransformer') return 'editorial-transform';
+  if (roleId === 'editorialVerifier') return 'editorial-verification';
+  if (roleId === 'generationReviewer') return 'generation-review';
+  if (roleId === 'providerTest') return 'provider-test';
+  return 'provider-call';
+}
+
 function safeInvoke(fn) {
   if (typeof fn !== 'function') return undefined;
   try {
@@ -2327,11 +2337,13 @@ export function createGenerationRouter({ client, activity = null, journal = null
           }, 300);
 
           const safeError = sanitizedError(error, request);
+          const failure = providerFailure(safeError, { stage: failureStageForRole(roleId) });
           const diagnostics = sanitize({
             ...lastDiagnostics,
             retryCount,
             ...(structuredOutputRecovery ? { structuredOutputRecovery } : {}),
             error: safeError,
+            failure,
             status: statusForError(error)
           }, 300);
           await queueJournalAppend({
@@ -2418,11 +2430,13 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     async function failureResult(entry, error, retryCount = 0, extraDiagnostics = {}) {
       const safeError = sanitizedError(error, entry.request);
+      const failure = providerFailure(safeError, { stage: failureStageForRole(entry.roleId) });
       const diagnostics = sanitize({
         ...entry.diagnostics,
         retryCount,
         latencyMs: Date.now() - entry.started,
         error: safeError,
+        failure,
         status: statusForError(error),
         failedAt: nowIso(),
         ...extraDiagnostics
@@ -2571,6 +2585,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     function emitSlotFailureActivity(entry, error, raw = null, retryCount = 0, options = {}) {
       const safeError = sanitizedError(error, entry.request);
+      const failure = providerFailure(safeError, { stage: failureStageForRole(entry.roleId) });
       emitSlotActivity(entry, {
         severity: 'error',
         outcome: 'error',
@@ -2581,6 +2596,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
           retryCount,
           latencyMs: Date.now() - entry.started,
           error: safeError,
+          failure,
           status: statusForError(error),
           failedAt: nowIso(),
           batchIndex: entry.index

@@ -74,9 +74,15 @@ assertEqual(missingProviderDraft.openAICompatible.model, 'saved-model', 'missing
 const normalizedUiFailure = normalizeUiActionFailure(new Error('Clipboard denied'), 'Copy failed.');
 assertEqual(normalizedUiFailure.severity, 'warning', 'UI action failure uses warning severity');
 assertEqual(normalizedUiFailure.label, 'Clipboard denied', 'UI action failure preserves concise error message');
+assertEqual(normalizedUiFailure.failure.category, 'internal', 'UI action failure exposes normalized category');
+assertEqual(normalizedUiFailure.failure.message, 'Clipboard denied', 'UI action failure exposes normalized reason');
 const uiActionStatus = createUiActionStatus();
 uiActionStatus.setFailure('', 'Copy failed.');
-assertEqual(uiActionStatus.current().label, 'Copy failed.', 'UI action status uses fallback for empty failures');
+assertEqual(
+  uiActionStatus.current().label,
+  'Unexpected internal failure (RECURSION_UI_ACTION_FAILED).',
+  'UI action status never presents a generic fallback as the failure reason'
+);
 uiActionStatus.set('Card prioritized.', 'success');
 assertEqual(uiActionStatus.current().label, 'Card prioritized.', 'UI action status supports non-failure card feedback');
 assertEqual(uiActionStatus.current().severity, 'success', 'UI action status preserves safe non-failure severity');

@@ -946,6 +946,8 @@ const malformedRouter = createGenerationRouter({
 const malformed = await malformedRouter.generate('utilityArbiter', { prompt: 'Return bad JSON' });
 assertEqual(malformed.ok, false, 'malformed json returns failure result');
 assertEqual(malformed.error.code, 'RECURSION_JSON_PARSE_FAILED', 'malformed json exposes useful parse code');
+assertEqual(malformed.diagnostics.failure.category, 'provider-output', 'malformed json exposes normalized failure category');
+assertEqual(malformed.diagnostics.failure.message, 'Provider returned malformed JSON.', 'malformed json explains the failure');
 
 const fusedRecoverableText = '{"schema":"recursion.cardBundle.v1","snapshotHash":"snapshot-fused-1","items":[{"schema":"recursion.card.v1","family":"Scene Frame","role":"sceneFrameCard","promptText":"FUSED_FRAGMENT_RECOVERED_SCENE survives truncation.","evidenceRefs":["message:8"]},{"schema":"recursion.card.v1","family":"Scene Constraints","role":"sceneConstraintsCard","promptText":"unfinished"';
 const fusedMalformedRouter = createGenerationRouter({
@@ -2106,6 +2108,8 @@ const authFailureResult = await createGenerationRouter({
 const authFailureReasoner = authFailureStore.get().providers.reasoner;
 assertEqual(authFailureResult.ok, false, 'openai auth failure returns failure result');
 assertEqual(authFailureResult.error.code, 'RECURSION_PROVIDER_AUTH_FAILED', 'openai auth failure exposes stable auth code');
+assertEqual(authFailureResult.diagnostics.failure.category, 'provider-account', 'auth failure exposes normalized account category');
+assertEqual(authFailureResult.diagnostics.failure.message, 'Provider authentication failed.', 'auth failure explains the failure');
 assertEqual(authFailureFetches, 1, 'openai auth failure is not retried');
 assertEqual(authFailureReasoner.lastTest.status, 'fail', 'openai auth failure marks lane test status failed');
 assertEqual(authFailureReasoner.lastTest.compactError, 'OpenAI-compatible authentication failed.', 'openai auth failure records stable compact error');
@@ -2176,6 +2180,8 @@ const tokenLimitFailure = await openAiProviderFailure((marker) => ({
 }), 'Token limit response');
 assertEqual(tokenLimitFailure.result.ok, false, 'token-limit provider response returns failure result');
 assertEqual(tokenLimitFailure.result.error.code, 'RECURSION_PROVIDER_TOKEN_LIMIT', 'token-limit response exposes stable code');
+assertEqual(tokenLimitFailure.result.diagnostics.failure.category, 'provider-length', 'token-limit response exposes normalized length category');
+assertEqual(tokenLimitFailure.result.diagnostics.failure.message, 'Provider response reached its token limit.', 'token-limit response explains the failure');
 assertEqual(tokenLimitFailure.result.diagnostics.status, 'provider-failed', 'token-limit response is a provider failure, not a JSON parse failure');
 assertEqual(tokenLimitFailure.result.diagnostics.model, 'normalizer-model', 'token-limit diagnostics retain the provider model');
 assertEqual(tokenLimitFailure.result.diagnostics.effectiveMaxTokens, 8192, 'token-limit diagnostics retain the effective output ceiling');

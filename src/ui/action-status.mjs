@@ -1,3 +1,5 @@
+import { failureFrom } from '../failures.mjs';
+
 function safeMessage(error) {
   const message = String(error?.message || error || '').trim();
   if (!message) return 'Action failed.';
@@ -10,10 +12,15 @@ function safeSeverity(value) {
 }
 
 export function normalizeUiActionFailure(error, fallback = 'Action failed.') {
-  const message = safeMessage(error);
+  const failure = failureFrom(error, {
+    code: 'RECURSION_UI_ACTION_FAILED',
+    stage: 'ui-action',
+    category: 'internal'
+  });
   return {
     severity: 'warning',
-    label: message === 'Action failed.' ? fallback : message
+    label: failure.message,
+    failure
   };
 }
 

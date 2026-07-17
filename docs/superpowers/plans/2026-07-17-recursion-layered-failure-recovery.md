@@ -174,7 +174,7 @@ node tools/scripts/test-providers.mjs
 Expected: PASS; malformed syntax recovers without a provider retry, while blank,
 prose-only, and oversized content retain stable failures.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```powershell
 git add package.json src/vendor/jsonrepair src/providers.mjs tools/scripts/test-provider-response-parser.mjs tools/scripts/test-providers.mjs
@@ -200,7 +200,7 @@ git commit -m "fix(providers): repair malformed JSON locally"
   `failureReason(value): string`.
 - `RecursionFailure` requires `code`, `stage`, `category`, and `message`.
 
-- [ ] **Step 1: Write failure-contract tests**
+- [x] **Step 1: Write failure-contract tests**
 
 Cover funds, auth, timeout, length, unsupported parameters, malformed output,
 host mutation, storage, and unknown internal errors:
@@ -218,7 +218,7 @@ assert(!JSON.stringify(funds).includes('api_key'), 'failure excludes secrets');
 Assert generic input such as `Action failed.` becomes
 `Unexpected internal failure (RECURSION_INTERNAL).`
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run:
 
@@ -228,7 +228,7 @@ node tools/scripts/test-failures.mjs
 
 Expected: FAIL because `src/failures.mjs` does not exist.
 
-- [ ] **Step 3: Implement the normalized descriptor**
+- [x] **Step 3: Implement the normalized descriptor**
 
 Use the approved shape:
 
@@ -252,7 +252,7 @@ export function createFailure(input = {}) {
 Provider mapping must use status codes, stable provider error codes, finish
 reasons, and known message patterns without copying raw provider text.
 
-- [ ] **Step 4: Replace provider and action-status generic failures**
+- [x] **Step 4: Replace provider and action-status generic failures**
 
 Make provider settlement include:
 
@@ -264,7 +264,7 @@ detail: { ...diagnostics, error: safeError, failure }
 Make `normalizeUiActionFailure` return the same descriptor and a label derived
 from `failure.message`.
 
-- [ ] **Step 5: Register and run tests**
+- [x] **Step 5: Register and run tests**
 
 Run:
 

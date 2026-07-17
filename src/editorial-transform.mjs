@@ -203,11 +203,18 @@ function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
   const data = { ...object(brief) };
   const known = evidenceMap(evidence);
   const list = (value) => Array.isArray(value) ? value.map(String) : [];
-  const knownRefs = (value, { allowEmpty = false } = {}) => {
-    const ids = list(value);
-    return ids.length <= 8
-      && (allowEmpty || ids.length > 0)
-      && ids.every((id) => id && known.has(id));
+  const referenceIssues = [];
+  const normalizeKnownRefs = (value, path) => {
+    const ids = list(value).slice(0, 8);
+    return ids.filter((id, index) => {
+      if (id && known.has(id)) return true;
+      referenceIssues.push({
+        code: 'RECURSION_EDITORIAL_REDIRECT_REFERENCE_DROPPED',
+        path: `${path}[${index}]`,
+        reference: safeText(id, 180)
+      });
+      return false;
+    });
   };
   if (data.mode !== 'redirect') {
     return fail(REDIRECT_ERROR_CODES.BRIEF_INVALID, 'Redirect diagnosis used the wrong brief mode.');
@@ -248,46 +255,44 @@ function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
   }
   data.sourceFailure = {
     ...data.sourceFailure,
-    establishedEvidenceRefs: list(data.sourceFailure.establishedEvidenceRefs),
-    conflictingSourceRefs: list(data.sourceFailure.conflictingSourceRefs)
+    establishedEvidenceRefs: normalizeKnownRefs(
+      data.sourceFailure.establishedEvidenceRefs,
+      'sourceFailure.establishedEvidenceRefs'
+    ),
+    conflictingSourceRefs: normalizeKnownRefs(
+      data.sourceFailure.conflictingSourceRefs,
+      'sourceFailure.conflictingSourceRefs'
+    )
   };
   data.replacementObjective = {
     ...data.replacementObjective,
-    evidenceRefs: list(data.replacementObjective.evidenceRefs)
+    evidenceRefs: normalizeKnownRefs(
+      data.replacementObjective.evidenceRefs,
+      'replacementObjective.evidenceRefs'
+    )
   };
-  data.requiredBeats = data.requiredBeats.map((beat) => ({
+  data.requiredBeats = data.requiredBeats.map((beat, index) => ({
     ...beat,
-    evidenceRefs: list(beat?.evidenceRefs)
+    evidenceRefs: normalizeKnownRefs(beat?.evidenceRefs, `requiredBeats[${index}].evidenceRefs`)
   }));
-  data.forbiddenSourceBeats = data.forbiddenSourceBeats.map((beat) => ({
+  data.forbiddenSourceBeats = data.forbiddenSourceBeats.map((beat, index) => ({
     ...beat,
-    sourceRefs: list(beat?.sourceRefs)
+    sourceRefs: normalizeKnownRefs(beat?.sourceRefs, `forbiddenSourceBeats[${index}].sourceRefs`)
   }));
-  data.sceneCharacters = data.sceneCharacters.map((entry) => ({
+  data.sceneCharacters = data.sceneCharacters.map((entry, index) => ({
     ...entry,
     character: safeText(entry?.character, 120),
-    evidenceRefs: list(entry?.evidenceRefs)
+    evidenceRefs: normalizeKnownRefs(entry?.evidenceRefs, `sceneCharacters[${index}].evidenceRefs`)
   }));
-  data.characterPressure = data.characterPressure.map((row) => ({
+  data.characterPressure = data.characterPressure.map((row, index) => ({
     ...row,
     character: safeText(row?.character, 120),
     immediateWant: row?.immediateWant === null ? null : safeText(row?.immediateWant, MAX_CLAIM),
-    wantEvidenceRefs: list(row?.wantEvidenceRefs),
+    wantEvidenceRefs: normalizeKnownRefs(row?.wantEvidenceRefs, `characterPressure[${index}].wantEvidenceRefs`),
     sourcePressureEffect: safeText(row?.sourcePressureEffect, 80),
-    sourceEvidenceRefs: list(row?.sourceEvidenceRefs),
+    sourceEvidenceRefs: normalizeKnownRefs(row?.sourceEvidenceRefs, `characterPressure[${index}].sourceEvidenceRefs`),
     pressureReason: safeText(row?.pressureReason, MAX_CLAIM)
   }));
-  if (!knownRefs(data.sourceFailure.establishedEvidenceRefs)
-    || !knownRefs(data.sourceFailure.conflictingSourceRefs)
-    || !knownRefs(data.replacementObjective.evidenceRefs)
-    || data.requiredBeats.some((beat) => !knownRefs(beat?.evidenceRefs))
-    || data.forbiddenSourceBeats.some((beat) => !knownRefs(beat?.sourceRefs))
-    || data.sceneCharacters.some((entry) => !knownRefs(entry?.evidenceRefs, { allowEmpty: true }))
-    || data.characterPressure.some((row) =>
-      !knownRefs(row?.wantEvidenceRefs, { allowEmpty: true })
-      || !knownRefs(row?.sourceEvidenceRefs, { allowEmpty: true }))) {
-    return fail(REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'Redirect diagnosis cited unknown evidence.');
-  }
 
   const characters = data.sceneCharacters.map((entry) => safeText(entry?.character, 120));
   if (!characters.length || characters.some((name) => !name)) {
@@ -299,7 +304,11 @@ function validateRedirectBrief(brief = {}, evidence = [], decision = '') {
     || !row.sourcePressureEffect)) {
     return fail(REDIRECT_ERROR_CODES.PRESSURE_INVALID, 'Redirect character-pressure structure is invalid.');
   }
-  return { ok: true, value: data };
+  return {
+    ok: true,
+    value: data,
+    ...(referenceIssues.length ? { diagnostics: { referenceIssues } } : {})
+  };
 }
 
 function canonicalDiagnosis(result) {
@@ -379,7 +388,12 @@ export function validateEditorialDiagnosis(result = {}, { mode = '', sourceText 
       decision: data.decision,
       brief: redirectResult.value
     };
-    return { ok: true, value, hash: editorialDiagnosisHash(value) };
+    return {
+      ok: true,
+      value,
+      hash: editorialDiagnosisHash(value),
+      ...(redirectResult.diagnostics ? { diagnostics: redirectResult.diagnostics } : {})
+    };
   }
   const diagnosisBrief = data.brief;
   const briefResult = validateEditorialBrief(diagnosisBrief, evidence);

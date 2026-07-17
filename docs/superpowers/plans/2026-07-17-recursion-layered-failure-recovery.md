@@ -277,7 +277,7 @@ node tools/scripts/test-ui.mjs
 Expected: PASS; every provider hard failure and UI action failure exposes a
 bounded specific reason.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/failures.mjs src/providers.mjs src/ui/action-status.mjs tools/scripts/test-failures.mjs tools/scripts/run-tests.mjs tools/scripts/test-providers.mjs tools/scripts/test-ui.mjs
@@ -300,7 +300,7 @@ git commit -m "feat: normalize extension failure reasons"
 - Produces `validateEditorialDiagnosis(...).diagnostics.referenceIssues[]`.
 - Preserves mandatory verifier authority.
 
-- [ ] **Step 1: Write failing identity and reference tests**
+- [x] **Step 1: Write failing identity and reference tests**
 
 Add cases proving:
 
@@ -321,7 +321,7 @@ assertEqual(
 Add a terminal negative control where normalization leaves no replacement
 objective or required beat.
 
-- [ ] **Step 2: Run and confirm failures**
+- [x] **Step 2: Run and confirm failures**
 
 Run:
 
@@ -333,12 +333,12 @@ node tools/scripts/test-provider-response-parser.mjs
 Expected: FAIL because identity is trusted from the model and unknown references
 terminate validation.
 
-- [ ] **Step 3: Make identity runtime-owned**
+- [x] **Step 3: Make identity runtime-owned**
 
 For `editorialDiagnostician`, overwrite schema, mode, hashes, and Redirect
 decision from the request after parse and before role validation.
 
-- [ ] **Step 4: Return reference diagnostics instead of semantic failure**
+- [x] **Step 4: Return reference diagnostics instead of semantic failure**
 
 Replace the aggregate `knownRefs` failure with path-aware normalization:
 
@@ -359,7 +359,7 @@ function normalizeKnownRefs(values, known, path, issues) {
 Do not replace references or claims. Return a precise structural error only when
 required semantic fields become unusable.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 

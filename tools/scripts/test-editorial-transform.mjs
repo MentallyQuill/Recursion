@@ -256,10 +256,40 @@ const sourceGroundedObjective = validateEditorialDiagnosis(redirectDiagnosis({
 }), redirectFixture);
 assertEqual(sourceGroundedObjective.ok, true, 'source-grounded replacement objective reaches the semantic verifier');
 assertDeepEqual(sourceGroundedObjective.value?.brief?.replacementObjective?.evidenceRefs, ['source:0'], 'diagnosis preserves objective citations for verifier judgment');
-assertEqual(validateEditorialDiagnosis(redirectDiagnosis({
+const fabricatedObjectiveReference = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   replacementObjective: { ...validRedirectBrief.replacementObjective, evidenceRefs: ['fabricated:0'] }
-}), redirectFixture).error?.code, REDIRECT_ERROR_CODES.EVIDENCE_INVALID, 'fabricated evidence ids still fail mechanical provenance validation');
+}), redirectFixture);
+assertEqual(fabricatedObjectiveReference.ok, true, 'fabricated evidence id is recoverable bookkeeping before verification');
+assertDeepEqual(
+  fabricatedObjectiveReference.value?.brief?.replacementObjective?.evidenceRefs,
+  [],
+  'fabricated objective reference is removed without substitution'
+);
+assertEqual(
+  fabricatedObjectiveReference.diagnostics?.referenceIssues?.[0]?.path,
+  'replacementObjective.evidenceRefs[0]',
+  'fabricated objective reference reports its exact field path'
+);
+assertEqual(
+  fabricatedObjectiveReference.diagnostics?.referenceIssues?.[0]?.reference,
+  'fabricated:0',
+  'fabricated objective reference diagnostic preserves the bounded identifier'
+);
+const fabricatedRequiredBeatReference = validateEditorialDiagnosis(redirectDiagnosis({
+  ...validRedirectBrief,
+  requiredBeats: [{
+    ...validRedirectBrief.requiredBeats[0],
+    evidenceRefs: ['missing:beat']
+  }]
+}), redirectFixture);
+assertEqual(fabricatedRequiredBeatReference.ok, true, 'unknown required-beat reference reaches the verifier');
+assertDeepEqual(fabricatedRequiredBeatReference.value?.brief?.requiredBeats[0]?.evidenceRefs, [], 'unknown required-beat reference is removed');
+assertEqual(
+  fabricatedRequiredBeatReference.diagnostics?.referenceIssues?.[0]?.path,
+  'requiredBeats[0].evidenceRefs[0]',
+  'unknown required-beat reference reports its exact nested path'
+);
 const mixedAuthorityRedirect = validateEditorialDiagnosis(redirectDiagnosis({
   ...validRedirectBrief,
   sourceFailure: {

@@ -280,7 +280,19 @@ async function nativeProof(page, { timeoutMs, pipelineModes }) {
   if (!chatSetup?.ok) {
     fail('native-chat-unavailable', 'A dedicated native SillyTavern character chat is required.', chatSetup || {});
   }
-  await page.waitForSelector('#send_textarea, textarea#send_textarea', { state: 'visible', timeout: timeoutMs });
+  await page.waitForFunction(() => {
+    const selectors = [
+      '#send_textarea',
+      'textarea[name="send_textarea"]',
+      'textarea[aria-label*="message" i]',
+      'textarea[placeholder*="message" i]',
+      '[contenteditable="true"][aria-label*="message" i]'
+    ];
+    return selectors.some((selector) => [...document.querySelectorAll(selector)].some((node) => {
+      const style = getComputedStyle(node);
+      return style.display !== 'none' && style.visibility !== 'hidden' && node.getClientRects().length > 0;
+    }));
+  }, null, { timeout: timeoutMs });
 
   async function setPipeline(pipelineMode) {
     const result = await page.evaluate(async (mode) => {
@@ -297,10 +309,43 @@ async function nativeProof(page, { timeoutMs, pipelineModes }) {
   }
 
   async function sendVisible(message) {
-    const input = page.locator('#send_textarea, textarea#send_textarea, [contenteditable="true"][data-testid="send-textarea"]').first();
-    const button = page.locator('#send_but, button#send_but').first();
-    if (!(await input.isVisible().catch(() => false)) || !(await button.isVisible().catch(() => false))) {
-      fail('visible-send-unavailable', 'Visible SillyTavern send controls were not available.');
+    async function firstVisible(selectors) {
+      for (const selector of selectors) {
+        const candidates = page.locator(selector);
+        const count = await candidates.count().catch(() => 0);
+        for (let index = 0; index < count; index += 1) {
+          const candidate = candidates.nth(index);
+          if (await candidate.isVisible().catch(() => false)) return candidate;
+        }
+      }
+      return null;
+    }
+    const input = await firstVisible([
+      '#send_textarea',
+      'textarea[name="send_textarea"]',
+      'textarea[aria-label*="message" i]',
+      'textarea[placeholder*="message" i]',
+      '[contenteditable="true"][aria-label*="message" i]',
+      '[contenteditable="true"]'
+    ]);
+    const button = await firstVisible([
+      '#send_but',
+      'button[aria-label*="send" i]',
+      'button[title*="send" i]',
+      '[role="button"][aria-label*="send" i]'
+    ]);
+    if (!input || !button) {
+      const details = await page.evaluate(() => {
+        const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+        return {
+          characterId: String(context.characterId ?? ''),
+          chatId: String(context.chatId || context.currentChatId || ''),
+          chatLength: Array.isArray(context.chat) ? context.chat.length : null,
+          inputCount: document.querySelectorAll('#send_textarea, textarea, [contenteditable="true"]').length,
+          buttonCount: document.querySelectorAll('#send_but, button[aria-label*="send" i], button[title*="send" i]').length
+        };
+      });
+      fail('visible-send-unavailable', 'Visible SillyTavern send controls were not available.', details);
     }
     await input.fill(message, { timeout: Math.min(timeoutMs, 10000) });
     await button.click({ timeout: timeoutMs });

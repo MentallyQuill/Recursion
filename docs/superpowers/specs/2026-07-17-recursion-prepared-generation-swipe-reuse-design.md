@@ -170,6 +170,7 @@ to be identical.
 | Scenario | Expected behavior |
 | --- | --- |
 | Latest assistant is swiped and the generation basis is unchanged | Reinstall the same packet and hand; make zero Recursion provider calls. |
+| The assistant output displaces older rows from a full message- or character-bounded source window | Reuse when every still-observable pre-assistant source identity is an exact suffix of the prepared basis. |
 | The user waits longer than two minutes before swiping | Reuse if source and contracts still match; elapsed time alone is not staleness. |
 | A swipe is stopped and the user swipes again | Preserve and reuse the last-known-good artifact when the generation basis still matches. |
 | The prepared packet contains zero selected cards | It remains a valid artifact if the packet and hand schemas are valid. |
@@ -288,13 +289,22 @@ state. That keeps its behavior deterministic and directly testable.
 ### Shape
 
 ```ts
+type SourceWindowIdentity = {
+  mesid: number;
+  role: 'user' | 'assistant' | 'system';
+  textHash: string;
+  swipeId?: number;
+  swipeCount?: number;
+  activeSwipeTextHash?: string;
+};
+
 type PreparedGenerationBasis = {
   chatKey: string;
   sceneKey: string;
   sceneFingerprint: string;
   latestMesId: number;
   sourceRevisionHash: string;
-  visibleMessagesHash: string;
+  sourceWindow: SourceWindowIdentity[];
   sourceWindowContractHash: string;
 };
 ```
@@ -311,15 +321,18 @@ the same basis:
 ```js
 function generationBasisForSnapshot(snapshot, settings) {
   const source = normalizeSnapshot(snapshot);
-  const contract = buildContextContract(source, settings);
+  const retention = normalizeRetentionSettings(settings.retention);
   return {
     chatKey: safeText(source.chatKey || DEFAULT_CHAT_ID, 160),
     sceneKey: safeText(source.sceneKey || DEFAULT_SCENE_KEY, 160),
     sceneFingerprint: safeText(source.sceneFingerprint || '', 180),
     latestMesId: numberOr(source.latestMesId, 0),
     sourceRevisionHash: activeSourceRevisionHash(source),
-    visibleMessagesHash: hashJson(promptInstallVisibleMessages(source)),
-    sourceWindowContractHash: hashJson(contract.sourceWindow)
+    sourceWindow: sourceWindowMessages(source),
+    sourceWindowContractHash: hashJson({
+      sourceWindowMessages: retention.sourceWindowMessages,
+      sourceWindowCharacters: retention.sourceWindowCharacters
+    })
   };
 }
 
@@ -347,21 +360,75 @@ contract.
 
 ### Matching
 
+The host applies the source-window message and character bounds before runtime
+removes the latest assistant. When the window is full, the assistant output may
+displace one or more older source messages. The current pre-assistant window can
+therefore be a shorter exact suffix of the prepared basis without any source
+mutation.
+
 Matching is pure and exported by `src/runtime/prepared-generation.mjs`:
 
 ```js
-export function generationBasisMatches(expected, current) {
-  return expected?.chatKey === current?.chatKey
+export function compareGenerationBasis(
+  expected,
+  current,
+  { allowBoundedSuffix = false } = {}
+) {
+  const metadataMatches = expected?.chatKey === current?.chatKey
     && expected?.sceneKey === current?.sceneKey
     && expected?.sceneFingerprint === current?.sceneFingerprint
     && expected?.latestMesId === current?.latestMesId
-    && expected?.sourceRevisionHash === current?.sourceRevisionHash
-    && expected?.visibleMessagesHash === current?.visibleMessagesHash
     && expected?.sourceWindowContractHash === current?.sourceWindowContractHash;
+  if (!metadataMatches) {
+    return { matches: false, mode: 'none', reason: 'basis-metadata-mismatch' };
+  }
+
+  const expectedWindow = Array.isArray(expected?.sourceWindow)
+    ? expected.sourceWindow
+    : [];
+  const currentWindow = Array.isArray(current?.sourceWindow)
+    ? current.sourceWindow
+    : [];
+  if (!expectedWindow.length || !currentWindow.length) {
+    return { matches: false, mode: 'none', reason: 'basis-window-empty' };
+  }
+
+  if (
+    expected?.sourceRevisionHash === current?.sourceRevisionHash
+    && hashJson(expectedWindow) === hashJson(currentWindow)
+  ) {
+    return { matches: true, mode: 'exact', reason: 'basis-exact' };
+  }
+
+  if (
+    allowBoundedSuffix
+    && currentWindow.length < expectedWindow.length
+    && hashJson(currentWindow) === hashJson(
+      expectedWindow.slice(-currentWindow.length)
+    )
+  ) {
+    return {
+      matches: true,
+      mode: 'bounded-suffix',
+      reason: 'basis-observable-suffix'
+    };
+  }
+
+  return { matches: false, mode: 'none', reason: 'basis-window-mismatch' };
 }
 ```
 
-Every field is required. A missing field is a miss, not a partial match.
+Every metadata field and at least one currently observable source identity are
+required. A missing field or empty post-assistant source window is a miss.
+Suffix matching is allowed only for a classified latest-assistant swipe. Direct
+same-snapshot reuse and ordinary generation preparation require `mode:
+'exact'`.
+
+The basis stores only compact message identities and hashes, never source text.
+An edit, deletion, insertion, visibility change, or older-message swipe inside
+the observable suffix changes that suffix and produces a miss. A mutation
+outside Recursion's configured bounded window is intentionally outside the
+cache-freshness contract.
 
 ## Packet-Input Contract
 
@@ -477,7 +544,12 @@ The pure validator returns an explicit decision rather than a boolean:
 ```js
 export function validatePreparedGenerationArtifact(
   artifact,
-  { basis, packetInputHash, forceFresh = false } = {}
+  {
+    basis,
+    packetInputHash,
+    forceFresh = false,
+    allowBoundedSuffix = false
+  } = {}
 ) {
   if (forceFresh) {
     return { decision: 'bypassed', reason: 'force-fresh' };
@@ -488,15 +560,26 @@ export function validatePreparedGenerationArtifact(
   if (!preparedGenerationIntegrityIsValid(artifact)) {
     return { decision: 'invalid', reason: 'artifact-integrity' };
   }
-  if (!generationBasisMatches(artifact.basis, basis)) {
-    return { decision: 'miss', reason: 'generation-basis-mismatch' };
+  const basisComparison = compareGenerationBasis(
+    artifact.basis,
+    basis,
+    { allowBoundedSuffix }
+  );
+  if (!basisComparison.matches) {
+    return {
+      decision: 'miss',
+      reason: 'generation-basis-mismatch',
+      basisMode: basisComparison.mode,
+      basisReason: basisComparison.reason
+    };
   }
   if (artifact.contract.packetInputHash !== packetInputHash) {
     return { decision: 'miss', reason: 'packet-input-mismatch' };
   }
   return {
     decision: 'hit',
-    reason: 'prepared-generation-exact-match'
+    reason: 'prepared-generation-exact-match',
+    basisMode: basisComparison.mode
   };
 }
 ```
@@ -573,7 +656,8 @@ async function tryPreparedGenerationReuse({
     {
       basis,
       packetInputHash: contract.packetInputHash,
-      forceFresh
+      forceFresh,
+      allowBoundedSuffix: true
     }
   );
 
@@ -631,14 +715,25 @@ async function recheckPreparedGenerationBasis({
       swipeMessageId,
       settings
     );
-    if (!generationBasisMatches(expectedBasis, currentBasis)) {
+    const comparison = compareGenerationBasis(
+      expectedBasis,
+      currentBasis,
+      { allowBoundedSuffix: true }
+    );
+    if (!comparison.matches) {
       return {
         ok: false,
         reason: 'stale-generation-basis',
-        currentSnapshot
+        currentSnapshot,
+        comparison
       };
     }
-    return { ok: true, currentSnapshot, currentBasis };
+    return {
+      ok: true,
+      currentSnapshot,
+      currentBasis,
+      basisMode: comparison.mode
+    };
   } catch (error) {
     return {
       ok: false,
@@ -685,16 +780,25 @@ async function reinstallPreparedGeneration({
 
     if (!isActiveRun(runId)) return supersededResult(runId);
     const install = await installPrompt(host, artifact.packet);
-    if (install?.ok !== false) {
-      readyLastBrief(artifact.packet, artifact.hand, {
-        runId,
-        reason: 'prepared-generation-reused'
-      });
+    if (install?.ok === false) {
+      return {
+        ok: false,
+        reused: false,
+        reason: 'prompt-install-failed',
+        packet: artifact.packet,
+        hand: artifact.hand,
+        install
+      };
     }
+    readyLastBrief(artifact.packet, artifact.hand, {
+      runId,
+      reason: 'prepared-generation-reused'
+    });
     return {
       ok: true,
       reused: true,
       reason: 'prepared-generation-exact-match',
+      basisMode: freshness.basisMode,
       packet: artifact.packet,
       hand: artifact.hand,
       install
@@ -843,6 +947,7 @@ non-swipe packet validator.
   decision: 'hit',
   kind: 'prepared-generation',
   reason: 'prepared-generation-exact-match',
+  basisMode: 'exact | bounded-suffix',
   artifactHash: 'safe-hash',
   packetId: 'prompt-packet-...',
   handId: 'hand-...',
@@ -860,6 +965,9 @@ non-swipe packet validator.
 - `artifact-integrity`
 - `swipe-basis-unavailable`
 - `generation-basis-mismatch`
+- `basis-metadata-mismatch`
+- `basis-window-empty`
+- `basis-window-mismatch`
 - `packet-input-mismatch`
 - `force-fresh`
 - `explicit-regenerate`
@@ -921,10 +1029,17 @@ runtime views only. V1 does not persist it.
 ### Phase 1: Pure contract and failing tests
 
 1. Add `src/runtime/prepared-generation.mjs`.
-2. Add pure tests for artifact creation, integrity, basis matching, and
-   packet-input matching.
-3. Add failing runtime regressions for the known gaps before changing runtime
-   behavior.
+2. Add `tools/scripts/test-prepared-generation.mjs` for artifact creation,
+   integrity, exact and bounded-suffix basis matching, and packet-input
+   matching.
+3. Register the focused script in `tools/scripts/run-tests.mjs`; the maintained
+   alpha gate inherits it through `tools/scripts/run-alpha-gate.mjs`.
+4. Add failing runtime regressions for settings drift, final-install races,
+   stopped-swipe retry, and bounded-window displacement before changing
+   runtime behavior.
+5. Run each new regression red against the current runtime, then green against
+   the implementation. A test that never demonstrated the original failure is
+   not accepted as regression evidence.
 
 ### Phase 2: Canonical artifact ownership
 
@@ -939,11 +1054,12 @@ runtime views only. V1 does not persist it.
 
 1. Add `generationBasisForSnapshot(...)`.
 2. Add `generationBasisForLatestAssistantSwipe(...)`.
-3. Add `preparedGenerationSettingsSignature(...)`.
-4. Add active deck content revision hashing.
-5. Route direct same-snapshot and latest-assistant swipe reuse through one
+3. Add exact and observable-suffix `compareGenerationBasis(...)` modes.
+4. Add `preparedGenerationSettingsSignature(...)`.
+5. Add active deck content revision hashing.
+6. Route direct same-snapshot and latest-assistant swipe reuse through one
    validator.
-6. Keep Force Fresh and Regenerate ahead of reuse.
+7. Keep Force Fresh and Regenerate ahead of reuse.
 
 ### Phase 4: Freshness and stop lifecycle
 
@@ -975,11 +1091,205 @@ runtime views only. V1 does not persist it.
 2. Sync the tested source to the served Recursion extension.
 3. Hash-compare repository and served modules.
 4. Reload SillyTavern to avoid stale browser modules.
-5. Run the actual latest-assistant swipe path.
-6. Inspect provider calls, run journal, cache decision, installed packet ID,
-   visible progress, and chat shape.
+5. Retain the current synthetic served-module check as deterministic browser
+   evidence, not live-host certification.
+6. Expand `tools/scripts/prove-live-swipe-reuse.mjs` with a strict native-host
+   path that does not construct an in-page fake runtime or provider router.
+7. Drive the visible SillyTavern latest-assistant swipe control and actual
+   extension event/interceptor path.
+8. Inspect story-generation continuation, Recursion provider-call absence, run
+   journal, prompt store, cache decision, installed packet ID, visible
+   progress, and chat shape.
+
+## Test Methodology and Maintained Gates
+
+### Test ownership
+
+| Test surface | Owned methodology |
+| --- | --- |
+| `tools/scripts/test-prepared-generation.mjs` | Pure artifact schema, integrity, exact/suffix basis comparison, contract hashing, and decision reasons. |
+| `tools/scripts/test-runtime.mjs` | Provider-call counts, canonical artifact lifecycle, commit atomicity, stop/retry, Force Fresh, settings/deck/provider mutations, races, and diagnostics. |
+| `tools/scripts/test-extension-smoke.mjs` | `MESSAGE_SWIPED` classification, sparse payload fallback, event/interceptor overlap, and teardown. |
+| `tools/scripts/test-live-harness.mjs` | Dedicated-user rejection, strict-vs-synthetic proof classification, report shape, redaction, and fail-closed behavior. |
+| `tools/scripts/prove-live-swipe-reuse.mjs` | Actual served-copy and native SillyTavern swipe certification. |
+
+Add the focused pure test to the package and maintained suite:
+
+```json
+{
+  "scripts": {
+    "test:prepared-generation": "node tools/scripts/test-prepared-generation.mjs"
+  }
+}
+```
+
+`npm.cmd test` and `node tools/scripts/run-alpha-gate.mjs` must execute it
+through `run-tests.mjs`. A standalone passing command that is absent from the
+maintained gates is incomplete.
+
+### Red-green regression order
+
+Before runtime implementation, add and run focused failures for:
+
+1. full message-window displacement;
+2. character-budget displacement;
+3. packet-affecting settings drift;
+4. stopped-swipe marker preservation;
+5. source mutation during cached prompt installation.
+
+Record the expected failing assertion for each. Implement one contract boundary
+at a time, rerun the focused test, then rerun the complete maintained suite.
+
+### Table-driven one-variable mutation tests
+
+Contract and source mutation tests change exactly one field from a known-good
+artifact. Each row declares the expected cache decision, basis mode, provider
+call delta, and packet identity outcome:
+
+```js
+const cases = [
+  {
+    name: 'strength changes',
+    mutate: ({ settings }) => settingsStore.update({ strength: 'strong' }),
+    decision: 'miss',
+    reason: 'packet-input-mismatch',
+    providerCallsIncrease: true,
+    packetIdStable: false
+  },
+  {
+    name: 'enhancement depth changes',
+    mutate: ({ settings }) => settingsStore.update({
+      enhancements: { ...settings.enhancements, contextMessages: 20 }
+    }),
+    decision: 'hit',
+    reason: 'prepared-generation-exact-match',
+    providerCallsIncrease: false,
+    packetIdStable: true
+  }
+];
+
+for (const testCase of cases) {
+  const harness = await prepareKnownGoodArtifact();
+  await testCase.mutate(harness);
+  const beforeCalls = harness.providerCalls.length;
+  const result = await harness.swipe();
+  assertEqual(result.decision, testCase.decision, testCase.name);
+  assertEqual(result.reason, testCase.reason, testCase.name);
+  assertEqual(
+    harness.providerCalls.length > beforeCalls,
+    testCase.providerCallsIncrease,
+    testCase.name
+  );
+  assertEqual(
+    result.packet?.packetId === harness.originalPacketId,
+    testCase.packetIdStable,
+    testCase.name
+  );
+}
+```
+
+Do not reuse mutable settings, storage, runtime, or provider-call arrays across
+table rows. Every row starts from a fresh known-good artifact so failures remain
+attributable to the named mutation.
+
+### Cache-hit oracle
+
+No single signal is sufficient. A deterministic cache hit requires all of:
+
+- `result.reused === true`;
+- cache decision `hit`;
+- reason `prepared-generation-exact-match`;
+- expected `basisMode`;
+- unchanged artifact, packet, and hand IDs;
+- exactly one additional prompt installation;
+- zero additional Recursion provider calls;
+- no scene-cache read or write required by the hit;
+- no warning/error journal event;
+- host generation remains allowed to continue.
+
+A purple progress row or stable packet ID alone is supporting evidence, not a
+pass oracle.
+
+### Cache-miss oracle
+
+A deliberate miss requires:
+
+- the exact expected miss/bypass reason;
+- no cached packet installation;
+- a new packet ID after successful normal preparation;
+- the expected provider roles for the active pipeline;
+- no stale artifact mutation before the new candidate installs;
+- no fallback to a different cache kind being mislabeled as a Prepared
+  Generation hit.
+
+### Performance methodology
+
+The functional performance contract is zero provider and storage work on a hit.
+Add a deterministic 20-swipe loop using `performance.now()`:
+
+```js
+const elapsed = [];
+for (let index = 0; index < 20; index += 1) {
+  host.advanceLatestAssistantSwipeIdentity();
+  const startedAt = performance.now();
+  const result = await runtime.prepareForGeneration({
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  elapsed.push(performance.now() - startedAt);
+  assertEqual(result.reused, true, `repeat swipe ${index + 1}`);
+}
+
+assert(Math.max(...elapsed) <= 250, 'prepared swipe reuse stays below 250ms');
+```
+
+The deterministic harness uses immediate fake prompt installation and no
+artificial sleeps. Report median and maximum elapsed time. Live proof records
+elapsed time for regression evidence but does not use a machine-independent
+latency threshold; its pass oracle remains zero Recursion provider calls and
+successful native host continuation.
 
 ## Required Deterministic Tests
+
+### Bounded-window displacement
+
+Message-cap fixture:
+
+1. Prepare a packet from exactly `sourceWindowMessages` visible source rows.
+2. Append the latest assistant output so host bounding displaces the oldest
+   source row.
+3. Remove the output through
+   `generationBasisForLatestAssistantSwipe(...)`.
+4. Prove the remaining identities exactly equal the suffix of the prepared
+   basis.
+5. Require a hit with `basisMode: 'bounded-suffix'` and zero provider calls.
+
+Character-cap fixture:
+
+1. Fill the source window to within a few characters of
+   `sourceWindowCharacters`.
+2. Append a long assistant output that displaces multiple older source rows
+   before runtime sees the bounded host snapshot.
+3. Remove the output and prove the still-observable identities form the exact
+   prepared suffix.
+4. Require the same bounded-suffix hit.
+
+Negative controls:
+
+- edit the first currently observable suffix row -> miss;
+- change an observable older assistant's `swipeId` -> miss;
+- insert a new source row inside the observable suffix -> miss;
+- delete a non-prefix row from the observable suffix -> miss;
+- present an empty pre-assistant observable window -> miss with
+  `basis-window-empty`;
+- change only a row outside both configured bounds -> hit, because it is
+  outside Recursion's declared freshness contract;
+- request suffix matching for a direct same-snapshot reuse -> miss; suffix mode
+  is latest-assistant-swipe-only.
+
+Pure tests assert `compareGenerationBasis(...)` directly. Runtime tests also
+assert the provider-call and prompt-install oracles so a correct pure matcher
+cannot be wired incorrectly.
 
 ### Standard, Rapid, and Fused exact reuse
 
@@ -1010,6 +1320,30 @@ assertEqual(second.packet.packetId, packetId);
 assertEqual(providerCalls.length, callsAfterFirst);
 assertEqual(runtime.view().lastCacheDecision.kind, 'prepared-generation');
 ```
+
+Run this fixture once with a short exact basis and once with a full bounded
+window. The short case requires `basisMode: 'exact'`; the full case requires
+`basisMode: 'bounded-suffix'`.
+
+### Repeated swipe lifecycle
+
+For Standard, Rapid, and Fused, run:
+
+```text
+prepare -> swipe -> swipe -> stop -> swipe -> swipe
+```
+
+Across the complete sequence, assert:
+
+- every swipe reuses the committed artifact;
+- no swipe adds a Recursion provider call;
+- packet, hand, and artifact IDs remain stable;
+- each attempt performs exactly one prompt installation;
+- each attempt records exactly one cache decision;
+- event/interceptor overlap does not duplicate installation;
+- stopping preserves the artifact and re-arms classification;
+- no retry marker survives after its attempt is consumed;
+- no age-based expiry occurs.
 
 ### Stop then swipe
 
@@ -1057,6 +1391,12 @@ assertEqual(result.skipped, true);
 assertEqual(result.reason, 'stale-generation-basis');
 assertEqual(installed.length, installsBeforeReuse);
 ```
+
+Also assert:
+
+- no successful cache-hit journal event is written after the stale recheck;
+- the previously committed artifact remains byte-identical;
+- a superseding run can subsequently prepare and install normally.
 
 ### Contract mutations
 
@@ -1110,6 +1450,54 @@ These must force a miss:
 - late provider completion cannot replace the committed artifact;
 - Force Fresh and explicit Regenerate always bypass.
 
+### Atomicity and failure injection
+
+Use controlled promises to stop execution at:
+
+- candidate composed but not installed;
+- cached hit validated but waiting for prompt mutation;
+- prompt installation in progress;
+- old provider result completing after supersession;
+- scene-cache save completing after prompt installation.
+
+At every boundary, capture the committed artifact hash before release. Require:
+
+- a failed or superseded candidate never becomes committed;
+- a failed cached installation retains the previous artifact;
+- a successful new installation changes the artifact exactly once;
+- late provider or storage completion cannot overwrite the newer artifact;
+- `lastPacket` and `lastHand` views always come from the same committed
+  artifact.
+
+### Privacy and diagnostic methodology
+
+Seed fixtures with unique canaries for:
+
+- transcript text;
+- card prompt text;
+- provider endpoint;
+- provider profile ID;
+- model name;
+- API key and bearer token.
+
+Then run hit, miss, invalid, stale-recheck, and install-failure paths. Pass
+exported diagnostics, journals, progress details, and
+`preparedGenerationSummary(...)` through the existing `assertNoSecretText`
+helper and explicit canary checks:
+
+```js
+for (const canary of privateCanaries) {
+  assert(
+    !JSON.stringify(publicEvidence).includes(canary),
+    `prepared generation evidence omits ${canary}`
+  );
+}
+assertNoSecretText(publicEvidence, 'prepared generation evidence');
+```
+
+The trusted in-memory packet and hand are excluded from this redaction oracle;
+the public summary, cache decisions, journal, and exported diagnostics are not.
+
 ## Extension and Host-Boundary Tests
 
 Extension smoke must prove:
@@ -1131,20 +1519,84 @@ on the preceding user row.
 The live proof must use a dedicated `recursion-soak-*` user and the actually
 served extension copy.
 
+### Proof classification
+
+The existing `prove-live-swipe-reuse.mjs` path imports the served runtime in a
+browser page but constructs an in-memory host and fake provider router. Preserve
+that useful check as `served-module` evidence, but it cannot produce a strict
+live pass.
+
+A strict pass must:
+
+- use the runtime mounted by the installed extension;
+- use SillyTavern's real `context.chat`;
+- trigger the visible/native latest-assistant swipe control;
+- pass through the actual `MESSAGE_SWIPED` subscription and generation
+  interceptor;
+- use the real prompt store and host generation path;
+- never call `createRecursionRuntime(...)` or install a fake provider router
+  inside `page.evaluate(...)`.
+
+The report records one of:
+
+- `served-module-pass`;
+- `strict-live-pass`;
+- `fail`;
+- `environment-fail`;
+- `stale-extension`;
+- `unsafe-user`.
+
+Only `strict-live-pass` satisfies this design's live acceptance criterion.
+
+### Strict oracle
+
+Capture these baselines before the native swipe:
+
+- chat row count, latest assistant `mesid`, `swipe_id`, and `swipes.length`;
+- committed artifact, packet, and hand IDs;
+- Recursion run-journal tail position;
+- Recursion provider-call start count by role;
+- prompt-store hashes for Recursion-owned keys;
+- browser network request count for host story generation.
+
+After the swipe settles, require:
+
+- the same assistant row remains latest;
+- `swipes.length` increases and the active `swipe_id` selects the new variant;
+- at least one host story-generation request occurred;
+- no new Recursion `provider.call.started` journal entry exists;
+- no Recursion provider request role was observed;
+- artifact, packet, and hand IDs are unchanged;
+- Recursion prompt-store hashes match the prepared packet;
+- exactly one `prepared-generation` cache decision exists for the attempt;
+- no warning/error journal event or visible failure state exists;
+- the assistant response completes through the real host path.
+
+Network observation is supporting evidence for host continuation. The
+run-journal provider-role delta is the authoritative Recursion-call oracle
+because the host story model and Recursion providers may share an HTTP
+endpoint.
+
 Required sequence:
 
-1. Load a chat with a bounded source window and generate an assistant reply.
-2. Record the installed Prompt Packet ID and provider-role call counts.
-3. Trigger a native latest-assistant swipe.
-4. Verify the assistant remains one chat row with multiple SillyTavern swipes.
-5. Verify the Prompt Packet ID is unchanged.
-6. Verify no Recursion provider request occurred.
-7. Verify diagnostics report a `prepared-generation` hit.
-8. Stop a later swipe attempt.
-9. Swipe again.
-10. Verify the stopped-swipe retry also makes zero Recursion provider calls.
-11. Arm Force Fresh and swipe again.
-12. Verify a new packet ID and new provider calls.
+1. Verify the repository, installed extension, and served extension are
+   byte-identical.
+2. Run once with a short-window fixture and once with a configured-bound
+   fixture.
+3. Generate an assistant reply through visible SillyTavern controls.
+4. Record the strict-oracle baselines.
+5. Trigger a native latest-assistant swipe.
+6. Verify one assistant row now owns multiple SillyTavern swipes.
+7. Verify artifact, Prompt Packet, and hand IDs are unchanged.
+8. Verify no Recursion provider request occurred.
+9. Verify diagnostics report a `prepared-generation` hit with the expected
+   `exact` or `bounded-suffix` basis mode.
+10. Repeat a native swipe and verify another zero-call hit.
+11. Stop a later swipe attempt.
+12. Swipe again and verify the stopped-swipe retry makes zero Recursion
+    provider calls.
+13. Arm Force Fresh and swipe again.
+14. Verify a new artifact/packet ID and new Recursion provider calls.
 
 Evidence must include:
 
@@ -1157,12 +1609,19 @@ Evidence must include:
 - chat message ID, active swipe ID, and swipe count without raw story text.
 
 A failed live proof remains a failure. Tests or mock-provider evidence do not
-substitute for the actual host path.
+substitute for the actual host path. Screenshots and traces are suppressed
+during generation-enabled proof because they may capture story text; the strict
+machine-readable report is the certification artifact.
 
 ## Acceptance Criteria
 
 - Latest-assistant swipes with an unchanged generation basis and packet-input
   contract reinstall the exact same packet and hand.
+- Full message- and character-bounded windows reuse through an exact observable
+  suffix without requiring the displaced source rows to remain in the current
+  host snapshot.
+- Any mutation inside the observable suffix rejects reuse; an empty observable
+  pre-assistant window rejects reuse.
 - Exact hits make zero Recursion provider calls in Standard, Rapid, and Fused.
 - The assistant output's text and active swipe ID do not prevent legitimate
   reuse.
@@ -1181,9 +1640,18 @@ substitute for the actual host path.
 - Elapsed time alone does not invalidate an otherwise exact artifact.
 - Valid zero-card packets can be reused.
 - Force Fresh and explicit Regenerate always bypass reuse.
+- Twenty repeated deterministic swipes preserve artifact, packet, and hand
+  identity, make zero Recursion provider/storage calls, and each complete
+  within the documented 250ms deterministic ceiling.
 - Diagnostics report exact decisions and skipped provider roles without raw
   prompt, transcript, card, swipe, provider, or secret content.
-- Deterministic suites and the served SillyTavern proof both pass.
+- Pure, runtime, extension, and live-harness tests are registered in the
+  maintained test and alpha gates.
+- Known regressions demonstrate red-before-green evidence.
+- The strict live proof uses the mounted extension, native SillyTavern swipe
+  path, real prompt store, and real run journal; synthetic served-module proof
+  is not accepted as live certification.
+- Deterministic suites and the strict native SillyTavern proof both pass.
 
 ## Rejected Alternatives
 

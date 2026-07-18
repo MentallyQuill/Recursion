@@ -246,6 +246,10 @@ function proofScript() {
 }
 
 async function nativeProof(page, { timeoutMs, pipelineModes }) {
+  await page.waitForFunction(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+    return Array.isArray(context?.characters) && context.characters.length > 0;
+  }, null, { timeout: timeoutMs });
   const chatSetup = await page.evaluate(async () => {
     const readContext = () => globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
     let context = readContext();

@@ -1,4 +1,15 @@
-import { cacheContractVersions, createRecursionRuntime, filterCardsForCardEligibility, filterPlanForCardEligibility, rapidWarmContractVersions } from '../../src/runtime.mjs';
+import {
+  activeDeckRevisionHash,
+  cacheContractVersions,
+  createRecursionRuntime,
+  filterCardsForCardEligibility,
+  filterPlanForCardEligibility,
+  generationBasisForLatestAssistantSwipe,
+  generationBasisForSnapshot,
+  preparedGenerationContract,
+  preparedGenerationSettingsSignature,
+  rapidWarmContractVersions
+} from '../../src/runtime.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
@@ -79,6 +90,268 @@ function assertNotEqual(actual, expected, message) {
 
 function runtimeHasOwnMethod(runtime, name) {
   return typeof runtime?.[name] === 'function';
+}
+
+const preparedGenerationSettings = {
+  enabled: true,
+  mode: 'auto',
+  pipelineMode: 'fused',
+  cardScope: defaultCardScope(),
+  strength: 'strong',
+  minCards: 2,
+  maxCards: 7,
+  reasoningLevel: 'high',
+  promptFootprint: 'rich',
+  focus: 'scene',
+  reasonerUse: 'always',
+  storyFormOverride: 'screenplay',
+  injection: { placement: 'in_chat', role: 'user', depth: 3 },
+  retention: {
+    sourceWindowMessages: 24,
+    sourceWindowCharacters: 12000,
+    providerVisibleMessages: 18
+  },
+  providers: {
+    utility: {
+      source: 'openai-compatible',
+      hostConnectionProfileId: 'utility-profile',
+      openAICompatible: {
+        baseUrl: 'https://utility.example.test/v1',
+        model: 'utility-model',
+        sessionApiKeyPresent: true
+      },
+      temperature: 0.2,
+      topP: 0.8,
+      maxTokens: 4096,
+      configRevision: 2,
+      health: { status: 'healthy' }
+    },
+    reasoner: {
+      source: 'host-connection-profile',
+      hostConnectionProfileId: 'reasoner-profile',
+      openAICompatible: {
+        baseUrl: 'https://reasoner.example.test/v1',
+        model: 'reasoner-model',
+        sessionApiKeyPresent: false
+      },
+      temperature: 0.4,
+      topP: 0.9,
+      maxTokens: 8192,
+      configRevision: 4,
+      health: { status: 'unhealthy' }
+    }
+  },
+  enhancements: { mode: 'redirect', target: 'on', applyMode: 'replace', contextMessages: 21 },
+  diagnostics: { includeExcerpts: true },
+  ui: { viewerOpen: true, tooltipsEnabled: false }
+};
+
+const preparedGenerationSnapshot = {
+  chatId: 'task-2a-chat',
+  chatKey: 'task-2a-chat',
+  sceneKey: 'task-2a-scene',
+  sceneFingerprint: 'task-2a-scene-fingerprint',
+  latestMesId: 9,
+  sourceRevisionHash: 'task-2a-source-revision',
+  messages: [
+    {
+      mesid: 7,
+      role: 'assistant',
+      text: 'Older assistant text must not be stored in the basis.',
+      swipeId: 2,
+      swipeCount: 3,
+      activeSwipeTextHash: 'older-assistant-active-swipe',
+      visible: true
+    },
+    { mesid: 8, role: 'user', text: 'The current player request.', visible: true },
+    { mesid: 9, role: 'system', text: 'Current scene state.', visible: true }
+  ]
+};
+
+{
+  const basis = generationBasisForSnapshot(preparedGenerationSnapshot, preparedGenerationSettings);
+  assertDeepEqual(basis, {
+    chatKey: 'task-2a-chat',
+    sceneKey: 'task-2a-scene',
+    sceneFingerprint: 'task-2a-scene-fingerprint',
+    latestMesId: 9,
+    sourceRevisionHash: 'task-2a-source-revision',
+    sourceWindow: [
+      {
+        mesid: 7,
+        role: 'assistant',
+        textHash: hashJson('Older assistant text must not be stored in the basis.'),
+        swipeId: 2,
+        swipeCount: 3,
+        activeSwipeTextHash: 'older-assistant-active-swipe'
+      },
+      { mesid: 8, role: 'user', textHash: hashJson('The current player request.') },
+      { mesid: 9, role: 'system', textHash: hashJson('Current scene state.') }
+    ],
+    sourceWindowContractHash: hashJson({ sourceWindowMessages: 24, sourceWindowCharacters: 12000 })
+  }, 'generation basis normalizes a compact text-free source identity');
+  assertEqual(JSON.stringify(basis).includes('current player request'), false, 'generation basis does not retain source text');
+  assertEqual(generationBasisForSnapshot({ messages: [] }, preparedGenerationSettings), null, 'empty normal basis rejects reuse');
+}
+
+{
+  const swipeSnapshot = {
+    ...preparedGenerationSnapshot,
+    sourceRevisionHash: '',
+    latestMesId: 10,
+    messages: [
+      ...preparedGenerationSnapshot.messages,
+      { mesid: 10, role: 'assistant', text: 'This is the output being replaced.', swipeId: 1, swipeCount: 2, visible: true }
+    ]
+  };
+  const sourceBeforeAssistant = { ...preparedGenerationSnapshot, sourceRevisionHash: '' };
+  const basis = generationBasisForLatestAssistantSwipe(swipeSnapshot, 10, preparedGenerationSettings);
+  assertDeepEqual(basis, generationBasisForSnapshot(sourceBeforeAssistant, preparedGenerationSettings), 'swipe basis removes only the latest visible assistant');
+  assertEqual(generationBasisForLatestAssistantSwipe(swipeSnapshot, 999, preparedGenerationSettings), null, 'wrong swipe message id rejects reuse');
+  assertEqual(generationBasisForLatestAssistantSwipe(preparedGenerationSnapshot, 9, preparedGenerationSettings), null, 'missing latest assistant rejects reuse');
+  assertEqual(generationBasisForLatestAssistantSwipe({
+    latestMesId: 10,
+    messages: [{ mesid: 10, role: 'assistant', text: 'Only assistant output.', visible: true }]
+  }, 10, preparedGenerationSettings), null, 'assistant-only swipe basis rejects reuse');
+}
+
+{
+  const baseline = generationBasisForSnapshot(preparedGenerationSnapshot, preparedGenerationSettings);
+  const messageBoundSettings = clone(preparedGenerationSettings);
+  messageBoundSettings.retention.sourceWindowMessages = 23;
+  const characterBoundSettings = clone(preparedGenerationSettings);
+  characterBoundSettings.retention.sourceWindowCharacters = 11000;
+  assertNotEqual(
+    generationBasisForSnapshot(preparedGenerationSnapshot, messageBoundSettings).sourceWindowContractHash,
+    baseline.sourceWindowContractHash,
+    'message source-window cap changes the basis contract hash'
+  );
+  assertNotEqual(
+    generationBasisForSnapshot(preparedGenerationSnapshot, characterBoundSettings).sourceWindowContractHash,
+    baseline.sourceWindowContractHash,
+    'character source-window cap changes the basis contract hash'
+  );
+}
+
+{
+  const hostBoundedSwipeSnapshot = {
+    chatId: 'host-shaped-chat',
+    sceneKey: 'host-shaped-scene',
+    sceneFingerprint: 'host-shaped-fingerprint',
+    latestMesId: 32,
+    messages: [
+      { mesid: 30, is_user: false, name: 'Mara', mes: 'Earlier assistant source.', swipe_id: 1, swipes: ['Earlier assistant source.', 'Alternate earlier assistant source.'] },
+      { mesid: 31, is_user: true, name: 'Player', mes: 'Host-bounded user request.' },
+      { mesid: 32, is_user: false, name: 'Mara', mes: 'Assistant output being swiped.', swipe_id: 0, swipes: ['Assistant output being swiped.'] }
+    ]
+  };
+  const basis = generationBasisForLatestAssistantSwipe(hostBoundedSwipeSnapshot, 32, preparedGenerationSettings);
+  assertDeepEqual(basis.sourceWindow.map((message) => ({ mesid: message.mesid, role: message.role })), [
+    { mesid: 30, role: 'assistant' },
+    { mesid: 31, role: 'user' }
+  ], 'host-shaped bounded swipe fixture removes its latest assistant without requiring system messages');
+  assertEqual(basis.sourceWindow.some((message) => message.role === 'system'), false, 'host-shaped bounded fixture has no synthetic system source');
+}
+
+{
+  const original = preparedGenerationContract(preparedGenerationSettings);
+  const mutations = [
+    ['enabled', (settings) => { settings.enabled = false; }],
+    ['mode', (settings) => { settings.mode = 'manual'; }],
+    ['pipelineMode', (settings) => { settings.pipelineMode = 'rapid'; }],
+    ['cardScope', (settings) => { settings.cardScope.families['Scene Frame'].enabled = false; }],
+    ['strength', (settings) => { settings.strength = 'light'; }],
+    ['minCards', (settings) => { settings.minCards = 1; }],
+    ['maxCards', (settings) => { settings.maxCards = 8; }],
+    ['reasoningLevel', (settings) => { settings.reasoningLevel = 'ultra'; }],
+    ['promptFootprint', (settings) => { settings.promptFootprint = 'compact'; }],
+    ['focus', (settings) => { settings.focus = 'plot'; }],
+    ['storyFormOverride', (settings) => { settings.storyFormOverride = 'present-first-person'; }],
+    ['injection.placement', (settings) => { settings.injection.placement = 'in_prompt'; }],
+    ['injection.role', (settings) => { settings.injection.role = 'system'; }],
+    ['injection.depth', (settings) => { settings.injection.depth = 4; }],
+    ['retention.sourceWindowMessages', (settings) => { settings.retention.sourceWindowMessages = 23; }],
+    ['retention.sourceWindowCharacters', (settings) => { settings.retention.sourceWindowCharacters = 11000; }],
+    ['retention.providerVisibleMessages', (settings) => { settings.retention.providerVisibleMessages = 17; }],
+    ...['utility', 'reasoner'].flatMap((lane) => [
+      [`providers.${lane}.source`, (settings) => { settings.providers[lane].source = 'host-current-model'; }],
+      [`providers.${lane}.hostConnectionProfileId`, (settings) => { settings.providers[lane].hostConnectionProfileId = `${lane}-profile-next`; }],
+      [`providers.${lane}.openAICompatible.baseUrl`, (settings) => { settings.providers[lane].openAICompatible.baseUrl = `https://${lane}-next.example.test/v1`; }],
+      [`providers.${lane}.openAICompatible.model`, (settings) => { settings.providers[lane].openAICompatible.model = `${lane}-model-next`; }],
+      [`providers.${lane}.openAICompatible.sessionApiKeyPresent`, (settings) => { settings.providers[lane].openAICompatible.sessionApiKeyPresent = !settings.providers[lane].openAICompatible.sessionApiKeyPresent; }],
+      [`providers.${lane}.temperature`, (settings) => { settings.providers[lane].temperature += 0.1; }],
+      [`providers.${lane}.topP`, (settings) => { settings.providers[lane].topP -= 0.1; }],
+      [`providers.${lane}.maxTokens`, (settings) => { settings.providers[lane].maxTokens -= 1; }],
+      [`providers.${lane}.configRevision`, (settings) => { settings.providers[lane].configRevision += 1; }]
+    ])
+  ];
+  for (const [label, mutate] of mutations) {
+    const changed = clone(preparedGenerationSettings);
+    mutate(changed);
+    assertNotEqual(preparedGenerationContract(changed).packetInputHash, original.packetInputHash, `${label} changes the packet-input hash`);
+  }
+  const rawReasonerUseOverride = clone(preparedGenerationSettings);
+  rawReasonerUseOverride.reasonerUse = 'off';
+  assertEqual(
+    preparedGenerationContract(rawReasonerUseOverride).packetInputHash,
+    original.packetInputHash,
+    'equivalent raw reasonerUse does not change the packet-input hash when reasoning level is unchanged'
+  );
+}
+
+{
+  const deckSettings = clone(preparedGenerationSettings);
+  deckSettings.cardDecks = {
+    activeCardDeckId: 'task-2a-deck',
+    customCardDecks: {
+      'task-2a-deck': {
+        id: 'task-2a-deck',
+        name: 'Task 2A Deck',
+        categoryOrder: ['scene-frame'],
+        categories: { 'scene-frame': { id: 'scene-frame', name: 'Scene Frame' } },
+        cardOrderByCategory: { 'scene-frame': ['active-card'] },
+        cards: {
+          'active-card': {
+            id: 'active-card',
+            categoryId: 'scene-frame',
+            name: 'Active Card',
+            promptText: 'Original active card prompt.',
+            selectionState: 'active',
+            builtinFamily: 'Scene Frame'
+          }
+        }
+      }
+    }
+  };
+  const cardId = 'active-card';
+  const before = activeDeckRevisionHash(deckSettings);
+  const beforePacketInputHash = preparedGenerationContract(deckSettings).packetInputHash;
+  deckSettings.cardDecks.customCardDecks['task-2a-deck'].cards[cardId].promptText = 'Updated active card prompt.';
+  assertNotEqual(activeDeckRevisionHash(deckSettings), before, 'active card prompt text changes the deck revision hash');
+  assertNotEqual(preparedGenerationContract(deckSettings).packetInputHash, beforePacketInputHash, 'active card prompt text changes the packet-input hash');
+}
+
+{
+  const baseline = preparedGenerationContract(preparedGenerationSettings).packetInputHash;
+  const neutralMutations = [
+    ['enhancement mode', (settings) => { settings.enhancements.mode = 'repair'; }],
+    ['enhancement apply mode', (settings) => { settings.enhancements.applyMode = 'as-swipe'; }],
+    ['enhancement context', (settings) => { settings.enhancements.contextMessages = 7; }],
+    ['diagnostics', (settings) => { settings.diagnostics.includeExcerpts = false; }],
+    ['ui', (settings) => { settings.ui.viewerOpen = false; }],
+    ['utility health', (settings) => { settings.providers.utility.health.status = 'timeout'; }],
+    ['reasoner health', (settings) => { settings.providers.reasoner.health.status = 'healthy'; }]
+  ];
+  for (const [label, mutate] of neutralMutations) {
+    const changed = clone(preparedGenerationSettings);
+    mutate(changed);
+    assertEqual(preparedGenerationContract(changed).packetInputHash, baseline, `${label} does not change the packet-input hash`);
+  }
+  const signature = preparedGenerationSettingsSignature(preparedGenerationSettings);
+  assertEqual(signature.reasonerUse, 'always', 'settings signature includes normalized reasoner use');
+  assertEqual(Object.hasOwn(signature, 'enhancements'), false, 'settings signature omits enhancement settings');
+  assertEqual(Object.hasOwn(signature, 'diagnostics'), false, 'settings signature omits diagnostics settings');
+  assertEqual(Object.hasOwn(signature, 'ui'), false, 'settings signature omits UI settings');
 }
 
 {

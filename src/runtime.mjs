@@ -94,6 +94,7 @@ import {
 import { runFusedCardPipeline } from './runtime/pipelines/fused.mjs';
 import { runRapidForegroundPipeline, warmRapidPipeline } from './runtime/pipelines/rapid.mjs';
 import { runStandardCardPipeline } from './runtime/pipelines/standard.mjs';
+import { PREPARED_GENERATION_VERSION } from './runtime/prepared-generation.mjs';
 import { createRuntimeRunState } from './runtime/run-state.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
@@ -1310,6 +1311,143 @@ function sceneCacheLatestHand(hand, packet = null) {
 
 function activeSourceRevisionHash(snapshot) {
   return safeText(snapshot?.sourceRevisionHash || sourceWindowFingerprint(snapshot), 180);
+}
+
+function latestVisibleAssistantEntry(snapshot) {
+  const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.visible === false) continue;
+    if (!String(message?.text ?? '').trim()) continue;
+    if (safeProviderRole(message?.role) !== 'assistant') return null;
+    return { message, index };
+  }
+  return null;
+}
+
+function latestVisibleMesId(messages = []) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.visible === false) continue;
+    if (!String(message?.text ?? '').trim()) continue;
+    return numberOr(message?.mesid, index);
+  }
+  return 0;
+}
+
+function snapshotWithoutLatestAssistant(snapshot, entry) {
+  if (!entry) return null;
+  const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+  const nextMessages = messages.filter((_, index) => index !== entry.index);
+  return normalizeSnapshot({
+    ...snapshot,
+    latestMesId: latestVisibleMesId(nextMessages),
+    messages: nextMessages,
+    sourceRevisionHash: '',
+    turnFingerprint: ''
+  });
+}
+
+export function generationBasisForSnapshot(snapshot, settings = {}) {
+  const source = normalizeSnapshot(snapshot);
+  const sourceWindow = sourceWindowMessages(source);
+  if (!sourceWindow.length) return null;
+  const retention = normalizeRetentionSettings(settings?.retention);
+  return {
+    chatKey: safeText(source.chatKey || DEFAULT_CHAT_ID, 160),
+    sceneKey: safeText(source.sceneKey || DEFAULT_SCENE_KEY, 160),
+    sceneFingerprint: safeText(source.sceneFingerprint || '', 180),
+    latestMesId: numberOr(source.latestMesId, 0),
+    sourceRevisionHash: activeSourceRevisionHash(source),
+    sourceWindow,
+    sourceWindowContractHash: hashJson({
+      sourceWindowMessages: retention.sourceWindowMessages,
+      sourceWindowCharacters: retention.sourceWindowCharacters
+    })
+  };
+}
+
+export function generationBasisForLatestAssistantSwipe(snapshot, messageId = null, settings = {}) {
+  const normalizedSnapshot = normalizeSnapshot(snapshot);
+  const latestAssistant = latestVisibleAssistantEntry(normalizedSnapshot);
+  if (!latestAssistant) return null;
+  const latestMessageId = numberOr(latestAssistant.message?.mesid, latestAssistant.index);
+  if (messageId !== null && messageId !== latestMessageId) return null;
+  const sourceBeforeAssistant = snapshotWithoutLatestAssistant(normalizedSnapshot, latestAssistant);
+  return sourceBeforeAssistant
+    ? generationBasisForSnapshot(sourceBeforeAssistant, settings)
+    : null;
+}
+
+export function preparedGenerationSettingsSignature(settings = {}) {
+  const normalized = settingsWithRuntimeCardScope(settings, { normalize: true });
+  const source = asObject(settings);
+  const retention = normalizeRetentionSettings(normalized.retention);
+  const providerSignature = (lane) => {
+    const provider = asObject(normalized.providers?.[lane]);
+    const rawProvider = asObject(source.providers?.[lane]);
+    const rawOpenAICompatible = asObject(rawProvider.openAICompatible);
+    return cacheProviderSettingsSignature({
+      ...provider,
+      openAICompatible: {
+        ...asObject(provider.openAICompatible),
+        sessionApiKeyPresent: rawOpenAICompatible.sessionApiKeyPresent === true
+      }
+    });
+  };
+  return {
+    enabled: normalized.enabled,
+    mode: normalized.mode,
+    pipelineMode: normalized.pipelineMode,
+    cardScope: normalized.cardScope,
+    strength: normalized.strength,
+    minCards: normalized.minCards,
+    maxCards: normalized.maxCards,
+    reasoningLevel: normalized.reasoningLevel,
+    promptFootprint: normalized.promptFootprint,
+    focus: normalized.focus,
+    reasonerUse: normalized.reasonerUse,
+    storyFormOverride: normalized.storyFormOverride,
+    injection: normalizeInjectionSettings(normalized.injection),
+    retention: {
+      sourceWindowMessages: retention.sourceWindowMessages,
+      sourceWindowCharacters: retention.sourceWindowCharacters,
+      providerVisibleMessages: retention.providerVisibleMessages
+    },
+    providers: {
+      utility: providerSignature('utility'),
+      reasoner: providerSignature('reasoner')
+    }
+  };
+}
+
+export function activeDeckRevisionHash(settings = {}) {
+  const eligibility = activeCardDeckEligibility(settings);
+  return hashJson({
+    activeDeckId: eligibility.activeDeckId,
+    sourceCardsByFamily: activeCardDeckSourceCards(settings)
+  });
+}
+
+export function preparedGenerationContract(settings = {}) {
+  const cacheVersions = cacheContractVersions(settings);
+  const contract = {
+    preparedGenerationVersion: PREPARED_GENERATION_VERSION,
+    promptPacketVersion: PROMPT_PACKET_VERSION,
+    runtimeCacheContractVersion: RUNTIME_CACHE_CONTRACT_VERSION,
+    promptContractHash: cacheVersions.promptContractHash,
+    providerContractHash: cacheVersions.providerContractHash,
+    cardCatalogHash: cacheVersions.cardCatalogHash,
+    activeDeckRevisionHash: activeDeckRevisionHash(settings),
+    cardEligibilityHash: cacheVersions.cardEligibilityHash
+  };
+  return {
+    ...contract,
+    packetInputHash: hashJson({
+      ...contract,
+      settings: preparedGenerationSettingsSignature(settings)
+    })
+  };
 }
 
 function cloneCacheVariants(cache) {
@@ -2702,41 +2840,6 @@ export function createRecursionRuntime({
         ...(messageId !== null ? { messageId } : {})
       }
     };
-  }
-
-  function latestVisibleAssistantEntry(snapshot) {
-    const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message?.visible === false) continue;
-      if (!String(message?.text ?? '').trim()) continue;
-      if (safeProviderRole(message?.role) !== 'assistant') return null;
-      return { message, index };
-    }
-    return null;
-  }
-
-  function latestVisibleMesId(messages = []) {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message?.visible === false) continue;
-      if (!String(message?.text ?? '').trim()) continue;
-      return numberOr(message?.mesid, index);
-    }
-    return 0;
-  }
-
-  function snapshotWithoutLatestAssistant(snapshot, entry) {
-    if (!entry) return null;
-    const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
-    const nextMessages = messages.filter((_, index) => index !== entry.index);
-    return normalizeSnapshot({
-      ...snapshot,
-      latestMesId: latestVisibleMesId(nextMessages),
-      messages: nextMessages,
-      sourceRevisionHash: '',
-      turnFingerprint: ''
-    });
   }
 
   function sameSourceBeforeLatestAssistant(currentSnapshot, previousSnapshot, latestAssistantEntry) {

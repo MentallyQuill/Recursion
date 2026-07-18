@@ -202,6 +202,23 @@ function proofScript() {
         generationType: 'swipe'
       });
       const secondView = runtime.view();
+      const safeHash = (value) => {
+        let result = 2166136261;
+        for (const character of String(value || '')) {
+          result ^= character.charCodeAt(0);
+          result = Math.imul(result, 16777619);
+        }
+        return value ? (result >>> 0).toString(16).padStart(8, '0') : '';
+      };
+      const safeSnapshotSummary = (snapshot) => ({
+        chatIdHash: safeHash(snapshot?.chatId),
+        sceneKeyHash: safeHash(snapshot?.sceneKey),
+        sourceRevisionHash: String(snapshot?.sourceRevisionHash || ''),
+        latestMesId: Number(snapshot?.latestMesId || 0),
+        messageCount: Array.isArray(snapshot?.messages) ? snapshot.messages.length : 0,
+        sourceWindowTruncated: snapshot?.sourceWindowTruncated === true,
+        sourceWindowLimitReason: String(snapshot?.sourceWindowLimitReason || '')
+      });
       return {
         pipelineMode,
         swipePayloadEndedOnUser: Boolean(swipePayloadUserMessage),
@@ -215,8 +232,8 @@ function proofScript() {
         installCount: installs.length,
         firstPacketSnapshotHash: installs[0]?.snapshotHash || '',
         secondPacketSnapshotHash: installs[1]?.snapshotHash || '',
-        firstSnapshot: firstView.lastSnapshot || null,
-        secondSnapshot: secondView.lastSnapshot || null,
+        firstSnapshot: safeSnapshotSummary(firstView.lastSnapshot),
+        secondSnapshot: safeSnapshotSummary(secondView.lastSnapshot),
         cacheDecision: secondView.lastCacheDecision || null
       };
     }
@@ -245,20 +262,32 @@ function proofScript() {
   };
 }
 
-async function nativeProof(page, { timeoutMs, pipelineModes }) {
+async function nativeProof(page, { timeoutMs, pipelineModes, characterName = '', chatFile = '' }) {
   await page.waitForFunction(() => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
     return Array.isArray(context?.characters) && context.characters.length > 0;
-  }, null, { timeout: timeoutMs });
-  const chatSetup = await page.evaluate(async () => {
+  }, null, { timeout: timeoutMs }).catch(() => {
+    fail('native-stage-timeout', 'Timed out waiting for SillyTavern characters.', { stage: 'characters-ready' });
+  });
+  const chatSetup = await page.evaluate(async ({ requestedCharacter, requestedChatFile }) => {
     const readContext = () => globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
     let context = readContext();
     if (!context) return { ok: false, reason: 'context-unavailable' };
     const characters = Array.isArray(context.characters) ? context.characters : [];
     if (characters.length === 0) return { ok: false, reason: 'character-unavailable' };
-    let characterIndex = Number(context.characterId);
+    let characterIndex = requestedCharacter
+      ? characters.findIndex((entry) => {
+          const expected = requestedCharacter.toLowerCase();
+          const name = String(entry?.name || '').trim().toLowerCase();
+          const avatar = String(entry?.avatar || '').trim().toLowerCase();
+          return name === expected || avatar === expected || avatar.replace(/\.png$/i, '') === expected;
+        })
+      : Number(context.characterId);
     if (!Number.isInteger(characterIndex) || characterIndex < 0 || characterIndex >= characters.length) {
+      if (requestedCharacter) return { ok: false, reason: 'requested-character-unavailable' };
       characterIndex = 0;
+    }
+    if (Number(context.characterId) !== characterIndex) {
       if (typeof context.selectCharacterById !== 'function') {
         return { ok: false, reason: 'select-character-unavailable' };
       }
@@ -266,16 +295,19 @@ async function nativeProof(page, { timeoutMs, pipelineModes }) {
       context = readContext() || context;
     }
     const character = (Array.isArray(context.characters) ? context.characters : characters)[characterIndex] || characters[characterIndex];
-    const chatFile = String(character?.chat || context.chatId || context.currentChatId || '').replace(/\.jsonl$/i, '');
-    if (chatFile && typeof context.openCharacterChat === 'function') {
-      await context.openCharacterChat(chatFile);
+    const selectedChatFile = String(requestedChatFile || character?.chat || context.chatId || context.currentChatId || '').replace(/\.jsonl$/i, '');
+    if (selectedChatFile && typeof context.openCharacterChat === 'function') {
+      await context.openCharacterChat(selectedChatFile);
     }
     return {
       ok: true,
       characterIndex,
       characterName: String(character?.name || ''),
-      chatFile
+      chatFile: selectedChatFile
     };
+  }, {
+    requestedCharacter: String(characterName || '').trim(),
+    requestedChatFile: String(chatFile || '').trim()
   });
   if (!chatSetup?.ok) {
     fail('native-chat-unavailable', 'A dedicated native SillyTavern character chat is required.', chatSetup || {});
@@ -286,13 +318,19 @@ async function nativeProof(page, { timeoutMs, pipelineModes }) {
       'textarea[name="send_textarea"]',
       'textarea[aria-label*="message" i]',
       'textarea[placeholder*="message" i]',
-      '[contenteditable="true"][aria-label*="message" i]'
+      '[contenteditable="true"][aria-label*="message" i]',
+      '[contenteditable="true"]'
     ];
     return selectors.some((selector) => [...document.querySelectorAll(selector)].some((node) => {
       const style = getComputedStyle(node);
       return style.display !== 'none' && style.visibility !== 'hidden' && node.getClientRects().length > 0;
     }));
-  }, null, { timeout: timeoutMs });
+  }, null, { timeout: timeoutMs }).catch(() => {
+    fail('native-stage-timeout', 'Timed out waiting for a visible SillyTavern message input.', {
+      stage: 'visible-input-ready',
+      chatSetup
+    });
+  });
 
   async function setPipeline(pipelineMode) {
     const result = await page.evaluate(async (mode) => {
@@ -357,13 +395,39 @@ async function nativeProof(page, { timeoutMs, pipelineModes }) {
       return userIndex >= 0
         && chat.slice(userIndex + 1).some((entry) => entry?.is_user === false
           && String(entry?.mes || entry?.message || entry?.text || '').trim());
-    }, message, { timeout: timeoutMs });
+    }, message, { timeout: timeoutMs }).catch(async () => {
+      const evidence = await page.evaluate(() => {
+        const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+        const chat = Array.isArray(context.chat) ? context.chat : [];
+        const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+        return {
+          chatLength: chat.length,
+          latestRole: chat.at(-1)?.is_user === true ? 'user' : (chat.at(-1)?.is_user === false ? 'assistant' : ''),
+          hostGenerationActive: view.hostGenerationActive === true,
+          activeRun: Boolean(view.activeRunId),
+          activityPhase: String(view.activity?.phase || ''),
+          activityOutcome: String(view.activity?.outcome || ''),
+          activitySeverity: String(view.activity?.severity || ''),
+          activityLabel: String(view.activity?.label || ''),
+          utilityCapability: String(view.settings?.providerCapability?.utility?.status || ''),
+          sendDisabled: document.querySelector('#send_but')?.disabled === true
+        };
+      });
+      fail('native-stage-timeout', 'Timed out waiting for the native assistant response.', {
+        stage: 'assistant-response',
+        evidence
+      });
+    });
     await page.waitForFunction(() => {
       const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
       return Boolean(view.lastPreparedGeneration?.artifactHash)
         && view.hostGenerationActive !== true
         && !view.activeRunId;
-    }, null, { timeout: timeoutMs });
+    }, null, { timeout: timeoutMs }).catch(() => {
+      fail('native-stage-timeout', 'Timed out waiting for the prepared generation artifact.', {
+        stage: 'prepared-artifact'
+      });
+    });
   }
 
   function nativeStateScript() {
@@ -434,7 +498,12 @@ async function nativeProof(page, { timeoutMs, pipelineModes }) {
       return Number(view.lastCacheDecision?.sequence || 0) > Number(sequence || 0)
         && view.lastCacheDecision?.kind === 'prepared-generation'
         && view.lastCacheDecision?.decision === 'hit';
-    }, Number(before.cacheDecision?.sequence || 0), { timeout: timeoutMs });
+    }, Number(before.cacheDecision?.sequence || 0), { timeout: timeoutMs }).catch(() => {
+      fail('native-stage-timeout', `${pipelineMode} did not record a prepared-generation hit.`, {
+        stage: 'prepared-cache-decision',
+        pipelineMode
+      });
+    });
     await page.waitForFunction((previous) => {
       const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
       const chat = Array.isArray(context.chat) ? context.chat : [];
@@ -446,7 +515,12 @@ async function nativeProof(page, { timeoutMs, pipelineModes }) {
         && runtimeView.hostGenerationActive !== true
         && !runtimeView.activeRunId
         && (swipeCount > previous.assistantSwipeCount || swipeId !== previous.assistantSwipeId);
-    }, before, { timeout: timeoutMs });
+    }, before, { timeout: timeoutMs }).catch(() => {
+      fail('native-stage-timeout', `${pipelineMode} native swipe generation did not settle.`, {
+        stage: 'native-swipe-continuation',
+        pipelineMode
+      });
+    });
     const after = await page.evaluate(nativeStateScript());
     const providerIdsBefore = new Set(before.providerJournalIds);
     const providerJournalDelta = after.providerJournalIds.filter((id) => !providerIdsBefore.has(id));
@@ -531,7 +605,12 @@ async function main() {
     if (pipelineModes.length === 0) fail('missing-pipelines', 'No valid swipe proof pipelines were configured.');
     const proof = synthetic
       ? await page.evaluate(proofScript())
-      : await nativeProof(page, { timeoutMs, pipelineModes });
+      : await nativeProof(page, {
+          timeoutMs,
+          pipelineModes,
+          characterName: env.RECURSION_LIVE_CHARACTER || '',
+          chatFile: env.RECURSION_LIVE_CHAT_FILE || ''
+        });
     if (!proof?.ok) fail('live-swipe-reuse-failed', 'Latest assistant swipe reuse proof failed.', proof || {});
     console.log(JSON.stringify({
       status: 'pass',

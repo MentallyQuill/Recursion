@@ -40,6 +40,8 @@ assert(swipeReuseProofSource.includes("mode: 'native-host-playwright'"), 'swipe 
 assert(swipeReuseProofSource.includes('.swipe_right'), 'native swipe proof drives the visible SillyTavern swipe control');
 assert(swipeReuseProofSource.includes("globalThis.__recursionLiveHarnessRuntime"), 'native swipe proof inspects the installed extension runtime');
 assert(swipeReuseProofSource.includes("fail('stale-extension'"), 'swipe proof fails closed when repository and served copies differ');
+assert(swipeReuseProofSource.includes('safeSnapshotSummary'), 'synthetic swipe evidence summarizes snapshots without transcript rows');
+assert(!swipeReuseProofSource.includes('firstSnapshot: firstView.lastSnapshot'), 'synthetic swipe evidence does not export a trusted snapshot verbatim');
 assertEqual(liveEditorialStageTimeoutMs('settings', 180000), 15000, 'settings transition has a short fail-fast deadline');
 assertEqual(liveEditorialStageTimeoutMs('warm', 180000), 540000, 'Rapid warm allows its sequential provider deadlines');
 assertEqual(liveEditorialStageTimeoutMs('prepare', 180000), 180000, 'preparation uses one configured live timeout');

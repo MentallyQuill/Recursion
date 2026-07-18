@@ -371,7 +371,9 @@ Every candidate passes these gates before it becomes a SillyTavern message:
    evidence item; all installed cards are accounted for. The installed-card
    IDs come from the configured source cards that contributed to the frozen
    hand, in runtime order. Generated packet text may enrich those cards through
-   their frozen `packetRefs`, but it does not replace their IDs.
+   their frozen `packetRefs`, but it does not replace their IDs. An empty
+   configured hand remains empty, and snapshot construction does not truncate
+   the configured-card or generated-packet ledgers at an arbitrary count.
 5. **Claim floor:** preservation claims must cite continuity, scene-support, or
    hard-constraint evidence; source-draft and source-negative citations cannot
    protect a fact.

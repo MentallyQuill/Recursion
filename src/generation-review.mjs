@@ -100,7 +100,7 @@ export function eligibleGenerationReviewTargets(targets = {}) {
 }
 
 function publicInstalledHand(value = []) {
-  return (Array.isArray(value) ? value : []).slice(0, 48).map((card) => ({
+  return (Array.isArray(value) ? value : []).map((card) => ({
     cardId: safeText(card?.cardId || card?.id || '', 160),
     categoryId: safeText(card?.categoryId || '', 160),
     name: safeText(card?.name || '', 120),
@@ -108,8 +108,8 @@ function publicInstalledHand(value = []) {
     promptText: safeText(card?.promptText || '', 1200),
     kind: safeText(card?.kind || '', 40),
     selectionState: safeText(card?.selectionState || '', 40),
-    packetRefs: (Array.isArray(card?.packetRefs) ? card.packetRefs : []).map((entry) => safeText(entry, 120)).filter(Boolean).slice(0, 16),
-    sourceCardIds: (Array.isArray(card?.sourceCardIds) ? card.sourceCardIds : []).map((entry) => safeText(entry, 160)).filter(Boolean).slice(0, 32)
+    packetRefs: (Array.isArray(card?.packetRefs) ? card.packetRefs : []).map((entry) => safeText(entry, 120)).filter(Boolean),
+    sourceCardIds: (Array.isArray(card?.sourceCardIds) ? card.sourceCardIds : []).map((entry) => safeText(entry, 160)).filter(Boolean)
   })).filter((card) => card.cardId && card.promptText);
 }
 
@@ -132,7 +132,7 @@ function textList(value, limit = 16, itemLimit = 160) {
 }
 
 function publicPacketCardEvidence(value = []) {
-  return (Array.isArray(value) ? value : []).slice(0, 16).map((card) => ({
+  return (Array.isArray(value) ? value : []).map((card) => ({
     id: safeText(card?.id || '', 160),
     family: safeText(card?.family || card?.name || '', 120),
     promptText: safeText(card?.promptText || '', 1600),
@@ -229,24 +229,13 @@ export function publicGenerationReviewSnapshot(snapshot = {}) {
       .find(Boolean);
     return generated ? { ...card, promptText: generated.promptText } : card;
   });
-  const generatedHand = promptPacket.cardEvidence.map((card) => ({
-    cardId: card.id,
-    categoryId: '',
-    name: card.family,
-    description: '',
-    promptText: card.promptText,
-    kind: 'generated-card',
-    selectionState: 'active',
-    packetRefs: [card.id],
-    sourceCardIds: []
-  }));
   return {
     deck: {
       id: safeText(source?.deck?.id || '', 160),
       name: safeText(source?.deck?.name || '', 160),
       revisionHash: safeText(source?.deck?.revisionHash || '', 180)
     },
-    installedHand: configuredHand.length ? configuredHand : generatedHand,
+    installedHand: configuredHand,
     promptPacket,
     lastBrief: publicLastBrief(source.lastBrief),
     storyForm: publicStoryForm(source.storyForm),

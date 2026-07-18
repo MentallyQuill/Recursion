@@ -94,7 +94,10 @@ Editorial regressions must separate mechanical integrity from model-owned semant
 Repair card-ledger regressions must prepare a real frozen hand from configurable
 source cards, preserve only the source-card IDs that contributed to that hand,
 and use generated packet text through frozen `packetRefs` without replacing
-those IDs. The first Transform result is validated strictly. A missing,
+those IDs. Tests include an explicitly empty configured hand, the full supported
+20-card generated packet, and more than 48 configured source-card obligations
+to prevent generated-ID fallback or fixed-count truncation. The first Transform
+result is validated strictly. A missing,
 duplicate, unknown, or invalid outcome may consume exactly one shared correction
 request. If the corrected Repair still lacks coverage while its bounded patch
 remains independently safe, tests require exactly one applied swipe or

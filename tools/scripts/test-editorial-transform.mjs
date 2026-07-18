@@ -68,6 +68,47 @@ const longReviewSnapshot = publicGenerationReviewSnapshot({
   }
 });
 const longReviewEvidence = buildEditorialEvidence(longReviewSnapshot, sourceText);
+const emptyConfiguredReviewSnapshot = publicGenerationReviewSnapshot({
+  installedHand: [],
+  promptPacket: {
+    cardEvidence: [{
+      id: 'generated-evidence-only',
+      family: 'Scene Frame',
+      promptText: 'Generated packet evidence without a configured installed-card obligation.'
+    }]
+  }
+});
+assertDeepEqual(
+  emptyConfiguredReviewSnapshot.installedHand,
+  [],
+  'an explicitly empty configured hand never promotes generated packet IDs into Editorial obligations'
+);
+const largeConfiguredCards = Array.from({ length: 52 }, (_, index) => ({
+  cardId: `configured-card-${index + 1}`,
+  name: `Configured Card ${index + 1}`,
+  promptText: `Generic configured prompt ${index + 1}.`,
+  packetRefs: [`generated-card-${(index % 20) + 1}`]
+}));
+const largePacketCards = Array.from({ length: 20 }, (_, index) => ({
+  id: `generated-card-${index + 1}`,
+  family: `Generated Family ${index + 1}`,
+  promptText: `Generated scene-specific evidence ${index + 1}.`
+}));
+const largeConfiguredReviewSnapshot = publicGenerationReviewSnapshot({
+  installedHand: largeConfiguredCards,
+  promptPacket: { cardEvidence: largePacketCards }
+});
+assertEqual(largeConfiguredReviewSnapshot.installedHand.length, 52, 'Editorial snapshot preserves every configured card that contributed to the frozen hand');
+assertEqual(largeConfiguredReviewSnapshot.promptPacket.cardEvidence.length, 20, 'Editorial snapshot preserves the complete supported generated packet ledger');
+assert(
+  largeConfiguredReviewSnapshot.installedHand[51].promptText.includes('Generated scene-specific evidence 12'),
+  'configured cards beyond the old truncation boundary still receive generated packet evidence through packetRefs'
+);
+assertEqual(
+  buildEditorialEvidence(largeConfiguredReviewSnapshot, sourceText).filter((entry) => entry.kind === 'installed-card').length,
+  52,
+  'Editorial evidence preserves every dynamic configured-card obligation beyond the old fixed boundary'
+);
 const sourceHash = 'source-a';
 const snapshotHash = 'snapshot-a';
 const diagnosis = {

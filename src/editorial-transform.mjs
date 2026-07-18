@@ -163,7 +163,7 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
   const packetCardsById = new Map(packetCards.map((card) => [String(card?.id || ''), card]));
   const installedCards = array(data.installedHand);
   const evidenceCards = installedCards.length ? installedCards : packetCards;
-  for (const [index, card] of evidenceCards.slice(0, 48).entries()) {
+  for (const card of evidenceCards) {
     const cardId = String(card?.cardId || card?.id || '').trim();
     if (!cardId) continue;
     const generated = array(card?.packetRefs)
@@ -176,16 +176,18 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
       card?.hardConstraint ? 'hard-constraint' : 'scene-support',
       generated?.promptText || card.promptText || card.description || card.name
     );
-    if (index >= 47) break;
   }
   if (brief.userTurn || brief.userMessage) addEvidence(entries, 'brief:turn', 'last-brief', 'continuity-fact', brief.userTurn || brief.userMessage);
   if (Object.keys(storyForm).length) addEvidence(entries, 'story-form:0', 'story-form', 'hard-constraint', JSON.stringify(storyForm));
   for (const [index, sentence] of sourceSentences(source).entries()) addEvidence(entries, `source:${index}`, 'source-draft', 'source-draft', sentence);
-  let total = 0;
+  let retainedNonCardEvidence = 0;
+  let totalNonCardEvidence = 0;
   return entries.filter((entry) => {
-    if (entries.indexOf(entry) >= MAX_EVIDENCE) return false;
-    if (total + entry.excerpt.length > MAX_TOTAL_EVIDENCE) return false;
-    total += entry.excerpt.length;
+    if (entry.kind === 'installed-card') return true;
+    if (retainedNonCardEvidence >= MAX_EVIDENCE) return false;
+    if (totalNonCardEvidence + entry.excerpt.length > MAX_TOTAL_EVIDENCE) return false;
+    retainedNonCardEvidence += 1;
+    totalNonCardEvidence += entry.excerpt.length;
     return true;
   });
 }

@@ -106,6 +106,31 @@ const mutationNegativeControls = [
     failure: 'enhancement-before-state-missing'
   },
   {
+    label: 'zero-swipe source state',
+    input: {
+      ...mutationInput,
+      before: { ...beforeMutation, swipeCount: 0, swipeId: 0 },
+      after: { ...afterMutation, swipeCount: 1, swipeId: 0 }
+    },
+    failure: 'enhancement-before-state-missing'
+  },
+  {
+    label: 'out-of-range selected source swipe',
+    input: {
+      ...mutationInput,
+      before: { ...beforeMutation, swipeCount: 1, swipeId: 1 }
+    },
+    failure: 'enhancement-before-state-missing'
+  },
+  {
+    label: 'out-of-range selected final swipe',
+    input: {
+      ...mutationInput,
+      after: { ...afterMutation, swipeCount: 2, swipeId: 2 }
+    },
+    failure: 'enhancement-after-state-missing'
+  },
+  {
     label: 'trusted booleans without concrete evidence',
     input: {
       enhancement: mutationInput.enhancement,

@@ -51,13 +51,18 @@ function object(value) {
 
 function hasMutationState(value) {
   const state = object(value);
+  const swipeCount = Number(state.swipeCount);
+  const swipeId = Number(state.swipeId);
   return text(state.chatKey)
     && state.messageId !== null
     && state.messageId !== ''
     && Number.isInteger(Number(state.messageId))
     && Number(state.messageId) >= 0
-    && Number.isInteger(Number(state.swipeCount))
-    && Number.isInteger(Number(state.swipeId))
+    && Number.isInteger(swipeCount)
+    && swipeCount >= 1
+    && Number.isInteger(swipeId)
+    && swipeId >= 0
+    && swipeId < swipeCount
     && typeof state.text === 'string';
 }
 

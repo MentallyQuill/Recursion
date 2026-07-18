@@ -6,6 +6,7 @@ import { createGenerationRouter } from '../../src/providers.mjs';
 import { providerConfigHash } from '../../src/provider-capability.mjs';
 import { hashJson } from '../../src/core.mjs';
 import { REDIRECT_ERROR_CODES, REDIRECT_VERIFICATION_CHECKS } from '../../src/editorial-transform.mjs';
+import { buildGenerationReviewTargets } from '../../src/generation-review.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const source = 'She smiled. "Who sent you?" He told her the sender name, then reached for the latch.';
@@ -347,6 +348,191 @@ assertEqual(transformCorrectionResult.ok, true, 'runtime corrects invalid candid
 const transformerCalls = transformCalls.filter((call) => call.roleId === 'editorialTransformer');
 assertEqual(transformerCalls.length, 2, 'runtime uses exactly one semantic correction for invalid candidate evidence');
 assert(transformerCalls[1].request.prompt.includes('Editorial pass correction required'), 'transform semantic correction names the rejected pass contract');
+
+{
+  const repairSource = 'The waitress repeated the same motion. Teal watched the loop without blinking.';
+  const repairTargets = buildGenerationReviewTargets(repairSource);
+  const repairTarget = repairTargets.prose[0];
+  const repairMessage = {
+    messageId: 2,
+    chatKey: 'editorial-repair-card-coverage-chat',
+    swipeId: 0,
+    text: repairSource,
+    swipes: [repairSource]
+  };
+  let repairSnapshot = {
+    chatId: repairMessage.chatKey,
+    chatKey: repairMessage.chatKey,
+    sceneKey: 'scene',
+    sceneFingerprint: 'scene-fp',
+    turnFingerprint: 'turn-fp',
+    latestMesId: 1,
+    messages: [{ mesid: 1, role: 'user', text: 'Keep the diner loop grounded.', visible: true }]
+  };
+  let repairTransformAttempts = 0;
+  const appendedRepairSwipes = [];
+  const repairStorage = createStorageRepository({ storage: createMemoryStorageAdapter() });
+  const repairRuntime = createRecursionRuntime({
+    host: {
+      async snapshot() { return repairSnapshot; },
+      messages: {
+        activeAssistantMessageIdentity() {
+          return { ...repairMessage, originalHash: hashJson(repairSource) };
+        },
+        async holdAssistantMessage() {
+          repairMessage.text = '';
+          return { ok: true };
+        },
+        async revealAssistantMessage() {
+          repairMessage.text = repairSource;
+          return { ok: true };
+        },
+        async appendAssistantMessageSwipe(_id, text, options) {
+          repairMessage.text = text;
+          repairMessage.swipes.push(text);
+          appendedRepairSwipes.push({ text, options });
+          return { ok: true };
+        },
+        async findEnhancedSwipe() { return null; }
+      },
+      prompt: {
+        async install() { return { ok: true, installed: true }; },
+        async clear() { return { ok: true, cleared: true }; }
+      }
+    },
+    settingsStore: createSettingsStore({ root: {} }),
+    storage: repairStorage,
+    activity: createActivityReporter(),
+    generationRouter: {
+      async generate(roleId, request) {
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.utilityArbiter.v1',
+              snapshotHash: request.snapshotHash,
+              action: 'refresh-cards',
+              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame' }],
+              budgets: { targetBriefTokens: 500, maxCards: 1 },
+              reasonerDecision: { mode: 'skip', reason: 'repair coverage regression' }
+            }
+          };
+        }
+        if (roleId === 'sceneFrameCard') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.card.v1',
+              role: 'sceneFrameCard',
+              family: 'Scene Frame',
+              snapshotHash: request.snapshotHash,
+              items: [{
+                promptText: 'Keep the diner loop and active cast grounded.',
+                evidenceRefs: ['message:1'],
+                tokenEstimate: 8
+              }]
+            }
+          };
+        }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Keep the diner loop grounded.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: []
+            }
+          };
+        }
+        if (roleId === 'editorialDiagnostician') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.editorialDiagnosis.v1',
+              mode: 'repair',
+              sourceHash: request.sourceHash,
+              snapshotHash: request.snapshotHash,
+              decision: 'proceed',
+              brief: {
+                mode: 'repair',
+                diagnosis: [{
+                  dimension: 'anti-slop',
+                  problem: 'The repeated-motion sentence is flat.',
+                  evidenceRefs: ['source:0']
+                }],
+                preserve: [],
+                discard: [{ claim: 'Flat repeated-motion wording.', evidenceRefs: ['source:0'] }],
+                allowedChanges: ['Repair the first sentence.'],
+                forbiddenChanges: ['Do not alter the diner-loop fact.']
+              }
+            }
+          };
+        }
+        if (roleId === 'editorialTransformer') {
+          repairTransformAttempts += 1;
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.editorialPass.v1',
+              mode: 'repair',
+              sourceHash: request.sourceHash,
+              snapshotHash: request.snapshotHash,
+              diagnosisHash: request.diagnosisHash,
+              cardOutcomes: [],
+              patches: [{
+                id: repairTarget.id,
+                before: repairTarget.before,
+                after: 'The waitress reset the same table with the precision of a machine.',
+                domain: 'narrative-execution',
+                evidenceRefs: ['source:0']
+              }]
+            }
+          };
+        }
+        throw new Error(`unexpected repair coverage role ${roleId}`);
+      }
+    }
+  });
+  const prepared = await repairRuntime.prepareForGeneration({ hostGeneration: true });
+  assertEqual(prepared.ok, true, 'repair coverage setup installs a prompt packet');
+  assert(repairRuntime.view().lastPreparedGeneration?.hand?.cards?.length > 0, 'repair coverage setup has an installed card obligation');
+  repairSnapshot = {
+    ...repairSnapshot,
+    latestMesId: 2,
+    messages: [
+      ...repairSnapshot.messages,
+      { mesid: 2, role: 'assistant', text: repairSource, visible: true }
+    ]
+  };
+  await repairRuntime.updateSettings({ enhancements: { mode: 'repair', applyMode: 'as-swipe' } });
+  const repaired = await repairRuntime.enhanceLatestAssistantMessage({ reason: 'repair-card-coverage-regression' });
+  assertEqual(repairTransformAttempts, 2, 'Repair first spends its one semantic correction on missing card coverage');
+  assertEqual(repaired.ok, true, 'Repair retains an independently safe patch after repeated card-ledger failure');
+  assertEqual(repaired.partialFailed, true, 'Repair reports recovered card-ledger coverage as partial-failed');
+  assertEqual(appendedRepairSwipes.length, 1, 'partial-failed Repair appends exactly one safe swipe');
+  assertEqual(repairRuntime.view().editorialResult?.status, 'partial-failed', 'partial-failed Repair remains visibly unhealthy');
+  assertDeepEqual(
+    repairRuntime.view().activity?.detail?.unresolvedCardIds,
+    repaired.unresolvedCardIds,
+    'partial-failed Repair exposes its dynamic unresolved installed-card IDs to progress rendering'
+  );
+  assertDeepEqual(
+    repairRuntime.view().activity?.detail?.cardOutcomes,
+    repaired.marker.cardOutcomes,
+    'partial-failed Repair exposes the recovered card ledger to progress rendering'
+  );
+  assert(
+    repaired.marker.cardOutcomes.every((outcome) => outcome.status === 'partially-reflected'),
+    'partial-failed Repair marks reconstructed card outcomes as unresolved'
+  );
+  const repairJournal = await repairStorage.loadRunJournal(repairMessage.chatKey);
+  const repairSettlement = repairJournal.entries.find((entry) => entry.event === 'editorial.run.settled');
+  assertEqual(repairSettlement.severity, 'error', 'partial-failed Repair persists an unhealthy terminal severity');
+  assertEqual(repairSettlement.details.status, 'partial-failed', 'partial-failed Repair persists its exact terminal status');
+}
 
 const failedSource = 'Mara kept her hand on the latch.';
 const failedMessage = { messageId: 28, chatKey: 'editorial-transform-failure-chat', swipeId: 0, text: failedSource, swipes: [failedSource] };
@@ -1044,6 +1230,20 @@ assertEqual(acceptedRedirect.state.calls.length, 0, 'verified Redirect cache reu
 assertDeepEqual(cachedRedirectResult.marker, acceptedRedirect.state.persistedMarker, 'cached Redirect returns the persisted accepted marker');
 assertDeepEqual(acceptedRedirect.state.selected.at(-1).options.marker, acceptedRedirect.state.persistedMarker, 'cached Redirect selects with the persisted accepted marker');
 assert(acceptedRedirect.state.persistedMarker.key.endsWith('::verify'), 'Redirect cache identity always records mandatory verification');
+
+const partialCachedRedirect = createRedirectHarness({
+  cachedMarkerFactory: (marker) => ({
+    ...marker,
+    outcome: 'partial-failed',
+    verification: 'accept',
+    candidateHash: 'partial-candidate',
+    unresolvedCardIds: ['custom-card']
+  })
+});
+await partialCachedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const partialCachedRedirectResult = await partialCachedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-partial-cache-test' });
+assertEqual(partialCachedRedirectResult.cached, undefined, 'partial-failed Editorial swipe is never reused as a healthy cached result');
+assert(partialCachedRedirect.state.calls.length > 0, 'partial-failed cache entry falls through to a fresh Editorial run');
 
 const directCachedRedirect = createRedirectHarness({
   cachedMarkerFactory: (marker) => ({ ...marker, verification: 'not-required', candidateHash: 'direct-candidate' })

@@ -4161,7 +4161,9 @@ export function createRecursionRuntime({
       editorialSettlementRecorded = true;
       const status = safeText(editorialSettlement.status || 'error', 40);
       const outcome = safeText(editorialSettlement.outcome || 'original-kept', 80);
-      const severity = status === 'error' ? 'error' : (status === 'warning' ? 'warn' : 'info');
+      const severity = ['error', 'partial-failed'].includes(status)
+        ? 'error'
+        : (status === 'warning' ? 'warn' : 'info');
       return appendJournalSafe(runId, identity.chatKey, {
         event: 'editorial.run.settled',
         severity,
@@ -4245,8 +4247,11 @@ export function createRecursionRuntime({
     const existing = await messages.findEnhancedSwipe?.(messageId, markerBase);
     if (existing && applyMode === 'as-swipe' && typeof messages.selectAssistantMessageSwipe === 'function') {
       const persistedMarker = asObject(existing.marker);
-      const verifiedForMode = editorialMode !== 'redirect'
-        || (persistedMarker.verification === 'accept' && safeText(persistedMarker.candidateHash, 180));
+      const verifiedForMode = persistedMarker.outcome !== 'partial-failed'
+        && (
+          editorialMode !== 'redirect'
+          || (persistedMarker.verification === 'accept' && safeText(persistedMarker.candidateHash, 180))
+        );
       if (verifiedForMode) {
         await messages.selectAssistantMessageSwipe(messageId, existing.index, { marker: persistedMarker });
         setEditorialResult({
@@ -4478,7 +4483,17 @@ export function createRecursionRuntime({
         });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
         validation = transformResponse.result?.ok === true
-          ? validateEditorialPass(transformResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, snapshot: publicSnapshot, targets })
+          ? validateEditorialPass(transformResponse.result.data, {
+              mode: editorialMode,
+              sourceText,
+              sourceHash,
+              snapshotHash,
+              diagnosisHash,
+              diagnosis: diagnosisValidation.value,
+              snapshot: publicSnapshot,
+              targets,
+              recoverCardCoverage: editorialMode === 'repair'
+            })
           : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
       }
       if (!validation.ok) return { ...failEditorial(validation.error), validation };
@@ -4628,13 +4643,16 @@ export function createRecursionRuntime({
       if (!transformedText || transformedText === sourceText) {
         return failEditorial({ code: 'RECURSION_EDITORIAL_NO_EFFECT', message: 'Editorial transform returned no effective revision.' });
       }
+      const editorialPartialFailed = validation.partialFailed === true;
       const marker = {
         ...markerBase,
         diagnosisHash,
         candidateHash: candidateHash || hashJson(transformedText),
         producerLane: transformResponse.lane,
         verification: verificationResult.decision,
+        outcome: editorialPartialFailed ? 'partial-failed' : 'applied',
         cardOutcomes: validation.cardOutcomes,
+        unresolvedCardIds: validation.unresolvedCardIds || [],
         preservationLedger: validation.artifact.candidate?.preservationLedger || [],
         changeLedger: validation.artifact.candidate?.changeLedger || [],
         riskFlags: validation.artifact.candidate?.riskFlags || [],
@@ -4676,8 +4694,8 @@ export function createRecursionRuntime({
       }
       setEditorialResult({
         mode: editorialMode,
-        status: 'success',
-        outcome: 'applied',
+        status: editorialPartialFailed ? 'partial-failed' : 'success',
+        outcome: editorialPartialFailed ? 'partial-failed' : 'applied',
         applyMode,
         verification: verificationResult.decision,
         candidateHash: marker.candidateHash,
@@ -4686,12 +4704,40 @@ export function createRecursionRuntime({
         changeLedger: marker.changeLedger,
         riskFlags: marker.riskFlags,
         cardOutcomes: marker.cardOutcomes,
+        unresolvedCardIds: marker.unresolvedCardIds,
         redirectCharacterCount: Array.isArray(marker.redirect?.characterPressure) ? marker.redirect.characterPressure.length : 0,
         redirectRequiredBeatCount: Array.isArray(marker.redirect?.requiredBeats) ? marker.redirect.requiredBeats.length : 0
       });
       enhanced = true;
-      settleRuntimeActivity({ runId, phase: 'settled', severity: 'success', label: `${editorialMode} applied.`, chips: ['Enhancement', editorialMode], detail: { mode: editorialMode, applyMode, verification: verificationResult.decision } });
-      return { ok: true, mode: editorialMode, messageId, sourceHash, enhancedHash: marker.candidateHash, marker, artifact: validation.artifact, verification: verificationResult };
+      settleRuntimeActivity({
+        runId,
+        phase: 'settled',
+        severity: editorialPartialFailed ? 'error' : 'success',
+        label: editorialPartialFailed
+          ? `${editorialMode} partially applied; card review remains unresolved.`
+          : `${editorialMode} applied.`,
+        chips: editorialPartialFailed ? ['Enhancement', 'Partial failed'] : ['Enhancement', editorialMode],
+        detail: {
+          mode: editorialMode,
+          applyMode,
+          verification: verificationResult.decision,
+          partialFailed: editorialPartialFailed,
+          cardOutcomes: marker.cardOutcomes,
+          unresolvedCardIds: marker.unresolvedCardIds
+        }
+      });
+      return {
+        ok: true,
+        partialFailed: editorialPartialFailed,
+        unresolvedCardIds: marker.unresolvedCardIds,
+        mode: editorialMode,
+        messageId,
+        sourceHash,
+        enhancedHash: marker.candidateHash,
+        marker,
+        artifact: validation.artifact,
+        verification: verificationResult
+      };
     } catch (error) {
       if (enhancementSignal?.aborted) return canceledEditorialResult();
       return failEditorial({

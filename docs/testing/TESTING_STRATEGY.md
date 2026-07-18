@@ -91,6 +91,19 @@ Generation Review requests must expose the frozen `sourceHash`, eligible target 
 
 Editorial regressions must separate mechanical integrity from model-owned semantic judgment. Diagnosis, Transform, and Verification requests expose frozen evidence IDs as structured fields; Transform also exposes installed-card and repair-target IDs. Provider tests bind frozen identities and permit Redirect diagnosis fields to cite any request-known evidence ID while Repair/Recompose preservation remains narrower. Deterministic diagnosis tests reject fabricated IDs, stale hashes, malformed layouts, and unsafe bounds, but must not reject or rewrite known citations because of authority placement, character coverage, or pressure interpretation. Runtime tests prove the complete unfiltered Redirect proposal reaches the mandatory Verifier, whose `diagnosis-evidence-grounded` result decides semantic support together with the other eight checks. An accepted Redirect uses exactly Diagnostician, Transformer, and Verifier calls; semantic rejection ends after those three calls with no swipe and no rewrite loop. Diagnosis, Transform, and Verification share one malformed-output recovery token, limiting every run to at most one additional model call. Tests also require candidate-hash binding, accepted-marker cache reuse, and absence of private diagnosis text from prose, prompt, UI, and journal surfaces. Card lifecycle tests must recreate repeated cached/generated same-role waves and prove that only the newest card for each fixed generated role remains active before hand selection; the live enhancement proof rejects same-family `max-cards` omissions. `npm.cmd run prove:enhancements-live` is the dedicated Playwright gate with real configured model calls; it is intentionally separate from deterministic `npm.cmd test` and must require a `recursion-soak-*` user. Every live proof that claims Editorial Enhancement success must use the shared live-enhancement-run oracle. The oracle captures the run-journal baseline and every rendered progress transition before generation, including removed or replaced rows. It fails on any observed caution, warning, failure, warning/error journal entry, `provider.call.failed`, `prompt.install_skipped`, unmatched provider start, or skipped Enhancement. Success additionally requires final `Editorial diagnosis`, `Editorial candidate`, `Editorial verification`, and `Recursion prompt ready` rows to be `done` plus a validated Recursion-owned swipe or replacement marker.
 
+Repair card-ledger regressions must prepare a real frozen hand from configurable
+source cards, preserve only the source-card IDs that contributed to that hand,
+and use generated packet text through frozen `packetRefs` without replacing
+those IDs. The first Transform result is validated strictly. A missing,
+duplicate, unknown, or invalid outcome may consume exactly one shared correction
+request. If the corrected Repair still lacks coverage while its bounded patch
+remains independently safe, tests require exactly one applied swipe or
+replacement, terminal `partial-failed` status, error journal severity, and red
+children only for the dynamically unresolved card IDs. Recompose must continue
+to reject incomplete coverage because it is a full rewrite. Redirect's existing
+audit reconstruction must remain non-failing. A persisted `partial-failed`
+marker must never be reused as a healthy cached Editorial result.
+
 The checked-in `core` evaluation pack contains six Redirect cases covering turn
 deferral, wrong focus, unsupported outcome, character pressure, supported
 restraint, and unclear character-want evidence. Every explicit Redirect case must

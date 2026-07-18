@@ -17,7 +17,7 @@ import {
 } from '../../src/editorial-transform.mjs';
 import { assert, assertEqual, assertDeepEqual } from '../../tests/helpers/assert.mjs';
 import { hashJson } from '../../src/core.mjs';
-import { publicGenerationReviewSnapshot } from '../../src/generation-review.mjs';
+import { buildGenerationReviewTargets, publicGenerationReviewSnapshot } from '../../src/generation-review.mjs';
 
 const sourceText = 'She smiled. “Who sent you?” He told her the sender’s name, then reached for the latch.';
 const snapshot = {
@@ -39,7 +39,8 @@ const longReviewSnapshot = publicGenerationReviewSnapshot({
   installedHand: [{
     cardId: 'source-template-card',
     name: 'Present characters',
-    promptText: 'Who can act, observe, interrupt, or be addressed.'
+    promptText: 'Who can act, observe, interrupt, or be addressed.',
+    packetRefs: ['card-Active-Cast-generated']
   }],
   promptPacket: {
     packetId: 'packet-sg1-regression',
@@ -113,11 +114,15 @@ assert(
   'long Editorial context preserves the actual latest user turn instead of the no-user fallback'
 );
 assert(
-  longReviewEvidence.some((item) => item.id === 'card:card-Active-Cast-generated' && item.excerpt.includes("Keep Carter, O'Neill")),
-  'Editorial evidence uses generated packet card content'
+  longReviewEvidence.some((item) => item.id === 'card:source-template-card' && item.excerpt.includes("Keep Carter, O'Neill")),
+  'Editorial evidence keeps the configured installed-card identity while using its generated packet content'
 );
 assert(
-  !longReviewEvidence.some((item) => item.excerpt.includes('Who can act, observe, interrupt')),
+  !longReviewEvidence.some((item) => item.id === 'card:card-Active-Cast-generated'),
+  'generated packet card IDs do not replace configured installed-card obligations'
+);
+assert(
+  !longReviewEvidence.some((item) => item.id === 'card:source-template-card' && item.excerpt.includes('Who can act, observe, interrupt')),
   'generated packet evidence prevents generic source-card templates from poisoning Editorial diagnosis'
 );
 assert(
@@ -520,6 +525,8 @@ const redirectWithoutCardOutcomes = validateEditorialPass({
   cardOutcomes: []
 }, redirectPassFixture);
 assertEqual(redirectWithoutCardOutcomes.ok, true, 'Redirect does not discard a valid candidate because its audit-only card ledger is missing');
+assertEqual(redirectWithoutCardOutcomes.partialFailed, false, 'Redirect audit reconstruction does not become a Repair partial-failed result');
+assertDeepEqual(redirectWithoutCardOutcomes.unresolvedCardIds, [], 'Redirect audit reconstruction exposes no unresolved Repair rows');
 assertDeepEqual(
   redirectWithoutCardOutcomes.cardOutcomes,
   [{
@@ -580,6 +587,88 @@ assertEqual(
   recomposeWithoutCardOutcomes.error?.code,
   'RECURSION_EDITORIAL_CARD_COVERAGE_MISSING',
   'Recompose still reports missing card coverage as a validation failure'
+);
+const duplicateCoverageSnapshot = {
+  ...snapshot,
+  installedHand: [
+    ...snapshot.installedHand,
+    {
+      cardId: 'scene-constraint',
+      categoryId: 'scene-constraint',
+      name: 'Scene Constraint',
+      promptText: 'Keep the sender unidentified.',
+      selectionState: 'active'
+    }
+  ]
+};
+const duplicateCoverageTarget = buildGenerationReviewTargets(sourceText).prose[1];
+const duplicateCoverageCandidate = {
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: [
+    candidate.cardOutcomes[0],
+    {
+      ...candidate.cardOutcomes[0],
+      status: 'repaired'
+    }
+  ],
+  patches: [{
+    id: duplicateCoverageTarget.id,
+    before: duplicateCoverageTarget.before,
+    after: 'He withheld the sender’s name and kept one hand near the latch.',
+    domain: duplicateCoverageTarget.domain,
+    evidenceRefs: ['source:0']
+  }]
+};
+const recoveredRepairCoverage = validateEditorialPass(duplicateCoverageCandidate, {
+  mode: 'repair',
+  sourceText,
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  diagnosis,
+  snapshot: duplicateCoverageSnapshot,
+  targets: buildGenerationReviewTargets(sourceText),
+  recoverCardCoverage: true
+});
+assertEqual(recoveredRepairCoverage.ok, true, 'post-correction Editorial pass preserves a safe candidate with incomplete card audit coverage');
+assertEqual(recoveredRepairCoverage.partialFailed, true, 'recovered card audit coverage remains explicitly partial-failed');
+assertDeepEqual(
+  recoveredRepairCoverage.unresolvedCardIds,
+  ['scene-constraint'],
+  'post-correction recovery identifies only dynamically missing installed-card outcomes as unresolved'
+);
+assertDeepEqual(
+  recoveredRepairCoverage.cardOutcomes,
+  [
+    candidate.cardOutcomes[0],
+    {
+      cardId: 'scene-constraint',
+      status: 'partially-reflected',
+      evidenceRefs: ['card:scene-constraint']
+    }
+  ],
+  'post-correction recovery keeps one valid outcome and reconstructs the missing installed-card audit row'
+);
+assertEqual(
+  validateEditorialPass({
+    ...candidate,
+    cardOutcomes: duplicateCoverageCandidate.cardOutcomes
+  }, {
+    mode: 'recompose',
+    sourceText,
+    sourceHash,
+    snapshotHash,
+    diagnosisHash,
+    diagnosis,
+    snapshot: duplicateCoverageSnapshot,
+    recoverCardCoverage: true
+  }).error?.code,
+  'RECURSION_EDITORIAL_CARD_OUTCOME_INVALID',
+  'Recompose never recovers incomplete card coverage because a full rewrite cannot apply partially'
 );
 const ov1MinorRewrite = {
   ...redirectCandidate,
@@ -745,6 +834,26 @@ assertDeepEqual(passRequest.validEvidenceIds, evidence.map((entry) => entry.id),
 assertDeepEqual(passRequest.requiredPreservationLedger, diagnosis.brief.preserve, 'transform freezes the validated diagnosis preservation ledger');
 assert(passRequest.prompt.includes('Copy diagnosis.brief.preserve exactly'), 'transform explicitly forbids invented preservation claims or evidence ids');
 assertDeepEqual(passRequest.installedCardIds, ['relationship'], 'transform request exposes frozen installed card ids');
+const cardCoverageCorrectionRequest = buildEditorialPassRequest({
+  mode: 'recompose',
+  sourceText,
+  sourceHash,
+  snapshotHash,
+  diagnosis,
+  evidence: buildEditorialEvidence(duplicateCoverageSnapshot, sourceText),
+  snapshot: duplicateCoverageSnapshot,
+  lane: 'reasoner',
+  retry: {
+    code: 'RECURSION_EDITORIAL_CARD_COVERAGE_MISSING',
+    message: 'Editorial pass must report every installed card exactly once.'
+  }
+});
+assert(
+  cardCoverageCorrectionRequest.prompt.includes(
+    'Return cardOutcomes in this exact cardId order, once each: ["relationship","scene-constraint"].'
+  ),
+  'Editorial correction names the complete frozen card ledger and exact output order'
+);
 const redirectPassRequest = buildEditorialPassRequest({
   mode: 'redirect',
   sourceText,

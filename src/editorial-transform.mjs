@@ -160,11 +160,22 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
   }
   if (packet.story || packet.scene || packet.summary) addEvidence(entries, 'packet:scene', 'prompt-packet', 'scene-support', packet.story || packet.scene || packet.summary);
   const packetCards = array(packet.cardEvidence);
-  const installedCards = packetCards.length ? packetCards : array(data.installedHand);
-  for (const [index, card] of installedCards.slice(0, 48).entries()) {
+  const packetCardsById = new Map(packetCards.map((card) => [String(card?.id || ''), card]));
+  const installedCards = array(data.installedHand);
+  const evidenceCards = installedCards.length ? installedCards : packetCards;
+  for (const [index, card] of evidenceCards.slice(0, 48).entries()) {
     const cardId = String(card?.cardId || card?.id || '').trim();
     if (!cardId) continue;
-    addEvidence(entries, `card:${cardId}`, 'installed-card', card?.hardConstraint ? 'hard-constraint' : 'scene-support', card.promptText || card.description || card.name);
+    const generated = array(card?.packetRefs)
+      .map((packetRef) => packetCardsById.get(String(packetRef)))
+      .find(Boolean);
+    addEvidence(
+      entries,
+      `card:${cardId}`,
+      'installed-card',
+      card?.hardConstraint ? 'hard-constraint' : 'scene-support',
+      generated?.promptText || card.promptText || card.description || card.name
+    );
     if (index >= 47) break;
   }
   if (brief.userTurn || brief.userMessage) addEvidence(entries, 'brief:turn', 'last-brief', 'continuity-fact', brief.userTurn || brief.userMessage);
@@ -445,9 +456,13 @@ function cardOutcomeValidation(cardOutcomes, installedHand, known, { recoverMiss
     });
   }
   if (recoverMissing) {
+    let partialFailed = false;
+    const unresolvedCardIds = [];
     const recovered = cards.map((cardId) => {
       const valid = validOutcomes.get(cardId);
       if (valid) return valid;
+      partialFailed = true;
+      unresolvedCardIds.push(cardId);
       const evidenceId = `card:${cardId}`;
       return known.has(evidenceId)
         ? { cardId, status: 'partially-reflected', evidenceRefs: [evidenceId] }
@@ -456,7 +471,7 @@ function cardOutcomeValidation(cardOutcomes, installedHand, known, { recoverMiss
     if (recovered.some((outcome) => !outcome)) {
       return fail('RECURSION_EDITORIAL_CARD_COVERAGE_MISSING', 'Editorial pass could not recover installed-card audit coverage from frozen evidence.');
     }
-    return { ok: true, cardOutcomes: recovered };
+    return { ok: true, cardOutcomes: recovered, partialFailed, unresolvedCardIds };
   }
   return { ok: true, cardOutcomes: cards.map((cardId) => validOutcomes.get(cardId)) };
 }
@@ -466,15 +481,20 @@ function maxCandidateLength(sourceLength, mode = '') {
   return Math.min(MAX_CANDIDATE, Math.max(1500, Math.ceil(Math.max(1, sourceLength) * 1.75)));
 }
 
-export function validateEditorialPass(result = {}, { mode = '', sourceText = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', diagnosis = {}, snapshot = {}, targets = {} } = {}) {
+export function validateEditorialPass(result = {}, { mode = '', sourceText = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', diagnosis = {}, snapshot = {}, targets = {}, recoverCardCoverage = false } = {}) {
   const data = object(result);
   if (data.schema !== EDITORIAL_PASS_SCHEMA) return fail('RECURSION_EDITORIAL_SCHEMA_MISMATCH', 'Editorial pass returned the wrong schema.');
   if (data.mode !== mode || data.sourceHash !== sourceHash || data.snapshotHash !== snapshotHash) return fail('RECURSION_EDITORIAL_STALE_SOURCE', 'Editorial pass does not match the frozen source.');
   if (String(data.diagnosisHash || '') !== String(diagnosisHash || '')) return fail('RECURSION_EDITORIAL_DIAGNOSIS_STALE', 'Editorial pass used a different diagnosis.');
   const evidence = buildEditorialEvidence(snapshot, sourceText);
   const known = evidenceMap(evidence);
-  const cards = cardOutcomeValidation(data.cardOutcomes, snapshot.installedHand, known, { recoverMissing: mode === 'redirect' });
+  const cards = cardOutcomeValidation(data.cardOutcomes, snapshot.installedHand, known, {
+    recoverMissing: mode === 'redirect' || (mode === 'repair' && recoverCardCoverage === true)
+  });
   if (!cards.ok) return cards;
+  const recoveredRepairCoverage = mode === 'repair'
+    && recoverCardCoverage === true
+    && cards.partialFailed === true;
   if (FULL_MODES.has(mode)) {
     if (data.patches !== undefined || !object(data.candidate).text) return fail('RECURSION_EDITORIAL_CANDIDATE_INVALID', 'Full editorial mode requires one complete candidate and no patches.');
     const text = String(data.candidate.text);
@@ -505,7 +525,14 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
       ? recognizedRiskFlags.filter((flag) => flag !== 'none')
       : recognizedRiskFlags;
     const candidate = { ...data.candidate, riskFlags };
-    return { ok: true, artifact: { kind: 'candidate', mode, text, candidate }, cardOutcomes: cards.cardOutcomes, evidence };
+    return {
+      ok: true,
+      artifact: { kind: 'candidate', mode, text, candidate },
+      cardOutcomes: cards.cardOutcomes,
+      partialFailed: recoveredRepairCoverage,
+      unresolvedCardIds: recoveredRepairCoverage ? (cards.unresolvedCardIds || []) : [],
+      evidence
+    };
   }
   if (data.candidate !== undefined || !Array.isArray(data.patches) || data.patches.length === 0) return fail('RECURSION_EDITORIAL_REPAIR_INVALID', 'Repair requires bounded patches and cannot return a full candidate.');
   const targetEntries = Object.values(targets || {}).flat().filter(Boolean);
@@ -522,7 +549,14 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
   if (!preservesPresentationEnvelope(sourceText, applyEditorialArtifact(sourceText, { kind: 'patches', mode: 'repair', patches }, targets))) {
     return fail('RECURSION_EDITORIAL_PRESENTATION_INVALID', 'Editorial repair changed or collapsed the leading presentation envelope.');
   }
-  return { ok: true, artifact: { kind: 'patches', mode: 'repair', patches }, cardOutcomes: cards.cardOutcomes, evidence };
+  return {
+    ok: true,
+    artifact: { kind: 'patches', mode: 'repair', patches },
+    cardOutcomes: cards.cardOutcomes,
+    partialFailed: recoveredRepairCoverage,
+    unresolvedCardIds: recoveredRepairCoverage ? (cards.unresolvedCardIds || []) : [],
+    evidence
+  };
 }
 
 function validateRedirectVerificationChecks(checks, known, decision) {
@@ -716,6 +750,9 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     claim: String(entry?.claim || ''),
     evidenceRefs: array(entry?.evidenceRefs).map(String)
   }));
+  const installedCardIds = array(snapshot?.installedHand)
+    .map((card) => String(card?.cardId || card?.id || ''))
+    .filter(Boolean);
   const redirectChangeEvidenceRefs = mode === 'redirect'
     ? [...new Set([
         ...array(diagnosis?.brief?.replacementObjective?.evidenceRefs).map(String),
@@ -754,6 +791,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
       ]
     : [
         `Copy diagnosis.brief.preserve exactly into candidate.preservationLedger: ${JSON.stringify(requiredPreservationLedger)}. Do not add, remove, or rewrite preservation claims or evidence IDs.`,
+        `Return cardOutcomes in this exact cardId order, once each: ${JSON.stringify(installedCardIds)}.`,
         'Every preservation claim, major change, patch, and card outcome must cite only supplied evidence IDs.'
       ];
   const prompt = [
@@ -796,7 +834,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     validPreservationEvidenceIds,
     requiredPreservationLedger,
     redirectChangeEvidenceRefs,
-    installedCardIds: array(snapshot?.installedHand).map((card) => String(card?.cardId || card?.id || '')).filter(Boolean),
+    installedCardIds,
     validTargetIds: targetList.map((entry) => String(entry.id || '')).filter(Boolean)
   };
 }

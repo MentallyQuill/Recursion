@@ -222,6 +222,13 @@ function publicContext(value = {}) {
 export function publicGenerationReviewSnapshot(snapshot = {}) {
   const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
   const promptPacket = publicPromptPacket(source.promptPacket);
+  const packetCardsById = new Map(promptPacket.cardEvidence.map((card) => [card.id, card]));
+  const configuredHand = publicInstalledHand(source.installedHand).map((card) => {
+    const generated = card.packetRefs
+      .map((packetRef) => packetCardsById.get(packetRef))
+      .find(Boolean);
+    return generated ? { ...card, promptText: generated.promptText } : card;
+  });
   const generatedHand = promptPacket.cardEvidence.map((card) => ({
     cardId: card.id,
     categoryId: '',
@@ -239,7 +246,7 @@ export function publicGenerationReviewSnapshot(snapshot = {}) {
       name: safeText(source?.deck?.name || '', 160),
       revisionHash: safeText(source?.deck?.revisionHash || '', 180)
     },
-    installedHand: generatedHand.length ? generatedHand : publicInstalledHand(source.installedHand),
+    installedHand: configuredHand.length ? configuredHand : generatedHand,
     promptPacket,
     lastBrief: publicLastBrief(source.lastBrief),
     storyForm: publicStoryForm(source.storyForm),

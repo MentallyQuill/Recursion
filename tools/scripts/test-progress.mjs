@@ -877,6 +877,32 @@ assertEqual(editorialNoChangeProgress.heroPixelState, 'skipped', 'Editorial no-c
 assert(editorialNoChangeProgress.steps.some((step) => step.id === 'editorial-result' && step.state === 'skipped'), 'Editorial no-change renders a skipped terminal result');
 assert(!editorialNoChangeProgress.steps.some((step) => ['selecting-turn-hand', 'saving-scene-cache', 'composing-prompt-packet', 'installing-recursion-prompt', 'recursion-prompt-ready'].includes(step.id)), 'Editorial no-change renders no pre-generation or prompt-ready rows');
 
+const editorialPartialFailedProgress = createProgressRunModel({
+  activity: {
+    runId: 'editorial-partial-failed-progress',
+    phase: 'settled',
+    outcome: 'success',
+    severity: 'error',
+    label: 'Repair partially applied; card review remains unresolved.',
+    detail: {
+      mode: 'repair',
+      partialFailed: true,
+      unresolvedCardIds: ['custom-card-b'],
+      cardOutcomes: [
+        { cardId: 'custom-card-a', status: 'honored' },
+        { cardId: 'custom-card-b', status: 'partially-reflected' }
+      ]
+    },
+    recordedAt: '1'
+  }
+});
+const editorialPartialFailedResult = editorialPartialFailedProgress.steps.find((step) => step.id === 'editorial-result');
+const editorialPartialFailedCards = editorialPartialFailedResult?.children?.find((child) => child.id === 'editorial-result-cards');
+assertEqual(editorialPartialFailedResult?.state, 'failed', 'partial-failed Editorial result remains red');
+assertEqual(editorialPartialFailedCards?.children?.length, 2, 'partial-failed Editorial result lists every dynamic installed-card outcome');
+assertEqual(editorialPartialFailedCards?.children?.[0]?.state, 'done', 'valid Editorial card outcome remains resolved');
+assertEqual(editorialPartialFailedCards?.children?.[1]?.state, 'failed', 'reconstructed missing Editorial card outcome renders red');
+
 const hostStoppedProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'host-stopped-progress', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },

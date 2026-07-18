@@ -519,6 +519,44 @@ function childStepFromEvent(event, state, order = 0) {
       order
     }, order);
   }
+  if (
+    phase === 'settled'
+    && cleanText(event.runId).toLowerCase().startsWith('editorial-')
+    && Array.isArray(detail.cardOutcomes)
+  ) {
+    const unresolvedCardIds = new Set(
+      (Array.isArray(detail.unresolvedCardIds) ? detail.unresolvedCardIds : [])
+        .map((cardId) => cleanText(cardId))
+        .filter(Boolean)
+    );
+    const stateForOutcome = (outcome) => {
+      const cardId = cleanText(outcome?.cardId);
+      const status = cleanText(outcome?.status);
+      if (unresolvedCardIds.has(cardId) || ['violated', 'requires-regeneration', 'unresolved'].includes(status)) return 'failed';
+      if (status === 'partially-reflected') return 'warning';
+      if (status === 'not-applicable') return 'info';
+      return 'done';
+    };
+    return normalizeChildStep({
+      id: 'editorial-result-cards',
+      label: 'Installed cards',
+      providerLane: event.providerLane || detail.lane || 'utility',
+      state: unresolvedCardIds.size > 0 ? 'failed' : state,
+      source: 'generated',
+      children: detail.cardOutcomes.map((outcome, childIndex) => ({
+        id: outcome.cardId,
+        label: outcome.name || outcome.cardId,
+        providerLane: event.providerLane || detail.lane || 'utility',
+        state: stateForOutcome(outcome),
+        reason: unresolvedCardIds.has(cleanText(outcome.cardId))
+          ? 'Provider did not return one valid outcome for this installed card.'
+          : (outcome.reason || ''),
+        order: childIndex
+      })),
+      sourcePhase: phase,
+      order
+    }, order);
+  }
   if (isProviderTestEvent(event)) return null;
   if (phase.startsWith('providerCall') || isProviderSettledEvent(event)) {
     const roleId = cleanText(detail.roleId || event.roleId);

@@ -288,8 +288,12 @@ Artifact rules are strict:
   exactly one outcome, but `not-applicable` remains valid.
 - Any source or snapshot hash mismatch, unknown evidence ID, unknown card,
   empty candidate, duplicate card outcome, or incompatible artifact fails the
-  whole provider result. Recursion never applies a partly trustworthy full
-  rewrite.
+  strict provider result. Repair may spend the run's one shared correction
+  request on incomplete card coverage. If that corrected response still has an
+  incomplete ledger but its bounded patches independently pass every source,
+  target, overlap, evidence, presentation, and commit-time identity check,
+  Recursion may apply those patches only as `partial-failed`. Recompose remains
+  strict because Recursion never applies a partly trustworthy full rewrite.
 - A candidate whose `diagnosisHash` does not exactly match the accepted
   diagnosis is stale and fails. A writer cannot replace the independently
   approved editorial brief with a new rationale.
@@ -364,7 +368,10 @@ Every candidate passes these gates before it becomes a SillyTavern message:
    patches; Recompose/Redirect contain one non-empty materially different
    candidate.
 4. **Evidence closure:** every reference resolves to an allowed immutable
-   evidence item; all installed cards are accounted for.
+   evidence item; all installed cards are accounted for. The installed-card
+   IDs come from the configured source cards that contributed to the frozen
+   hand, in runtime order. Generated packet text may enrich those cards through
+   their frozen `packetRefs`, but it does not replace their IDs.
 5. **Claim floor:** preservation claims must cite continuity, scene-support, or
    hard-constraint evidence; source-draft and source-negative citations cannot
    protect a fact.
@@ -481,6 +488,11 @@ candidate carousel is introduced.
   already-running host hook alive during migration.
 - Repair accepts only deterministic bounded patches and directs material cases
   to Recompose or Redirect.
+- Repair first validates card coverage strictly and may make at most one shared
+  correction request. If the corrected ledger remains incomplete, independently
+  safe patches may apply only as a red `partial-failed` result with the exact
+  unresolved installed-card rows shown in red. Such a result is not reusable as
+  a healthy cached Enhancement.
 - Recompose and Redirect can replace the entire assistant response when their
   evidence ledger validates.
 - A full rewrite is rejected if it lacks known evidence references, violates

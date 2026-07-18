@@ -3,10 +3,9 @@ import { hashJson } from '../../../src/core.mjs';
 const UNHEALTHY_PROGRESS_STATES = new Set(['caution', 'warning', 'warn', 'failed', 'failure', 'error']);
 const UNHEALTHY_JOURNAL_SEVERITIES = new Set(['warning', 'warn', 'error', 'fatal']);
 const UNHEALTHY_JOURNAL_EVENTS = new Set(['provider.call.failed', 'prompt.install_skipped']);
-const REQUIRED_EDITORIAL_LABELS = Object.freeze([
+const BASE_REQUIRED_EDITORIAL_LABELS = Object.freeze([
   'editorial diagnosis',
   'editorial candidate',
-  'editorial verification',
   'recursion prompt ready'
 ]);
 
@@ -260,7 +259,10 @@ export function evaluateLiveEnhancementRun({
     const label = normalized(row?.label);
     if (label) latestByLabel.set(label, row);
   }
-  for (const requiredLabel of REQUIRED_EDITORIAL_LABELS) {
+  const requiredEditorialLabels = normalized(enhancement?.mode) === 'redirect'
+    ? [...BASE_REQUIRED_EDITORIAL_LABELS, 'editorial verification']
+    : BASE_REQUIRED_EDITORIAL_LABELS;
+  for (const requiredLabel of requiredEditorialLabels) {
     const row = latestByLabel.get(requiredLabel);
     if (!row) failures.push(`missing-${requiredLabel.replace(/\s+/g, '-')}`);
     else if (normalized(row?.state) !== 'done') {

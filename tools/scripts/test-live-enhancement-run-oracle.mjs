@@ -366,6 +366,33 @@ const healthy = evaluate({
   ...mutationInput
 });
 assertEqual(healthy.ok, true, 'strict live enhancement oracle accepts a fully healthy concrete enhancement');
+const repairRowsWithoutVerifier = doneRows.filter((row) => row.label !== 'Editorial verification');
+assertEqual(
+  evaluate({
+    transitions: repairRowsWithoutVerifier,
+    finalRows: repairRowsWithoutVerifier,
+    journalDelta: [],
+    ...mutationInput
+  }).ok,
+  true,
+  'strict live enhancement oracle does not require a verifier row for Repair'
+);
+assert(
+  evaluate({
+    transitions: repairRowsWithoutVerifier,
+    finalRows: repairRowsWithoutVerifier,
+    journalDelta: [],
+    ...mutationInput,
+    enhancement: { ...mutationInput.enhancement, mode: 'redirect' },
+    enhancementResult: { ...mutationInput.enhancementResult, mode: 'redirect' },
+    editorialResult: { ...mutationInput.editorialResult, mode: 'redirect' },
+    after: {
+      ...mutationInput.after,
+      marker: { ...mutationInput.after.marker, mode: 'redirect' }
+    }
+  }).failures.includes('missing-editorial-verification'),
+  'strict live enhancement oracle keeps verifier progress mandatory for Redirect'
+);
 
 const healthyReplacedTree = evaluate({
   transitions: doneRows.map((row) => ({ ...row, source: 'removed' })),

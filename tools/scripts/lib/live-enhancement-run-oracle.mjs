@@ -1,3 +1,5 @@
+import { hashJson } from '../../../src/core.mjs';
+
 const UNHEALTHY_PROGRESS_STATES = new Set(['caution', 'warning', 'warn', 'failed', 'failure', 'error']);
 const UNHEALTHY_JOURNAL_SEVERITIES = new Set(['warning', 'warn', 'error', 'fatal']);
 const UNHEALTHY_JOURNAL_EVENTS = new Set(['provider.call.failed', 'prompt.install_skipped']);
@@ -43,6 +45,181 @@ function countByKey(entries = []) {
   return counts;
 }
 
+function object(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function hasMutationState(value) {
+  const state = object(value);
+  return text(state.chatKey)
+    && state.messageId !== undefined
+    && Number.isInteger(Number(state.swipeCount))
+    && Number.isInteger(Number(state.swipeId))
+    && typeof state.text === 'string';
+}
+
+function sameIdentity(left = {}, right = {}) {
+  return text(left.chatKey) === text(right.chatKey)
+    && String(left.messageId ?? '') === String(right.messageId ?? '');
+}
+
+function pushIf(failures, condition, code) {
+  if (condition) failures.push(code);
+}
+
+function markerSummary(value) {
+  const marker = object(value);
+  return {
+    schema: text(marker.schema),
+    chatKeyHash: marker.chatKey === undefined ? '' : hashJson(String(marker.chatKey)),
+    messageId: marker.messageId ?? null,
+    swipeId: marker.swipeId ?? null,
+    mode: text(marker.mode),
+    applyMode: text(marker.applyMode),
+    sourceHash: text(marker.sourceHash),
+    candidateHash: text(marker.candidateHash),
+    diagnosisHash: text(marker.diagnosisHash),
+    outcome: text(marker.outcome)
+  };
+}
+
+function mutationStateSummary(value) {
+  const state = object(value);
+  return {
+    chatKeyHash: state.chatKey === undefined ? '' : hashJson(String(state.chatKey)),
+    messageId: state.messageId ?? null,
+    swipeCount: Number(state.swipeCount || 0),
+    swipeId: Number(state.swipeId || 0),
+    textHash: typeof state.text === 'string' ? hashJson(state.text) : '',
+    marker: markerSummary(state.marker)
+  };
+}
+
+export function evaluateEnhancementMutation({
+  enhancement = null,
+  before = null,
+  after = null,
+  enhancementResult = null,
+  editorialResult = null
+} = {}) {
+  const failures = [];
+  const configured = object(enhancement);
+  const source = object(before);
+  const final = object(after);
+  const result = object(enhancementResult);
+  const editorial = object(editorialResult);
+  const mode = normalized(configured.mode);
+  const applyMode = normalized(configured.applyMode);
+  const enabled = configured.enabled !== false && !['off', 'none', 'disabled'].includes(mode);
+
+  if (!Object.keys(configured).length) failures.push('enhancement-config-missing');
+  if (!hasMutationState(source)) failures.push('enhancement-before-state-missing');
+  if (!hasMutationState(final)) failures.push('enhancement-after-state-missing');
+
+  if (!enabled) {
+    if (hasMutationState(source) && hasMutationState(final)) {
+      const stateChanged = !sameIdentity(source, final)
+        || Number(source.swipeCount) !== Number(final.swipeCount)
+        || Number(source.swipeId) !== Number(final.swipeId)
+        || source.text !== final.text;
+      const beforeMarkerHash = hashJson(object(source.marker));
+      const afterMarkerHash = hashJson(object(final.marker));
+      const recursionMarkerAdded = final.marker?.schema === 'recursion.editorialMarker.v1'
+        && beforeMarkerHash !== afterMarkerHash;
+      pushIf(failures, stateChanged || recursionMarkerAdded, 'enhancement-disabled-mutated');
+    }
+    return {
+      ok: failures.length === 0,
+      kind: 'off',
+      failures: [...new Set(failures)],
+      marker: markerSummary(final.marker)
+    };
+  }
+
+  pushIf(failures, !['as-swipe', 'replace'].includes(applyMode), 'enhancement-apply-mode-invalid');
+  pushIf(failures, !Object.keys(result).length || result.ok !== true, 'enhancement-result-unhealthy');
+  pushIf(failures, result.skipped === true, 'enhancement-result-skipped');
+  pushIf(
+    failures,
+    result.partialFailed === true || normalized(result?.marker?.outcome) === 'partial-failed',
+    'enhancement-result-partial-failed'
+  );
+  pushIf(
+    failures,
+    !Object.keys(editorial).length
+      || normalized(editorial.status) !== 'success'
+      || !['applied', 'cached'].includes(normalized(editorial.outcome)),
+    'enhancement-editorial-result-unhealthy'
+  );
+  pushIf(
+    failures,
+    normalized(result.mode) !== mode,
+    'enhancement-result-mode-mismatch'
+  );
+  pushIf(
+    failures,
+    normalized(editorial.mode) !== mode || normalized(editorial.applyMode) !== applyMode,
+    'enhancement-editorial-result-mismatch'
+  );
+
+  if (hasMutationState(source) && hasMutationState(final)) {
+    pushIf(failures, !sameIdentity(source, final), 'enhancement-message-identity-mismatch');
+    if (applyMode === 'as-swipe') {
+      pushIf(
+        failures,
+        Number(final.swipeCount) !== Number(source.swipeCount) + 1,
+        'enhancement-swipe-count-invalid'
+      );
+      pushIf(
+        failures,
+        Number(final.swipeId) !== Number(final.swipeCount) - 1,
+        'enhancement-swipe-selection-invalid'
+      );
+      pushIf(failures, final.text === source.text, 'enhancement-swipe-text-unchanged');
+    } else if (applyMode === 'replace') {
+      pushIf(
+        failures,
+        Number(final.swipeCount) !== Number(source.swipeCount)
+          || Number(final.swipeId) !== Number(source.swipeId),
+        'enhancement-replace-swipe-state-invalid'
+      );
+      pushIf(failures, final.text === source.text, 'enhancement-replace-text-unchanged');
+    }
+  }
+
+  const marker = object(final.marker);
+  if (!Object.keys(marker).length) {
+    failures.push('enhancement-marker-missing');
+  } else {
+    pushIf(failures, marker.schema !== 'recursion.editorialMarker.v1', 'enhancement-marker-schema-invalid');
+    pushIf(
+      failures,
+      text(marker.chatKey) !== text(source.chatKey)
+        || String(marker.messageId ?? '') !== String(source.messageId ?? '')
+        || Number(marker.swipeId ?? -1) !== Number(source.swipeId ?? -2),
+      'enhancement-marker-identity-mismatch'
+    );
+    pushIf(failures, normalized(marker.mode) !== mode, 'enhancement-marker-mode-mismatch');
+    pushIf(failures, normalized(marker.applyMode) !== applyMode, 'enhancement-marker-apply-mode-mismatch');
+    pushIf(failures, text(marker.sourceHash) !== hashJson(source.text), 'enhancement-marker-source-mismatch');
+    pushIf(failures, text(marker.candidateHash) !== hashJson(final.text), 'enhancement-marker-candidate-mismatch');
+    pushIf(failures, !text(marker.diagnosisHash), 'enhancement-marker-diagnosis-missing');
+    pushIf(failures, normalized(marker.outcome) !== 'applied', 'enhancement-marker-outcome-invalid');
+    pushIf(
+      failures,
+      Object.keys(object(result.marker)).length > 0 && hashJson(result.marker) !== hashJson(marker),
+      'enhancement-result-marker-mismatch'
+    );
+  }
+
+  return {
+    ok: failures.length === 0,
+    kind: applyMode === 'as-swipe' ? 'swipe' : (applyMode === 'replace' ? 'replace' : 'invalid'),
+    failures: [...new Set(failures)],
+    marker: markerSummary(marker)
+  };
+}
+
 export function journalDeltaSince(journal = [], { baselineIds = [], startedAt = '' } = {}) {
   const baseline = new Set((baselineIds || []).map((id) => String(id || '')).filter(Boolean));
   const startedAtMs = Date.parse(String(startedAt || ''));
@@ -58,7 +235,11 @@ export function evaluateLiveEnhancementRun({
   transitions = [],
   finalRows = [],
   journalDelta = [],
-  enhancementMutation = null
+  enhancement = null,
+  before = null,
+  after = null,
+  enhancementResult = null,
+  editorialResult = null
 } = {}) {
   const failures = [];
   const observedRows = [...transitions, ...finalRows];
@@ -110,12 +291,14 @@ export function evaluateLiveEnhancementRun({
     .map(([key]) => key);
   if (unmatchedProviderCalls.length) failures.push('provider-call-unmatched');
 
-  const mutation = enhancementMutation && typeof enhancementMutation === 'object'
-    ? enhancementMutation
-    : {};
-  if (!['swipe', 'replace'].includes(text(mutation.kind))) failures.push('enhancement-result-missing');
-  if (mutation.recursionOwned !== true) failures.push('enhancement-result-not-recursion-owned');
-  if (mutation.validated !== true) failures.push('enhancement-result-not-validated');
+  const mutation = evaluateEnhancementMutation({
+    enhancement,
+    before,
+    after,
+    enhancementResult,
+    editorialResult
+  });
+  failures.push(...mutation.failures);
 
   return {
     ok: failures.length === 0,
@@ -209,7 +392,7 @@ export async function installLiveEnhancementRunOracle(page) {
   });
 }
 
-export async function collectLiveEnhancementRunOracle(page) {
+export async function collectLiveEnhancementRunOracle(page, certification = {}) {
   const observation = await page.evaluate(async () => {
     const state = globalThis.__recursionLiveEnhancementRunOracle;
     const runtime = globalThis.__recursionLiveHarnessRuntime || null;
@@ -227,36 +410,21 @@ export async function collectLiveEnhancementRunOracle(page) {
     const journal = Array.isArray(diagnosticsResult?.diagnostics?.journal)
       ? diagnosticsResult.diagnostics.journal
       : [];
-    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
-    const assistant = [...(Array.isArray(context.chat) ? context.chat : [])].reverse().find((entry) => entry?.is_user === false) || null;
-    const swipeId = Number(assistant?.swipe_id ?? 0);
-    const swipeMarker = Array.isArray(assistant?.__recursionGenerationReviewSwipes)
-      ? assistant.__recursionGenerationReviewSwipes[swipeId]
-      : null;
-    const replaceMarker = assistant?.__recursionGenerationReview || null;
-    const marker = swipeMarker || replaceMarker || null;
-    const markerSchema = String(marker?.schema || '');
-    const applyMode = String(marker?.applyMode || '');
-    const enhancementMutation = {
-      kind: applyMode === 'as-swipe' ? 'swipe' : (applyMode === 'replace' ? 'replace' : 'none'),
-      recursionOwned: markerSchema === 'recursion.editorialMarker.v1',
-      validated: markerSchema === 'recursion.editorialMarker.v1'
-        && Boolean(marker?.diagnosisHash)
-        && Boolean(marker?.candidateHash),
-      markerSchema,
-      applyMode,
-      swipeId,
-      swipeCount: Array.isArray(assistant?.swipes) ? assistant.swipes.length : 0
-    };
     delete globalThis.__recursionLiveEnhancementRunOracle;
     return {
       transitions: state.transitions || [],
       finalRows,
       journal,
       baselineJournalIds: state.baselineJournalIds || [],
-      enhancementMutation,
       startedAt: state.startedAt
     };
+  });
+  Object.assign(observation, {
+    enhancement: object(certification.enhancement),
+    before: object(certification.before),
+    after: object(certification.after),
+    enhancementResult: object(certification.enhancementResult),
+    editorialResult: object(certification.editorialResult)
   });
   observation.journalDelta = journalDeltaSince(observation.journal, {
     baselineIds: observation.baselineJournalIds,
@@ -264,8 +432,27 @@ export async function collectLiveEnhancementRunOracle(page) {
   });
   delete observation.journal;
   delete observation.baselineJournalIds;
+  const verdict = evaluateLiveEnhancementRun(observation);
   return {
-    observation,
-    verdict: evaluateLiveEnhancementRun(observation)
+    observation: {
+      ...observation,
+      before: mutationStateSummary(observation.before),
+      after: mutationStateSummary(observation.after),
+      enhancementResult: {
+        ok: observation.enhancementResult?.ok === true,
+        skipped: observation.enhancementResult?.skipped === true,
+        partialFailed: observation.enhancementResult?.partialFailed === true,
+        mode: text(observation.enhancementResult?.mode),
+        marker: markerSummary(observation.enhancementResult?.marker)
+      },
+      editorialResult: {
+        mode: text(observation.editorialResult?.mode),
+        status: text(observation.editorialResult?.status),
+        outcome: text(observation.editorialResult?.outcome),
+        applyMode: text(observation.editorialResult?.applyMode),
+        errorCode: text(observation.editorialResult?.errorCode)
+      }
+    },
+    verdict
   };
 }

@@ -26,11 +26,13 @@ import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests
 const liveEditorialModule = await import('./lib/live-editorial-effectiveness.mjs').catch(() => ({}));
 const liveEditorialSource = readFileSync(join(process.cwd(), 'tools', 'scripts', 'lib', 'live-editorial-effectiveness.mjs'), 'utf8');
 const evaluateLiveRedirectScenarioArtifacts = liveEditorialModule.evaluateLiveRedirectScenarioArtifacts;
+const evaluateLiveRepairScenarioArtifacts = liveEditorialModule.evaluateLiveRepairScenarioArtifacts;
 const runLiveEditorialEffectiveness = liveEditorialModule.runLiveEditorialEffectiveness;
 const validateLiveEditorialRuntime = liveEditorialModule.validateLiveEditorialRuntime;
 const liveEditorialStageTimeoutMs = liveEditorialModule.liveEditorialStageTimeoutMs;
 const swipeReuseProofSource = readFileSync(join(process.cwd(), 'tools', 'scripts', 'prove-live-swipe-reuse.mjs'), 'utf8');
 assertEqual(typeof evaluateLiveRedirectScenarioArtifacts, 'function', 'live harness exposes strict Redirect scenario evaluator');
+assertEqual(typeof evaluateLiveRepairScenarioArtifacts, 'function', 'live harness exposes strict Repair scenario evaluator');
 assertEqual(typeof runLiveEditorialEffectiveness, 'function', 'live harness exposes reusable Redirect effectiveness runner');
 assertEqual(typeof validateLiveEditorialRuntime, 'function', 'live harness exposes served runtime capability validation');
 assertEqual(typeof liveEditorialStageTimeoutMs, 'function', 'live harness exposes bounded Redirect proof stage deadlines');
@@ -151,6 +153,68 @@ const healthyNoChangeArtifacts = {
   visibleText: 'Editorial complete; no changes needed.'
 };
 assertEqual(evaluateLiveRedirectScenarioArtifacts(healthyNoChangeArtifacts).ok, false, 'explicit Redirect rejects no-change even when the tree is otherwise healthy');
+
+const repairScenario = {
+  id: 'repair-bounded-patches',
+  enhancementMode: 'repair'
+};
+const healthyRepairArtifacts = {
+  scenario: repairScenario,
+  before: { swipeCount: 1, swipeId: 0, text: 'Carter leaned leaned forward.' },
+  after: { swipeCount: 2, swipeId: 1, text: 'Carter leaned forward.' },
+  enhancementResult: {
+    ok: true,
+    partialFailed: false,
+    mode: 'repair',
+    marker: {
+      mode: 'repair',
+      applyMode: 'as-swipe',
+      outcome: 'applied',
+      candidateHash: 'candidate-hash',
+      diagnosisHash: 'diagnosis-hash'
+    },
+    artifact: {
+      kind: 'patches',
+      patches: [{ exact: 'leaned leaned', replacement: 'leaned' }]
+    }
+  },
+  oracle: { verdict: { ok: true, failures: [] } },
+  runtimeView: {
+    editorialResult: {
+      mode: 'repair',
+      status: 'success',
+      outcome: 'applied',
+      applyMode: 'as-swipe'
+    }
+  }
+};
+assertEqual(
+  evaluateLiveRepairScenarioArtifacts(healthyRepairArtifacts).ok,
+  true,
+  'strict Repair evaluator accepts bounded patches plus a certified second swipe'
+);
+for (const [name, patch] of [
+  ['full candidate artifact', { enhancementResult: { ...healthyRepairArtifacts.enhancementResult, artifact: { kind: 'candidate', text: 'Rewritten.' } } }],
+  ['missing swipe', { after: healthyRepairArtifacts.before }],
+  ['failed oracle', { oracle: { verdict: { ok: false, failures: ['enhancement-swipe-count-invalid'] } } }],
+  ['partial failure', {
+    enhancementResult: { ...healthyRepairArtifacts.enhancementResult, partialFailed: true },
+    runtimeView: { editorialResult: { mode: 'repair', status: 'partial-failed', outcome: 'partial-failed' } }
+  }],
+  ['skipped result', {
+    enhancementResult: { ok: true, skipped: true, mode: 'repair' },
+    runtimeView: { editorialResult: { mode: 'repair', status: 'skipped', outcome: 'original-kept' } }
+  }],
+  ['red final settlement', {
+    runtimeView: { editorialResult: { mode: 'repair', status: 'error', outcome: 'original-kept' } }
+  }]
+]) {
+  assertEqual(
+    evaluateLiveRepairScenarioArtifacts({ ...healthyRepairArtifacts, ...patch }).ok,
+    false,
+    `strict Repair evaluator rejects ${name}`
+  );
+}
 
 let unsafeScenarioExecutions = 0;
 const unsafeEditorialRun = await runLiveEditorialEffectiveness({

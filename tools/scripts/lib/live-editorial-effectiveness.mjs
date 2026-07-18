@@ -149,6 +149,73 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
   };
 }
 
+export function evaluateLiveRepairScenarioArtifacts(artifacts = {}) {
+  const failures = [];
+  const scenario = artifacts.scenario && typeof artifacts.scenario === 'object' ? artifacts.scenario : {};
+  const result = artifacts.enhancementResult && typeof artifacts.enhancementResult === 'object'
+    ? artifacts.enhancementResult
+    : {};
+  const before = artifacts.before && typeof artifacts.before === 'object' ? artifacts.before : {};
+  const after = artifacts.after && typeof artifacts.after === 'object' ? artifacts.after : {};
+  const marker = result.marker && typeof result.marker === 'object' ? result.marker : {};
+  const editorialResult = artifacts.runtimeView?.editorialResult && typeof artifacts.runtimeView.editorialResult === 'object'
+    ? artifacts.runtimeView.editorialResult
+    : {};
+
+  if (artifacts.oracle?.verdict?.ok !== true) failures.push('strict-oracle-failed');
+  if (
+    result.ok !== true
+    || result.skipped === true
+    || result.partialFailed === true
+    || result.mode !== 'repair'
+  ) {
+    failures.push('repair-result-invalid');
+  }
+  if (
+    Number(after.swipeCount) !== Number(before.swipeCount) + 1
+    || Number(after.swipeId) !== Number(after.swipeCount) - 1
+  ) {
+    failures.push('repair-swipe-missing');
+  }
+  if (
+    marker.mode !== 'repair'
+    || marker.applyMode !== 'as-swipe'
+    || marker.outcome !== 'applied'
+    || !text(marker.candidateHash)
+    || !text(marker.diagnosisHash)
+  ) {
+    failures.push('repair-marker-invalid');
+  }
+  if (
+    result.artifact?.kind !== 'patches'
+    || !Array.isArray(result.artifact?.patches)
+    || result.artifact.patches.length === 0
+  ) {
+    failures.push('repair-bounded-patches-missing');
+  }
+  if (
+    editorialResult.mode !== 'repair'
+    || editorialResult.status !== 'success'
+    || editorialResult.outcome !== 'applied'
+    || editorialResult.applyMode !== 'as-swipe'
+  ) {
+    failures.push('repair-editorial-settlement-unhealthy');
+  }
+
+  return {
+    ok: failures.length === 0,
+    status: failures.length === 0 ? 'pass' : 'fail',
+    scenarioId: text(scenario.id),
+    sourceHash: text(result.sourceHash || marker.sourceHash),
+    candidateHash: text(marker.candidateHash),
+    patchCount: Array.isArray(result.artifact?.patches) ? result.artifact.patches.length : 0,
+    errorCode: text(result.error?.code || result.validation?.error?.code || editorialResult.errorCode),
+    errorMessage: text(result.error?.message || result.validation?.error?.message || editorialResult.reason),
+    oracle: artifacts.oracle?.verdict || {},
+    failures
+  };
+}
+
 async function executeScenarioInPage(input) {
   const scenario = input?.scenario || {};
   const stageTimeouts = input?.stageTimeouts || {};
@@ -189,8 +256,11 @@ async function executeScenarioInPage(input) {
   const context = () => decorateContext(rawContext());
   const runtime = globalThis.__recursionLiveHarnessRuntime;
   if (!runtime) return { environmentFailure: 'runtime-unavailable' };
+  const enhancementMode = String(scenario?.enhancementMode || 'redirect').toLowerCase() === 'repair'
+    ? 'repair'
+    : 'redirect';
   const redirectOracle = scenario?.oracle?.editorialRedirect || {};
-  const sourceText = String(redirectOracle.sourceResponse || '');
+  const sourceText = String(scenario?.enhancementSource || redirectOracle.sourceResponse || '');
   const ctx = context();
   if (!Array.isArray(ctx.chat)) ctx.chat = [];
   ctx.chat.length = 0;
@@ -207,12 +277,15 @@ async function executeScenarioInPage(input) {
   const sourceMesId = mesid;
 
   const state = () => {
-    const message = (context().chat || []).find((entry, index) => Number(entry?.mesid ?? index) === Number(sourceMesId));
+    const currentContext = context();
+    const message = (currentContext.chat || []).find((entry, index) => Number(entry?.mesid ?? index) === Number(sourceMesId));
     const swipeId = Number(message?.swipe_id ?? 0);
     const marker = Array.isArray(message?.__recursionGenerationReviewSwipes)
       ? message.__recursionGenerationReviewSwipes[swipeId] || null
       : message?.__recursionGenerationReview || null;
     return {
+      chatKey: String(currentContext?.chatId || currentContext?.chat_id || currentContext?.currentChatId || 'chat'),
+      messageId: Number(message?.mesid ?? sourceMesId),
       swipeCount: Array.isArray(message?.swipes) ? message.swipes.length : 0,
       swipeId,
       text: String(message?.mes || ''),
@@ -226,10 +299,10 @@ async function executeScenarioInPage(input) {
     pipelineMode: String(scenario?.pipelineMode || 'standard'),
     reasoningLevel: scenario?.forceUtilityEnhancement === true ? 'low' : 'medium',
     reasonerUse: 'always',
-    enhancements: { mode: 'redirect', applyMode: 'as-swipe', contextMessages: 13 }
+    enhancements: { mode: enhancementMode, applyMode: 'as-swipe', contextMessages: 13 }
   }));
   if (String(scenario?.pipelineMode || '').toLowerCase() === 'rapid') {
-    const warm = await runStage('warm', () => runtime.warmRapidScene({ reason: `live-redirect-warm-${scenario.id}` }));
+    const warm = await runStage('warm', () => runtime.warmRapidScene({ reason: `live-${enhancementMode}-warm-${scenario.id}` }));
     if (warm?.ok !== true || warm?.rapid?.status !== 'ready') {
       throw new Error(`live-rapid-warm-failed:${warm?.rapid?.failureReasonCode || warm?.reason || 'not-ready'}`);
     }
@@ -251,7 +324,7 @@ async function executeScenarioInPage(input) {
   });
   ctx.chat.push({ mesid: sourceMesId, is_user: false, name: 'Story', mes: sourceText, swipe_id: 0, swipes: [sourceText] });
   const before = state();
-  const enhancementResult = await runStage('enhance', () => runtime.enhanceLatestAssistantMessage({ reason: `live-redirect-${scenario.id}` }));
+  const enhancementResult = await runStage('enhance', () => runtime.enhanceLatestAssistantMessage({ reason: `live-${enhancementMode}-${scenario.id}` }));
   const after = state();
   const candidateText = String(after.text || '');
   const runtimeView = runtime.view?.() || {};
@@ -385,7 +458,18 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
           const rows = [...document.querySelectorAll('[data-recursion-status-popover] [data-recursion-progress-row]')];
           return !rows.some((row) => ['running', 'pending', 'waiting'].includes(String(row.dataset.recursionProgressState || '').toLowerCase()));
         }, null, { timeout: 15000 }).catch(() => {});
-        const oracle = await collectLiveEnhancementRunOracle(page);
+        const enhancementMode = String(scenario?.enhancementMode || 'redirect').toLowerCase();
+        const oracle = await collectLiveEnhancementRunOracle(page, {
+          enhancement: {
+            enabled: true,
+            mode: enhancementMode,
+            applyMode: 'as-swipe'
+          },
+          before: artifacts.before,
+          after: artifacts.after,
+          enhancementResult: artifacts.enhancementResult,
+          editorialResult: artifacts.runtimeView?.editorialResult
+        });
         const journalDelta = Array.isArray(oracle?.observation?.journalDelta) ? oracle.observation.journalDelta : [];
         const screenshotPath = artifactRoot
           ? join(artifactRoot, `${String(scenario.id || 'redirect').replace(/[^a-z0-9_-]+/gi, '-')}.png`)
@@ -403,12 +487,14 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
           await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           await page.screenshot({ path: screenshotPath, fullPage: true });
         }
-        const judge = await page.evaluate(executeJudgeInPage, {
-          scenario,
-          sourceText: artifacts.sourceText,
-          candidateText: artifacts.candidateText,
-          marker: artifacts.enhancementResult?.marker || {}
-        });
+        const judge = enhancementMode === 'redirect'
+          ? await page.evaluate(executeJudgeInPage, {
+              scenario,
+              sourceText: artifacts.sourceText,
+              candidateText: artifacts.candidateText,
+              marker: artifacts.enhancementResult?.marker || {}
+            })
+          : { ok: true, decision: 'not-required', criteria: [] };
       return {
         ...artifacts,
         scenario,
@@ -478,7 +564,10 @@ export async function runLiveEditorialEffectiveness({
     }
     for (const scenario of scenarioList) {
       const artifacts = await execute({ scenario, targetModel, judgeModel, forceUtilityEnhancement });
-      const result = evaluateLiveRedirectScenarioArtifacts({
+      const evaluateScenario = String(scenario?.enhancementMode || 'redirect').toLowerCase() === 'repair'
+        ? evaluateLiveRepairScenarioArtifacts
+        : evaluateLiveRedirectScenarioArtifacts;
+      const result = evaluateScenario({
         ...artifacts,
         scenario: artifacts?.scenario || scenario,
         expectedModels: artifacts?.expectedModels || { targetModel, judgeModel }

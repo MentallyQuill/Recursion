@@ -77,7 +77,7 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-recursion-status-popover]')?.hidden === false, null, { timeout: timeoutMs });
   await page.waitForTimeout(300);
 
-  const snapshot = await page.evaluate(() => {
+  const snapshot = await page.evaluate((sentMessage) => {
     const popover = document.querySelector('[data-recursion-status-popover]');
     const rows = [...(popover?.querySelectorAll('[data-recursion-progress-row]') || [])].map((row) => ({
       label: String(row.querySelector('[data-recursion-progress-label]')?.textContent || '').replace(/\s+/g, ' ').trim(),
@@ -85,16 +85,73 @@ try {
       meta: String(row.querySelector('[data-recursion-progress-meta]')?.textContent || '').replace(/\s+/g, ' ').trim(),
       parent: row.parentElement?.dataset?.recursionProgressParentStep || ''
     }));
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    const runtimeView = runtime?.view?.() || {};
+    const hostContext = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const chat = Array.isArray(hostContext.chat) ? hostContext.chat : [];
+    const userIndex = chat.findLastIndex((entry) => entry?.is_user === true && String(entry?.mes || '') === sentMessage);
+    const assistantIndex = chat.findIndex((entry, index) => (
+      index > userIndex && entry?.is_user === false && String(entry?.mes || '').trim()
+    ));
+    const assistant = assistantIndex >= 0 ? chat[assistantIndex] : null;
+    const messageId = Number(assistant?.mesid ?? assistantIndex);
+    const swipeId = Number(assistant?.swipe_id ?? 0);
+    const swipeCount = Array.isArray(assistant?.swipes) ? assistant.swipes.length : 0;
+    const indexedMarker = Array.isArray(assistant?.__recursionGenerationReviewSwipes)
+      ? assistant.__recursionGenerationReviewSwipes[swipeId] || null
+      : null;
+    const swipeInfoMarker = Array.isArray(assistant?.swipe_info)
+      ? assistant.swipe_info[swipeId]?.extra?.recursion?.enhancement || null
+      : null;
+    const marker = indexedMarker || swipeInfoMarker || assistant?.__recursionGenerationReview || null;
+    const sourceText = String(assistant?.swipes?.[0] || '');
+    const chatKey = String(hostContext?.chatId || hostContext?.chat_id || hostContext?.currentChatId || 'chat');
+    const editorialResult = runtimeView.editorialResult || null;
     return {
       popoverOpen: popover?.hidden === false,
       enhancementMode: document.querySelector('[data-recursion-enhancements-button]')?.getAttribute('aria-label') || '',
       title: String(popover?.querySelector('[data-recursion-progress-title]')?.textContent || '').replace(/\s+/g, ' ').trim(),
       subtitle: String(popover?.querySelector('[data-recursion-progress-subtitle]')?.textContent || '').replace(/\s+/g, ' ').trim(),
       rows,
-      text: String(popover?.textContent || '').replace(/\s+/g, ' ').trim()
+      text: String(popover?.textContent || '').replace(/\s+/g, ' ').trim(),
+      assistantFound: Boolean(assistant),
+      certification: {
+        enhancement: { enabled: true, mode: 'redirect', applyMode: 'as-swipe' },
+        before: {
+          chatKey,
+          messageId,
+          swipeCount: assistant ? 1 : 0,
+          swipeId: 0,
+          text: sourceText
+        },
+        after: {
+          chatKey,
+          messageId,
+          swipeCount,
+          swipeId,
+          text: String(assistant?.mes || ''),
+          marker
+        },
+        enhancementResult: {
+          ok: editorialResult?.status === 'success',
+          skipped: editorialResult?.status === 'skipped',
+          partialFailed: editorialResult?.status === 'partial-failed',
+          mode: String(editorialResult?.mode || marker?.mode || ''),
+          marker
+        },
+        editorialResult
+      }
     };
+  }, message);
+  const certification = snapshot.certification;
+  delete snapshot.certification;
+  const oracle = await collectLiveEnhancementRunOracle(page, {
+    enhancement: certification.enhancement,
+    before: certification.before,
+    after: certification.after,
+    enhancementResult: certification.enhancementResult,
+    editorialResult: certification.editorialResult
   });
-  const oracle = await collectLiveEnhancementRunOracle(page);
   await page.screenshot({ path: resolve(artifactDir, 'desktop.png'), fullPage: false });
   await page.setViewportSize({ width: 420, height: 900 });
   await page.waitForTimeout(300);
@@ -104,6 +161,7 @@ try {
   const promptReady = snapshot.rows.some((row) => /recursion prompt ready/i.test(row.label) && row.state === 'done');
   const failures = [
     ...(!snapshot.popoverOpen ? ['progress-popover-closed'] : []),
+    ...(!snapshot.assistantFound ? ['generated-assistant-message-missing'] : []),
     ...(snapshot.rows.length === 0 ? ['progress-tree-empty'] : []),
     ...(unhealthyRows.length ? ['progress-tree-unhealthy'] : []),
     ...(!promptReady ? ['prompt-ready-not-done'] : []),

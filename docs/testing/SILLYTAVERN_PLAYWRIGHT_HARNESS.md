@@ -12,6 +12,7 @@ The first executable slice has these files:
 | `tools/scripts/check-playwright-readiness.mjs` | Offline browser readiness probe. It dynamically imports Playwright, launches Chromium when available, drives a local fixture, and never contacts SillyTavern. |
 | `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety and storage preflight. It rejects unsafe users before mutation, logs into dedicated users, writes/reads/verifies/deletes Recursion-owned probe files, and checks cross-user isolation when two or more users are configured. |
 | `tools/scripts/smoke-sillytavern-live.mjs` | Focused live smoke. It validates the dedicated user and base URL gate, authenticates, compares served Recursion files, verifies the Recursion Bar, Hero Pixel Array progress menu, options/settings menu, provider controls, Last Brief dropdown, Full Viewer access, and bridge hooks with Playwright, and writes screenshots/trace for no-generation UI runs when artifacts are enabled. With generation flags, it drives visible send controls when available, records the trigger source, proves host generation continued for UI sends, suppresses binary artifacts, and proves Recursion-owned prompt keys can install and clear without storing raw prompt text. |
+| `tools/scripts/prove-live-enhancements.mjs` | Real-provider Repair and Redirect certification across Standard, Rapid, and Fused. It requires a dedicated soak user and a concrete before/after mutation certificate; green progress or provider completion without the required selected second swipe is a failure. |
 | `tools/scripts/test-live-harness.mjs` | Deterministic contract tests for the guardrail behavior. |
 
 The harness should be a library, not a second runtime. Runtime behavior stays in `src/`; the harness drives the public host/UI surface and reads documented diagnostics.
@@ -40,6 +41,22 @@ Scripts should print a dry-run checklist when required live variables are missin
 If `--dry-run` is passed with `--live`, dry-run wins and the report must include a warning. This keeps an explicit safety flag from being bypassed by a broader command alias.
 
 `--strict` and `RECURSION_LIVE_STRICT=1` both enable strict mode in reports.
+
+## Enhancement Mutation Certification
+
+Run the configured-provider gate with:
+
+```powershell
+$env:SILLYTAVERN_BASE_URL = 'http://127.0.0.1:8000'
+$env:RECURSION_SILLYTAVERN_USER = 'recursion-soak-a'
+npm.cmd run prove:enhancements-live
+```
+
+The default matrix runs both `Redirect` and `Repair` under Standard, Rapid, and Fused. A diagnostic run may set `RECURSION_ENHANCEMENT_PROOF_CASE` to a pipeline/mode pair such as `standard-repair`; only the unfiltered command is the complete matrix.
+
+The shared live-enhancement oracle receives the configured Enhancement mode, concrete assistant state before and after the run, the runtime Enhancement return value, and the final Editorial settlement. For enabled `As Swipe`, pass requires exactly one appended swipe, selection of that appended swipe, changed text, and a persisted Recursion marker whose identity and hashes match the source and candidate. `Replace` has a separate in-place contract and must not change swipe count. `Off` must not mutate.
+
+The runner fails on skipped, warning, error, or `partial-failed` settlement even when a provider call returned parseable JSON. Repair must return a nonempty bounded-patch artifact; returning a full candidate fails. Redirect must also pass its production verifier and independent effectiveness judge. Provider completion and green intermediate rows are supporting evidence only.
 
 ## Dedicated User Policy
 

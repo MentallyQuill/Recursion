@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
+import { hashJson } from '../../src/core.mjs';
 
 const oracleModule = await import('./lib/live-enhancement-run-oracle.mjs').catch(() => ({}));
 const oracleSource = readFileSync('tools/scripts/lib/live-enhancement-run-oracle.mjs', 'utf8');
@@ -7,6 +8,9 @@ const evaluate = typeof oracleModule.evaluateLiveEnhancementRun === 'function'
   ? oracleModule.evaluateLiveEnhancementRun
   : () => ({ ok: true, failures: [] });
 const journalDeltaSince = oracleModule.journalDeltaSince;
+const evaluateMutation = typeof oracleModule.evaluateEnhancementMutation === 'function'
+  ? oracleModule.evaluateEnhancementMutation
+  : () => ({ ok: true, failures: [] });
 
 assertEqual(typeof journalDeltaSince, 'function', 'live oracle exposes timestamp-bounded journal delta filtering');
 assertDeepEqual(
@@ -22,13 +26,206 @@ assertDeepEqual(
   'live oracle excludes stale retained journal failures but preserves current-run failures'
 );
 
+const sourceText = 'Original response.';
+const candidateText = 'Repaired response.';
+const beforeMutation = {
+  chatKey: 'proof-chat',
+  messageId: 7,
+  swipeCount: 1,
+  swipeId: 0,
+  text: sourceText
+};
+const healthyMarker = {
+  schema: 'recursion.editorialMarker.v1',
+  chatKey: 'proof-chat',
+  messageId: 7,
+  swipeId: 0,
+  mode: 'repair',
+  applyMode: 'as-swipe',
+  sourceHash: hashJson(sourceText),
+  candidateHash: hashJson(candidateText),
+  diagnosisHash: 'diagnosis-hash',
+  outcome: 'applied'
+};
+const afterMutation = {
+  ...beforeMutation,
+  swipeCount: 2,
+  swipeId: 1,
+  text: candidateText,
+  marker: healthyMarker
+};
+const healthyEnhancementResult = {
+  ok: true,
+  partialFailed: false,
+  mode: 'repair',
+  marker: healthyMarker
+};
+const healthyEditorialResult = {
+  mode: 'repair',
+  status: 'success',
+  outcome: 'applied',
+  applyMode: 'as-swipe'
+};
+const mutationInput = {
+  enhancement: { enabled: true, mode: 'repair', applyMode: 'as-swipe' },
+  before: beforeMutation,
+  after: afterMutation,
+  enhancementResult: healthyEnhancementResult,
+  editorialResult: healthyEditorialResult
+};
+
+assertEqual(
+  evaluateMutation(mutationInput).ok,
+  true,
+  'mutation oracle accepts exactly one selected, source-bound Enhancement swipe'
+);
+
+const mutationNegativeControls = [
+  {
+    label: 'trusted booleans without concrete evidence',
+    input: {
+      enhancement: mutationInput.enhancement,
+      enhancementMutation: { kind: 'swipe', recursionOwned: true, validated: true }
+    },
+    failure: 'enhancement-before-state-missing'
+  },
+  {
+    label: 'no appended swipe',
+    input: { ...mutationInput, after: { ...afterMutation, swipeCount: 1, swipeId: 0 } },
+    failure: 'enhancement-swipe-count-invalid'
+  },
+  {
+    label: 'two appended swipes',
+    input: { ...mutationInput, after: { ...afterMutation, swipeCount: 3, swipeId: 2 } },
+    failure: 'enhancement-swipe-count-invalid'
+  },
+  {
+    label: 'new swipe not selected',
+    input: { ...mutationInput, after: { ...afterMutation, swipeId: 0 } },
+    failure: 'enhancement-swipe-selection-invalid'
+  },
+  {
+    label: 'missing marker',
+    input: { ...mutationInput, after: { ...afterMutation, marker: null } },
+    failure: 'enhancement-marker-missing'
+  },
+  {
+    label: 'stale source identity',
+    input: {
+      ...mutationInput,
+      after: {
+        ...afterMutation,
+        marker: { ...healthyMarker, chatKey: 'stale-chat', messageId: 6 }
+      }
+    },
+    failure: 'enhancement-marker-identity-mismatch'
+  },
+  {
+    label: 'candidate hash mismatch',
+    input: {
+      ...mutationInput,
+      after: {
+        ...afterMutation,
+        marker: { ...healthyMarker, candidateHash: hashJson('Different text.') }
+      }
+    },
+    failure: 'enhancement-marker-candidate-mismatch'
+  },
+  {
+    label: 'partial failure',
+    input: {
+      ...mutationInput,
+      enhancementResult: { ...healthyEnhancementResult, partialFailed: true },
+      editorialResult: { ...healthyEditorialResult, status: 'partial-failed', outcome: 'partial-failed' }
+    },
+    failure: 'enhancement-result-partial-failed'
+  },
+  {
+    label: 'skipped result',
+    input: {
+      ...mutationInput,
+      enhancementResult: { ok: true, skipped: true, mode: 'repair' },
+      editorialResult: { ...healthyEditorialResult, status: 'skipped', outcome: 'original-kept' }
+    },
+    failure: 'enhancement-result-skipped'
+  },
+  {
+    label: 'unhealthy Editorial settlement',
+    input: {
+      ...mutationInput,
+      editorialResult: { ...healthyEditorialResult, status: 'error', outcome: 'original-kept' }
+    },
+    failure: 'enhancement-editorial-result-unhealthy'
+  }
+];
+
+for (const control of mutationNegativeControls) {
+  const result = evaluateMutation(control.input);
+  assertEqual(result.ok, false, `mutation oracle rejects ${control.label}`);
+  assert(
+    result.failures.includes(control.failure),
+    `mutation oracle reports ${control.failure} for ${control.label}`
+  );
+}
+
+const replaceMarker = {
+  ...healthyMarker,
+  applyMode: 'replace'
+};
+const healthyReplace = evaluateMutation({
+  enhancement: { enabled: true, mode: 'repair', applyMode: 'replace' },
+  before: beforeMutation,
+  after: {
+    ...beforeMutation,
+    text: candidateText,
+    marker: replaceMarker
+  },
+  enhancementResult: {
+    ...healthyEnhancementResult,
+    marker: replaceMarker
+  },
+  editorialResult: {
+    ...healthyEditorialResult,
+    applyMode: 'replace'
+  }
+});
+assertEqual(healthyReplace.ok, true, 'mutation oracle accepts a validated in-place replacement');
+assertEqual(
+  evaluateMutation({
+    enhancement: { enabled: true, mode: 'repair', applyMode: 'replace' },
+    before: beforeMutation,
+    after: { ...beforeMutation, marker: replaceMarker },
+    enhancementResult: { ...healthyEnhancementResult, marker: replaceMarker },
+    editorialResult: { ...healthyEditorialResult, applyMode: 'replace' }
+  }).ok,
+  false,
+  'mutation oracle rejects a Replace result that did not change text'
+);
+assertEqual(
+  evaluateMutation({
+    enhancement: { enabled: false, mode: 'off', applyMode: 'as-swipe' },
+    before: beforeMutation,
+    after: beforeMutation
+  }).ok,
+  true,
+  'mutation oracle accepts no mutation while Enhancement is off'
+);
+assertEqual(
+  evaluateMutation({
+    enhancement: { enabled: false, mode: 'off', applyMode: 'as-swipe' },
+    before: beforeMutation,
+    after: afterMutation
+  }).ok,
+  false,
+  'mutation oracle rejects Recursion mutation while Enhancement is off'
+);
+
 const doneRows = [
   { label: 'Editorial diagnosis', state: 'done' },
   { label: 'Editorial candidate', state: 'done' },
   { label: 'Editorial verification', state: 'done' },
   { label: 'Recursion prompt ready', state: 'done' }
 ];
-const mutation = { kind: 'swipe', recursionOwned: true, validated: true };
 
 const negativeControls = [
   evaluate({
@@ -38,7 +235,7 @@ const negativeControls = [
     ],
     finalRows: doneRows,
     journalDelta: [],
-    enhancementMutation: mutation
+    ...mutationInput
   }),
   evaluate({
     transitions: [
@@ -47,7 +244,7 @@ const negativeControls = [
     ],
     finalRows: doneRows,
     journalDelta: [],
-    enhancementMutation: mutation
+    ...mutationInput
   }),
   evaluate({
     transitions: doneRows,
@@ -59,13 +256,15 @@ const negativeControls = [
       event: 'provider.call.failed',
       details: { roleId: 'editorialTransformer' }
     }],
-    enhancementMutation: mutation
+    ...mutationInput
   }),
   evaluate({
     transitions: [...doneRows, { label: 'Editorial enhancement', state: 'skipped' }],
     finalRows: [...doneRows, { label: 'Editorial enhancement', state: 'skipped' }],
     journalDelta: [],
-    enhancementMutation: { kind: 'none', recursionOwned: false, validated: false }
+    ...mutationInput,
+    enhancementResult: { ok: true, skipped: true, mode: 'repair' },
+    editorialResult: { ...healthyEditorialResult, status: 'skipped', outcome: 'original-kept' }
   })
 ];
 
@@ -108,7 +307,7 @@ const explainedUnhealthy = evaluate({
       }
     }
   }],
-  enhancementMutation: mutation
+  ...mutationInput
 });
 assertEqual(explainedUnhealthy.ok, false, 'explained unhealthy run still cannot pass');
 assert(
@@ -131,7 +330,7 @@ const unmatchedProvider = evaluate({
     details: { roleId: 'editorialDiagnostician' },
     hashes: { requestHash: 'request-1' }
   }],
-  enhancementMutation: mutation
+  ...mutationInput
 });
 assertEqual(unmatchedProvider.ok, false, 'strict live enhancement oracle rejects unmatched provider starts');
 
@@ -164,7 +363,7 @@ const healthy = evaluate({
       hashes: { requestHash: 'request-2' }
     }
   ],
-  enhancementMutation: mutation
+  ...mutationInput
 });
 assertEqual(healthy.ok, true, 'strict live enhancement oracle accepts a fully healthy concrete enhancement');
 
@@ -175,7 +374,7 @@ const healthyReplacedTree = evaluate({
     { label: 'Recursion prompt ready', state: 'done' }
   ],
   journalDelta: [],
-  enhancementMutation: mutation
+  ...mutationInput
 });
 assertEqual(
   healthyReplacedTree.ok,
@@ -193,6 +392,14 @@ for (const scriptPath of [
   const source = readFileSync(scriptPath, 'utf8');
   assert(source.includes('installLiveEnhancementRunOracle'), `${scriptPath} installs the strict live enhancement oracle before generation`);
   assert(source.includes('collectLiveEnhancementRunOracle'), `${scriptPath} collects the strict live enhancement oracle before reporting pass`);
+  assert(
+    source.includes('collectLiveEnhancementRunOracle(page, {'),
+    `${scriptPath} supplies concrete before/after certification evidence to the strict oracle`
+  );
+  assert(
+    !source.includes('enhancementMutation:'),
+    `${scriptPath} does not supply trusted Enhancement mutation booleans`
+  );
   assert(/oracle(?:\?\.|\.)verdict(?:\?\.|\.)ok/.test(source), `${scriptPath} gates its pass result on the strict oracle verdict`);
 }
 
@@ -210,6 +417,14 @@ assert(
 assert(
   proofSource.includes("envValue('RECURSION_FORCE_UTILITY_ENHANCEMENT'"),
   'live Redirect proof exposes an explicit Utility-only Enhancement switch'
+);
+assert(
+  proofSource.includes("enhancementMode: 'repair'"),
+  'live Enhancement proof includes a real-provider Repair scenario'
+);
+assert(
+  proofSource.includes('repair-bounded-patches'),
+  'live Enhancement proof names its bounded-patch Repair certification case'
 );
 assert(
   effectivenessSource.includes("reasoningLevel: scenario?.forceUtilityEnhancement === true ? 'low' : 'medium'"),
@@ -232,8 +447,8 @@ assert(
   /catch \(error\) \{\s*await browser\.close\(\)\.catch/.test(effectivenessSource),
   'live Redirect proof closes Chromium when browser setup or provider preflight fails'
 );
-const rapidWarmCall = "runtime.warmRapidScene({ reason: `live-redirect-warm-${scenario.id}` })";
-assert(effectivenessSource.includes(rapidWarmCall), 'live Redirect proof explicitly primes Rapid background warm');
+const rapidWarmCall = "runtime.warmRapidScene({ reason: `live-${enhancementMode}-warm-${scenario.id}` })";
+assert(effectivenessSource.includes(rapidWarmCall), 'live Enhancement proof explicitly primes Rapid background warm');
 assert(
   effectivenessSource.indexOf(rapidWarmCall)
     < effectivenessSource.indexOf("runtime.prepareForGeneration({ userMessage: pendingUserMessage })"),
@@ -241,7 +456,7 @@ assert(
 );
 const preparationCallIndex = effectivenessSource.indexOf("runtime.prepareForGeneration({ userMessage: pendingUserMessage })");
 const preparationRenderIndex = effectivenessSource.indexOf('live-prompt-ready-not-rendered', preparationCallIndex);
-const enhancementCallIndex = effectivenessSource.indexOf("runtime.enhanceLatestAssistantMessage({ reason: `live-redirect-${scenario.id}` })");
+const enhancementCallIndex = effectivenessSource.indexOf("runtime.enhanceLatestAssistantMessage({ reason: `live-${enhancementMode}-${scenario.id}` })");
 assert(
   preparationCallIndex >= 0 && preparationRenderIndex > preparationCallIndex && preparationRenderIndex < enhancementCallIndex,
   'live Redirect proof gives prompt-ready one browser render boundary before post-generation Enhancement begins'

@@ -355,6 +355,18 @@ async function executeJudgeInPage(input = {}) {
   });
 }
 
+async function ensureProgressPopoverOpen(page) {
+  const open = await page.evaluate(() => (
+    document.querySelector('[data-recursion-status-popover]')?.hidden === false
+  ));
+  if (!open) {
+    await page.locator('[data-recursion-status-trigger]').first().click();
+  }
+  await page.waitForFunction(() => (
+    document.querySelector('[data-recursion-status-popover]')?.hidden === false
+  ), null, { timeout: 5000 });
+}
+
 async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artifactRoot, forceUtilityEnhancement = false }) {
   const session = createSillyTavernHttpSession({ baseUrl, user, password });
   await session.login();
@@ -447,6 +459,7 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
   return {
     async execute({ scenario, targetModel, judgeModel, forceUtilityEnhancement = false }) {
       await page.setViewportSize({ width: 1280, height: 720 });
+      await ensureProgressPopoverOpen(page);
       await installLiveEnhancementRunOracle(page);
       const artifacts = await page.evaluate(executeScenarioInPage, {
         scenario: { ...scenario, forceUtilityEnhancement },

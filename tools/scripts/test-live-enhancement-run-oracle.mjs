@@ -469,6 +469,12 @@ assert(
   effectivenessSource.includes("document.querySelector('[data-recursion-status-popover]')?.hidden === false"),
   'live Redirect proof opens the progress popover before visual capture'
 );
+const progressOpenIndex = effectivenessSource.indexOf('await ensureProgressPopoverOpen(page);');
+assert(
+  progressOpenIndex >= 0
+    && progressOpenIndex < effectivenessSource.indexOf('await installLiveEnhancementRunOracle(page);'),
+  'live Enhancement proof renders the progress surface before installing its transition observer'
+);
 assert(effectivenessSource.includes('phoneScreenshotPath'), 'live Redirect proof records a compact-phone visual confirmation');
 assert(
   /catch \(error\) \{\s*await browser\.close\(\)\.catch/.test(effectivenessSource),

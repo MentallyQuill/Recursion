@@ -56,6 +56,46 @@ try {
   await installLiveEnhancementRunOracle(page);
 
   const message = `Card progress proof ${Date.now()}: keep the archive door, candle, Mara, and missing captain in the immediate scene. Return a concise next beat.`;
+  await page.evaluate(() => {
+    const hostContext = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const chat = Array.isArray(hostContext.chat) ? hostContext.chat : [];
+    const baselineLength = chat.length;
+    const existing = globalThis.__recursionLiveCardProgressInitialAssistant;
+    existing?.stop?.();
+    const monitor = {
+      before: null,
+      interval: null,
+      originalPush: chat.push
+    };
+    const capture = (entries = chat.slice(baselineLength)) => {
+      if (monitor.before) return;
+      const message = entries.find((entry) => entry?.is_user === false && String(entry?.mes || '').trim());
+      if (!message) return;
+      const messageIndex = chat.indexOf(message);
+      const text = String(message?.mes || '');
+      const swipes = Array.isArray(message?.swipes) ? message.swipes : [];
+      monitor.before = {
+        chatKey: String(hostContext?.chatId || hostContext?.chat_id || hostContext?.currentChatId || 'chat'),
+        messageId: Number(message?.mesid ?? messageIndex),
+        swipeCount: swipes.length || (text ? 1 : 0),
+        swipeId: Number(message?.swipe_id ?? 0),
+        text: String(swipes[Number(message?.swipe_id ?? 0)] || text),
+        marker: null
+      };
+    };
+    const monitoredPush = function (...entries) {
+      const length = Array.prototype.push.apply(this, entries);
+      capture(entries);
+      return length;
+    };
+    chat.push = monitoredPush;
+    monitor.interval = setInterval(() => capture(), 5);
+    monitor.stop = () => {
+      clearInterval(monitor.interval);
+      if (chat.push === monitoredPush) chat.push = monitor.originalPush;
+    };
+    globalThis.__recursionLiveCardProgressInitialAssistant = monitor;
+  });
   const input = page.locator('#send_textarea, textarea#send_textarea, textarea[name="send_textarea"]').first();
   await input.fill(message);
   await page.locator('#send_but, button#send_but').first().click();
@@ -104,7 +144,9 @@ try {
       ? assistant.swipe_info[swipeId]?.extra?.recursion?.enhancement || null
       : null;
     const marker = indexedMarker || swipeInfoMarker || assistant?.__recursionGenerationReview || null;
-    const sourceText = String(assistant?.swipes?.[0] || '');
+    const sourceState = globalThis.__recursionLiveCardProgressInitialAssistant?.before || null;
+    globalThis.__recursionLiveCardProgressInitialAssistant?.stop?.();
+    delete globalThis.__recursionLiveCardProgressInitialAssistant;
     const chatKey = String(hostContext?.chatId || hostContext?.chat_id || hostContext?.currentChatId || 'chat');
     const editorialResult = runtimeView.editorialResult || null;
     return {
@@ -117,13 +159,7 @@ try {
       assistantFound: Boolean(assistant),
       certification: {
         enhancement: { enabled: true, mode: 'redirect', applyMode: 'as-swipe' },
-        before: {
-          chatKey,
-          messageId,
-          swipeCount: assistant ? 1 : 0,
-          swipeId: 0,
-          text: sourceText
-        },
+        before: sourceState || {},
         after: {
           chatKey,
           messageId,

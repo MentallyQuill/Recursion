@@ -82,6 +82,30 @@ assertEqual(
 
 const mutationNegativeControls = [
   {
+    label: 'missing explicit enabled flag',
+    input: {
+      ...mutationInput,
+      enhancement: { mode: 'repair', applyMode: 'as-swipe' }
+    },
+    failure: 'enhancement-enabled-invalid'
+  },
+  {
+    label: 'unknown Enhancement mode',
+    input: {
+      ...mutationInput,
+      enhancement: { enabled: true, mode: 'unknown', applyMode: 'as-swipe' }
+    },
+    failure: 'enhancement-mode-invalid'
+  },
+  {
+    label: 'missing source message identity',
+    input: {
+      ...mutationInput,
+      before: { ...beforeMutation, messageId: null }
+    },
+    failure: 'enhancement-before-state-missing'
+  },
+  {
     label: 'trusted booleans without concrete evidence',
     input: {
       enhancement: mutationInput.enhancement,
@@ -429,6 +453,15 @@ for (const scriptPath of [
   );
   assert(/oracle(?:\?\.|\.)verdict(?:\?\.|\.)ok/.test(source), `${scriptPath} gates its pass result on the strict oracle verdict`);
 }
+const cardProgressSource = readFileSync('tools/scripts/prove-live-card-progress.mjs', 'utf8');
+assert(
+  cardProgressSource.includes('__recursionLiveCardProgressInitialAssistant'),
+  'card-progress proof captures the actual initial assistant state at the host boundary'
+);
+assert(
+  !cardProgressSource.includes('swipeCount: assistant ? 1 : 0'),
+  'card-progress proof does not manufacture a one-swipe before state after Enhancement settles'
+);
 
 const effectivenessSource = readFileSync('tools/scripts/lib/live-editorial-effectiveness.mjs', 'utf8');
 const proofSource = readFileSync('tools/scripts/prove-live-enhancements.mjs', 'utf8');
@@ -488,6 +521,11 @@ assert(
   'live Redirect proof awaits Rapid background warm before the strict foreground preparation'
 );
 const preparationCallIndex = effectivenessSource.indexOf("runtime.prepareForGeneration({ userMessage: pendingUserMessage })");
+const preparationPopoverIndex = effectivenessSource.indexOf('live-progress-popover-not-rendered');
+assert(
+  preparationPopoverIndex >= 0 && preparationPopoverIndex < preparationCallIndex,
+  'live Enhancement proof remounts progress after settings changes and before preparation'
+);
 const preparationRenderIndex = effectivenessSource.indexOf('live-prompt-ready-not-rendered', preparationCallIndex);
 const enhancementCallIndex = effectivenessSource.indexOf("runtime.enhanceLatestAssistantMessage({ reason: `live-${enhancementMode}-${scenario.id}` })");
 assert(

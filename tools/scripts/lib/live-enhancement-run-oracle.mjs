@@ -3,6 +3,7 @@ import { hashJson } from '../../../src/core.mjs';
 const UNHEALTHY_PROGRESS_STATES = new Set(['caution', 'warning', 'warn', 'failed', 'failure', 'error']);
 const UNHEALTHY_JOURNAL_SEVERITIES = new Set(['warning', 'warn', 'error', 'fatal']);
 const UNHEALTHY_JOURNAL_EVENTS = new Set(['provider.call.failed', 'prompt.install_skipped']);
+const ENABLED_ENHANCEMENT_MODES = new Set(['repair', 'recompose', 'redirect']);
 const BASE_REQUIRED_EDITORIAL_LABELS = Object.freeze([
   'editorial diagnosis',
   'editorial candidate',
@@ -51,7 +52,10 @@ function object(value) {
 function hasMutationState(value) {
   const state = object(value);
   return text(state.chatKey)
-    && state.messageId !== undefined
+    && state.messageId !== null
+    && state.messageId !== ''
+    && Number.isInteger(Number(state.messageId))
+    && Number(state.messageId) >= 0
     && Number.isInteger(Number(state.swipeCount))
     && Number.isInteger(Number(state.swipeId))
     && typeof state.text === 'string';
@@ -109,13 +113,17 @@ export function evaluateEnhancementMutation({
   const editorial = object(editorialResult);
   const mode = normalized(configured.mode);
   const applyMode = normalized(configured.applyMode);
-  const enabled = configured.enabled !== false && !['off', 'none', 'disabled'].includes(mode);
+  const explicitlyOff = configured.enabled === false && ['off', 'none', 'disabled'].includes(mode);
+  const enabled = configured.enabled === true && ENABLED_ENHANCEMENT_MODES.has(mode);
 
   if (!Object.keys(configured).length) failures.push('enhancement-config-missing');
+  if (configured.enabled !== true && configured.enabled !== false) failures.push('enhancement-enabled-invalid');
+  if (configured.enabled === true && !ENABLED_ENHANCEMENT_MODES.has(mode)) failures.push('enhancement-mode-invalid');
+  if (configured.enabled === false && !['off', 'none', 'disabled'].includes(mode)) failures.push('enhancement-mode-invalid');
   if (!hasMutationState(source)) failures.push('enhancement-before-state-missing');
   if (!hasMutationState(final)) failures.push('enhancement-after-state-missing');
 
-  if (!enabled) {
+  if (explicitlyOff) {
     if (hasMutationState(source) && hasMutationState(final)) {
       const stateChanged = !sameIdentity(source, final)
         || Number(source.swipeCount) !== Number(final.swipeCount)
@@ -135,6 +143,7 @@ export function evaluateEnhancementMutation({
     };
   }
 
+  pushIf(failures, !enabled, 'enhancement-config-invalid');
   pushIf(failures, !['as-swipe', 'replace'].includes(applyMode), 'enhancement-apply-mode-invalid');
   pushIf(failures, !Object.keys(result).length || result.ok !== true, 'enhancement-result-unhealthy');
   pushIf(failures, result.skipped === true, 'enhancement-result-skipped');

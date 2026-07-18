@@ -76,6 +76,7 @@ const report = {
   runId,
   baseUrl,
   user,
+  evidenceClass: 'served-runtime-synthetic-message-real-provider',
   artifactRoot,
   finishedAt: new Date().toISOString(),
   ...result

@@ -145,6 +145,7 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
     provider: artifacts.provider || {},
     oracle: artifacts.oracle?.verdict || {},
     privateLeakSurfaces,
+    evidenceClass: text(artifacts.evidenceClass),
     failures
   };
 }
@@ -212,6 +213,7 @@ export function evaluateLiveRepairScenarioArtifacts(artifacts = {}) {
     errorCode: text(result.error?.code || result.validation?.error?.code || editorialResult.errorCode),
     errorMessage: text(result.error?.message || result.validation?.error?.message || editorialResult.reason),
     oracle: artifacts.oracle?.verdict || {},
+    evidenceClass: text(artifacts.evidenceClass),
     failures
   };
 }
@@ -307,6 +309,13 @@ async function executeScenarioInPage(input) {
       throw new Error(`live-rapid-warm-failed:${warm?.rapid?.failureReasonCode || warm?.reason || 'not-ready'}`);
     }
   }
+  if (document.querySelector('[data-recursion-status-popover]')?.hidden !== false) {
+    document.querySelector('[data-recursion-status-trigger]')?.click();
+  }
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  if (document.querySelector('[data-recursion-status-popover]')?.hidden !== false) {
+    throw new Error('live-progress-popover-not-rendered');
+  }
   const prepared = await runStage('prepare', () => runtime.prepareForGeneration({ userMessage: pendingUserMessage }));
   await new Promise((resolve, reject) => {
     const deadline = Date.now() + 10000;
@@ -330,6 +339,7 @@ async function executeScenarioInPage(input) {
   const runtimeView = runtime.view?.() || {};
   globalThis.__recursionLiveRedirectProofStage = 'complete';
   return {
+    evidenceClass: 'served-runtime-synthetic-message-real-provider',
     prepared,
     before,
     after,

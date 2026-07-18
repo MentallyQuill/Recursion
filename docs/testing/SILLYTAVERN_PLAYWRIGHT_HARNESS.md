@@ -58,6 +58,8 @@ The shared live-enhancement oracle receives the configured Enhancement mode, con
 
 The runner fails on skipped, warning, error, or `partial-failed` settlement even when a provider call returned parseable JSON. Repair must return a nonempty bounded-patch artifact; returning a full candidate fails. Redirect must also pass its production verifier and independent effectiveness judge. Provider completion and green intermediate rows are supporting evidence only.
 
+The report classifies this deterministic corpus as `served-runtime-synthetic-message-real-provider`. It uses the production runtime, configured providers, host adapter, and actual SillyTavern page, but keeps its deliberately flawed source messages out of durable chat storage. Therefore it certifies in-page message mutation and marker binding, not save/reload durability. The visible-send `prove:card-progress-live` path separately captures the real initial host assistant state and owns native-chat mutation evidence.
+
 ## Dedicated User Policy
 
 State-mutating live scripts must require a dedicated Recursion soak user. The accepted handle pattern is:

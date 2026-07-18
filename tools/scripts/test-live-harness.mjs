@@ -29,10 +29,17 @@ const evaluateLiveRedirectScenarioArtifacts = liveEditorialModule.evaluateLiveRe
 const runLiveEditorialEffectiveness = liveEditorialModule.runLiveEditorialEffectiveness;
 const validateLiveEditorialRuntime = liveEditorialModule.validateLiveEditorialRuntime;
 const liveEditorialStageTimeoutMs = liveEditorialModule.liveEditorialStageTimeoutMs;
+const swipeReuseProofSource = readFileSync(join(process.cwd(), 'tools', 'scripts', 'prove-live-swipe-reuse.mjs'), 'utf8');
 assertEqual(typeof evaluateLiveRedirectScenarioArtifacts, 'function', 'live harness exposes strict Redirect scenario evaluator');
 assertEqual(typeof runLiveEditorialEffectiveness, 'function', 'live harness exposes reusable Redirect effectiveness runner');
 assertEqual(typeof validateLiveEditorialRuntime, 'function', 'live harness exposes served runtime capability validation');
 assertEqual(typeof liveEditorialStageTimeoutMs, 'function', 'live harness exposes bounded Redirect proof stage deadlines');
+assert(swipeReuseProofSource.includes("proofClassification: synthetic ? 'synthetic-served-module' : 'strict-native-host'"), 'swipe proof classifies synthetic and strict native evidence');
+assert(swipeReuseProofSource.includes("const synthetic = argv.includes('--synthetic')"), 'swipe proof requires an explicit synthetic opt-in');
+assert(swipeReuseProofSource.includes("mode: 'native-host-playwright'"), 'swipe proof has a native host certification path');
+assert(swipeReuseProofSource.includes('.swipe_right'), 'native swipe proof drives the visible SillyTavern swipe control');
+assert(swipeReuseProofSource.includes("globalThis.__recursionLiveHarnessRuntime"), 'native swipe proof inspects the installed extension runtime');
+assert(swipeReuseProofSource.includes("fail('stale-extension'"), 'swipe proof fails closed when repository and served copies differ');
 assertEqual(liveEditorialStageTimeoutMs('settings', 180000), 15000, 'settings transition has a short fail-fast deadline');
 assertEqual(liveEditorialStageTimeoutMs('warm', 180000), 540000, 'Rapid warm allows its sequential provider deadlines');
 assertEqual(liveEditorialStageTimeoutMs('prepare', 180000), 180000, 'preparation uses one configured live timeout');
@@ -816,6 +823,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/reasoning-policy.mjs',
     'src/retention-policy.mjs',
     'src/runtime/diagnostics.mjs',
+    'src/runtime/prepared-generation.mjs',
     'src/runtime/pipelines/fused.mjs',
     'src/runtime/pipelines/rapid.mjs',
     'src/runtime/pipelines/standard.mjs',

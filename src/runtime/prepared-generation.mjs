@@ -153,6 +153,8 @@ export function compareGenerationBasis(
 
   if (
     allowBoundedSuffix
+    && current.sourceWindowTruncated === true
+    && ['message-cap', 'character-budget', 'both'].includes(current.sourceWindowLimitReason)
     && currentWindow.length < expectedWindow.length
     && hashJson(currentWindow) === hashJson(expectedWindow.slice(-currentWindow.length))
   ) {

@@ -94,7 +94,13 @@ import {
 import { runFusedCardPipeline } from './runtime/pipelines/fused.mjs';
 import { runRapidForegroundPipeline, warmRapidPipeline } from './runtime/pipelines/rapid.mjs';
 import { runStandardCardPipeline } from './runtime/pipelines/standard.mjs';
-import { PREPARED_GENERATION_VERSION } from './runtime/prepared-generation.mjs';
+import {
+  PREPARED_GENERATION_VERSION,
+  compareGenerationBasis,
+  createPreparedGenerationArtifact,
+  preparedGenerationIntegrityIsValid,
+  validatePreparedGenerationArtifact
+} from './runtime/prepared-generation.mjs';
 import { createRuntimeRunState } from './runtime/run-state.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
@@ -121,7 +127,6 @@ const DEFAULT_LOW_REASONING_MAX_CARDS = 3;
 const DEFAULT_NORMAL_REASONING_MAX_CARDS = 6;
 const DEFAULT_ULTRA_REASONING_MAX_CARDS = 10;
 const HIGH_REASONER_CARD_PRIORITY = 88;
-const LATEST_ASSISTANT_SWIPE_RETRY_MAX_AGE_MS = 120000;
 const REASONING_LEVEL_POLICIES = Object.freeze({
   low: {
     level: 'low',
@@ -478,7 +483,11 @@ function normalizeSnapshot(rawSnapshot = {}) {
       hashJson({ latestMesId, messages: messages.slice(-3) })
     ),
     latestMesId,
-    messages
+    messages,
+    sourceWindowTruncated: source.sourceWindowTruncated === true,
+    sourceWindowLimitReason: safeText(source.sourceWindowLimitReason || '', 40),
+    sourceWindowMessageCount: numberOr(source.sourceWindowMessageCount, messages.length),
+    sourceWindowCharacterCount: numberOr(source.sourceWindowCharacterCount, 0)
   };
   return {
     ...normalized,
@@ -533,7 +542,11 @@ function viewSnapshot(snapshot) {
     turnFingerprint: safeText(source.turnFingerprint || '', 180),
     sourceRevisionHash: safeText(source.sourceRevisionHash || '', 180),
     latestMesId: numberOr(source.latestMesId, 0),
-    messages
+    messages,
+    sourceWindowTruncated: source.sourceWindowTruncated === true,
+    sourceWindowLimitReason: safeText(source.sourceWindowLimitReason || '', 40),
+    sourceWindowMessageCount: numberOr(source.sourceWindowMessageCount, messages.length),
+    sourceWindowCharacterCount: numberOr(source.sourceWindowCharacterCount, 0)
   };
 }
 
@@ -1360,6 +1373,8 @@ export function generationBasisForSnapshot(snapshot, settings = {}) {
     latestMesId: numberOr(source.latestMesId, 0),
     sourceRevisionHash: activeSourceRevisionHash(source),
     sourceWindow,
+    sourceWindowTruncated: source.sourceWindowTruncated === true,
+    sourceWindowLimitReason: safeText(source.sourceWindowLimitReason || '', 40),
     sourceWindowContractHash: hashJson({
       sourceWindowMessages: retention.sourceWindowMessages,
       sourceWindowCharacters: retention.sourceWindowCharacters
@@ -2335,8 +2350,7 @@ export function createRecursionRuntime({
   }
   let hostStopCleanupPromise = null;
   let recursionStopRequest = null;
-  let lastPacket = null;
-  let lastHand = { cards: [], omitted: [] };
+  let lastPreparedGeneration = null;
   let lastBriefPacket = null;
   let lastBriefHand = { cards: [], omitted: [] };
   let lastPlan = null;
@@ -2359,6 +2373,37 @@ export function createRecursionRuntime({
   let activeProseEnhancementLifecycle = null;
   let canceledProseEnhancement = null;
   let lastEditorialResult = null;
+
+  function createPreparedGenerationCandidate(packet, hand, snapshot, settings) {
+    const basis = generationBasisForSnapshot(snapshot, settings);
+    if (!basis) return null;
+    return createPreparedGenerationArtifact({
+      packet,
+      hand,
+      basis,
+      contract: preparedGenerationContract(settings)
+    });
+  }
+
+  function commitPreparedGeneration(candidate) {
+    if (!preparedGenerationIntegrityIsValid(candidate)) {
+      throw new TypeError('Prepared generation candidate is invalid.');
+    }
+    lastPreparedGeneration = candidate;
+    return candidate;
+  }
+
+  function clearPreparedGeneration() {
+    lastPreparedGeneration = null;
+  }
+
+  function preparedPacket() {
+    return lastPreparedGeneration?.packet || null;
+  }
+
+  function preparedHand() {
+    return lastPreparedGeneration?.hand || { cards: [], omitted: [] };
+  }
 
   async function readSnapshot() {
     if (typeof host?.snapshot !== 'function') {
@@ -2775,7 +2820,9 @@ export function createRecursionRuntime({
     };
   }
 
-  function readyLastBrief(packet = lastPacket, hand = lastHand, { runId = '', reason = 'packet-ready' } = {}) {
+  function readyLastBrief({ runId = '', reason = 'packet-ready' } = {}) {
+    const packet = preparedPacket();
+    const hand = preparedHand();
     const cards = Array.isArray(hand?.cards) ? hand.cards : [];
     lastBriefPacket = packet || null;
     lastBriefHand = hand || { cards: [], omitted: [] };
@@ -2811,8 +2858,8 @@ export function createRecursionRuntime({
       packetId: '',
       handId: '',
       cardCount: 0,
-      previousPacketId: safeText(lastPacket?.packetId || lastBrief.packetId || '', 180),
-      previousHandId: safeText(lastHand?.handId || lastBrief.handId || '', 180),
+      previousPacketId: safeText(preparedPacket()?.packetId || lastBrief.packetId || '', 180),
+      previousHandId: safeText(preparedHand()?.handId || lastBrief.handId || '', 180),
       previousCardCount: previousCards.length,
       sourceCardCount: 0,
       coverageStatus: 'none',
@@ -2842,41 +2889,10 @@ export function createRecursionRuntime({
     };
   }
 
-  function sameSourceBeforeLatestAssistant(currentSnapshot, previousSnapshot, latestAssistantEntry) {
-    const candidate = snapshotWithoutLatestAssistant(currentSnapshot, latestAssistantEntry);
-    if (!candidate || !previousSnapshot) return false;
-    const candidateMessages = sourceWindowMessages(candidate);
-    const previousMessages = sourceWindowMessages(previousSnapshot);
-    if (!candidateMessages.length || candidateMessages.length > previousMessages.length) return false;
-    const previousSuffix = previousMessages.slice(previousMessages.length - candidateMessages.length);
-    return safeText(candidate.chatId || DEFAULT_CHAT_ID, 160) === safeText(previousSnapshot.chatId || DEFAULT_CHAT_ID, 160)
-      && safeText(candidate.chatKey || DEFAULT_CHAT_ID, 160) === safeText(previousSnapshot.chatKey || DEFAULT_CHAT_ID, 160)
-      && safeText(candidate.sceneKey || DEFAULT_SCENE_KEY, 160) === safeText(previousSnapshot.sceneKey || DEFAULT_SCENE_KEY, 160)
-      && safeText(candidate.sceneFingerprint || '', 180) === safeText(previousSnapshot.sceneFingerprint || '', 180)
-      && numberOr(candidate.latestMesId, 0) === numberOr(previousSnapshot.latestMesId, 0)
-      && hashJson(candidateMessages) === hashJson(previousSuffix);
-  }
-
-  function reusableSnapshotForLatestAssistantSwipeRetry(snapshot, pendingUserMessage) {
-    const retry = runState.takeLatestAssistantSwipeRetry();
-    if (!retry) return null;
-    if (Date.now() - numberOr(retry.recordedAtMs, 0) > LATEST_ASSISTANT_SWIPE_RETRY_MAX_AGE_MS) return null;
-    if (safeText(pendingUserMessage?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT)) return null;
-    if (!lastSnapshot || !canReuseLastPacketForSnapshot(lastSnapshot)) return null;
-    const latestAssistant = latestVisibleAssistantEntry(snapshot);
-    if (!latestAssistant) return null;
-    const expectedMessageId = finiteNumberOrNull(retry.messageId);
-    const latestMessageId = numberOr(latestAssistant.message?.mesid, latestAssistant.index);
-    if (expectedMessageId !== null && expectedMessageId !== latestMessageId) return null;
-    if (!sameSourceBeforeLatestAssistant(snapshot, lastSnapshot, latestAssistant)) return null;
-    return lastSnapshot;
-  }
-
   function clearVolatileSceneState({ preserveLastBrief = false } = {}) {
     abortActiveRapidWarmRun('stale');
     clearPendingProseEnhancement();
-    lastPacket = null;
-    lastHand = { cards: [], omitted: [] };
+    clearPreparedGeneration();
     lastPlan = null;
     lastSnapshot = null;
     lastSavedSceneCacheRef = null;
@@ -2985,8 +3001,8 @@ export function createRecursionRuntime({
   }
 
   function manualTrimPreferenceFamiliesForRuntime(settings = {}) {
-    const fromLastHand = Array.isArray(lastHand?.cards)
-      ? lastHand.cards.map((card) => safeText(card?.family || '', 120)).filter(Boolean)
+    const fromLastHand = Array.isArray(preparedHand()?.cards)
+      ? preparedHand().cards.map((card) => safeText(card?.family || '', 120)).filter(Boolean)
       : [];
     const focusFamilies = influencePolicyForSettings(settings).focus?.boostedFamilies || [];
     return [...fromLastHand, ...focusFamilies];
@@ -3059,6 +3075,7 @@ export function createRecursionRuntime({
     if (changedKeys.length > 0) {
       supersedeActiveRun();
       abortActiveRapidWarmRun('settings-mismatch');
+      if (next.enabled === false) clearPreparedGeneration();
       const result = await trackRuntimeMutation(async () => {
         await invalidateActiveSceneCacheBestEffort('settings-changed', {
           changedKeys
@@ -3081,11 +3098,18 @@ export function createRecursionRuntime({
   }
 
   function recordCacheDecision(runId, decision = {}) {
+    const sequence = numberOr(lastCacheDecision?.sequence, 0) + 1;
     lastCacheDecision = {
+      sequence,
       decision: safeText(decision.decision || '', 40),
       kind: safeText(decision.kind || '', 60),
       reason: safeText(decision.reason || '', 180),
       variant: safeText(decision.variant || '', 40),
+      basisMode: safeText(decision.basisMode || '', 40),
+      basisReason: safeText(decision.basisReason || '', 120),
+      artifactHash: safeText(decision.artifactHash || '', 180),
+      packetId: safeText(decision.packetId || '', 180),
+      handId: safeText(decision.handId || '', 180),
       reusedCardIds: Array.isArray(decision.reusedCardIds) ? decision.reusedCardIds.map((id) => safeText(id, 160)).filter(Boolean).slice(0, 32) : [],
       providerCallsSkipped: Array.isArray(decision.providerCallsSkipped) ? decision.providerCallsSkipped.map((role) => safeText(role, 80)).filter(Boolean).slice(0, 16) : [],
       recordedAt: nowIso()
@@ -3281,8 +3305,9 @@ export function createRecursionRuntime({
       activeRunId: state.activeRunId,
       hostGenerationActive: state.hostGenerationActive,
       activeAttempt: state.activeAttempt,
-      lastPacket,
-      lastHand,
+      lastPreparedGeneration,
+      lastPacket: lastPreparedGeneration?.packet || null,
+      lastHand: lastPreparedGeneration?.hand || { cards: [], omitted: [] },
       lastBriefPacket,
       lastBriefHand,
       lastPlan,
@@ -3417,8 +3442,7 @@ export function createRecursionRuntime({
         });
         return { ok: false, chatKey, sceneKey, result: redact(result), clear: null };
       }
-      lastPacket = null;
-      lastHand = { cards: [], omitted: [] };
+      clearPreparedGeneration();
       lastPlan = null;
       lastSavedSceneCacheRef = null;
       runState.clearLatestAssistantSwipeRetry();
@@ -3652,7 +3676,7 @@ export function createRecursionRuntime({
         // Placeholder cleanup is best-effort; stop settlement must still complete.
       }
       const attempt = runState.current().activeAttempt;
-      const preserveLastKnownGood = attempt?.kind === 'swipe' && Boolean(lastPacket && lastHand?.cards?.length);
+      const preserveLastKnownGood = attempt?.kind === 'swipe' && Boolean(lastPreparedGeneration);
       if (preserveLastKnownGood) {
         runState.setLatestAssistantSwipeRetry({
           eventName: 'message_swiped',
@@ -3702,7 +3726,7 @@ export function createRecursionRuntime({
     const sourceById = new Map(Object.values(sourceCardsByFamily).flat().map((card) => [String(card.id), card]));
     const installed = [];
     const seen = new Set();
-    for (const generated of Array.isArray(lastHand?.cards) ? lastHand.cards : []) {
+    for (const generated of Array.isArray(preparedHand()?.cards) ? preparedHand().cards : []) {
       const sourceCards = Array.isArray(generated?.sourceCards) && generated.sourceCards.length
         ? generated.sourceCards
         : (sourceCardsByFamily?.[generated?.family] || []);
@@ -3763,7 +3787,7 @@ export function createRecursionRuntime({
     const snapshot = typeof host.snapshot === 'function' ? await host.snapshot() : {};
     const enhancementContext = enhancementContextFromSnapshot({
       snapshot,
-      hand: lastHand,
+      hand: preparedHand(),
       activeText: originalText,
       activeSender: identity.sender || '',
       contextMessageLimit: enhancementSettings.contextMessages
@@ -3776,9 +3800,9 @@ export function createRecursionRuntime({
     ).messages;
     const reviewSnapshot = {
       ...generationReviewInstalledHand(settings),
-      promptPacket: lastPacket || {},
+      promptPacket: preparedPacket() || {},
       lastBrief,
-      storyForm: lastPacket?.storyForm || lastPlan?.storyForm || {},
+      storyForm: preparedPacket()?.storyForm || lastPlan?.storyForm || {},
       pipeline: settings.pipelineMode,
       context: {
         messages: contextMessages,
@@ -4076,7 +4100,7 @@ export function createRecursionRuntime({
     const snapshot = typeof host.snapshot === 'function' ? await host.snapshot() : {};
     const enhancementContext = enhancementContextFromSnapshot({
       snapshot,
-      hand: lastHand,
+      hand: preparedHand(),
       activeText: sourceText,
       activeSender: identity.sender || '',
       contextMessageLimit: enhancementSettings.contextMessages
@@ -4089,9 +4113,9 @@ export function createRecursionRuntime({
     ).messages;
     const reviewSnapshot = {
       ...generationReviewInstalledHand(settings),
-      promptPacket: lastPacket || {},
+      promptPacket: preparedPacket() || {},
       lastBrief,
-      storyForm: lastPacket?.storyForm || lastPlan?.storyForm || {},
+      storyForm: preparedPacket()?.storyForm || lastPlan?.storyForm || {},
       pipeline: settings.pipelineMode,
       context: {
         messages: contextMessages,
@@ -4788,7 +4812,7 @@ export function createRecursionRuntime({
       enhancementSceneKey = safeText(snapshot?.sceneKey || '', 180);
       const enhancementContext = enhancementContextFromSnapshot({
         snapshot: snapshot || {},
-        hand: lastHand,
+        hand: preparedHand(),
         activeText: originalText,
         activeSender: identity.sender || '',
         contextMessageLimit: enhancementSettings.contextMessages
@@ -4804,7 +4828,7 @@ export function createRecursionRuntime({
         sourceRevisionHash: snapshot?.sourceRevisionHash || '',
         contextMessages: contextMessageIdentity(contextMessages),
         enhancementContextMessages: contextContract.enhancementContext.configuredMessages,
-        cardIds: Array.isArray(lastHand?.cards) ? lastHand.cards.map((card) => card.id) : []
+        cardIds: Array.isArray(preparedHand()?.cards) ? preparedHand().cards.map((card) => card.id) : []
       });
       marker.key = proseEnhancementKey({
         chatKey: identity.chatKey,
@@ -4813,7 +4837,7 @@ export function createRecursionRuntime({
         originalHash: `${target}:${mode}:${originalHash}`,
         contextHash: marker.contextHash
       });
-      const storyForm = lastPacket?.storyForm || lastPlan?.storyForm || null;
+      const storyForm = preparedPacket()?.storyForm || lastPlan?.storyForm || null;
       let enhancedText = originalText;
       const passHashes = [];
       async function generateEnhancementPass(roleId, request) {
@@ -6429,6 +6453,17 @@ export function createRecursionRuntime({
       planDiagnostics: plan.diagnostics
     });
     if (!isActiveRun(runId)) return supersededResult(runId);
+    const candidate = createPreparedGenerationCandidate(packet, hand, promptSnapshot, settings);
+    if (!candidate) {
+      return skipPromptInstallAfterFreshnessFailure(runId, {
+        reason: 'prepared-generation-basis-unavailable',
+        sceneSnapshot: promptSnapshot,
+        currentSnapshot: promptSnapshot,
+        packet,
+        hand,
+        plan
+      });
+    }
     const installedResult = await runPromptMutationSection(runId, async () => {
       stageRuntimeActivity({
         runId,
@@ -6438,11 +6473,13 @@ export function createRecursionRuntime({
       });
       if (!isActiveRun(runId)) return supersededResult(runId);
       const install = await installPrompt(host, packet);
+      if (!isActiveRun(runId)) return supersededResult(runId);
       const installOk = install?.ok !== false;
       lastSnapshot = promptSnapshot;
-      lastHand = hand;
-      lastPacket = packet;
-      if (installOk) readyLastBrief(packet, hand, { runId, reason: 'rapid-packet-installed' });
+      if (installOk && candidate) {
+        commitPreparedGeneration(candidate);
+        readyLastBrief({ runId, reason: 'rapid-packet-installed' });
+      }
       else clearLastBrief({ status: 'empty', reason: 'prompt-install-failed', runId });
       await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
       await appendJournalSafe(runId, promptSnapshot.chatKey, {
@@ -6751,50 +6788,156 @@ export function createRecursionRuntime({
     });
   }
 
-  function canReuseLastPacketForSnapshot(snapshot) {
-    if (!lastPacket || typeof lastPacket !== 'object') return false;
-    if (!lastHand || !Array.isArray(lastHand.cards)) return false;
-    return safeText(lastPacket.snapshotHash || '', 180) === hashJson(snapshot)
-      && safeText(lastPacket.chatId || '', 160) === safeText(snapshot.chatId || DEFAULT_CHAT_ID, 160)
-      && safeText(lastPacket.sceneFingerprint || '', 180) === safeText(snapshot.sceneFingerprint || '', 180)
-      && safeText(lastPacket.turnFingerprint || '', 180) === safeText(snapshot.turnFingerprint || '', 180);
+  function preparedGenerationBasisForAttempt(snapshot, {
+    swipe = false,
+    swipeMessageId = null,
+    pendingUserMessage = null,
+    settings
+  } = {}) {
+    return swipe
+      ? generationBasisForLatestAssistantSwipe(snapshot, swipeMessageId, settings)
+      : generationBasisForSnapshot(
+          snapshotWithPendingUserMessage(snapshot, pendingUserMessage),
+          settings
+        );
   }
 
-  async function reinstallLastPacketForSameTurn(runId, snapshot) {
-    const packet = lastPacket;
-    const hand = lastHand;
-    recordCacheDecision(runId, {
-      decision: 'hit',
-      kind: 'swipe-packet',
-      reason: 'same-turn-source-unchanged',
-      reusedCardIds: hand.cards?.map((card) => card.id),
-      providerCallsSkipped: ['utilityArbiter', 'standardCardCalls', 'fusedCardBundle', 'guidanceComposer']
-    });
+  async function reinstallPreparedGeneration(runId, {
+    artifact,
+    settings,
+    swipe = false,
+    swipeMessageId = null,
+    pendingUserMessage = null,
+    basisMode = 'exact'
+  } = {}) {
+    const packet = artifact.packet;
+    const hand = artifact.hand;
     const install = await runPromptMutationSection(runId, async () => {
       stageRuntimeActivity({
         runId,
         phase: 'promptInstalling',
         label: 'Reinstalling Recursion prompt for swipe retry...',
         chips: ['Prompt', 'Swipe']
-        , detail: { cacheDecision: 'hit', cacheKind: 'swipe-packet', cacheReason: 'same-turn-source-unchanged' }
+        , detail: {
+          cacheDecision: 'hit',
+          cacheKind: 'prepared-generation',
+          cacheReason: 'prepared-generation-exact-match',
+          basisMode
+        }
       });
       if (!isActiveRun(runId)) return supersededResult(runId);
+      let currentSnapshot;
+      let currentBasis;
+      try {
+        currentSnapshot = await readSnapshot();
+        currentBasis = preparedGenerationBasisForAttempt(currentSnapshot, {
+          swipe,
+          swipeMessageId,
+          pendingUserMessage,
+          settings
+        });
+      } catch (error) {
+        recordCacheDecision(runId, {
+          decision: 'miss',
+          kind: 'prepared-generation',
+          reason: 'snapshot-recheck-failed',
+          artifactHash: artifact.artifactHash,
+          packetId: packet.packetId,
+          handId: hand.handId
+        });
+        return {
+          ok: true,
+          skipped: true,
+          reason: 'snapshot-recheck-failed',
+          error: sanitizePromptError(
+            error,
+            'RECURSION_PREPARED_GENERATION_RECHECK_FAILED',
+            'Prepared generation snapshot recheck failed.'
+          )
+        };
+      }
+      const comparison = compareGenerationBasis(
+        artifact.basis,
+        currentBasis,
+        { allowBoundedSuffix: swipe }
+      );
+      if (!comparison.matches) {
+        recordCacheDecision(runId, {
+          decision: 'miss',
+          kind: 'prepared-generation',
+          reason: 'stale-generation-basis',
+          basisMode: comparison.mode,
+          basisReason: comparison.reason,
+          artifactHash: artifact.artifactHash,
+          packetId: packet.packetId,
+          handId: hand.handId
+        });
+        await appendJournalSafe(runId, artifact.basis.chatKey, {
+          event: 'prompt.install_skipped',
+          severity: 'warn',
+          summary: 'Prepared generation became stale before prompt install.',
+          runId,
+          sceneKey: artifact.basis.sceneKey,
+          details: {
+            reason: 'stale-generation-basis',
+            basisMode: comparison.mode,
+            basisReason: comparison.reason
+          },
+          hashes: {
+            artifactHash: artifact.artifactHash,
+            expectedBasisHash: hashJson(artifact.basis),
+            currentBasisHash: currentBasis ? hashJson(currentBasis) : ''
+          }
+        });
+        return {
+          ok: true,
+          skipped: true,
+          reason: 'stale-generation-basis',
+          comparison
+        };
+      }
+      if (!isActiveRun(runId)) return supersededResult(runId);
       const result = await installPrompt(host, packet);
+      if (!isActiveRun(runId)) return supersededResult(runId);
       const installOk = result?.ok !== false;
-      await appendJournalSafe(runId, snapshot.chatKey, {
-        event: installOk ? 'prompt.reinstalled' : 'prompt.install_failed',
-        severity: installOk ? 'info' : 'warn',
-        summary: installOk
-          ? 'Reinstalled existing Recursion prompt for same-turn swipe retry.'
-          : installSummary(result),
-        runId,
-        sceneKey: snapshot.sceneKey,
-        details: {
-          reason: 'same-turn-swipe-retry',
-          ...installJournalDetails(result)
-        },
-        hashes: { promptPacketHash: hashJson(packet) }
-      });
+      if (installOk) {
+        recordCacheDecision(runId, {
+          decision: 'hit',
+          kind: 'prepared-generation',
+          reason: 'prepared-generation-exact-match',
+          basisMode: comparison.mode,
+          basisReason: comparison.reason,
+          artifactHash: artifact.artifactHash,
+          packetId: packet.packetId,
+          handId: hand.handId,
+          reusedCardIds: hand.cards?.map((card) => card.id),
+          providerCallsSkipped: preparedGenerationSkippedRoles(artifact)
+        });
+      } else {
+        recordCacheDecision(runId, {
+          decision: 'miss',
+          kind: 'prepared-generation',
+          reason: 'prompt-install-failed',
+          basisMode: comparison.mode,
+          basisReason: comparison.reason,
+          artifactHash: artifact.artifactHash,
+          packetId: packet.packetId,
+          handId: hand.handId
+        });
+        await appendJournalSafe(runId, artifact.basis.chatKey, {
+          event: 'prompt.install_failed',
+          severity: 'warn',
+          summary: installSummary(result),
+          runId,
+          sceneKey: artifact.basis.sceneKey,
+          details: {
+            reason: 'prepared-generation-exact-match',
+            basisMode: comparison.mode,
+            ...installJournalDetails(result)
+          },
+          hashes: { promptPacketHash: hashJson(packet) }
+        });
+      }
       if (!isActiveRun(runId)) return supersededResult(runId);
       settleRuntimeActivity({
         runId,
@@ -6802,20 +6945,86 @@ export function createRecursionRuntime({
         label: installOk ? 'Recursion prompt reused for swipe retry.' : INSTALL_FAILURE_LABEL,
         chips: ['Prompt', 'Swipe']
       });
-      return result;
+      return { ...result, basisMode: comparison.mode };
     });
     if (install?.superseded) return install;
+    if (install?.skipped) {
+      settleRuntimeActivity({
+        runId,
+        outcome: 'warning',
+        phase: 'promptInstallSkipped',
+        label: STALE_INSTALL_LABEL,
+        chips: ['Prompt', 'Swipe']
+      });
+      return {
+        ok: true,
+        skipped: true,
+        reused: false,
+        preparedMatch: true,
+        reason: install.reason,
+        packet,
+        hand,
+        install
+      };
+    }
     const installOk = install?.ok !== false;
-    if (installOk) readyLastBrief(packet, hand, { runId, reason: 'same-turn-swipe-retry' });
+    if (installOk) readyLastBrief({ runId, reason: 'prepared-generation-reused' });
     else clearLastBrief({ status: 'empty', reason: 'prompt-install-failed', runId });
     return {
-      ok: true,
-      reused: true,
-      reason: 'same-turn-swipe-retry',
+      ok: installOk,
+      reused: installOk,
+      preparedMatch: true,
+      reason: installOk ? 'prepared-generation-exact-match' : 'prompt-install-failed',
+      basisMode: install.basisMode || basisMode,
       packet,
       hand,
       install
     };
+  }
+
+  function preparedGenerationSkippedRoles(artifact) {
+    const pipelineMode = safeText(artifact?.packet?.diagnostics?.pipelineMode || 'standard', 40);
+    if (pipelineMode === 'rapid') return ['rapidTurnDelta'];
+    const roles = ['utilityArbiter'];
+    if (pipelineMode === 'fused') roles.push('fusedCardBundle');
+    else if ((artifact?.hand?.cards?.length || 0) > 0) roles.push('standardCardCalls');
+    if (artifact?.packet?.diagnostics?.composerLane === 'reasoner') roles.push('reasonerComposer');
+    return roles;
+  }
+
+  async function tryPreparedGenerationReuse(runId, {
+    basis,
+    settings,
+    swipe = false,
+    swipeMessageId = null,
+    pendingUserMessage = null,
+    forceFresh = false
+  } = {}) {
+    const contract = preparedGenerationContract(settings);
+    const decision = validatePreparedGenerationArtifact(lastPreparedGeneration, {
+      basis,
+      packetInputHash: contract.packetInputHash,
+      forceFresh,
+      allowBoundedSuffix: swipe
+    });
+    if (decision.decision !== 'hit') {
+      recordCacheDecision(runId, {
+        ...decision,
+        kind: 'prepared-generation',
+        artifactHash: lastPreparedGeneration?.artifactHash,
+        packetId: lastPreparedGeneration?.packet?.packetId,
+        handId: lastPreparedGeneration?.hand?.handId
+      });
+      return { reused: false, ...decision };
+    }
+    return reinstallPreparedGeneration(runId, {
+      artifact: lastPreparedGeneration,
+      settings,
+      swipe,
+      swipeMessageId,
+      pendingUserMessage,
+      basisMode: decision.basisMode
+    });
   }
 
   async function prepareForGeneration({ userMessage = '', refreshReason = '', hostGeneration = false, generationType = '' } = {}) {
@@ -6915,19 +7124,48 @@ export function createRecursionRuntime({
         runId,
         kind: (freshContext || explicitRegenerate) ? 'fresh' : (hasSwipeRetry ? 'swipe' : 'normal'),
         sourceRevisionHash: activeSourceRevisionHash(snapshot),
-        packetId: lastPacket?.packetId
+        packetId: preparedPacket()?.packetId
       });
-      const swipeRetrySnapshot = !bypassSwipeReuse
-        ? reusableSnapshotForLatestAssistantSwipeRetry(snapshot, pendingUserMessage)
+      const swipeRetry = hasSwipeRetry && !bypassSwipeReuse
+        ? runState.takeLatestAssistantSwipeRetry()
         : null;
-      if (bypassSwipeReuse) clearPendingLatestAssistantSwipeRetry();
-      if (swipeRetrySnapshot) {
-        lastSnapshot = swipeRetrySnapshot;
-        return await reinstallLastPacketForSameTurn(runId, swipeRetrySnapshot);
-      }
-      if (!bypassSwipeReuse && canReuseLastPacketForSnapshot(snapshot)) {
-        lastSnapshot = snapshot;
-        return await reinstallLastPacketForSameTurn(runId, snapshot);
+      if (bypassSwipeReuse) {
+        clearPendingLatestAssistantSwipeRetry();
+        recordCacheDecision(runId, {
+          decision: 'bypassed',
+          kind: 'prepared-generation',
+          reason: explicitRegenerate ? 'explicit-regenerate' : 'force-fresh'
+        });
+      } else if (hasSwipeRetry) {
+        const swipeMessageId = finiteNumberOrNull(swipeRetry?.messageId);
+        const swipeBasis = generationBasisForLatestAssistantSwipe(
+          hostSnapshot,
+          swipeMessageId,
+          settings
+        );
+        if (!swipeBasis) {
+          recordCacheDecision(runId, {
+            decision: 'miss',
+            kind: 'prepared-generation',
+            reason: 'swipe-basis-unavailable'
+          });
+        } else {
+          const reuse = await tryPreparedGenerationReuse(runId, {
+            basis: swipeBasis,
+            settings,
+            swipe: true,
+            swipeMessageId
+          });
+          if (reuse.reused || reuse.preparedMatch) return reuse;
+        }
+      } else {
+        const directBasis = generationBasisForSnapshot(snapshot, settings);
+        const reuse = await tryPreparedGenerationReuse(runId, {
+          basis: directBasis,
+          settings,
+          pendingUserMessage
+        });
+        if (reuse.reused || reuse.preparedMatch) return reuse;
       }
       clearPendingLatestAssistantSwipeRetry();
       lastSnapshot = snapshot;
@@ -7256,8 +7494,6 @@ export function createRecursionRuntime({
         planDiagnostics: plan.diagnostics
       });
       if (!isActiveRun(runId)) return supersededResult(runId);
-      lastHand = hand;
-      lastPacket = packet;
 
       if (!isActiveRun(runId)) return supersededResult(runId);
       const installedResult = await runPromptMutationSection(runId, async () => {
@@ -7329,13 +7565,24 @@ export function createRecursionRuntime({
           });
           if (!isActiveRun(runId)) return supersededResult(runId);
           lastSnapshot = promptSnapshot;
-          lastHand = hand;
-          lastPacket = packet;
+        }
+        const candidate = createPreparedGenerationCandidate(packet, hand, promptSnapshot, settings);
+        if (!candidate) {
+          return skipPromptInstallAfterFreshnessFailure(runId, {
+            reason: 'prepared-generation-basis-unavailable',
+            sceneSnapshot: promptSnapshot,
+            currentSnapshot: promptSnapshot,
+            packet,
+            hand,
+            plan
+          });
         }
         const install = await installPrompt(host, packet);
+        if (!isActiveRun(runId)) return supersededResult(runId);
         const installOk = install?.ok !== false;
-        if (installOk) {
-          readyLastBrief(packet, hand, {
+        if (installOk && candidate) {
+          commitPreparedGeneration(candidate);
+          readyLastBrief({
             runId,
             reason: freshContext ? 'fresh-next-generation-installed' : 'packet-installed'
           });
@@ -7546,6 +7793,7 @@ export function createRecursionRuntime({
       abortActiveRapidWarmRun('stale');
       clearPendingFreshNextGeneration();
       await waitForExternalMutations();
+      clearPreparedGeneration();
       if (host && typeof host === 'object') {
         if (previousProviderAuthFailureHandler === undefined) delete host.handleProviderAuthFailure;
         else host.handleProviderAuthFailure = previousProviderAuthFailureHandler;

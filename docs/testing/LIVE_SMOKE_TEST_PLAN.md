@@ -79,7 +79,18 @@ $env:RECURSION_LIVE_SWIPE='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts
 ```
 
-This command uses the no-generation browser smoke path, then creates a temporary in-page chat state with an older assistant message that has two swipes and a later user message. It emits SillyTavern's real `MESSAGE_SWIPED` event path, verifies Recursion clears seeded prompt text for that source mutation, verifies the activity ribbon reports source cleanup, and records hashed A/B/A source revision evidence. Latest-assistant swipe retry coverage is deterministic: extension smoke keeps the assistant in the host chat while passing an interceptor payload that ends on the preceding user row, then proves it does not clear prompt lanes, Rapid-warm again, or call a provider. The served-runtime Playwright proof uses the same divergent payload/snapshot shape for Standard, Rapid, and Fused. The live swipe proof restores the original chat after the proof and does not call external providers.
+The older-message swipe smoke remains a temporary in-page mutation and proves
+source invalidation. That evidence is synthetic and must be labeled as such.
+Prepared-generation certification is a separate strict native-host proof:
+`prove-live-swipe-reuse.mjs --live` must use the installed extension runtime,
+visible SillyTavern latest-assistant swipe control, real event/interceptor
+routing, and configured provider/host generation path. It must not construct a
+fake runtime or provider router in the page. The report proves the installed
+and served hashes, stable packet/artifact identity, no additional Recursion
+provider calls or storage writes on the swipe, prompt reinstallation, native
+story continuation, compact cached feedback, and unchanged pre-assistant chat
+shape. If any native evidence is unavailable, strict proof fails rather than
+falling back to the synthetic served-module check.
 
 Before any served Playwright proof, synchronize and hash-check the complete extension directory that backs `/scripts/extensions/third-party/Recursion`. Updating only a profile data copy or selected source modules is not sufficient evidence: SillyTavern may continue serving stale transitive modules such as `cards.mjs`.
 

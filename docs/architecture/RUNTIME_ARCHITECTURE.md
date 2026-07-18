@@ -139,7 +139,16 @@ Pipeline controls change when work happens:
 
 Pipeline is selected from the compact bar dropdown immediately left of Mode. It is not duplicated in Settings.
 
-Regenerate is a one-shot fresh-next-generation override from the Recursion Bar command slot. The bar calls `runtime.requestFreshNextGeneration({ source: 'bar' })`, runtime records a pending token and leaves Last Brief on the previous completed packet; no provider work, prompt installation, prompt clearing, Last Brief clearing, or host generation starts on click. The next `prepareForGeneration({ hostGeneration: true })` consumes the token once, clears Last Brief with reason `user-fresh-next-generation` as the send or swipe begins, skips same-turn packet reinstall, skips latest-assistant swipe packet reuse, bypasses Rapid foreground warm, soft-invalidates the current scene cache with reason `user-fresh-next-generation`, prevents cached cards from entering the prompt-eligible hand, and records diagnostics such as `fresh-next-generation:cache-bypassed` and `fresh-next-generation:rapid-bypassed`. Pipeline selection remains a deferred scheduling setting; changing Standard/Rapid/Fused does not start generation or Rapid warming.
+Regenerate is a one-shot fresh-next-generation override from the Recursion Bar command slot. The bar calls `runtime.requestFreshNextGeneration({ source: 'bar' })`, runtime records a pending token and leaves Last Brief on the previous completed packet; no provider work, prompt installation, prompt clearing, Last Brief clearing, or host generation starts on click. The next `prepareForGeneration({ hostGeneration: true })` consumes the token once, clears Last Brief with reason `user-fresh-next-generation` as the send or swipe begins, bypasses the volatile Prepared Generation Artifact, bypasses Rapid foreground warm, soft-invalidates the current scene cache with reason `user-fresh-next-generation`, prevents cached cards from entering the prompt-eligible hand, and records diagnostics such as `fresh-next-generation:cache-bypassed` and `fresh-next-generation:rapid-bypassed`. Pipeline selection remains a deferred scheduling setting; changing Standard/Rapid/Fused does not start generation or Rapid warming.
+
+`lastPreparedGeneration` is the sole volatile owner of the installed packet and
+hand. Runtime builds a candidate locally and commits it only after the host
+confirms installation and the final host-snapshot barrier still matches. Exact
+same-snapshot retries and latest-assistant swipes share one integrity, basis,
+and packet-input validator. Hits perform no provider or storage work and have
+no wall-clock expiry. Source/chat mutation, reset, disable, and teardown clear
+the artifact; settings, deck, provider, and contract drift produce a safe miss
+until a later successful installation replaces it.
 
 Last Brief has a committed inspection lifecycle distinct from volatile packet-reuse state. `MESSAGE_SWIPED`, `MESSAGE_UPDATED`, Enhancement-owned Replace/As Swipe mutations, and other navigation or persistence events may update source or reuse bookkeeping, but they must not clear the committed `lastBriefPacket` or `lastBriefHand`. Only an accepted host generation in `prepareForGeneration()` consumes the visible brief during ordinary turn flow. The interceptor's explicit `generationType: 'swipe'` is authoritative for swipe generation; a low-level `MESSAGE_SWIPED` event alone is not.
 

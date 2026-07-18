@@ -492,7 +492,7 @@ if (lifecycleFailures.length) {
   assertEqual(fake.context.chat[1].swipe_id, 1, 'latest assistant native swipe sequence keeps the selected response variant');
   assertEqual(prompts.length, callsAfterSetup, 'latest assistant native swipe sequence does not call providers again');
   assert(fake.promptWrites.length > writesAfterSetup, 'latest assistant native swipe sequence reinstalls previous prompt');
-  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastCacheDecision?.kind, 'swipe-packet', 'latest assistant native swipe sequence records packet-cache provenance');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastCacheDecision?.kind, 'prepared-generation', 'latest assistant native swipe sequence records prepared-cache provenance');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastCacheDecision?.decision, 'hit', 'latest assistant native swipe sequence records a packet-cache hit');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId, preparedPacketId, 'latest assistant native swipe sequence preserves packet identity');
   for (const key of RECURSION_PROMPT_KEYS) {
@@ -658,7 +658,7 @@ if (lifecycleFailures.length) {
 
   assertEqual(transformerSignal?.aborted, true, 'extension event order aborts active Editorial provider work');
   assertEqual(finalPipelineCalls, initialPipelineCalls, 'extension event order makes no new Arbiter, Fused, or Guidance calls on swipe');
-  assertEqual(finalView.lastCacheDecision?.kind, 'swipe-packet', 'extension event order records packet-cache reuse');
+  assertEqual(finalView.lastCacheDecision?.kind, 'prepared-generation', 'extension event order records prepared-cache reuse');
   assertEqual(finalView.lastBrief?.packetId, initialPacketId, 'extension event order preserves packet identity');
   assertEqual(fake.context.chat[30].swipes.length, 1, 'extension cancellation removes the native empty swipe placeholder');
   assert(fake.context.chat[30].swipes.every((text) => String(text).trim()), 'extension cancellation leaves no blank assistant swipes');

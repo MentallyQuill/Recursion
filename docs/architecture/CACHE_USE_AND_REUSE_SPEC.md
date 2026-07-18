@@ -75,27 +75,33 @@ Keeping a variant does not make it automatically active. Standard and Fused
 must prefer the exact active source variant unless an explicit reuse policy
 allows a validated alternate.
 
-### 3. Latest-assistant swipe packet reuse
+### 3. Prepared Generation Artifact reuse
 
-**Owner:** `src/runtime.mjs`, `src/runtime/run-state.mjs`
+**Owner:** `src/runtime.mjs`, `src/runtime/prepared-generation.mjs`,
+`src/runtime/run-state.mjs`
 
-This is a complete prompt-packet reuse path, separate from scene-card cache.
-When the latest assistant message is swiped and the source before that
-assistant remains unchanged, Recursion may reinstall the previous packet and
-hand without provider work.
+This volatile artifact is the sole mutable owner of the complete installed
+prompt packet, selected hand, normalized generation basis, and packet-input
+contract. It is committed atomically only after the host confirms prompt
+installation. Direct same-snapshot retries and latest-assistant swipes use the
+same validator and reinstall the exact packet and hand without provider or
+storage work.
 
 ```js
 {
-  reason: 'same-turn-swipe-retry',
-  packet: lastPacket,
-  hand: lastHand,
+  reason: 'prepared-generation-exact-match',
+  packet: lastPreparedGeneration.packet,
+  hand: lastPreparedGeneration.hand,
   reused: true
 }
 ```
 
-The reuse check must compare chat identity, scene identity, source revision,
-scene fingerprint, turn fingerprint, snapshot hash, and the bounded source
-window.
+The validator checks artifact integrity, chat and scene identity, the bounded
+source window, source-window contract, packet-affecting settings, active deck
+content revision, provider configuration, and runtime/prompt/card contract
+hashes. Exact matching is preferred. A suffix match is allowed only when the
+host explicitly reports that the current window is truncated by the message
+or character bound; an unexplained leading deletion never qualifies.
 
 ### 4. Standard and Fused card reuse
 
@@ -201,7 +207,7 @@ Every reusable artifact should expose the following conceptual fields:
 type CacheProvenance = {
   cacheKind:
     | 'scene-cards'
-    | 'swipe-packet'
+    | 'prepared-generation'
     | 'rapid-warm'
     | 'enhancement-swipe';
   sourceRevisionHash?: string;
@@ -851,11 +857,11 @@ Generation preparation should evaluate reuse in this order:
 1. Explicit Force Fresh token?
    yes -> bypass all reusable work
 
-2. Latest-assistant swipe retry with unchanged source?
-   yes -> reinstall last packet; do not call providers
+2. Latest-assistant swipe retry with a valid Prepared Generation Artifact?
+   yes -> final host recheck; reinstall exact packet; do not call providers or storage
 
-3. Valid same-turn packet snapshot?
-   yes -> reinstall last packet; do not call providers
+3. Exact same full prompt snapshot with a valid Prepared Generation Artifact?
+   yes -> final host recheck; reinstall exact packet; do not call providers or storage
 
 4. Rapid pipeline with valid warm artifact?
    yes -> run Rapid foreground delta
@@ -871,8 +877,8 @@ The decision and reason must be recorded once per run:
 ```js
 {
   cacheDecision: 'hit',
-  cacheKind: 'swipe-packet',
-  reason: 'same-turn-source-unchanged',
+  cacheKind: 'prepared-generation',
+  reason: 'prepared-generation-exact-match',
   providerCallsSkipped: ['utilityArbiter', 'fusedCardBundle', 'guidanceComposer']
 }
 ```
@@ -1001,7 +1007,7 @@ For cancellation:
 ```js
 {
   cacheDecision: 'canceled',
-  cacheKind: 'swipe-packet',
+  cacheKind: 'prepared-generation',
   cacheReason: 'host-generation-stopped',
   preservedLastKnownGood: true
 }
@@ -1053,7 +1059,7 @@ Add or maintain tests for:
 - Rapid warm exact hit;
 - Rapid warm miss and Standard escalation;
 - Force Fresh bypassing all reuse;
-- same-turn packet reuse;
+- prepared-generation exact and bounded-suffix reuse;
 - source edit invalidating packet reuse;
 - swipe retry reuse without provider work;
 - stop-then-swipe preserving the last known-good cache;
@@ -1070,7 +1076,7 @@ const result = await runtime.prepareForGeneration({
 
 assertEqual(result.reused, true, 'same-turn swipe reuses the prior packet');
 assertDeepEqual(providerCalls, [], 'same-turn swipe makes no provider calls');
-assertEqual(result.reason, 'same-turn-swipe-retry', 'reuse reason is explicit');
+assertEqual(result.reason, 'prepared-generation-exact-match', 'reuse reason is explicit');
 ```
 
 ### Standard and Fused model-call tests

@@ -3,6 +3,7 @@ import {
   createSillyTavernHttpSession,
   validateSoakUserHandle
 } from './lib/sillytavern-live-harness.mjs';
+import { runInstalledCopyVerifierCli } from './verify-installed-copy.mjs';
 
 const DEFAULT_TIMEOUT_MS = 120000;
 
@@ -244,11 +245,186 @@ function proofScript() {
   };
 }
 
+async function nativeProof(page, { timeoutMs, pipelineModes }) {
+  async function setPipeline(pipelineMode) {
+    const result = await page.evaluate(async (mode) => {
+      const runtime = globalThis.__recursionLiveHarnessRuntime;
+      if (!runtime?.updateSettings) throw new Error('Recursion live runtime unavailable');
+      return runtime.updateSettings({
+        enabled: true,
+        mode: 'auto',
+        pipelineMode: mode,
+        enhancements: { mode: 'off' }
+      });
+    }, pipelineMode);
+    if (result?.ok === false) fail('native-settings-failed', `Could not select ${pipelineMode}.`, { pipelineMode });
+  }
+
+  async function sendVisible(message) {
+    const input = page.locator('#send_textarea, textarea#send_textarea, [contenteditable="true"][data-testid="send-textarea"]').first();
+    const button = page.locator('#send_but, button#send_but').first();
+    if (!(await input.isVisible().catch(() => false)) || !(await button.isVisible().catch(() => false))) {
+      fail('visible-send-unavailable', 'Visible SillyTavern send controls were not available.');
+    }
+    await input.fill(message, { timeout: Math.min(timeoutMs, 10000) });
+    await button.click({ timeout: timeoutMs });
+    await page.waitForFunction((needle) => {
+      const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+      const chat = Array.isArray(context.chat) ? context.chat : [];
+      const userIndex = chat.findIndex((entry) => entry?.is_user === true
+        && String(entry?.mes || entry?.message || entry?.text || '').includes(needle));
+      return userIndex >= 0
+        && chat.slice(userIndex + 1).some((entry) => entry?.is_user === false
+          && String(entry?.mes || entry?.message || entry?.text || '').trim());
+    }, message, { timeout: timeoutMs });
+    await page.waitForFunction(() => {
+      const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+      return Boolean(view.lastPreparedGeneration?.artifactHash)
+        && view.hostGenerationActive !== true
+        && !view.activeRunId;
+    }, null, { timeout: timeoutMs });
+  }
+
+  function nativeStateScript() {
+    return async () => {
+      const runtime = globalThis.__recursionLiveHarnessRuntime;
+      const view = runtime?.view?.() || {};
+      const exported = await runtime?.exportDiagnostics?.();
+      const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+      const chat = Array.isArray(context.chat) ? context.chat : [];
+      const assistantIndex = chat.findLastIndex((entry) => entry?.is_user === false);
+      const assistant = assistantIndex >= 0 ? chat[assistantIndex] : null;
+      const hash = (value) => {
+        let result = 2166136261;
+        for (const character of JSON.stringify(value || [])) {
+          result ^= character.charCodeAt(0);
+          result = Math.imul(result, 16777619);
+        }
+        return (result >>> 0).toString(16).padStart(8, '0');
+      };
+      const journal = exported?.diagnostics?.journal || [];
+      return {
+        artifactHash: String(view.lastPreparedGeneration?.artifactHash || ''),
+        packetId: String(view.lastPreparedGeneration?.packet?.packetId || ''),
+        handId: String(view.lastPreparedGeneration?.hand?.handId || ''),
+        cacheDecision: view.lastCacheDecision || null,
+        journalCount: Number(exported?.diagnostics?.storage?.journalEntryCount || 0),
+        providerJournalIds: journal
+          .filter((entry) => /provider/i.test(String(entry?.event || entry?.phase || '')))
+          .map((entry) => String(entry?.id || ''))
+          .filter(Boolean),
+        assistantIndex,
+        assistantMesId: Number(assistant?.mesid ?? assistantIndex),
+        assistantSwipeCount: Array.isArray(assistant?.swipes) ? assistant.swipes.length : 0,
+        assistantSwipeId: Number(assistant?.swipe_id ?? assistant?.swipeId ?? 0),
+        preAssistantShapeHash: hash(chat.slice(0, Math.max(0, assistantIndex)).map((entry, index) => ({
+          index,
+          mesid: Number(entry?.mesid ?? index),
+          role: entry?.is_user === true ? 'user' : 'assistant',
+          text: String(entry?.mes || entry?.message || entry?.text || '')
+        }))),
+        chatLength: chat.length,
+        statusText: String(document.querySelector('[data-recursion-ribbon-label], [data-recursion-status]')?.textContent || '').trim()
+      };
+    };
+  }
+
+  const results = [];
+  for (const pipelineMode of pipelineModes) {
+    await setPipeline(pipelineMode);
+    const marker = `Recursion native ${pipelineMode} swipe proof ${Date.now()}. Continue with one short sentence.`;
+    await sendVisible(marker);
+    const before = await page.evaluate(nativeStateScript());
+    if (!before.artifactHash || !before.packetId) {
+      fail('prepared-artifact-missing', `${pipelineMode} did not commit a prepared artifact.`, { pipelineMode });
+    }
+    const swipe = page.locator(
+      `.mes[mesid="${before.assistantMesId}"] .swipe_right, .mes[data-message-id="${before.assistantMesId}"] .swipe_right, #chat .mes:last-child .swipe_right`
+    ).last();
+    if (!(await swipe.isVisible().catch(() => false))) {
+      fail('visible-swipe-unavailable', 'The native latest-assistant swipe control was not visible.', {
+        pipelineMode,
+        assistantMesId: before.assistantMesId
+      });
+    }
+    await swipe.click({ timeout: timeoutMs });
+    await page.waitForFunction((sequence) => {
+      const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+      return Number(view.lastCacheDecision?.sequence || 0) > Number(sequence || 0)
+        && view.lastCacheDecision?.kind === 'prepared-generation'
+        && view.lastCacheDecision?.decision === 'hit';
+    }, Number(before.cacheDecision?.sequence || 0), { timeout: timeoutMs });
+    await page.waitForFunction((previous) => {
+      const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+      const chat = Array.isArray(context.chat) ? context.chat : [];
+      const assistant = chat[previous.assistantIndex];
+      const swipeCount = Array.isArray(assistant?.swipes) ? assistant.swipes.length : 0;
+      const swipeId = Number(assistant?.swipe_id ?? assistant?.swipeId ?? 0);
+      const runtimeView = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+      return chat.length === previous.chatLength
+        && runtimeView.hostGenerationActive !== true
+        && !runtimeView.activeRunId
+        && (swipeCount > previous.assistantSwipeCount || swipeId !== previous.assistantSwipeId);
+    }, before, { timeout: timeoutMs });
+    const after = await page.evaluate(nativeStateScript());
+    const providerIdsBefore = new Set(before.providerJournalIds);
+    const providerJournalDelta = after.providerJournalIds.filter((id) => !providerIdsBefore.has(id));
+    const result = {
+      pipelineMode,
+      cacheKind: after.cacheDecision?.kind || '',
+      cacheDecision: after.cacheDecision?.decision || '',
+      cacheReason: after.cacheDecision?.reason || '',
+      basisMode: after.cacheDecision?.basisMode || '',
+      artifactHashStable: after.artifactHash === before.artifactHash,
+      packetIdStable: after.packetId === before.packetId,
+      handIdStable: after.handId === before.handId,
+      preAssistantShapeStable: after.preAssistantShapeHash === before.preAssistantShapeHash,
+      assistantRowStable: after.chatLength === before.chatLength && after.assistantIndex === before.assistantIndex,
+      nativeSwipeAdvanced: after.assistantSwipeCount > before.assistantSwipeCount
+        || after.assistantSwipeId !== before.assistantSwipeId,
+      recursionJournalWrites: after.journalCount - before.journalCount,
+      recursionProviderJournalEvents: providerJournalDelta.length,
+      cachedFeedbackVisible: /reused|cached/i.test(after.statusText)
+    };
+    if (!result.artifactHashStable
+      || !result.packetIdStable
+      || !result.handIdStable
+      || !result.preAssistantShapeStable
+      || !result.assistantRowStable
+      || !result.nativeSwipeAdvanced
+      || result.recursionJournalWrites !== 0
+      || result.recursionProviderJournalEvents !== 0
+      || result.cacheKind !== 'prepared-generation'
+      || result.cacheDecision !== 'hit') {
+      fail('native-swipe-reuse-failed', `${pipelineMode} native swipe reuse proof failed.`, result);
+    }
+    results.push(result);
+  }
+  return {
+    ok: results.length === pipelineModes.length && results.every((entry) => entry.cacheDecision === 'hit'),
+    mode: 'native-host-playwright',
+    pipelines: results
+  };
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const env = process.env;
   const user = assertPreflight(argv, env);
+  const synthetic = argv.includes('--synthetic');
   const timeoutMs = Number(env.RECURSION_LIVE_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
+  const verifierOutput = [];
+  const verifierExit = runInstalledCopyVerifierCli(['--user', user], {
+    cwd: process.cwd(),
+    environment: env,
+    stdout: { write: (text) => verifierOutput.push(String(text)) },
+    stderr: { write: (text) => verifierOutput.push(String(text)) }
+  });
+  if (verifierExit !== 0) {
+    fail('stale-extension', 'Repository, installed, and served Recursion copies do not match.', {
+      verifier: verifierOutput.join('').trim()
+    });
+  }
   const session = createSillyTavernHttpSession({
     baseUrl: env.SILLYTAVERN_BASE_URL,
     user,
@@ -266,12 +442,21 @@ async function main() {
     const page = await context.newPage();
     await page.goto(env.SILLYTAVERN_BASE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForSelector('#recursion-root', { timeout: timeoutMs });
-    const proof = await page.evaluate(proofScript());
+    await page.waitForFunction(() => Boolean(globalThis.__recursionLiveHarnessRuntime), null, { timeout: timeoutMs });
+    const pipelineModes = String(env.RECURSION_LIVE_SWIPE_PIPELINES || 'standard,rapid,fused')
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => ['standard', 'rapid', 'fused'].includes(entry));
+    if (pipelineModes.length === 0) fail('missing-pipelines', 'No valid swipe proof pipelines were configured.');
+    const proof = synthetic
+      ? await page.evaluate(proofScript())
+      : await nativeProof(page, { timeoutMs, pipelineModes });
     if (!proof?.ok) fail('live-swipe-reuse-failed', 'Latest assistant swipe reuse proof failed.', proof || {});
     console.log(JSON.stringify({
       status: 'pass',
       result: 'live-swipe-reuse-pass',
       user,
+      proofClassification: synthetic ? 'synthetic-served-module' : 'strict-native-host',
       proof
     }, null, 2));
   } finally {

@@ -1,4 +1,5 @@
 import { asArray, compact, hashJson, nowIso, redact, truncate } from '../core.mjs';
+import { summarizePreparedGenerationArtifact } from './prepared-generation.mjs';
 
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 
@@ -179,6 +180,25 @@ function mapJournalEntry(entry) {
   }, 500);
 }
 
+function mapCacheDecision(decision) {
+  const source = asObject(decision);
+  if (!source.decision && !source.kind && !source.reason) return null;
+  return safeDiagnosticValue({
+    sequence: numberOr(source.sequence, 0),
+    decision: safeText(source.decision, 40),
+    kind: safeText(source.kind, 60),
+    reason: safeText(source.reason, 180),
+    basisMode: safeText(source.basisMode, 40),
+    basisReason: safeText(source.basisReason, 120),
+    artifactHash: safeText(source.artifactHash, 180),
+    packetId: safeText(source.packetId, 180),
+    handId: safeText(source.handId, 180),
+    reusedCardIds: asArray(source.reusedCardIds).slice(0, 32).map((entry) => safeText(entry, 160)),
+    providerCallsSkipped: asArray(source.providerCallsSkipped).slice(0, 16).map((entry) => safeText(entry, 80)),
+    recordedAt: safeText(source.recordedAt, 80)
+  }, 500);
+}
+
 export function buildDiagnosticsPayload({
   view,
   settings,
@@ -202,6 +222,10 @@ export function buildDiagnosticsPayload({
       activityHistory: asArray(runtime.activityHistory).slice(-20),
       freshNextGeneration: runtime.freshNextGeneration || null,
       rapidWarm: runtime.rapidWarm || null,
+      cacheDecision: mapCacheDecision(runtime.lastCacheDecision),
+      preparedGeneration: runtime.lastPreparedGeneration
+        ? safeDiagnosticValue(summarizePreparedGenerationArtifact(runtime.lastPreparedGeneration), 500)
+        : null,
       packet: mapPacketSummary(runtime.lastPacket),
       hand: mapHandSummary(runtime.lastHand),
       plan: mapPlanSummary(runtime.lastPlan)

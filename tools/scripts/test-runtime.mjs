@@ -15,6 +15,7 @@ import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
 import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
 import { createRuntimeRunState } from '../../src/runtime/run-state.mjs';
+import { preparedGenerationIntegrityIsValid } from '../../src/runtime/prepared-generation.mjs';
 import { clearPromptBestEffort, installPrompt } from '../../src/runtime/prompt-install.mjs';
 import { runFusedCardPipeline } from '../../src/runtime/pipelines/fused.mjs';
 import { runRapidForegroundPipeline, warmRapidPipeline } from '../../src/runtime/pipelines/rapid.mjs';
@@ -188,6 +189,8 @@ const preparedGenerationSnapshot = {
       { mesid: 8, role: 'user', textHash: hashJson('The current player request.') },
       { mesid: 9, role: 'system', textHash: hashJson('Current scene state.') }
     ],
+    sourceWindowTruncated: false,
+    sourceWindowLimitReason: '',
     sourceWindowContractHash: hashJson({ sourceWindowMessages: 24, sourceWindowCharacters: 12000 })
   }, 'generation basis normalizes a compact text-free source identity');
   assertEqual(JSON.stringify(basis).includes('current player request'), false, 'generation basis does not retain source text');
@@ -2944,6 +2947,11 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   assert(result.packet.sections.cardEvidence.includes('The hatch stays sealed until opened.'), 'Rapid packet includes full raw card evidence');
   assertEqual(result.packet.diagnostics.pipelineMode, 'rapid', 'Rapid packet records Rapid pipeline');
   assertEqual(result.packet.diagnostics.rapidPath, 'warm-v2', 'Rapid packet records warm-v2 path');
+  const rapidArtifact = harness.runtime.view().lastPreparedGeneration;
+  assert(rapidArtifact, 'actual Rapid warm-v2 path commits a prepared artifact');
+  assert(preparedGenerationIntegrityIsValid(rapidArtifact), 'Rapid warm-v2 prepared artifact passes integrity');
+  assertEqual(rapidArtifact.packet.diagnostics.pipelineMode, 'rapid', 'Rapid artifact owns a Rapid packet');
+  assertEqual(rapidArtifact.packet.diagnostics.rapidPath, 'warm-v2', 'Rapid artifact owns the warm-v2 path');
   assertEqual(result.packet.storyForm.tense, 'past', 'Rapid packet stores warm story tense');
   assertEqual(result.packet.storyForm.pov, 'third-person-limited', 'Rapid packet stores warm story pov');
   assertNoSecretText(result.packet, 'Rapid packet');
@@ -3631,6 +3639,10 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(result.ok, true, 'auto mode returns ok');
   assertEqual(calls.snapshot, 3, 'auto mode reads snapshot and rechecks before compose and install');
   assertEqual(installed.length, 1, 'auto mode installs one prompt');
+  assert(view.lastPreparedGeneration, 'successful preparation commits a prepared generation artifact');
+  assert(preparedGenerationIntegrityIsValid(view.lastPreparedGeneration), 'committed prepared generation artifact passes integrity');
+  assertEqual(view.lastPreparedGeneration.packet.packetId, view.lastPacket.packetId, 'packet view derives from committed artifact');
+  assertEqual(view.lastPreparedGeneration.hand.handId, view.lastHand.handId, 'hand view derives from committed artifact');
   assert(view.lastHand.cards.length > 0, 'hand available in view');
   assert(view.lastPacket.sections.cardEvidence.includes('The lamp breaks.'), 'scene frame uses latest visible message');
   assert(!view.lastPacket.sections.cardEvidence.includes('hidden draft'), 'scene frame ignores invisible message');
@@ -3961,15 +3973,20 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   const first = await runtime.prepareForGeneration({ userMessage });
   assertEqual(first.ok, true, `${pipelineMode} first same-turn run installs`);
   assertEqual(installed.length, 1, `${pipelineMode} first same-turn run installs one packet`);
+  const preparedView = runtime.view();
+  assert(preparedView.lastPreparedGeneration, `${pipelineMode} successful preparation commits one artifact`);
+  assert(preparedGenerationIntegrityIsValid(preparedView.lastPreparedGeneration), `${pipelineMode} committed artifact passes integrity`);
+  assertEqual(preparedView.lastPreparedGeneration.packet.packetId, preparedView.lastPacket.packetId, `${pipelineMode} packet derives from artifact`);
+  assertEqual(preparedView.lastPreparedGeneration.hand.handId, preparedView.lastHand.handId, `${pipelineMode} hand derives from artifact`);
   const callsAfterFirst = providerCalls;
   const second = await runtime.prepareForGeneration({ userMessage });
   assertEqual(second.ok, true, `${pipelineMode} same-turn retry succeeds`);
   assertEqual(second.reused, true, `${pipelineMode} same-turn retry reuses prior packet`);
-  assertEqual(second.reason, 'same-turn-swipe-retry', `${pipelineMode} same-turn retry reports reuse reason`);
+  assertEqual(second.reason, 'prepared-generation-exact-match', `${pipelineMode} same-turn retry reports prepared reuse reason`);
   assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} same-turn retry does not call providers again`);
   assertEqual(installed.length, 2, `${pipelineMode} same-turn retry reinstalls the existing packet`);
   assertEqual(installed[0].packetId, installed[1].packetId, `${pipelineMode} same-turn retry keeps packet identity`);
-  assertEqual(runtime.view().lastCacheDecision?.kind, 'swipe-packet', `${pipelineMode} same-turn retry exposes swipe cache provenance`);
+  assertEqual(runtime.view().lastCacheDecision?.kind, 'prepared-generation', `${pipelineMode} same-turn retry exposes prepared cache provenance`);
   assertEqual(runtime.view().lastCacheDecision?.decision, 'hit', `${pipelineMode} same-turn retry exposes cache hit`);
 }
 
@@ -3989,6 +4006,8 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
     messages
   });
   let activeSnapshot = snapshotFromMessages(initialMessages);
+  let failReuseInstall = false;
+  const trackedStorage = createTrackedStorageRepository();
   const { runtime, installed, cleared, storage } = createRuntimeHarness({
     settings: {
       pipelineMode,
@@ -3997,6 +4016,14 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
       enhancements: { mode: 'off', applyMode: 'as-swipe', contextMessages: 13 }
     },
     snapshot: () => activeSnapshot,
+    storage: trackedStorage.storage,
+    hostPrompt: {
+      async install() {
+        return failReuseInstall
+          ? { ok: false, error: { code: 'REUSE_INSTALL_FAILED', message: 'prepared reuse install failed' } }
+          : { ok: true, installed: true };
+      }
+    },
     generationRouter: {
       async generate(roleId, request = {}) {
         providerCalls += 1;
@@ -4095,16 +4122,140 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
       activeSwipeTextHash: hashJson('Alternate assistant response.')
     }
   ]);
-  const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true, generationType: 'swipe' });
+  const storageBeforeReuse = clone(trackedStorage.counts);
+  const cacheSequenceBeforeReuse = runtime.view().lastCacheDecision?.sequence || 0;
+  const realDateNow = Date.now;
+  if (pipelineMode === 'standard') {
+    await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped', messageId: 11 });
+    Date.now = () => realDateNow() + (60 * 60 * 1000);
+  }
+  let second;
+  try {
+    second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true, generationType: 'swipe' });
+  } finally {
+    Date.now = realDateNow;
+  }
   assertEqual(second.ok, true, `${pipelineMode} latest-assistant swipe retry succeeds`);
   assertEqual(second.reused, true, `${pipelineMode} latest-assistant swipe retry reuses previous packet`);
-  assertEqual(second.reason, 'same-turn-swipe-retry', `${pipelineMode} latest-assistant swipe retry reports reuse reason`);
+  assertEqual(second.reason, 'prepared-generation-exact-match', `${pipelineMode} latest-assistant swipe retry reports prepared reuse reason`);
   assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} latest-assistant swipe retry does not call providers again`);
   assertEqual(installed.length, 2, `${pipelineMode} latest-assistant swipe retry reinstalls previous packet`);
   assertEqual(installed[0].packetId, installed[1].packetId, `${pipelineMode} latest-assistant swipe retry keeps packet identity`);
+  assertEqual(runtime.view().lastCacheDecision?.basisMode, 'exact', `${pipelineMode} short-window swipe reports exact basis reuse`);
+  if (pipelineMode === 'standard') {
+    assertEqual(second.reused, true, 'prepared swipe reuse has no two-minute semantic expiry');
+  }
   assertEqual(runtime.view().lastBrief?.status, 'ready', `${pipelineMode} latest-assistant swipe reuse restores Last Brief after reinstall`);
   assertEqual(runtime.view().lastBrief?.packetId, installed[0].packetId, `${pipelineMode} latest-assistant swipe reuse restores original packet id`);
   assertEqual(runtime.view().lastSnapshot.latestMesId, 10, `${pipelineMode} latest-assistant swipe retry keeps original user-turn snapshot`);
+  assertDeepEqual(trackedStorage.counts, storageBeforeReuse, `${pipelineMode} exact prepared hit performs zero storage work`);
+  assertEqual(runtime.view().lastCacheDecision?.sequence, cacheSequenceBeforeReuse + 1, `${pipelineMode} exact prepared hit records one final cache decision`);
+  const originalArtifactHash = runtime.view().lastPreparedGeneration.artifactHash;
+  const originalHandId = runtime.view().lastPreparedGeneration.hand.handId;
+  const repeatedElapsed = [];
+  for (let swipeIndex = 0; swipeIndex < 20; swipeIndex += 1) {
+    activeSnapshot = snapshotFromMessages([
+      ...initialMessages,
+      {
+        mesid: 11,
+        role: 'assistant',
+        text: `Repeated assistant swipe ${swipeIndex + 1}.`,
+        visible: true,
+        swipeId: swipeIndex + 2,
+        swipeCount: swipeIndex + 3,
+        activeSwipeTextHash: hashJson(`Repeated assistant swipe ${swipeIndex + 1}.`)
+      }
+    ]);
+    const startedAt = performance.now();
+    const repeated = await runtime.prepareForGeneration({
+      userMessage: null,
+      hostGeneration: true,
+      generationType: 'swipe'
+    });
+    repeatedElapsed.push(performance.now() - startedAt);
+    assertEqual(repeated.reused, true, `${pipelineMode} repeated swipe ${swipeIndex + 1} reuses`);
+    assertEqual(repeated.packet.packetId, installed[0].packetId, `${pipelineMode} repeated swipe ${swipeIndex + 1} preserves packet identity`);
+  }
+  assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} twenty repeated swipes make zero provider calls`);
+  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, originalArtifactHash, `${pipelineMode} repeated swipes preserve artifact identity`);
+  assertEqual(runtime.view().lastPreparedGeneration.hand.handId, originalHandId, `${pipelineMode} repeated swipes preserve hand identity`);
+  assert(Math.max(...repeatedElapsed) <= 250, `${pipelineMode} repeated prepared swipes stay below 250ms`);
+  assertDeepEqual(trackedStorage.counts, storageBeforeReuse, `${pipelineMode} twenty repeated swipes perform zero storage work`);
+  assertEqual(runtime.view().lastCacheDecision?.sequence, cacheSequenceBeforeReuse + 21, `${pipelineMode} twenty repeated swipes each record exactly one final decision`);
+  const installsBeforeStopRetry = installed.length;
+  await runtime.handleHostGenerationStopped({
+    eventName: 'generation_stopped',
+    messageId: 11
+  });
+  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, originalArtifactHash, `${pipelineMode} stopped swipe preserves artifact identity`);
+  const storageAfterStop = clone(trackedStorage.counts);
+  const sequenceAfterStop = runtime.view().lastCacheDecision?.sequence || 0;
+  activeSnapshot = snapshotFromMessages([
+    ...initialMessages,
+    {
+      mesid: 11,
+      role: 'assistant',
+      text: 'Swipe after native stop.',
+      visible: true,
+      swipeId: 50,
+      swipeCount: 51
+    }
+  ]);
+  const afterStopRetry = await runtime.prepareForGeneration({
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  assertEqual(afterStopRetry.reused, true, `${pipelineMode} swipe after stop reuses the prepared artifact`);
+  assertEqual(installed.length, installsBeforeStopRetry + 1, `${pipelineMode} swipe after stop installs exactly once`);
+  assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} swipe after stop makes zero provider calls`);
+  assertDeepEqual(trackedStorage.counts, storageAfterStop, `${pipelineMode} swipe after stop makes zero storage calls`);
+  assertEqual(runtime.view().lastCacheDecision?.sequence, sequenceAfterStop + 1, `${pipelineMode} swipe after stop records one cache decision`);
+  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, originalArtifactHash, `${pipelineMode} swipe after stop keeps artifact identity`);
+  failReuseInstall = true;
+  activeSnapshot = snapshotFromMessages([
+    ...initialMessages,
+    {
+      mesid: 11,
+      role: 'assistant',
+      text: 'Prepared reuse install failure output.',
+      visible: true,
+      swipeId: 99,
+      swipeCount: 100
+    }
+  ]);
+  const failedReuse = await runtime.prepareForGeneration({
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  assertEqual(failedReuse.ok, false, `${pipelineMode} cached reinstall failure reports failure`);
+  assertEqual(failedReuse.reused, false, `${pipelineMode} cached reinstall failure does not report successful reuse`);
+  assertEqual(failedReuse.reason, 'prompt-install-failed', `${pipelineMode} cached reinstall failure reports the concrete reason`);
+  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, originalArtifactHash, `${pipelineMode} cached reinstall failure preserves artifact identity`);
+  assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} cached reinstall failure still makes zero provider calls`);
+  assertEqual(runtime.view().lastCacheDecision?.decision, 'miss', `${pipelineMode} cached reinstall failure is not reported as a hit`);
+  assertEqual(runtime.view().lastCacheDecision?.reason, 'prompt-install-failed', `${pipelineMode} cached reinstall failure records its final reason`);
+}
+
+function createTrackedStorageRepository() {
+  const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
+  const counts = {};
+  for (const methodName of [
+    'loadSceneCache',
+    'saveSceneCache',
+    'invalidateSceneCache',
+    'clearSceneCache',
+    'appendJournal',
+    'loadRunJournal',
+    'maintainRetention'
+  ]) {
+    if (typeof storage[methodName] !== 'function') continue;
+    const original = storage[methodName].bind(storage);
+    storage[methodName] = async (...args) => {
+      counts[methodName] = (counts[methodName] || 0) + 1;
+      return original(...args);
+    };
+  }
+  return { storage, counts };
 }
 
 {
@@ -4123,7 +4274,9 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
     sceneKey: 'editorial-overlap-swipe-scene',
     sceneFingerprint: 'editorial-overlap-swipe-scene-fp',
     latestMesId: messages.at(-1)?.mesid || 0,
-    messages: messages.slice(-20)
+    messages: messages.slice(-20),
+    sourceWindowTruncated: messages.length > 20,
+    sourceWindowLimitReason: messages.length > 20 ? 'message-cap' : ''
   });
   let activeSnapshot = snapshotFromMessages(initialMessages);
   let swipeStarting = false;
@@ -4287,11 +4440,178 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   assertEqual(enhancementResult.reason, 'latest-assistant-swipe', 'aborted Editorial work records the swipe cancellation reason');
   assert(revealIndex >= 0 && revealIndex < swipeSnapshotIndex, 'Editorial reveal completes before the swipe snapshot is read');
   assertEqual(second.reused, true, 'overlapping Editorial swipe reuses the previous packet');
-  assertEqual(second.reason, 'same-turn-swipe-retry', 'overlapping Editorial swipe reports packet reuse');
+  assertEqual(second.reason, 'prepared-generation-exact-match', 'overlapping Editorial swipe reports prepared reuse');
+  assertEqual(runtime.view().lastCacheDecision?.basisMode, 'bounded-suffix', 'full host message window reports bounded-suffix reuse');
   assertEqual(finalPipelineCalls, initialPipelineCalls, 'overlapping Editorial swipe makes no new Arbiter, Fused, or Guidance calls');
   assertEqual(installed.at(-1)?.packetId, initialPacketId, 'overlapping Editorial swipe preserves packet identity');
   assertEqual(appendCount, 0, 'aborted Editorial work appends no enhancement swipe');
   assertEqual(runtime.view().activity.label, 'Recursion prompt reused for swipe retry.', 'new swipe progress remains authoritative after old Editorial cancellation');
+}
+
+{
+  const sourceMessages = Array.from({ length: 20 }, (_, index) => ({
+    mesid: index + 1,
+    role: index % 2 === 0 ? 'assistant' : 'user',
+    text: `${index === 19 ? 'Character-bound current request' : `Character-bound source ${index + 1}`} ${'x'.repeat(260)}`,
+    visible: true
+  }));
+  let activeSnapshot = {
+    chatId: 'character-bound-swipe-chat',
+    chatKey: 'character-bound-swipe-chat',
+    sceneKey: 'character-bound-swipe-scene',
+    sceneFingerprint: 'character-bound-swipe-scene-fp',
+    latestMesId: 20,
+    messages: sourceMessages
+  };
+  let providerCalls = 0;
+  const { runtime, installed } = createRuntimeHarness({
+    settings: {
+      pipelineMode: 'standard',
+      mode: 'auto',
+      reasonerUse: 'off',
+      retention: {
+        sourceWindowMessages: 20,
+        sourceWindowCharacters: 6000,
+        providerVisibleMessages: 12
+      }
+    },
+    snapshot: () => activeSnapshot,
+    generationRouter: {
+      async generate(roleId, request) {
+        providerCalls += 1;
+        assertEqual(roleId, 'utilityArbiter', 'character-bound fixture only requires the Arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'compose-brief',
+            cardJobs: [],
+            budgets: { targetBriefTokens: 500, maxCards: 0 },
+            reasonerDecision: { mode: 'skip', reason: 'character-bound fixture', signals: [] },
+            diagnostics: ['character-bound-fixture']
+          }
+        };
+      }
+    }
+  });
+  const first = await runtime.prepareForGeneration({
+    userMessage: sourceMessages.at(-1).text,
+    hostGeneration: true
+  });
+  assertEqual(first.ok, true, 'character-bound setup installs');
+  const callsAfterFirst = providerCalls;
+  activeSnapshot = {
+    ...activeSnapshot,
+    latestMesId: 21,
+    sourceWindowTruncated: true,
+    sourceWindowLimitReason: 'character-budget',
+    messages: [
+      ...sourceMessages.slice(-4),
+      {
+        mesid: 21,
+        role: 'assistant',
+        text: `Long assistant output ${'y'.repeat(5000)}`,
+        visible: true,
+        swipeId: 1,
+        swipeCount: 2
+      }
+    ]
+  };
+  const swipe = await runtime.prepareForGeneration({
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  assertEqual(swipe.reused, true, 'character-budget displacement reuses the prepared artifact');
+  assertEqual(runtime.view().lastCacheDecision?.basisMode, 'bounded-suffix', 'character-budget displacement reports bounded suffix');
+  assertEqual(providerCalls, callsAfterFirst, 'character-budget displacement makes zero additional provider calls');
+  assertEqual(installed[0].packetId, installed[1].packetId, 'character-budget displacement preserves packet identity');
+  activeSnapshot = {
+    ...activeSnapshot,
+    sourceWindowTruncated: false,
+    sourceWindowLimitReason: '',
+    messages: [
+      ...sourceMessages.slice(1),
+      { mesid: 21, role: 'assistant', text: 'Assistant after a leading source deletion.', visible: true, swipeId: 2, swipeCount: 3 }
+    ]
+  };
+  const callsBeforeLeadingDeletion = providerCalls;
+  const leadingDeletion = await runtime.prepareForGeneration({
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  assertEqual(leadingDeletion.reused, undefined, 'leading source deletion without host-bound evidence cannot reuse');
+  assert(providerCalls > callsBeforeLeadingDeletion, 'leading source deletion falls through to fresh provider preparation');
+  assertEqual(runtime.view().lastCacheDecision?.decision, 'miss', 'leading source deletion records a prepared-generation miss');
+}
+
+{
+  const source = {
+    chatId: 'prepared-recheck-race-chat',
+    chatKey: 'prepared-recheck-race-chat',
+    sceneKey: 'prepared-recheck-race-scene',
+    sceneFingerprint: 'prepared-recheck-race-scene-fp',
+    latestMesId: 1,
+    messages: [{ mesid: 1, role: 'user', text: 'Original prepared source.', visible: true }]
+  };
+  const swipeSnapshot = {
+    ...source,
+    latestMesId: 2,
+    messages: [
+      ...source.messages,
+      { mesid: 2, role: 'assistant', text: 'Assistant output being swiped.', visible: true, swipeId: 1, swipeCount: 2 }
+    ]
+  };
+  const mutatedSwipeSnapshot = {
+    ...swipeSnapshot,
+    messages: [
+      { mesid: 1, role: 'user', text: 'Edited prepared source.', visible: true },
+      swipeSnapshot.messages[1]
+    ]
+  };
+  let phase = 'prepare';
+  let reuseSnapshotReads = 0;
+  let providerCalls = 0;
+  const { runtime, installed, storage } = createRuntimeHarness({
+    settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => {
+      if (phase === 'prepare') return source;
+      reuseSnapshotReads += 1;
+      return reuseSnapshotReads === 1 ? swipeSnapshot : mutatedSwipeSnapshot;
+    },
+    generationRouter: {
+      async generate(roleId, request) {
+        providerCalls += 1;
+        assertEqual(roleId, 'utilityArbiter', 'prepared recheck race only requires the Arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'compose-brief',
+            cardJobs: [],
+            budgets: { targetBriefTokens: 500, maxCards: 0 },
+            reasonerDecision: { mode: 'skip', reason: 'prepared recheck race', signals: [] }
+          }
+        };
+      }
+    }
+  });
+  await runtime.prepareForGeneration({ userMessage: 'Original prepared source.', hostGeneration: true });
+  const callsAfterPrepare = providerCalls;
+  const artifactBeforeRace = clone(runtime.view().lastPreparedGeneration);
+  phase = 'reuse';
+  const race = await runtime.prepareForGeneration({ hostGeneration: true, generationType: 'swipe' });
+  assertEqual(race.skipped, true, 'source mutation during cached install skips reuse');
+  assertEqual(race.reused, false, 'source mutation during cached install does not report reuse');
+  assertEqual(race.reason, 'stale-generation-basis', 'source mutation during cached install reports stale generation basis');
+  assertEqual(installed.length, 1, 'source mutation during cached install performs no second prompt installation');
+  assertEqual(providerCalls, callsAfterPrepare, 'stale final recheck performs no provider calls');
+  assertDeepEqual(runtime.view().lastPreparedGeneration, artifactBeforeRace, 'stale final recheck preserves committed artifact byte-for-byte');
+  assertEqual(runtime.view().lastCacheDecision?.decision, 'miss', 'stale final recheck is not reported as a cache hit');
+  assertEqual(runtime.view().lastCacheDecision?.reason, 'stale-generation-basis', 'stale final recheck records the final stale reason');
+  const journal = await storage.loadRunJournal(source.chatKey);
+  assert(!journal.entries.some((entry) => entry.event === 'prompt.reinstalled'), 'stale final recheck records no successful reinstall journal');
 }
 
 {
@@ -5830,6 +6150,7 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   assertEqual(view.activity.severity, 'warning', 'install failure settles warning');
   assertEqual(view.activity.label, 'Prompt install failed. Generation will continue without Recursion.', 'install failure label');
   assertEqual(view.lastBrief?.status, 'empty', 'failed prompt install does not report Last Brief as ready');
+  assertEqual(view.lastPreparedGeneration, null, 'initial prompt install failure does not commit a prepared generation artifact');
   assertEqual(view.activeRunId, null, 'active run cleared after install failure');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
   assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.install_failed'], 'install failure journals hand before failure');
@@ -5860,6 +6181,69 @@ for (const pipelineMode of ['standard', 'rapid', 'fused']) {
   assertEqual(result.install.ok, false, 'returned install failure preserves non-ok install outcome');
   assertEqual(result.install.error.code, 'RETURNED_SECRET', 'returned install failure preserves safe code');
   assertNoSecretText(result, 'returned install result');
+}
+
+{
+  const source = {
+    chatId: 'zero-card-stop-retry-chat',
+    chatKey: 'zero-card-stop-retry-chat',
+    sceneKey: 'zero-card-stop-retry-scene',
+    sceneFingerprint: 'zero-card-stop-retry-scene-fp',
+    latestMesId: 1,
+    messages: [{ mesid: 1, role: 'user', text: 'Prepare zero-card stop retry.', visible: true }]
+  };
+  let activeSnapshot = source;
+  let providerCalls = 0;
+  const { runtime, installed } = createRuntimeHarness({
+    settings: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => activeSnapshot,
+    generationRouter: {
+      async generate(roleId, request) {
+        providerCalls += 1;
+        assertEqual(roleId, 'utilityArbiter', 'zero-card stop fixture only calls Arbiter');
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'compose-brief',
+            cardJobs: [],
+            budgets: { targetBriefTokens: 0, maxCards: 0 },
+            reasonerDecision: { mode: 'skip', reason: 'zero-card stop fixture', signals: [] }
+          }
+        };
+      }
+    }
+  });
+  await runtime.prepareForGeneration({ userMessage: 'Prepare zero-card stop retry.', hostGeneration: true });
+  const artifactHash = runtime.view().lastPreparedGeneration.artifactHash;
+  assertEqual(runtime.view().lastPreparedGeneration.hand.cards.length, 0, 'zero-card stop setup commits an empty hand');
+  activeSnapshot = {
+    ...source,
+    latestMesId: 2,
+    messages: [
+      ...source.messages,
+      { mesid: 2, role: 'assistant', text: 'First zero-card swipe.', visible: true, swipeId: 1, swipeCount: 2 }
+    ]
+  };
+  const firstSwipe = await runtime.prepareForGeneration({ hostGeneration: true, generationType: 'swipe' });
+  assertEqual(firstSwipe.reused, true, 'zero-card artifact reuses before stop');
+  const callsBeforeStop = providerCalls;
+  await runtime.handleHostGenerationStopped({ eventName: 'generation_stopped', messageId: 2 });
+  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, artifactHash, 'stopped zero-card swipe preserves prepared artifact');
+  activeSnapshot = {
+    ...source,
+    latestMesId: 2,
+    messages: [
+      ...source.messages,
+      { mesid: 2, role: 'assistant', text: 'Stopped zero-card swipe retry.', visible: true, swipeId: 2, swipeCount: 3 }
+    ]
+  };
+  const retry = await runtime.prepareForGeneration({ hostGeneration: true });
+  assertEqual(retry.reused, true, 'next unchanged swipe after stop reuses zero-card artifact');
+  assertEqual(providerCalls, callsBeforeStop, 'stopped zero-card retry makes zero provider calls');
+  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, artifactHash, 'stopped zero-card retry preserves artifact identity');
+  assertEqual(installed.at(-1).packetId, runtime.view().lastPreparedGeneration.packet.packetId, 'stopped zero-card retry reinstalls exact packet');
 }
 
 {
@@ -7466,6 +7850,47 @@ for (const scenario of [
   assertEqual(view.lastPlan.budgets.maxCards, 0, 'zero maxCards budget is preserved');
   assertEqual(view.lastPlan.budgets.targetBriefTokens, 0, 'zero token budget is preserved');
   assertEqual(view.lastHand.cards.length, 0, 'zero maxCards budget selects no cards');
+  assert(view.lastPreparedGeneration, 'zero-card successful packet commits a prepared generation artifact');
+  assertEqual(view.lastPreparedGeneration.hand.cards.length, 0, 'zero-card artifact remains valid without selected cards');
+  await runtime.updateSettings({ enabled: false });
+  assertEqual(runtime.view().lastPreparedGeneration, null, 'disabling Recursion hard-clears the prepared generation artifact');
+}
+
+{
+  const { runtime } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' }
+  });
+  await runtime.prepareForGeneration({ userMessage: 'Prepare an artifact before teardown.' });
+  assert(runtime.view().lastPreparedGeneration, 'teardown setup commits a prepared generation artifact');
+  await runtime.dispose();
+  assertEqual(runtime.view().lastPreparedGeneration, null, 'runtime teardown hard-clears the prepared generation artifact');
+}
+
+{
+  let installAttempt = 0;
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    hostPrompt: {
+      async install() {
+        installAttempt += 1;
+        return installAttempt === 1
+          ? { ok: true, installed: true }
+          : { ok: false, error: { code: 'SECOND_INSTALL_FAILED', message: 'second install failed' } };
+      }
+    }
+  });
+  await runtime.prepareForGeneration({ userMessage: 'First prepared turn.' });
+  const firstArtifact = clone(runtime.view().lastPreparedGeneration);
+  assert(firstArtifact, 'first successful install establishes last-known-good artifact');
+  await runtime.prepareForGeneration({
+    userMessage: 'Second prepared turn.',
+    refreshReason: 'atomic-install-failure-test'
+  });
+  assertDeepEqual(
+    runtime.view().lastPreparedGeneration,
+    firstArtifact,
+    'later prompt install failure preserves the byte-identical last-known-good artifact'
+  );
 }
 
 {
@@ -10343,7 +10768,8 @@ for (const scenario of [
   assertEqual(view.lastSnapshot.sceneKey, 'scene', 'missing scene key normalized');
   assertEqual(view.lastSnapshot.latestMesId, 0, 'missing latest message id normalized');
   assertDeepEqual(view.lastSnapshot.messages, [], 'missing messages normalized to empty array');
-  assertEqual(view.lastPacket.chatId, 'chat', 'packet gets normalized chat id');
+  assertEqual(result.packet.chatId, 'chat', 'packet gets normalized chat id without creating a reusable empty-source artifact');
+  assertEqual(view.lastPreparedGeneration, null, 'empty normalized source does not create a reusable prepared artifact');
   assertEqual(view.activeRunId, null, 'active run cleared after normalized manual');
 }
 
@@ -10394,6 +10820,63 @@ for (const scenario of [
   assertEqual(threw, true, 'runtime failure still throws to caller');
   assertNoSecretText(caughtError?.message || caughtError, 'runtime thrown error');
   assertNoSecretText(runtime.view().activity.detail, 'runtime failure activity detail');
+}
+
+{
+  const firstInstallGate = deferred();
+  let firstInstallStarted = false;
+  let activeSource = 'first';
+  const snapshotFor = (label) => ({
+    chatId: `install-race-${label}`,
+    chatKey: `install-race-${label}`,
+    sceneKey: `install-race-${label}-scene`,
+    sceneFingerprint: `install-race-${label}-scene-fp`,
+    turnFingerprint: `install-race-${label}-turn-fp`,
+    latestMesId: label === 'first' ? 1 : 2,
+    messages: [{
+      mesid: label === 'first' ? 1 : 2,
+      role: 'user',
+      text: `${label} install race source`,
+      visible: true
+    }]
+  });
+  let installCount = 0;
+  const { runtime, storage } = createRuntimeHarness({
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    snapshot: () => snapshotFor(activeSource),
+    hostPrompt: {
+      async install() {
+        installCount += 1;
+        if (installCount === 1) {
+          firstInstallStarted = true;
+          await firstInstallGate.promise;
+        }
+        return { ok: true, installed: true };
+      }
+    }
+  });
+  const first = runtime.prepareForGeneration({ userMessage: 'first install race source' });
+  await waitUntil(() => firstInstallStarted, 'first install race did not reach prompt installation');
+  const supersedingSourceChange = runtime.handleSourceChanged({
+    eventName: 'message_updated',
+    messageId: 1
+  });
+  firstInstallGate.resolve();
+  const firstResult = await first;
+  await supersedingSourceChange;
+  activeSource = 'second';
+  const secondResult = await runtime.prepareForGeneration({ userMessage: 'second install race source' });
+  assertEqual(firstResult.superseded, true, 'run superseded during prompt installation cannot commit its artifact');
+  assertEqual(secondResult.ok, true, 'newer run installs after stale prompt mutation settles');
+  const committed = runtime.view().lastPreparedGeneration;
+  assert(committed, 'newer install race run owns the committed artifact');
+  assertEqual(committed.packet.packetId, secondResult.packet.packetId, 'stale install completion cannot replace newer artifact ownership');
+  assert(!JSON.stringify(committed).includes('first install race source'), 'stale install source is absent from committed artifact');
+  const staleJournal = await storage.loadRunJournal('install-race-first');
+  assert(
+    !staleJournal?.entries?.some((entry) => entry.event === 'prompt.installed' || entry.event === 'hand.selected'),
+    'superseded install completion records no stale success journal'
+  );
 }
 
 {
@@ -10520,6 +11003,10 @@ for (const scenario of [
   assert(firstResult.ok || firstResult.superseded, 'first save run either completes or is superseded after save commits');
   assertEqual(secondResult.ok, true, 'queued newer run completes after cache save');
   assertDeepEqual(sideEffects, ['save:save-run-1', 'save:save-run-2', 'save:save-run-2'], 'scene cache saves commit in run order, including final prompt-packet hash write');
+  const committed = runtime.view().lastPreparedGeneration;
+  assert(committed, 'late scene-cache save leaves a committed prepared artifact');
+  assertEqual(committed.packet.packetId, secondResult.packet.packetId, 'late scene-cache save cannot overwrite newer packet ownership');
+  assertEqual(committed.hand.handId, secondResult.hand.handId, 'late scene-cache save cannot split packet and hand ownership');
 }
 
 {

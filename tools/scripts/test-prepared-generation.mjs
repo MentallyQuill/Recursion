@@ -221,13 +221,24 @@ assertEqual(exact.reason, 'basis-exact', 'identical bases use exact reason');
 
 const suffixBasis = baseBasis({
   sourceRevisionHash: 'source-revision-after-host-bounding',
-  sourceWindow: basis.sourceWindow.slice(1)
+  sourceWindow: basis.sourceWindow.slice(1),
+  sourceWindowTruncated: true,
+  sourceWindowLimitReason: 'message-cap'
 });
 const boundedSuffix = compareGenerationBasis(basis, suffixBasis, { allowBoundedSuffix: true });
 assertEqual(boundedSuffix.matches, true, 'shorter observable suffix matches when enabled');
 assertEqual(boundedSuffix.mode, 'bounded-suffix', 'shorter observable suffix reports bounded mode');
 assertEqual(boundedSuffix.reason, 'basis-observable-suffix', 'shorter observable suffix reports bounded reason');
 assertEqual(compareGenerationBasis(basis, suffixBasis).reason, 'basis-window-mismatch', 'suffix matching is disabled by default');
+assertEqual(
+  compareGenerationBasis(
+    basis,
+    { ...suffixBasis, sourceWindowTruncated: false, sourceWindowLimitReason: '' },
+    { allowBoundedSuffix: true }
+  ).reason,
+  'basis-window-mismatch',
+  'leading deletion without host-bound evidence cannot masquerade as displacement'
+);
 
 const equalLengthChanged = baseBasis({
   sourceRevisionHash: 'source-revision-after-edit',

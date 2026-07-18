@@ -1924,7 +1924,7 @@ function renderHandDropdown(panel, view, model, options = {}) {
   }
   setTooltip(packetButton, model.tooltipsEnabled, briefPacket ? 'Open injected prompt packet' : 'No prompt packet has been composed yet.');
   const cacheDecision = model.lastCacheDecision?.decision === 'hit'
-    ? (model.lastCacheDecision?.kind === 'swipe-packet' ? 'swipe reused' : 'cached')
+    ? (model.lastCacheDecision?.kind === 'prepared-generation' ? 'swipe reused' : 'cached')
     : '';
   const sourceWindow = model.contextContract?.sourceWindow;
   const sourceSummary = sourceWindow?.actualMessages

@@ -9,7 +9,17 @@ Provider routing is implemented by `src/providers.mjs`, configured by `src/setti
 | Utility | Yes | Low/Medium Arbiter, Low/Medium card generation, Low/Medium Fused bundles, lower-priority High cards, provider tests, `guidanceComposer`, and Low/Medium post-generation Generation Review. | Local fallback plan, cache reuse, raw-card-only packet, prompt clear, original-message reveal, or skip. |
 | Reasoner | No | Medium+ guidance augmentation, High/Ultra Arbiter, High/Ultra Fused bundles when healthy, high-priority High cards, Ultra card generation. | Utility guidance plus raw card evidence. |
 
-Utility remains the required operational lane. Reasoner is eligible only when enabled and selected by Reasoning Level policy.
+Utility remains the required operational lane. Reasoner eligibility comes from
+one shared capability resolver plus Reasoning Level policy; there is no provider
+enable Boolean.
+
+The resolver reports `unconfigured`, `untested`, `ready`, or `unhealthy`.
+Configuration completeness, host support, and session credentials establish
+whether a lane is testable. Only pass/fail health evidence bound to the current
+configuration hash establishes `ready` or `unhealthy`; stale health is neutral.
+Ordinary Medium/High/Ultra work falls back to Utility unless Reasoner is
+`ready`. Medium+ Redirect instead remains unavailable and is skipped before
+provider work. Low Redirect uses Utility.
 
 ## Provider Sources
 
@@ -22,6 +32,12 @@ Each lane can resolve to:
 Host current model routes through SillyTavern raw generation when available, with quiet prompt as a current-model fallback. Host connection profiles route through `ConnectionManagerRequestService.sendRequest` when that SillyTavern service is available. For machine JSON jobs, Recursion passes the expected response schema and frozen snapshot hash to the host profile request, suppresses host preset/instruct wrapping, and still validates the returned schema before trusting the output. If a profile is selected but only quiet prompt generation is available, Recursion reports the profile route as unsupported instead of silently falling back to the current model. OpenAI-compatible endpoints use `fetch` against `/chat/completions` with JSON-object response format.
 
 Utility and Reasoner default to `8192` max tokens. Host connection-profile calls pass the lane's configured max tokens as the explicit `maxTokens` argument to `ConnectionManagerRequestService.sendRequest`, which SillyTavern forwards as request `max_tokens`. Recursion machine-JSON jobs suppress profile preset/instruct wrapping, so the selected connection profile supplies routing, model, and secret context rather than overriding Recursion's max-token budget through its preset.
+
+Provider Test uses the selected lane's configured max-token ceiling, including
+the default `8192`; it does not impose a smaller hidden response cap. Tests are
+single-flight per lane. Duplicate same-lane callers share one request, and a
+test requested while that lane has active production work returns
+`RECURSION_PROVIDER_BUSY` without superseding the active run.
 
 Direct endpoint API keys are session-only secrets kept in the in-memory secret store. Settings store only `sessionApiKeyPresent`.
 
@@ -126,7 +142,7 @@ Fallback behavior:
 - Fused bundle validation reports accepted, invalid, rejected, omitted, and missing requested families. When at least one requested item is trustworthy, runtime repairs only damaged or missing siblings through individual Standard card calls for the same pending user message. Wrong snapshot, provider failure with no recoverable item fragments, or zero trustworthy items triggers full Standard card fallback.
 - Card call failure omits failed cards and keeps valid siblings.
 - Reasoner failure falls back to Utility guidance plus raw selected Card Evidence.
-- Provider test failure updates lane status with compact error text.
+- Provider test completion records compact hash-bound health without changing provider configuration.
 - Host generation unavailability makes the lane unhealthy without blocking normal chat generation.
 - Token-limit, reasoning-only, and empty visible provider responses are classified before raw response text can enter diagnostics, journals, or progress details.
 
@@ -147,8 +163,16 @@ Journal entries are sanitized and bounded. They can include:
 - structured-output repair metadata
 - reasoning intent, category, dialect, applied/downgraded flags
 - compact error code and message
+- capability transition state, reason code, configuration revision, configuration hash, and changed field names
 
 They must not include raw prompts, raw provider responses, API keys, bearer tokens, cookies, full chat messages, hidden reasoning, or full prompt packets.
+
+`provider.capability.changed` records configuration and health transitions with
+only lane, prior/current capability, reason code, `configRevision`, hash, and
+changed field names. `editorial.preflight.skipped` records a blocked Medium+
+Redirect with the same sanitized capability reason. Neither event may contain a
+profile id, endpoint, model value, secret, raw provider error, prompt, or
+response.
 
 ## Session Secret Boundary
 
@@ -166,10 +190,16 @@ If a run is no longer active, runtime returns a superseded result and refuses to
 
 ## Recovery And Editorial Routing
 
-Generation Review follows the selected Enhancement mode and frozen request metadata. Low and Medium Enhancement review use Utility; High and Ultra use Reasoner when enabled and healthy, with Utility fallback for transport or routing failure before a structured result is accepted. Once a structured result exists, semantic correction is not an extra lane fallback: it uses the shared one-request recovery budget and the authoritative validator.
+Generation Review follows the selected Enhancement mode and frozen request
+metadata. Ordinary Repair/Recompose routing uses Reasoner only when capability
+is `ready` and may fall back to Utility under its existing bounded rules.
+Redirect is stricter: Low uses Utility, while Medium/High/Ultra require Reasoner
+`ready` before generation and never use a Utility Redirect fallback.
 
 Provider status must distinguish transport/auth failure, malformed structured output, semantic validation failure, token exhaustion, and safe fallback. The UI may show a concise normalized reason, but raw provider payloads, prompts, secrets, and hidden reasoning stay out of progress, diagnostics, journals, and saved artifacts.
 
-The compact UI shows Utility and Reasoner provider details in collapsible lanes with source, profile, endpoint, model, session key state, max tokens, test status, resolved provider, and resolved model. Temperature and top-p remain normalized provider settings with defaults, but they are not visible controls in the compact V1 surface. The Recursion Bar shows current progress, active composition lane, and Reasoning Level bias without exposing raw provider errors.
+The compact UI shows Utility and Reasoner provider details in collapsible lanes with source, profile, endpoint, model, session key state, max tokens, capability, resolved provider, and resolved model. Temperature and top-p remain normalized provider settings with defaults, but they are not visible controls in the compact V1 surface. Provider field commits are field-scoped compare-and-swap updates against `configRevision`; stale UI writes refresh instead of replacing newer configuration. The Recursion Bar shows current progress, active composition lane, and Reasoning Level bias without exposing raw provider errors.
 
-Visible states are compact: ready, unavailable, disabled, issue, composing, or test failed. Raw provider errors remain out of the bar and progress menu.
+Visible provider capability labels are compact: `Ready`, `Untested`,
+`Unhealthy`, or `Configure`. Raw provider errors remain out of the bar and
+progress menu.

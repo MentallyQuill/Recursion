@@ -38,7 +38,7 @@ Highest-priority invariants:
 - Stale provider results cannot update the active scene cache or active prompt packet.
 - Older SillyTavern swipe changes clear stale Recursion prompts and cannot reuse cards from a different active source revision. Latest-assistant native swipe retries must preserve one assistant row with multiple swipe variants, process `MESSAGE_SWIPED` before the generation interceptor's `generationType: "swipe"`, reinstall the same prompt packet, record a `swipe-packet` cache hit, and perform no provider work. The host-boundary regression must keep the assistant in `SillyTavern.getContext().chat` while the interceptor payload ends on the preceding user row, matching SillyTavern's native swipe payload. Post-generation editorial setting changes must not invalidate that packet or clear its prompt lanes.
 - Utility is the default provider lane for Arbiter and composition work.
-- Reasoner composition is optional and must fall back to Utility or local composition on timeout, failure, off state, or invalid schema.
+- Reasoner composition is optional. Ordinary work must fall back to Utility or local composition when capability is `unconfigured`, `untested`, or `unhealthy`, or when a routed call fails. Medium+ Redirect instead remains unavailable and settles as a pre-generation skip unless Reasoner is `ready`; Low Redirect uses Utility.
 - Runtime must trim over-budget `cardJobs` before provider card calls; deterministic tests should prove provider card-call count cannot exceed the effective hand budget for the turn.
 - Generated card `promptText` must be instruction-shaped private evidence, not story prose or mini-scene narration.
 - `guidanceComposer` provider-call success and prompt packet guidance acceptance are separate; tests should prove fallback reasons persist without raw guidance text.
@@ -75,6 +75,9 @@ The gate calls the focused local suite rather than duplicating test logic. Cover
 - card catalog, lifecycle, emphasis, detail, and hand-selection contracts;
 - pre-generation card-job budgeting, instruction-shaped card text validation, and multiline Card Evidence rendering;
 - Utility and Reasoner prompt packet composition;
+- provider capability matrices for `unconfigured`, `untested`, `ready`, and `unhealthy`;
+- field-scoped provider compare-and-swap updates, configuration revisions, and hash-bound health;
+- Provider Test at the configured `8192` default ceiling, same-lane single-flight, and active-lane busy rejection;
 - prompt budget trimming and omission reasons;
 - prompt injection metadata, replacement, and clearing through a fake host;
 - Rapid background warm provider calls, no prompt install, foreground warm-v2 install, warm-miss Standard escalation, hedged Utility winner selection, invalid-output Standard escalation, and mandatory-gap Standard escalation;
@@ -246,7 +249,15 @@ Documentation renders are separate from run artifacts. Draft captures, raw trace
 
 The focused suite must cover the live-facing contracts added on `card-system`: bundled Default Deck read-only behavior; custom deck/category/card CRUD; authored-card draft gating; `off`/`active`/`priority` cycles; bulk state actions; category/card drag ordering; Manual scope and Auto priority overflow; Card Assist commit boundaries; exact-source Rapid and swipe reuse; Fused partial repair; and visible normalized failure reasons.
 
-Editorial tests must separately prove Repair, Recompose, and Redirect source binding, evidence references, patch bounds, installed-card outcome coverage, shared one-correction recovery, verifier rejection, `As Swipe`, `Replace`, and no-write failure. The live UI matrix must include the experimental Redirect label and red failure rows. Live generation proof remains dedicated-user-only and must verify the mounted/served extension copy before mutation.
+Editorial tests must separately prove Repair, Recompose, and Redirect source binding, evidence references, patch bounds, installed-card outcome coverage, shared one-correction recovery, verifier rejection, `As Swipe`, `Replace`, and no-write failure. Redirect coverage must include Low Utility routing, ready Medium+ Reasoner routing, a visibly unavailable Medium+ row, unchanged selection on unavailable click, and a pre-generation blocked path that makes no Editorial calls and settles `skipped`. Capability-journal tests must cover configuration transitions, health transitions, stale results, and redaction. The live UI matrix must include the experimental Redirect label and red failure rows.
+
+Live generation proof remains dedicated-user-only. Before browser navigation,
+chat mutation, or provider calls, run
+`node tools/scripts/verify-installed-copy.mjs --user <recursion-soak-user>` and
+require byte-for-byte SHA-256 identity across the repository production
+allowlist, installed user extension, and served public extension. Missing,
+extra, mismatched, or symlinked production files fail the proof. Repeat the
+verifier for `default-user` before any approved default-user proof.
 
 Use these result categories:
 

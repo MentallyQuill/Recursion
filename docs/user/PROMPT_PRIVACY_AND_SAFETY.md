@@ -182,7 +182,7 @@ Screenshots are allowed as visual evidence, but do not capture provider setup wh
 Before using Auto:
 
 1. Confirm Utility is healthy.
-2. Confirm Reasoner is intentionally enabled or disabled.
+2. Confirm Reasoner capability is intentionally `Ready`, `Untested`, `Unhealthy`, or `Configure`.
 3. Inspect Last Brief and Prompt Packet after a safe Auto or Manual pass if you are unsure what Recursion compiled.
 4. Inspect Prompt Packet when output quality or privacy matters.
 5. Confirm the packet is current-scene guidance, not lore, memory, or hidden planning.

@@ -22,8 +22,8 @@ Recursion has two provider lanes.
 
 | Lane | Default use | Expected behavior | User-facing posture |
 | --- | --- | --- | --- |
-| Utility | Arbiter, scene/card extraction, card generation, lifecycle support, structured diagnostics | Fast, cheap, bounded, JSON-first, tolerant of being batched | Always configured, always the default |
-| Reasoner | Optional composition/fusion of crowded, ambiguous, or conflicted card hands | Slower, smarter, synthesis-oriented, still evidence-bound | Off or conservative by default |
+| Utility | Arbiter, scene/card extraction, card generation, lifecycle support, structured diagnostics | Fast, cheap, bounded, JSON-first, tolerant of being batched | Required operational lane |
+| Reasoner | Optional composition/fusion of crowded, ambiguous, or conflicted card hands | Slower, smarter, synthesis-oriented, still evidence-bound | Optional, capability-gated |
 
 Utility is the operational backbone. It should handle the initial Arbiter call and normal card generation without needing a Reasoner handoff.
 
@@ -43,7 +43,6 @@ type RecursionProviderSource =
 
 type RecursionProviderSettings = {
   lane: RecursionProviderLane;
-  enabled: boolean;
   source: RecursionProviderSource;
   hostConnectionProfileId?: string;
   openAICompatible?: {
@@ -54,17 +53,38 @@ type RecursionProviderSettings = {
   temperature: number;
   topP: number;
   maxTokens: number;
+  configRevision: number;
   resolvedProviderLabel?: string;
   resolvedModelLabel?: string;
-  lastTest?: {
+  health: {
     status: "pass" | "fail" | "not-run";
+    configHash?: string;
     checkedAt?: string;
     compactError?: string;
   };
 };
 ```
 
-The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `medium`. V1 derives the internal Reasoner route preference from it: Low disables Reasoner use, while Medium, High, and Ultra require Reasoner composition when the lane is healthy. The companion card-budget settings are `minCards` and `maxCards`; runtime derives `normalCards = floor((minCards + maxCards) / 2)`.
+There is no provider `enabled` Boolean. Provider capability is derived by one
+shared resolver from the lane configuration, selected source requirements, host
+support, session credential presence, and health evidence bound to the current
+configuration hash:
+
+| Capability | Meaning |
+| --- | --- |
+| `unconfigured` | The selected route lacks required data, host support, or a session credential. |
+| `untested` | The route is complete, but no pass/fail evidence matches its current configuration hash. |
+| `ready` | A passing health result matches the current configuration hash. |
+| `unhealthy` | A failing health result matches the current configuration hash. |
+
+Configuration and health mutations are separate. A field-scoped configuration
+commit supplies the exact expected `configRevision`; a successful material
+change increments the revision and invalidates prior health. A no-op preserves
+both. Provider-test completion records only pass/fail health for the hash it
+tested, so a stale result cannot overwrite newer configuration or establish
+readiness for it.
+
+The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `medium`. V1 derives the internal Reasoner route preference from it: Low selects Utility-only routing, while Medium, High, and Ultra use Reasoner for policy-selected work when its capability is `ready`. The companion card-budget settings are `minCards` and `maxCards`; runtime derives `normalCards = floor((minCards + maxCards) / 2)`.
 
 Reasoning Level also controls runtime lane preference and card pressure:
 
@@ -75,7 +95,10 @@ Reasoning Level also controls runtime lane preference and card pressure:
 | High | Reasoner when healthy | Reasoner for high-priority families, Utility for lower-priority families | Reasoner | Cap positive `maxCards` at Normal Cards. |
 | Ultra | Reasoner when healthy | Reasoner when healthy | Reasoner | Raise and cap positive `maxCards` at Max Cards. |
 
-If the Reasoner lane is disabled, untested, unhealthy, missing credentials, or missing required profile/config fields, runtime falls back to Utility for the affected call instead of blocking the host generation.
+If Reasoner is not `ready`, ordinary Medium/High/Ultra work falls back to
+Utility instead of blocking host generation. Medium+ Redirect is the deliberate
+exception: it is unavailable and settles as a preflight skip because its writer
+and verifier require Reasoner. Low Redirect remains on Utility.
 
 Reasoning Level also maps to provider-level reasoning intent for model calls that actually use the Reasoner lane:
 
@@ -96,7 +119,7 @@ Source options:
 
 V1 should implement all three source options for Utility and Reasoner when the host exposes the required APIs. If a host cannot support connection profiles, the setting should be unavailable with a clear UI status rather than silently mapped to the current model.
 
-Utility and Reasoner provider settings default to `8192` max tokens. The configured lane value is the authoritative response ceiling for every provider source. A caller may supply a narrower per-request response length, but a request may never exceed the configured lane ceiling.
+Utility and Reasoner provider settings default to `8192` max tokens. The configured lane value is the authoritative response ceiling for every provider source. Provider Test uses that configured ceiling, including the untouched `8192` default, rather than a smaller hidden cap. Other callers may supply a narrower per-request response length, but a request may never exceed the configured lane ceiling.
 
 Provider setup uses the same control-plane helpers as generation:
 
@@ -117,9 +140,18 @@ Machine JSON calls carry the expected response schema as provider request metada
 
 Host current-model calls pass normalized `reasoningIntent`, `reasoningCategory`, and nested `reasoning` metadata to raw host adapters when a caller provides reasoning intent. Host connection-profile calls pass both Recursion's normalized `parameters.reasoning = { intent, category, exclude: true }` metadata and SillyTavern's native `reasoning_effort` plus `include_reasoning: false` fields. The native fields are required for Connection Manager's OpenRouter backend to apply the requested effort instead of silently using a `:thinking` model's default reasoning budget. Recursion never stores or exposes hidden reasoning content.
 
-Utility must always have an enabled settings object. If Utility is misconfigured or unhealthy, Recursion degrades to cached/local behavior and does not block the user's normal SillyTavern generation.
+Utility always has a settings object. If its capability is not `ready`,
+Recursion degrades to cached/local behavior and does not block normal
+SillyTavern generation.
 
-Reasoner may be disabled. Disabled or unhealthy Reasoner means Medium, High, and Ultra keep their selected UI level but fall back to Utility guidance and Utility Arbiter/card routing where needed.
+Reasoner is optional. Medium, High, and Ultra keep their selected UI level when
+its capability is not `ready`; ordinary work falls back to Utility, while
+Medium+ Redirect remains visibly unavailable.
+
+Provider Test is single-flight per lane. Concurrent callers for the same lane
+share the in-flight test. A test requested while production work is active on
+that lane returns `RECURSION_PROVIDER_BUSY`; it does not cancel, supersede, or
+race the production request.
 
 The first working loop must include:
 
@@ -174,10 +206,10 @@ Generation roles describe why a model call exists. They are not the same thing a
 | `generationReviewer` | Utility at Low/Medium; Reasoner at High/Ultra when healthy | Review the frozen host generation against the generation-time installed Recursion hand, pipeline provenance, scene constraints, prose, dialogue, pacing, and anti-slop policy; return a bounded patch and per-installed-card outcome ledger | Parse/schema and semantic recovery share one correction budget. Apply only safe patches; unresolved outcome coverage is explicit `partial-failed`, while unsafe patches and unrecoverable fidelity defects fail or return `requires-regeneration`. |
 | `editorialDiagnostician` | Utility at Low/Medium; Reasoner at High/Ultra when healthy | Propose a bounded diagnosis against frozen evidence; never return candidate prose | Runtime validates identity, shape, bounds, and request-known evidence IDs. Redirect citation authority and relevance remain semantic questions for the mandatory Verifier. |
 | `editorialTransformer` | Repair/Recompose retain normal Enhancement routing. Redirect uses Utility at Low and Reasoner at Medium/High/Ultra. | Apply the Repair/Recompose brief or Redirect proposal as bounded patches or one complete candidate | Medium+ Redirect permits exactly two actual Reasoner writer calls, sends the first failure into the second correction prompt, and fails without Utility fallback when both attempts fail. Recursion pins source/snapshot/diagnosis identity from the frozen request; mechanical candidate safety passes before verification or host mutation. |
-| `editorialVerifier` | Healthy Reasoner for every Redirect; Reasoner at High/Ultra for Recompose; Utility fallback when Reasoner unavailable | Judge the proposed Redirect diagnosis and produced candidate against complete frozen evidence, or return binary accept/reject for Recompose | No rewrite, ranking, or alternate candidate. The first valid Redirect rejection may spend the remaining writer attempt, followed by a mandatory second verification. A second rejection preserves the original. One structurally malformed verifier result may be corrected only when the shared operation recovery token remains unused. |
+| `editorialVerifier` | Utility for Low Redirect; ready Reasoner for Medium/High/Ultra Redirect; Reasoner at High/Ultra for Recompose with ordinary Utility fallback | Judge the proposed Redirect diagnosis and produced candidate against complete frozen evidence, or return binary accept/reject for Recompose | Medium+ Redirect is skipped before provider work unless Reasoner is ready. No rewrite, ranking, or alternate candidate. The first valid Redirect rejection may spend the remaining writer attempt, followed by a mandatory second verification. A second rejection preserves the original. One structurally malformed verifier result may be corrected only when the shared operation recovery token remains unused. |
 | `editorialEffectivenessJudge` | Utility, live evaluation harness only | Independently judge Redirect trajectory, forbidden beats, character pressure, and evidence/constraints | Never runs during normal chat generation; malformed, skipped, or incomplete judge output fails strict model evaluation. |
 | `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility guidance plus raw selected Card Evidence |
-| `providerTest` | Selected lane | Validate lane connectivity and structured response capability | Mark lane test failed with compact error |
+| `providerTest` | Selected lane | Validate lane connectivity and structured response capability at the configured max-token ceiling | Record hash-bound health only; never mutate provider configuration |
 
 Card names should align with [Card System Spec](../design/CARD_SYSTEM_SPEC.md). Prompt installation and depth decisions belong to [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md), not provider routing.
 
@@ -242,9 +274,13 @@ objective, required and forbidden beats, and private character-pressure map. The
 provider returns only `failedChecks` plus a short reason. The provider boundary
 derives accept/reject and constructs all nine canonical evidence-bound check rows
 locally. Unknown, duplicate, or malformed failed-check names remain invalid. The
-hash still binds identity; it is not a substitute for the semantic input. Redirect
-verification always prefers a healthy Reasoner, independently of the Medium Utility
-diagnosis/transform lane; Utility is only the unavailable-Reasoner fallback.
+hash still binds identity; it is not a substitute for the semantic input. Low
+Low Redirect uses Utility for diagnosis, transformation, and verification. Medium,
+High, and Ultra require Reasoner capability `ready` before host generation.
+Diagnosis remains on its normal Utility-first policy; transformation and
+verification remain on the exact armed Reasoner configuration with no Utility
+fallback. Runtime revalidates that configuration before diagnosis and before
+each mandatory Reasoner stage.
 
 Missing, duplicate, failed, or unclear checks reject the candidate before host
 mutation. Unknown diagnosis evidence references are surfaced privately to the
@@ -328,7 +364,10 @@ The provider router only receives card jobs that can fit the effective hand budg
 
 Invalid or unsupported `storyForm` values normalize to `unknown` rather than failing the whole plan. Runtime also runs a heuristic cross-check against the latest assistant narration. If obvious tense cues disagree with a confident Arbiter result, runtime lowers story form to `unknown` and records the disagreement reason. If stable-tense assistant narration has strong mixed POV evidence, runtime preserves that as mixed POV even when the Arbiter chose a single viewpoint family. Unknown story form produces conservative downstream prompt text that tells card and story models to match the active chat's established form.
 
-The Arbiter is allowed to choose `reasonerDecision.mode: "use"` only when Reasoner is enabled and healthy. If Reasoner is disabled, unhealthy, or missing a provider secret, the Arbiter must select `skip` and explain the reason compactly.
+The Arbiter is allowed to choose `reasonerDecision.mode: "use"` only when the
+shared resolver reports Reasoner `ready`. For `unconfigured`, `untested`, or
+`unhealthy`, runtime normalizes the decision to `skip` and records a compact
+capability reason.
 
 `promptFootprint` is a current-turn override only. Runtime accepts only `compact`, `normal`, or `rich`; invalid or missing values fall back to the stored user setting and must not appear in the sanitized plan. The override is passed to Prompt Composition for the packet being installed, but it does not mutate the stored setting.
 
@@ -396,14 +435,14 @@ Reasoner is appropriate when:
 - accepted cards exceed the normal prompt budget;
 - Utility cards conflict or overlap in a way bounded runtime validation cannot cleanly resolve;
 - multiple active characters have tense or subtle visible posture that needs careful fusion;
-- the Arbiter selected Reasoner in its initial response and the lane is enabled and healthy.
+- the Arbiter selected Reasoner in its initial response and the shared resolver reports it `ready`.
 
 Reasoner is not appropriate when:
 
 - the hand is small and non-conflicting;
 - Utility produced invalid or insufficient card data;
-- the Reasoner lane is disabled by settings or Reasoning Level;
-- the Reasoner lane is missing a provider secret or failed its last connectivity test.
+- Reasoning Level policy selects Utility;
+- Reasoner capability is `unconfigured`, `untested`, or `unhealthy`.
 
 Required output shape:
 
@@ -439,10 +478,11 @@ Auto lane selection follows this order:
 2. Utility Arbiter decides the run action, card jobs, and Reasoner use where possible.
 3. Utility card calls generate the structured hand.
 4. Runtime validation accepts or omits cards, while the Utility Arbiter owns semantic hand selection.
-5. Reasoner runs only if the Arbiter selected it, the lane is enabled, the lane is healthy, and accepted card data is sufficient.
+5. Reasoner runs only if the Arbiter selected it, the shared resolver reports it `ready`, and accepted card data is sufficient.
 6. Prompt composition installs the Utility-only or Reasoner-assisted packet.
 
-Auto must be Utility-first. Enabling Reasoner only makes Reasoner eligible; it must not cause every run to use Reasoner.
+Auto must be Utility-first. A ready Reasoner is eligible under the selected
+Reasoning Level; readiness must not cause every run to use Reasoner.
 
 Advanced job routing may expose `Auto Route`, `Utility Provider`, and `Reasoner Provider` for internal roles, but v1 should keep that surface secondary to the main Utility and Reasoner provider cards.
 
@@ -455,7 +495,7 @@ The first end-to-end loop should prove both composer paths even if the default s
 3. Generate or reuse a small accepted hand.
 4. Compose a prompt packet through `guidanceComposer`, injecting guidance plus full raw selected card evidence.
 5. Compose through `reasonerComposer` when the setting and Arbiter decision permit it.
-6. Keep Utility guidance plus raw selected Card Evidence if Reasoner fails, times out, returns invalid schema, or is disabled during the run.
+6. Keep Utility guidance plus raw selected Card Evidence if Reasoner is not ready, fails, times out, or returns invalid schema.
 7. Install, skip, or clear the Recursion prompt packet through the host adapter.
 8. Emit visible progress stages and sanitized model-call journal entries for the route taken.
 
@@ -560,7 +600,7 @@ Card failure:
 
 Reasoner failure:
 
-- retry the same Reasoner call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot and the Reasoner route remains enabled;
+- retry the same Reasoner call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot and the current configuration hash remains eligible;
 - fall back to Utility guidance plus raw selected Card Evidence;
 - do not run an additional hidden Utility model call solely to recover the Reasoner result; use the Guidance composer output that is already part of the normal route, or compose locally from accepted cards if available;
 - record a compact reason such as auth failure, timeout, validation failure, or provider error.

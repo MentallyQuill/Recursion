@@ -94,6 +94,26 @@ The readiness implementation:
 9. Switch to phone viewport.
 10. Capture a phone screenshot.
 11. Stop a Playwright trace when artifact capture is enabled.
+
+## Installed-Copy Identity Gate
+
+Every live proof must verify the exact extension bytes before Playwright
+navigation, chat mutation, or provider calls:
+
+```powershell
+node tools\scripts\verify-installed-copy.mjs --user recursion-soak-a
+```
+
+The verifier compares SHA-256 hashes for the repository production allowlist,
+the selected user's installed extension, and the served public extension. A
+missing, extra, content-mismatched, or symlinked production file fails the gate.
+The report must identify only safe relative paths and hashes; it must not inspect
+chat files, settings, or secrets. Dedicated `recursion-soak-*` users remain the
+required target for automated live proof. Run the same verifier with
+`--user default-user` only before an explicitly approved default-user proof.
+
+The browser harness does not replace this identity check with DOM version text
+or a partial served-file comparison.
 12. Write `report.json` and `summary.md`.
 
 ## Live Preflight Flow
@@ -159,6 +179,8 @@ When only one user is configured, the script verifies that user's storage but em
 - open the options/settings menu;
 - open the Hero Pixel Array progress menu;
 - switch disabled power, Standard/Rapid/Fused Pipeline, Auto, and Manual states;
+- render Utility and Reasoner capability as Configure, Untested, Ready, or Unhealthy with no provider enable control;
+- keep Medium+ Redirect visible but unavailable until Reasoner is Ready, preserve the prior Enhancement selection on an unavailable click, and keep Low Redirect available through Utility;
 - seed and clear a Recursion-owned prompt sentinel during no-generation mode smoke;
 - run Test Provider actions through visible controls when configured;
 - send a safe test message only when the live run explicitly allows chat mutation;

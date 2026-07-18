@@ -265,10 +265,14 @@ Fused progress treats `Fused card bundle` as the single parent row for the bundl
 
 Enhancement is one post-generation provider pass with a top-level `Generation review` row. Low and Medium route it through Utility; High and Ultra route it through Reasoner when that lane is available. SillyTavern's original response remains visible while review runs; Recursion never hides or replaces streaming text before the review has produced a validated revision. While running, compact current-step text is `Reviewing generated response...`; it must not reuse `Utility card batch`, seed prompt-install rows, or imply that a card batch is running. The progress tree owns `Card and scene fidelity`, card-outcome children, `Narrative execution`, `Anti-slop`, `Applying revisions`, and `Enhanced swipe`/`Replace` outcome rows. A failed review is a red review row with its reason, while the already installed `Recursion prompt ready` state remains green and the original response stays selected.
 
-Editorial Redirect is the routing exception: Low uses Utility for the final
-Redirect prose, while Medium, High, and Ultra use Reasoner. Medium+ makes at most
-two actual Reasoner writer calls and never falls back to Utility. Two failed writer
-attempts leave the original response selected and surface a failed red status.
+Editorial Redirect is the routing exception: Low uses Utility for the Redirect
+writer and verifier. Medium, High, and Ultra require a `ready` Reasoner
+capability before host generation begins. When Reasoner is not ready, Redirect
+remains visibly unavailable, the pending turn records one concise pre-generation
+warning, and the post-generation pass settles `skipped` without diagnosis,
+writer, or verifier calls. A ready Medium+ Redirect makes at most two actual
+Reasoner writer calls and never falls back to Utility. Two failed writer attempts
+leave the original response selected and surface a failed red status.
 
 An unchanged or unsafe review result must not append a duplicate enhanced swipe. Parser/schema recovery and review-semantic recovery share one external correction budget. A recovered valid result is amber with a compact retry reason; incomplete installed-card coverage after that one budget is `partial-failed`, with red unresolved card children. Validation failures and provider failures are terminal failures, not amber cautions.
 
@@ -1186,11 +1190,11 @@ Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must 
 - High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner guidance composition; card pressure capped at Normal Cards.
 - Ultra: Reasoner-heavy Arbiter, card generation, and guidance composition with card pressure raised/capped at Max Cards.
 
-`reasoningLevel` is persisted as `low | medium | high | ultra`, default `medium`. It is the authoritative user-facing provider-bias setting. Runtime may still carry an internal `reasonerUse` route value, but that value is always derived from `reasoningLevel`: Low maps to `off`, Medium/High/Ultra map to `always`. If the Reasoner provider is unavailable while Medium, High, or Ultra is selected, the UI should keep the selected level and show fallback status rather than blocking the user.
+`reasoningLevel` is persisted as `low | medium | high | ultra`, default `medium`. It is the authoritative user-facing provider-bias setting. Low keeps ordinary work on Utility. Medium, High, and Ultra use Reasoner only for policy-selected work when its derived capability is `ready`; otherwise ordinary work falls back to Utility without changing the selected level. Medium+ Redirect is stricter and remains unavailable until Reasoner is `ready`.
 
 Providers contains the complete provider setup surface in collapsible lane sections:
 
-- Utility Provider, always enabled and open by default.
+- Utility Provider, required and open by default.
 - Reasoner Provider, optional and collapsed by default unless it is configured.
 - Compact route summary derived from Reasoning Level; no deep per-role routing editor in V1.
 - Source, profile, endpoint, model, session key, max tokens.
@@ -1201,6 +1205,7 @@ Providers contains the complete provider setup surface in collapsible lane secti
 - Temperature and top-p stay internal/defaulted in the compact V1 menu so the provider pane matches the mockup and does not become a dense admin form.
 - User-opened provider lane disclosures remain open across autosave rerenders. Editing Reasoner fields must not collapse the Reasoner Provider section.
 - Test Provider uses lane-local busy feedback: the clicked button changes to `Testing...`, becomes disabled, and clears back when the request settles.
+- Each provider header shows one derived capability label: `Ready`, `Untested`, `Unhealthy`, or `Configure`. There is no provider enable control or persisted enable Boolean.
 
 Provider Source changes the field context inside each lane immediately, matching the lean Directive/Saga pattern instead of showing every possible provider field at once:
 
@@ -1209,8 +1214,9 @@ Provider Source changes the field context inside each lane immediately, matching
 - OpenAI-Compatible Endpoint shows Base URL, Model, and Session Key and hides Profile.
 - Clear Session Key appears only for OpenAI-compatible endpoints.
 - Max Tokens and provider actions remain visible for every Source.
-- Provider lane fields auto-save on committed changes. Hidden alternate-source field values are preserved so a user can compare sources without losing typed settings, but the selected source/profile/endpoint/model/max tokens apply immediately. Session API keys are accepted by autosave into session memory only; they must not persist.
-- Provider test requests use a short bounded generation budget and timeout. They do not borrow the lane's full generation max-token budget.
+- Provider lane fields auto-save on committed changes. Each commit sends only the changed field plus the rendered `configRevision`; stale revisions are rejected and refreshed instead of overwriting a newer edit. Hidden alternate-source field values are preserved so a user can compare sources without losing typed settings, but the selected source/profile/endpoint/model/max tokens apply immediately. Session API keys are accepted by autosave into session memory only; they must not persist.
+- Utility and Reasoner default to `8192` max tokens. Provider Test uses the lane's configured max-token ceiling, which is `8192` when untouched, plus a bounded timeout. It must not substitute a smaller hidden response cap.
+- Provider Test is single-flight per lane. A duplicate same-lane request joins the in-flight test, while a test requested during active same-lane generation returns a compact busy result without canceling or superseding that work.
 
 Advanced contains low-frequency controls grouped into collapsible sections:
 
@@ -1259,6 +1265,23 @@ Provider cards must not sprawl by rendering profile and OpenAI endpoint fields t
 Provider lane controls autosave. Tooltip and helper copy must not mention a Save Provider action; testing a provider is a separate explicit command.
 
 API keys are session-only. They must not be written to extension settings, scene caches, prompt packets, run journals, diagnostics, reports, or artifacts.
+
+Provider capability is derived from route completeness, host support, session
+credentials, and health evidence bound to the current configuration hash:
+
+- `Configure`: capability `unconfigured`; the selected source is incomplete or unavailable.
+- `Untested`: capability `untested`; configuration is complete but has no current hash-bound result.
+- `Ready`: capability `ready`; the current configuration hash has a passing result.
+- `Unhealthy`: capability `unhealthy`; the current configuration hash has a failing result.
+
+Changing a capability-bearing field increments `configRevision` and makes prior
+health evidence stale. Health results may change capability state but never
+rewrite provider configuration.
+
+For Medium, High, and Ultra, the Redirect row stays visible when Reasoner is not
+ready but is disabled with a concise reason and a lane-local `Test Reasoner` or
+`Configure Reasoner` action. Clicking the unavailable row leaves the current
+Enhancement mode unchanged. Low keeps Redirect available through Utility.
 
 ## Visual System
 
@@ -1314,7 +1337,9 @@ Examples:
 - No packet yet: `No packet has been composed for this chat.`
 - Power off: `Recursion disabled. Prompt cleared.`
 - Provider missing: `Utility provider is not ready.`
-- Reasoner unavailable: `Reasoner unavailable. Utility will compose compact packets.`
+- Reasoner untested: `Reasoner untested. Utility composed.`
+- Reasoner unhealthy: `Reasoner unhealthy. Utility composed.`
+- Medium+ Redirect blocked: `Redirect unavailable. Test Reasoner before using Redirect.`
 
 Provider failures should fail soft. The UI should show the issue, preserve any usable cached scene state, and allow the main generation to continue without Recursion when needed.
 

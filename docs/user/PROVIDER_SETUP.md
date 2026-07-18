@@ -3,9 +3,9 @@
 Recursion uses two provider lanes:
 
 - Utility: required, default, and used for Arbiter planning, scene/card extraction, card generation, lifecycle support, structured diagnostics, guidance composition, and fail-soft fallback guidance.
-- Reasoner: optional, used by Medium/High/Ultra Reasoning Level routing when enabled and healthy, with Utility fallback when unavailable.
+- Reasoner: optional, used by Medium/High/Ultra Reasoning Level routing when its capability is `ready`, with Utility fallback for ordinary work when unavailable.
 
-Reasoner is not a better default Utility. Utility remains the required path and the fallback path. The compact-bar Reasoning Level chain controls how much Recursion tries to use Reasoner: Low is Utility-only, Medium uses Reasoner for guidance composition when healthy, High adds Reasoner for Arbiter, priority card families, and Fused bundles when healthy, and Ultra is Reasoner-heavy when the lane is healthy.
+Reasoner is not a better default Utility. Utility remains the required path and the fallback path. The compact-bar Reasoning Level chain controls how much Recursion tries to use Reasoner: Low is Utility-only, Medium uses Reasoner for guidance composition when ready, High adds Reasoner for Arbiter, priority card families, and Fused bundles when ready, and Ultra is Reasoner-heavy when the lane is ready.
 
 ![Utility and Reasoner provider controls with session-only key state](../../assets/documentation/renders/recursion-provider-controls-utility-reasoner.png)
 
@@ -39,13 +39,17 @@ Utility is healthy when the test passes and the bar or provider card shows a rea
 ## Reasoner Setup
 
 1. Open the Reasoner provider card.
-2. Enable Reasoner only if you want Medium/High/Ultra routing to use the optional synthesis lane.
-3. Choose a provider source.
-4. Fill the required fields.
-5. Run `Test Provider`.
-6. Use the compact-bar Reasoning Level chain for broad provider bias; Low forces Utility-only behavior, while Medium, High, and Ultra keep their selected level and fall back to Utility if the Reasoner lane is unhealthy.
+2. Choose a provider source.
+3. Fill the required fields.
+4. Run `Test Provider`.
+5. Use the compact-bar Reasoning Level chain for broad provider bias; Low forces Utility-only behavior, while Medium, High, and Ultra keep their selected level and use Reasoner only when it is ready.
 
-Reasoner is eligible only when enabled, healthy, and selected by Reasoning Level plus runtime policy for a useful reason such as a crowded hand, conflicting cards, high scene-constraint risk, or complex active cast.
+There is no Reasoner enable switch. Its provider card shows one derived state:
+`Configure` when the selected route is incomplete, `Untested` when configuration
+is complete but lacks current health evidence, `Ready` after a passing test for
+the current configuration hash, or `Unhealthy` after a matching failed test.
+Reasoner is eligible only when `Ready` and selected by Reasoning Level plus
+runtime policy.
 
 Reasoning Level also sets the amount of provider-side reasoning Recursion requests for Reasoner work:
 
@@ -56,7 +60,7 @@ Reasoning Level also sets the amount of provider-side reasoning Recursion reques
 | High | medium | Enhancements medium, Arbiter medium, cards and Fused bundles minimal |
 | Ultra | high | Enhancements high, Arbiter medium, cards and Fused bundles medium |
 
-Enhancement is stricter than normal prompt-packet routing: Low and Medium use Utility, while High and Ultra use the Reasoner lane when it is available. If Reasoner is disabled or unhealthy, the initial review routes through Utility. A Reasoner-to-Utility routing fallback is permitted only for a transport/routing failure before a structured result is accepted or its structured-output recovery budget is spent; it is not an additional parser/schema or semantic correction call. The applied lane is recorded in the final marker.
+Ordinary Repair/Recompose routing uses Reasoner only when it is ready and otherwise follows its bounded Utility fallback. Redirect is stricter: Low uses Utility, while Medium, High, and Ultra require Reasoner `Ready`. If it is not ready, Redirect remains visible but unavailable, explains whether to configure or test Reasoner, and the turn settles Redirect as skipped without Editorial provider calls. Medium+ Redirect never silently routes its writer or verifier through Utility.
 
 Enhancement uses the configured context-message count to build a bounded, sender-aware review snapshot. Recent visible transcript messages, character evidence, the generation-time Prompt Packet, installed-card lineage, pipeline provenance, and compact selected-card context give one reviewer concrete evidence for prose, dialogue, pacing, subtext, scene fidelity, and anti-slop. It returns strict `recursion.generationReview.v1` JSON with exact local patches and per-installed-card outcomes; Recursion does not accept a plain rewritten message as a fallback.
 
@@ -93,6 +97,12 @@ Clear Session Key appears only when the lane source is OpenAI-Compatible Endpoin
 
 Provider field changes auto-save on commit. Source, profile, base URL, model, fetched-model selection, and max-token changes apply immediately. Open provider cards stay open while autosave refreshes the settings panel, so expanding Reasoner and editing fields should not collapse the Reasoner section. Session keys are accepted into browser-session memory only and are not written to persisted settings. Hidden alternate-source fields keep their values when the selected source changes, but only the selected source participates in readiness, tests, and generation.
 
+Each committed field sends only its own patch with the displayed
+`configRevision`. A newer saved revision wins over a stale panel edit. A
+material configuration change increments the revision and invalidates previous
+health because the old pass/fail result belongs to a different configuration
+hash; a no-op does neither.
+
 ## Test Provider Flow
 
 Use `Test Provider` after setup and after changing source, model, base URL, key, or token settings.
@@ -103,12 +113,19 @@ A safe provider test should:
 
 1. Send a structured request using the lane max-token setting configured by the operator.
 2. Validate the response schema.
-3. Record pass or fail status.
+3. Record pass or fail health bound to the tested configuration hash.
 4. Show resolved provider and model labels when available.
 5. Store only compact sanitized diagnostics.
 6. Show a lane-local `Testing...` state and disable that lane's `Test Provider` button while the request is pending.
 
 Provider tests should not store raw prompt bodies, raw responses, API keys, or unbounded error text. Test requests use the configured lane max-token budget and a bounded timeout; the test does not silently impose a smaller response cap than the operator selected.
+
+Utility and Reasoner default to `8192`, so an untouched provider test uses an
+`8192` max-token ceiling. Provider Test is single-flight per lane: duplicate
+same-lane clicks share the in-flight test, and a test requested while production
+work is using that lane returns a busy result without canceling the active work.
+A test result can update health only; it cannot change source, profile, endpoint,
+model, generation parameters, or `configRevision`.
 
 ```mermaid
 flowchart LR
@@ -138,7 +155,7 @@ Expected fallback behavior:
 - Utility timeout: retry once for transient transport failure only if the request is not aborted and the current snapshot is still current, then skip or reuse safe cache.
 - Utility invalid structured output: repair safe JSON syntax when possible, then reject any output that still misses the required schema or snapshot hash and use conservative local behavior.
 - Card job failure: omit failed card and keep valid sibling cards.
-- Reasoner disabled: Utility composes.
+- Reasoner unconfigured or untested: Utility composes for ordinary work.
 - Reasoner missing key: Utility composes.
 - Reasoner timeout or invalid output: Utility composes and the fallback is recorded.
 - Prompt install failure after provider success: generation continues without Recursion guidance.
@@ -155,7 +172,8 @@ Enhancement recovery is bounded separately from ordinary provider fallback. A ma
 | --- | --- | --- |
 | Utility not ready | Missing source, model, profile, or session key. | Open Utility provider card, complete setup, run Test Provider. |
 | Provider test failed | Bad key, base URL, model name, network, or incompatible response. | Re-enter session key, verify endpoint/model, test again. |
-| Reasoner never runs | Off, unhealthy, or not needed by Auto. | Enable Reasoner, test it, and use Auto only for suitable complex turns. |
+| Reasoner never runs | Unconfigured, untested, unhealthy, or not selected by policy. | Complete its configuration, run Test Provider, and choose an appropriate Reasoning Level. |
+| Medium+ Redirect is unavailable | Reasoner is not `Ready` for the current configuration hash. | Use Test Reasoner or complete the Reasoner route; Low Redirect remains available through Utility. |
 | Reasoner failed but generation continued | Expected fallback path. | Inspect Activity and Prompt Packet to confirm Utility guidance plus raw selected Card Evidence. |
 | Prompt not installed | Power is off, Utility unavailable, stale run, or injection failure. | Check power state, mode, Activity, Provider status, and Prompt Packet metadata. |
 | Session key disappeared | Browser session reset or Clear Session Key used. | Re-enter key and run Test Provider. |
@@ -168,14 +186,17 @@ For manual verification:
 
 1. Do not show provider secret fields in screenshots.
 2. Run Utility Test Provider.
-3. Run Reasoner Test Provider only if Reasoner is enabled.
+3. Run Reasoner Test Provider when you want Medium+ Reasoner routing or Redirect.
 4. Turn power off and confirm no prompt is installed.
 5. Set Auto only when you intend Recursion to affect the next prompt.
 6. Inspect Activity for route and fallback details.
 7. Inspect Prompt Packet metadata, not raw provider payloads.
 8. Clear session keys after testing direct endpoints.
 
-Automated live provider evidence should use dedicated `recursion-soak-*` users and the guarded live smoke flow described in [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md).
+Automated live provider evidence should use dedicated `recursion-soak-*` users
+and the guarded live smoke flow described in [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md).
+Before navigation or provider calls, run the installed-copy SHA-256 verifier and
+require repository, installed user copy, and served public copy to match.
 
 Related docs:
 

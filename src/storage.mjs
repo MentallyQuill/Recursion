@@ -51,6 +51,7 @@ const JOURNAL_EVENTS = new Set([
   'cache.invalidated',
   'card.generated',
   'card.rejected',
+  'editorial.preflight.skipped',
   'editorial.run.settled',
   'hand.selected',
   'host.generation_stopped',
@@ -62,6 +63,7 @@ const JOURNAL_EVENTS = new Set([
   'provider.call.started',
   'provider.call.completed',
   'provider.call.failed',
+  'provider.capability.changed',
   'storage.repaired',
   'storage.pruned'
 ]);

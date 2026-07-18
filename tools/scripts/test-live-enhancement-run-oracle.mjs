@@ -212,20 +212,16 @@ assert(
   'live Redirect proof exposes an explicit Utility-only Enhancement switch'
 );
 assert(
-  effectivenessSource.indexOf("runtime.updateProvider('reasoner', { enabled: false })")
-    < effectivenessSource.indexOf('await installLiveEnhancementRunOracle(page)'),
-  'Utility-only live proof disables Reasoner before installing the production-run oracle'
+  effectivenessSource.includes("reasoningLevel: scenario?.forceUtilityEnhancement === true ? 'low' : 'medium'"),
+  'Utility-only live proof selects the explicit Low policy lane without mutating provider capability'
 );
 assert(
-  effectivenessSource.indexOf('const oracle = await collectLiveEnhancementRunOracle(page)')
-    < effectivenessSource.indexOf("runtime.updateProvider('reasoner', { enabled: true })")
-    && effectivenessSource.indexOf("runtime.updateProvider('reasoner', { enabled: true })")
-      < effectivenessSource.indexOf('page.evaluate(executeJudgeInPage'),
-  'Utility-only live proof restores Reasoner after production evidence capture and before the independent judge'
+  effectivenessSource.includes('scenario: { ...scenario, forceUtilityEnhancement }'),
+  'Utility-only live proof passes the explicit policy override into the production scenario'
 );
 assert(
-  /finally\s*\{[\s\S]*restoreReasonerAfterEnhancement/.test(effectivenessSource),
-  'Utility-only live proof restores Reasoner on exceptional exits'
+  !effectivenessSource.includes("updateProvider('reasoner'"),
+  'Utility-only live proof never mutates Reasoner configuration'
 );
 assert(
   effectivenessSource.includes("document.querySelector('[data-recursion-status-popover]')?.hidden === false"),

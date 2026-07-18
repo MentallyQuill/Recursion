@@ -192,12 +192,11 @@ async function forceProviderProfile(page, profileName, timeoutMs) {
     }
     await runtime.updateSettings({ reasoningLevel: 'high' });
     const providerPatch = {
-      enabled: true,
       source: 'host-connection-profile',
       hostConnectionProfileId: selected.id
     };
-    await runtime.updateProvider('utility', providerPatch);
-    await runtime.updateProvider('reasoner', providerPatch);
+    await runtime.updateProviderConfig('utility', providerPatch);
+    await runtime.updateProviderConfig('reasoner', providerPatch);
     const utilityTest = typeof runtime.testProvider === 'function'
       ? await runtime.testProvider('utility')
       : { ok: false, error: { code: 'testProvider-unavailable' } };
@@ -230,8 +229,8 @@ async function forceProviderProfile(page, profileName, timeoutMs) {
       && settings.providers?.reasoner?.source === 'host-connection-profile'
       && settings.providers?.utility?.hostConnectionProfileId === profileId
       && settings.providers?.reasoner?.hostConnectionProfileId === profileId
-      && settings.providers?.utility?.lastTest?.status === 'pass'
-      && settings.providers?.reasoner?.lastTest?.status === 'pass';
+      && settings.providerCapabilities?.utility?.promptPacket?.state === 'ready'
+      && settings.providerCapabilities?.reasoner?.promptPacket?.state === 'ready';
   }, result.selected.id, { timeout: timeoutMs });
   return result;
 }

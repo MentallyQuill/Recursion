@@ -455,10 +455,9 @@ function recursionSmokeFixtureHtml({
           <select data-recursion-setting-mode aria-label="Mode"><option value="auto" selected>Auto</option><option value="manual">Manual</option></select>
           <input type="number" data-recursion-setting-max-cards aria-label="Max Cards" value="10">
           <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
-          <input type="checkbox" data-recursion-provider-enabled-reasoner aria-label="Reasoner enabled">
           <button type="button" data-recursion-provider-test data-recursion-provider-lane="utility">Test Provider</button>
           <button type="button" data-recursion-provider-toggle="reasoner" aria-expanded="true">Reasoner Provider</button>
-          <span data-recursion-provider-status-reasoner>optional</span>
+          <span data-recursion-provider-status-reasoner>Untested</span>
           <button type="button" data-recursion-provider-test data-recursion-provider-lane="reasoner">Test Reasoner Provider</button>
         </div>
         <dialog data-recursion-viewer aria-label="Recursion Viewer">
@@ -717,7 +716,7 @@ function recursionSmokeFixtureHtml({
         applyModeChange(event.target?.value || 'auto');
       });
       document.querySelector('[data-recursion-provider-test][data-recursion-provider-lane="reasoner"]')?.addEventListener('click', () => {
-        document.querySelector('[data-recursion-provider-status-reasoner]').textContent = 'pass';
+        document.querySelector('[data-recursion-provider-status-reasoner]').textContent = 'Ready';
       });
       document.querySelectorAll('[data-recursion-mode-choice]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -808,6 +807,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/hosts/sillytavern/storage.mjs',
     'src/progress.mjs',
     'src/prompt.mjs',
+    'src/provider-capability.mjs',
     'src/providers.mjs',
     'src/providers/provider-response-normalizer.mjs',
     'src/providers/structured-output-parser.mjs',

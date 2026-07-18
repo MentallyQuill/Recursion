@@ -25,6 +25,29 @@ function fakeProviderControls(values = {}) {
   };
 }
 
+function capabilityState(state, {
+  eligible = state === 'ready',
+  message = `${state} capability`
+} = {}) {
+  return { state, eligible, reasonCode: `RECURSION_PROVIDER_${state.toUpperCase()}`, message };
+}
+
+function providerCapabilities(reasonerState = 'ready', options = {}) {
+  const reasoner = capabilityState(reasonerState, options);
+  return {
+    utility: {
+      promptPacket: capabilityState('ready'),
+      providerTest: capabilityState('ready'),
+      redirect: capabilityState('ready')
+    },
+    reasoner: {
+      promptPacket: { ...reasoner },
+      providerTest: capabilityState('ready'),
+      redirect: { ...reasoner }
+    }
+  };
+}
+
 assertEqual(activityLabel({ phase: 'cardBatchRunning' }), 'Generating scene cards...', 'phase label mapped');
 assertEqual(activityLabel({ phase: 'fusedCardBundleRunning' }), 'Generating fused card bundle...', 'Fused phase label mapped');
 assertEqual(providerSelector('model', 'utility'), '[data-recursion-provider-model-utility]', 'provider selector helper is stable');
@@ -1093,10 +1116,10 @@ assertEqual(fallbackModel.runtimeHealthLabel, 'Ready', 'missing view defaults to
 assertEqual(fallbackModel.modeLabel, 'Auto', 'missing view defaults to auto mode');
 assertEqual(fallbackModel.handCount, 0, 'missing hand defaults to zero');
 assertEqual(fallbackModel.composerLabel, 'Utility', 'missing composer defaults to Utility');
-assertEqual(fallbackModel.reasonerState, 'Unavailable', 'missing reasoner provider is unavailable');
+assertEqual(fallbackModel.reasonerState, 'Configure', 'missing reasoner capability prompts configuration');
 
 const activeModel = createRecursionViewModel({
-  settings: { mode: 'auto', providers: { reasoner: { enabled: false, lastTest: { status: 'failed' } } } },
+  settings: { mode: 'auto', providerCapabilities: providerCapabilities('unconfigured') },
   lastHand: { cards: 'not-cards' },
   activity: {
     phase: 'reasonerComposing',
@@ -1111,7 +1134,7 @@ assertEqual(activeModel.modeLabel, 'Auto', 'mode label is separate from runtime 
 assertEqual(activeModel.activitySeverity, 'warning', 'activity severity is preserved');
 assertDeepEqual(activeModel.activityChips, ['Reasoner', 'Cards', '3'], 'activity chips are normalized and deduped');
 assertEqual(activeModel.composerLabel, 'Reasoner', 'reasoner composer label built');
-assertEqual(activeModel.reasonerState, 'Disabled', 'disabled reasoner state built');
+assertEqual(activeModel.reasonerState, 'Composing', 'active Reasoner work takes precedence over readiness state');
 
 const settledWarningModel = createRecursionViewModel({
   settings: { mode: 'manual' },
@@ -1141,13 +1164,13 @@ const settledErrorModel = createRecursionViewModel({
 assertEqual(settledErrorModel.statusSeverity, 'error', 'failed progress takes error precedence over successful settlement activity');
 
 const reasonerAvailable = createRecursionViewModel({
-  settings: { mode: 'auto', providers: { reasoner: { enabled: true, lastTest: { status: 'ok' } } } },
+  settings: { mode: 'auto', providerCapabilities: providerCapabilities('ready') },
   activity: { phase: 'idle' }
 });
-assertEqual(reasonerAvailable.reasonerState, 'Available', 'available reasoner state built');
+assertEqual(reasonerAvailable.reasonerState, 'Ready', 'ready reasoner state built');
 
 const mixedLaneProgressModel = createRecursionViewModel({
-  settings: { mode: 'auto', providers: { reasoner: { enabled: true, lastTest: { status: 'ok' } } } },
+  settings: { mode: 'auto', providerCapabilities: providerCapabilities('ready') },
   activity: { phase: 'cardBatchRunning' },
   lastPacket: { diagnostics: { composerLane: 'utility' } },
   progressRun: {
@@ -1161,23 +1184,23 @@ const mixedLaneProgressModel = createRecursionViewModel({
 assertEqual(mixedLaneProgressModel.progressFooterLabel, 'Auto - Utility and Reasoner lanes', 'progress footer summarizes all visible active provider lanes');
 
 const reasonerPassAvailable = createRecursionViewModel({
-  settings: { mode: 'auto', providers: { reasoner: { enabled: true, lastTest: { status: 'pass' } } } },
+  settings: { mode: 'auto', providerCapabilities: providerCapabilities('untested') },
   activity: { phase: 'idle' }
 });
-assertEqual(reasonerPassAvailable.reasonerState, 'Available', 'pass reasoner test status is available');
+assertEqual(reasonerPassAvailable.reasonerState, 'Untested', 'untested reasoner capability is visible');
 
 const reasonerFailIssue = createRecursionViewModel({
-  settings: { mode: 'auto', providers: { reasoner: { enabled: true, lastTest: { status: 'fail' } } } },
+  settings: { mode: 'auto', providerCapabilities: providerCapabilities('unhealthy') },
   activity: { phase: 'idle' }
 });
-assertEqual(reasonerFailIssue.reasonerState, 'Issue', 'fail reasoner test status is an issue');
+assertEqual(reasonerFailIssue.reasonerState, 'Unhealthy', 'unhealthy reasoner capability is visible');
 
 const sensitiveView = {
   settings: {
     mode: 'auto',
     providers: {
       utility: {
-        lastTest: { compactError: 'Bearer ui-token and sk-ui-secret' },
+        health: { status: 'fail', message: 'Bearer ui-token and sk-ui-secret' },
         privateKey: 'plain-private-key',
         sessionKey: 'plain-session-key',
         authHeader: 'plain-auth-header',
@@ -1665,13 +1688,14 @@ try {
           providers: {
             reasoner: {
               ...DEFAULT_RECURSION_SETTINGS.providers.reasoner,
-              enabled: false,
               source: 'host-connection-profile',
               hostConnectionProfileId: 'deepseek-profile',
-              lastTest: { status: 'pass' },
+              configRevision: 4,
+              health: { status: 'pass', configHash: 'reasoner-ready' },
               resolvedModelLabel: 'deepseek-v4-pro'
             }
-          }
+          },
+          providerCapabilities: providerCapabilities('ready')
         },
         activity: { phase: 'idle' },
         lastHand: { cards: [] }
@@ -1689,18 +1713,23 @@ try {
   configuredReasonerRoot.querySelector('[data-recursion-actions]').click();
   configuredReasonerRoot.querySelector('[data-recursion-settings-tab-providers]').click({ ignoreStopPropagation: true });
   assertEqual(
-    configuredReasonerRoot.querySelector('[data-recursion-provider-status-reasoner]').textContent.toLowerCase().includes('pass'),
+    configuredReasonerRoot.querySelector('[data-recursion-provider-status-reasoner]').textContent,
+    'Ready',
+    'configured Reasoner provider header shows the authoritative ready capability state'
+  );
+  assertEqual(
+    configuredReasonerRoot.querySelector('[data-recursion-provider-status-reasoner]').textContent.toLowerCase().includes('ready'),
     true,
-    'configured disabled Reasoner provider header shows passing provider-test health instead of optional route eligibility'
+    'configured Reasoner provider header exposes ready state'
   );
   assertEqual(
     configuredReasonerRoot.querySelector('[data-recursion-provider-status-reasoner]').textContent.toLowerCase().includes('optional'),
     false,
-    'configured disabled Reasoner provider header does not replace provider-test health with optional copy'
+    'configured Reasoner provider header does not replace capability state with optional copy'
   );
   assert(
     fakeDocument.textTree(configuredReasonerRoot.querySelector('[data-recursion-provider-route-summary]')).includes('Utility fallback'),
-    'disabled Reasoner route eligibility stays visible in the route summary'
+    'Reasoner route behavior stays visible in the route summary'
   );
   assertEqual(
     configuredReasonerRoot.querySelector('[data-recursion-provider-body-reasoner]').hidden,
@@ -1716,6 +1745,48 @@ try {
     'explicitly collapsed configured Reasoner profile section stays collapsed during the UI session'
   );
   configuredReasonerUi.destroy();
+
+  for (const [state, label] of [
+    ['ready', 'Ready'],
+    ['untested', 'Untested'],
+    ['unhealthy', 'Unhealthy'],
+    ['unconfigured', 'Configure']
+  ]) {
+    const capabilityHeaderUi = mountRecursionUi({
+      runtime: {
+        view: () => ({
+          settings: {
+            mode: 'auto',
+            providers: {
+              reasoner: {
+                ...DEFAULT_RECURSION_SETTINGS.providers.reasoner,
+                configRevision: 0
+              }
+            },
+            providerCapabilities: providerCapabilities(state)
+          },
+          activity: { phase: 'idle' },
+          lastHand: { cards: [] }
+        }),
+        listProviderConnectionProfiles: () => []
+      },
+      mountPoint: fakeDocument.body
+    });
+    const capabilityHeaderRoot = fakeDocument.getElementById('recursion-root');
+    capabilityHeaderRoot.querySelector('[data-recursion-actions]').click();
+    capabilityHeaderRoot.querySelector('[data-recursion-settings-tab-providers]').click({ ignoreStopPropagation: true });
+    assertEqual(
+      capabilityHeaderRoot.querySelector('[data-recursion-provider-status-reasoner]').textContent,
+      label,
+      `Reasoner provider header renders ${label} capability state`
+    );
+    assertEqual(
+      capabilityHeaderRoot.querySelector('[data-recursion-provider-enabled-reasoner]'),
+      null,
+      'Reasoner provider does not render a hidden enabled control'
+    );
+    capabilityHeaderUi.destroy();
+  }
 
   let refreshed = 0;
   let closeCount = 0;
@@ -1755,6 +1826,7 @@ try {
       promptFootprint: 'normal',
       focus: 'balanced',
       reasonerUse: 'auto',
+      reasoningLevel: 'high',
       storyFormOverride: 'present-third-omniscient',
       ui: {
         viewerOpen: false,
@@ -1764,27 +1836,28 @@ try {
       providers: {
         utility: {
           lane: 'utility',
-          enabled: true,
           source: 'host-current-model',
           hostConnectionProfileId: '',
           openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
           temperature: 0.1,
           topP: 0.95,
           maxTokens: DEFAULT_RECURSION_SETTINGS.providers.utility.maxTokens,
-          lastTest: { status: 'not-run' }
+          configRevision: 2,
+          health: { status: 'not-run' }
         },
         reasoner: {
           lane: 'reasoner',
-          enabled: true,
           source: 'host-current-model',
           hostConnectionProfileId: '',
           openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
           temperature: 0.4,
           topP: 0.95,
           maxTokens: DEFAULT_RECURSION_SETTINGS.providers.reasoner.maxTokens,
-          lastTest: { status: 'pass' }
+          configRevision: 3,
+          health: { status: 'pass', configHash: 'reasoner-ready' }
         }
-      }
+      },
+      providerCapabilities: providerCapabilities('ready')
     },
     freshNextGeneration: { pending: false },
     lastHand: {
@@ -1904,8 +1977,18 @@ try {
         }
         return view.settings;
       },
-      updateProvider: (lane, patch) => {
-        providerUpdates.push({ lane, patch });
+      updateProviderConfig: (lane, patch, options = {}) => {
+        providerUpdates.push({ lane, patch, options });
+        if (patch.maxTokens === 7777) {
+          return Promise.resolve({
+            ok: false,
+            error: {
+              code: 'RECURSION_PROVIDER_CONFIG_STALE',
+              message: 'Provider settings changed in another view. Refresh and try again.'
+            }
+          });
+        }
+        const provider = view.settings.providers[lane];
         view = {
           ...view,
           settings: {
@@ -1913,10 +1996,12 @@ try {
             providers: {
               ...view.settings.providers,
               [lane]: {
-                ...view.settings.providers[lane],
+                ...provider,
                 ...patch,
+                configRevision: provider.configRevision + 1,
+                health: { status: 'not-run' },
                 openAICompatible: {
-                  ...view.settings.providers[lane].openAICompatible,
+                  ...provider.openAICompatible,
                   ...(patch.openAICompatible || {}),
                   sessionApiKeyPresent: Boolean(patch.apiKey) || view.settings.providers[lane].openAICompatible.sessionApiKeyPresent
                 }
@@ -1924,7 +2009,7 @@ try {
             }
           }
         };
-        return view.settings.providers[lane];
+        return { ok: true, provider: view.settings.providers[lane], changedKeys: Object.keys(patch) };
       },
       testProvider: (lane) => {
         providerTests.push(lane);
@@ -2346,6 +2431,80 @@ try {
   view = { ...view, settings: { ...view.settings, enhancements: { mode: 'recompose', target: 'on', applyMode: 'replace', contextMessages: 13 } } };
   ui.update();
   assert(!root.querySelector('[data-recursion-enhancements-button]').className.includes('is-off'), 'Enhancements button is no longer grey when enabled');
+  const redirectUnavailableMessage = 'Reasoner is untested. Test Reasoner before using Redirect.';
+  view = {
+    ...view,
+    settings: {
+      ...view.settings,
+      reasoningLevel: 'medium',
+      enhancements: { mode: 'recompose', target: 'on', applyMode: 'replace', contextMessages: 13 },
+      providerCapabilities: providerCapabilities('untested', {
+        eligible: false,
+        message: redirectUnavailableMessage
+      })
+    }
+  };
+  ui.update();
+  const unavailableRedirectChoice = root.querySelector('[data-recursion-enhancement-target-choice-redirect]');
+  assert(unavailableRedirectChoice, 'Medium unavailable Redirect remains visible');
+  assertEqual(unavailableRedirectChoice.disabled, true, 'Medium unavailable Redirect is disabled');
+  assertEqual(unavailableRedirectChoice.getAttribute('aria-disabled'), 'true', 'Medium unavailable Redirect exposes disabled state accessibly');
+  assert(unavailableRedirectChoice.getAttribute('aria-label').includes(redirectUnavailableMessage), 'Medium unavailable Redirect exposes its reason accessibly');
+  assert(fakeDocument.textTree(unavailableRedirectChoice).includes(redirectUnavailableMessage), 'Medium unavailable Redirect visibly explains its reason');
+  const redirectTestReasoner = root.querySelector('[data-recursion-redirect-test-reasoner]');
+  assertEqual(redirectTestReasoner.hidden, false, 'Medium unavailable Redirect shows Test Reasoner');
+  assert(fakeDocument.textTree(redirectTestReasoner).includes('Test Reasoner'), 'Redirect readiness action uses Test Reasoner copy');
+  const settingsUpdatesBeforeUnavailableRedirect = settingsUpdates.length;
+  unavailableRedirectChoice.click();
+  assertEqual(settingsUpdates.length, settingsUpdatesBeforeUnavailableRedirect, 'clicking unavailable Redirect does not write settings');
+  assertEqual(view.settings.enhancements.mode, 'recompose', 'clicking unavailable Redirect preserves the existing Enhancement mode');
+  runNextTimeout(2000);
+  view = {
+    ...view,
+    settings: {
+      ...view.settings,
+      reasoningLevel: 'medium',
+      providerCapabilities: providerCapabilities('ready')
+    }
+  };
+  ui.update();
+  const readyRedirectChoice = root.querySelector('[data-recursion-enhancement-target-choice-redirect]');
+  assertEqual(readyRedirectChoice, unavailableRedirectChoice, 'Redirect readiness updates the same mounted row');
+  assertEqual(readyRedirectChoice.disabled, false, 'ready Reasoner enables Redirect');
+  assertEqual(readyRedirectChoice.getAttribute('aria-label'), 'Redirect (Experimental)', 'ready Redirect restores its canonical aria label');
+  assertEqual(
+    readyRedirectChoice.getAttribute('title'),
+    'Replace a drifted response with an evidence-grounded one.',
+    'ready Redirect restores its canonical title'
+  );
+  assertEqual(
+    fakeDocument.textTree(readyRedirectChoice.querySelector('[data-recursion-enhancement-target-choice-tip]')),
+    'Uses card-evidence to replace a misaligned trajectory with a stronger, verified response.',
+    'ready Redirect restores its canonical description'
+  );
+  assertEqual(redirectTestReasoner.hidden, true, 'ready Redirect hides Test Reasoner');
+  view = {
+    ...view,
+    settings: {
+      ...view.settings,
+      reasoningLevel: 'low',
+      providerCapabilities: providerCapabilities('untested', {
+        eligible: false,
+        message: redirectUnavailableMessage
+      })
+    }
+  };
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-enhancement-target-choice-redirect]').disabled, false, 'Low reasoning enables Redirect without Reasoner readiness');
+  view = {
+    ...view,
+    settings: {
+      ...view.settings,
+      reasoningLevel: 'medium',
+      providerCapabilities: providerCapabilities('ready')
+    }
+  };
+  ui.update();
   view = { ...view, settings: { ...view.settings, enhancements: { mode: 'redirect', target: 'on', applyMode: 'as-swipe', contextMessages: 13 } } };
   ui.update();
   assertEqual(root.querySelector('[data-recursion-enhancement-apply-choice-replace]').disabled, true, 'Redirect disables Replace application');
@@ -2463,7 +2622,52 @@ try {
     .find((row) => row.dataset.recursionProgressStepId === 'scene-frame-card');
   assert(fakeDocument.textTree(retriedProgressRow).includes('retried'), 'retried generated card row shows visible retried meta');
   assertEqual(retriedProgressRow.dataset.recursionProgressReason, retryReason, 'retried generated card row carries safe reason metadata');
+  assertEqual(
+    retriedProgressRow.querySelector('[data-recursion-progress-reason]').textContent,
+    retryReason,
+    'warning progress rows retain a visible reason'
+  );
+  assert(retriedProgressRow.className.includes('has-reason'), 'warning progress rows expand for their reason');
   assert(retriedProgressRow.getAttribute('title').includes(`Reason: ${retryReason}`), 'retried generated card row tooltip explains why it is yellow');
+  const routineReason = 'Included in category generation.';
+  view = {
+    ...view,
+    activity: { phase: 'settled', severity: 'success', label: 'Recursion prompt ready.' },
+    progressRun: {
+      runId: 'ui-progress-retried',
+      title: 'Ready',
+      steps: [
+        {
+          id: 'utility-card-batch',
+          label: 'Fused card bundle',
+          providerLane: 'utility',
+          state: 'done',
+          children: [
+            {
+              id: 'scene-frame-card',
+              label: 'Scene Frame',
+              providerLane: 'utility',
+              state: 'done',
+              meta: 'included',
+              reason: routineReason
+            }
+          ]
+        }
+      ]
+    }
+  };
+  ui.update();
+  const routineProgressRow = root.querySelectorAll('[data-recursion-progress-row]')
+    .find((row) => row.dataset.recursionProgressStepId === 'scene-frame-card');
+  assertEqual(routineProgressRow, retriedProgressRow, 'warning-to-routine progress updates the same mounted child row');
+  assertEqual(routineProgressRow.dataset.recursionProgressReason, routineReason, 'routine progress rows retain reason metadata for diagnostics');
+  assertEqual(
+    routineProgressRow.querySelector('[data-recursion-progress-reason]').textContent,
+    '',
+    'routine progress rows omit visible reason copy'
+  );
+  assert(!routineProgressRow.className.includes('has-reason'), 'routine progress rows keep compact fixed-height geometry');
+  assert(routineProgressRow.getAttribute('title').includes(`Reason: ${routineReason}`), 'routine progress row tooltip retains its explanation');
   view = {
     ...view,
     activity: originalActivity,
@@ -2701,7 +2905,9 @@ try {
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open');
   assertEqual(root.querySelector('[data-recursion-settings-play]').hidden, true, 'clicking Providers hides Play pane');
   assertEqual(root.querySelector('[data-recursion-settings-providers]').hidden, false, 'clicking Providers shows provider controls');
-  assert(root.querySelector('[data-recursion-provider-status-reasoner]').textContent.toLowerCase().includes('pass'), 'enabled Reasoner provider renders its test status instead of optional');
+  assertEqual(root.querySelector('[data-recursion-provider-status-reasoner]').textContent, 'Ready', 'Reasoner provider renders authoritative ready capability state');
+  assertEqual(root.querySelector('[data-recursion-provider-enabled-utility]'), null, 'Utility provider omits hidden enabled control');
+  assertEqual(root.querySelector('[data-recursion-provider-enabled-reasoner]'), null, 'Reasoner provider omits hidden enabled control');
   assertEqual(root.querySelector('[data-recursion-provider-body-utility]').hidden, false, 'Utility provider section defaults open');
   assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, true, 'Reasoner provider section defaults collapsed');
   root.querySelector('[data-recursion-provider-toggle-utility]').click();
@@ -2721,12 +2927,14 @@ try {
   await Promise.resolve();
   assertEqual(providerUpdates.length, providerUpdatesBeforeReasonerAutosave + 1, 'Reasoner provider autosave runs from expanded section');
   assertEqual(providerUpdates.at(-1).lane, 'reasoner', 'Reasoner provider autosave targets reasoner lane');
+  assertDeepEqual(providerUpdates.at(-1).patch, { source: 'host-connection-profile' }, 'Reasoner source autosave is field-scoped');
+  assertEqual(providerUpdates.at(-1).options.expectedRevision, 3, 'Reasoner source autosave includes the rendered configuration revision');
   assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, false, 'Reasoner provider stays expanded after provider autosave rerender');
   assertEqual(root.querySelector('[data-recursion-provider-toggle-reasoner]').getAttribute('aria-expanded'), 'true', 'Reasoner provider toggle keeps expanded state after provider autosave rerender');
   const utilitySource = root.querySelector('[data-recursion-provider-source-utility]');
-  const utilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
-  const utilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
-  const utilityClearKey = root.querySelector('[data-recursion-utility-provider-clear-key]');
+  let utilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
+  let utilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
+  let utilityClearKey = root.querySelector('[data-recursion-utility-provider-clear-key]');
   assertEqual(utilitySource.getAttribute('title'), 'Choose where this lane sends Recursion model calls. Current Host Model follows the active chat model; Host Connection Profile uses a saved SillyTavern profile; OpenAI-Compatible uses the endpoint fields below. Changes auto-save; hidden alternate-source fields keep their values.', 'provider Source control explains autosave and hidden field persistence');
   assertEqual(root.querySelector('[data-recursion-provider-base-url-utility]').getAttribute('title'), 'Base /v1 URL for a direct OpenAI-compatible endpoint. Only used when Source is OpenAI-Compatible.', 'provider Base URL explains source-specific endpoint use');
   assertEqual(root.querySelector('[data-recursion-provider-api-key-utility]').getAttribute('title'), 'Session-only key for the OpenAI-compatible endpoint. Recursion keeps it in memory and never writes it to settings or diagnostics.', 'provider API key tooltip explains secret boundary');
@@ -2743,9 +2951,9 @@ try {
   assertEqual(utilityProfileContext.hidden, true, 'Current Host Model hides Utility profile fields');
   assertEqual(utilityOpenAiContext.hidden, true, 'Current Host Model hides Utility OpenAI endpoint fields');
   assertEqual(utilityClearKey.hidden, true, 'Current Host Model hides Utility clear session key action');
-  const utilityProfileValue = root.querySelector('[data-recursion-provider-profile-utility]');
-  const utilityProfileFilter = root.querySelector('[data-recursion-provider-profile-filter-utility]');
-  const utilityProfileList = root.querySelector('[data-recursion-provider-profile-list-utility]');
+  let utilityProfileValue = root.querySelector('[data-recursion-provider-profile-utility]');
+  let utilityProfileFilter = root.querySelector('[data-recursion-provider-profile-filter-utility]');
+  let utilityProfileList = root.querySelector('[data-recursion-provider-profile-list-utility]');
   assertEqual(utilityProfileValue.tagName, 'INPUT', 'Host Connection Profile stores a committed hidden profile id, not the typed filter text');
   assertEqual(utilityProfileValue.getAttribute('type'), 'hidden', 'committed profile id stays hidden from the search field');
   assertEqual(utilityProfileFilter.tagName, 'INPUT', 'Host Connection Profile renders a searchable profile input');
@@ -2755,7 +2963,13 @@ try {
   assert(utilityProfileList, 'profile combobox renders a scrollable option list');
   assert(utilityProfileList.className.includes('recursion-provider-profile-list'), 'profile combobox list owns the scrollable list class');
   utilitySource.value = 'host-connection-profile';
-  for (const listener of utilitySource.eventListeners.change || []) listener({ target: utilitySource });
+  utilitySource.dispatchEvent({ type: 'change', target: utilitySource });
+  utilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
+  utilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
+  utilityClearKey = root.querySelector('[data-recursion-utility-provider-clear-key]');
+  utilityProfileValue = root.querySelector('[data-recursion-provider-profile-utility]');
+  utilityProfileFilter = root.querySelector('[data-recursion-provider-profile-filter-utility]');
+  utilityProfileList = root.querySelector('[data-recursion-provider-profile-list-utility]');
   assertEqual(utilityProfileContext.hidden, false, 'Host Connection Profile shows Utility profile fields');
   assertEqual(utilityOpenAiContext.hidden, true, 'Host Connection Profile hides Utility OpenAI endpoint fields');
   assertEqual(utilityClearKey.hidden, true, 'Host Connection Profile hides Utility clear session key action');
@@ -2780,18 +2994,21 @@ try {
   assertEqual(filteredProfileReadiness.includes('Profile: Deep Reasoner'), true, 'choosing a filtered profile updates readiness profile copy');
   assertEqual(filteredProfileReadiness.includes('Model: o-reasoner'), true, 'choosing a filtered profile updates readiness model copy');
   assertEqual(providerUpdates.length, providerUpdatesBeforeProfileSearch + 1, 'choosing a filtered profile autosaves once');
-  assertEqual(providerUpdates.at(-1).patch.hostConnectionProfileId, 'deep-profile-b', 'profile autosave records the selected detected profile id');
+  assertDeepEqual(providerUpdates.at(-1).patch, { hostConnectionProfileId: 'deep-profile-b' }, 'profile autosave sends only the selected detected profile id');
   const selectedProfileFilter = root.querySelector('[data-recursion-provider-profile-filter-utility]');
   const selectedProfileList = root.querySelector('[data-recursion-provider-profile-list-utility]');
   selectedProfileFilter.click();
   assertEqual(selectedProfileFilter.getAttribute('aria-expanded'), 'true', 'clicking selected profile opens the dropdown');
   assert(selectedProfileList.children.length > 20, 'clicking selected profile shows the full scrollable profile dropdown instead of only the selected profile');
   const currentUtilitySource = root.querySelector('[data-recursion-provider-source-utility]');
-  const currentUtilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
-  const currentUtilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
-  const currentUtilityClearKey = root.querySelector('[data-recursion-utility-provider-clear-key]');
+  let currentUtilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
+  let currentUtilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
+  let currentUtilityClearKey = root.querySelector('[data-recursion-utility-provider-clear-key]');
   currentUtilitySource.value = 'openai-compatible';
-  for (const listener of currentUtilitySource.eventListeners.change || []) listener({ target: currentUtilitySource });
+  currentUtilitySource.dispatchEvent({ type: 'change', target: currentUtilitySource });
+  currentUtilityProfileContext = root.querySelector('[data-recursion-provider-context-profile-utility]');
+  currentUtilityOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-utility]');
+  currentUtilityClearKey = root.querySelector('[data-recursion-utility-provider-clear-key]');
   assertEqual(currentUtilityProfileContext.hidden, true, 'OpenAI-Compatible hides Utility profile fields');
   assertEqual(currentUtilityOpenAiContext.hidden, false, 'OpenAI-Compatible shows Utility endpoint/model/key fields');
   assertEqual(currentUtilityClearKey.hidden, false, 'OpenAI-Compatible shows Utility clear session key action');
@@ -2822,10 +3039,12 @@ try {
   }
   assertEqual(root.querySelector('[data-recursion-provider-model-utility]').value, 'alpha-model', 'fetched model selector writes selected model id into model input');
   const reasonerSource = root.querySelector('[data-recursion-provider-source-reasoner]');
-  const reasonerProfileContext = root.querySelector('[data-recursion-provider-context-profile-reasoner]');
-  const reasonerOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-reasoner]');
+  let reasonerProfileContext = root.querySelector('[data-recursion-provider-context-profile-reasoner]');
+  let reasonerOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-reasoner]');
   reasonerSource.value = 'host-connection-profile';
-  for (const listener of reasonerSource.eventListeners.change || []) listener({ target: reasonerSource });
+  reasonerSource.dispatchEvent({ type: 'change', target: reasonerSource });
+  reasonerProfileContext = root.querySelector('[data-recursion-provider-context-profile-reasoner]');
+  reasonerOpenAiContext = root.querySelector('[data-recursion-provider-context-open-ai-reasoner]');
   assertEqual(reasonerProfileContext.hidden, false, 'Host Connection Profile shows Reasoner profile fields');
   assertEqual(reasonerOpenAiContext.hidden, true, 'Host Connection Profile hides Reasoner OpenAI endpoint fields');
   root.querySelector('[data-recursion-settings-tab-advanced]').click({ ignoreStopPropagation: true });
@@ -3135,10 +3354,64 @@ try {
   }
   assertEqual(providerUpdates.length, providerUpdatesBeforeAutoSave + 1, 'provider controls auto-save as soon as a committed value changes');
   assertEqual(providerUpdates.at(-1).lane, 'utility', 'utility provider autosave targets utility lane');
-  assertEqual(providerUpdates.at(-1).patch.source, 'openai-compatible', 'provider autosave records source');
-  assertEqual(providerUpdates.at(-1).patch.openAICompatible.model, 'utility-model', 'provider autosave records model');
-  assertEqual(providerUpdates.at(-1).patch.apiKey, 'sk-ui-secret', 'provider autosave forwards session key without writing it into text');
+  assertDeepEqual(providerUpdates.at(-1).patch, { openAICompatible: { model: 'utility-model' } }, 'provider model autosave is field-scoped');
   assert(!fakeDocument.textTree(root).includes('sk-ui-secret'), 'provider controls do not render session api key text');
+
+  async function assertFieldScopedProviderAutosave(selector, value, expectedPatch, label) {
+    const control = root.querySelector(selector);
+    const body = root.querySelector('[data-recursion-provider-body-utility]');
+    const expectedRevision = Number(body.dataset.recursionProviderRevision);
+    control.value = value;
+    const updatesBefore = providerUpdates.length;
+    for (const listener of root.querySelector('[data-recursion-settings-panel]').eventListeners.change || []) {
+      listener({ target: control });
+    }
+    assertEqual(providerUpdates.length, updatesBefore + 1, `${label} autosaves once`);
+    assertDeepEqual(providerUpdates.at(-1).patch, expectedPatch, `${label} autosave is field-scoped`);
+    assertEqual(providerUpdates.at(-1).options.expectedRevision, expectedRevision, `${label} autosave includes the rendered configuration revision`);
+    await flushMicrotasks();
+  }
+
+  await assertFieldScopedProviderAutosave(
+    '[data-recursion-provider-source-utility]',
+    'openai-compatible',
+    { source: 'openai-compatible' },
+    'provider source'
+  );
+  await assertFieldScopedProviderAutosave(
+    '[data-recursion-provider-base-url-utility]',
+    'https://utility.example/v1',
+    { openAICompatible: { baseUrl: 'https://utility.example/v1' } },
+    'provider base URL'
+  );
+  await assertFieldScopedProviderAutosave(
+    '[data-recursion-provider-model-utility]',
+    'utility-model-v2',
+    { openAICompatible: { model: 'utility-model-v2' } },
+    'provider model'
+  );
+  await assertFieldScopedProviderAutosave(
+    '[data-recursion-provider-api-key-utility]',
+    'sk-ui-secret',
+    { apiKey: 'sk-ui-secret' },
+    'provider API key'
+  );
+  await assertFieldScopedProviderAutosave(
+    '[data-recursion-provider-max-tokens-utility]',
+    '8192',
+    { maxTokens: 8192 },
+    'provider Max Tokens'
+  );
+  const staleMaxTokensControl = root.querySelector('[data-recursion-provider-max-tokens-utility]');
+  staleMaxTokensControl.value = '7777';
+  for (const listener of root.querySelector('[data-recursion-settings-panel]').eventListeners.change || []) {
+    listener({ target: staleMaxTokensControl });
+  }
+  await flushMicrotasks();
+  assert(
+    fakeDocument.textTree(root).includes('Provider settings changed in another view. Refresh and try again.'),
+    'resolved provider autosave rejection is surfaced instead of silently rerendering stale values'
+  );
 
   let hostGenerationClicks = 0;
   fakeDocument.addEventListener('click', (event) => {

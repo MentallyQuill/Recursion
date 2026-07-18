@@ -182,18 +182,16 @@ function integerInRange(value, fallback, min, max) {
 
 function reasonerState(view, activity) {
   const settings = asObject(view.settings);
-  const reasoner = settings.providers && Object.prototype.hasOwnProperty.call(settings.providers, 'reasoner')
-    ? asObject(settings.providers.reasoner)
-    : null;
-  if (reasoner?.enabled === false) return 'Disabled';
   if (REASONER_ACTIVE_PHASES.has(activity.phase) || activity.providerLane === 'reasoner' || activity.composerLane === 'reasoner') {
     return 'Composing';
   }
-  if (!reasoner) return 'Unavailable';
-  if (reasoner.lastTest?.status && !['ok', 'pass', 'passed', 'ready', 'not-run'].includes(cleanText(reasoner.lastTest.status).toLowerCase())) {
-    return 'Issue';
-  }
-  return reasoner.enabled === true ? 'Available' : 'Unavailable';
+  const capability = asObject(settings.providerCapabilities?.reasoner?.promptPacket);
+  return {
+    ready: 'Ready',
+    untested: 'Untested',
+    unhealthy: 'Unhealthy',
+    unconfigured: 'Configure'
+  }[cleanText(capability.state).toLowerCase()] || 'Configure';
 }
 
 function collectProviderLanesFromSteps(steps, lanes = new Set()) {

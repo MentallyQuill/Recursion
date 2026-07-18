@@ -1,4 +1,5 @@
 import { cloneJson } from './core.mjs';
+import { providerConfigHash } from './provider-capability.mjs';
 import { defaultCardScope, normalizeCardScope } from './card-scope.mjs';
 import { CARD_DECK_SETTINGS_VERSION, DEFAULT_CARD_DECK_ID, normalizeCardDeckSettings } from './card-decks.mjs';
 import { DEFAULT_RETENTION_SETTINGS, normalizeRetentionSettings } from './retention-policy.mjs';
@@ -67,25 +68,25 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   providers: {
     utility: {
       lane: 'utility',
-      enabled: true,
       source: 'host-current-model',
       hostConnectionProfileId: '',
       openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
       temperature: 0.1,
       topP: 0.95,
       maxTokens: 8192,
-      lastTest: { status: 'not-run' }
+      configRevision: 0,
+      health: { status: 'not-run' }
     },
     reasoner: {
       lane: 'reasoner',
-      enabled: false,
       source: 'host-current-model',
       hostConnectionProfileId: '',
       openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
       temperature: 0.4,
       topP: 0.95,
       maxTokens: 8192,
-      lastTest: { status: 'not-run' }
+      configRevision: 0,
+      health: { status: 'not-run' }
     }
   },
   ui: {
@@ -243,25 +244,77 @@ function requireProviderLane(lane) {
   return resolvedLane;
 }
 
-function providerTestSignature(provider = {}) {
-  return JSON.stringify({
-    enabled: provider.enabled === true,
-    source: String(provider.source || ''),
-    hostConnectionProfileId: String(provider.hostConnectionProfileId || ''),
-    baseUrl: String(provider.openAICompatible?.baseUrl || ''),
-    model: String(provider.openAICompatible?.model || ''),
-    sessionApiKeyPresent: provider.openAICompatible?.sessionApiKeyPresent === true,
-    maxTokens: Number(provider.maxTokens) || 0
-  });
+function nonNegativeInteger(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : fallback;
 }
 
-function resetProviderTestState(provider) {
+function normalizeProviderHealth(value = {}) {
+  const source = isPlainObject(value) ? value : {};
+  const status = enumValue(source.status, new Set(['pass', 'fail', 'not-run']), 'not-run');
+  if (status === 'not-run') return { status };
   return {
-    ...provider,
-    resolvedProviderLabel: '',
-    resolvedModelLabel: '',
-    lastTest: { status: 'not-run' }
+    status,
+    configHash: String(source.configHash || '').slice(0, 16),
+    checkedAt: source.checkedAt ? String(source.checkedAt).slice(0, 80) : undefined,
+    source: source.source ? String(source.source).slice(0, 80) : undefined,
+    compactError: status === 'fail' && source.compactError
+      ? String(source.compactError).slice(0, 300)
+      : undefined
   };
+}
+
+function providerConfiguration(provider = {}) {
+  return {
+    source: String(provider.source || ''),
+    hostConnectionProfileId: String(provider.hostConnectionProfileId || ''),
+    openAICompatible: {
+      baseUrl: String(provider.openAICompatible?.baseUrl || ''),
+      model: String(provider.openAICompatible?.model || ''),
+      sessionApiKeyPresent: provider.openAICompatible?.sessionApiKeyPresent === true
+    },
+    temperature: Number(provider.temperature),
+    topP: Number(provider.topP),
+    maxTokens: Number(provider.maxTokens),
+    configRevision: nonNegativeInteger(provider.configRevision)
+  };
+}
+
+function changedProviderConfigKeys(current = {}, next = {}, { secretChanged = false } = {}) {
+  const before = providerConfiguration(current);
+  const after = providerConfiguration(next);
+  const changed = [];
+  if (before.source !== after.source) changed.push('source');
+  if (before.hostConnectionProfileId !== after.hostConnectionProfileId) changed.push('hostConnectionProfileId');
+  if (before.openAICompatible.baseUrl !== after.openAICompatible.baseUrl) changed.push('openAICompatible.baseUrl');
+  if (before.openAICompatible.model !== after.openAICompatible.model) changed.push('openAICompatible.model');
+  if (before.openAICompatible.sessionApiKeyPresent !== after.openAICompatible.sessionApiKeyPresent || secretChanged) changed.push('apiKey');
+  if (before.temperature !== after.temperature) changed.push('temperature');
+  if (before.topP !== after.topP) changed.push('topP');
+  if (before.maxTokens !== after.maxTokens) changed.push('maxTokens');
+  return changed;
+}
+
+function pickProviderConfigPatch(patch = {}) {
+  const source = isPlainObject(patch) ? patch : {};
+  const result = {};
+  if (Object.prototype.hasOwnProperty.call(source, 'source')) result.source = source.source;
+  if (Object.prototype.hasOwnProperty.call(source, 'hostConnectionProfileId')) {
+    result.hostConnectionProfileId = source.hostConnectionProfileId;
+  }
+  if (Object.prototype.hasOwnProperty.call(source, 'temperature')) result.temperature = source.temperature;
+  if (Object.prototype.hasOwnProperty.call(source, 'topP')) result.topP = source.topP;
+  if (Object.prototype.hasOwnProperty.call(source, 'maxTokens')) result.maxTokens = source.maxTokens;
+  if (isPlainObject(source.openAICompatible)) {
+    result.openAICompatible = {};
+    if (Object.prototype.hasOwnProperty.call(source.openAICompatible, 'baseUrl')) {
+      result.openAICompatible.baseUrl = source.openAICompatible.baseUrl;
+    }
+    if (Object.prototype.hasOwnProperty.call(source.openAICompatible, 'model')) {
+      result.openAICompatible.model = source.openAICompatible.model;
+    }
+  }
+  return result;
 }
 
 export function normalizeProviderSettings(lane, value = {}, secretStore = null) {
@@ -272,9 +325,8 @@ export function normalizeProviderSettings(lane, value = {}, secretStore = null) 
     ? source.openAICompatible
     : {};
   const hasSecret = Boolean(secretStore?.get?.(resolvedLane));
-  return {
+  const normalized = {
     lane: resolvedLane,
-    enabled: resolvedLane === 'utility' ? true : source.enabled === true,
     source: enumValue(source.source, SOURCES, defaults.source),
     hostConnectionProfileId: String(source.hostConnectionProfileId ?? defaults.hostConnectionProfileId).trim(),
     openAICompatible: {
@@ -285,14 +337,18 @@ export function normalizeProviderSettings(lane, value = {}, secretStore = null) 
     temperature: numberInRange(source.temperature, defaults.temperature, 0, 2),
     topP: numberInRange(source.topP, defaults.topP, 0, 1),
     maxTokens: Math.round(numberInRange(source.maxTokens, defaults.maxTokens, 64, 131072)),
-    resolvedProviderLabel: String(source.resolvedProviderLabel || '').trim(),
-    resolvedModelLabel: String(source.resolvedModelLabel || '').trim(),
-    lastTest: {
-      status: enumValue(source.lastTest?.status, new Set(['pass', 'fail', 'not-run']), 'not-run'),
-      checkedAt: source.lastTest?.checkedAt ? String(source.lastTest.checkedAt) : undefined,
-      compactError: source.lastTest?.compactError ? String(source.lastTest.compactError).slice(0, 300) : undefined
-    }
+    configRevision: nonNegativeInteger(source.configRevision),
+    health: { status: 'not-run' }
   };
+  const health = normalizeProviderHealth(source.health);
+  if (
+    health.status !== 'not-run'
+    && health.configHash
+    && health.configHash === providerConfigHash(normalized)
+  ) {
+    normalized.health = health;
+  }
+  return normalized;
 }
 
 export function normalizeSettings(value = {}, secretStore = null) {
@@ -414,44 +470,130 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
     resetSettingsMenu() {
       return persist(resetSettingsMenuValue(root.recursion, secretStore));
     },
-    updateProvider(lane, patch = {}) {
+    updateProviderConfig(lane, patch = {}, options = {}) {
       const resolvedLane = requireProviderLane(lane);
       const current = this.get();
-      const cleanPatch = { ...patch };
-      const secretWasPatched = Object.prototype.hasOwnProperty.call(cleanPatch, 'apiKey');
-      if (Object.prototype.hasOwnProperty.call(cleanPatch, 'apiKey')) {
-        secretStore.set(resolvedLane, cleanPatch.apiKey);
-        delete cleanPatch.apiKey;
+      const currentProvider = current.providers[resolvedLane];
+      const revisionRequired = Object.prototype.hasOwnProperty.call(options, 'expectedRevision');
+      const expectedRevision = options.expectedRevision;
+      if (
+        revisionRequired
+        && (
+          !Number.isInteger(expectedRevision)
+          || expectedRevision < 0
+          || expectedRevision !== currentProvider.configRevision
+        )
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: 'RECURSION_PROVIDER_CONFIG_STALE',
+            message: 'Provider settings changed before this edit was saved.'
+          }
+        };
       }
-      let nextProvider = mergePlainObjects(current.providers[resolvedLane], cleanPatch);
-      const normalizedNextProvider = normalizeProviderSettings(resolvedLane, nextProvider, secretStore);
-      const providerConnectionChanged = providerTestSignature(current.providers[resolvedLane]) !== providerTestSignature(normalizedNextProvider);
-      if (secretWasPatched || providerConnectionChanged) {
-        nextProvider = resetProviderTestState(nextProvider);
+
+      const apiKeyPatched = Object.prototype.hasOwnProperty.call(patch, 'apiKey');
+      const nextApiKey = apiKeyPatched ? String(patch.apiKey || '') : secretStore.get(resolvedLane);
+      const secretChanged = apiKeyPatched && nextApiKey !== secretStore.get(resolvedLane);
+      const configPatch = pickProviderConfigPatch(patch);
+      const merged = mergePlainObjects(currentProvider, configPatch);
+      const previewSecretStore = {
+        get(candidateLane) {
+          return candidateLane === resolvedLane ? nextApiKey : secretStore.get(candidateLane);
+        }
+      };
+      const previewProvider = normalizeProviderSettings(resolvedLane, merged, previewSecretStore);
+      const changedKeys = changedProviderConfigKeys(currentProvider, previewProvider, { secretChanged });
+      if (changedKeys.length === 0) {
+        return { ok: true, provider: currentProvider, changedKeys };
       }
-      return persist({
+
+      if (apiKeyPatched) secretStore.set(resolvedLane, nextApiKey);
+      const nextProvider = {
+        ...merged,
+        configRevision: currentProvider.configRevision + 1,
+        health: { status: 'not-run' }
+      };
+      const provider = persist({
         ...current,
         providers: {
           ...current.providers,
           [resolvedLane]: nextProvider
         }
       }).providers[resolvedLane];
+      return { ok: true, provider, changedKeys };
+    },
+    recordProviderHealth(lane, result = {}, { configHash = '', configRevision = -1 } = {}) {
+      const resolvedLane = requireProviderLane(lane);
+      const current = this.get();
+      const provider = current.providers[resolvedLane];
+      const forbiddenKeys = [
+        'lane',
+        'enabled',
+        'hostConnectionProfileId',
+        'openAICompatible',
+        'temperature',
+        'topP',
+        'maxTokens',
+        'configRevision',
+        'health',
+        'lastTest',
+        'apiKey'
+      ];
+      if (
+        !isPlainObject(result)
+        || !new Set(['pass', 'fail']).has(result.status)
+        || forbiddenKeys.some((key) => Object.prototype.hasOwnProperty.call(result, key))
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: 'RECURSION_PROVIDER_HEALTH_INVALID',
+            message: 'Provider health results cannot change provider configuration.'
+          }
+        };
+      }
+      const currentHash = providerConfigHash(provider);
+      if (
+        !Number.isInteger(configRevision)
+        || configRevision !== provider.configRevision
+        || String(configHash || '') !== currentHash
+      ) {
+        return {
+          ok: false,
+          stale: true,
+          error: {
+            code: 'RECURSION_PROVIDER_TEST_STALE',
+            message: 'Provider settings changed before the test completed.'
+          }
+        };
+      }
+      const health = normalizeProviderHealth({
+        status: result.status,
+        checkedAt: result.checkedAt,
+        source: result.source,
+        compactError: result.compactError,
+        configHash: currentHash
+      });
+      const persistedProvider = persist({
+        ...current,
+        providers: {
+          ...current.providers,
+          [resolvedLane]: {
+            ...provider,
+            health
+          }
+        }
+      }).providers[resolvedLane];
+      return { ok: true, provider: persistedProvider };
     },
     getApiKey(lane) {
       return secretStore.get(requireProviderLane(lane));
     },
-    clearApiKey(lane) {
+    clearApiKey(lane, options = {}) {
       const resolvedLane = requireProviderLane(lane);
-      const current = this.get();
-      secretStore.clear(resolvedLane);
-      const nextProvider = resetProviderTestState(current.providers[resolvedLane]);
-      return persist({
-        ...current,
-        providers: {
-          ...current.providers,
-          [resolvedLane]: nextProvider
-        }
-      }).providers[resolvedLane];
+      return this.updateProviderConfig(resolvedLane, { apiKey: '' }, options);
     }
   };
 }

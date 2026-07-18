@@ -245,7 +245,7 @@ Typical shape:
 - expanded Guidance for active cast, spatial state, near-term pressure, continuity, and dialogue priorities;
 - selected Card Evidence preserved as raw prompts;
 - explicit Guardrails for high-risk contradictions;
-- optional Reasoner synthesis when enabled and available.
+- optional Reasoner synthesis when its current configuration is ready and policy selects it.
 
 Rich must not become a broad plot plan, transcript summary, or lore recap. It is a temporary current-turn response aid.
 

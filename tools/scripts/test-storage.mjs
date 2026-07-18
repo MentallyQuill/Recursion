@@ -1233,6 +1233,39 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
 {
   const adapter = createMemoryStorageAdapter();
   const repo = createStorageRepository({ storage: adapter });
+  const clean = await repo.appendJournal('Capability Chat', {
+    event: 'provider.capability.changed',
+    severity: 'info',
+    summary: 'Reasoner provider capability untested to ready.',
+    details: {
+      lane: 'reasoner',
+      kind: 'health',
+      changedKeys: [],
+      beforeState: 'untested',
+      afterState: 'ready',
+      configRevision: 4,
+      configHash: '7e23c91a',
+      stale: false
+    }
+  });
+  assertEqual(clean.event, 'provider.capability.changed', 'provider capability event survives the journal allowlist');
+  assertDeepEqual(clean.details, {
+    lane: 'reasoner',
+    kind: 'health',
+    changedKeys: [],
+    beforeState: 'untested',
+    afterState: 'ready',
+    configRevision: 4,
+    configHash: '7e23c91a',
+    stale: false
+  }, 'provider capability event retains bounded safe transition evidence');
+  const journal = await repo.loadRunJournal('Capability Chat');
+  assertEqual(journal.entries[0].event, 'provider.capability.changed', 'provider capability event persists canonically');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
   const clean = await repo.appendJournal('Event Gate Chat', {
     id: 'F:\\SillyTavern\\secret\\entry.json',
     event: 'raw.provider.response.should.not.persist',

@@ -17,6 +17,10 @@ import {
 } from './providers/structured-output-parser.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 import {
+  providerConfigHash,
+  resolveProviderCapability
+} from './provider-capability.mjs';
+import {
   EDITORIAL_EFFECTIVENESS_SCHEMA,
   REDIRECT_EFFECTIVENESS_CRITERIA,
   REDIRECT_FAILURE_CATEGORIES,
@@ -61,7 +65,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
-export const PROVIDER_CONTRACT_VERSION = 4;
+export const PROVIDER_CONTRACT_VERSION = 5;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.card.v1',
@@ -129,22 +133,23 @@ function providerError(code, message, { retryable = false, status = undefined, c
   return error;
 }
 
-function markOpenAiAuthFailure(settingsStore, lane) {
+async function markOpenAiAuthFailure(host, settingsStore, lane, providerSnapshot = {}) {
+  const configRevision = Number(providerSnapshot.configRevision || 0);
+  const configHash = providerConfigHash(providerSnapshot);
   try {
-    if (typeof settingsStore?.clearApiKey === 'function') settingsStore.clearApiKey(lane);
-    if (typeof settingsStore?.updateProvider === 'function') {
-      settingsStore.updateProvider(lane, {
-        resolvedProviderLabel: '',
-        resolvedModelLabel: '',
-        lastTest: {
-          status: 'fail',
-          checkedAt: nowIso(),
-          compactError: 'OpenAI-compatible authentication failed.'
-        }
+    if (typeof host?.handleProviderAuthFailure === 'function') {
+      await host.handleProviderAuthFailure({
+        lane,
+        configHash,
+        configRevision
       });
+      return;
+    }
+    if (typeof settingsStore?.clearApiKey === 'function') {
+      settingsStore.clearApiKey(lane, { expectedRevision: configRevision });
     }
   } catch {
-    // Provider health metadata is advisory; the provider call still fails with a stable auth error.
+    // The provider call still fails with a stable auth error; stale credentials remain untouched.
   }
 }
 
@@ -199,8 +204,12 @@ function providerConfigFor(settingsStore, lane) {
   };
 }
 
-function shouldAllowReasoner(settings, config) {
-  return settings.reasonerUse !== 'off' && config?.enabled === true;
+function providerCapabilityHost(host = null) {
+  return {
+    currentModelAvailable: typeof host?.generation?.generate === 'function'
+      || typeof host?.generation?.batch === 'function',
+    connectionProfiles: listProviderConnectionProfiles({ host })
+  };
 }
 
 function requestLane(roleId, request = {}) {
@@ -1109,51 +1118,46 @@ function sourceLabel(source) {
 
 export function validateProviderConfiguration(provider = {}, options = {}) {
   const source = sourceName(provider.source);
-  const missing = [];
-  let ready = true;
-  let message = 'Ready.';
-  if (source === 'host-current-model') {
-    if (options.hostGenerationAvailable === false) {
-      ready = false;
-      missing.push('hostGeneration');
-      message = 'Host generation API unavailable.';
-    } else {
-      message = 'Uses the active SillyTavern model.';
+  const profiles = Array.isArray(options.profiles)
+    ? options.profiles
+    : listProviderConnectionProfiles(options);
+  const lane = laneName(provider.lane);
+  const capabilityProvider = source === 'openai-compatible' && textValue(options.apiKey)
+    ? {
+        ...provider,
+        openAICompatible: {
+          ...(plainObject(provider.openAICompatible) ? provider.openAICompatible : {}),
+          sessionApiKeyPresent: true
+        }
+      }
+    : provider;
+  const capability = resolveProviderCapability({
+    settings: {
+      reasoningLevel: 'medium',
+      providers: { [lane]: { ...capabilityProvider, lane } }
+    },
+    lane,
+    operation: 'provider-test',
+    host: {
+      currentModelAvailable: options.hostGenerationAvailable !== false,
+      connectionProfiles: profiles
     }
-  } else if (source === 'host-connection-profile') {
-    const profile = textValue(provider.hostConnectionProfileId);
-    const profiles = Array.isArray(options.profiles)
-      ? options.profiles
-      : listProviderConnectionProfiles(options);
-    if (!profile) {
-      ready = false;
-      missing.push('hostConnectionProfileId');
-      message = profiles.length ? 'Select a host connection profile.' : 'No host connection profiles detected.';
-    } else if (!profiles.some((entry) => entry.id === profile)) {
-      ready = false;
-      missing.push('connectionProfile');
-      message = profiles.length ? 'Saved profile was not detected.' : 'Connection profile service unavailable.';
-    } else {
-      message = 'Uses the selected SillyTavern connection profile.';
-    }
-  } else if (source === 'openai-compatible') {
-    const direct = plainObject(provider.openAICompatible) ? provider.openAICompatible : {};
-    if (!textValue(direct.baseUrl)) missing.push('baseUrl');
-    if (!textValue(direct.model)) missing.push('model');
-    if (!textValue(options.apiKey) && direct.sessionApiKeyPresent !== true) missing.push('sessionApiKey');
-    ready = missing.length === 0;
-    message = ready ? 'Direct endpoint configured for this session.' : `Missing ${missing.join(', ')}.`;
-  } else {
-    ready = false;
-    missing.push('source');
-    message = 'Unsupported provider source.';
-  }
+  });
+  const missingByReason = {
+    'provider-current-model-unavailable': ['hostGeneration'],
+    'provider-profile-missing': ['hostConnectionProfileId'],
+    'provider-profile-unavailable': ['connectionProfile'],
+    'provider-base-url-missing': ['baseUrl'],
+    'provider-model-missing': ['model'],
+    'provider-session-key-missing': ['sessionApiKey'],
+    'provider-source-unsupported': ['source']
+  };
   return {
-    ready,
-    missing,
+    ready: capability.testable,
+    missing: missingByReason[capability.reasonCode] || [],
     source,
     sourceLabel: sourceLabel(source),
-    message
+    message: capability.message
   };
 }
 
@@ -1188,11 +1192,16 @@ export function providerModelStatus(provider = {}, options = {}) {
   };
 }
 
-export function providerRouteSummary(settings = {}) {
+export function providerRouteSummary(settings = {}, host = {}) {
   const level = String(settings?.reasoningLevel || 'medium').toLowerCase();
   const normalizedLevel = ['low', 'medium', 'high', 'ultra'].includes(level) ? level : 'medium';
-  const reasoner = settings?.providers?.reasoner || {};
-  const reasonerHealthy = reasoner.enabled === true && reasoner.lastTest?.status === 'pass';
+  const capability = resolveProviderCapability({
+    settings,
+    lane: 'reasoner',
+    operation: 'prompt-packet',
+    host
+  });
+  const reasonerHealthy = capability.ready;
   const reasonerLabel = reasonerHealthy ? 'Reasoner' : 'Utility fallback';
   const summary = normalizedLevel === 'low'
     ? { arbiter: 'Utility', cards: 'Utility', composer: 'Utility' }
@@ -1889,8 +1898,22 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
 
     const lane = laneName(requestLane(resolvedRoleId, request));
     const { settings, config } = providerConfigFor(settingsStore, lane);
-    if (lane === 'reasoner' && resolvedRoleId !== 'providerTest' && !shouldAllowReasoner(settings, config)) {
-      throw providerError('RECURSION_REASONER_DISABLED', 'Reasoner provider lane is disabled.', { retryable: false });
+    const operation = resolvedRoleId === 'providerTest' ? 'provider-test' : 'prompt-packet';
+    const capability = resolveProviderCapability({
+      settings,
+      lane,
+      operation,
+      host: providerCapabilityHost(host)
+    });
+    if (
+      (resolvedRoleId === 'providerTest' && !capability.testable)
+      || (lane === 'reasoner' && resolvedRoleId !== 'providerTest' && !capability.eligible)
+    ) {
+      throw providerError(
+        'RECURSION_PROVIDER_NOT_READY',
+        capability.message,
+        { retryable: false, providerDiagnostics: { capability } }
+      );
     }
 
     return {
@@ -2001,7 +2024,7 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
     if (!response?.ok) {
       const status = Number(response?.status || 0);
       if (status === 401 || status === 403) {
-        markOpenAiAuthFailure(settingsStore, enriched.lane);
+        await markOpenAiAuthFailure(host, settingsStore, enriched.lane, enriched.providerConfig);
         throw providerError('RECURSION_PROVIDER_AUTH_FAILED', 'OpenAI-compatible authentication failed.', {
           retryable: false,
           status
@@ -2027,7 +2050,7 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
     if (!response?.ok) {
       const status = Number(response?.status || 0);
       if (status === 401 || status === 403) {
-        markOpenAiAuthFailure(settingsStore, enriched.lane);
+        await markOpenAiAuthFailure(host, settingsStore, enriched.lane, enriched.providerConfig);
         throw providerError('RECURSION_PROVIDER_AUTH_FAILED', 'OpenAI-compatible authentication failed.', {
           retryable: false,
           status

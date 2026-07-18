@@ -105,7 +105,7 @@ Recursion has two provider lanes:
 
 Each lane can use the current host model, a host connection profile when the host supports it, or an OpenAI-compatible endpoint. Direct endpoint API keys live only in the session secret store and are never persisted. OpenAI-compatible model discovery is read-only against `/models`; it may use the session key but does not save secrets, write journals, clear prompts, or invalidate scene cache.
 
-Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses Reasoner for guidance composition when healthy, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when healthy. Disabled, untested, unhealthy, missing-profile, or missing-key Reasoner routes fall back to Utility without blocking normal chat generation.
+Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses ready Reasoner for guidance composition, High adds ready Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when ready. Unconfigured, untested, or unhealthy Reasoner routes fall back to Utility without blocking normal chat generation. Medium+ Redirect is the exception: it remains unavailable and settles as a pre-generation skip until Reasoner is ready.
 
 ## Card And Hand System
 

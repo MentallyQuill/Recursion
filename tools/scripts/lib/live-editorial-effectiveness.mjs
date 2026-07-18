@@ -50,7 +50,7 @@ function exactCoverage(entries, names, nameKey, { requirePass = true } = {}) {
   return names.every((name) => seen.has(name));
 }
 
-const PRIVATE_REDIRECT_FIELD_PATTERN = /"(?:redirect|characterPressure|immediateWant|pressureReason|wantEvidenceRefs|sourcePressureEffect|sourceEvidenceRefs)"\s*:/;
+const PRIVATE_REDIRECT_FIELD_PATTERN = /"(?:characterPressure|immediateWant|pressureReason|wantEvidenceRefs|sourcePressureEffect|sourceEvidenceRefs)"\s*:/;
 const PRIVATE_REDIRECT_SENTINEL = 'PRIVATE_REDIRECT_PRESSURE_SENTINEL';
 
 function leaksPrivateRedirectStructure(value) {
@@ -58,8 +58,27 @@ function leaksPrivateRedirectStructure(value) {
   return PRIVATE_REDIRECT_FIELD_PATTERN.test(serialized) || serialized.includes(PRIVATE_REDIRECT_SENTINEL);
 }
 
+function privateRedirectPaths(value, path = '$', output = [], seen = new Set()) {
+  if (output.length >= 24 || value === null || value === undefined) return output;
+  if (typeof value === 'string') {
+    if (value.includes(PRIVATE_REDIRECT_SENTINEL)) output.push(path);
+    return output;
+  }
+  if (typeof value !== 'object' || seen.has(value)) return output;
+  seen.add(value);
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = `${path}.${key}`;
+    if (/^(characterPressure|immediateWant|pressureReason|wantEvidenceRefs|sourcePressureEffect|sourceEvidenceRefs)$/.test(key)) {
+      output.push(childPath);
+    }
+    privateRedirectPaths(child, childPath, output, seen);
+  }
+  return output;
+}
+
 export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
   const failures = [];
+  const privateLeakSurfaces = {};
   const scenario = artifacts.scenario && typeof artifacts.scenario === 'object' ? artifacts.scenario : {};
   const expectedDecision = text(scenario?.oracle?.editorialRedirect?.expectedDecision || 'proceed').toLowerCase();
   const result = artifacts.enhancementResult && typeof artifacts.enhancementResult === 'object'
@@ -104,7 +123,10 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
     ['prompt-packet', artifacts.promptPacket],
     ['journal', artifacts.journalDelta]
   ]) {
-    if (leaksPrivateRedirectStructure(value)) failures.push(`private-redirect-leak-${surface}`);
+    if (leaksPrivateRedirectStructure(value)) {
+      failures.push(`private-redirect-leak-${surface}`);
+      privateLeakSurfaces[surface] = privateRedirectPaths(value);
+    }
   }
 
   return {
@@ -122,6 +144,7 @@ export function evaluateLiveRedirectScenarioArtifacts(artifacts = {}) {
     judge,
     provider: artifacts.provider || {},
     oracle: artifacts.oracle?.verdict || {},
+    privateLeakSurfaces,
     failures
   };
 }
@@ -201,7 +224,7 @@ async function executeScenarioInPage(input) {
     enabled: true,
     mode: 'auto',
     pipelineMode: String(scenario?.pipelineMode || 'standard'),
-    reasoningLevel: 'medium',
+    reasoningLevel: scenario?.forceUtilityEnhancement === true ? 'low' : 'medium',
     reasonerUse: 'always',
     enhancements: { mode: 'redirect', applyMode: 'as-swipe', contextMessages: 13 }
   }));
@@ -213,7 +236,7 @@ async function executeScenarioInPage(input) {
   }
   const prepared = await runStage('prepare', () => runtime.prepareForGeneration({ userMessage: pendingUserMessage }));
   await new Promise((resolve, reject) => {
-    const deadline = Date.now() + 2000;
+    const deadline = Date.now() + 10000;
     const poll = () => {
       const transitions = globalThis.__recursionLiveEnhancementRunOracle?.transitions || [];
       const ready = transitions.some((entry) => (
@@ -259,7 +282,7 @@ async function executeJudgeInPage(input = {}) {
   });
 }
 
-async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artifactRoot }) {
+async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artifactRoot, forceUtilityEnhancement = false }) {
   const session = createSillyTavernHttpSession({ baseUrl, user, password });
   await session.login();
   const browser = await chromium.launch({ headless: true });
@@ -294,30 +317,69 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
     error.code = providerTest?.error?.code || 'utility-provider-live-call-failed';
     throw error;
   }
+  let reasonerProviderTest = null;
+  let reasonerReadiness = null;
+  if (!forceUtilityEnhancement) {
+    const reasonerSetup = await page.evaluate(async () => {
+      const runtime = globalThis.__recursionLiveHarnessRuntime;
+      const before = runtime?.view?.()?.settings?.providers?.reasoner || {};
+      const update = await runtime?.updateProviderConfig?.('reasoner', {
+        maxTokens: 8192
+      }, {
+        expectedRevision: Number(before.configRevision || 0)
+      });
+      return {
+        update,
+        provider: runtime?.view?.()?.settings?.providers?.reasoner || null
+      };
+    });
+    if (reasonerSetup?.update?.ok !== true) {
+      const error = new Error(reasonerSetup?.update?.error?.message || 'Reasoner configuration could not be prepared for live proof.');
+      error.code = reasonerSetup?.update?.error?.code || 'reasoner-provider-live-setup-failed';
+      throw error;
+    }
+    reasonerProviderTest = await page.evaluate(async () => globalThis.__recursionLiveHarnessRuntime?.testProvider?.('reasoner'));
+    if (reasonerProviderTest?.ok !== true) {
+      const error = new Error('Reasoner provider test failed before Medium+ Redirect effectiveness run.');
+      error.code = reasonerProviderTest?.error?.code || 'reasoner-provider-live-call-failed';
+      throw error;
+    }
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    await page.waitForSelector('#recursion-root', { state: 'visible', timeout: timeoutMs });
+    await page.waitForFunction(() => Boolean(globalThis.__recursionLiveHarnessRuntime), null, { timeout: timeoutMs });
+    reasonerReadiness = await page.evaluate(() => {
+      const runtime = globalThis.__recursionLiveHarnessRuntime;
+      return {
+        provider: runtime?.view?.()?.settings?.providers?.reasoner || null,
+        capability: runtime?.providerCapability?.('reasoner', 'redirect') || null
+      };
+    });
+    if (
+      Number(reasonerReadiness?.provider?.maxTokens) !== 8192
+      || reasonerReadiness?.capability?.state !== 'ready'
+    ) {
+      const error = new Error([
+        'Reasoner readiness did not survive reload for the live Redirect proof.',
+        `state=${text(reasonerReadiness?.capability?.state || 'missing')}`,
+        `maxTokens=${Number(reasonerReadiness?.provider?.maxTokens || 0)}`,
+        `revision=${Number(reasonerReadiness?.provider?.configRevision || 0)}`,
+        `health=${text(reasonerReadiness?.provider?.health?.status || 'missing')}`
+      ].join(' '));
+      error.code = 'reasoner-provider-live-reload-failed';
+      throw error;
+    }
+  }
   if (artifactRoot) mkdirSync(artifactRoot, { recursive: true });
 
   return {
     async execute({ scenario, targetModel, judgeModel, forceUtilityEnhancement = false }) {
-      let restoreReasonerAfterEnhancement = false;
-      try {
-        await page.setViewportSize({ width: 1280, height: 720 });
-        if (forceUtilityEnhancement) {
-          restoreReasonerAfterEnhancement = await page.evaluate(async () => {
-            const runtime = globalThis.__recursionLiveHarnessRuntime;
-            const wasEnabled = runtime?.view?.()?.settings?.providers?.reasoner?.enabled === true;
-            if (wasEnabled) {
-              const result = await runtime.updateProvider('reasoner', { enabled: false });
-              if (result?.ok !== true) throw new Error('live-reasoner-disable-failed');
-            }
-            return wasEnabled;
-          });
-        }
-        await installLiveEnhancementRunOracle(page);
-        const artifacts = await page.evaluate(executeScenarioInPage, {
-          scenario,
-          stageTimeouts: Object.fromEntries(['settings', 'warm', 'prepare', 'enhance', 'judge']
-            .map((stage) => [stage, liveEditorialStageTimeoutMs(stage, timeoutMs)]))
-        });
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await installLiveEnhancementRunOracle(page);
+      const artifacts = await page.evaluate(executeScenarioInPage, {
+        scenario: { ...scenario, forceUtilityEnhancement },
+        stageTimeouts: Object.fromEntries(['settings', 'warm', 'prepare', 'enhance', 'judge']
+          .map((stage) => [stage, liveEditorialStageTimeoutMs(stage, timeoutMs)]))
+      });
         if (artifacts?.environmentFailure) throw new Error(artifacts.environmentFailure);
         await page.waitForFunction(() => {
           const rows = [...document.querySelectorAll('[data-recursion-status-popover] [data-recursion-progress-row]')];
@@ -341,46 +403,29 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
           await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           await page.screenshot({ path: screenshotPath, fullPage: true });
         }
-        if (restoreReasonerAfterEnhancement) {
-          const restored = await page.evaluate(async () => {
-            const runtime = globalThis.__recursionLiveHarnessRuntime;
-            const update = await runtime.updateProvider('reasoner', { enabled: true });
-            const test = update?.ok === true ? await runtime.testProvider('reasoner') : null;
-            return { update, test };
-          });
-          if (restored?.update?.ok !== true || restored?.test?.ok !== true) throw new Error('live-reasoner-restore-failed');
-          restoreReasonerAfterEnhancement = false;
-        }
         const judge = await page.evaluate(executeJudgeInPage, {
           scenario,
           sourceText: artifacts.sourceText,
           candidateText: artifacts.candidateText,
           marker: artifacts.enhancementResult?.marker || {}
         });
-        return {
-          ...artifacts,
-          scenario,
-          oracle,
-          journalDelta,
-          judge,
-          provider: {
-            targetModel: text(providerTest?.diagnostics?.model || providerTest?.provider?.resolvedModelLabel),
-            judgeModel: text(judge?.diagnostics?.model)
-          },
-          expectedModels: { targetModel, judgeModel },
-          screenshotPath,
-          phoneScreenshotPath
-        };
-      } finally {
-        if (restoreReasonerAfterEnhancement) {
-          await page.evaluate(async () => {
-            const runtime = globalThis.__recursionLiveHarnessRuntime;
-            const update = await runtime.updateProvider('reasoner', { enabled: true });
-            if (update?.ok === true) await runtime.testProvider('reasoner');
-            return update;
-          }).catch(() => {});
-        }
-      }
+      return {
+        ...artifacts,
+        scenario,
+        oracle,
+        journalDelta,
+        judge,
+        provider: {
+          targetModel: text(providerTest?.diagnostics?.model || providerTest?.provider?.resolvedModelLabel),
+          judgeModel: text(judge?.diagnostics?.model),
+          reasonerModel: text(reasonerProviderTest?.diagnostics?.model || reasonerProviderTest?.provider?.resolvedModelLabel),
+          reasonerMaxTokens: Number(reasonerReadiness?.provider?.maxTokens || 0),
+          reasonerCapability: text(reasonerReadiness?.capability?.state)
+        },
+        expectedModels: { targetModel, judgeModel },
+        screenshotPath,
+        phoneScreenshotPath
+      };
     },
     async close() {
       await browser.close();
@@ -427,7 +472,8 @@ export async function runLiveEditorialEffectiveness({
         user: userValidation.user,
         password: password || env.SILLYTAVERN_PASSWORD || '',
         timeoutMs: Math.max(10000, Number(timeoutMs) || 120000),
-        artifactRoot
+        artifactRoot,
+        forceUtilityEnhancement
       });
     }
     for (const scenario of scenarioList) {

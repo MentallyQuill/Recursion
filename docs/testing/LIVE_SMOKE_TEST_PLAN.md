@@ -92,7 +92,7 @@ $env:RECURSION_LIVE_GENERATION='1'
 node tools\scripts\smoke-sillytavern-live.mjs --live --write-artifacts --strict
 ```
 
-Reasoner-enabled smoke target:
+Reasoner-capable smoke target:
 
 ```powershell
 $env:SILLYTAVERN_BASE_URL='http://127.0.0.1:8000'
@@ -168,13 +168,13 @@ Pipeline, mode, and power changes should be visible in the bar and should append
 When providers are configured:
 
 - Run Utility Test Provider.
-- Run Reasoner Test Provider when enabled.
+- Run Reasoner Test Provider when the Reasoner route is configured.
 - While Reasoner is expanded, change a committed provider field and verify the Reasoner Provider section stays expanded after autosave.
 - Verify the clicked Test Provider button changes to `Testing...`, disables while pending, and the settings panel remains responsive.
 - Verify provider test activity appears in the progress menu or Full Viewer Activity section.
 - Verify model, lane, status, duration, and redacted error category appear in diagnostics.
 
-Provider tests must not persist API keys, raw prompts, or raw responses. They should complete as short bounded health checks, not full-length generation calls.
+Provider tests must not persist API keys, raw prompts, or raw responses. They use the lane's configured max-token ceiling, default `8192`, with a bounded timeout and strict structured health response.
 
 ### 5. Manual Pass
 

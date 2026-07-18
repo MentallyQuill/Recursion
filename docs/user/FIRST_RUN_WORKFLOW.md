@@ -35,9 +35,9 @@ Session API keys are memory-only for the browser session. Recursion may remember
 
 ## 3. Optionally Configure Reasoner
 
-Reasoner is optional. Leave it disabled for the first pass unless you intentionally want Medium/High/Ultra routing to use the extra synthesis lane.
+Reasoner is optional. Leave it unconfigured for the first pass unless you intentionally want Medium/High/Ultra routing to use the extra synthesis lane.
 
-Reasoning Level controls how strongly Recursion tries to use Reasoner. Low is Utility-only. Medium uses Reasoner for guidance composition when healthy. High adds Reasoner for Arbiter and priority card families. Ultra is Reasoner-heavy when the lane is healthy. If Reasoner fails, times out, is disabled, lacks credentials, or returns invalid output, Recursion keeps the selected level visible and falls back to Utility.
+Reasoning Level controls how strongly Recursion tries to use Reasoner. Low is Utility-only. Medium uses ready Reasoner for guidance composition. High adds ready Reasoner for Arbiter and priority card families. Ultra is Reasoner-heavy when ready. If Reasoner is unconfigured, untested, unhealthy, or a routed call fails, Recursion keeps the selected level visible and falls back to Utility for ordinary work. Medium+ Redirect remains unavailable until Reasoner is `Ready`.
 
 ## 4. Run The First Auto Pass
 

@@ -1,7 +1,7 @@
 # Reasoner Capability and Redirect Readiness Fix-Improvement
 
 **Date:** 2026-07-17  
-**Status:** Proposed implementation authority  
+**Status:** Implemented and dedicated-user verified
 **Scope:** Provider capability state, provider-test isolation, Redirect
 readiness, settings persistence, runtime routing, observability, regression
 coverage, and installed-copy verification
@@ -1389,3 +1389,65 @@ The prior preflight may remain useful as historical evidence, but it is not the
 target architecture. The replacement prevents invalid capability state from
 being armed, uses one shared readiness contract, and preserves normal host
 generation without spending Editorial calls.
+
+## Post-Deployment UI Regression Addendum
+
+The first `default-user` SG-1 verification exposed two presentation defects
+after the provider-capability implementation was deployed:
+
+1. The Reasoner Provider Test succeeded, the following normal generation used
+   Reasoner successfully, and Redirect completed its Diagnostician,
+   Transformer, and Verifier path and applied a verified swipe. Despite that
+   runtime evidence, the already-mounted Redirect row still displayed its old
+   unavailable description ending in `Test Reasoner below.` The readiness
+   resolver was correct; `renderEnhancementsState()` overlaid unavailable copy
+   but did not restore the row's canonical ARIA label, title, or card-evidence
+   description after capability changed to `ready`.
+2. Fused child rows retained routine reasons such as
+   `Included in category generation.` The renderer inserted those reasons into
+   every row, while CSS expanded height only for `warning` and `failed` rows.
+   Completed child rows therefore kept their compact fixed height and allowed
+   the reason text to overlap neighboring rows on mobile.
+
+The permanent presentation contract is:
+
+- every Enhancements render restores canonical option metadata before applying
+  any state-specific unavailable overlay;
+- a ready Redirect immediately restores
+  `Uses card-evidence to replace a misaligned trajectory with a stronger,
+  verified response.` and hides the Test Reasoner action;
+- progress reasons remain in sanitized row metadata and tooltips;
+- only `warning` and `failed` rows render a visible wrapped reason subline;
+- routine completed, generated, included, and cached child rows remain compact.
+
+Regression coverage must exercise state changes on the same mounted DOM nodes:
+
+```js
+unavailable Redirect -> ready Redirect
+warning child with visible reason -> done child with tooltip-only reason
+```
+
+## Implementation Verification Record
+
+Completed on 2026-07-17:
+
+- all 36 deterministic test scripts passed through `npm.cmd test`;
+- the installed-copy verifier matched 69 production files across the
+  repository, `recursion-soak-a` installation, and public served copy;
+- no-generation SillyTavern smoke passed with zero page errors and exact served
+  extension hashes;
+- the live Reasoner provider test used Max Tokens `8192`, reached `ready`, and
+  remained `ready` after page reload;
+- the SG-1-shaped Standard Redirect proof passed through the real
+  SillyTavern/provider path with a ready Reasoner writer/verifier, all nine
+  production verification checks passing, one validated Recursion-owned swipe,
+  no unmatched provider calls, no unhealthy or unexplained journal transitions,
+  and no private Redirect leakage;
+- the live proof artifact is
+  `artifacts/live-redirect/prove-live-enhancements-mrpk00fe-jmqtef`.
+
+After the post-deployment UI regressions were fixed, the tested tree was copied
+to the `default-user` installed extension and public served copy. The
+installed-copy verifier matched all 69 production files. No automated provider
+test or generation was run against `default-user` during this corrective
+deployment.

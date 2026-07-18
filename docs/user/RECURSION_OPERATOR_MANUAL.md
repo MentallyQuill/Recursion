@@ -28,7 +28,7 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 ![Settings view with Play Behavior, Strength, Focus, Prompt Footprint, and injection controls](../../assets/documentation/renders/recursion-operator-settings.png)
 
-![Provider controls with Utility fallback warning and Reasoner disabled state](../../assets/documentation/renders/recursion-operator-provider-controls.png)
+![Provider controls with Utility fallback warning and Reasoner capability state](../../assets/documentation/renders/recursion-operator-provider-controls.png)
 
 ![Prompt Packet inspection with redaction-safe diagnostics](../../assets/documentation/renders/recursion-operator-prompt-packet-inspection.png)
 
@@ -58,7 +58,7 @@ The bar should be stable. Status changes should not repeatedly resize the transc
 
 The Pipeline control is a small icon-only dropdown immediately to the left of the Mode button. `Standard` uses the full foreground Arbiter, card, hand, compose, validate, and install path on send. `Rapid` warms a provider-generated card packet in the background and uses a short provider delta on send. `Fused` keeps the foreground Arbiter and shared deck/hand/compose/install path, but asks one provider call to generate all requested cards as a bundle. The selected icon updates on the bar, and the dropdown follows the compact Mode-menu pattern. Pipeline is not duplicated in Settings.
 
-The Enhancement control sits immediately to the right of Cards and uses the upgrade icon. It is grey when `Off`. A single enabled Enhancement reviews the completed response against the generation-time Prompt Packet, installed cards, scene context, story form, character evidence, and anti-slop profile. It returns only validated local dialogue or prose replacements, never a full-message rewrite. `As Swipe` keeps the original as one swipe and selects the enhanced swipe; `Replace` replaces the active assistant text only after its bounded patches validate. The configured context-message count controls the bounded, sender-aware context window. Low and Medium use Utility; High and Ultra use Reasoner when healthy, with a normal routing fallback to Utility.
+The Enhancement control sits immediately to the right of Cards and uses the upgrade icon. It is grey when `Off`. A single selected Enhancement reviews the completed response against the generation-time Prompt Packet, installed cards, scene context, story form, character evidence, and anti-slop profile. It returns only validated local dialogue or prose replacements, never a full-message rewrite. `As Swipe` keeps the original as one swipe and selects the enhanced swipe; `Replace` replaces the active assistant text only after its bounded patches validate. The configured context-message count controls the bounded, sender-aware context window. Ordinary Repair/Recompose work uses Reasoner only when ready and otherwise follows Utility fallback. Redirect uses Utility at Low and requires ready Reasoner at Medium, High, and Ultra.
 
 The progress menu shows the review, card influence, anti-slop, patch application, and swipe result. Green means a verified outcome, purple means a validated cache reuse, gray means waiting or not applicable, yellow is an explicit recoverable caution, and red is a failure with a reason. When a provider response is malformed or has an incomplete card-outcome ledger, Recursion may make one total correction request. It never adds a second correction because a parser retry and a review-ledger retry are the same budget. A safe patch may still appear as an enhanced swipe after unresolved card coverage, but the parent is reported as `partial-failed` and the unresolved card rows remain red; it is never presented as a successful Enhancement.
 
@@ -185,6 +185,14 @@ The menu offers:
 - `Redirect`: replace a failed trajectory only when diagnosis can establish a supported source failure and a concrete replacement objective.
 
 Choose `As Swipe` to keep the original and select the accepted enhancement, or `Replace` to replace the active assistant text after validation. A successful operation requires exact source/target binding, safe non-overlapping patches, valid evidence references, and complete installed-card outcomes. Redirect also requires all verification checks to pass. A provider result with safe patches but unresolved card coverage is `partial-failed`, not success; unsafe or stale patches are discarded.
+
+At Medium, High, or Ultra, Redirect remains visible but unavailable until the
+Reasoner provider card shows `Ready`. The row explains whether to configure or
+test Reasoner and offers the matching action. If an already-selected Redirect
+loses readiness before the next send, Recursion warns before host generation,
+lets the original response generate normally, then settles Redirect `skipped`
+without diagnosis, writer, or verifier calls. Low Redirect continues through
+Utility.
 
 The progress menu shows the editorial diagnosis, candidate, verification, and settlement rows. Red rows include a user-safe reason such as `provider-failed`, `validation-failed`, `partial-failed`, `requires-regeneration`, or `skipped/no-eligible-target`. These states describe Recursion's review; they do not erase or downgrade the original SillyTavern generation.
 
@@ -323,7 +331,7 @@ Retention caps are local Recursion tuning controls. Lower Source Messages or Sou
 Recursion has two provider lanes:
 
 - Utility: required, default, and used for Arbiter planning, structured card work, provider tests, guidance composition, and fail-soft fallback guidance.
-- Reasoner: optional, selected by Reasoning Level and lane health for synthesis, priority routing, crowded hands, conflicted cards, or subtle composition work.
+- Reasoner: optional, selected by Reasoning Level and a `Ready` capability for synthesis, priority routing, crowded hands, conflicted cards, or subtle composition work.
 
 Each lane may support:
 
@@ -338,7 +346,11 @@ Each lane may support:
 
 Provider fields auto-save when changed. Source changes switch the visible field context immediately while preserving hidden alternate-source values. Session API keys stay in browser-session memory and are never persisted.
 
-Utility must be configured for normal operation. Reasoner can remain disabled; if Medium, High, or Ultra is selected while Reasoner is unavailable, Recursion keeps the selected Reasoning Level and falls back through Utility. See [Provider Setup](PROVIDER_SETUP.md).
+Utility must be configured for normal operation. Reasoner can remain
+unconfigured; if Medium, High, or Ultra is selected while Reasoner is not ready,
+Recursion keeps the selected Reasoning Level and falls back through Utility for
+ordinary work. Medium+ Redirect remains unavailable. See
+[Provider Setup](PROVIDER_SETUP.md).
 
 ## First Run
 
@@ -346,7 +358,7 @@ Use this first-run path:
 
 1. Enable Recursion and confirm the bar mounts.
 2. Configure Utility.
-3. Leave Reasoner disabled unless you need Medium/High/Ultra synthesis; if you enable it, run Test Provider.
+3. Configure and test Reasoner only when you need Medium/High/Ultra synthesis or Medium+ Redirect.
 4. Confirm the power toggle is on.
 5. Leave Tense & PoV on Auto unless the active chat needs a forced story form.
 6. Set Pipeline to Standard, then set mode to Auto.
@@ -385,7 +397,7 @@ Expected behavior:
 - Rapid invalid output or mandatory gap: escalate the current turn to Standard.
 - Bar Regenerate: arm one fresh-next-generation token without starting provider or host generation; the next send or swipe consumes it once, bypasses cached cards, Rapid warm, Fused bundle reuse, and same-turn/swipe packet reuse for that run, then returns to the selected pipeline.
 - Card failure: omit failed cards and keep valid siblings.
-- Reasoner disabled, unhealthy, missing credentials, or failed: compose with Utility.
+- Reasoner unconfigured, untested, unhealthy, or missing credentials: compose ordinary work with Utility; skip Medium+ Redirect before Editorial calls.
 - Player Stop / host generation stop, including the Recursion Bar Stop generation button: abort active Recursion work, stop the host generation when the SillyTavern stop seam is available, clear owned prompt keys, and show skipped/canceled progress rather than a provider warning.
 - Storage write failure: continue with memory state when safe and report a warning.
 - Prompt install failure: allow SillyTavern generation to continue without Recursion guidance.

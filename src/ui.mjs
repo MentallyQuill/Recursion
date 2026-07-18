@@ -240,7 +240,6 @@ const SETTINGS_AUTOSAVE_DATASETS = Object.freeze([
   'recursionSettingIncludeExcerpts'
 ]);
 const PROVIDER_AUTOSAVE_DATASETS = Object.freeze([
-  'recursionProviderEnabled',
   'recursionProviderSource',
   'recursionProviderProfile',
   'recursionProviderBaseUrl',
@@ -1303,12 +1302,6 @@ function settingsDisclosureSection(id, title, children, { defaultOpen = true, to
   return section;
 }
 
-function hiddenCheckedControl({ checked, dataset, ariaLabel }) {
-  const input = checkboxControl({ checked, dataset, ariaLabel });
-  input.hidden = true;
-  return input;
-}
-
 function selectControl({ value, options, dataset, ariaLabel }) {
   const select = el('select', {
     className: 'recursion-input recursion-select',
@@ -1396,12 +1389,18 @@ function controlChecked(root, selector) {
   return root.querySelector(selector)?.checked === true;
 }
 
-function providerStatusText(provider) {
+function providerStatusText(provider, capability = {}) {
   const source = asObject(provider);
-  const status = cleanText(source.lastTest?.status, 'not-run');
-  const model = cleanText(source.resolvedModelLabel || source.openAICompatible?.model);
+  const state = cleanText(asObject(capability).state || source.capability?.state, 'untested').toLowerCase();
+  const status = {
+    ready: 'Ready',
+    unhealthy: 'Unhealthy',
+    unconfigured: 'Configure',
+    untested: 'Untested'
+  }[state] || 'Untested';
+  const model = cleanText(source.openAICompatible?.model);
   const key = source.openAICompatible?.sessionApiKeyPresent ? 'session key loaded' : '';
-  return [titleCase(status, 'Not Run'), model, key].filter(Boolean).join(' - ');
+  return [status, model, key].filter(Boolean).join(' - ');
 }
 
 function setText(root, selector, text) {
@@ -1533,6 +1532,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   const state = step.state || 'pending';
   const providerLane = step.providerLane || 'utility';
   const reason = step.reason || '';
+  const visibleReason = reason && ['warning', 'failed'].includes(state) ? reason : '';
   const firstRender = row.dataset.recursionProgressRendered !== 'true';
   const changed = !firstRender && (
     row.dataset.recursionProgressState !== state
@@ -1552,8 +1552,8 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   setText(row, '[data-recursion-progress-provider-mark]', providerMark(providerLane));
   setText(row, '[data-recursion-progress-label]', label);
   setText(row, '[data-recursion-progress-meta]', meta);
-  setText(row, '[data-recursion-progress-reason]', reason);
-  if (reason && ['warning', 'failed'].includes(state)) addClassName(row, 'has-reason');
+  setText(row, '[data-recursion-progress-reason]', visibleReason);
+  if (visibleReason) addClassName(row, 'has-reason');
   else removeClassName(row, 'has-reason');
   setTooltip(row, tooltipsEnabled, progressStepTooltip({ ...step, label, meta, state, providerLane }, child));
   setTooltip(row.querySelector?.('[data-recursion-progress-provider-mark]'), tooltipsEnabled, `${laneLabel(providerLane)} provider`);
@@ -2974,13 +2974,14 @@ function fetchedModelOptions(models = []) {
 
 function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, options = {}) {
   const source = asObject(provider);
+  const capability = asObject(options.capability || source.capability);
   const fetchState = asObject(asObject(options).modelFetchState);
   const providerUiState = asObject(asObject(options).providerUiState);
   const testState = asObject(providerUiState.test);
   const connectionProfiles = Array.isArray(options.connectionProfiles) ? options.connectionProfiles : null;
   const readinessOptions = connectionProfiles ? { profiles: connectionProfiles } : {};
   const title = lane === 'reasoner' ? 'Reasoner Provider' : 'Utility Provider';
-  const statusText = providerStatusText(source).toLowerCase();
+  const statusText = providerStatusText(source, capability);
   const selectedSource = cleanText(source.source, 'host-current-model');
   const hasProfileConfiguration = selectedSource === 'host-connection-profile' && Boolean(cleanText(source.hostConnectionProfileId));
   const hasDirectConfiguration = selectedSource === 'openai-compatible'
@@ -3018,16 +3019,12 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
     className: 'recursion-provider-body',
     dataset: {
       recursionProviderBody: lane,
+      recursionProviderRevision: String(Number(source.configRevision) || 0),
       ...providerDataset('Body', lane)
     }
   });
   body.hidden = !open;
   renderProviderHiddenDefaults(body, lane, source);
-  body.appendChild(hiddenCheckedControl({
-    checked: lane === 'utility' ? true : source.enabled === true,
-    dataset: providerDataset('Enabled', lane),
-    ariaLabel: `${title} enabled`
-  }));
   body.appendChild(providerReadinessNode(source, lane, readinessOptions));
   const grid = el('div', { className: 'recursion-provider-grid', dataset: { recursionProviderGrid: '' } });
   const sourceControl = selectControl({
@@ -3228,6 +3225,7 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
   ]));
   const connectionProfiles = runtimeConnectionProfiles(view, runtime);
   renderProviderSettings(providersPane, 'utility', settings.providers?.utility || {}, tooltipsEnabled, {
+    capability: settings.providerCapabilities?.utility?.promptPacket,
     modelFetchState: providerModelFetchState.utility,
     providerUiState: {
       disclosureOpen: asObject(asObject(providerUiState).disclosureOpen).utility,
@@ -3236,6 +3234,7 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
     connectionProfiles
   });
   renderProviderSettings(providersPane, 'reasoner', settings.providers?.reasoner || {}, tooltipsEnabled, {
+    capability: settings.providerCapabilities?.reasoner?.promptPacket,
     modelFetchState: providerModelFetchState.reasoner,
     providerUiState: {
       disclosureOpen: asObject(asObject(providerUiState).disclosureOpen).reasoner,
@@ -3612,6 +3611,12 @@ function buildRoot() {
           ENHANCEMENT_APPLY_OPTIONS.map(enhancementApplyChoice)),
         el('div', { className: 'recursion-enhancements-target-list', attrs: { role: 'group', 'aria-label': 'Enhancement target' }, dataset: { recursionEnhancementTargetList: '' } },
           ENHANCEMENT_TARGET_OPTIONS.map(enhancementTargetChoice)),
+        el('button', {
+          className: 'recursion-button recursion-redirect-test-reasoner',
+          text: 'Test Reasoner',
+          attrs: { type: 'button', hidden: '' },
+          dataset: { recursionRedirectTestReasoner: '' }
+        }),
         el('div', { className: 'recursion-editorial-inspector', attrs: { hidden: '' }, dataset: { recursionEditorialInspector: '' } }, [
           el('div', { className: 'recursion-editorial-inspector-heading', text: 'Editorial result', dataset: { recursionEditorialInspectorHeading: '' } }),
           el('div', { className: 'recursion-editorial-inspector-status', text: '', dataset: { recursionEditorialInspectorStatus: '' } }),
@@ -4277,6 +4282,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       ? explicitMode
       : normalizeEnhancementTarget(settings.target);
     const applyMode = normalizeEnhancementApplyMode(settings.applyMode);
+    const reasoningLevel = normalizeReasoningLevel(view.settings?.reasoningLevel);
+    const redirectCapability = asObject(view.settings?.providerCapabilities?.reasoner?.redirect);
+    const redirectAvailable = reasoningLevel === 'low' || redirectCapability.eligible === true;
+    const redirectReason = reasoningLevel === 'low'
+      ? ''
+      : cleanText(redirectCapability.message, 'Reasoner must be tested and ready for Redirect.');
     const label = target === 'off'
       ? 'Off'
       : `${enhancementTargetLabel(target)}, ${enhancementApplyModeLabel(applyMode)}`;
@@ -4285,12 +4296,35 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     setTooltip(enhancementsButton, view.settings?.ui?.tooltipsEnabled !== false, `Enhancements: ${label}`);
     for (const choice of root.querySelectorAll('[data-recursion-enhancement-target-choice]')) {
       const choiceTarget = normalizeEnhancementTarget(choice.dataset.recursionEnhancementTargetChoice);
+      const option = ENHANCEMENT_TARGET_OPTIONS.find((entry) => entry.value === choiceTarget);
+      const canonicalLabel = option?.qualifier
+        ? `${option.label} (${option.qualifier})`
+        : option?.label || enhancementTargetLabel(choiceTarget);
+      const tip = choice.querySelector?.('[data-recursion-enhancement-target-choice-tip]');
+      choice.setAttribute('aria-label', canonicalLabel);
+      choice.setAttribute('title', option?.title || '');
+      if (tip) tip.textContent = option?.tip || '';
       const selected = choiceTarget === target;
+      const unavailable = choiceTarget === 'redirect' && !redirectAvailable;
       choice.className = [
         'recursion-enhancements-choice',
-        selected ? 'is-selected' : ''
+        selected ? 'is-selected' : '',
+        unavailable ? 'is-unavailable' : ''
       ].filter(Boolean).join(' ');
       choice.setAttribute('aria-current', selected ? 'true' : 'false');
+      choice.disabled = unavailable;
+      choice.setAttribute('aria-disabled', unavailable ? 'true' : 'false');
+      if (unavailable) {
+        choice.setAttribute('aria-label', `Redirect (Experimental). Unavailable: ${redirectReason}`);
+        choice.setAttribute('title', redirectReason);
+        if (tip) tip.textContent = `${redirectReason} Test Reasoner below.`;
+      }
+    }
+    const redirectTest = root.querySelector('[data-recursion-redirect-test-reasoner]');
+    if (redirectTest) {
+      redirectTest.hidden = redirectAvailable;
+      redirectTest.setAttribute('aria-label', `Test Reasoner. ${redirectReason}`);
+      redirectTest.setAttribute('title', redirectReason);
     }
     for (const choice of root.querySelectorAll('[data-recursion-enhancement-apply-choice]')) {
       const selected = cleanText(choice.dataset.recursionEnhancementApplyChoice).toLowerCase() === applyMode;
@@ -5477,7 +5511,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const target = event?.target;
     if (!isProviderAutoSaveControl(target)) return;
     const lane = providerLaneFromDataset(target.dataset);
-    runAction(runtime?.updateProvider?.(lane, readProviderPatch(root, lane)), () => {
+    const patch = providerPatchFromControl(target, lane);
+    if (Object.keys(patch).length === 0) return;
+    const body = closestDatasetElement(target, 'recursionProviderBody', settingsPanel);
+    const expectedRevision = Number(body?.dataset?.recursionProviderRevision);
+    runAction(runtime?.updateProviderConfig?.(lane, patch, {
+      expectedRevision: Number.isInteger(expectedRevision) ? expectedRevision : 0
+    }), () => {
       settingsPanelRendered = false;
       update();
     });
@@ -5735,10 +5775,32 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (enhancementTargetChoice) {
       panelRerenderClickEvents?.add(event);
       event?.stopPropagation?.();
+      if (enhancementTargetChoice.disabled === true) {
+        showTransientCurrentStepText(
+          cleanText(
+            currentView().settings?.providerCapabilities?.reasoner?.redirect?.message,
+            'Reasoner must be tested and ready for Redirect.'
+          ),
+          'warning'
+        );
+        return;
+      }
       const target = normalizeEnhancementTarget(enhancementTargetChoice.dataset.recursionEnhancementTargetChoice);
       renderEnhancementsTargetSelection(target);
       const mode = ['repair', 'recompose', 'redirect'].includes(target) ? target : 'off';
       runAction(runtime?.updateSettings?.({ enhancements: { mode } }));
+    }
+    const redirectTestReasoner = control('recursionRedirectTestReasoner');
+    if (redirectTestReasoner) {
+      consumeClickEvent(event);
+      if (asObject(providerUiState.tests.reasoner).running === true) return;
+      providerUiState.tests.reasoner = { running: true };
+      const action = Promise.resolve()
+        .then(() => runtime?.testProvider?.('reasoner'))
+        .finally(() => {
+          providerUiState.tests.reasoner = { running: false };
+        });
+      runAction(action, () => update(), 'Reasoner test failed.');
     }
     const storyFormAutoChoice = control('recursionStoryFormAutoChoice');
     if (storyFormAutoChoice) {
@@ -6074,7 +6136,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       consumeClickEvent(event);
       const lane = providerLaneFromDataset(providerFetchModels.dataset);
       setProviderModelFetchStatus(lane, 'Fetching models...');
-      runAction(Promise.resolve(runtime?.fetchProviderModels?.(lane, readProviderPatch(root, lane)))
+      runAction(Promise.resolve(runtime?.fetchProviderModels?.(lane, readProviderDiscoveryPatch(root, lane)))
         .then((result) => applyProviderModelFetchResult(lane, result || {
           ok: false,
           error: { message: 'Model fetch is unavailable.' }
@@ -6210,7 +6272,15 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       return;
     }
     result
-      .then(() => {
+      .then((outcome) => {
+        if (outcome?.ok === false) {
+          const detail = outcome.error;
+          const error = detail instanceof Error
+            ? detail
+            : new Error(cleanText(detail?.message || failureLabel, failureLabel));
+          if (detail?.code) error.code = cleanText(detail.code);
+          throw error;
+        }
         uiActionStatus.clear();
         after?.();
         update();
@@ -6340,21 +6410,35 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     };
   }
 
-  function readProviderPatch(sourceRoot, lane) {
-    const apiKey = controlValue(sourceRoot, providerSelector('api-key', lane));
-    const providerDefaults = DEFAULT_RECURSION_SETTINGS.providers[lane] || DEFAULT_RECURSION_SETTINGS.providers.utility;
-    const patch = {
-      enabled: lane === 'utility' ? true : controlChecked(sourceRoot, providerSelector('enabled', lane)),
-      source: controlValue(sourceRoot, providerSelector('source', lane)),
-      hostConnectionProfileId: controlValue(sourceRoot, providerSelector('profile', lane)),
-      openAICompatible: {
-        baseUrl: controlValue(sourceRoot, providerSelector('base-url', lane)),
-        model: controlValue(sourceRoot, providerSelector('model', lane))
-      },
-      temperature: controlNumber(sourceRoot, providerSelector('temperature', lane), lane === 'reasoner' ? 0.4 : 0.1),
-      topP: controlNumber(sourceRoot, providerSelector('top-p', lane), 0.95),
-      maxTokens: controlNumber(sourceRoot, providerSelector('max-tokens', lane), providerDefaults.maxTokens)
+  function providerPatchFromControl(control, lane) {
+    const dataset = asObject(control?.dataset);
+    const value = String(control?.value ?? '').trim();
+    const has = (name) => Object.prototype.hasOwnProperty.call(
+      dataset,
+      `recursionProvider${name}${titleCase(lane)}`
+    );
+    if (has('Source')) return { source: value || 'host-current-model' };
+    if (has('Profile')) return { hostConnectionProfileId: value };
+    if (has('BaseUrl')) return { openAICompatible: { baseUrl: value } };
+    if (has('Model') || has('ModelList')) return value ? { openAICompatible: { model: value } } : {};
+    if (has('ApiKey')) return value ? { apiKey: value } : {};
+    if (has('Temperature')) return { temperature: Number(value) };
+    if (has('TopP')) return { topP: Number(value) };
+    if (has('MaxTokens')) return {
+      maxTokens: Number.isFinite(Number(value))
+        ? Number(value)
+        : DEFAULT_RECURSION_SETTINGS.providers[lane]?.maxTokens || 8192
     };
+    return {};
+  }
+
+  function readProviderDiscoveryPatch(sourceRoot, lane) {
+    const apiKey = controlValue(sourceRoot, providerSelector('api-key', lane));
+    const patch = providerFromControls(
+      sourceRoot,
+      lane,
+      currentView().settings?.providers?.[lane] || {}
+    );
     if (apiKey) patch.apiKey = apiKey;
     return patch;
   }

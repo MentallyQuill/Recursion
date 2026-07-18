@@ -3,6 +3,7 @@ import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createGenerationRouter } from '../../src/providers.mjs';
+import { providerConfigHash } from '../../src/provider-capability.mjs';
 import { hashJson } from '../../src/core.mjs';
 import { REDIRECT_ERROR_CODES, REDIRECT_VERIFICATION_CHECKS } from '../../src/editorial-transform.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -499,7 +500,8 @@ function createRedirectHarness({
   diagnosisProviderFailureOnFirst = false,
   transformProviderFailures = 0,
   candidateOverride = null,
-  reasonerAvailable = true,
+  reasonerCapability = 'ready',
+  mutateReasonerAfterDiagnosis = false,
   pressureReason = 'The source blocks the immediate test.'
 } = {}) {
   const state = {
@@ -509,13 +511,18 @@ function createRedirectHarness({
     verifierAttempts: 0,
     appended: [],
     selected: [],
+    activityEvents: [],
     persistedMarker: null,
     reusePersisted: false,
     verifierFinished: false,
     message: { messageId: 48, chatKey: `redirect-runtime-${Math.random()}`, swipeId: 0, text: redirectSource, swipes: [redirectSource] }
   };
   const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
-  const activity = createActivityReporter();
+  const activity = createActivityReporter({
+    onEvent(event) {
+      state.activityEvents.push(event);
+    }
+  });
   const host = {
     async snapshot() {
       return {
@@ -561,9 +568,25 @@ function createRedirectHarness({
     },
     prompt: { async install() { return { ok: true }; }, async clear() { return { ok: true }; } }
   };
+  let settingsStore = null;
   const generationRouter = {
     async generate(roleId, request, options) {
       state.calls.push({ roleId, request, options });
+      if (roleId === 'utilityArbiter') {
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.utilityArbiter.v1',
+            snapshotHash: request.snapshotHash,
+            action: 'skip',
+            sceneStatus: 'same-scene',
+            cardJobs: [],
+            reasonerDecision: { mode: 'skip', reason: 'Redirect capability preflight fixture.', signals: [] },
+            budgets: { targetBriefTokens: 500, maxCards: 4 },
+            diagnostics: ['redirect-capability-preflight']
+          }
+        };
+      }
       if (roleId === 'editorialDiagnostician') {
         state.diagnosisAttempts += 1;
         if (diagnosisProviderFailureOnFirst && state.diagnosisAttempts === 1) {
@@ -601,6 +624,9 @@ function createRedirectHarness({
             pressureReason
           }]
         };
+        if (mutateReasonerAfterDiagnosis) {
+          settingsStore.updateProviderConfig('reasoner', { maxTokens: 4096 });
+        }
         return {
           ok: true,
           data: typeof diagnosisOverride === 'function'
@@ -673,14 +699,23 @@ function createRedirectHarness({
       throw new Error(`Unexpected Redirect role ${roleId}`);
     }
   };
-  const settingsStore = createSettingsStore({ root: {} });
-  if (reasonerAvailable) {
-    settingsStore.updateProvider('reasoner', {
-      enabled: true,
+  settingsStore = createSettingsStore({ root: {} });
+  if (reasonerCapability === 'unconfigured') {
+    settingsStore.updateProviderConfig('reasoner', {
       source: 'host-connection-profile',
-      hostConnectionProfileId: 'reasoner-test-profile'
+      hostConnectionProfileId: ''
     });
-    settingsStore.updateProvider('reasoner', { lastTest: { status: 'pass', checkedAt: new Date().toISOString() } });
+  } else if (reasonerCapability === 'ready' || reasonerCapability === 'unhealthy') {
+    const reasoner = settingsStore.get().providers.reasoner;
+    settingsStore.recordProviderHealth('reasoner', {
+      status: reasonerCapability === 'ready' ? 'pass' : 'fail',
+      checkedAt: new Date().toISOString(),
+      errorCode: reasonerCapability === 'unhealthy' ? 'RECURSION_TEST_PROVIDER_FAILED' : '',
+      message: reasonerCapability === 'unhealthy' ? 'Reasoner health check failed.' : ''
+    }, {
+      configHash: providerConfigHash(reasoner),
+      configRevision: reasoner.configRevision
+    });
   }
   const runtime = createRecursionRuntime({
     host,
@@ -713,6 +748,14 @@ assertEqual(
   'increasing',
   'runtime verifier receives the private character-pressure finding it must judge'
 );
+
+const decayedRedirect = createRedirectHarness({ mutateReasonerAfterDiagnosis: true });
+await decayedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
+const decayedRedirectResult = await decayedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-capability-decay-test' });
+assertEqual(decayedRedirectResult.ok, true, 'Redirect capability decay settles as a safe skip');
+assertEqual(decayedRedirectResult.skipped, true, 'Redirect capability decay does not continue Editorial');
+assertEqual(decayedRedirect.state.calls.length, 1, 'configuration change after diagnosis prevents writer and verifier calls');
+assertEqual(decayedRedirect.state.appended.length, 0, 'configuration change after diagnosis preserves the original response');
 assertEqual(acceptedRedirectResult.marker.applyMode, 'as-swipe', 'Redirect forces swipe application');
 assertEqual(acceptedRedirectResult.marker.verification, 'accept', 'accepted verifier status persists');
 assertEqual(acceptedRedirectResult.marker.redirect.characterPressure[0].character, 'Carter', 'private pressure audit persists in the marker');
@@ -728,7 +771,7 @@ assertEqual(acceptedRedirectSettlement.details.redirectCharacterCount, 1, 'Redir
 assertEqual(acceptedRedirectSettlement.details.redirectRequiredBeatCount, 1, 'Redirect journal records required-beat count only');
 assert(!JSON.stringify(acceptedRedirectSettlement).includes(privateRedirectSentinel), 'Redirect journal excludes private pressure text');
 
-const reasonerVerifiedRedirect = createRedirectHarness({ reasonerAvailable: true });
+const reasonerVerifiedRedirect = createRedirectHarness({ reasonerCapability: 'ready' });
 await reasonerVerifiedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const reasonerVerifiedResult = await reasonerVerifiedRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-reasoner-verifier-test' });
 assertEqual(reasonerVerifiedResult.ok, true, 'Medium Redirect succeeds with an independent healthy Reasoner verifier');
@@ -748,7 +791,7 @@ assertEqual(
   'Redirect verification prefers a healthy independent Reasoner'
 );
 
-const lowUtilityRedirect = createRedirectHarness({ reasonerAvailable: false });
+const lowUtilityRedirect = createRedirectHarness({ reasonerCapability: 'untested' });
 await lowUtilityRedirect.runtime.updateSettings({ reasoningLevel: 'low', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const lowUtilityResult = await lowUtilityRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-low-utility-writer-test' });
 assertEqual(lowUtilityResult.ok, true, 'Low Redirect succeeds with a Utility writer');
@@ -758,21 +801,69 @@ assertEqual(
   'Low Redirect final writing stays on Utility'
 );
 
-const disabledMediumRedirect = createRedirectHarness({ reasonerAvailable: false });
-await disabledMediumRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
-const disabledMediumResult = await disabledMediumRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-disabled-reasoner-preflight-test' });
-assertEqual(disabledMediumResult.ok, false, 'Medium Redirect fails when its required Reasoner writer is explicitly disabled');
-assertEqual(disabledMediumResult.error?.code, 'RECURSION_REASONER_DISABLED', 'disabled Medium Redirect reports the exact configuration error');
-assertEqual(disabledMediumRedirect.state.calls.length, 0, 'disabled Medium Redirect fails before spending a Utility diagnosis call');
-assertEqual(disabledMediumRedirect.state.appended.length, 0, 'disabled Medium Redirect preserves the original response');
-assertEqual(
-  disabledMediumRedirect.runtime.view().activity?.detail?.failure?.message,
-  'Reasoner provider lane is disabled. Enable Reasoner in Providers or select Low reasoning.',
-  'disabled Medium Redirect gives an actionable visible reason'
-);
+for (const reasonerCapability of ['unconfigured', 'untested', 'unhealthy']) {
+  const blockedMediumRedirect = createRedirectHarness({ reasonerCapability });
+  await blockedMediumRedirect.runtime.updateSettings({
+    reasoningLevel: 'medium',
+    enhancements: { mode: 'redirect', applyMode: 'as-swipe' }
+  });
+  const setup = await blockedMediumRedirect.runtime.prepareForGeneration({
+    userMessage: 'Carter wants to test the transport method now.',
+    hostGeneration: true
+  });
+  assertEqual(setup.ok, true, `Medium Redirect ${reasonerCapability} preflight preserves host generation`);
+  const preflightWarning = blockedMediumRedirect.state.activityEvents.find((event) => (
+    event.phase === 'editorialPreflight'
+    && event.severity === 'warning'
+  ));
+  assertEqual(
+    Boolean(preflightWarning),
+    true,
+    `Medium Redirect ${reasonerCapability} warns before assistant processing`
+  );
+  assertEqual(
+    preflightWarning?.detail?.state,
+    reasonerCapability,
+    `Medium Redirect ${reasonerCapability} warning names the capability state`
+  );
+  assertEqual(
+    blockedMediumRedirect.state.calls.some((call) => [
+      'editorialDiagnostician',
+      'editorialTransformer',
+      'editorialVerifier'
+    ].includes(call.roleId)),
+    false,
+    `Medium Redirect ${reasonerCapability} preflight makes no Editorial provider calls`
+  );
+  const blockedResult = await blockedMediumRedirect.runtime.enhanceLatestAssistantMessage({
+    reason: 'assistant-message-landed'
+  });
+  assertEqual(blockedResult.ok, true, `Medium Redirect ${reasonerCapability} settles without a critical error`);
+  assertEqual(blockedResult.skipped, true, `Medium Redirect ${reasonerCapability} settles skipped`);
+  assertEqual(
+    blockedMediumRedirect.runtime.view().editorialResult?.status,
+    'skipped',
+    `Medium Redirect ${reasonerCapability} records a skipped Editorial outcome`
+  );
+  assertEqual(
+    blockedMediumRedirect.state.calls.some((call) => [
+      'editorialDiagnostician',
+      'editorialTransformer',
+      'editorialVerifier'
+    ].includes(call.roleId)),
+    false,
+    `Medium Redirect ${reasonerCapability} makes no diagnosis, transform, or verifier call`
+  );
+  assertEqual(blockedMediumRedirect.state.appended.length, 0, `Medium Redirect ${reasonerCapability} adds no swipe`);
+  assertEqual(
+    blockedMediumRedirect.state.message.text,
+    redirectSource,
+    `Medium Redirect ${reasonerCapability} preserves the original assistant response`
+  );
+}
 
 for (const reasoningLevel of ['high', 'ultra']) {
-  const reasonerWriterRedirect = createRedirectHarness({ reasonerAvailable: true });
+  const reasonerWriterRedirect = createRedirectHarness({ reasonerCapability: 'ready' });
   await reasonerWriterRedirect.runtime.updateSettings({ reasoningLevel, enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
   const reasonerWriterResult = await reasonerWriterRedirect.runtime.enhanceLatestAssistantMessage({ reason: `redirect-${reasoningLevel}-reasoner-writer-test` });
   assertEqual(reasonerWriterResult.ok, true, `${reasoningLevel} Redirect succeeds with a Reasoner writer`);
@@ -784,7 +875,7 @@ for (const reasoningLevel of ['high', 'ultra']) {
 }
 
 const exhaustedReasonerWriter = createRedirectHarness({
-  reasonerAvailable: true,
+  reasonerCapability: 'ready',
   transformProviderFailures: 2
 });
 await exhaustedReasonerWriter.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
@@ -866,7 +957,7 @@ assert(
 );
 
 const reasonerCorrectedRedirect = createRedirectHarness({
-  reasonerAvailable: true,
+  reasonerCapability: 'ready',
   diagnosisProviderFailureOnFirst: true
 });
 await reasonerCorrectedRedirect.runtime.updateSettings({ reasoningLevel: 'medium', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
@@ -886,7 +977,7 @@ assert(reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'e
 assertEqual(reasonerCorrectedRedirect.state.appended.length, 1, 'Reasoner-corrected Redirect appends one verified swipe');
 
 const utilityCorrectedRedirect = createRedirectHarness({
-  reasonerAvailable: false,
+  reasonerCapability: 'untested',
   diagnosisOverride: (value, attempt) => attempt === 1
     ? {
         schema: value.schema,
@@ -1083,13 +1174,14 @@ assertEqual(missingDirectionRedirect.state.appended.length, 0, 'missing Redirect
 
 const effectivenessCalls = [];
 const effectivenessSettings = createSettingsStore({ root: {} });
-effectivenessSettings.updateProvider('reasoner', {
-  enabled: true,
-  source: 'host-connection-profile',
-  hostConnectionProfileId: 'effectiveness-reasoner-profile'
-});
-effectivenessSettings.updateProvider('reasoner', {
-  lastTest: { status: 'pass', checkedAt: new Date().toISOString() }
+effectivenessSettings.updateProviderConfig('reasoner', { source: 'host-current-model' });
+const effectivenessReasoner = effectivenessSettings.get().providers.reasoner;
+effectivenessSettings.recordProviderHealth('reasoner', {
+  status: 'pass',
+  checkedAt: new Date().toISOString()
+}, {
+  configHash: providerConfigHash(effectivenessReasoner),
+  configRevision: effectivenessReasoner.configRevision
 });
 const effectivenessRuntime = createRecursionRuntime({
   host: {},

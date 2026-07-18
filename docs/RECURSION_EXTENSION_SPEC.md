@@ -84,7 +84,7 @@ Recursion does not own:
 5. Standard validates the Arbiter plan, enforces schema and budget caps, applies current behavior policy and card-scope policy, and executes requested card jobs from one frozen snapshot.
 6. Standard updates the scene deck with generated, refreshed, stowed, discarded, or stale cards, then passes the selected turn hand to prompt composition.
 7. Rapid uses exact-source warm provider artifacts when available; when no warm artifact is ready it continues through Standard.
-8. Utility `guidanceComposer` builds the guidance layer, Reasoner Composer assists when enabled and justified, and Standard, Rapid, and Fused preserve full selected raw card evidence in the normal prompt-install contract.
+8. Utility `guidanceComposer` builds the guidance layer, Reasoner Composer assists when the shared capability resolver reports it ready and policy selects it, and Standard, Rapid, and Fused preserve full selected raw card evidence in the normal prompt-install contract.
 9. Runtime validates the packet and installs it through Recursion-owned SillyTavern prompt keys.
 10. The UI and storage layers receive sanitized diagnostics and latest-hand metadata.
 

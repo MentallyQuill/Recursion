@@ -15,11 +15,39 @@ import {
 } from '../../src/providers.mjs';
 import { readFileSync } from 'node:fs';
 import { createActivityReporter } from '../../src/activity.mjs';
+import { providerConfigHash } from '../../src/provider-capability.mjs';
 import { createSessionSecretStore, createSettingsStore } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 function createStore() {
   return createSettingsStore({ root: {}, secretStore: createSessionSecretStore() });
+}
+
+function updateProviderConfig(store, lane, patch = {}) {
+  const result = store.updateProviderConfig(lane, patch);
+  assertEqual(result.ok, true, `${lane} provider configuration update succeeds`);
+  return result.provider;
+}
+
+function recordProviderHealth(store, lane, status = 'pass', fields = {}) {
+  const provider = store.get().providers[lane];
+  const result = store.recordProviderHealth(lane, {
+    status,
+    checkedAt: '2026-07-17T00:00:00.000Z',
+    source: 'provider-boundary-test',
+    ...(status === 'fail' ? { compactError: 'Provider readiness test failed.' } : {}),
+    ...fields
+  }, {
+    configHash: providerConfigHash(provider),
+    configRevision: provider.configRevision
+  });
+  assertEqual(result.ok, true, `${lane} provider health update succeeds`);
+  return result.provider;
+}
+
+function configureReadyProvider(store, lane, patch = {}) {
+  updateProviderConfig(store, lane, patch);
+  return recordProviderHealth(store, lane);
 }
 
 function assertNoSecret(value, message) {
@@ -94,7 +122,7 @@ const expectedUtilityRoles = [
 assertDeepEqual(UTILITY_ROLE_IDS, expectedUtilityRoles, 'utility role catalog exactly matches Task 6 plan');
 assert(!UTILITY_ROLE_IDS.includes('briefUtilityComposer'), 'old brief utility composer role is removed');
 assertDeepEqual(REASONER_ROLE_IDS, ['reasonerComposer'], 'reasoner role catalog exactly matches Task 6 plan');
-assertEqual(PROVIDER_CONTRACT_VERSION, 4, 'provider contract version advances for the effectiveness judge role');
+assertEqual(PROVIDER_CONTRACT_VERSION, 5, 'provider contract version advances for shared capability enforcement');
 for (const utilityRole of expectedUtilityRoles) {
   assertEqual(roleLane(utilityRole), 'utility', `${utilityRole} uses utility lane`);
 }
@@ -155,19 +183,31 @@ const directValidation = validateProviderConfiguration({
 assertEqual(directValidation.ready, false, 'OpenAI-compatible validation catches missing setup');
 assertDeepEqual(
   directValidation.missing,
-  ['baseUrl', 'model', 'sessionApiKey'],
-  'OpenAI-compatible validation names missing setup fields'
+  ['baseUrl'],
+  'OpenAI-compatible validation exposes the shared capability blocker'
 );
 
+const routeSummaryStore = createStore();
+configureReadyProvider(routeSummaryStore, 'reasoner');
 const routeSummary = providerRouteSummary({
-  reasoningLevel: 'high',
-  providers: {
-    reasoner: { enabled: true, lastTest: { status: 'pass' } }
-  }
+  ...routeSummaryStore.get(),
+  reasoningLevel: 'high'
+}, {
+  currentModelAvailable: true
 });
 assertEqual(routeSummary.level, 'high', 'provider route summary tracks reasoning level');
+assertEqual(routeSummary.reasonerHealthy, true, 'provider route summary consumes ready shared Reasoner capability');
 assert(routeSummary.text.includes('Arbiter: Reasoner'), 'provider route summary exposes Reasoner Arbiter route');
 assert(routeSummary.text.includes('Composer: Reasoner'), 'provider route summary exposes Reasoner composer route');
+recordProviderHealth(routeSummaryStore, 'reasoner', 'fail');
+const unhealthyRouteSummary = providerRouteSummary({
+  ...routeSummaryStore.get(),
+  reasoningLevel: 'high'
+}, {
+  currentModelAvailable: true
+});
+assertEqual(unhealthyRouteSummary.reasonerHealthy, false, 'provider route summary consumes unhealthy shared Reasoner capability');
+assert(unhealthyRouteSummary.text.includes('Utility fallback'), 'provider route summary exposes Utility fallback for unhealthy Reasoner');
 
 const modelFetchCalls = [];
 const fetchedModels = await fetchOpenAICompatibleModels({
@@ -758,7 +798,7 @@ assertEqual(rawReviewResult.ok, false, 'generationReviewer rejects raw text beca
 assertEqual(rawReviewResult.error.code, 'RECURSION_JSON_PARSE_FAILED', 'generationReviewer raw text has a stable parse error');
 
 store.update({ reasonerUse: 'always' });
-store.updateProvider('reasoner', { enabled: true });
+configureReadyProvider(store, 'reasoner');
 const reasoner = await router.generate('reasonerComposer', { prompt: 'Reason' });
 assertEqual(reasoner.ok, true, 'reasoner route succeeds');
 assertEqual(calls.at(-1).lane, 'reasoner', 'reasoner lane selected');
@@ -833,6 +873,11 @@ assertEqual(wrongSchemaBatch[1].error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH'
 const schemaOmittedReviewRouter = createGenerationRouter({
   client: createProviderClient({
     host: {
+      providerProfiles: {
+        list() {
+          return [{ id: 'reasoner-profile', name: 'Reasoner profile' }];
+        }
+      },
       generation: {
         async generate() {
           return {
@@ -885,19 +930,24 @@ const staleReview = await staleReviewRouter.generate('generationReviewer', {
 assertEqual(staleReview.ok, false, 'generation reviewer does not normalize a nonempty wrong source hash');
 assertEqual(staleReview.error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'wrong reviewer source remains a provider schema failure before patch application');
 
-const disabledReasonerProviderTestCalls = [];
-const disabledReasonerProviderTestStore = createStore();
-disabledReasonerProviderTestStore.updateProvider('reasoner', {
-  enabled: false,
+const unhealthyReasonerProviderTestCalls = [];
+const unhealthyReasonerProviderTestStore = createStore();
+updateProviderConfig(unhealthyReasonerProviderTestStore, 'reasoner', {
   source: 'host-connection-profile',
   hostConnectionProfileId: 'reasoner-profile'
 });
-const disabledReasonerProviderTestRouter = createGenerationRouter({
+recordProviderHealth(unhealthyReasonerProviderTestStore, 'reasoner', 'fail');
+const unhealthyReasonerProviderTestRouter = createGenerationRouter({
   client: createProviderClient({
     host: {
+      providerProfiles: {
+        list() {
+          return [{ id: 'reasoner-profile', name: 'Reasoner profile' }];
+        }
+      },
       generation: {
         async generate(request) {
-          disabledReasonerProviderTestCalls.push(request);
+          unhealthyReasonerProviderTestCalls.push(request);
           return {
             text: responseTextForRole(request.roleId),
             providerId: 'deepseek',
@@ -906,31 +956,31 @@ const disabledReasonerProviderTestRouter = createGenerationRouter({
         }
       }
     },
-    settingsStore: disabledReasonerProviderTestStore
+    settingsStore: unhealthyReasonerProviderTestStore
   })
 });
-const disabledReasonerProviderTest = await disabledReasonerProviderTestRouter.generate('providerTest', {
+const unhealthyReasonerProviderTest = await unhealthyReasonerProviderTestRouter.generate('providerTest', {
   lane: 'reasoner',
-  prompt: 'Reasoner provider test while lane is disabled.'
+  prompt: 'Reasoner provider test while prior health is unhealthy.'
 });
-assertEqual(disabledReasonerProviderTest.ok, true, 'provider test can validate a configured disabled Reasoner lane');
-assertEqual(disabledReasonerProviderTestCalls.length, 1, 'disabled Reasoner provider test calls host once');
-assertEqual(disabledReasonerProviderTestCalls[0].lane, 'reasoner', 'disabled Reasoner provider test keeps the requested lane');
-assertEqual(disabledReasonerProviderTestCalls[0].roleId, 'providerTest', 'disabled Reasoner provider test keeps providerTest role');
-assertEqual(disabledReasonerProviderTestCalls[0].providerSource, 'host-connection-profile', 'disabled Reasoner provider test uses selected Reasoner provider source');
+assertEqual(unhealthyReasonerProviderTest.ok, true, 'provider test can validate a testable Reasoner regardless of prior health');
+assertEqual(unhealthyReasonerProviderTestCalls.length, 1, 'unhealthy Reasoner provider test calls host once');
+assertEqual(unhealthyReasonerProviderTestCalls[0].lane, 'reasoner', 'Reasoner provider test keeps the requested lane');
+assertEqual(unhealthyReasonerProviderTestCalls[0].roleId, 'providerTest', 'Reasoner provider test keeps providerTest role');
+assertEqual(unhealthyReasonerProviderTestCalls[0].providerSource, 'host-connection-profile', 'Reasoner provider test uses selected provider source');
 
 const reasonerOverrideStore = createStore();
 const reasonerOverrideRouter = createGenerationRouter({
   client: createProviderClient({ host, settingsStore: reasonerOverrideStore })
 });
-const disabledLaneOverride = await reasonerOverrideRouter.generate('utilityArbiter', { lane: 'reasoner', prompt: 'Disabled reasoner override' });
-assertEqual(disabledLaneOverride.ok, false, 'utility role cannot use disabled reasoner lane');
-assertEqual(disabledLaneOverride.error.code, 'RECURSION_REASONER_DISABLED', 'disabled lane override exposes reasoner disabled code');
+const untestedLaneOverride = await reasonerOverrideRouter.generate('utilityArbiter', { lane: 'reasoner', prompt: 'Untested reasoner override' });
+assertEqual(untestedLaneOverride.ok, false, 'utility role cannot use untested Reasoner lane');
+assertEqual(untestedLaneOverride.error.code, 'RECURSION_PROVIDER_NOT_READY', 'untested lane override exposes stable readiness code');
 reasonerOverrideStore.update({ reasonerUse: 'always' });
-reasonerOverrideStore.updateProvider('reasoner', { enabled: true });
-const enabledLaneOverride = await reasonerOverrideRouter.generate('utilityArbiter', { lane: 'reasoner', prompt: 'Enabled reasoner override' });
-assertEqual(enabledLaneOverride.ok, true, 'utility role can use enabled explicit reasoner lane');
-assertEqual(calls.at(-1).lane, 'reasoner', 'explicit reasoner lane override applied when enabled');
+recordProviderHealth(reasonerOverrideStore, 'reasoner');
+const readyLaneOverride = await reasonerOverrideRouter.generate('utilityArbiter', { lane: 'reasoner', prompt: 'Ready reasoner override' });
+assertEqual(readyLaneOverride.ok, true, 'utility role can use ready explicit Reasoner lane');
+assertEqual(calls.at(-1).lane, 'reasoner', 'explicit Reasoner lane override applied when ready');
 
 const malformedHost = {
   generation: {
@@ -1304,28 +1354,43 @@ const nonTransient = await nonTransientRouter.generate('utilityArbiter', { promp
 assertEqual(nonTransient.ok, false, 'non-transient failure returns failure result');
 assertEqual(nonTransientAttempts, 1, 'non-transient failure is not retried');
 
-const disabledReasonerCalls = [];
-const disabledReasonerRouter = createGenerationRouter({
-  client: createProviderClient({
-    host: {
-      generation: {
-        async generate(request) {
-          disabledReasonerCalls.push(request);
-          return { text: '{"schema":"should.not.call"}' };
+async function rejectedReasonerForState(state) {
+  const generationCalls = [];
+  const settingsStore = createStore();
+  if (state === 'unconfigured') {
+    updateProviderConfig(settingsStore, 'reasoner', {
+      source: 'openai-compatible',
+      openAICompatible: { baseUrl: '', model: '' }
+    });
+  }
+  if (state === 'unhealthy') recordProviderHealth(settingsStore, 'reasoner', 'fail');
+  const stateRouter = createGenerationRouter({
+    client: createProviderClient({
+      host: {
+        generation: {
+          async generate(request) {
+            generationCalls.push(request);
+            return { text: '{"schema":"should.not.call"}' };
+          }
         }
-      }
-    },
-    settingsStore: createStore()
-  })
-});
-const disabledReasoner = await disabledReasonerRouter.generate('reasonerComposer', { prompt: 'Reason disabled' });
-assertEqual(disabledReasoner.ok, false, 'disabled reasoner returns failure result');
-assertEqual(disabledReasoner.error.code, 'RECURSION_REASONER_DISABLED', 'disabled reasoner exposes stable code');
-assertEqual(disabledReasonerCalls.length, 0, 'disabled reasoner does not call host');
+      },
+      settingsStore
+    })
+  });
+  const result = await stateRouter.generate('reasonerComposer', { prompt: `Reasoner ${state}` });
+  return { result, generationCalls };
+}
+
+for (const state of ['unconfigured', 'untested', 'unhealthy']) {
+  const rejected = await rejectedReasonerForState(state);
+  assertEqual(rejected.result.ok, false, `${state} Reasoner returns failure result`);
+  assertEqual(rejected.result.error.code, 'RECURSION_PROVIDER_NOT_READY', `${state} Reasoner exposes stable readiness code`);
+  assertEqual(rejected.generationCalls.length, 0, `${state} Reasoner does not call host`);
+}
 
 let missingKeyFetches = 0;
 const missingKeyStore = createStore();
-missingKeyStore.updateProvider('utility', {
+updateProviderConfig(missingKeyStore, 'utility', {
   source: 'openai-compatible',
   openAICompatible: { baseUrl: 'https://example.test/v1', model: 'utility-model' }
 });
@@ -1817,7 +1882,7 @@ assertEqual(badBatchCode, 'RECURSION_PROVIDER_BATCH_INVALID', 'host batch valida
 
 const fetchCalls = [];
 const openAiStore = createStore();
-openAiStore.updateProvider('utility', {
+updateProviderConfig(openAiStore, 'utility', {
   source: 'openai-compatible',
   apiKey: 'session-key',
   openAICompatible: { baseUrl: 'https://provider.test/v1/', model: 'utility-model' },
@@ -1881,8 +1946,7 @@ async function captureReasoningBody({
 } = {}) {
   const calls = [];
   const store = createStore();
-  store.updateProvider('reasoner', {
-    enabled: true,
+  configureReadyProvider(store, 'reasoner', {
     source: 'openai-compatible',
     apiKey: 'session-key',
     openAICompatible: { baseUrl, model },
@@ -2019,7 +2083,7 @@ assertEqual(downgradedReasoning.result.ok, true, 'downgraded reasoning retry suc
 assertEqual(downgradedReasoning.result.diagnostics.reasoningDowngraded, true, 'diagnostics record reasoning downgrade');
 
 const invalidUrlStore = createStore();
-invalidUrlStore.updateProvider('utility', {
+updateProviderConfig(invalidUrlStore, 'utility', {
   source: 'openai-compatible',
   apiKey: 'session-key',
   openAICompatible: { baseUrl: 'not a url', model: 'utility-model' }
@@ -2039,7 +2103,7 @@ assertEqual(invalidUrlResult.error.code, 'RECURSION_PROVIDER_CONFIG_INVALID', 'i
 assertEqual(invalidUrlFetches, 0, 'invalid base url does not call fetch');
 
 const invalidProtocolStore = createStore();
-invalidProtocolStore.updateProvider('utility', {
+updateProviderConfig(invalidProtocolStore, 'utility', {
   source: 'openai-compatible',
   apiKey: 'session-key',
   openAICompatible: { baseUrl: 'ftp://provider.test/v1', model: 'utility-model' }
@@ -2059,7 +2123,7 @@ assertEqual(invalidProtocolResult.error.code, 'RECURSION_PROVIDER_CONFIG_INVALID
 assertEqual(invalidProtocolFetches, 0, 'invalid protocol does not call fetch');
 
 const badJsonStore = createStore();
-badJsonStore.updateProvider('utility', {
+updateProviderConfig(badJsonStore, 'utility', {
   source: 'openai-compatible',
   apiKey: 'session-key',
   openAICompatible: { baseUrl: 'https://bad-json.test/v1', model: 'utility-model' }
@@ -2079,16 +2143,10 @@ assertEqual(badJsonResult.ok, false, 'bad provider response json returns failure
 assertEqual(badJsonResult.error.code, 'RECURSION_PROVIDER_RESPONSE_JSON_INVALID', 'bad response json exposes stable code');
 
 const authFailureStore = createStore();
-authFailureStore.updateProvider('reasoner', {
-  enabled: true,
+configureReadyProvider(authFailureStore, 'reasoner', {
   source: 'openai-compatible',
   apiKey: 'sk-live-secret',
   openAICompatible: { baseUrl: 'https://auth-failure.test/v1', model: 'reasoner-model' }
-});
-authFailureStore.updateProvider('reasoner', {
-  resolvedProviderLabel: 'stale-provider',
-  resolvedModelLabel: 'stale-model',
-  lastTest: { status: 'pass', checkedAt: '2026-07-01T00:00:00.000Z' }
 });
 let authFailureFetches = 0;
 const authFailureResult = await createGenerationRouter({
@@ -2110,10 +2168,7 @@ assertEqual(authFailureResult.error.code, 'RECURSION_PROVIDER_AUTH_FAILED', 'ope
 assertEqual(authFailureResult.diagnostics.failure.category, 'provider-account', 'auth failure exposes normalized account category');
 assertEqual(authFailureResult.diagnostics.failure.message, 'Provider authentication failed.', 'auth failure explains the failure');
 assertEqual(authFailureFetches, 1, 'openai auth failure is not retried');
-assertEqual(authFailureReasoner.lastTest.status, 'fail', 'openai auth failure marks lane test status failed');
-assertEqual(authFailureReasoner.lastTest.compactError, 'OpenAI-compatible authentication failed.', 'openai auth failure records stable compact error');
-assertEqual(authFailureReasoner.resolvedProviderLabel, '', 'openai auth failure clears stale provider label');
-assertEqual(authFailureReasoner.resolvedModelLabel, '', 'openai auth failure clears stale model label');
+assertEqual(authFailureReasoner.health.status, 'not-run', 'openai auth failure invalidates health when the key is cleared');
 assertEqual(authFailureReasoner.openAICompatible.sessionApiKeyPresent, false, 'openai auth failure clears invalid session key');
 assertEqual(authFailureReasoner.openAICompatible.baseUrl, 'https://auth-failure.test/v1', 'openai auth failure preserves non-secret base URL');
 assertEqual(authFailureReasoner.openAICompatible.model, 'reasoner-model', 'openai auth failure preserves non-secret model');
@@ -2121,7 +2176,7 @@ assertNoSecret(authFailureResult, 'openai auth failure result redacts session ke
 assertNoSecret(authFailureReasoner, 'openai auth failure provider health redacts session key');
 
 const forbiddenAuthStore = createStore();
-forbiddenAuthStore.updateProvider('utility', {
+updateProviderConfig(forbiddenAuthStore, 'utility', {
   source: 'openai-compatible',
   apiKey: 'sk-live-secret',
   openAICompatible: { baseUrl: 'https://auth-forbidden.test/v1', model: 'utility-model' }
@@ -2134,14 +2189,33 @@ const forbiddenAuthResult = await createGenerationRouter({
 }).generate('utilityArbiter', { prompt: 'Forbidden auth failure.' });
 assertEqual(forbiddenAuthResult.ok, false, 'openai forbidden auth failure returns failure result');
 assertEqual(forbiddenAuthResult.error.code, 'RECURSION_PROVIDER_AUTH_FAILED', 'openai 403 auth failure exposes stable auth code');
-assertEqual(forbiddenAuthStore.get().providers.utility.lastTest.status, 'fail', 'openai 403 auth failure marks lane unhealthy');
+assertEqual(forbiddenAuthStore.get().providers.utility.health.status, 'not-run', 'openai 403 auth failure invalidates health after clearing the key');
+
+const staleAuthStore = createStore();
+updateProviderConfig(staleAuthStore, 'utility', {
+  source: 'openai-compatible',
+  apiKey: 'key-a',
+  openAICompatible: { baseUrl: 'https://auth-race.test/v1', model: 'utility-model' }
+});
+const staleAuthResult = await createGenerationRouter({
+  client: createProviderClient({
+    settingsStore: staleAuthStore,
+    fetchImpl: async () => {
+      staleAuthStore.updateProviderConfig('utility', { apiKey: 'key-b' });
+      return { ok: false, status: 401 };
+    }
+  })
+}).generate('utilityArbiter', { prompt: 'Stale auth failure must not clear replacement credentials.' });
+assertEqual(staleAuthResult.error.code, 'RECURSION_PROVIDER_AUTH_FAILED', 'stale auth response still reports the request failure');
+assertEqual(staleAuthStore.getApiKey('utility'), 'key-b', 'late auth failure cannot clear a replacement session key');
+assertEqual(staleAuthStore.get().providers.utility.openAICompatible.sessionApiKeyPresent, true, 'replacement credential presence remains configured');
 
 async function openAiProviderFailure(payload, prompt = 'OpenAI provider failure') {
   const marker = 'RAW_PROVIDER_NORMALIZER_MARKER';
   const activity = createActivityReporter();
   const journal = [];
   const store = createStore();
-  store.updateProvider('utility', {
+  updateProviderConfig(store, 'utility', {
     source: 'openai-compatible',
     apiKey: 'session-key',
     openAICompatible: { baseUrl: 'https://normalizer.test/v1', model: 'normalizer-model' }
@@ -2212,7 +2286,7 @@ function tokenLimitPayload(marker = 'TOKEN_LIMIT_RETRY_MARKER') {
 
 async function createTokenRecoveryResult({ alwaysFail = false, machineJson = true } = {}) {
   const store = createStore();
-  store.updateProvider('utility', {
+  updateProviderConfig(store, 'utility', {
     source: 'openai-compatible',
     apiKey: 'session-key',
     maxTokens: 8192,
@@ -2285,7 +2359,7 @@ assertEqual(emptyVisibleFailure.result.error.code, 'RECURSION_PROVIDER_EMPTY_RES
 const redactionActivityEvents = [];
 const redactionJournalEntries = [];
 const redactionStore = createStore();
-redactionStore.updateProvider('utility', {
+updateProviderConfig(redactionStore, 'utility', {
   source: 'openai-compatible',
   apiKey: 'sk-live-secret',
   openAICompatible: { baseUrl: 'https://redaction.test/v1', model: 'redaction-model' }

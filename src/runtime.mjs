@@ -32,6 +32,11 @@ import { ENHANCEMENT_EDIT_RATIO_MINIMUM, roundedEnhancementEditRatio } from './e
 import { composeGuidanceForCards, composePromptPacket, GUIDANCE_SCHEMA as PROMPT_GUIDANCE_SCHEMA, PROMPT_PACKET_VERSION } from './prompt.mjs';
 import { PROVIDER_CONTRACT_HASH, fetchOpenAICompatibleModels } from './providers.mjs';
 import {
+  providerConfigHash,
+  resolveProviderCapability,
+  sanitizeProviderCapability
+} from './provider-capability.mjs';
+import {
   RAPID_PIPELINE_VERSION,
   rapidArtifactHash,
   rapidWarmArtifactIsUsable
@@ -213,7 +218,6 @@ function cacheProviderSettingsSignature(provider = {}) {
   const source = asObject(provider);
   const openAICompatible = asObject(source.openAICompatible);
   return {
-    enabled: source.enabled === true,
     source: String(source.source || ''),
     hostConnectionProfileId: String(source.hostConnectionProfileId || ''),
     openAICompatible: {
@@ -223,7 +227,8 @@ function cacheProviderSettingsSignature(provider = {}) {
     },
     temperature: numberOr(source.temperature, 0),
     topP: numberOr(source.topP, 0),
-    maxTokens: numberOr(source.maxTokens, 0)
+    maxTokens: numberOr(source.maxTokens, 0),
+    configRevision: numberOr(source.configRevision, 0)
   };
 }
 
@@ -724,40 +729,29 @@ function normalizeReasonerDecision(fallbackDecision, value) {
   };
 }
 
-function reasonerUnavailableReason(settings = {}) {
-  const provider = asObject(settings?.providers?.reasoner);
-  if (provider.enabled !== true) return 'reasoner-disabled';
-  const lastTestStatus = safeProviderLastTest(provider.lastTest).status;
-  if (lastTestStatus !== 'pass') {
-    return lastTestStatus === 'not-run' ? 'reasoner-not-tested' : 'reasoner-unhealthy';
-  }
-  const source = safeText(provider.source || 'host-current-model', 80) || 'host-current-model';
-  if (source === 'openai-compatible') {
-    const openAICompatible = asObject(provider.openAICompatible);
-    if (openAICompatible.sessionApiKeyPresent !== true) return 'reasoner-key-missing';
-    if (!safeText(openAICompatible.baseUrl || '', 300) || !safeText(openAICompatible.model || '', 160)) {
-      return 'reasoner-config-missing';
-    }
-  }
-  if (source === 'host-connection-profile' && !safeText(provider.hostConnectionProfileId || '', 160)) {
-    return 'reasoner-profile-missing';
-  }
-  return '';
+function providerCapability(settings = {}, lane = 'utility', operation = 'prompt-packet', hostContext = {}) {
+  return resolveProviderCapability({
+    settings,
+    lane,
+    operation,
+    host: hostContext
+  });
 }
 
-function enforceReasonerAvailability(plan, settings) {
+function enforceReasonerAvailability(plan, settings, capabilityResolver = providerCapability) {
   const decision = asObject(plan?.reasonerDecision);
   if (decision.mode !== 'use') return plan;
-  const reason = reasonerUnavailableReason(settings);
-  if (!reason) return plan;
+  if (reasoningPolicyForSettings(settings).level === 'low') return plan;
+  const capability = capabilityResolver(settings, 'reasoner', 'prompt-packet');
+  if (capability.eligible) return plan;
   return {
     ...plan,
     reasonerDecision: {
       mode: 'skip',
-      reason,
+      reason: capability.reasonCode,
       signals: safeStringList(decision.signals, 120)
     },
-    diagnostics: mergeDiagnostics(plan.diagnostics, ['reasoner-unavailable', reason])
+    diagnostics: mergeDiagnostics(plan.diagnostics, ['reasoner-unavailable', capability.reasonCode])
   };
 }
 
@@ -777,16 +771,15 @@ function reasoningPolicyForSettings(settings = {}) {
   return { ...base, cardBudget };
 }
 
-function reasonerLaneAvailable(settings) {
-  return !reasonerUnavailableReason(settings);
+function providerLaneForPolicyLane(policyLane, settings, capabilityResolver = providerCapability) {
+  return policyLane === 'reasoner'
+    && capabilityResolver(settings, 'reasoner', 'prompt-packet').eligible
+    ? 'reasoner'
+    : 'utility';
 }
 
-function providerLaneForPolicyLane(policyLane, settings) {
-  return policyLane === 'reasoner' && reasonerLaneAvailable(settings) ? 'reasoner' : 'utility';
-}
-
-function arbiterLaneForSettings(settings) {
-  return providerLaneForPolicyLane(reasoningPolicyForSettings(settings).arbiterLane, settings);
+function arbiterLaneForSettings(settings, capabilityResolver = providerCapability) {
+  return providerLaneForPolicyLane(reasoningPolicyForSettings(settings).arbiterLane, settings, capabilityResolver);
 }
 
 function reasoningPolicyPromptLine(settings) {
@@ -884,10 +877,10 @@ function catalogForCardRequest(request) {
   });
 }
 
-function cardLaneForRequest(request, settings) {
+function cardLaneForRequest(request, settings, capabilityResolver = providerCapability) {
   const policy = reasoningPolicyForSettings(settings);
   if (policy.cardLane === 'utility') return 'utility';
-  if (!reasonerLaneAvailable(settings)) return 'utility';
+  if (!capabilityResolver(settings, 'reasoner', 'prompt-packet').eligible) return 'utility';
   if (policy.cardLane === 'reasoner') return 'reasoner';
   if (policy.cardLane === 'priority') {
     const catalog = catalogForCardRequest(request);
@@ -896,10 +889,10 @@ function cardLaneForRequest(request, settings) {
   return 'utility';
 }
 
-function applyReasoningLaneToCardRequest(request, settings) {
+function applyReasoningLaneToCardRequest(request, settings, capabilityResolver = providerCapability) {
   const routedRequest = {
     ...request,
-    lane: cardLaneForRequest(request, settings)
+    lane: cardLaneForRequest(request, settings, capabilityResolver)
   };
   if (routedRequest.lane !== 'reasoner') return routedRequest;
   return {
@@ -908,26 +901,33 @@ function applyReasoningLaneToCardRequest(request, settings) {
   };
 }
 
-function fusedCardBundleLaneForSettings(settings) {
+function fusedCardBundleLaneForSettings(settings, capabilityResolver = providerCapability) {
   const policy = reasoningPolicyForSettings(settings);
-  if ((policy.level === 'high' || policy.level === 'ultra') && reasonerLaneAvailable(settings)) return 'reasoner';
+  if (
+    (policy.level === 'high' || policy.level === 'ultra')
+    && capabilityResolver(settings, 'reasoner', 'prompt-packet').eligible
+  ) return 'reasoner';
   return 'utility';
 }
 
-function enhancementLaneForSettings(settings) {
+function enhancementLaneForSettings(settings, capabilityResolver = providerCapability) {
   const policy = reasoningPolicyForSettings(settings);
-  if ((policy.level === 'high' || policy.level === 'ultra') && reasonerLaneAvailable(settings)) return 'reasoner';
+  if (
+    (policy.level === 'high' || policy.level === 'ultra')
+    && capabilityResolver(settings, 'reasoner', 'prompt-packet').eligible
+  ) return 'reasoner';
   return 'utility';
 }
 
-function redirectTransformerLaneForSettings(settings) {
-  return reasoningPolicyForSettings(settings).level === 'low' ? 'utility' : 'reasoner';
+function redirectTransformerLaneForSettings(settings, capabilityResolver = providerCapability) {
+  if (reasoningPolicyForSettings(settings).level === 'low') return 'utility';
+  return capabilityResolver(settings, 'reasoner', 'redirect').eligible ? 'reasoner' : '';
 }
 
-function applyReasoningLaneToFusedCardBundleRequest(request, settings) {
+function applyReasoningLaneToFusedCardBundleRequest(request, settings, capabilityResolver = providerCapability) {
   const routedRequest = {
     ...request,
-    lane: fusedCardBundleLaneForSettings(settings)
+    lane: fusedCardBundleLaneForSettings(settings, capabilityResolver)
   };
   if (routedRequest.lane !== 'reasoner') return routedRequest;
   return {
@@ -1056,12 +1056,15 @@ function planAction(plan) {
   return PLAN_ACTIONS.has(action) ? action : 'compose-brief';
 }
 
-function settingsForPlan(settings, plan) {
+function settingsForPlan(settings, plan, capabilityResolver = providerCapability) {
   const promptFootprint = normalizePromptFootprint(plan?.promptFootprint, settings.promptFootprint);
   if (Array.isArray(plan?.diagnostics) && plan.diagnostics.includes('behavior-reasoner-clamped')) {
     return { ...settings, promptFootprint, reasonerUse: 'off' };
   }
-  if (settings.reasonerUse !== 'off' && reasonerUnavailableReason(settings)) {
+  if (
+    settings.reasonerUse !== 'off'
+    && !capabilityResolver(settings, 'reasoner', 'prompt-packet').eligible
+  ) {
     return { ...settings, promptFootprint, reasonerUse: 'off' };
   }
   if (settings.reasonerUse === 'auto' && plan?.reasonerDecision?.mode === 'skip') {
@@ -1475,7 +1478,7 @@ function cardEvidenceTokenBudget(settings, plan, behaviorPolicy = null) {
   return Number.isFinite(budget) && budget > 0 ? Math.round(budget) : 30000;
 }
 
-function arbiterSafeSettings(settings) {
+function arbiterSafeSettings(settings, capabilityResolver = providerCapability) {
   const source = settingsWithRuntimeCardScope(settings);
   return {
     enabled: source.enabled !== false,
@@ -1494,18 +1497,18 @@ function arbiterSafeSettings(settings) {
     reasonerUse: safeText(source.reasonerUse || 'auto', 40),
     providers: {
       utility: {
-        enabled: source.providers?.utility?.enabled === true,
-        source: safeText(source.providers?.utility?.source || '', 80)
+        source: safeText(source.providers?.utility?.source || '', 80),
+        capability: capabilityResolver(source, 'utility', 'prompt-packet').state
       },
       reasoner: {
-        enabled: source.providers?.reasoner?.enabled === true,
-        source: safeText(source.providers?.reasoner?.source || '', 80)
+        source: safeText(source.providers?.reasoner?.source || '', 80),
+        capability: capabilityResolver(source, 'reasoner', 'prompt-packet').state
       }
     }
   };
 }
 
-function safeProviderLastTest(value) {
+function safeProviderHealth(value) {
   const source = asObject(value);
   const output = {
     status: safeText(source.status || 'not-run', 40) || 'not-run'
@@ -1517,11 +1520,10 @@ function safeProviderLastTest(value) {
   return output;
 }
 
-function safeProviderSettingsView(provider) {
+function safeProviderSettingsView(provider, settings, lane, capabilityResolver = providerCapability) {
   const source = asObject(provider);
   return {
     lane: safeText(source.lane || '', 40),
-    enabled: source.enabled === true,
     source: safeText(source.source || '', 80),
     hostConnectionProfileId: safeText(source.hostConnectionProfileId || '', 160),
     openAICompatible: {
@@ -1532,13 +1534,13 @@ function safeProviderSettingsView(provider) {
     temperature: numberOr(source.temperature, 0),
     topP: numberOr(source.topP, 0),
     maxTokens: numberOr(source.maxTokens, 0),
-    resolvedProviderLabel: safeText(source.resolvedProviderLabel || '', 120),
-    resolvedModelLabel: safeText(source.resolvedModelLabel || '', 120),
-    lastTest: safeProviderLastTest(source.lastTest)
+    configRevision: numberOr(source.configRevision, 0),
+    health: safeProviderHealth(source.health),
+    capability: sanitizeProviderCapability(capabilityResolver(settings, lane, 'prompt-packet'))
   };
 }
 
-function safeSettingsView(settings) {
+function safeSettingsView(settings, capabilityResolver = providerCapability) {
   const source = settingsWithRuntimeCardScope(settings);
   const cardScope = normalizeCardScope(source.cardScope);
   const cardBudget = normalizeCardBudgetSettings(source);
@@ -1574,8 +1576,20 @@ function safeSettingsView(settings) {
     },
     retention: normalizeRetentionSettings(source.retention),
     providers: {
-      utility: safeProviderSettingsView(source.providers?.utility),
-      reasoner: safeProviderSettingsView(source.providers?.reasoner)
+      utility: safeProviderSettingsView(source.providers?.utility, source, 'utility', capabilityResolver),
+      reasoner: safeProviderSettingsView(source.providers?.reasoner, source, 'reasoner', capabilityResolver)
+    },
+    providerCapabilities: {
+      utility: {
+        promptPacket: sanitizeProviderCapability(capabilityResolver(source, 'utility', 'prompt-packet')),
+        providerTest: sanitizeProviderCapability(capabilityResolver(source, 'utility', 'provider-test')),
+        redirect: sanitizeProviderCapability(capabilityResolver(source, 'utility', 'redirect'))
+      },
+      reasoner: {
+        promptPacket: sanitizeProviderCapability(capabilityResolver(source, 'reasoner', 'prompt-packet')),
+        providerTest: sanitizeProviderCapability(capabilityResolver(source, 'reasoner', 'provider-test')),
+        redirect: sanitizeProviderCapability(capabilityResolver(source, 'reasoner', 'redirect'))
+      }
     },
     ui: {
       viewerOpen: source.ui?.viewerOpen === true,
@@ -1586,14 +1600,14 @@ function safeSettingsView(settings) {
   };
 }
 
-function providerHealthForArbiter(settings) {
+function providerHealthForArbiter(settings, capabilityResolver = providerCapability) {
   const source = asObject(settings);
   const provider = (lane) => {
     const config = asObject(source.providers?.[lane]);
+    const capability = capabilityResolver(source, lane, 'prompt-packet');
     return {
-      enabled: config.enabled === true,
       source: safeText(config.source || '', 80),
-      status: safeProviderLastTest(config.lastTest).status
+      status: capability.state
     };
   };
   return {
@@ -2092,6 +2106,95 @@ export function createRecursionRuntime({
   rapidWarmJoinWaitMs = RAPID_WARM_JOIN_WAIT_MS
 } = {}) {
   const runState = createRuntimeRunState();
+  const activeProviderOperations = new Map();
+  const activeProviderTests = new Map();
+  const baseGenerationRouter = generationRouter;
+  const previousProviderAuthFailureHandler = host?.handleProviderAuthFailure;
+
+  if (host && typeof host === 'object') {
+    host.handleProviderAuthFailure = async ({ lane, configHash, configRevision } = {}) => {
+      const resolvedLane = providerLane(lane);
+      const provider = settingsStore.get().providers?.[resolvedLane] || {};
+      if (
+        Number(provider.configRevision || 0) !== Number(configRevision)
+        || providerConfigHash(provider) !== String(configHash || '')
+      ) {
+        return {
+          ok: false,
+          stale: true,
+          error: {
+            code: 'RECURSION_PROVIDER_AUTH_STALE',
+            message: 'Provider settings changed before the authentication failure settled.'
+          }
+        };
+      }
+      return clearProviderKey(resolvedLane, {
+        expectedRevision: Number(configRevision)
+      });
+    };
+  }
+
+  function providerOperationLane(request = {}) {
+    return asObject(request).lane === 'reasoner' ? 'reasoner' : 'utility';
+  }
+
+  function beginProviderOperation(lane) {
+    activeProviderOperations.set(lane, (activeProviderOperations.get(lane) || 0) + 1);
+  }
+
+  function endProviderOperation(lane) {
+    const remaining = (activeProviderOperations.get(lane) || 0) - 1;
+    if (remaining > 0) activeProviderOperations.set(lane, remaining);
+    else activeProviderOperations.delete(lane);
+  }
+
+  function providerBusyResult(lane, operation = 'provider-test') {
+    return {
+      ok: false,
+      roleId: operation === 'provider-test' ? 'providerTest' : '',
+      lane,
+      error: {
+        code: 'RECURSION_PROVIDER_BUSY',
+        message: `${lane === 'reasoner' ? 'Reasoner' : 'Utility'} is in use. Try again after the current operation finishes.`,
+        retryable: true
+      }
+    };
+  }
+
+  if (baseGenerationRouter && typeof baseGenerationRouter.generate === 'function') {
+    generationRouter = {
+      ...baseGenerationRouter,
+      async generate(roleId, request = {}, options = {}) {
+        if (roleId === 'providerTest') {
+          return baseGenerationRouter.generate(roleId, request, options);
+        }
+        const lane = providerOperationLane(request);
+        if (activeProviderTests.has(lane)) return providerBusyResult(lane, 'operation');
+        beginProviderOperation(lane);
+        try {
+          return await baseGenerationRouter.generate(roleId, request, options);
+        } finally {
+          endProviderOperation(lane);
+        }
+      },
+      ...(typeof baseGenerationRouter.batch === 'function'
+        ? {
+            async batch(requests = [], options = {}) {
+              const entries = Array.isArray(requests) ? requests : [];
+              const lanes = [...new Set(entries.map(providerOperationLane))];
+              const busyLane = lanes.find((lane) => activeProviderTests.has(lane));
+              if (busyLane) return entries.map(() => providerBusyResult(busyLane, 'operation'));
+              for (const lane of lanes) beginProviderOperation(lane);
+              try {
+                return await baseGenerationRouter.batch(entries, options);
+              } finally {
+                for (const lane of lanes) endProviderOperation(lane);
+              }
+            }
+          }
+        : {})
+    };
+  }
   let hostStopCleanupPromise = null;
   let recursionStopRequest = null;
   let lastPacket = null;
@@ -2306,17 +2409,44 @@ export function createRecursionRuntime({
     return enhancementTarget(settings) !== 'off';
   }
 
+  function runtimeProviderCapability(settings, lane, operation) {
+    return resolveProviderCapability({
+      settings,
+      lane,
+      operation,
+      host: {
+        currentModelAvailable: Boolean(generationRouter?.generate),
+        connectionProfiles: listProviderConnectionProfilesForUi()
+      }
+    });
+  }
+
   function armProseEnhancementForHostGeneration(settings = settingsStore.get(), runId = '') {
     canceledProseEnhancement = null;
     if (!proseEnhancementEnabled(settings)) {
       pendingProseEnhancement = null;
       return false;
     }
+    const target = enhancementTarget(settings);
+    const redirectCapability = target === 'redirect'
+      ? runtimeProviderCapability(settings, 'reasoner', 'redirect')
+      : null;
     pendingProseEnhancement = {
-      target: enhancementTarget(settings),
+      target,
       applyMode: enhancementApplyMode(settings),
       armedAt: nowIso(),
-      runId: safeText(runId || '', 120)
+      runId: safeText(runId || '', 120),
+      ...(redirectCapability?.required
+        ? {
+            requiredCapability: {
+              configHash: redirectCapability.configHash,
+              configRevision: redirectCapability.configRevision
+            }
+          }
+        : {}),
+      ...(redirectCapability?.required && !redirectCapability.eligible
+        ? { blockedCapability: sanitizeProviderCapability(redirectCapability) }
+        : {})
     };
     return true;
   }
@@ -2897,30 +3027,60 @@ export function createRecursionRuntime({
     });
   }
 
-  async function updateProvider(lane, patch = {}) {
+  async function updateProviderConfig(lane, patch = {}, options = {}) {
     const resolvedLane = providerLane(lane);
-    const provider = settingsStore.updateProvider(resolvedLane, patch);
+    const beforeSettings = settingsStore.get();
+    const beforeCapability = providerCapability(beforeSettings, resolvedLane, 'prompt-packet');
+    const update = settingsStore.updateProviderConfig(resolvedLane, patch, options);
+    if (update.ok !== true || update.changedKeys.length === 0) {
+      return { ...update, clear: null };
+    }
+    const provider = update.provider;
     supersedeActiveRun();
     abortActiveRapidWarmRun('provider-contract-mismatch');
     return trackRuntimeMutation(async () => {
+      const afterSettings = settingsStore.get();
+      const afterCapability = providerCapability(afterSettings, resolvedLane, 'prompt-packet');
+      await appendProviderCapabilityMutation({
+        lane: resolvedLane,
+        kind: 'configuration',
+        changedKeys: update.changedKeys,
+        before: beforeCapability,
+        after: afterCapability
+      });
       await invalidateActiveSceneCacheBestEffort('provider-changed', {
         lane: resolvedLane,
-        changedKeys: Object.keys(asObject(patch))
+        changedKeys: update.changedKeys
       });
       const clear = await clearPromptAfterSupersede({
         successLabel: 'Recursion prompt cleared after provider change.',
         journalReason: 'provider-changed'
       });
-      return { ok: clear?.ok !== false, provider, clear };
+      return { ok: clear?.ok !== false, provider, changedKeys: update.changedKeys, clear };
     });
   }
 
-  async function clearProviderKey(lane) {
+  async function clearProviderKey(lane, options = {}) {
     const resolvedLane = providerLane(lane);
-    const provider = settingsStore.clearApiKey(resolvedLane);
+    const beforeSettings = settingsStore.get();
+    const beforeCapability = providerCapability(beforeSettings, resolvedLane, 'prompt-packet');
+    const update = settingsStore.clearApiKey(resolvedLane, options);
+    if (update.ok !== true || update.changedKeys.length === 0) {
+      return { ...update, clear: null };
+    }
+    const provider = update.provider;
     supersedeActiveRun();
     abortActiveRapidWarmRun('provider-contract-mismatch');
     return trackRuntimeMutation(async () => {
+      const afterSettings = settingsStore.get();
+      const afterCapability = providerCapability(afterSettings, resolvedLane, 'prompt-packet');
+      await appendProviderCapabilityMutation({
+        lane: resolvedLane,
+        kind: 'configuration',
+        changedKeys: update.changedKeys,
+        before: beforeCapability,
+        after: afterCapability
+      });
       await invalidateActiveSceneCacheBestEffort('provider-key-cleared', {
         lane: resolvedLane
       });
@@ -2928,7 +3088,7 @@ export function createRecursionRuntime({
         successLabel: 'Recursion prompt cleared after provider key change.',
         journalReason: 'provider-key-cleared'
       });
-      return { ok: clear?.ok !== false, provider, clear };
+      return { ok: clear?.ok !== false, provider, changedKeys: update.changedKeys, clear };
     });
   }
 
@@ -3035,7 +3195,7 @@ export function createRecursionRuntime({
       activityHistory: safeActivityHistory(activity),
       editorialResult: lastEditorialResult ? { ...lastEditorialResult } : null,
       providerProfiles: listProviderConnectionProfilesForUi(),
-      settings: safeSettingsView(settingsStore.get()),
+      settings: safeSettingsView(settingsStore.get(), runtimeProviderCapability),
       contextContract: buildContextContract(lastSnapshot || {}, settingsStore.get()),
       updatedAt: nowIso()
     };
@@ -3496,7 +3656,7 @@ export function createRecursionRuntime({
     const messageId = identity.messageId;
     const originalText = String(identity.text || '');
     const sourceHash = identity.originalHash || hashJson(originalText);
-    const lane = enhancementLaneForSettings(settings);
+    const lane = enhancementLaneForSettings(settings, runtimeProviderCapability);
     const snapshot = typeof host.snapshot === 'function' ? await host.snapshot() : {};
     const enhancementContext = enhancementContextFromSnapshot({
       snapshot,
@@ -3739,6 +3899,9 @@ export function createRecursionRuntime({
       clearPendingProseEnhancement();
       return { ok: true, skipped: true, reason: 'editorial-off' };
     }
+    if (!pendingProseEnhancement) {
+      armProseEnhancementForHostGeneration(settings);
+    }
     const messages = asObject(host.messages);
     if (typeof messages.activeAssistantMessageIdentity !== 'function') return { ok: true, skipped: true, reason: 'host-message-api-unavailable' };
     const identity = messages.activeAssistantMessageIdentity();
@@ -3747,11 +3910,66 @@ export function createRecursionRuntime({
       clearPendingProseEnhancement();
       return { ok: true, skipped: true, reason: 'enhancement-owned-source' };
     }
+    const redirectCapabilityFailure = () => {
+      if (editorialMode !== 'redirect') return null;
+      const capability = runtimeProviderCapability(settingsStore.get(), 'reasoner', 'redirect');
+      if (!capability.required) return null;
+      const armed = asObject(pendingProseEnhancement?.requiredCapability);
+      if (!capability.eligible) return sanitizeProviderCapability(capability);
+      if (
+        safeText(armed.configHash, 180) !== capability.configHash
+        || Number(armed.configRevision) !== capability.configRevision
+      ) {
+        return {
+          ...sanitizeProviderCapability(capability),
+          eligible: false,
+          reasonCode: 'reasoner-configuration-changed',
+          message: 'Reasoner settings changed after Redirect was armed. Generate again.'
+        };
+      }
+      return null;
+    };
+    const initialRedirectCapabilityFailure = pendingProseEnhancement?.blockedCapability
+      || redirectCapabilityFailure();
+    if (editorialMode === 'redirect' && initialRedirectCapabilityFailure) {
+      const blockedCapability = initialRedirectCapabilityFailure;
+      const blockedRunId = makeId('editorial-preflight');
+      lastEditorialResult = {
+        mode: editorialMode,
+        status: 'skipped',
+        outcome: 'provider-not-ready',
+        applyMode: 'as-swipe',
+        reasonCode: blockedCapability.reasonCode
+      };
+      settleRuntimeActivity({
+        runId: blockedRunId,
+        phase: 'editorialPreflight',
+        severity: 'warning',
+        outcome: 'skipped',
+        label: blockedCapability.message,
+        chips: ['Enhancement', 'Redirect', 'Skipped'],
+        detail: blockedCapability
+      });
+      await appendJournalSafe(blockedRunId, identity.chatKey, {
+        event: 'editorial.preflight.skipped',
+        severity: 'warn',
+        summary: 'Redirect skipped because Reasoner is not ready.',
+        runId: blockedRunId,
+        details: blockedCapability
+      });
+      clearPendingProseEnhancement();
+      return {
+        ok: true,
+        skipped: true,
+        mode: editorialMode,
+        reason: blockedCapability.reasonCode
+      };
+    }
     const runId = makeId('editorial');
     const messageId = identity.messageId;
     const sourceText = String(identity.text || '');
     const sourceHash = identity.originalHash || hashJson(sourceText);
-    const lane = enhancementLaneForSettings(settings);
+    const lane = enhancementLaneForSettings(settings, runtimeProviderCapability);
     const snapshot = typeof host.snapshot === 'function' ? await host.snapshot() : {};
     const enhancementContext = enhancementContextFromSnapshot({
       snapshot,
@@ -3925,18 +4143,6 @@ export function createRecursionRuntime({
       await appendEditorialSettlement();
       return unavailable;
     }
-    if (
-      editorialMode === 'redirect'
-      && reasoningPolicyForSettings(settings).level !== 'low'
-      && asObject(settings?.providers?.reasoner).enabled !== true
-    ) {
-      const disabled = failEditorial({
-        code: 'RECURSION_REASONER_DISABLED',
-        message: 'Reasoner provider lane is disabled. Enable Reasoner in Providers or select Low reasoning.'
-      });
-      await appendEditorialSettlement();
-      return disabled;
-    }
     const evidence = buildEditorialEvidence(publicSnapshot, sourceText);
     const targets = editorialMode === 'repair' ? buildGenerationReviewTargets(sourceText) : {};
     const recoveryToken = { spent: false };
@@ -3944,6 +4150,45 @@ export function createRecursionRuntime({
     let enhanced = false;
     let editorialLane = lane;
     let verificationResult = { decision: 'not-required' };
+    async function skipIfRedirectCapabilityChanged(stage) {
+      const blockedCapability = redirectCapabilityFailure();
+      if (!blockedCapability) return null;
+      if (held && typeof messages.revealAssistantMessage === 'function') {
+        await messages.revealAssistantMessage(messageId);
+        held = false;
+      }
+      setEditorialResult({
+        mode: editorialMode,
+        status: 'skipped',
+        outcome: 'provider-not-ready',
+        applyMode,
+        decision: blockedCapability.reasonCode,
+        errorCode: blockedCapability.reasonCode
+      });
+      settleRuntimeActivity({
+        runId,
+        phase: 'editorialPreflight',
+        severity: 'warning',
+        outcome: 'skipped',
+        label: blockedCapability.message,
+        chips: ['Enhancement', 'Redirect', 'Skipped'],
+        detail: { ...blockedCapability, stage }
+      });
+      await appendJournalSafe(runId, identity.chatKey, {
+        event: 'editorial.preflight.skipped',
+        severity: 'warn',
+        summary: 'Redirect skipped because Reasoner readiness changed.',
+        runId,
+        details: { ...blockedCapability, stage }
+      });
+      clearPendingProseEnhancement();
+      return {
+        ok: true,
+        skipped: true,
+        mode: editorialMode,
+        reason: blockedCapability.reasonCode
+      };
+    }
     async function generateEditorialRole(roleId, request, options = {}) {
       if (enhancementSignal?.aborted) {
         return {
@@ -3979,6 +4224,8 @@ export function createRecursionRuntime({
       return { result: fallback, lane: fallback?.ok === true ? 'utility' : primaryLane };
     }
     try {
+      const diagnosisReadinessSkip = await skipIfRedirectCapabilityChanged('before-diagnosis');
+      if (diagnosisReadinessSkip) return diagnosisReadinessSkip;
       if (typeof messages.holdAssistantMessage === 'function') {
         const hold = await messages.holdAssistantMessage(messageId);
         held = hold?.ok !== false;
@@ -4006,7 +4253,7 @@ export function createRecursionRuntime({
         recoveryToken.spent = true;
         const correctionLane = editorialMode === 'redirect'
           && diagnosisResponse.lane === 'utility'
-          && reasonerLaneAvailable(settings)
+          && runtimeProviderCapability(settings, 'reasoner', 'prompt-packet').eligible
           ? 'reasoner'
           : editorialLane;
         diagnosisResponse = await generateEditorialRole('editorialDiagnostician', {
@@ -4054,12 +4301,16 @@ export function createRecursionRuntime({
       }
       const diagnosisHash = diagnosisValidation.hash;
       const transformLane = editorialMode === 'redirect'
-        ? redirectTransformerLaneForSettings(settings)
+        ? redirectTransformerLaneForSettings(settings, runtimeProviderCapability)
         : editorialLane;
       const strictReasonerWriter = editorialMode === 'redirect' && transformLane === 'reasoner';
       const transformOptions = strictReasonerWriter
         ? { allowStructuredRecovery: false, allowLaneFallback: false, maxAttempts: 1 }
         : {};
+      const transformReadinessSkip = strictReasonerWriter
+        ? await skipIfRedirectCapabilityChanged('before-transform')
+        : null;
+      if (transformReadinessSkip) return transformReadinessSkip;
       stageRuntimeActivity({ runId, phase: 'editorialTransforming', label: editorialMode === 'repair' ? 'Applying grounded repairs...' : `${editorialMode === 'redirect' ? 'Redirecting' : 'Recomposing'} response...`, providerLane: transformLane, composerLane: transformLane, chips: ['Enhancement', editorialMode] });
       let transformResponse = await generateEditorialRole('editorialTransformer', {
         ...buildEditorialPassRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosis: diagnosisValidation.value, diagnosisDiagnostics: diagnosisValidation.diagnostics, evidence, snapshot: publicSnapshot, targets, lane: transformLane }),
@@ -4075,6 +4326,10 @@ export function createRecursionRuntime({
       if (!validation.ok && transformCorrectionAvailable) {
         if (!strictReasonerWriter) recoveryToken.spent = true;
         transformAttemptCount += 1;
+        const correctionReadinessSkip = strictReasonerWriter
+          ? await skipIfRedirectCapabilityChanged('before-transform-correction')
+          : null;
+        if (correctionReadinessSkip) return correctionReadinessSkip;
         transformResponse = await generateEditorialRole('editorialTransformer', {
           ...buildEditorialPassRequest({
             mode: editorialMode,
@@ -4105,11 +4360,16 @@ export function createRecursionRuntime({
         ? hashJson(String(validation.artifact.candidate?.text || validation.artifact.text || ''))
         : '';
       if (verificationRequired) {
-        const verifierLane = editorialMode === 'redirect' && reasonerLaneAvailable(settings)
+        const verifierLane = editorialMode === 'redirect'
+          && runtimeProviderCapability(settings, 'reasoner', 'redirect').eligible
           ? 'reasoner'
           : editorialLane;
         const verifyCandidate = async () => {
           const runVerifier = async (retry = null) => {
+            const verifierReadinessSkip = editorialMode === 'redirect'
+              ? await skipIfRedirectCapabilityChanged(retry ? 'before-verifier-correction' : 'before-verifier')
+              : null;
+            if (verifierReadinessSkip) return { skipped: verifierReadinessSkip };
             const verificationRequest = buildEditorialVerificationRequest({
               mode: editorialMode,
               sourceHash,
@@ -4142,15 +4402,18 @@ export function createRecursionRuntime({
           };
           stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Verifying editorial candidate...', providerLane: verifierLane, composerLane: verifierLane, chips: ['Enhancement', 'Verify'] });
           let verified = await runVerifier();
+          if (verified.skipped) return verified;
           if (verified.canceled) return verified;
           if (editorialMode === 'redirect' && !verified.result.ok && recoveryToken.spent !== true) {
             recoveryToken.spent = true;
             stageRuntimeActivity({ runId, phase: 'editorialVerifying', label: 'Correcting editorial verification...', providerLane: verifierLane, composerLane: verifierLane, chips: ['Enhancement', 'Verify'] });
             verified = await runVerifier(verified.result.error);
+            if (verified.skipped) return verified;
           }
           return verified;
         };
         let verified = await verifyCandidate();
+        if (verified.skipped) return verified.skipped;
         if (verified.canceled) return canceledEditorialResult();
         verificationResult = verified.result;
         if (editorialMode === 'redirect'
@@ -4170,6 +4433,10 @@ export function createRecursionRuntime({
             ].filter(Boolean).join(' ')
           };
           transformAttemptCount += 1;
+          const verifierCorrectionReadinessSkip = strictReasonerWriter
+            ? await skipIfRedirectCapabilityChanged('before-verifier-directed-transform')
+            : null;
+          if (verifierCorrectionReadinessSkip) return verifierCorrectionReadinessSkip;
           stageRuntimeActivity({
             runId,
             phase: 'editorialTransforming',
@@ -4383,8 +4650,8 @@ export function createRecursionRuntime({
         phase: pass === 'dialogue' ? 'dialogueEnhancing' : 'proseEnhancing',
         severity: ['provider-failed', 'validation-failed'].includes(status) ? 'error' : 'success',
         label: `${passLabel} ${statusLabel}.`,
-        providerLane: enhancementLaneForSettings(settings),
-        composerLane: enhancementLaneForSettings(settings),
+        providerLane: enhancementLaneForSettings(settings, runtimeProviderCapability),
+        composerLane: enhancementLaneForSettings(settings, runtimeProviderCapability),
         chips: [passLabel],
         detail: { pass, status, attempt, ...(reasonCode ? { reasonCode } : {}), ...(reason ? { reason } : {}) }
       });
@@ -4397,7 +4664,7 @@ export function createRecursionRuntime({
         details: { pass, status, attempt, ...(reasonCode ? { reasonCode } : {}), ...(reason ? { reason } : {}) }
       });
     };
-    const enhancementLane = enhancementLaneForSettings(settings);
+    const enhancementLane = enhancementLaneForSettings(settings, runtimeProviderCapability);
     const enhancementReasoning = reasonerRequestMetadata(settings, 'enhancement', enhancementLane);
     stageRuntimeActivity({
       runId,
@@ -4763,17 +5030,33 @@ export function createRecursionRuntime({
     ].join('\n');
   }
 
-  function providerTestFailure(lane, checkedAt, error) {
+  async function recordProviderTestHealth(lane, status, checkedAt, configHash, configRevision, error = null) {
+    const beforeSettings = settingsStore.get();
+    const beforeCapability = providerCapability(beforeSettings, lane, 'prompt-packet');
     const compactError = safeText(error?.message || error?.code || error || 'Provider test failed.', 300);
-    return settingsStore.updateProvider(lane, {
-      resolvedProviderLabel: '',
-      resolvedModelLabel: '',
-      lastTest: {
-        status: 'fail',
-        checkedAt,
-        compactError
-      }
+    const result = settingsStore.recordProviderHealth(lane, {
+      status,
+      checkedAt,
+      source: 'provider-test',
+      ...(status === 'fail' ? { compactError } : {})
+    }, {
+      configHash,
+      configRevision
     });
+    if (result.ok === true && typeof host?.settings?.flush === 'function') {
+      await host.settings.flush();
+    }
+    const afterSettings = settingsStore.get();
+    const afterCapability = providerCapability(afterSettings, lane, 'prompt-packet');
+    await trackRuntimeMutation(() => appendProviderCapabilityMutation({
+      lane,
+      kind: result.stale ? 'stale-health' : 'health',
+      changedKeys: [],
+      before: beforeCapability,
+      after: afterCapability,
+      stale: result.stale === true
+    })).catch(() => {});
+    return result;
   }
 
   function validProviderTestResult(result) {
@@ -4783,139 +5066,154 @@ export function createRecursionRuntime({
       && data.ok === true;
   }
 
-  async function testProvider(lane = 'utility') {
-    supersedeActiveRun();
+  function testProvider(lane = 'utility') {
     const resolvedLane = providerLane(lane);
-    const checkedAt = nowIso();
-    const runId = makeId(`provider-test-${resolvedLane}`);
-    startRuntimeActivity({
-      runId,
-      phase: 'providerCallStarted',
-      mode: 'review',
-      severity: 'info',
-      providerLane: resolvedLane,
-      label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test started.`,
-      chips: [resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility', 'Provider']
-    });
-
-    if (!generationRouter || typeof generationRouter.generate !== 'function') {
-      const provider = providerTestFailure(resolvedLane, checkedAt, {
-        code: 'RECURSION_PROVIDER_ROUTER_UNAVAILABLE',
-        message: 'Provider test is unavailable because the generation router is not configured.'
-      });
-      settleRuntimeActivity({
-        runId,
-        outcome: 'warning',
-        phase: 'providerTestFailed',
-        severity: 'warning',
-        providerLane: resolvedLane,
-        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
-        chips: ['Provider'],
-        detail: provider.lastTest
-      });
-      return {
-        ok: false,
-        error: {
-          code: 'RECURSION_PROVIDER_ROUTER_UNAVAILABLE',
-          message: 'Provider test is unavailable.'
-        }
-      };
+    if (activeProviderTests.has(resolvedLane)) return activeProviderTests.get(resolvedLane);
+    if (activeProviderOperations.has(resolvedLane)) {
+      return Promise.resolve(providerBusyResult(resolvedLane));
     }
 
-    try {
-      stageRuntimeActivity({
+    const task = (async () => {
+      const checkedAt = nowIso();
+      const runId = makeId(`provider-test-${resolvedLane}`);
+      const settings = settingsStore.get();
+      const providerSnapshot = settings.providers?.[resolvedLane] || {};
+      const configHash = providerConfigHash(providerSnapshot);
+      const configRevision = Number(providerSnapshot.configRevision || 0);
+      const capability = resolveProviderCapability({
+        settings,
+        lane: resolvedLane,
+        operation: 'provider-test',
+        host: {
+          currentModelAvailable: Boolean(generationRouter?.generate),
+          connectionProfiles: listProviderConnectionProfilesForUi()
+        }
+      });
+      startRuntimeActivity({
         runId,
-        phase: 'providerCallRunning',
+        phase: 'providerCallStarted',
         mode: 'review',
         severity: 'info',
         providerLane: resolvedLane,
-        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test running.`,
-        chips: ['Provider']
+        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test started.`,
+        chips: [resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility', 'Provider']
       });
-      const configuredMaxTokens = Number(settingsStore.get()?.providers?.[resolvedLane]?.maxTokens) || 0;
-      const result = await generationRouter.generate('providerTest', {
-        runId,
-        lane: resolvedLane,
-        ...reasoningRequestMetadata({}, 'provider-test'),
-        responseLength: configuredMaxTokens,
-        prompt: providerTestPrompt(resolvedLane)
-      }, { timeoutMs: PROVIDER_TEST_TIMEOUT_MS });
-      if (validProviderTestResult(result)) {
-        const provider = settingsStore.updateProvider(resolvedLane, {
-          resolvedProviderLabel: safeText(result.diagnostics?.providerId || result.providerId || '', 120),
-          resolvedModelLabel: safeText(result.diagnostics?.model || result.model || '', 120),
-          lastTest: {
-            status: 'pass',
-            checkedAt
-          }
-        });
-        settleRuntimeActivity({
-          runId,
-          outcome: 'success',
-          phase: 'settled',
-          severity: 'success',
-          providerLane: resolvedLane,
-          label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test passed.`,
-          chips: ['Provider'],
-          detail: {
-            provider: provider.resolvedProviderLabel,
-            model: provider.resolvedModelLabel
-          }
-        });
-        return result;
-      }
 
-      if (result?.ok) {
-        const invalid = {
-          code: 'RECURSION_PROVIDER_TEST_INVALID',
-          message: 'Provider test returned an invalid structured response.'
+      if (!capability.testable) {
+        const error = {
+          code: 'RECURSION_PROVIDER_NOT_READY',
+          message: capability.message
         };
-        const provider = providerTestFailure(resolvedLane, checkedAt, invalid);
+        await recordProviderTestHealth(resolvedLane, 'fail', checkedAt, configHash, configRevision, error);
         settleRuntimeActivity({
           runId,
           outcome: 'warning',
           phase: 'providerTestFailed',
           severity: 'warning',
           providerLane: resolvedLane,
-          label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
+          label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test unavailable.`,
           chips: ['Provider'],
-          detail: provider.lastTest
+          detail: sanitizeProviderCapability(capability)
         });
-        return { ok: false, error: invalid };
+        return { ok: false, error };
       }
 
-      const provider = providerTestFailure(resolvedLane, checkedAt, result?.error || 'Provider test failed.');
-      settleRuntimeActivity({
-        runId,
-        outcome: 'warning',
-        phase: 'providerTestFailed',
-        severity: 'warning',
-        providerLane: resolvedLane,
-        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
-        chips: ['Provider'],
-        detail: provider.lastTest
-      });
-      return result || { ok: false, error: { code: 'RECURSION_PROVIDER_TEST_FAILED', message: 'Provider test failed.' } };
-    } catch (error) {
-      const provider = providerTestFailure(resolvedLane, checkedAt, error);
-      settleRuntimeActivity({
-        runId,
-        outcome: 'warning',
-        phase: 'providerTestFailed',
-        severity: 'warning',
-        providerLane: resolvedLane,
-        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
-        chips: ['Provider'],
-        detail: provider.lastTest
-      });
-      return {
-        ok: false,
-        error: {
-          code: safeText(error?.code || 'RECURSION_PROVIDER_TEST_FAILED', 120),
-          message: safeText(error?.message || 'Provider test failed.', 300)
+      if (!generationRouter || typeof generationRouter.generate !== 'function') {
+        const error = {
+          code: 'RECURSION_PROVIDER_ROUTER_UNAVAILABLE',
+          message: 'Provider test is unavailable.'
+        };
+        await recordProviderTestHealth(resolvedLane, 'fail', checkedAt, configHash, configRevision, error);
+        return { ok: false, error };
+      }
+
+      try {
+        stageRuntimeActivity({
+          runId,
+          phase: 'providerCallRunning',
+          mode: 'review',
+          severity: 'info',
+          providerLane: resolvedLane,
+          label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test running.`,
+          chips: ['Provider']
+        });
+        const configuredMaxTokens = Number(providerSnapshot.maxTokens) || 8192;
+        const result = await generationRouter.generate('providerTest', {
+          runId,
+          lane: resolvedLane,
+          ...reasoningRequestMetadata({}, 'provider-test'),
+          responseLength: configuredMaxTokens,
+          prompt: providerTestPrompt(resolvedLane)
+        }, { timeoutMs: PROVIDER_TEST_TIMEOUT_MS });
+        if (validProviderTestResult(result)) {
+          const health = await recordProviderTestHealth(resolvedLane, 'pass', checkedAt, configHash, configRevision);
+          settleRuntimeActivity({
+            runId,
+            outcome: health.stale ? 'neutral' : 'success',
+            phase: 'settled',
+            severity: health.stale ? 'info' : 'success',
+            providerLane: resolvedLane,
+            label: health.stale
+              ? `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test result ignored after configuration changed.`
+              : `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test passed.`,
+            chips: ['Provider'],
+            detail: { configHash, stale: health.stale === true }
+          });
+          return { ...result, healthStale: health.stale === true };
         }
-      };
-    }
+
+        const failure = result?.ok
+          ? {
+              code: 'RECURSION_PROVIDER_TEST_INVALID',
+              message: 'Provider test returned an invalid structured response.'
+            }
+          : (result?.error || {
+              code: 'RECURSION_PROVIDER_TEST_FAILED',
+              message: 'Provider test failed.'
+            });
+        const health = await recordProviderTestHealth(resolvedLane, 'fail', checkedAt, configHash, configRevision, failure);
+        settleRuntimeActivity({
+          runId,
+          outcome: health.stale ? 'neutral' : 'warning',
+          phase: 'providerTestFailed',
+          severity: health.stale ? 'info' : 'warning',
+          providerLane: resolvedLane,
+          label: health.stale
+            ? `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test result ignored after configuration changed.`
+            : `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
+          chips: ['Provider'],
+          detail: { configHash, stale: health.stale === true }
+        });
+        return result?.ok ? { ok: false, error: failure } : (result || { ok: false, error: failure });
+      } catch (error) {
+        const health = await recordProviderTestHealth(resolvedLane, 'fail', checkedAt, configHash, configRevision, error);
+        settleRuntimeActivity({
+          runId,
+          outcome: health.stale ? 'neutral' : 'warning',
+          phase: 'providerTestFailed',
+          severity: health.stale ? 'info' : 'warning',
+          providerLane: resolvedLane,
+          label: health.stale
+            ? `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test result ignored after configuration changed.`
+            : `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
+          chips: ['Provider'],
+          detail: { configHash, stale: health.stale === true }
+        });
+        return {
+          ok: false,
+          healthStale: health.stale === true,
+          error: {
+            code: safeText(error?.code || 'RECURSION_PROVIDER_TEST_FAILED', 120),
+            message: safeText(error?.message || 'Provider test failed.', 300)
+          }
+        };
+      }
+    })();
+    activeProviderTests.set(resolvedLane, task);
+    task.finally(() => {
+      if (activeProviderTests.get(resolvedLane) === task) activeProviderTests.delete(resolvedLane);
+    }).catch(() => {});
+    return task;
   }
 
   async function waitForExternalMutations() {
@@ -5505,7 +5803,7 @@ export function createRecursionRuntime({
     if (!generationRouter || typeof generationRouter.generate !== 'function') {
       return markUtilityUnavailable(fallbackPlan, 'utility provider unavailable');
     }
-    const arbiterLane = arbiterLaneForSettings(settings);
+    const arbiterLane = arbiterLaneForSettings(settings, runtimeProviderCapability);
     stageRuntimeActivity({
       runId,
       phase: 'arbiterPlanning',
@@ -5530,9 +5828,9 @@ export function createRecursionRuntime({
           'Return a Recursion Utility Arbiter plan as strict JSON.',
           `Schema: ${UTILITY_ARBITER_SCHEMA}`,
           arbiterOutputContractLine(fallbackPlan.snapshotHash),
-          `Settings: ${JSON.stringify(arbiterSafeSettings(settings))}`,
+          `Settings: ${JSON.stringify(arbiterSafeSettings(settings, runtimeProviderCapability))}`,
           behaviorPolicyPromptLines(influencePolicyForSettings(settings)),
-          `Provider health: ${JSON.stringify(providerHealthForArbiter(settings))}`,
+          `Provider health: ${JSON.stringify(providerHealthForArbiter(settings, runtimeProviderCapability))}`,
           `Card scope: ${JSON.stringify(cardScope)}`,
           cardScopePolicyLine(cardScope),
           ...(usesCardDeckEligibility(settings)
@@ -5574,7 +5872,7 @@ export function createRecursionRuntime({
       sourceCardsByFamily: activeCardDeckSourceCards(settings),
       storyForm: plan.storyForm || UNKNOWN_STORY_FORM
     };
-    const requests = buildCardRequests(plan, requestContext).map((request) => applyReasoningLaneToCardRequest(request, settings));
+    const requests = buildCardRequests(plan, requestContext).map((request) => applyReasoningLaneToCardRequest(request, settings, runtimeProviderCapability));
     if (!requests.length) return empty;
     if (typeof generationRouter.batch !== 'function' && typeof generationRouter.generate !== 'function') return empty;
     if (settings.pipelineMode === 'fused' && typeof generationRouter.generate === 'function') {
@@ -5587,7 +5885,11 @@ export function createRecursionRuntime({
         requests,
         requestContext,
         sourceContext: cardSourceContext(snapshot),
-        applyFusedRequest: applyReasoningLaneToFusedCardBundleRequest,
+        applyFusedRequest: (request, sourceSettings) => applyReasoningLaneToFusedCardBundleRequest(
+          request,
+          sourceSettings,
+          runtimeProviderCapability
+        ),
         stageRuntimeActivity,
         signal,
         isCurrent: () => isRuntimeRunCurrent(runId),
@@ -5696,7 +5998,7 @@ export function createRecursionRuntime({
         const latestAssistantText = latestAssistant?.message?.text || '';
         plan = { ...plan, storyForm: normalizeStoryFormWithHeuristic(plan.storyForm, UNKNOWN_STORY_FORM, latestAssistantText) };
       }
-      plan = enforceReasonerAvailability(plan, settings);
+      plan = enforceReasonerAvailability(plan, settings, runtimeProviderCapability);
       plan = applyReasoningPolicyToPlan(plan, settings);
       plan = applyBehaviorPolicyToPlan(plan, settings);
       if (plan.utilityUnavailable) {
@@ -6465,6 +6767,17 @@ export function createRecursionRuntime({
       : (explicitRegenerate ? 'host-regenerate' : '');
     const modeChip = settings.mode === 'manual' ? 'Manual' : 'Auto';
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: [modeChip] });
+    if (pendingProseEnhancement?.blockedCapability) {
+      stageRuntimeActivity({
+        runId,
+        phase: 'editorialPreflight',
+        severity: 'warning',
+        outcome: 'skipped',
+        label: pendingProseEnhancement.blockedCapability.message,
+        chips: ['Enhancement', 'Redirect', 'Skipped'],
+        detail: pendingProseEnhancement.blockedCapability
+      });
+    }
     if (explicitSwipe && !runState.current().pendingLatestAssistantSwipeRetry) {
       // SillyTavern passes `swipe` directly to the interceptor after changing the active swipe.
       // This is the authoritative signal; MESSAGE_SWIPED remains only a UI/navigation fallback.
@@ -6587,7 +6900,7 @@ export function createRecursionRuntime({
       } else {
         plan = { ...plan, storyForm: normalizeStoryFormWithHeuristic(plan.storyForm, UNKNOWN_STORY_FORM, latestAssistantText) };
       }
-      plan = enforceReasonerAvailability(plan, settings);
+      plan = enforceReasonerAvailability(plan, settings, runtimeProviderCapability);
       plan = applyReasoningPolicyToPlan(plan, settings);
       plan = applyBehaviorPolicyToPlan(plan, settings);
       const scopedCardJobs = filterCardJobsForRuntimeScope(plan.cardJobs, settings);
@@ -6771,7 +7084,7 @@ export function createRecursionRuntime({
         )
       });
       if (!isActiveRun(runId)) return supersededResult(runId);
-      const effectiveSettings = settingsForPlan(settings, plan);
+      const effectiveSettings = settingsForPlan(settings, plan, runtimeProviderCapability);
       const behaviorPolicy = runPolicyForEffectivePlan(settings, plan);
 
       stageRuntimeActivity({
@@ -6965,6 +7278,40 @@ export function createRecursionRuntime({
     }
   }
 
+  async function appendProviderCapabilityMutation({
+    lane,
+    kind,
+    changedKeys = [],
+    before,
+    after,
+    stale = false
+  } = {}) {
+    const context = promptClearContext();
+    if (!context?.chatKey) return null;
+    const runId = makeId('provider-capability');
+    const safeBefore = sanitizeProviderCapability(before);
+    const safeAfter = sanitizeProviderCapability(after);
+    return appendJournalSafe(runId, context.chatKey, {
+      event: 'provider.capability.changed',
+      severity: stale ? 'info' : (safeAfter.state === 'unhealthy' ? 'warn' : 'info'),
+      summary: stale
+        ? `${providerLane(lane) === 'reasoner' ? 'Reasoner' : 'Utility'} provider health result ignored after configuration changed.`
+        : `${providerLane(lane) === 'reasoner' ? 'Reasoner' : 'Utility'} provider capability ${safeBefore.state} to ${safeAfter.state}.`,
+      runId,
+      sceneKey: context.sceneKey,
+      details: {
+        lane: providerLane(lane),
+        kind: safeText(kind, 40),
+        changedKeys: safeStringList(changedKeys, 80),
+        beforeState: safeBefore.state,
+        afterState: safeAfter.state,
+        configRevision: safeAfter.configRevision,
+        configHash: safeAfter.configHash,
+        stale
+      }
+    });
+  }
+
   async function recommendCardDraft(draft = {}) {
     const source = asObject(draft);
     const fallback = {
@@ -7028,7 +7375,7 @@ export function createRecursionRuntime({
       };
     }
     const settings = settingsStore.get();
-    const lane = reasonerLaneAvailable(settings) ? 'reasoner' : 'utility';
+    const lane = runtimeProviderCapability(settings, 'reasoner', 'prompt-packet').eligible ? 'reasoner' : 'utility';
     const request = buildRedirectEffectivenessRequest({
       ...asObject(input),
       lane,
@@ -7068,6 +7415,23 @@ export function createRecursionRuntime({
     }
   }
 
+  function providerOperationState() {
+    return {
+      operations: Object.fromEntries(
+        [...activeProviderOperations.entries()].map(([lane, count]) => [lane, count])
+      ),
+      tests: [...activeProviderTests.keys()]
+    };
+  }
+
+  function providerCapabilityView(lane = 'utility', operation = 'prompt-packet') {
+    return sanitizeProviderCapability(runtimeProviderCapability(
+      settingsStore.get(),
+      providerLane(lane),
+      operation
+    ));
+  }
+
   return {
     storage,
     prepareForGeneration,
@@ -7079,6 +7443,10 @@ export function createRecursionRuntime({
       abortActiveRapidWarmRun('stale');
       clearPendingFreshNextGeneration();
       await waitForExternalMutations();
+      if (host && typeof host === 'object') {
+        if (previousProviderAuthFailureHandler === undefined) delete host.handleProviderAuthFailure;
+        else host.handleProviderAuthFailure = previousProviderAuthFailureHandler;
+      }
     },
     async refreshScene() {
       return prepareForGeneration({ refreshReason: 'user-refresh' });
@@ -7096,10 +7464,12 @@ export function createRecursionRuntime({
     stopGeneration,
     updateSettings,
     resetSettingsMenu,
-    updateProvider,
+    updateProviderConfig,
     clearProviderKey,
     fetchProviderModels,
     testProvider,
+    providerOperationState,
+    providerCapability: providerCapabilityView,
     evaluateRedirectEffectiveness,
     recommendCardDraft,
     listProviderConnectionProfiles: listProviderConnectionProfilesForUi,

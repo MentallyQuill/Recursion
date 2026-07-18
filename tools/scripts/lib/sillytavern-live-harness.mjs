@@ -2013,10 +2013,11 @@ async function proveReasonerProviderReady(page, timeoutMs, browserPhase = () => 
       || context?.extensionSettings?.recursion
       || context?.extension_settings?.recursion
       || null;
-    const status = String(settings?.providers?.reasoner?.lastTest?.status
+    const status = String(settings?.providerCapabilities?.reasoner?.promptPacket?.state
+      || settings?.providers?.reasoner?.capability?.state
       || document.querySelector('[data-recursion-provider-status-reasoner]')?.textContent
       || '').trim().toLowerCase();
-    return ['pass', 'passed', 'ok', 'ready'].includes(status);
+    return status === 'ready';
   }, null, { timeout: timeoutMs });
   browserPhase('reasoner-provider-test-completed');
 }
@@ -2996,7 +2997,6 @@ async function runBrowserUiSmoke({
         browserPhase('reasoner-controls-start');
         const optionalControlTimeoutMs = Math.min(timeoutMs, 2000);
         await page.locator('[data-recursion-setting-reasoner]').selectOption('always', { timeout: optionalControlTimeoutMs }).catch(() => {});
-        await page.locator('[data-recursion-provider-enabled-reasoner]').check({ timeout: optionalControlTimeoutMs }).catch(() => {});
         await proveReasonerProviderReady(page, timeoutMs, browserPhase);
         browserPhase('reasoner-controls-completed');
       }

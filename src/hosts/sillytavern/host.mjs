@@ -946,10 +946,20 @@ export function createSillyTavernHost({
     const context = currentContext(contextFactory);
     return context.extensionSettings || globalThis.extension_settings || null;
   });
-  const resolvedSaveSettings = saveSettings || (() => {
+  const resolvedSaveSettings = saveSettings || (({ immediate = false } = {}) => {
     const context = currentContext(contextFactory);
-    const save = context.saveSettingsDebounced || globalThis.saveSettingsDebounced;
-    if (typeof save === 'function') save();
+    const immediateSave = context.saveSettings || globalThis.saveSettings;
+    const debouncedSave = context.saveSettingsDebounced || globalThis.saveSettingsDebounced;
+    if (immediate && typeof immediateSave === 'function') return immediateSave();
+    if (typeof debouncedSave === 'function') {
+      const result = debouncedSave();
+      if (immediate) {
+        return Promise.resolve(result).then(() => new Promise((resolve) => setTimeout(resolve, 2000)));
+      }
+      return result;
+    }
+    if (typeof immediateSave === 'function') return immediateSave();
+    return undefined;
   });
   const settingsStore = createSettingsStore({ root: resolvedSettingsRoot, save: resolvedSaveSettings });
   const storage = storageAdapter || (
@@ -1499,6 +1509,11 @@ export function createSillyTavernHost({
     storageAdapter: storage,
     generation,
     messages: messagesApi,
+    settings: {
+      async flush() {
+        await resolvedSaveSettings({ immediate: true });
+      }
+    },
     providerProfiles: {
       list(options = {}) {
         return listSillyTavernConnectionProfiles({

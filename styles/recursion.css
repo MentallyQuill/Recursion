@@ -1777,6 +1777,24 @@
   opacity: .42;
 }
 
+.recursion-enhancements-choice.is-unavailable,
+.recursion-enhancements-choice:disabled {
+  cursor: not-allowed;
+  opacity: .62;
+}
+
+.recursion-enhancements-choice.is-unavailable .recursion-enhancements-choice-tip {
+  color: var(--recursion-warning);
+}
+
+.recursion-redirect-test-reasoner {
+  margin: 6px 8px 8px auto;
+}
+
+.recursion-redirect-test-reasoner[hidden] {
+  display: none;
+}
+
 .recursion-card-deck-category-arrow {
   align-items: center;
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);

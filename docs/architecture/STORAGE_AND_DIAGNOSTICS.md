@@ -31,9 +31,10 @@ Every persisted record is cache-oriented. If it is stale, corrupt, too large, or
 `extension_settings.recursion` is for compact controls only. It may store:
 
 - enabled state plus mode: power on/off and `auto` or `manual`;
-- strength, prompt footprint, focus, and Reasoner-use settings;
+- strength, prompt footprint, focus, and Reasoning Level settings;
 - final prompt injection placement, role, and depth controls;
 - provider lane preferences without secrets;
+- provider `configRevision` and hash-bound health, but no provider enable Boolean;
 - advanced routing choices that are part of the current settings contract;
 - retention caps for Recursion-owned source windows, provider snapshots, scene caches, source variants, and run journals;
 - diagnostic toggles such as safe excerpt export;
@@ -224,6 +225,8 @@ type RecursionRunJournalEntry = {
     | "provider.call.started"
     | "provider.call.completed"
     | "provider.call.failed"
+    | "provider.capability.changed"
+    | "editorial.preflight.skipped"
     | "storage.repaired"
     | "storage.pruned";
   severity: "debug" | "info" | "warn" | "error";
@@ -257,6 +260,16 @@ type RecursionRunJournalEntry = {
 It must not contain card `promptText`, prompt packet sections, inspector notes, raw provider prompts, raw provider responses, transcript text, API keys, bearer tokens, `sk-...` tokens, or private secrets.
 
 Journal entries may record provider name, resolved model, status code, error category, timing, token counts, schema-validity result, request hash, response hash, prompt packet hash, selected card ids, omission reasons, and invalidation reasons.
+
+`provider.capability.changed` is the bounded audit event for provider
+configuration and health transitions. It may contain lane, prior/current
+capability, reason code, changed field names, `configRevision`, and the
+configuration hash. `editorial.preflight.skipped` may contain the same sanitized
+capability reason for a blocked Medium+ Redirect. These events must not contain
+profile ids, base URLs, model values, API-key state beyond the derived
+capability, raw provider errors, prompts, responses, or transcript text. A stale
+test result is neutral: it cannot establish readiness for a newer configuration
+hash.
 
 Every `warn` or `error` journal entry must contain `details.failure` with the normalized fields `code`, `stage`, `category`, `message`, and `retryable`. The message must state a sanitized concrete cause. If a producer emits an unhealthy entry without one, the repository records `RECURSION_JOURNAL_REASON_MISSING` rather than allowing an unexplained failure to look complete. Activity events enforce the same invariant before UI publication. Skipped and player-canceled outcomes remain neutral and do not receive failure descriptors.
 
@@ -356,7 +369,7 @@ Soft invalidation marks the cache stale and asks the Utility Arbiter to review:
 - manual scene refresh is invoked by runtime/tooling, recorded as reason `user-refresh`;
 - host chat-change events clear the active runtime scene state and best-effort mark the previously active scene cache stale as `chat-changed`;
 - host message delete, update, or older-message swipe events clear the active runtime scene state and best-effort mark the previously active scene cache stale as `source-changed`; latest-assistant swipe retries keep the existing prompt packet for the same turn;
-- provider settings, model, route, strength, focus, prompt footprint, or Reasoner mode changes;
+- provider configuration revision, model, route, strength, focus, prompt footprint, or Reasoning Level changes;
 - freshness cap is reached;
 - source window advances beyond the card evidence range;
 - token budget changes materially;
@@ -422,6 +435,7 @@ Required coverage:
 - run journal enforces ring-buffer bounds;
 - every warning/error journal event has a normalized, sanitized failure reason, including the explicit missing-reason sentinel;
 - journal redaction strips secrets, raw prompts, raw responses, headers, cookies, and private notes;
+- capability-transition journal coverage proves config and health transitions, stale-result neutrality, bounded fields, and redaction;
 - diagnostic artifacts use the same redaction path as normal diagnostics;
 - invalidation matrix covers chat change, scene shift, message edit/delete, provider/settings changes, schema changes, card catalog changes, and prompt composition contract changes;
 - cleanup rebuilds a missing index, ignores corrupt records, prunes old caches, and never touches non-Recursion records;

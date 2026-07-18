@@ -334,7 +334,7 @@ The operation result shape is:
 
 When power is toggled off, the progress surface must show prompt-clearing work and then settle to either `Recursion disabled. Prompt cleared.` or a sanitized prompt-clear warning. A clear failure does not roll back the disabled setting, but the operation returns `ok: false` and the UI keeps the warning visible. This makes power-off a real emergency brake while still exposing host prompt cleanup failures.
 
-Provider setting and session-key mutations follow the same prompt-safety rule. `runtime.updateProvider(lane, patch)` and `runtime.clearProviderKey(lane)` apply the provider change immediately, supersede active work, best-effort soft-invalidates the last successful scene cache, then await host prompt clear before resolving. Provider updates use reason `provider-changed`; session-key clears use `provider-key-cleared`.
+Provider setting and session-key mutations follow the same prompt-safety rule. `runtime.updateProviderConfig(lane, fieldScopedPatch, { expectedRevision })` and `runtime.clearProviderKey(lane)` apply the provider change transactionally, supersede active work, best-effort soft-invalidates the last successful scene cache, then await host prompt clear before resolving. Provider updates use reason `provider-changed`; session-key clears use `provider-key-cleared`.
 
 ```ts
 {

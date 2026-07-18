@@ -246,6 +246,38 @@ function proofScript() {
 }
 
 async function nativeProof(page, { timeoutMs, pipelineModes }) {
+  const chatSetup = await page.evaluate(async () => {
+    const readContext = () => globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || null;
+    let context = readContext();
+    if (!context) return { ok: false, reason: 'context-unavailable' };
+    const characters = Array.isArray(context.characters) ? context.characters : [];
+    if (characters.length === 0) return { ok: false, reason: 'character-unavailable' };
+    let characterIndex = Number(context.characterId);
+    if (!Number.isInteger(characterIndex) || characterIndex < 0 || characterIndex >= characters.length) {
+      characterIndex = 0;
+      if (typeof context.selectCharacterById !== 'function') {
+        return { ok: false, reason: 'select-character-unavailable' };
+      }
+      await context.selectCharacterById(characterIndex);
+      context = readContext() || context;
+    }
+    const character = (Array.isArray(context.characters) ? context.characters : characters)[characterIndex] || characters[characterIndex];
+    const chatFile = String(character?.chat || context.chatId || context.currentChatId || '').replace(/\.jsonl$/i, '');
+    if (chatFile && typeof context.openCharacterChat === 'function') {
+      await context.openCharacterChat(chatFile);
+    }
+    return {
+      ok: true,
+      characterIndex,
+      characterName: String(character?.name || ''),
+      chatFile
+    };
+  });
+  if (!chatSetup?.ok) {
+    fail('native-chat-unavailable', 'A dedicated native SillyTavern character chat is required.', chatSetup || {});
+  }
+  await page.waitForSelector('#send_textarea, textarea#send_textarea', { state: 'visible', timeout: timeoutMs });
+
   async function setPipeline(pipelineMode) {
     const result = await page.evaluate(async (mode) => {
       const runtime = globalThis.__recursionLiveHarnessRuntime;

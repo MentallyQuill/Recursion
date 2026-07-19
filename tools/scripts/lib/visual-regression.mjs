@@ -18,5 +18,11 @@ export async function assertVisualBaseline(locator, snapshotPath, { mask = [], r
   }
   const actualHash = createHash('sha256').update(actual).digest('hex');
   const expectedHash = createHash('sha256').update(expected).digest('hex');
-  return { ok: true, snapshotPath, baseline: actualHash === expectedHash ? 'match' : 'captured-different', sha256: actualHash, expectedSha256: expectedHash };
+  if (actualHash !== expectedHash) {
+    throw new Error(
+      `Visual baseline changed: ${snapshotPath} `
+      + `(expected ${expectedHash}, received ${actualHash})`
+    );
+  }
+  return { ok: true, snapshotPath, baseline: 'match', sha256: actualHash, expectedSha256: expectedHash };
 }

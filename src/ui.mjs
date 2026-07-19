@@ -251,8 +251,9 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   maxCards: 'Upper Manual card-selection cap and Ultra Reasoning Level card target. Medium and High use the average, so this also sets the upper range for busier scenes.',
   focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, constraints, scene, or plot without becoming a hard whitelist.',
   footprint: 'Prompt budget for the composed Recursion packet. Compact spends fewer tokens, Rich preserves more scene detail when the moment is complex.',
+  contextWindows: 'Bounds the Recursion-owned evidence and analysis windows used before and after generation. These do not replace or limit SillyTavern writer context.',
   postProcess: 'Bounds only the frozen evidence used to synthesize Post-process guidance. SillyTavern still assembles the writer context.',
-  postProcessContextMessages: 'Recent visible messages available to guidance synthesis. This does not replace or limit SillyTavern writer context.',
+  postProcessContextMessages: 'Recent visible messages available to Post-process guidance synthesis. This does not replace or limit SillyTavern writer context.',
   injection: 'Compatibility controls for where the final composed Recursion packet lands in SillyTavern. These do not create per-card prompt controls.',
   injectionPlacement: 'Choose the SillyTavern prompt lane for the composed Recursion packet. In Prompt is the recommended default; In Chat can help presets that weight recent chat harder.',
   injectionRole: 'Role SillyTavern assigns to Recursion prompt blocks. System is safest for instruction-like scene guidance; User or Assistant exist for preset compatibility.',
@@ -261,10 +262,10 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   tooltips: 'Show hover help across Recursion. Turn off once the controls are familiar; hidden text never affects model calls.',
   progressChildLimit: 'Maximum visible sub-rows under one progress step before that child list scrolls. Useful when many card calls run in one turn.',
   progressListLimit: 'Maximum combined progress rows before the whole progress menu scrolls. Keeps long model-call runs readable without growing over the chat.',
-  retention: 'Operational caps for Recursion-owned source windows and cache files. These never delete SillyTavern chat messages.',
+  storageRetention: 'Operational caps for Recursion-owned cache files and journals. These never delete SillyTavern chat messages.',
   sourceWindowMessages: 'Recent visible messages Recursion reads for source freshness. This does not delete SillyTavern chat.',
   sourceWindowCharacters: 'Character budget for the source freshness window. Lower values make long chats cheaper; higher values keep more local scene evidence.',
-  providerVisibleMessages: 'Recent visible messages sent to Recursion provider calls. This affects Recursion analysis prompts, not the final story model context.',
+  providerVisibleMessages: 'Recent visible messages sent to Recursion analysis calls. This affects Recursion analysis prompts, not the final story model context.',
   sceneCachesPerChat: 'Recursion scene-cache files retained per chat. Old unprotected caches are disposable and can be rebuilt.',
   sceneCachesTotal: 'Total Recursion scene-cache files retained across chats. Cleanup never deletes SillyTavern messages or other extension data.',
   sourceVariantsPerScene: 'Active-source variants retained for swipe A/B/A reuse. Higher values preserve more swipe branches but make scene-cache files larger.',
@@ -2508,7 +2509,7 @@ function postProcessCardCounts(deck = {}) {
       if (!cleanText(card.name) || !cleanText(card.promptText)) continue;
       eligible += 1;
       if (card.enabled !== false) enabled += 1;
-      if (category.enabled !== false && card.enabled !== false) active += 1;
+      if (card.enabled !== false) active += 1;
     }
   }
   return {
@@ -2735,7 +2736,8 @@ function renderPostProcessPanel(panel, view, {
   for (const category of orderedPostProcessCategories(deck)) {
     const expanded = postProcessCategoryExpanded(deckSettings, deck.id, category.id);
     const cards = orderedPostProcessCards(deck, category.id);
-    const runnableCount = cards.filter((card) => category.enabled !== false && card.enabled !== false && cleanText(card.name) && cleanText(card.promptText)).length;
+    const categoryEnabled = cards.some((card) => card.enabled !== false);
+    const runnableCount = cards.filter((card) => card.enabled !== false && cleanText(card.name) && cleanText(card.promptText)).length;
     const categoryActions = deck.readonly ? [] : [
       cardSystemIconButton('plus', 'Create a new Card in category', { recursionPostProcessCardCreate: category.id }),
       cardSystemIconButton('pencil', `Edit ${category.name}`, { recursionPostProcessCategoryEdit: category.id }),
@@ -2745,8 +2747,8 @@ function renderPostProcessPanel(panel, view, {
       })
     ];
     const cardRows = cards.map((card) => {
-      const effectiveOn = category.enabled !== false && card.enabled !== false;
-      const cardToggleLabel = `${card.name || 'Unnamed card'}: saved ${card.enabled === false ? 'Off' : 'On'}${category.enabled === false ? ', effectively Off because category is Off' : ''}`;
+      const effectiveOn = card.enabled !== false;
+      const cardToggleLabel = `${card.name || 'Unnamed card'}: ${effectiveOn ? 'On' : 'Off'}`;
       const actions = deck.readonly ? [] : [
         cardSystemIconButton('pencil', `Edit ${card.name || 'card'}`, { recursionPostProcessCardEdit: card.id }),
         cardSystemIconButton('copy', `Duplicate ${card.name || 'card'}`, { recursionPostProcessCardDuplicate: card.id }),
@@ -2786,7 +2788,7 @@ function renderPostProcessPanel(panel, view, {
     });
     list.appendChild(renderDeckCategory({
       el,
-      className: `recursion-post-process-category ${category.enabled === false ? 'is-inactive' : 'is-active'}`,
+      className: `recursion-post-process-category ${categoryEnabled ? 'is-active' : 'is-inactive'}`,
       category,
       expanded,
       disclosure: cardSystemIconSvg(expanded ? 'chevron-up' : 'chevron-down'),
@@ -2936,12 +2938,9 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     max: 35,
     step: 1,
     dataset: { recursionSettingPostProcessContextMessages: '' },
-    ariaLabel: 'Post-process guidance context messages'
+    ariaLabel: 'Post-process evidence messages'
   });
   setTooltip(postProcessContextControl, tooltipsEnabled, SETTINGS_TOOLTIPS.postProcessContextMessages);
-  group.appendChild(settingsDisclosureSection('post-process', 'Post-process', [
-    controlRow('Guidance Context Messages', postProcessContextControl)
-  ], { tooltip: SETTINGS_TOOLTIPS.postProcess, tooltipsEnabled }));
   const retentionNumberControl = (key, datasetKey, ariaLabel) => {
     const limits = RETENTION_LIMITS[key];
     return integerInputControl({
@@ -2967,15 +2966,18 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
   setTooltip(variantControl, tooltipsEnabled, SETTINGS_TOOLTIPS.sourceVariantsPerScene);
   const journalEntriesControl = retentionNumberControl('runJournalEntries', 'recursionSettingRunJournalEntries', 'Maximum diagnostic journal entries');
   setTooltip(journalEntriesControl, tooltipsEnabled, SETTINGS_TOOLTIPS.runJournalEntries);
-  group.appendChild(settingsDisclosureSection('retention', 'Retention', [
-    controlRow('Source Messages', sourceMessagesControl),
-    controlRow('Source Text Budget', sourceCharactersControl),
-    controlRow('Provider Messages', providerMessagesControl),
+  group.appendChild(settingsDisclosureSection('context-windows', 'Context Windows', [
+    controlRow('Post-process Evidence Messages', postProcessContextControl),
+    controlRow('Source Freshness Messages', sourceMessagesControl),
+    controlRow('Source Freshness Text Budget', sourceCharactersControl),
+    controlRow('Provider Analysis Messages', providerMessagesControl)
+  ], { tooltip: SETTINGS_TOOLTIPS.contextWindows, tooltipsEnabled }));
+  group.appendChild(settingsDisclosureSection('storage-retention', 'Storage Retention', [
     controlRow('Scene Caches / Chat', perChatCacheControl),
     controlRow('Scene Caches Total', totalCacheControl),
     controlRow('Swipe Variants / Scene', variantControl),
     controlRow('Journal Entries', journalEntriesControl)
-  ], { tooltip: SETTINGS_TOOLTIPS.retention, tooltipsEnabled }));
+  ], { tooltip: SETTINGS_TOOLTIPS.storageRetention, tooltipsEnabled }));
   const excerptsControl = checkboxControl({
     checked: diagnostics.includeExcerpts === true,
     dataset: { recursionSettingIncludeExcerpts: '' },
@@ -5299,11 +5301,16 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
 
   function createCardDragGhost(sourceNode) {
     if (!sourceNode?.cloneNode || !canUseDocument()) return null;
+    const sourceRect = sourceNode.getBoundingClientRect?.();
+    const sourceStyle = globalThis.getComputedStyle?.(sourceNode);
     const ghost = sourceNode.cloneNode(true);
     ghost.classList?.remove('is-dragging');
     ghost.classList?.add('recursion-card-drag-ghost');
     ghost.removeAttribute?.('id');
-    ghost.style.width = `${Math.max(0, Number(sourceNode.getBoundingClientRect?.().width || 0))}px`;
+    ghost.style.width = `${Math.max(0, Number(sourceRect?.width || 0))}px`;
+    ghost.style.height = `${Math.max(0, Number(sourceRect?.height || 0))}px`;
+    const actionRailWidth = sourceStyle?.getPropertyValue?.('--recursion-card-action-rail-width')?.trim();
+    if (actionRailWidth) ghost.style.setProperty('--recursion-card-action-rail-width', actionRailWidth);
     document.body?.appendChild?.(ghost);
     requestDragFrame(() => ghost.classList?.add('is-visible'));
     return ghost;

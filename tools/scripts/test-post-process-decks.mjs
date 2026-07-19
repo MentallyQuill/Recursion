@@ -15,11 +15,11 @@ import {
   deletePostProcessCard,
   movePostProcessCard,
   reorderPostProcessCards,
-  togglePostProcessCategory,
   togglePostProcessCard,
   normalizePostProcessDeck,
   normalizePostProcessDeckSettings,
   getActivePostProcessDeck,
+  updateActivePostProcessDeckState,
   orderedRunnablePostProcessCategories,
   postProcessCategoryExpanded,
   setPostProcessCategoryExpanded,
@@ -30,17 +30,74 @@ import { assert, assertDeepEqual as deepEqual, assertEqual as equal } from '../.
 const now = '2026-07-18T00:00:00.000Z';
 const starter = createStarterPostProcessDeck({ now });
 
+equal(POST_PROCESS_DECK_SETTINGS_VERSION, 3, 'expanded starter deck uses the V3 Post-process deck contract');
 equal(starter.id, STARTER_POST_PROCESS_DECK_ID, 'starter id is stable');
 equal(starter.name, 'Starter Post-process Deck', 'starter name is approved');
-deepEqual(starter.categoryOrder, ['natural-prose', 'follow-through'], 'starter category order is approved');
+deepEqual(
+  starter.categoryOrder,
+  ['natural-prose', 'follow-through', 'concrete-meaning', 'character-specific-relationships'],
+  'starter category order is approved'
+);
 deepEqual(starter.cardOrderByCategory['natural-prose'], ['cut-echoes', 'natural-diction', 'land-the-ending'], 'Natural Prose card order is approved');
 deepEqual(starter.cardOrderByCategory['follow-through'], ['act-on-the-threat', 'close-the-distance', 'complete-the-move'], 'Follow Through card order is approved');
-equal(Object.keys(starter.cards).length, 6, 'starter has exactly six cards');
+deepEqual(starter.cardOrderByCategory['concrete-meaning'], ['strip-false-weight'], 'Concrete Meaning card order is approved');
+deepEqual(
+  starter.cardOrderByCategory['character-specific-relationships'],
+  ['earn-the-attraction', 'ground-the-deflection'],
+  'Character-Specific Relationships card order is approved'
+);
+equal(Object.keys(starter.cards).length, 9, 'starter has exactly nine cards');
 assert(starter.cards['natural-diction'].promptText.includes('literal robot or android'), 'Natural Diction preserves the exact robot/android exception');
 equal(starter.cards['natural-diction'].promptText, `Review dialogue and character-facing narration for over-technical or pseudo-analytical diction such as “assessing variables,” “recalibrating,” “data point,” “optimal,” “inefficient,” “statistically,” “physiologically,” “strategically,” “tactically,” and “clinical precision.”\n\nFor non-robotic characters, rewrite those expressions into direct, idiomatic phrasing that matches each character's established voice. Do not use technical language as shorthand for intelligence, emotional distance, dominance, or competence.\n\nPreserve this register only when the speaker is a literal robot or android whose canonical voice genuinely uses it. Preserve the intended meaning and do not flatten distinct character voices.`, 'Natural Diction prompt is canonical');
 assert(starter.bundled && starter.readonly, 'starter is bundled and read-only');
-assert(Object.values(starter.categories).every((category) => category.enabled === true), 'starter categories default On');
-assert(Object.values(starter.cards).every((card) => card.enabled === true), 'starter cards default On');
+deepEqual(
+  Object.fromEntries(Object.values(starter.categories).map((category) => [category.id, Object.hasOwn(category, 'enabled')])),
+  {
+    'natural-prose': false,
+    'follow-through': false,
+    'concrete-meaning': false,
+    'character-specific-relationships': false
+  },
+  'Post-process categories do not store independent enabled state'
+);
+deepEqual(
+  Object.fromEntries(Object.values(starter.cards).map((card) => [card.id, card.enabled])),
+  {
+    'cut-echoes': true,
+    'natural-diction': true,
+    'land-the-ending': true,
+    'act-on-the-threat': true,
+    'close-the-distance': true,
+    'complete-the-move': true,
+    'strip-false-weight': false,
+    'earn-the-attraction': false,
+    'ground-the-deflection': false
+  },
+  'original starter cards default On and optional expansion cards default Off'
+);
+deepEqual(
+  orderedRunnablePostProcessCategories(starter).map((category) => category.id),
+  ['natural-prose', 'follow-through'],
+  'only the original two starter categories participate by default'
+);
+const starterWithConcreteMeaning = togglePostProcessCard(starter, 'strip-false-weight', true, { now });
+deepEqual(
+  orderedRunnablePostProcessCategories(starterWithConcreteMeaning).map((category) => category.id),
+  ['natural-prose', 'follow-through', 'concrete-meaning'],
+  'enabling any one card automatically makes its category participate'
+);
+assert(
+  starter.cards['strip-false-weight'].promptText.includes('Do not substitute one ornamental phrase for another'),
+  'Strip False Weight repairs missing narrative work instead of performing word replacement'
+);
+assert(
+  starter.cards['earn-the-attraction'].promptText.includes('Do not merely replace stock words with softer synonyms'),
+  'Earn the Attraction repairs relationship characterization instead of performing word replacement'
+);
+assert(
+  starter.cards['ground-the-deflection'].promptText.includes('Do not replace one stock deflection with another'),
+  'Ground the Deflection repairs defensive characterization instead of performing word replacement'
+);
 
 const normalizedStarterStates = normalizePostProcessDeckSettings({
   activeDeckId: STARTER_POST_PROCESS_DECK_ID,
@@ -53,10 +110,9 @@ const normalizedStarterStates = normalizePostProcessDeckSettings({
     missing: false
   }
 }, { now });
-deepEqual(normalizedStarterStates.starterCategoryStates, { 'natural-prose': false }, 'starter category overrides keep only known categories');
+equal(normalizedStarterStates.starterCategoryStates, undefined, 'independent starter category state is removed from V3');
 deepEqual(normalizedStarterStates.starterCardStates, { 'cut-echoes': false }, 'starter card overrides keep only known cards');
 const overlaidStarter = getActivePostProcessDeck(normalizedStarterStates, { now });
-equal(overlaidStarter.categories['natural-prose'].enabled, false, 'starter category overrides apply to the active deck');
 equal(overlaidStarter.cards['cut-echoes'].enabled, false, 'starter card overrides apply to the active deck');
 assert(overlaidStarter.readonly, 'starter state overrides do not make bundled content structurally editable');
 equal(
@@ -88,14 +144,35 @@ const starterOff = setAllPostProcessCardsEnabled(
 );
 assert(Object.values(starterOff.starterCardStates).every((state) => state === false), 'starter bulk Off persists every card state');
 assert(Object.values(getActivePostProcessDeck(starterOff, { now }).cards).every((card) => card.enabled === false), 'starter bulk Off disables every card');
+deepEqual(
+  orderedRunnablePostProcessCategories(getActivePostProcessDeck(starterOff, { now })),
+  [],
+  'disabling every card automatically leaves every category inactive'
+);
 const starterOn = setAllPostProcessCardsEnabled(starterOff, true, { now });
 assert(Object.values(starterOn.starterCardStates).every((state) => state === true), 'starter bulk On persists every card state');
 assert(Object.values(getActivePostProcessDeck(starterOn, { now }).cards).every((card) => card.enabled === true), 'starter bulk On enables every card');
-assert(Object.values(getActivePostProcessDeck(starterOn, { now }).categories).every((category) => category.enabled === true), 'starter bulk On enables every category containing runnable cards');
 
 const mutatedStarter = createStarterPostProcessDeck({ now });
 mutatedStarter.categories['natural-prose'].name = 'Changed';
 equal(createStarterPostProcessDeck({ now }).categories['natural-prose'].name, 'Natural Prose', 'starter data is deeply cloned');
+
+const starterWithOptionalCardSettings = updateActivePostProcessDeckState(
+  {},
+  togglePostProcessCard(createStarterPostProcessDeck({ now }), 'strip-false-weight', true, { now }),
+  { now }
+);
+const duplicatedStarterSettings = duplicatePostProcessDeck(
+  starterWithOptionalCardSettings,
+  STARTER_POST_PROCESS_DECK_ID,
+  { now }
+);
+const duplicatedStarter = duplicatedStarterSettings.customDecks[duplicatedStarterSettings.activeDeckId];
+equal(
+  Object.values(duplicatedStarter.cards).find((card) => card.name === 'Strip False Weight')?.enabled,
+  true,
+  'duplicating the starter preserves current card-state overlays'
+);
 
 let settings = createCustomPostProcessDeck({}, { name: '  Revision   Rules  ', now });
 const customId = settings.activeDeckId;
@@ -117,7 +194,7 @@ equal(settings.categoryExpansion[duplicatedId], undefined, 'deleting a Post-proc
 let deck = settings.customDecks[customId];
 deck = createPostProcessCategory(deck, { name: 'Finish', description: 'Complete the response.', now });
 const finishId = deck.categoryOrder.at(-1);
-equal(deck.categories[finishId].enabled, true, 'new category defaults On');
+equal(Object.hasOwn(deck.categories[finishId], 'enabled'), false, 'new categories do not store enabled state');
 deck = updatePostProcessCategory(deck, finishId, { name: '  Finish Strong  ', description: '  Land it.  ', now });
 equal(deck.categories[finishId].name, 'Finish Strong', 'category update normalizes name');
 deck = reorderPostProcessCategories(deck, finishId, 'general');
@@ -141,9 +218,6 @@ deck = reorderPostProcessCards(deck, secondId, [copyId]);
 equal(deck.cardOrderByCategory[secondId][0], copyId, 'card reorder respects requested order');
 deck = togglePostProcessCard(deck, copyId, false, { now });
 equal(deck.cards[copyId].enabled, false, 'card toggle is binary Off');
-deck = togglePostProcessCategory(deck, secondId, false, { now });
-equal(deck.categories[secondId].enabled, false, 'category toggle is binary Off');
-equal(deck.cards[copyId].enabled, false, 'category Off preserves child saved state');
 deck = deletePostProcessCard(deck, copyId, { now });
 assert(!deck.cards[copyId], 'card delete removes card');
 
@@ -156,10 +230,9 @@ const runnableDeck = normalizePostProcessDeck({
     disabled: { id: 'disabled', categoryId: 'second', name: 'Disabled', promptText: 'No', enabled: false },
     'blank-name': { id: 'blank-name', categoryId: 'first', name: ' ', promptText: 'No', enabled: true },
     'blank-prompt': { id: 'blank-prompt', categoryId: 'first', name: 'Blank', promptText: ' ', enabled: true },
-    'off-category': { id: 'off-category', categoryId: 'first', name: 'Off category', promptText: 'No', enabled: true }
+    'off-category': { id: 'off-category', categoryId: 'first', name: 'Off card', promptText: 'No', enabled: false }
   }
 }, 'runnable', { now });
-runnableDeck.categories.first.enabled = false;
 deepEqual(orderedRunnablePostProcessCategories(runnableDeck).map((category) => [category.id, category.cards.map((card) => card.id)]), [['second', ['valid']]], 'runnable selection obeys deck order and binary states');
 
 const normalized = normalizePostProcessDeckSettings({

@@ -1061,7 +1061,11 @@ assert(/function categoryZoneFromPointer\(state, contentY, target = null\)[\s\S]
   && /cardPlaceholderFromZones\(state, y, target\)/.test(recursionUi), 'production Card System prefers the category under the pointer when source removal shifts layout');
 assert(/function scheduleCardDragUpdate/.test(recursionUi) && /pendingCardDragEvent/.test(recursionUi), 'production Card System batches drag pointer updates through requestAnimationFrame');
 assert(/state\.grabOffset = cardDragGrabOffset/.test(recursionUi) && /state\.current\?\.x \|\| 0\) - Number\(state\.grabOffset\?\.x/.test(recursionUi), 'production Card System anchors the drag ghost to the original grab point');
-assert(/ghost\.style\.width\s*=\s*`\$\{Math\.max\(0, Number\(sourceNode\.getBoundingClientRect\?\.\(\)\.width \|\| 0\)\)\}px`/.test(recursionUi), 'production Card System preserves the source row width on the drag ghost');
+assert(/const sourceRect = sourceNode\.getBoundingClientRect\?\.\(\)/.test(recursionUi)
+  && /ghost\.style\.width\s*=\s*`\$\{Math\.max\(0, Number\(sourceRect\?\.width \|\| 0\)\)\}px`/.test(recursionUi)
+  && /ghost\.style\.height\s*=\s*`\$\{Math\.max\(0, Number\(sourceRect\?\.height \|\| 0\)\)\}px`/.test(recursionUi), 'production Card System preserves the source row width and height on the drag ghost');
+assert(/getPropertyValue\?\.\('--recursion-card-action-rail-width'\)/.test(recursionUi)
+  && /ghost\.style\.setProperty\('--recursion-card-action-rail-width', actionRailWidth\)/.test(recursionUi), 'production Card System preserves the panel action-rail geometry on the body-level drag ghost');
 assert(/\.recursion-card-drag-ghost\s*\{[\s\S]*?max-width:\s*none;/.test(recursionCss)
   && /\.recursion-card-drag-ghost\.is-visible\s*\{[\s\S]*?opacity:\s*\.85;/.test(recursionCss), 'production Card System keeps the ghost width stable and uses 85 percent opacity');
 assert(/cardDragGhost = createCardDragGhost\(sourceNode\)[\s\S]*?sourceNode\.classList\?\.add\('is-dragging'\)/.test(recursionUi), 'production Card System clones the drag ghost before hiding the source row');
@@ -2327,10 +2331,23 @@ try {
     !root.querySelector('[data-recursion-post-process-header]').textContent.includes('structure read-only'),
     'read-only structure is communicated by disabled authoring controls rather than unique header copy'
   );
-  assertEqual(root.querySelectorAll('[data-recursion-post-process-category]').length, 2, 'starter Post-process Deck renders two ordered categories');
-  assertEqual(root.querySelectorAll('[data-recursion-post-process-card]').length, 6, 'starter Post-process Deck renders six ordered cards');
-  assertEqual(root.querySelectorAll('[data-recursion-post-process-category-toggle]').length, 0, 'Post-process category headers omit the phase-only visibility eye');
-  assertEqual(root.querySelectorAll('[data-recursion-post-process-card-toggle]').length, 6, 'Post-process card rows retain their binary visibility eyes');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-category]').length, 4, 'starter Post-process Deck renders four ordered categories');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-card]').length, 9, 'starter Post-process Deck renders nine ordered cards');
+  assertDeepEqual(
+    root.querySelectorAll('[data-recursion-post-process-category]').map((category) => ({
+      id: category.dataset.recursionPostProcessCategory,
+      active: category.className.includes('is-active')
+    })),
+    [
+      { id: 'natural-prose', active: true },
+      { id: 'follow-through', active: true },
+      { id: 'concrete-meaning', active: false },
+      { id: 'character-specific-relationships', active: false }
+    ],
+    'starter Post-process Deck keeps only the original two categories active by default'
+  );
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-category-toggle]').length, 0, 'Post-process category headers omit independent visibility controls');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-card-toggle]').length, 9, 'Post-process card rows retain their binary visibility eyes');
   assert(
     root.querySelector('[data-recursion-post-process-category]').children[0]?.className.includes('recursion-post-process-category-head'),
     'Post-process category modifiers preserve the shared category header class'
@@ -2635,37 +2652,59 @@ try {
   assertEqual(root.querySelector('[data-recursion-post-process-deck-delete]').disabled, true, 'starter Post-process Deck delete is read-only');
   assertEqual(root.querySelector('[data-recursion-post-process-category-toggle]'), null, 'starter category headers do not expose visibility controls');
   assertEqual(root.querySelector('[data-recursion-post-process-card-toggle]').disabled, false, 'starter card state remains operator-controllable');
+  const stripFalseWeightToggle = root.querySelectorAll('[data-recursion-post-process-card-toggle]')
+    .find((button) => button.dataset.recursionPostProcessCardToggle === 'strip-false-weight');
+  assertEqual(stripFalseWeightToggle.getAttribute('aria-pressed'), 'false', 'optional Post-process card reflects its default Off state');
+  stripFalseWeightToggle.click();
+  assertEqual(
+    settingsUpdates.at(-1).postProcessDecks.starterCardStates['strip-false-weight'],
+    true,
+    'optional Post-process card can be enabled independently'
+  );
+  assert(
+    root.querySelectorAll('[data-recursion-post-process-category]')
+      .find((category) => category.dataset.recursionPostProcessCategory === 'concrete-meaning')
+      .className.includes('is-active'),
+    'enabling one card automatically makes its category active'
+  );
   assertEqual(root.querySelector('[data-recursion-post-process-deactivate-all]').disabled, false, 'Post-process slashed eye stays available while starter cards are enabled');
   root.querySelector('[data-recursion-post-process-deactivate-all]').click();
   assert(
     Object.values(settingsUpdates.at(-1).postProcessDecks.starterCardStates).every((enabled) => enabled === false),
     'Post-process slashed eye disables every starter card'
   );
+  assert(
+    root.querySelectorAll('[data-recursion-post-process-category]')
+      .every((category) => category.className.includes('is-inactive')),
+    'disabling every Post-process card automatically makes every category inactive'
+  );
   root.querySelector('[data-recursion-post-process-activate-all]').click();
   assert(
-    Object.values(settingsUpdates.at(-1).postProcessDecks.starterCategoryStates).every((enabled) => enabled === true),
-    'Post-process open eye enables every starter category'
+    Object.values(settingsUpdates.at(-1).postProcessDecks.starterCardStates).every((enabled) => enabled === true),
+    'Post-process open eye enables every starter card and therefore every category'
   );
   const expandedPostProcessCount = () => root.querySelectorAll('[data-recursion-post-process-category-expand]')
     .filter((button) => button.getAttribute('aria-expanded') === 'true')
     .length;
-  assertEqual(expandedPostProcessCount(), 2, 'Post-process categories default expanded on the initial panel render');
+  assertEqual(expandedPostProcessCount(), 4, 'Post-process categories default expanded on the initial panel render');
   const firstPostProcessCategoryId = root.querySelectorAll('[data-recursion-post-process-category-expand]')[0].dataset.recursionPostProcessCategoryExpand;
   root.querySelectorAll('[data-recursion-post-process-category-expand]')[0].click();
-  assertEqual(expandedPostProcessCount(), 1, 'collapsing the first Post-process category leaves only the second open');
+  assertEqual(expandedPostProcessCount(), 3, 'collapsing the first Post-process category leaves the other three open');
   assertEqual(
     settingsUpdates.at(-1).postProcessDecks.categoryExpansion[STARTER_POST_PROCESS_DECK_ID][firstPostProcessCategoryId],
     false,
     'Post-process disclosure writes the collapsed category to global deck settings'
   );
   ui.update();
-  assertEqual(expandedPostProcessCount(), 1, 'a partial Post-process disclosure state persists across rerender');
+  assertEqual(expandedPostProcessCount(), 3, 'a partial Post-process disclosure state persists across rerender');
   root.querySelector('[data-recursion-post-process-cards-button]').click();
   root.querySelector('[data-recursion-post-process-cards-button]').click();
-  assertEqual(expandedPostProcessCount(), 1, 'Post-process disclosure survives panel close and reopen');
-  root.querySelectorAll('[data-recursion-post-process-category-expand]')
-    .find((button) => button.getAttribute('aria-expanded') === 'true')
-    .click();
+  assertEqual(expandedPostProcessCount(), 3, 'Post-process disclosure survives panel close and reopen');
+  while (expandedPostProcessCount() > 0) {
+    root.querySelectorAll('[data-recursion-post-process-category-expand]')
+      .find((button) => button.getAttribute('aria-expanded') === 'true')
+      .click();
+  }
   assertEqual(expandedPostProcessCount(), 0, 'collapsing the final Post-process category leaves every category closed');
   ui.update();
   assertEqual(expandedPostProcessCount(), 0, 'the all-collapsed Post-process disclosure state persists across rerender');
@@ -2687,7 +2726,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-post-process-card-drag-handle]').getAttribute('draggable'), null, 'Post-process card drag uses pointer events instead of native draggable');
   assert(root.querySelector('[data-recursion-post-process-category-create]').className.includes('recursion-card-deck-tool-add'), 'editable Post-process deck uses the shared category creation plus');
   assert(root.querySelector('[data-recursion-post-process-card-create]'), 'editable Post-process category exposes a header create-card plus');
-  assertEqual(root.querySelectorAll('[data-recursion-post-process-category-toggle]').length, 0, 'editable Post-process category headers also omit visibility eyes');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-category-toggle]').length, 0, 'editable Post-process category headers also omit visibility controls');
   const customPostCategoryActions = root.querySelector('[data-recursion-post-process-category]').children[0].children
     .find((child) => child.className?.includes('recursion-card-panel-row-actions'));
   assert(
@@ -3515,11 +3554,14 @@ try {
   assertEqual(root.querySelector('[data-recursion-settings-advanced]').hidden, false, 'clicking Advanced shows advanced controls');
   assert(root.querySelector('[data-recursion-settings-section-injection]'), 'Advanced settings groups injection controls');
   assert(root.querySelector('[data-recursion-settings-section-ui]'), 'Advanced settings groups UI controls');
-  assert(root.querySelector('[data-recursion-settings-section-retention]'), 'Advanced settings groups retention controls');
+  assert(root.querySelector('[data-recursion-settings-section-context-windows]'), 'Advanced settings groups context-window controls');
+  assert(root.querySelector('[data-recursion-settings-section-storage-retention]'), 'Advanced settings groups storage-retention controls');
+  assert(!root.querySelector('[data-recursion-settings-section-post-process]'), 'Advanced settings removes the single-row Post-process disclosure');
   assert(root.querySelector('[data-recursion-settings-section-diagnostics]'), 'Advanced settings groups diagnostics controls');
   assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, false, 'Injection section defaults open');
   assertEqual(root.querySelector('[data-recursion-settings-section-body-ui]').hidden, false, 'UI section defaults open');
-  assertEqual(root.querySelector('[data-recursion-settings-section-body-retention]').hidden, false, 'Retention section defaults open');
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-context-windows]').hidden, false, 'Context Windows section defaults open');
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-storage-retention]').hidden, false, 'Storage Retention section defaults open');
   assertEqual(root.querySelector('[data-recursion-settings-section-body-diagnostics]').hidden, false, 'Diagnostics section defaults open');
   root.querySelector('[data-recursion-settings-section-toggle-injection]').click();
   assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, true, 'Injection section collapses');
@@ -3531,13 +3573,14 @@ try {
   assert(root.querySelector('[data-recursion-setting-injection-placement]'), 'Advanced settings render injection placement control');
   assert(root.querySelector('[data-recursion-setting-injection-role]'), 'Advanced settings render injection role control');
   assert(root.querySelector('[data-recursion-setting-injection-depth]'), 'Advanced settings render injection depth control');
-  assert(root.querySelector('[data-recursion-setting-source-window-messages]'), 'Retention renders source message cap');
-  assert(root.querySelector('[data-recursion-setting-source-window-characters]'), 'Retention renders source character budget');
-  assert(root.querySelector('[data-recursion-setting-provider-visible-messages]'), 'Retention renders provider message cap');
-  assert(root.querySelector('[data-recursion-setting-scene-caches-per-chat]'), 'Retention renders per-chat scene cache cap');
-  assert(root.querySelector('[data-recursion-setting-scene-caches-total]'), 'Retention renders total scene cache cap');
-  assert(root.querySelector('[data-recursion-setting-source-variants-per-scene]'), 'Retention renders source variant cap');
-  assert(root.querySelector('[data-recursion-setting-run-journal-entries]'), 'Retention renders journal entry cap');
+  assert(root.querySelector('[data-recursion-setting-post-process-context-messages]'), 'Context Windows renders Post-process evidence cap');
+  assert(root.querySelector('[data-recursion-setting-source-window-messages]'), 'Context Windows renders source freshness message cap');
+  assert(root.querySelector('[data-recursion-setting-source-window-characters]'), 'Context Windows renders source freshness character budget');
+  assert(root.querySelector('[data-recursion-setting-provider-visible-messages]'), 'Context Windows renders provider analysis message cap');
+  assert(root.querySelector('[data-recursion-setting-scene-caches-per-chat]'), 'Storage Retention renders per-chat scene cache cap');
+  assert(root.querySelector('[data-recursion-setting-scene-caches-total]'), 'Storage Retention renders total scene cache cap');
+  assert(root.querySelector('[data-recursion-setting-source-variants-per-scene]'), 'Storage Retention renders source variant cap');
+  assert(root.querySelector('[data-recursion-setting-run-journal-entries]'), 'Storage Retention renders journal entry cap');
   const typedIntegerSettingSelectors = [
     '[data-recursion-setting-min-cards]',
     '[data-recursion-setting-max-cards]',

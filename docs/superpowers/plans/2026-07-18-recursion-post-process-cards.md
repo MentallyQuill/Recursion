@@ -126,14 +126,17 @@ git commit -m "docs: define post-process runtime boundary"
 
 Cover:
 
-- exact starter deck id, two categories, six cards, and order;
+- exact starter deck id, four categories, nine cards, and order;
 - exact approved `Natural Diction` prompt and robot/android exception;
+- repair-oriented prompt contracts for `Strip False Weight`, `Earn the Attraction`, and `Ground the Deflection`;
 - starter deck is bundled/read-only;
-- default category/card `enabled: true`;
+- Natural Prose and Follow Through default On;
+- the three cards under Concrete Meaning and Character-Specific Relationships default Off;
+- the original six starter cards retain `enabled: true`;
 - custom deck CRUD;
 - category CRUD and reorder;
 - card CRUD, duplicate, move, reorder, and toggle;
-- category Off preserves child saved states;
+- category activity derives from child card states, with no category toggle or persisted category-enabled field;
 - runnable selection respects deck order, category state, card state, nonempty name, and nonempty prompt;
 - custom and starter data are deeply cloned;
 - invalid input normalizes to the V1 shape without importing old enhancement settings.
@@ -154,7 +157,12 @@ const starter = createStarterPostProcessDeck({
 });
 
 equal(starter.id, STARTER_POST_PROCESS_DECK_ID);
-deepEqual(starter.categoryOrder, ["natural-prose", "follow-through"]);
+deepEqual(starter.categoryOrder, [
+  "natural-prose",
+  "follow-through",
+  "concrete-meaning",
+  "character-specific-relationships"
+]);
 deepEqual(
   starter.cardOrderByCategory["natural-prose"],
   ["cut-echoes", "natural-diction", "land-the-ending"]
@@ -178,12 +186,11 @@ Expected: fail because the module does not exist.
 Use a dedicated model rather than overloading Pre-process tri-state semantics:
 
 ```js
-export const POST_PROCESS_DECK_SETTINGS_VERSION = 1;
+export const POST_PROCESS_DECK_SETTINGS_VERSION = 3;
 export const STARTER_POST_PROCESS_DECK_ID = "starter-post-process";
 
-export function isRunnablePostProcessCard(card, category) {
-  return category?.enabled !== false
-    && card?.enabled !== false
+export function isRunnablePostProcessCard(card) {
+  return card?.enabled !== false
     && normalizeName(card?.name) !== ""
     && String(card?.promptText || "").trim() !== "";
 }
@@ -193,9 +200,9 @@ export function orderedRunnablePostProcessCategories(deck) {
     .map((category) => ({
       ...category,
       cards: orderedCards(deck, category.id)
-        .filter((card) => isRunnablePostProcessCard(card, category))
+        .filter((card) => isRunnablePostProcessCard(card))
     }))
-    .filter((category) => category.enabled !== false && category.cards.length > 0);
+    .filter((category) => category.cards.length > 0);
 }
 ```
 
@@ -242,9 +249,11 @@ deepEqual(DEFAULT_RECURSION_SETTINGS.postProcess, {
 });
 
 deepEqual(DEFAULT_RECURSION_SETTINGS.postProcessDecks, {
-  version: 1,
+  version: 3,
   activeDeckId: "starter-post-process",
-  customDecks: {}
+  customDecks: {},
+  starterCardStates: {},
+  categoryExpansion: {}
 });
 
 assert(!("enhancements" in normalizeSettings({})));
@@ -288,7 +297,9 @@ postProcess: {
 postProcessDecks: {
   version: POST_PROCESS_DECK_SETTINGS_VERSION,
   activeDeckId: STARTER_POST_PROCESS_DECK_ID,
-  customDecks: {}
+  customDecks: {},
+  starterCardStates: {},
+  categoryExpansion: {}
 }
 ```
 
@@ -880,8 +891,8 @@ Cover:
 - duplicate starter and blank deck actions;
 - Apply segmented control;
 - Unified/Progressive segmented control;
-- category/card On/Off;
-- category Off effective state without child-state mutation;
+- card On/Off with no category-level visibility control;
+- category active/inactive state derived from whether any child card is On;
 - CRUD editors;
 - drag handles only;
 - keyboard Escape/focus return;

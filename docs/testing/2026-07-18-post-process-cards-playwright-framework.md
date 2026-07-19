@@ -152,7 +152,8 @@ For every viewport:
 6. Open Post-process Cards.
 7. Assert Post-process is Off by default.
 8. Assert the starter deck is active, bundled, and read-only.
-9. Assert exactly two categories and six cards in the approved order.
+9. Assert exactly four categories and nine cards in the approved order.
+10. Assert the six Natural Prose and Follow Through cards are On, the three optional cards are Off, and category activity is derived from those card states.
 
 ### Independent deck proof
 
@@ -180,15 +181,14 @@ Through visible controls:
 3. Create card `Playwright Card`.
 4. Enter a harmless synthetic prompt: `Preserve the source and make one concrete supported change.`
 5. Save and assert the card is runnable.
-6. Toggle the card Off and On.
-7. Toggle its category Off.
-8. Assert the card's saved On state remains and its effective state is disabled.
-9. Toggle the category On and assert the card becomes effectively runnable again.
-10. Drag the category above `Natural Prose`.
-11. Drag the card into `Natural Prose`.
-12. Reload and assert order/category persistence.
-13. Duplicate the card and assert a unique copy name.
-14. Delete the duplicate through the destructive confirmation flow.
+6. Toggle the card Off and assert its one-card category becomes inactive automatically.
+7. Toggle the card On and assert its category becomes active automatically.
+8. Assert neither Pre-process nor Post-process category headers expose an On/Off control.
+9. Drag the category above `Natural Prose`.
+10. Drag the card into `Natural Prose`.
+11. Reload and assert order/category persistence.
+12. Duplicate the card and assert a unique copy name.
+13. Delete the duplicate through the destructive confirmation flow.
 
 Drag must begin from the grip handle. Attempting the same pointer movement from the row body must not reorder.
 

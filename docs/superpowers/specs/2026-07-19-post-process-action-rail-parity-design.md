@@ -11,7 +11,7 @@ Make Post-process category headers and editable action rails follow the same vis
 
 - Remove the per-category visibility-eye control from Post-process category headers.
 - Keep Post-process card-level visibility eyes. Cards remain individually enabled or disabled from their rows.
-- Preserve the persisted Post-process category-enabled data contract and runtime behavior. This change removes only the category-header control; it does not migrate or discard saved state.
+- Do not persist an independent Post-process category-enabled state. Category activity is derived from child cards: any On card makes the category active and all cards Off makes it inactive.
 - Align editable Post-process category actions with Pre-process in this order:
   1. Create a new card in the category.
   2. Edit the category.
@@ -36,6 +36,7 @@ No fixed coordinates or phase-specific absolute positioning will be introduced. 
 
 - Clicking a Post-process category header still expands or collapses it.
 - Clicking a Post-process card eye still changes that card's saved On/Off state.
+- Clicking a card eye immediately updates its category's derived active/inactive presentation.
 - Category descriptions remain tooltip/accessibility text rather than visible header copy.
 - Read-only Starter deck structure continues to hide authoring actions.
 - Custom decks continue to expose all authoring and drag controls.
@@ -55,7 +56,6 @@ After the focused test passes, run the complete test suite. Then sync the produc
 
 ## Non-goals
 
-- Removing or migrating persisted Post-process category-enabled state.
 - Changing card-level On/Off behavior.
 - Changing Pre-process card selection behavior.
 - Redesigning deck, category, card, or drag-and-drop data contracts.

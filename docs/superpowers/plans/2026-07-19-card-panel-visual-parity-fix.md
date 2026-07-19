@@ -987,19 +987,10 @@ const cardRow = renderDeckCard({
 
 - [ ] **Step 5: Render Post-process categories with the same disclosure and head grid**
 
-Remove the literal plus/minus `expander` button. Build the category state control with the shared marker class:
+Remove the literal plus/minus `expander` button. Do not add a category state control; category activity is derived from child-card state:
 
 ```js
-const categoryToggle = el('button', {
-  className: `recursion-card-panel-category-state recursion-post-process-state ${category.enabled === false ? 'is-off' : 'is-on'}`,
-  attrs: {
-    type: 'button',
-    'aria-label': categoryToggleLabel,
-    title: categoryToggleLabel,
-    'aria-pressed': category.enabled === false ? 'false' : 'true'
-  },
-  dataset: { recursionPostProcessCategoryToggle: category.id }
-}, [cardSystemIconSvg(category.enabled === false ? 'eye-off' : 'eye')]);
+const categoryEnabled = cards.some((card) => card.enabled !== false);
 
 const categoryCopy = el('span', {
   className: 'recursion-card-panel-category-copy recursion-post-process-category-copy'
@@ -1022,12 +1013,11 @@ const categoryCopy = el('span', {
 
 list.appendChild(renderDeckCategory({
   el,
-  className: `recursion-post-process-category ${category.enabled === false ? 'is-inactive' : 'is-active'}`,
+  className: `recursion-post-process-category ${categoryEnabled ? 'is-active' : 'is-inactive'}`,
   category,
   expanded,
   disclosure: cardSystemIconSvg(expanded ? 'chevron-up' : 'chevron-down'),
   copy: categoryCopy,
-  state: categoryToggle,
   actions: categoryActions,
   body: cardRows,
   dataset: { recursionPostProcessCategory: category.id },

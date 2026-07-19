@@ -54,7 +54,7 @@ Do not retain `Enhancement`, `Generation Review`, `Repair`, `Recompose`, `Redire
 - Independent Post-process Deck selection and persistence.
 - Bundled read-only starter Post-process Deck.
 - Custom decks, categories, and cards.
-- Category and card on/off controls.
+- Card on/off controls with category participation derived from child-card state.
 - Category and card drag reordering.
 - Unified and Progressive rewrite flows.
 - As Swipe and Replace final application.
@@ -83,7 +83,7 @@ Post-process Decks use the following canonical V1 shape:
 
 ```js
 {
-  version: 1,
+  version: 3,
   activeDeckId: "starter-post-process",
   customDecks: {
     "post-process-1720000000000-1": {
@@ -98,7 +98,6 @@ Post-process Decks use the following canonical V1 shape:
           id: "natural-prose",
           name: "Natural Prose",
           description: "",
-          enabled: true,
           createdAt: "2026-07-18T00:00:00.000Z",
           updatedAt: "2026-07-18T00:00:00.000Z"
         }
@@ -127,19 +126,18 @@ Post-process Decks use the following canonical V1 shape:
 
 ### Participation
 
-- Post-process categories and cards are binary: On or Off.
+- Post-process cards are binary: On or Off.
 - Post-process cards never have Priority.
-- A category that is Off contributes no cards.
-- Turning a category Off does not rewrite the saved `enabled` values of its cards.
-- Turning the category On restores the category's previously configured card participation.
-- A card is runnable only when its category is On, the card is On, its name is nonempty, and its prompt is nonempty.
+- Categories have no independent On/Off state or visibility control.
+- A category is active whenever at least one child card is On and inactive whenever every child card is Off.
+- A card is runnable only when it is On, its name is nonempty, and its prompt is nonempty.
 - Empty categories and categories with no runnable cards are skipped without a provider or host call.
 - Deck/category/card order is authoritative execution order.
 
 ### Editing
 
 - The starter deck is bundled and structurally read-only.
-- Its category and card enabled states remain operator-controllable.
+- Its card enabled states remain operator-controllable; category activity is derived.
 - Users duplicate the starter deck to edit its structure or content.
 - Users may create a blank custom deck.
 - Custom decks support rename, duplicate, and typed-confirmation delete.
@@ -161,11 +159,11 @@ Post-processing is off by default.
     contextMessages: 13
   },
   postProcessDecks: {
-    version: 1,
+    version: 3,
     activeDeckId: "starter-post-process",
     customDecks: {},
-    starterCategoryStates: {},
-    starterCardStates: {}
+    starterCardStates: {},
+    categoryExpansion: {}
   }
 }
 ```
@@ -192,13 +190,18 @@ Starter Post-process Deck
 │  ├─ Cut Echoes
 │  ├─ Natural Diction
 │  └─ Land the Ending
-└─ Follow Through
-   ├─ Act on the Threat
-   ├─ Close the Distance
-   └─ Complete the Move
+├─ Follow Through
+│  ├─ Act on the Threat
+│  ├─ Close the Distance
+│  └─ Complete the Move
+├─ Concrete Meaning (Off)
+│  └─ Strip False Weight
+└─ Character-Specific Relationships (Off)
+   ├─ Earn the Attraction
+   └─ Ground the Deflection
 ```
 
-All starter categories and cards are On inside the deck, but the top-level Post-process feature is Off by default.
+The six cards under Natural Prose and Follow Through are On inside the starter deck. The three cards under Concrete Meaning and Character-Specific Relationships are Off by default so users can opt into stronger stylistic and relationship repair. Categories have no switch: enabling any child card automatically makes its category active, and disabling every child card makes it inactive. The top-level Post-process feature remains Off by default.
 
 ### Natural Prose
 
@@ -259,6 +262,44 @@ Every Follow Through card carries these hard boundaries:
 **Prompt:**
 
 > When a character repeatedly prepares, hints, reaches, starts, or almost acts, carry the established intention into the concrete next step. Do not manufacture a new intention or skip a necessary decision. Prefer an observable action or consequence over another statement of intent.
+
+### Concrete Meaning
+
+Its only starter card is Off by default, so the category begins inactive.
+
+#### Strip False Weight
+
+**Description:** Replace manufactured profundity with concrete meaning, behavior, or consequence.
+
+**Prompt:**
+
+> Review the draft for sentence structures that manufacture significance without adding specific meaning. This includes stacked negation or contrast, fragment ladders, vague almost-statements, generic lock-and-key revelations, unnamed truths, and the weight of what remains unspoken.
+>
+> Do not substitute one ornamental phrase for another. When a construction carries no scene-specific information, remove it or rebuild the beat around a concrete observation, choice, action, consequence, or explicit realization already supported by the draft and frozen context. Preserve genuinely apt figurative language, deliberate rhythm, character-specific phrasing, and motifs that earn their effect through the scene.
+
+### Character-Specific Relationships
+
+Both starter cards are Off by default, so the category begins inactive.
+
+#### Earn the Attraction
+
+**Description:** Replace prefabricated hunger, possession, and dominance scripts with character-specific attraction.
+
+**Prompt:**
+
+> Review romantic or sexual dialogue and narration for prefabricated attraction scripts: generic hunger or predation, ownership and claiming language, automatic dominance, ritual warnings, and stock declarations of overwhelming desire.
+>
+> Do not merely replace stock words with softer synonyms. Rewrite only where the formula substitutes for characterization. Ground attraction in established voice, history, specific observed qualities, reciprocal behavior, present stakes, and the scene's supported level of intimacy. Preserve intensity, consensual possessiveness, or genre-specific language when it is genuinely established for these characters. Do not invent attraction, consent, submission, dominance, or escalation, and do not take control of the user's character.
+
+#### Ground the Deflection
+
+**Description:** Replace stock defensive banter with the character's actual motive, boundary, or conflict.
+
+**Prompt:**
+
+> Review guarded or defensive dialogue for stock deflection: automatic denial of care, canned irritation, tactical or research excuses, generic insults, and reflexive refusal to admit that another character is right.
+>
+> Do not replace one stock deflection with another. Identify the supported reason for the defense, such as pride, embarrassment, fear, distrust, status, unresolved conflict, a genuine boundary, deliberate humor, or difficulty conceding. Rewrite the beat so that motive emerges through character-specific wording, action, silence, or subtext. Preserve established recurring speech, sincere hostility, explicit refusal, and real boundaries. Never convert resistance into hidden attraction or soften a boundary without evidence.
 
 ## Frozen Operation Snapshot
 

@@ -1,9 +1,11 @@
-export const POST_PROCESS_DECK_SETTINGS_VERSION = 2;
+export const POST_PROCESS_DECK_SETTINGS_VERSION = 3;
 export const STARTER_POST_PROCESS_DECK_ID = 'starter-post-process';
 
 const STARTER_CATEGORIES = [
   ['natural-prose', 'Natural Prose', ''],
-  ['follow-through', 'Follow Through', '']
+  ['follow-through', 'Follow Through', ''],
+  ['concrete-meaning', 'Concrete Meaning', 'Replace manufactured significance with concrete meaning, behavior, or consequence.'],
+  ['character-specific-relationships', 'Character-Specific Relationships', 'Repair stock attraction and defensive scripts through established character and relationship evidence.']
 ];
 
 const STARTER_CARDS = [
@@ -12,7 +14,10 @@ const STARTER_CARDS = [
   ['land-the-ending', 'natural-prose', 'Land the Ending', 'End on consequential movement instead of canned questions or fake choices.', 'Review the ending. Remove canned questions, fake either-or choices, summary conclusions, and endings that hand responsibility back to the user without meaningful movement. End on the strongest concrete beat already supported by the scene: an action, consequence, revelation, sensory change, or decisive line. Do not invent a new plot turn solely to avoid a question.'],
   ['act-on-the-threat', 'follow-through', 'Act on the Threat', 'Convert repeated immediate threats into supported action or consequence.', 'Do not invent intent, override consent, force unsupported escalation, or take control of the user\'s character. Act only on intent, reciprocity, capability, and immediacy already established by the draft and frozen context.\n\nWhen a character\'s immediate violent intent is already established and the draft repeats warnings, threats, preparations, or chances to back down, replace the repetition with the supported action or its immediate consequence. Preserve hesitation when it is itself meaningful characterization or when action is not yet supported.'],
   ['close-the-distance', 'follow-through', 'Close the Distance', 'Complete supported reciprocal physical or romantic contact.', 'Do not invent intent, override consent, force unsupported escalation, or take control of the user\'s character. Act only on intent, reciprocity, capability, and immediacy already established by the draft and frozen context.\n\nWhen reciprocal physical or romantic intent is already established, replace repeated hovering, near-touching, almost-kissing, interrupted-contact, or “giving one last chance” loops with the appropriate supported contact. Preserve boundaries, consent, character voice, and the scene\'s established intensity.'],
-  ['complete-the-move', 'follow-through', 'Complete the Move', 'Carry repeated preparation or implication into the concrete next step.', 'Do not invent intent, override consent, force unsupported escalation, or take control of the user\'s character. Act only on intent, reciprocity, capability, and immediacy already established by the draft and frozen context.\n\nWhen a character repeatedly prepares, hints, reaches, starts, or almost acts, carry the established intention into the concrete next step. Do not manufacture a new intention or skip a necessary decision. Prefer an observable action or consequence over another statement of intent.']
+  ['complete-the-move', 'follow-through', 'Complete the Move', 'Carry repeated preparation or implication into the concrete next step.', 'Do not invent intent, override consent, force unsupported escalation, or take control of the user\'s character. Act only on intent, reciprocity, capability, and immediacy already established by the draft and frozen context.\n\nWhen a character repeatedly prepares, hints, reaches, starts, or almost acts, carry the established intention into the concrete next step. Do not manufacture a new intention or skip a necessary decision. Prefer an observable action or consequence over another statement of intent.'],
+  ['strip-false-weight', 'concrete-meaning', 'Strip False Weight', 'Replace manufactured profundity with concrete meaning, behavior, or consequence.', 'Review the draft for sentence structures that manufacture significance without adding specific meaning. This includes stacked negation or contrast, fragment ladders, vague almost-statements, generic lock-and-key revelations, unnamed truths, and the weight of what remains unspoken.\n\nDo not substitute one ornamental phrase for another. When a construction carries no scene-specific information, remove it or rebuild the beat around a concrete observation, choice, action, consequence, or explicit realization already supported by the draft and frozen context. Preserve genuinely apt figurative language, deliberate rhythm, character-specific phrasing, and motifs that earn their effect through the scene.', false],
+  ['earn-the-attraction', 'character-specific-relationships', 'Earn the Attraction', 'Replace prefabricated hunger, possession, and dominance scripts with character-specific attraction.', 'Review romantic or sexual dialogue and narration for prefabricated attraction scripts: generic hunger or predation, ownership and claiming language, automatic dominance, ritual warnings, and stock declarations of overwhelming desire.\n\nDo not merely replace stock words with softer synonyms. Rewrite only where the formula substitutes for characterization. Ground attraction in established voice, history, specific observed qualities, reciprocal behavior, present stakes, and the scene\'s supported level of intimacy. Preserve intensity, consensual possessiveness, or genre-specific language when it is genuinely established for these characters. Do not invent attraction, consent, submission, dominance, or escalation, and do not take control of the user\'s character.', false],
+  ['ground-the-deflection', 'character-specific-relationships', 'Ground the Deflection', 'Replace stock defensive banter with the character\'s actual motive, boundary, or conflict.', 'Review guarded or defensive dialogue for stock deflection: automatic denial of care, canned irritation, tactical or research excuses, generic insults, and reflexive refusal to admit that another character is right.\n\nDo not replace one stock deflection with another. Identify the supported reason for the defense, such as pride, embarrassment, fear, distrust, status, unresolved conflict, a genuine boundary, deliberate humor, or difficulty conceding. Rewrite the beat so that motive emerges through character-specific wording, action, silence, or subtext. Preserve established recurring speech, sincere hostility, explicit refusal, and real boundaries. Never convert resistance into hidden attraction or soften a boundary without evidence.', false]
 ];
 
 const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -54,9 +59,9 @@ function normalizeCategories(raw, now) {
     const id = normalizePostProcessId(value?.id || fallback);
     const name = normalizePostProcessName(value?.name);
     if (!id || !name) continue;
-    categories[id] = { id, name, description: String(value?.description || '').trim(), enabled: value?.enabled !== false, createdAt: String(value?.createdAt || now), updatedAt: String(value?.updatedAt || now) };
+    categories[id] = { id, name, description: String(value?.description || '').trim(), createdAt: String(value?.createdAt || now), updatedAt: String(value?.updatedAt || now) };
   }
-  if (!Object.keys(categories).length) categories.general = { id: 'general', name: 'General', description: '', enabled: true, createdAt: now, updatedAt: now };
+  if (!Object.keys(categories).length) categories.general = { id: 'general', name: 'General', description: '', createdAt: now, updatedAt: now };
   return categories;
 }
 
@@ -89,8 +94,8 @@ function normalizeCardOrder(raw, cards, categoryOrder) {
 
 export function createStarterPostProcessDeck({ now = nowIso() } = {}) {
   const categoryOrder = STARTER_CATEGORIES.map(([id]) => id);
-  const categories = Object.fromEntries(STARTER_CATEGORIES.map(([id, name, description]) => [id, { id, name, description, enabled: true, createdAt: now, updatedAt: now }]));
-  const cards = Object.fromEntries(STARTER_CARDS.map(([id, categoryId, name, description, promptText]) => [id, { id, categoryId, name, description, promptText, enabled: true, createdAt: now, updatedAt: now }]));
+  const categories = Object.fromEntries(STARTER_CATEGORIES.map(([id, name, description]) => [id, { id, name, description, createdAt: now, updatedAt: now }]));
+  const cards = Object.fromEntries(STARTER_CARDS.map(([id, categoryId, name, description, promptText, enabled = true]) => [id, { id, categoryId, name, description, promptText, enabled, createdAt: now, updatedAt: now }]));
   const cardOrderByCategory = Object.fromEntries(categoryOrder.map((categoryId) => [categoryId, STARTER_CARDS.filter(([, cardCategoryId]) => cardCategoryId === categoryId).map(([id]) => id)]));
   return { id: STARTER_POST_PROCESS_DECK_ID, name: 'Starter Post-process Deck', description: 'Bundled Recursion Post-process Deck.', bundled: true, readonly: true, categoryOrder, categories, cardOrderByCategory, cards, createdAt: now, updatedAt: now };
 }
@@ -143,7 +148,6 @@ export function normalizePostProcessDeckSettings(raw = {}, { now = nowIso() } = 
     version: POST_PROCESS_DECK_SETTINGS_VERSION,
     activeDeckId: customDecks[activeDeckId] ? activeDeckId : STARTER_POST_PROCESS_DECK_ID,
     customDecks,
-    starterCategoryStates: normalizeStarterStates(raw?.starterCategoryStates, Object.keys(starter.categories)),
     starterCardStates: normalizeStarterStates(raw?.starterCardStates, Object.keys(starter.cards)),
     categoryExpansion: normalizeCategoryExpansion(raw?.categoryExpansion, customDecks, starter)
   };
@@ -184,9 +188,6 @@ export function getActivePostProcessDeck(settings = {}, { now = nowIso() } = {})
   const normalized = normalizePostProcessDeckSettings(settings, { now });
   if (normalized.customDecks[normalized.activeDeckId]) return clone(normalized.customDecks[normalized.activeDeckId]);
   const starter = createStarterPostProcessDeck({ now });
-  for (const [categoryId, enabled] of Object.entries(normalized.starterCategoryStates)) {
-    starter.categories[categoryId].enabled = enabled;
-  }
   for (const [cardId, enabled] of Object.entries(normalized.starterCardStates)) {
     starter.cards[cardId].enabled = enabled;
   }
@@ -208,17 +209,12 @@ export function updateActivePostProcessDeckState(settings = {}, nextDeck = {}, {
     }, { now });
   }
   const starter = createStarterPostProcessDeck({ now });
-  const starterCategoryStates = Object.fromEntries(Object.keys(starter.categories).map((categoryId) => [
-    categoryId,
-    nextDeck.categories?.[categoryId]?.enabled !== false
-  ]));
   const starterCardStates = Object.fromEntries(Object.keys(starter.cards).map((cardId) => [
     cardId,
     nextDeck.cards?.[cardId]?.enabled !== false
   ]));
   return normalizePostProcessDeckSettings({
     ...source,
-    starterCategoryStates,
     starterCardStates
   }, { now });
 }
@@ -233,7 +229,6 @@ export function setAllPostProcessCardsEnabled(settings = {}, enabled = true, { n
       && normalizePostProcessName(card.name)
       && String(card.promptText || '').trim()
     ));
-    if (enabled && eligible.length) category.enabled = true;
     for (const card of eligible) card.enabled = enabled;
   }
   return updateActivePostProcessDeckState(source, next, { now });
@@ -242,13 +237,15 @@ export function setAllPostProcessCardsEnabled(settings = {}, enabled = true, { n
 export function createCustomPostProcessDeck(settings = {}, { name = 'Custom Deck', description = '', now = nowIso() } = {}) {
   const normalized = normalizePostProcessDeckSettings(settings, { now });
   const id = generatedId('post-process', normalized.customDecks);
-  const deck = normalizePostProcessDeck({ id, name: uniqueName(name, Object.values(normalized.customDecks).map((entry) => entry.name), 'Custom Deck'), description, categories: { general: { id: 'general', name: 'General', enabled: true } }, categoryOrder: ['general'], cardOrderByCategory: { general: [] }, cards: {}, createdAt: now, updatedAt: now }, id, { now });
+  const deck = normalizePostProcessDeck({ id, name: uniqueName(name, Object.values(normalized.customDecks).map((entry) => entry.name), 'Custom Deck'), description, categories: { general: { id: 'general', name: 'General' } }, categoryOrder: ['general'], cardOrderByCategory: { general: [] }, cards: {}, createdAt: now, updatedAt: now }, id, { now });
   return { ...normalized, activeDeckId: id, customDecks: { ...normalized.customDecks, [id]: deck } };
 }
 
 export function duplicatePostProcessDeck(settings = {}, deckId = '', { now = nowIso() } = {}) {
   const normalized = normalizePostProcessDeckSettings(settings, { now });
-  const source = normalizePostProcessId(deckId) === STARTER_POST_PROCESS_DECK_ID ? createStarterPostProcessDeck({ now }) : normalized.customDecks[normalizePostProcessId(deckId)];
+  const source = normalizePostProcessId(deckId) === STARTER_POST_PROCESS_DECK_ID
+    ? getActivePostProcessDeck({ ...normalized, activeDeckId: STARTER_POST_PROCESS_DECK_ID }, { now })
+    : normalized.customDecks[normalizePostProcessId(deckId)];
   if (!source) return normalized;
   const id = generatedId('post-process', normalized.customDecks);
   const categoryIdMap = Object.fromEntries(source.categoryOrder.map((oldId) => [oldId, `${oldId}-${id.split('-').at(-1)}`]));
@@ -288,20 +285,8 @@ export function deleteCustomPostProcessDeck(settings = {}, deckId = '') {
 }
 
 function editDeck(deck, mutate, now) { const normalized = normalizePostProcessDeck(deck, deck?.id, { now }) || deck; const next = mutate(clone(normalized)); return normalizePostProcessDeck({ ...next, updatedAt: now }, normalized.id, { now }) || normalized; }
-export function createPostProcessCategory(deck, { name = 'New Category', description = '', now = nowIso() } = {}) { return editDeck(deck, (next) => { const id = generatedId('category', next.categories); next.categories[id] = { id, name: uniqueName(name, Object.values(next.categories).map((category) => category.name), 'New Category'), description: String(description).trim(), enabled: true, createdAt: now, updatedAt: now }; next.categoryOrder.push(id); next.cardOrderByCategory[id] = []; return next; }, now); }
+export function createPostProcessCategory(deck, { name = 'New Category', description = '', now = nowIso() } = {}) { return editDeck(deck, (next) => { const id = generatedId('category', next.categories); next.categories[id] = { id, name: uniqueName(name, Object.values(next.categories).map((category) => category.name), 'New Category'), description: String(description).trim(), createdAt: now, updatedAt: now }; next.categoryOrder.push(id); next.cardOrderByCategory[id] = []; return next; }, now); }
 export function updatePostProcessCategory(deck, categoryId, patch = {}) { const now = patch.now || nowIso(); return editDeck(deck, (next) => { const id = normalizePostProcessId(categoryId); if (!next.categories[id]) return next; next.categories[id] = { ...next.categories[id], name: normalizePostProcessName(patch.name ?? next.categories[id].name) || next.categories[id].name, description: String(patch.description ?? next.categories[id].description).trim(), updatedAt: now }; return next; }, now); }
-export function togglePostProcessCategory(deck, categoryId, enabled, { now = nowIso() } = {}) {
-  const id = normalizePostProcessId(categoryId);
-  if (deck?.id === STARTER_POST_PROCESS_DECK_ID) {
-    const next = clone(deck);
-    if (next.categories?.[id]) next.categories[id] = { ...next.categories[id], enabled: enabled !== false, updatedAt: now };
-    return next;
-  }
-  return editDeck(deck, (next) => {
-    if (next.categories[id]) next.categories[id] = { ...next.categories[id], enabled: enabled !== false, updatedAt: now };
-    return next;
-  }, now);
-}
 export function reorderPostProcessCategories(deck, movingId, beforeId = '', { now = nowIso() } = {}) { return editDeck(deck, (next) => { const moving = normalizePostProcessId(movingId); const before = normalizePostProcessId(beforeId); if (!next.categories[moving]) return next; const order = next.categoryOrder.filter((id) => id !== moving); order.splice(before && order.includes(before) ? order.indexOf(before) : order.length, 0, moving); next.categoryOrder = order; return next; }, now); }
 export function deletePostProcessCategory(deck, categoryId, { now = nowIso() } = {}) { return editDeck(deck, (next) => { const id = normalizePostProcessId(categoryId); if (!next.categories[id] || next.categoryOrder.length <= 1) return next; delete next.categories[id]; delete next.cardOrderByCategory[id]; next.categoryOrder = next.categoryOrder.filter((entry) => entry !== id); for (const cardId of Object.keys(next.cards)) if (next.cards[cardId].categoryId === id) delete next.cards[cardId]; return next; }, now); }
 export function createPostProcessCard(deck, categoryId, { name = 'New Card', description = '', promptText = '', now = nowIso() } = {}) { return editDeck(deck, (next) => { const category = normalizePostProcessId(categoryId); if (!next.categories[category]) return next; const id = generatedId('card', next.cards); next.cards[id] = { id, categoryId: category, name: normalizePostProcessName(name), description: String(description).trim(), promptText: String(promptText).trim(), enabled: true, createdAt: now, updatedAt: now }; next.cardOrderByCategory[category].push(id); return next; }, now); }
@@ -325,5 +310,5 @@ export function reorderPostProcessCards(deck, categoryId, order = [], { now = no
 
 export function orderedPostProcessCategories(deck) { const categories = isObject(deck?.categories) ? deck.categories : {}; return idOrder(deck?.categoryOrder, Object.keys(categories)).map((id) => categories[id]); }
 export function orderedPostProcessCards(deck, categoryId) { const category = normalizePostProcessId(categoryId); const cards = isObject(deck?.cards) ? deck.cards : {}; const ordered = []; const seen = new Set(); for (const raw of Array.isArray(deck?.cardOrderByCategory?.[category]) ? deck.cardOrderByCategory[category] : []) { const id = normalizePostProcessId(raw); if (cards[id]?.categoryId === category && !seen.has(id)) { ordered.push(cards[id]); seen.add(id); } } for (const card of Object.values(cards)) if (card.categoryId === category && !seen.has(card.id)) ordered.push(card); return ordered; }
-export function isRunnablePostProcessCard(card, category) { return category?.enabled !== false && card?.enabled !== false && normalizePostProcessName(card?.name) !== '' && String(card?.promptText || '').trim() !== ''; }
-export function orderedRunnablePostProcessCategories(deck) { return orderedPostProcessCategories(deck).map((category) => ({ ...clone(category), cards: orderedPostProcessCards(deck, category.id).filter((card) => isRunnablePostProcessCard(card, category)).map(clone) })).filter((category) => category.enabled !== false && category.cards.length > 0); }
+export function isRunnablePostProcessCard(card) { return card?.enabled !== false && normalizePostProcessName(card?.name) !== '' && String(card?.promptText || '').trim() !== ''; }
+export function orderedRunnablePostProcessCategories(deck) { return orderedPostProcessCategories(deck).map((category) => ({ ...clone(category), cards: orderedPostProcessCards(deck, category.id).filter((card) => isRunnablePostProcessCard(card)).map(clone) })).filter((category) => category.cards.length > 0); }

@@ -147,6 +147,9 @@ async function dragCenterToCenterAndInspect(page, sourceSelector, targetSelector
   const sourceBox = await source.boundingBox();
   const targetBox = await target.boundingBox();
   if (!sourceBox || !targetBox) throw new Error(`Could not measure drag boxes for ${sourceSelector} -> ${targetSelector}`);
+  const sourceRowHeight = await source.evaluate((node) => (
+    node.closest('[data-recursion-card-id]')?.getBoundingClientRect?.().height || 0
+  ));
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(sourceBox.x + sourceBox.width / 2 + 3, sourceBox.y + sourceBox.height / 2 + 3, { steps: 2 });
@@ -155,15 +158,19 @@ async function dragCenterToCenterAndInspect(page, sourceSelector, targetSelector
   await page.mouse.move(shiftedTargetBox.x + shiftedTargetBox.width / 2, shiftedTargetBox.y + shiftedTargetBox.height / 2, { steps: 12 });
   const inspection = await page.evaluate((sourceHeight) => {
     const placeholder = document.querySelector('.recursion-card-drag-placeholder');
-    const rect = placeholder?.getBoundingClientRect();
+    const ghost = document.querySelector('.recursion-card-drag-ghost');
+    const placeholderRect = placeholder?.getBoundingClientRect();
+    const ghostRect = ghost?.getBoundingClientRect();
     return {
       sourceHeight,
+      ghostHeight: ghostRect?.height || 0,
+      ghostConnected: ghost?.isConnected === true,
       placeholderClass: placeholder?.className || '',
-      placeholderHeight: rect?.height || 0,
+      placeholderHeight: placeholderRect?.height || 0,
       placeholderVisible: placeholder?.classList?.contains('is-visible') === true,
       placeholderConnected: placeholder?.isConnected === true
     };
-  }, sourceBox.height);
+  }, sourceRowHeight);
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2, { steps: 8 });
   await page.mouse.up();
   await page.waitForFunction(() => !document.querySelector('.recursion-card-drag-placeholder'), null, { timeout: timeoutMs }).catch(() => {});
@@ -509,8 +516,10 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   if (!placeholderProof.placeholderConnected
     || !placeholderProof.placeholderVisible
     || !placeholderProof.placeholderClass.includes('recursion-card-drag-placeholder-card')
-    || placeholderProof.placeholderHeight < Math.max(12, placeholderProof.sourceHeight * 0.75)) {
-    fail(report, 'card-drag-placeholder', 'Card drag did not reserve a visible same-row-height placeholder while held.', placeholderProof);
+    || Math.abs(placeholderProof.placeholderHeight - placeholderProof.sourceHeight) > 1
+    || !placeholderProof.ghostConnected
+    || Math.abs(placeholderProof.ghostHeight - placeholderProof.sourceHeight) > 1) {
+    fail(report, 'card-drag-placeholder', 'Card drag did not preserve the source row height in its placeholder and ghost.', placeholderProof);
   }
   await dragCenterToTopEdge(
     page,

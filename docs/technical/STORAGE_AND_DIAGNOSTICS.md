@@ -30,17 +30,17 @@ Logical JSON records store larger bounded data:
 
 The storage repository constructs keys. Runtime and UI modules do not build physical paths directly.
 
-`extension_settings.recursion.retention` owns the user-facing caps:
+`extension_settings.recursion.retention` owns the persisted caps shown in the Context Windows and Storage Retention sections:
 
-- Source Messages: recent visible messages used for source freshness.
-- Source Text Budget: character budget for the source freshness window.
-- Provider Messages: recent visible messages sent to Recursion provider calls.
+- Source Messages: recent visible messages used for source freshness; shown as Source Freshness Messages.
+- Source Text Budget: character budget for the source freshness window; shown as Source Freshness Text Budget.
+- Provider Messages: recent visible messages sent to Recursion analysis calls; shown as Provider Analysis Messages.
 - Scene Caches / Chat: unprotected scene-cache files retained per chat.
 - Scene Caches Total: unprotected scene-cache files retained across chats.
 - Swipe Variants / Scene: source variants retained inside one scene cache.
 - Journal Entries: sanitized run-journal entries retained per chat.
 
-These caps never delete, hide, summarize, or rewrite SillyTavern chat messages. They only bound Recursion-owned windows, caches, and diagnostics. Long-chat scaling is handled by the bounded source window: Recursion walks backward from the latest visible chat message until Source Messages or Source Text Budget is reached, then uses that bounded window for source hashes and cache freshness. Older chat messages remain in SillyTavern and can still be used by SillyTavern presets or other extensions.
+These caps never delete, hide, summarize, or rewrite SillyTavern chat messages. They only bound Recursion-owned windows, caches, and diagnostics. Long-chat scaling is handled by the bounded source window: Recursion walks backward from the latest visible chat message until Source Freshness Messages or Source Freshness Text Budget is reached, then uses that bounded window for source hashes and cache freshness. Older chat messages remain in SillyTavern and can still be used by SillyTavern presets or other extensions.
 
 ## Scene Cache
 

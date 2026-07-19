@@ -44,17 +44,17 @@ It must not store scene decks, full cards, run journals, raw prompt packets, pro
 
 The Advanced-tab Reset Defaults action replaces only the Play and Advanced settings with the current default contract. It preserves provider preferences and session-only keys, Card System decks and scope, compact-bar settings, and viewer visibility. It does not delete chat history, scene caches, run journals, or other Recursion-owned records; runtime invalidates the active scene cache and clears the installed prompt so the next turn reflects the reset settings.
 
-`extension_settings.recursion.retention` stores user-facing caps for Recursion-owned source-window and storage behavior:
+`extension_settings.recursion.retention` remains the internal settings namespace for user-facing Context Windows and Storage Retention caps:
 
-- Source Messages: recent visible messages used for source freshness.
-- Source Text Budget: character budget for the source freshness window.
-- Provider Messages: recent visible messages sent to Recursion provider calls.
+- Source Messages: recent visible messages used for source freshness. The UI labels this Source Freshness Messages.
+- Source Text Budget: character budget for the source freshness window. The UI labels this Source Freshness Text Budget.
+- Provider Messages: recent visible messages sent to Recursion analysis calls. The UI labels this Provider Analysis Messages.
 - Scene Caches / Chat: unprotected scene-cache files retained per chat.
 - Scene Caches Total: unprotected scene-cache files retained across chats.
 - Swipe Variants / Scene: source variants retained inside one scene cache.
 - Journal Entries: sanitized run-journal entries retained per chat.
 
-These caps never delete, hide, summarize, or rewrite SillyTavern chat messages. They only bound Recursion-owned windows, caches, and diagnostics.
+These caps never delete, hide, summarize, or rewrite SillyTavern chat messages. Context Windows bound Recursion-owned evidence and analysis windows; Storage Retention bounds Recursion-owned caches and diagnostics.
 
 Logical JSON files are for bounded structured records that are larger than settings:
 
@@ -400,7 +400,7 @@ V1 retention should start small:
 - keep one bounded run journal per chat;
 - prune discarded-card history unless diagnostics explicitly need it.
 
-Long-chat scaling is handled before cache freshness and provider prompts. Recursion walks backward from the latest visible chat message until Source Messages or Source Text Budget is reached, then uses that bounded window for source hashes and cache freshness. Older chat messages remain in SillyTavern and can still be used by SillyTavern presets or other extensions.
+Long-chat scaling is handled before cache freshness and provider prompts. Recursion walks backward from the latest visible chat message until Source Freshness Messages or Source Freshness Text Budget is reached, then uses that bounded window for source hashes and cache freshness. Older chat messages remain in SillyTavern and can still be used by SillyTavern presets or other extensions.
 
 Cleanup must never delete SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or any non-Recursion extension records.
 

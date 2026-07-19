@@ -65,7 +65,6 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
     version: POST_PROCESS_DECK_SETTINGS_VERSION,
     activeDeckId: STARTER_POST_PROCESS_DECK_ID,
     customDecks: {},
-    starterCategoryStates: {},
     starterCardStates: {},
     categoryExpansion: {}
   },

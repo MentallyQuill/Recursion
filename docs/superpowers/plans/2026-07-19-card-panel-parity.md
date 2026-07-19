@@ -33,7 +33,7 @@
 **Interfaces:**
 - Produces: `updateActivePreProcessDeckSelection(settings, nextDeck) -> normalized preProcessDecks`
 - Produces: `setAllPostProcessCardsEnabled(settings, enabled) -> normalized postProcessDecks`
-- Produces: bundled settings keys `defaultCardStates`, `starterCategoryStates`, and `starterCardStates`
+- Produces: bundled settings keys `defaultCardStates` and `starterCardStates`
 - Consumes: existing `normalizeCardDeckSettings`, `normalizePostProcessDeckSettings`, and active-deck readers
 
 - [ ] **Step 1: Write failing bundled Pre-process state tests**
@@ -121,11 +121,12 @@ Keep `readonly: true`; only state mutation uses this helper.
 
 - [ ] **Step 5: Implement Post-process starter state overlays and bulk helper**
 
-Normalize `starterCategoryStates` and `starterCardStates` against starter IDs,
-overlay them in `getActivePostProcessDeck()`, and persist custom/starter decks
+Normalize `starterCardStates` against starter card IDs, overlay them in
+`getActivePostProcessDeck()`, and persist custom/starter decks
 through one settings-aware helper. `setAllPostProcessCardsEnabled(settings,
-true)` enables every structurally runnable starter/custom card and its category;
-`false` disables every structurally runnable card.
+true)` enables every structurally runnable starter/custom card; `false`
+disables every structurally runnable card. Category activity derives from those
+card states.
 
 ```js
 export function setAllPostProcessCardsEnabled(settings = {}, enabled = true) {
@@ -138,7 +139,6 @@ export function setAllPostProcessCardsEnabled(settings = {}, enabled = true) {
       && normalizePostProcessName(card.name)
       && String(card.promptText || '').trim()
     );
-    if (enabled && eligible.length) category.enabled = true;
     for (const card of eligible) card.enabled = enabled;
   }
   return updateActivePostProcessDeckState(source, next);

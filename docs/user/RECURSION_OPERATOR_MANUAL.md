@@ -112,7 +112,7 @@ Main controls:
 
 - Play: a Behavior section containing Strength, Min Cards, Max Cards, Prompt Footprint, and Focus.
 - Providers: collapsible Utility and Reasoner provider setup, test controls, and session key controls.
-- Advanced: collapsible Injection, UI, Post-process, Retention, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, Post-process context length, Recursion-owned cap settings, safe excerpts, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving providers, session-only provider keys, custom decks and scope, compact-bar settings, and viewer visibility.
+- Advanced: collapsible Injection, UI, Context Windows, Storage Retention, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, Recursion-owned evidence and analysis windows, cache and journal caps, safe excerpts, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving providers, session-only provider keys, custom decks and scope, compact-bar settings, and viewer visibility.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 
@@ -171,7 +171,9 @@ Post-process Cards uses the same compact deck layout after generation. Its cards
 - the open eye enables all runnable cards;
 - the slashed eye disables all runnable cards.
 
-The bundled Starter Post-process Deck is structurally read-only, but its category, card, and bulk enabled states are editable. Duplicate it only to rename, add, remove, reorder, or rewrite deck content.
+The bundled Starter Post-process Deck is structurally read-only, but its card and bulk enabled states are editable. Duplicate it only to rename, add, remove, reorder, or rewrite deck content.
+
+On a fresh starter deck, the six cards under Natural Prose and Follow Through are On. `Strip False Weight`, `Earn the Attraction`, and `Ground the Deflection` are Off, leaving their optional Concrete Meaning and Character-Specific Relationships categories inactive. Categories have no On/Off control in either card phase. Turning on any child card automatically makes its category active; turning every child card Off makes it inactive. Concrete Meaning removes manufactured profundity by restoring concrete meaning, behavior, or consequence. Character-Specific Relationships repairs stock attraction and defensive scripts through established character, relationship, consent, and boundary evidence.
 
 Editable Post-process decks use the same compact `Categories` plus row and the same drag behavior as Pre-process. Add cards with the plus in the owning category header. Category and card rows use different drag-handle shapes so their reorder targets remain visually distinct. Dragging works with mouse or pen; on touch, hold the handle briefly before moving.
 
@@ -303,8 +305,8 @@ Operator settings should stay broad. Pipeline, Mode, and Reasoning Level live in
 - Providers: collapsible Utility and Reasoner setup in the settings panel.
 - Advanced / Injection: final-prompt injection compatibility controls: Placement `In Prompt | In Chat`, Role `System | User | Assistant`, and Depth `0..10`.
 - Advanced / UI: progress row limits.
-- Advanced / Post-process: context messages for Post-process guidance synthesis, default `13`, range `0..35`.
-- Advanced / Retention: Source Messages, Source Text Budget, Provider Messages, Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries.
+- Advanced / Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. Post-process Evidence Messages defaults to `13` and ranges from `0..35`.
+- Advanced / Storage Retention: Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries.
 - Advanced / Diagnostics: safe excerpts, Reset Scene Cache, Clear Run Journal, and Export Diagnostics.
 
 Use Regenerate before Reset Scene Cache. Regenerate is the normal play control for "make the next packet fresh." Reset Scene Cache is a diagnostic cleanup action that deletes the current scene cache and clears the installed prompt.
@@ -323,9 +325,9 @@ flowchart LR
 
 Default injection settings use Recursion's recommended concrete plan: `In Prompt`, `System`, depth `1`. Injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
 
-Retention caps are local Recursion tuning controls. Lower Source Messages or Source Text Budget if a very long chat makes Recursion feel slow. Raise Scene Caches or Journal Entries when debugging. These caps only affect Recursion-owned files and analysis windows; they do not prune SillyTavern chat history.
+Context-window caps are local Recursion tuning controls. Lower Source Freshness Messages or Source Freshness Text Budget if a very long chat makes Recursion feel slow. Storage Retention caps control disposable Recursion-owned caches and journals; raise them when debugging. These caps do not prune SillyTavern chat history.
 
-![Advanced Retention controls for source windows, provider-visible messages, scene caches, source variants, and run journals](../../assets/documentation/renders/recursion-operator-retention-settings.png)
+![Advanced Context Windows and Storage Retention controls for source windows, provider analysis, scene caches, source variants, and run journals](../../assets/documentation/renders/recursion-operator-retention-settings.png)
 
 ## Provider Controls
 

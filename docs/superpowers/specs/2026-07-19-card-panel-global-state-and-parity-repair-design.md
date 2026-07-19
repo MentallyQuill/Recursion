@@ -77,7 +77,7 @@ All card-panel operator state is stored in global Recursion extension settings:
 - Active Pre-process deck.
 - Active Post-process deck.
 - Pre-process card selection: Active, Priority, or Inactive.
-- Post-process category and card selection: On or Off.
+- Post-process card selection: On or Off. Category activity is derived from child-card state and is not stored independently.
 - Per-deck Pre-process category expanded/collapsed state.
 - Per-deck Post-process category expanded/collapsed state.
 

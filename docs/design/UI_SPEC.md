@@ -165,11 +165,11 @@ Pre-process and Post-process card rows show a concise description beneath the ca
 Category descriptions are different from card descriptions: neither phase renders category descriptions as visible header copy. When tooltips are enabled, the disclosure header uses the category description as its hover title. When tooltips are disabled, that title is absent while the category name and description remain in the accessible disclosure label.
 
 - Pre-process cards cycle `Inactive → Active → Priority → Inactive` in Auto and `Inactive → Active → Inactive` in Manual.
-- Post-process cards remain binary `On` / `Off` through card-row eyes. Persisted category state remains part of the deck contract and bulk actions, but Post-process category headers expose no visibility eye or state-marker column.
+- Post-process cards remain binary `On` / `Off` through card-row eyes. Categories persist no independent participation state and expose no visibility eye or state-marker column; their active/inactive presentation derives from child-card state.
 - Bundled Default and Starter deck names, content, category structure, and order are read-only.
 - Bundled operator state remains writable. Individual card controls and both bulk eye actions work without duplicating the deck.
 
-All operator-selected deck state is global Recursion extension state: active Pre-process and Post-process deck IDs, Pre-process card Active/Priority/Inactive state, Post-process category/card On/Off state, and per-deck category disclosure. It survives dropdown close/reopen, chat changes, UI remounts, and page reloads. Pre-process categories default collapsed and Post-process categories default expanded until changed. New categories start expanded, duplicated decks inherit disclosure, and deleted decks/categories prune obsolete disclosure entries.
+All operator-selected deck state is global Recursion extension state: active Pre-process and Post-process deck IDs, Pre-process card Active/Priority/Inactive state, Post-process card On/Off state, and per-deck category disclosure. Categories in both phases have no independent On/Off control. Post-process category activity is derived: any On card makes the category active, while all cards Off makes it inactive. State survives dropdown close/reopen, chat changes, UI remounts, and page reloads. Pre-process categories default collapsed and Post-process categories default expanded until changed. New categories start expanded, duplicated decks inherit disclosure, and deleted decks/categories prune obsolete disclosure entries.
 
 Custom deck deletion is identical in both phases. Clicking the deck trash action replaces the right-side deck action rail with the shared inline confirmation beside the deck selector: a text box with `delete` placeholder, visible `type delete` hint, confirm icon disabled until the entered value equals `delete` case-insensitively, and cancel icon. Enter confirms only when valid; Escape cancels. Deck deletion never uses the category/card alert-dialog confirmation or require typing the deck name.
 
@@ -1231,7 +1231,8 @@ Advanced contains low-frequency controls grouped into collapsible sections:
 
 - Injection: placement, role, and depth controls for the composed prompt packet.
 - UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
-- Retention: Source Messages, Source Text Budget, Provider Messages, Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries. These controls tune Recursion-owned windows and cache files; they do not delete SillyTavern chat.
+- Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. These controls bound Recursion-owned evidence and analysis windows; they do not replace or limit SillyTavern writer context.
+- Storage Retention: Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries. These controls tune Recursion-owned cache files and journals; they do not delete SillyTavern chat.
 - Diagnostics: safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
 - Reset Defaults: a confirmed action at the bottom of Advanced that restores Play and Advanced controls to `DEFAULT_RECURSION_SETTINGS`. It preserves provider settings and session-only keys, custom card decks and scope, compact-bar settings, and viewer visibility.
 

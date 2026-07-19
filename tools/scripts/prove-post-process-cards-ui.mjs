@@ -319,7 +319,13 @@ async function activePostDeck(page) {
       cardOrderByCategory: Object.fromEntries(
         Object.entries(deck.cardOrderByCategory || {}).map(([categoryId, order]) => [categoryId, [...order]])
       ),
-      categories: Object.values(deck.categories || {}).map(({ id: categoryId, name, enabled }) => ({ id: categoryId, name, enabled })),
+      categories: Object.values(deck.categories || {}).map(({ id: categoryId, name }) => ({
+        id: categoryId,
+        name,
+        enabled: Object.values(deck.cards || {}).some((card) => (
+          card.categoryId === categoryId && card.enabled !== false
+        ))
+      })),
       cards: Object.values(deck.cards || {}).map(({ id: cardId, categoryId, name, enabled }) => ({ id: cardId, categoryId, name, enabled }))
     } : { id, name: 'Starter Post-process Deck', categoryOrder: [], cardOrderByCategory: {}, categories: [], cards: [] };
   });
@@ -378,13 +384,24 @@ async function independentDeckProof(page) {
   check(starter.activeDeckId === STARTER_DECK_ID, 'Starter Post-process Deck was not active.');
   check(starter.summary === 'Off', `Disabled Post-process header did not report Off: ${JSON.stringify(starter.summary)}`);
   check(starter.editDisabled && starter.deleteDisabled, 'Starter Post-process Deck did not communicate read-only structure through disabled authoring controls.');
-  for (const name of ['Natural Prose', 'Follow Through']) await expandCategory(page, name, true);
+  for (const name of ['Natural Prose', 'Follow Through', 'Concrete Meaning', 'Character-Specific Relationships']) {
+    await expandCategory(page, name, true);
+  }
   const starterRows = await page.evaluate(() => ({
     categories: [...document.querySelectorAll('[data-recursion-post-process-category] .recursion-post-process-category-name')].map((node) => node.textContent?.trim()),
+    categoryStates: [...document.querySelectorAll('[data-recursion-post-process-category]')].map((node) => ({
+      id: node.getAttribute('data-recursion-post-process-category'),
+      enabled: node.classList.contains('is-active')
+    })),
     cards: [...document.querySelectorAll('[data-recursion-post-process-card] .recursion-post-process-card-name')].map((node) => node.textContent?.trim())
   }));
   check(
-    JSON.stringify(starterRows.categories) === JSON.stringify(['Natural Prose', 'Follow Through']),
+    JSON.stringify(starterRows.categories) === JSON.stringify([
+      'Natural Prose',
+      'Follow Through',
+      'Concrete Meaning',
+      'Character-Specific Relationships'
+    ]),
     `Starter categories are not in approved order: ${JSON.stringify(starterRows.categories)}`
   );
   check(JSON.stringify(starterRows.cards) === JSON.stringify([
@@ -393,8 +410,17 @@ async function independentDeckProof(page) {
     'Land the Ending',
     'Act on the Threat',
     'Close the Distance',
-    'Complete the Move'
-  ]), `Starter cards are not the approved six cards in order: ${JSON.stringify(starterRows.cards)}`);
+    'Complete the Move',
+    'Strip False Weight',
+    'Earn the Attraction',
+    'Ground the Deflection'
+  ]), `Starter cards are not the approved nine cards in order: ${JSON.stringify(starterRows.cards)}`);
+  check(JSON.stringify(starterRows.categoryStates) === JSON.stringify([
+    { id: 'natural-prose', enabled: true },
+    { id: 'follow-through', enabled: true },
+    { id: 'concrete-meaning', enabled: false },
+    { id: 'character-specific-relationships', enabled: false }
+  ]), `Starter category defaults are not approved: ${JSON.stringify(starterRows.categoryStates)}`);
 
   await page.locator('[data-recursion-post-process-deck-duplicate]').first().click();
   await page.waitForFunction(() => (
@@ -550,7 +576,20 @@ async function createAndExerciseCustomDeck(page, customDeckId, { compact = false
       globalThis.__recursionLiveHarnessRuntime?.view?.().settings?.postProcessDecks?.activeDeckId
     ]?.cards?.[id]?.enabled === false
   ), card.id, { timeout: TIMEOUT_MS });
+  check(
+    (await page.locator(`[data-recursion-post-process-category="${category.id}"]`).first().getAttribute('class'))?.includes('is-inactive'),
+    'A one-card custom category did not become inactive when its card turned Off.'
+  );
   await page.locator(`[data-recursion-post-process-card-toggle="${card.id}"]`).first().click();
+  await page.waitForFunction((id) => (
+    globalThis.__recursionLiveHarnessRuntime?.view?.().settings?.postProcessDecks?.customDecks?.[
+      globalThis.__recursionLiveHarnessRuntime?.view?.().settings?.postProcessDecks?.activeDeckId
+    ]?.cards?.[id]?.enabled === true
+  ), card.id, { timeout: TIMEOUT_MS });
+  check(
+    (await page.locator(`[data-recursion-post-process-category="${category.id}"]`).first().getAttribute('class'))?.includes('is-active'),
+    'A one-card custom category did not become active when its card turned On.'
+  );
   deck = await activePostDeck(page);
   const natural = deck.categories.find((entry) => entry.name === 'Natural Prose');
   check(natural, 'Duplicated deck is missing Natural Prose.');

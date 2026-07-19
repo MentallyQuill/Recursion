@@ -141,7 +141,7 @@ Settings stay in `extension_settings.recursion`. Larger records use logical JSON
 
 Diagnostics are bounded and sanitized. Normal records may include hashes, ids, card families, statuses, token estimates, provider lane labels, durations, and compact errors. They must not include API keys, raw provider prompts, raw provider responses, full transcripts, hidden reasoning, private story plans, or unbounded local paths.
 
-Retention caps are local Recursion tuning controls. Source Messages and Source Text Budget bound the visible source window by walking backward from the latest visible chat message; Provider Messages bounds provider-safe snapshots; Scene Caches / Chat and Scene Caches Total prune only unprotected Recursion scene-cache files; Swipe Variants / Scene bounds active-source variants; Journal Entries bounds sanitized run journals. These caps do not delete, hide, summarize, or rewrite SillyTavern chat history.
+Context Windows and Storage Retention are local Recursion tuning controls. Source Freshness Messages and Source Freshness Text Budget bound the visible source window by walking backward from the latest visible chat message; Provider Analysis Messages bounds provider-safe snapshots; Scene Caches / Chat and Scene Caches Total prune only unprotected Recursion scene-cache files; Swipe Variants / Scene bounds active-source variants; Journal Entries bounds sanitized run journals. These caps do not delete, hide, summarize, or rewrite SillyTavern chat history.
 
 ```mermaid
 flowchart LR

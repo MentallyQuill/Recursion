@@ -8095,6 +8095,7 @@ export function createRecursionRuntime({
     cancelPostProcess: postProcessRuntime.cancelPostProcess,
     waitForPostProcessSettlement: postProcessRuntime.waitForPostProcessSettlement,
     postProcessFinalTargetReady: postProcessRuntime.postProcessFinalTargetReady,
+    postProcessHostRunReady: postProcessRuntime.postProcessHostRunReady,
     postProcessDiagnostics: postProcessRuntime.postProcessDiagnostics,
     enhanceLatestAssistantMessage,
     proseEnhancementPending,

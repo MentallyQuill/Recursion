@@ -1984,4 +1984,75 @@ for (const mode of ['as-swipe', 'replace']) {
   }
 }
 
+for (const mode of ['as-swipe', 'replace']) {
+  for (const handoff of ['abort', 'source-change']) {
+    const sourceText = `Handoff ${mode} source.`;
+    const candidate = `Handoff ${mode} candidate.`;
+    let saveCount = 0;
+    let signalReads = 0;
+    const context = {
+      chatId: `handoff-${mode}-${handoff}`,
+      chat: [{
+        mesid: 31,
+        is_user: false,
+        mes: sourceText,
+        swipe_id: 0,
+        swipes: [sourceText],
+        swipe_info: [{ extra: {} }]
+      }],
+      saveChat() {
+        saveCount += 1;
+      },
+      updateMessageBlock() {},
+      swipe: { refresh() {} }
+    };
+    const handoffHost = createSillyTavernHost({
+      contextFactory: () => context,
+      settingsRoot: {}
+    });
+    const expectedSourceIdentity = await handoffHost.messages.postProcessSourceIdentity();
+    const signal = {
+      get aborted() {
+        signalReads += 1;
+        if (signalReads === 4 && handoff === 'source-change') {
+          context.chat[0].mes = 'Source changed in the validation-to-mutation handoff.';
+          context.chat[0].swipes[0] = context.chat[0].mes;
+        }
+        return handoff === 'abort' && signalReads >= 4;
+      }
+    };
+    const marker = {
+      schema: 'recursion.postProcessMarker.v1',
+      operationId: `handoff-${mode}-${handoff}`,
+      sourceHash: hashJson(sourceText),
+      candidateHash: hashJson(candidate),
+      deckId: 'starter-post-process',
+      rewriteFlow: 'unified',
+      requestedApplyMode: mode,
+      committedApplyMode: mode,
+      lane: 'utility',
+      partial: false,
+      categories: []
+    };
+    const options = {
+      markerNamespace: 'postProcess',
+      marker,
+      expectedSourceIdentity: {
+        ...expectedSourceIdentity,
+        sourceTextHash: expectedSourceIdentity.originalHash
+      },
+      signal,
+      ...(mode === 'as-swipe' ? { select: true } : {})
+    };
+    const result = mode === 'as-swipe'
+      ? await handoffHost.messages.appendAssistantMessageSwipe(31, candidate, options)
+      : await handoffHost.messages.replaceAssistantMessageText(31, candidate, options);
+    assert(signalReads >= 4, `${mode} ${handoff} performs the immediate post-validation signal recheck`);
+    assertEqual(result.ok, false, `${mode} ${handoff} is rejected in the validation-to-mutation handoff`);
+    assertEqual(saveCount, 0, `${mode} ${handoff} performs no save`);
+    assert(!context.chat[0].swipes.includes(candidate), `${mode} ${handoff} appends no candidate`);
+    assert(context.chat[0].mes !== candidate, `${mode} ${handoff} replaces no candidate`);
+  }
+}
+
 console.log('[pass] host');

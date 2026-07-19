@@ -1490,6 +1490,109 @@ if (false) {
   else globalThis.fetch = previousGlobals.fetch;
 }
 
+for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
+  const fake = createFakeSillyTavernContext(`post-process-lock-cancel-${cancellation}`);
+  const eventSource = createFakeEventSource();
+  let lockStarted = false;
+  let releaseLock;
+  const lockGate = new Promise((resolve) => { releaseLock = resolve; });
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    CHAT_CHANGED: 'chat_changed',
+    GENERATION_ENDED: 'generation_ended',
+    GENERATION_STOPPED: 'generation_stopped',
+    MESSAGE_UPDATED: 'message_updated',
+    MESSAGE_DELETED: 'message_deleted',
+    MESSAGE_SWIPED: 'message_swiped'
+  };
+  fake.context.deactivateSendButtons = () => {
+    lockStarted = true;
+    return lockGate;
+  };
+  fake.context.activateSendButtons = () => {};
+  fake.context.swipe = {
+    hide() {},
+    refresh() {}
+  };
+  fake.context.chat = [
+    {
+      mesid: 0,
+      is_user: false,
+      mes: 'Prior response before the lock gate.',
+      swipe_id: 0,
+      swipes: ['Prior response before the lock gate.'],
+      swipe_info: [{ extra: {} }]
+    },
+    { mesid: 1, is_user: true, mes: 'Generate the lock-gated response.' }
+  ];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasoningLevel: 'medium',
+      postProcess: {
+        enabled: true,
+        applyMode: 'as-swipe',
+        rewriteFlow: 'unified',
+        contextMessages: 13
+      }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'normal');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  let runCalls = 0;
+  activeRuntime.runPostProcessForLatestAssistant = async () => {
+    runCalls += 1;
+    return { ok: true, committed: true };
+  };
+  fake.context.chat.push({
+    mesid: 2,
+    is_user: false,
+    mes: 'New response waiting behind the control lock.',
+    swipe_id: 0,
+    swipes: ['New response waiting behind the control lock.'],
+    swipe_info: [{ extra: {} }]
+  });
+  const ended = eventSource.emit('generation_ended', { mesid: 2 });
+  await waitUntil(() => lockStarted, `${cancellation} did not reach the Post-process control lock`);
+  if (cancellation === 'edit') {
+    fake.context.chat[2].mes = 'Edited while the control lock was pending.';
+    fake.context.chat[2].swipes[0] = fake.context.chat[2].mes;
+    await eventSource.emit('message_updated', { mesid: 2 });
+  } else if (cancellation === 'swipe') {
+    fake.context.chat[2].swipes.push('Swiped while the control lock was pending.');
+    fake.context.chat[2].swipe_info.push({ extra: {} });
+    fake.context.chat[2].swipe_id = 1;
+    fake.context.chat[2].mes = fake.context.chat[2].swipes[1];
+    await eventSource.emit('message_swiped', { mesid: 2 });
+  } else if (cancellation === 'delete') {
+    fake.context.chat.splice(2, 1);
+    await eventSource.emit('message_deleted', { mesid: 2 });
+  } else if (cancellation === 'chat-change') {
+    fake.context.chatId = `${fake.context.chatId}-changed`;
+    await eventSource.emit('chat_changed');
+  } else {
+    await activeRuntime.stopGeneration({
+      source: 'recursion-ui',
+      reason: 'stop-while-control-lock-pending'
+    });
+  }
+  releaseLock();
+  await ended;
+  assertEqual(runCalls, 0, `${cancellation} cancellation during control lock prevents Post-process run`);
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
 {
   const fake = createFakeSillyTavernContext('post-process-final-target-binding');
   const eventSource = createFakeEventSource();
@@ -1551,6 +1654,59 @@ if (false) {
   assertEqual(activeRuntime.postProcessPending(), true, 'mismatched terminal event leaves the valid arm pending');
   await eventSource.emit('generation_ended', { mesid: 2 });
   assertEqual(runCalls, 1, 'matching newly landed final assistant target consumes the arm exactly once');
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const fake = createFakeSillyTavernContext('post-process-continuation-target');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    GENERATION_ENDED: 'generation_ended'
+  };
+  fake.context.chat = [{
+    mesid: 4,
+    is_user: false,
+    mes: 'The response begins here.',
+    swipe_id: 0,
+    swipes: ['The response begins here.'],
+    swipe_info: [{ extra: {} }]
+  }];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasoningLevel: 'medium',
+      postProcess: {
+        enabled: true,
+        applyMode: 'as-swipe',
+        rewriteFlow: 'unified',
+        contextMessages: 13
+      }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'continue');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  let continuationRuns = 0;
+  activeRuntime.runPostProcessForLatestAssistant = async () => {
+    continuationRuns += 1;
+    activeRuntime.cancelPostProcess('continuation-consumed');
+    return { ok: true, committed: false, skipped: true };
+  };
+  fake.context.chat[0].mes = 'The response begins here and continues with a decisive action.';
+  fake.context.chat[0].swipes[0] = fake.context.chat[0].mes;
+  await eventSource.emit('generation_ended', { mesid: 4 });
+  assertEqual(continuationRuns, 1, 'same-message continuation with changed text is a valid newly landed target');
 
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;

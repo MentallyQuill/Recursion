@@ -1145,6 +1145,7 @@ function createLivePostProcessRuntimeHarness({
     'cancelPostProcess',
     'waitForPostProcessSettlement',
     'postProcessFinalTargetReady',
+    'postProcessHostRunReady',
     'postProcessDiagnostics'
   ]) {
     assertEqual(typeof runtime[method], 'function', `runtime delegates ${method}`);

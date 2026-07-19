@@ -267,6 +267,19 @@ test('1. Off makes no guidance, host, or commit calls', async () => {
   assertEqual(harness.commitCalls.length, 0, 'Off makes no commit call');
 });
 
+test('1a. A host-triggered run without its verified operation token fails soft', async () => {
+  const harness = createHarness();
+  const result = await harness.runtime.runPostProcessForLatestAssistant({
+    hostTriggered: true,
+    operationToken: 'missing-operation-token'
+  });
+  assertEqual(result.committed, false, 'unbound host-triggered run leaves the original unchanged');
+  assertEqual(result.reason, 'post-process-arm-canceled', 'unbound host-triggered run returns the stable canceled-arm reason');
+  assertEqual(harness.generationRouterCalls.length, 0, 'unbound host-triggered run makes no guidance call');
+  assertEqual(harness.hostCalls.length, 0, 'unbound host-triggered run makes no host rewrite call');
+  assertEqual(harness.commitCalls.length, 0, 'unbound host-triggered run makes no commit call');
+});
+
 test('2. No runnable cards makes no guidance, host, or commit calls', async () => {
   const deck = deckFrom();
   deck.cards['natural-prose-card'].promptText = '  ';
@@ -694,5 +707,5 @@ for (const entry of cases) {
   }
 }
 
-assertEqual(passed, 22, 'the complete 22-case state-machine matrix ran');
-console.log('[pass] post-process runtime (22 cases)');
+assertEqual(passed, 23, 'the complete 23-case state-machine matrix ran');
+console.log('[pass] post-process runtime (23 cases)');

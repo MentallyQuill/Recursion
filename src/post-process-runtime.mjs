@@ -965,8 +965,24 @@ export function createPostProcessRuntime({
     }
   }
 
-  function runPostProcessForLatestAssistant() {
+  function runPostProcessForLatestAssistant(options = {}) {
     if (active?.promise) return active.promise;
+    if (
+      options.hostTriggered === true
+      && (
+        !armed
+        || !verifiedFinalTarget
+        || cleanText(options.operationToken) !== armed.operationToken
+        || verifiedFinalTarget.operationToken !== armed.operationToken
+      )
+    ) {
+      return Promise.resolve({
+        ok: true,
+        committed: false,
+        skipped: true,
+        reason: 'post-process-arm-canceled'
+      });
+    }
     const consumedArm = armed;
     const expectedFinalTarget = verifiedFinalTarget;
     armed = null;
@@ -1008,6 +1024,7 @@ export function createPostProcessRuntime({
         }
       : null;
     armed = deepFreeze({
+      operationToken: makeId('post-process-arm'),
       generationType: cleanText(input.generationType || 'normal').toLowerCase(),
       requireFinalTargetVerification: input.requireFinalTargetVerification !== false,
       before
@@ -1071,12 +1088,13 @@ export function createPostProcessRuntime({
       const messageChanged = Number(current.messageId) !== Number(before.messageId);
       const swipeChanged = Number(current.swipeId ?? 0) !== Number(before.swipeId ?? 0);
       const textChanged = cleanText(current.originalHash) !== before.sourceTextHash;
-      const requiresNewMessage = !['swipe', 'regenerate'].includes(arm.generationType);
+      const requiresNewMessage = !['swipe', 'regenerate', 'continue'].includes(arm.generationType);
       if (requiresNewMessage ? !messageChanged : !(messageChanged || swipeChanged || textChanged)) {
         return { ok: true, ready: false, reason: 'post-process-final-target-unchanged' };
       }
     }
     verifiedFinalTarget = deepFreeze({
+      operationToken: arm.operationToken,
       chatIdentityHash: cleanText(current.chatIdentityHash),
       messageId: current.messageId,
       swipeId: Number(current.swipeId ?? 0),
@@ -1087,8 +1105,50 @@ export function createPostProcessRuntime({
     return {
       ok: true,
       ready: true,
+      operationToken: arm.operationToken,
       target: cloneValue(verifiedFinalTarget)
     };
+  }
+
+  async function postProcessHostRunReady(operationToken) {
+    const arm = armed;
+    const expected = verifiedFinalTarget;
+    if (
+      !arm
+      || !expected
+      || cleanText(operationToken) !== arm.operationToken
+      || expected.operationToken !== arm.operationToken
+    ) {
+      return { ok: true, ready: false, reason: 'post-process-arm-canceled' };
+    }
+    if (typeof host?.messages?.postProcessSourceIdentity !== 'function') {
+      return { ok: true, ready: false, reason: 'post-process-target-unavailable' };
+    }
+    let current;
+    try {
+      current = await host.messages.postProcessSourceIdentity();
+    } catch {
+      current = null;
+    }
+    if (
+      armed !== arm
+      || verifiedFinalTarget !== expected
+      || cleanText(operationToken) !== arm.operationToken
+    ) {
+      return { ok: true, ready: false, reason: 'post-process-arm-canceled' };
+    }
+    if (
+      !current
+      || cleanText(current.chatIdentityHash) !== expected.chatIdentityHash
+      || Number(current.messageId) !== Number(expected.messageId)
+      || Number(current.swipeId ?? 0) !== Number(expected.swipeId ?? 0)
+      || cleanText(current.originalHash) !== expected.sourceTextHash
+      || cleanText(current.activeCharacterHash) !== expected.activeCharacterHash
+      || cleanText(current.activeGroupHash) !== expected.activeGroupHash
+    ) {
+      return { ok: true, ready: false, reason: 'post-process-final-target-changed' };
+    }
+    return { ok: true, ready: true, operationToken: arm.operationToken };
   }
 
   return {
@@ -1103,6 +1163,7 @@ export function createPostProcessRuntime({
     cancelPostProcess,
     waitForPostProcessSettlement,
     postProcessFinalTargetReady,
+    postProcessHostRunReady,
     postProcessDiagnostics() {
       return cloneValue(lastDiagnostics);
     }

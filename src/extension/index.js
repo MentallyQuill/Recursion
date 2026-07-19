@@ -339,11 +339,25 @@ function registerHostEvents(nextRuntime, currentHost = host) {
               };
             }
             return lockPostProcessControls(currentHost)
-              .then(() => invokeRuntimeCleanup(
-                'runPostProcessForLatestAssistant',
-                'Post-processing failed.',
-                { reason: 'assistant-message-landed' }
-              ))
+              .then(() => nextRuntime.postProcessHostRunReady?.(target.operationToken))
+              .then((runReady) => {
+                if (runReady?.ready !== true) {
+                  return {
+                    ok: true,
+                    skipped: true,
+                    reason: runReady?.reason || 'post-process-arm-canceled'
+                  };
+                }
+                return invokeRuntimeCleanup(
+                  'runPostProcessForLatestAssistant',
+                  'Post-processing failed.',
+                  {
+                    hostTriggered: true,
+                    operationToken: target.operationToken,
+                    reason: 'assistant-message-landed'
+                  }
+                );
+              })
               .then(() => generationEnded())
               .finally(() => unlockPostProcessControls(currentHost))
               .then(() => {

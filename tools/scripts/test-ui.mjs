@@ -9,7 +9,13 @@ import {
 import { activityLabel, createRecursionViewModel, mountRecursionUi, providerFromControls } from '../../src/ui.mjs';
 import { createUiActionStatus, normalizeUiActionFailure } from '../../src/ui/action-status.mjs';
 import { renderCompactBar } from '../../src/ui/bar.mjs';
-import { cardsPanelState } from '../../src/ui/cards-panel.mjs';
+import {
+  cardsPanelState,
+  createDeckDragController,
+  renderDeckBar,
+  renderDeckCard,
+  renderDeckCategory
+} from '../../src/ui/cards-panel.mjs';
 import { providerSelector, providerStatusClass } from '../../src/ui/provider-panel.mjs';
 import { progressPanelState } from '../../src/ui/progress-panel.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
@@ -59,6 +65,7 @@ const compactBarPresentation = renderCompactBar({
     currentStepText: 'Generating scene cards...',
     standbyStatusText: 'Ready for Recursion.',
     modeLabel: 'Auto',
+    postProcess: { enabled: true, applyMode: 'as-swipe', rewriteFlow: 'progressive' },
     generationStopVisible: true,
     freshNextGenerationVisible: false
   },
@@ -67,6 +74,7 @@ const compactBarPresentation = renderCompactBar({
 assertEqual(compactBarPresentation.statusText, 'Generating scene cards...', 'compact bar presenter prefers active step text');
 assertEqual(compactBarPresentation.showStop, true, 'compact bar presenter exposes stop visibility');
 assertEqual(compactBarPresentation.showFreshNextGeneration, false, 'compact bar presenter hides fresh-next generation during active work');
+assertEqual(compactBarPresentation.postProcessLabel, 'Post-process Cards: On', 'compact bar presenter exposes Post-process feature state');
 assertEqual(progressPanelState({ progressRun: { title: 'Generating', steps: [{ id: 's1' }] } }).steps.length, 1, 'progress panel presenter exposes steps');
 assertEqual(cardsPanelState({ lastHand: { cards: [{ id: 'c1' }] } }).count, 1, 'cards panel presenter counts hand cards');
 const savedProviderDraft = {
@@ -743,18 +751,17 @@ assert(!/rgba\(101,\s*216,\s*232/.test(reasoningLitNodeCss), 'lit reasoning node
 assert(/\.reasoning-line-fill\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.52\)/.test(barImplementationReference), 'reasoning chain fill uses SillyTavern grey-white theme color');
 assert(/\.reasoning-node\.is-lit\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.62\)/.test(barImplementationReference), 'lit reasoning nodes use muted SillyTavern grey-white fill');
 assert(/\.recursion-reasoning-line-fill\s*\{[\s\S]*?var\(--SmartThemeBodyColor/.test(recursionCss), 'production reasoning fill derives from SillyTavern body color');
-assert(/assets\/icons\/prose\.svg/.test(recursionCss), 'Enhancements target rows use the prose.svg mask icon');
-assert(/assets\/icons\/dialogue\.svg/.test(recursionCss), 'Enhancements target rows use the dialogue.svg mask icon');
-assert(/\.recursion-enhancements-choice\.is-combo \.recursion-enhancements-choice-icon\s*\{[\s\S]*?height:\s*42px;/.test(recursionCss), 'Prose + Dialogue row centers the full-height combo icon stack in its own slot');
 assert(
-  /\.recursion-enhancements-choice-qualifier\s*\{[\s\S]*?font-size:\s*10px;[\s\S]*?letter-spacing:\s*0;[\s\S]*?margin-left:\s*4px;/.test(recursionCss),
-  'Redirect Experimental qualifier uses the compact helper-text scale and inline spacing'
+  /\.recursion-post-process-panel\s*\{[\s\S]*?display:\s*flex;[\s\S]*?overflow:\s*hidden;/.test(recursionCss),
+  'Post-process panel keeps its ordered deck list as the primary scroll surface'
 );
 assert(
-  /\.recursion-enhancements-choice-qualifier\s*\{[\s\S]*?color:\s*color-mix\(in srgb, var\(--SmartThemeBodyColor/.test(recursionCss),
-  'Redirect Experimental qualifier uses a muted SillyTavern foreground treatment'
+  /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-post-process-panel\s*\{[\s\S]*?100dvh/.test(recursionCss),
+  'Post-process panel clamps to the dynamic mobile viewport'
 );
-assert(uiSpec.includes('Redirect (Experimental)'), 'UI spec records the experimental Redirect selector label');
+assert(/postProcessDragController\.begin\(postProcessDragState,\s*\{\s*touch:\s*true\s*\}\)/.test(recursionUi), 'mobile Post-process drag starts through the short-hold controller');
+assert(/list\.scrollTop[\s\S]*?event\.clientY[\s\S]*?list\.scrollTop/.test(recursionUi), 'mobile Post-process drag edge-scrolls the ordered deck list');
+assert(recursionUi.includes('Post-process Cards'), 'production UI records the Post-process Cards surface');
 assert(!/recursion-settings-reasoning/.test(recursionCss), 'settings panel does not keep a duplicate reasoning chain stylesheet');
 assert(!/settingsReasoningLevelRow|recursionSettingReasoningChoice|MODE_OPTIONS/.test(recursionUi), 'settings panel does not keep duplicate mode or reasoning handlers');
 assert(/\.reasoning-chain::before/.test(barImplementationReference), 'reasoning nodes are connected by a chain line');
@@ -2107,6 +2114,24 @@ try {
   assert(root.querySelector('[data-recursion-power-toggle]').querySelector('svg'), 'power toggle uses the reference power SVG');
   assert(!fakeDocument.textTree(root.querySelector('[data-recursion-bar]')).includes('RECURSION'), 'compact bar does not render the Recursion wordmark');
   assert(root.querySelector('[data-recursion-mode-button]'), 'compact bar renders an icon-only mode button');
+  assert(root.querySelector('[data-recursion-pre-process-cards-button]'), 'compact bar exposes the Pre-process Cards control');
+  assertEqual(
+    root.querySelector('[data-recursion-pre-process-cards-button]').getAttribute('aria-label'),
+    'Pre-process Cards',
+    'Pre-process Cards control uses the approved accessible name'
+  );
+  assert(root.querySelector('[data-recursion-post-process-cards-button]'), 'compact bar replaces Enhancements with Post-process Cards');
+  assert(!root.querySelector('[data-recursion-enhancements-button]'), 'compact bar removes the Enhancements selector');
+  assert(root.querySelector('[data-recursion-post-process-panel]'), 'Post-process Cards panel exposes the stable panel selector');
+  assert(root.querySelector('[data-recursion-post-process-enabled]'), 'Post-process panel exposes the feature On/Off control');
+  assert(root.querySelector('[data-recursion-post-process-deck-select]'), 'Post-process panel exposes an independent deck selector');
+  assert(root.querySelector('[data-recursion-post-process-apply-as-swipe]'), 'Post-process panel exposes As Swipe');
+  assert(root.querySelector('[data-recursion-post-process-apply-replace]'), 'Post-process panel exposes Replace');
+  assert(root.querySelector('[data-recursion-post-process-flow-unified]'), 'Post-process panel exposes Unified');
+  assert(root.querySelector('[data-recursion-post-process-flow-progressive]'), 'Post-process panel exposes Progressive');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-category]').length, 2, 'starter Post-process Deck renders two ordered categories');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-card]').length, 6, 'starter Post-process Deck renders six ordered cards');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-drag-handle]').length, 0, 'read-only starter deck hides drag handles');
   assert(root.querySelector('[data-recursion-mode-menu]'), 'compact bar renders the mode selector menu');
   assert(root.querySelector('[data-recursion-pipeline-button]'), 'compact bar renders an icon-only pipeline button');
   assert(root.querySelector('[data-recursion-pipeline-menu]'), 'compact bar renders the pipeline selector menu');
@@ -2116,13 +2141,13 @@ try {
         if (child.querySelector?.('[data-recursion-pipeline-button]')) return 'pipeline';
         if (child.querySelector?.('[data-recursion-mode-button]')) return 'mode';
         if (child.dataset?.recursionCardsButton !== undefined || child.querySelector?.('[data-recursion-cards-button]')) return 'cards';
-        if (child.querySelector?.('[data-recursion-enhancements-button]')) return 'enhancements';
+        if (child.querySelector?.('[data-recursion-post-process-cards-button]')) return 'post-process';
         if (child.querySelector?.('[data-recursion-story-form-button]')) return 'storyForm';
         return '';
       })
       .filter(Boolean),
-    ['pipeline', 'mode', 'cards', 'enhancements', 'storyForm'],
-    'compact bar places Enhancements immediately after Cards and before Tense & PoV'
+    ['pipeline', 'mode', 'cards', 'post-process', 'storyForm'],
+    'compact bar places Post-process Cards immediately after Pre-process Cards and before Tense & PoV'
   );
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('svg'), 'pipeline button renders an inline SVG icon');
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-standard]'), 'Standard pipeline button uses the standard pipeline icon');
@@ -2164,53 +2189,6 @@ try {
     'mode button exposes the current mode label'
   );
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('title'), 'Mode: Auto', 'mode button exposes compact hover tip');
-  assert(root.querySelector('[data-recursion-enhancements-button]'), 'compact bar renders the Enhancements button');
-  assert(root.querySelector('[data-recursion-enhancements-menu]'), 'compact bar renders the Enhancements selector menu');
-  assert(root.querySelector('[data-recursion-enhancements-icon]'), 'Enhancements button renders the upgrade.svg mask icon');
-  assertEqual(root.querySelector('[data-recursion-enhancements-icon]').children.length, 0, 'Enhancements icon uses the upgrade.svg asset mask instead of inline SVG');
-  assert(root.querySelector('[data-recursion-enhancements-button]').className.includes('is-off'), 'Enhancements button greys out when Off');
-  assertDeepEqual(
-    root.querySelectorAll('[data-recursion-enhancement-apply-choice]').map((choice) => choice.dataset.recursionEnhancementApplyChoice),
-    ['as-swipe', 'replace'],
-    'Enhancements selector uses As Swipe/Replace apply order'
-  );
-  assertDeepEqual(
-    root.querySelectorAll('[data-recursion-enhancement-target-choice]').map((choice) => choice.dataset.recursionEnhancementTargetChoice),
-    ['off', 'repair', 'recompose', 'redirect'],
-    'Enhancements selector uses Off/Repair/Recompose/Redirect mode order'
-  );
-  assertDeepEqual(
-    root.querySelectorAll('[data-recursion-enhancement-target-icon]').map((icon) => icon.dataset.recursionEnhancementTargetIcon),
-    ['off', 'repair', 'recompose', 'redirect'],
-    'Enhancements selector renders one icon slot for each editorial mode'
-  );
-  const redirectEnhancementChoice = root.querySelector('[data-recursion-enhancement-target-choice-redirect]');
-  const redirectEnhancementQualifier = redirectEnhancementChoice.querySelector('[data-recursion-enhancement-target-choice-qualifier]');
-  assertEqual(
-    fakeDocument.textTree(redirectEnhancementChoice.querySelector('[data-recursion-enhancement-target-choice-name]')).trim(),
-    'Redirect Experimental',
-    'Redirect selector renders its primary label and inline Experimental qualifier'
-  );
-  assertEqual(redirectEnhancementQualifier?.tagName, 'SMALL', 'Redirect Experimental qualifier uses subordinate semantic markup');
-  assertEqual(fakeDocument.textTree(redirectEnhancementQualifier), 'Experimental', 'Redirect selector renders the exact Experimental qualifier');
-  assert(
-    redirectEnhancementQualifier.className.includes('recursion-enhancements-choice-qualifier'),
-    'Redirect Experimental qualifier exposes its subordinate styling class'
-  );
-  assertEqual(redirectEnhancementChoice.getAttribute('aria-label'), 'Redirect (Experimental)', 'Redirect selector exposes its maturity accessibly');
-  assertEqual(
-    root.querySelectorAll('[data-recursion-enhancement-target-choice-qualifier]').length,
-    1,
-    'only Redirect renders an Enhancement maturity qualifier'
-  );
-  const enhancementTargetIcon = root.querySelector('[data-recursion-enhancement-target-choice-recompose]').querySelector('[data-recursion-enhancement-target-icon]');
-  assert(enhancementTargetIcon.className.includes('is-on'), 'Recompose mode uses the unified review icon');
-  assertEqual(root.querySelectorAll('[data-recursion-enhancement-target-choice-tip]').length, 4, 'Enhancements selector renders mini descriptions for all editorial modes');
-  assertEqual(
-    root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-label'),
-    'Enhancements: Off',
-    'Enhancements button exposes the current target'
-  );
   const storyFormMenuText = fakeDocument.textTree(root.querySelector('[data-recursion-story-form-menu]'));
   assert(storyFormMenuText.includes('Auto'), 'story form menu includes Auto');
   assert(storyFormMenuText.includes('Tense'), 'story form menu includes Tense section');
@@ -2330,7 +2308,7 @@ try {
   const pipelineCluster = root.querySelector('[data-recursion-pipeline-button]').parentNode;
   const modeCluster = root.querySelector('[data-recursion-mode-button]').parentNode;
   const cardsButton = root.querySelector('[data-recursion-cards-button]');
-  const enhancementsCluster = root.querySelector('[data-recursion-enhancements-button]').parentNode;
+  const postProcessCluster = root.querySelector('[data-recursion-post-process-cards-button]').parentNode;
   const storyFormCluster = root.querySelector('[data-recursion-story-form-button]').parentNode;
   const statusTrigger = root.querySelector('[data-recursion-status-trigger]');
   const rightTools = root.querySelector('[data-recursion-reasoning-chain]').parentNode;
@@ -2338,8 +2316,8 @@ try {
   assertEqual(barChildren.indexOf(modeCluster), barChildren.indexOf(pipelineCluster) + 1, 'Mode sits immediately to the right of Pipeline');
   assertEqual(cardsButton.parentNode, root.querySelector('[data-recursion-bar]'), 'Cards button lives in the left bar flow');
   assert(barChildren.indexOf(modeCluster) < barChildren.indexOf(cardsButton), 'Cards button sits to the right of Mode');
-  assertEqual(barChildren.indexOf(enhancementsCluster), barChildren.indexOf(cardsButton) + 1, 'Enhancements sits immediately to the right of Cards');
-  assertEqual(barChildren.indexOf(storyFormCluster), barChildren.indexOf(enhancementsCluster) + 1, 'Tense & PoV sits immediately to the right of Enhancements');
+  assertEqual(barChildren.indexOf(postProcessCluster), barChildren.indexOf(cardsButton) + 1, 'Post-process Cards sits immediately to the right of Pre-process Cards');
+  assertEqual(barChildren.indexOf(storyFormCluster), barChildren.indexOf(postProcessCluster) + 1, 'Tense & PoV sits immediately to the right of Post-process Cards');
   assert(barChildren.indexOf(cardsButton) < barChildren.indexOf(statusTrigger), 'Cards button sits to the left of the Hero Pixel Array progress trigger');
   assert(!rightTools.children.includes(cardsButton), 'Cards button is not part of the right tool cluster');
   assert(!root.querySelector('[data-recursion-cards-label]'), 'Cards button is icon-only with no visible label node');
@@ -2416,101 +2394,95 @@ try {
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-fused]'), 'Fused pipeline button uses the fused pipeline icon after selection');
   assert(root.querySelector('[data-recursion-pipeline-button]').getAttribute('title').includes('Fused Pipeline'), 'Fused pipeline tooltip explains current pipeline');
 
-  root.querySelector('[data-recursion-enhancements-button]').setBoundingClientRect({ left: 118, top: 3, width: 24, height: 24, right: 142, bottom: 27 });
-  root.querySelector('[data-recursion-enhancements-button]').click();
-  assertEqual(root.querySelector('[data-recursion-enhancements-menu]').hidden, false, 'Enhancements button opens selector');
-  assertEqual(root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-expanded'), 'true', 'Enhancements button reflects open menu');
-  root.querySelector('[data-recursion-enhancement-apply-choice-replace]').querySelector('[data-recursion-enhancement-apply-choice-name]').click();
-  assertDeepEqual(settingsUpdates.at(-1), { enhancements: { applyMode: 'replace' } }, 'Enhancements menu switches apply mode from nested row content clicks');
-  assertEqual(root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-expanded'), 'true', 'Enhancements menu stays open after apply mode selection');
-  root.querySelector('[data-recursion-enhancement-target-choice-recompose]').querySelector('[data-recursion-enhancement-target-choice-tip]').click();
-  assertDeepEqual(settingsUpdates.at(-1), { enhancements: { mode: 'recompose' } }, 'Enhancements menu selects Recompose from nested row content clicks');
-  assertEqual(root.querySelector('[data-recursion-enhancements-button]').getAttribute('aria-expanded'), 'true', 'Enhancements button keeps menu open after target selection');
-  assertEqual(root.querySelector('[data-recursion-enhancements-menu]').hidden, false, 'Enhancements menu stays open after target selection');
-  assert(root.querySelector('[data-recursion-enhancement-target-choice-recompose]').className.includes('is-selected'), 'Recompose selection highlights immediately');
-  view = { ...view, settings: { ...view.settings, enhancements: { mode: 'recompose', target: 'on', applyMode: 'replace', contextMessages: 13 } } };
+  root.querySelector('[data-recursion-post-process-cards-button]').setBoundingClientRect({ left: 118, top: 3, width: 24, height: 24, right: 142, bottom: 27 });
+  root.querySelector('[data-recursion-post-process-cards-button]').click();
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'Post-process Cards button opens the panel');
+  assertEqual(root.querySelector('[data-recursion-post-process-cards-button]').getAttribute('aria-expanded'), 'true', 'Post-process Cards button reflects open panel');
+  root.querySelector('[data-recursion-post-process-enabled]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { postProcess: { enabled: true } }, 'Post-process feature toggles On independently');
+  root.querySelector('[data-recursion-post-process-apply-replace]').click();
+  assertDeepEqual(settingsUpdates.at(-1), { postProcess: { enabled: true, applyMode: 'replace' } }, 'Post-process Apply selects Replace');
+  root.querySelector('[data-recursion-post-process-flow-progressive]').click();
+  assertDeepEqual(
+    settingsUpdates.at(-1),
+    { postProcess: { enabled: true, applyMode: 'replace', rewriteFlow: 'progressive' } },
+    'Post-process Rewrite Flow selects Progressive'
+  );
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'segmented controls keep the Post-process panel open');
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-rename]').disabled, true, 'starter Post-process Deck rename is read-only');
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-delete]').disabled, true, 'starter Post-process Deck delete is read-only');
+  assertEqual(root.querySelector('[data-recursion-post-process-category-toggle]').disabled, true, 'starter category toggles are read-only');
+  assertEqual(root.querySelector('[data-recursion-post-process-card-toggle]').disabled, true, 'starter card toggles are read-only');
+  root.querySelector('[data-recursion-post-process-deck-duplicate]').click();
+  const postProcessDeckPatch = settingsUpdates.at(-1);
+  assert(postProcessDeckPatch.postProcessDecks, 'duplicating the starter writes only the Post-process deck store');
+  assert(!postProcessDeckPatch.preProcessDecks, 'Post-process deck actions do not mutate the Pre-process deck store');
+  const customPostProcessDeckId = postProcessDeckPatch.postProcessDecks.activeDeckId;
   ui.update();
-  assert(!root.querySelector('[data-recursion-enhancements-button]').className.includes('is-off'), 'Enhancements button is no longer grey when enabled');
-  const redirectUnavailableMessage = 'Reasoner is untested. Test Reasoner before using Redirect.';
-  view = {
-    ...view,
-    settings: {
-      ...view.settings,
-      reasoningLevel: 'medium',
-      enhancements: { mode: 'recompose', target: 'on', applyMode: 'replace', contextMessages: 13 },
-      providerCapabilities: providerCapabilities('untested', {
-        eligible: false,
-        message: redirectUnavailableMessage
-      })
-    }
-  };
-  ui.update();
-  const unavailableRedirectChoice = root.querySelector('[data-recursion-enhancement-target-choice-redirect]');
-  assert(unavailableRedirectChoice, 'Medium unavailable Redirect remains visible');
-  assertEqual(unavailableRedirectChoice.disabled, true, 'Medium unavailable Redirect is disabled');
-  assertEqual(unavailableRedirectChoice.getAttribute('aria-disabled'), 'true', 'Medium unavailable Redirect exposes disabled state accessibly');
-  assert(unavailableRedirectChoice.getAttribute('aria-label').includes(redirectUnavailableMessage), 'Medium unavailable Redirect exposes its reason accessibly');
-  assert(fakeDocument.textTree(unavailableRedirectChoice).includes(redirectUnavailableMessage), 'Medium unavailable Redirect visibly explains its reason');
-  const redirectTestReasoner = root.querySelector('[data-recursion-redirect-test-reasoner]');
-  assertEqual(redirectTestReasoner.hidden, false, 'Medium unavailable Redirect shows Test Reasoner');
-  assert(fakeDocument.textTree(redirectTestReasoner).includes('Test Reasoner'), 'Redirect readiness action uses Test Reasoner copy');
-  const settingsUpdatesBeforeUnavailableRedirect = settingsUpdates.length;
-  unavailableRedirectChoice.click();
-  assertEqual(settingsUpdates.length, settingsUpdatesBeforeUnavailableRedirect, 'clicking unavailable Redirect does not write settings');
-  assertEqual(view.settings.enhancements.mode, 'recompose', 'clicking unavailable Redirect preserves the existing Enhancement mode');
-  runNextTimeout(2000);
-  view = {
-    ...view,
-    settings: {
-      ...view.settings,
-      reasoningLevel: 'medium',
-      providerCapabilities: providerCapabilities('ready')
-    }
-  };
-  ui.update();
-  const readyRedirectChoice = root.querySelector('[data-recursion-enhancement-target-choice-redirect]');
-  assertEqual(readyRedirectChoice, unavailableRedirectChoice, 'Redirect readiness updates the same mounted row');
-  assertEqual(readyRedirectChoice.disabled, false, 'ready Reasoner enables Redirect');
-  assertEqual(readyRedirectChoice.getAttribute('aria-label'), 'Redirect (Experimental)', 'ready Redirect restores its canonical aria label');
-  assertEqual(
-    readyRedirectChoice.getAttribute('title'),
-    'Replace a drifted response with an evidence-grounded one.',
-    'ready Redirect restores its canonical title'
+  assert(root.querySelectorAll('[data-recursion-post-process-drag-handle]').length >= 8, 'editable duplicate exposes category and card drag handles');
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-rename]').disabled, false, 'custom Post-process Deck can be renamed');
+  const customCategoryToggle = root.querySelector('[data-recursion-post-process-category-toggle]');
+  const customCategoryId = customCategoryToggle.dataset.recursionPostProcessCategoryToggle;
+  const customDeckBeforeCategoryOff = view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId];
+  const savedChildStates = Object.fromEntries(
+    Object.values(customDeckBeforeCategoryOff.cards)
+      .filter((card) => card.categoryId === customCategoryId)
+      .map((card) => [card.id, card.enabled])
+  );
+  customCategoryToggle.click();
+  const customDeckAfterCategoryOff = view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId];
+  assertDeepEqual(
+    Object.fromEntries(
+      Object.values(customDeckAfterCategoryOff.cards)
+        .filter((card) => card.categoryId === customCategoryId)
+        .map((card) => [card.id, card.enabled])
+    ),
+    savedChildStates,
+    'turning a Post-process category Off preserves saved child card states'
   );
   assertEqual(
-    fakeDocument.textTree(readyRedirectChoice.querySelector('[data-recursion-enhancement-target-choice-tip]')),
-    'Uses card-evidence to replace a misaligned trajectory with a stronger, verified response.',
-    'ready Redirect restores its canonical description'
+    root.querySelector('[data-recursion-post-process-card-toggle]').getAttribute('data-effective-state'),
+    'off',
+    'category Off exposes each child card as effectively Off'
   );
-  assertEqual(redirectTestReasoner.hidden, true, 'ready Redirect hides Test Reasoner');
-  view = {
-    ...view,
-    settings: {
-      ...view.settings,
-      reasoningLevel: 'low',
-      providerCapabilities: providerCapabilities('untested', {
-        eligible: false,
-        message: redirectUnavailableMessage
-      })
-    }
-  };
-  ui.update();
-  assertEqual(root.querySelector('[data-recursion-enhancement-target-choice-redirect]').disabled, false, 'Low reasoning enables Redirect without Reasoner readiness');
-  view = {
-    ...view,
-    settings: {
-      ...view.settings,
-      reasoningLevel: 'medium',
-      providerCapabilities: providerCapabilities('ready')
-    }
-  };
-  ui.update();
-  view = { ...view, settings: { ...view.settings, enhancements: { mode: 'redirect', target: 'on', applyMode: 'as-swipe', contextMessages: 13 } } };
-  ui.update();
-  assertEqual(root.querySelector('[data-recursion-enhancement-apply-choice-replace]').disabled, true, 'Redirect disables Replace application');
-  assertEqual(root.querySelector('[data-recursion-enhancement-apply-choice-replace]').getAttribute('aria-disabled'), 'true', 'Redirect exposes disabled Replace state accessibly');
-  view = { ...view, settings: { ...view.settings, enhancements: { mode: 'recompose', target: 'on', applyMode: 'replace', contextMessages: 13 } } };
-  ui.update();
+  root.querySelector('[data-recursion-post-process-category-create]').click();
+  assert(root.querySelector('[data-recursion-post-process-card-editor]'), 'new category opens the shared Post-process editor');
+  root.querySelector('[data-recursion-post-process-editor-name]').value = 'Polish';
+  root.querySelector('[data-recursion-post-process-editor-description]').value = 'Final polish pass.';
+  root.querySelector('[data-recursion-post-process-editor-save]').click();
+  assert(
+    Object.values(view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId].categories)
+      .some((category) => category.name === 'Polish'),
+    'category editor creates a custom category'
+  );
+  const polishCategory = Object.values(view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId].categories)
+    .find((category) => category.name === 'Polish');
+  root.querySelectorAll('[data-recursion-post-process-card-create]')
+    .find((button) => button.dataset.recursionPostProcessCardCreate === polishCategory.id)
+    .click();
+  root.querySelector('[data-recursion-post-process-editor-name]').value = 'Tighten';
+  root.querySelector('[data-recursion-post-process-editor-description]').value = 'Make each line carry weight.';
+  root.querySelector('[data-recursion-post-process-editor-prompt]').value = 'Remove filler while preserving meaning and voice.';
+  root.querySelector('[data-recursion-post-process-editor-save]').click();
+  assert(
+    Object.values(view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId].cards)
+      .some((card) => card.name === 'Tighten' && card.promptText.includes('Remove filler')),
+    'card editor creates a user-authored Post-process prompt'
+  );
+  const firstPostProcessHandle = root.querySelector('[data-recursion-post-process-drag-handle]');
+  firstPostProcessHandle.keydown({ key: 'ArrowDown' });
+  assert(settingsUpdates.at(-1).postProcessDecks, 'keyboard drag-handle movement persists ordered Post-process deck state');
+  root.querySelector('[data-recursion-post-process-card-edit]').click();
+  root.querySelector('[data-recursion-post-process-card-editor]').keydown({ key: 'Escape' });
+  assertEqual(root.querySelector('[data-recursion-post-process-card-editor]'), null, 'Escape cancels the active Post-process editor');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-cards-button]'), 'Escape returns focus to the Post-process Cards trigger');
+  const postProcessDeckSelect = root.querySelector('[data-recursion-post-process-deck-select]');
+  postProcessDeckSelect.value = 'starter-post-process';
+  postProcessDeckSelect.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.at(-1).postProcessDecks.activeDeckId, 'starter-post-process', 'Post-process deck selector switches independently to the starter deck');
+  assert(!settingsUpdates.at(-1).preProcessDecks, 'Post-process deck selection never writes Pre-process deck state');
+  root.querySelector('[data-recursion-post-process-deck-select]').value = customPostProcessDeckId;
+  root.querySelector('[data-recursion-post-process-deck-select]').dispatchEvent({ type: 'change' });
 
   root.querySelector('[data-recursion-mode-button]').setBoundingClientRect({ left: 63, top: 3, width: 24, height: 24, right: 87, bottom: 27 });
   let bubbledModeClicks = 0;
@@ -3279,7 +3251,7 @@ try {
   root.querySelector('[data-recursion-setting-focus]').value = 'character';
   root.querySelector('[data-recursion-setting-progress-child-limit]').value = '7';
   root.querySelector('[data-recursion-setting-progress-list-limit]').value = '22';
-  root.querySelector('[data-recursion-setting-enhancement-context-messages]').value = '21';
+  root.querySelector('[data-recursion-setting-post-process-context-messages]').value = '21';
   root.querySelector('[data-recursion-setting-tooltips-enabled]').checked = false;
   root.querySelector('[data-recursion-setting-source-window-messages]').value = '64';
   root.querySelector('[data-recursion-setting-source-window-characters]').value = '36000';
@@ -3307,10 +3279,10 @@ try {
       progressListVisibleLimit: 22,
       tooltipsEnabled: false
     },
-    enhancements: {
-      mode: 'recompose',
-      target: 'on',
+    postProcess: {
+      enabled: true,
       applyMode: 'replace',
+      rewriteFlow: 'progressive',
       contextMessages: 21
     },
     diagnostics: {

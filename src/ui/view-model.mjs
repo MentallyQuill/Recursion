@@ -4,6 +4,7 @@ import {
   normalizeCardScope
 } from '../card-scope.mjs';
 import { activeCardDeckRuntimeScope, getActiveCardDeck, getAllCardDecks, normalizeCardDeckSettings } from '../pre-process-decks.mjs';
+import { getActivePostProcessDeck, normalizePostProcessDeckSettings } from '../post-process-decks.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from '../settings.mjs';
 
@@ -107,29 +108,6 @@ function pipelineLabel(value) {
   if (mode === 'rapid') return 'Rapid Pipeline';
   if (mode === 'fused') return 'Fused Pipeline';
   return 'Standard Pipeline';
-}
-
-function normalizeEnhancementTarget(value) {
-  const target = cleanText(value, 'off').toLowerCase();
-  if (['repair', 'recompose', 'redirect'].includes(target)) return target;
-  if (target === 'on' || target === 'prose' || target === 'dialogue' || target === 'prose-dialogue') return 'on';
-  return 'off';
-}
-
-function normalizeEnhancementApplyMode(value) {
-  return cleanText(value, 'as-swipe').toLowerCase() === 'replace' ? 'replace' : 'as-swipe';
-}
-
-function enhancementTargetLabel(value) {
-  const target = normalizeEnhancementTarget(value);
-  if (target === 'repair') return 'Repair';
-  if (target === 'recompose') return 'Recompose';
-  if (target === 'redirect') return 'Redirect';
-  return target === 'on' ? 'Enhancement' : 'Off';
-}
-
-function enhancementApplyModeLabel(value) {
-  return normalizeEnhancementApplyMode(value) === 'replace' ? 'Replace' : 'As Swipe';
 }
 
 function normalizeLastBriefStatus(value, hasCards = false, hasPacket = false) {
@@ -298,11 +276,13 @@ export function createRecursionViewModel(view = {}) {
   const enabled = settings.enabled !== false;
   const mode = normalizeMode(settings.mode);
   const pipelineMode = normalizePipelineMode(settings.pipelineMode);
-  const explicitEnhancementMode = cleanText(settings.enhancements?.mode, '').toLowerCase();
-  const enhancementTarget = ['off', 'repair', 'recompose', 'redirect'].includes(explicitEnhancementMode)
-    ? explicitEnhancementMode
-    : normalizeEnhancementTarget(settings.enhancements?.target);
-  const enhancementApplyMode = normalizeEnhancementApplyMode(settings.enhancements?.applyMode);
+  const postProcess = {
+    enabled: settings.postProcess?.enabled === true,
+    applyMode: settings.postProcess?.applyMode === 'replace' ? 'replace' : 'as-swipe',
+    rewriteFlow: settings.postProcess?.rewriteFlow === 'progressive' ? 'progressive' : 'unified'
+  };
+  const postProcessDecks = normalizePostProcessDeckSettings(settings.postProcessDecks);
+  const activePostProcessDeck = getActivePostProcessDeck(postProcessDecks);
   const preProcessDecks = normalizeCardDeckSettings(settings.preProcessDecks);
   const deckSettings = settings.preProcessDecks ? { ...settings, preProcessDecks } : settings;
   const cardScope = normalizeCardScope(activeCardDeckRuntimeScope(deckSettings));
@@ -337,8 +317,9 @@ export function createRecursionViewModel(view = {}) {
   return {
     mode,
     pipelineMode,
-    enhancementTarget,
-    enhancementApplyMode,
+    postProcess,
+    postProcessDecks,
+    activePostProcessDeck,
     lastBriefStatus,
     lastBriefReason: cleanText(source.lastBrief?.reason || ''),
     lastBriefSourceCardCount: Math.max(0, Math.floor(Number(source.lastBrief?.sourceCardCount) || 0)),
@@ -350,9 +331,7 @@ export function createRecursionViewModel(view = {}) {
     enabled,
     modeLabel: modeLabel(mode),
     pipelineLabel: pipelineLabel(pipelineMode),
-    enhancementsLabel: enhancementTarget === 'off'
-      ? 'Off'
-      : `${enhancementTargetLabel(enhancementTarget)}, ${enhancementApplyModeLabel(enhancementApplyMode)}`,
+    postProcessLabel: `${postProcess.enabled ? 'On' : 'Off'}, ${postProcess.applyMode === 'replace' ? 'Replace' : 'As Swipe'}, ${postProcess.rewriteFlow === 'progressive' ? 'Progressive' : 'Unified'}`,
     cardScope,
     preProcessDecks,
     activeCardDeck,

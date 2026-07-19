@@ -50,19 +50,21 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) - Source-backed V1 contract for Strength, Min/Max Cards, Focus, and Prompt Footprint backend effects.
 - [UI Spec](design/UI_SPEC.md) - Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, viewer, settings, and provider controls.
 - [Turn Context Compiler Seed Note](design/RECURSION_TURN_CONTEXT_COMPILER.md) - Historical seed note superseded by the V1 spec family.
-- [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - Approved product and UX direction for the unified Enhancement feature.
-- [Editorial Transformation Design](superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md) - Approved Repair, Recompose, and Redirect direction for evidence-led editorial transformation; supersedes the patch-only product boundary.
+- [Post-process Cards Design](superpowers/specs/2026-07-18-recursion-post-process-cards-design.md) - Approved V1 product, data, guidance, host-writer, persistence, and privacy contract.
+- [Post-process Cards Implementation Plan](superpowers/plans/2026-07-18-recursion-post-process-cards.md) - Approved task sequence for replacing the old Enhancement feature family.
+- [Post-process Cards Playwright Test Framework](testing/2026-07-18-post-process-cards-playwright-framework.md) - Required browser, visual, runtime-integration, and privacy proof framework.
+- [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - **Superseded by Post-process Cards; retained as historical context until Task 11 rewrites or removes affected documentation.**
+- [Editorial Transformation Design](superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md) - **Superseded by Post-process Cards; retained as historical context until Task 11 rewrites or removes affected documentation.**
 - [Layered Failure Recovery Design](superpowers/specs/2026-07-17-recursion-layered-failure-recovery-design.md) - Provider repair, semantic correction, safe partial results, and explicit failure severity.
-- [Enhancement Swipe Certification Design](superpowers/specs/2026-07-18-recursion-enhancement-swipe-certification-design.md) - Strict live proof for exact `As Swipe` mutation, dynamic Repair audits, current-run oracle evidence, and soak-user boundaries.
-- [Redirect Improvement Design](superpowers/specs/2026-07-15-recursion-redirect-improvement-design.md) - Supplemental Redirect contract for evidence-paired source failures, replacement objectives, character-pressure guidance, mandatory verification, and semantic regressions.
-- [Editorial Transformation Implementation Plan](superpowers/plans/2026-07-13-recursion-editorial-transformation.md) - V1 implementation sequence, real module contracts, tests, UI behavior, and verification for Repair, Recompose, and Redirect.
+- [Redirect Improvement Design](superpowers/specs/2026-07-15-recursion-redirect-improvement-design.md) - **Superseded by Post-process Cards; retained as historical context until Task 11 rewrites or removes affected documentation.**
+- [Editorial Transformation Implementation Plan](superpowers/plans/2026-07-13-recursion-editorial-transformation.md) - **Superseded by Post-process Cards; retained as historical context until Task 11 rewrites or removes affected documentation.**
 - [Design Folder Guide](design/README.md)
 
 ## Architecture Specs
 
 - [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md)
-- [Generation Review and Enhancement Contract](architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - Card-aware response review, bounded patches, anti-slop, cache, progress, and semantic validation under the shared structured-output recovery policy.
-- [Enhancement Swipe Certification Plan](superpowers/plans/2026-07-18-recursion-enhancement-swipe-certification.md) - Implemented deterministic gates, installed-copy parity, and Standard/Rapid/Fused real-provider certification.
+- [Post-process Cards Runtime Boundary](architecture/POST_PROCESS_CARDS_RUNTIME.md) - Frozen evidence, native SillyTavern writer ownership, Unified/Progressive sequencing, retry/fail-soft, final persistence, and privacy contract.
+- [Generation Review and Enhancement Contract](architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - **Superseded by Post-process Cards; retained as historical context until Task 11 rewrites or removes affected documentation.**
 - [Cache Use And Reuse Spec](architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-source reuse, Rapid warm artifacts, swipe variants, invalidation, and fresh-next-generation bypasses.
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md)

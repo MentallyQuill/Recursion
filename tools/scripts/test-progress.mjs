@@ -59,6 +59,52 @@ assertEqual(safeProgress.steps[0].label, 'Checking token: a brass coin', 'safe s
 const blocks = createHeroPixelBlocks(safeProgress);
 assertEqual(blocks[0].label, 'Checking token: a brass coin', 'hero blocks inherit safe labels');
 
+const runningPostProcessProgress = createProgressRunModel({
+  activityHistory: [{
+    runId: 'post-process-running',
+    phase: 'postProcessStarted',
+    severity: 'info',
+    label: 'Post-processing response...',
+    providerLane: 'utility',
+    detail: {
+      rewriteFlow: 'unified',
+      applyMode: 'as-swipe',
+      categoryCount: 2
+    }
+  }, {
+    runId: 'post-process-running',
+    phase: 'postProcessCategory',
+    severity: 'info',
+    label: 'Unified',
+    providerLane: 'utility',
+    detail: {
+      categoryId: 'unified',
+      categoryName: 'Unified',
+      state: 'running',
+      guidanceAttempts: 0,
+      hostAttempts: 0
+    }
+  }],
+  activity: {
+    runId: 'post-process-running',
+    phase: 'providerCallRunning',
+    severity: 'info',
+    label: 'Post-process guidance running.',
+    providerLane: 'utility',
+    detail: {
+      roleId: 'postProcessGuidanceUtility'
+    }
+  }
+});
+assert(
+  runningPostProcessProgress.steps.some((step) => step.state === 'running'),
+  'Post-process guidance exposes a running progress row'
+);
+assert(
+  createHeroPixelBlocks(runningPostProcessProgress).some((block) => block.state === 'running'),
+  'Post-process guidance exposes a running Hero Pixel Array block'
+);
+
 const progressivePostProcessProgress = createProgressRunModel({
   activityHistory: [
     {
@@ -124,6 +170,10 @@ assertEqual(progressivePostProcessProgress.steps[2].state, 'warning', 'committed
 assert(
   progressivePostProcessProgress.steps[2].reason.includes('Replace was withheld'),
   'committed partial parent explains why Replace was withheld'
+);
+assert(
+  createHeroPixelBlocks(progressivePostProcessProgress).every((block) => block.state !== 'running'),
+  'completed Post-process stages leave no running Hero Pixel Array blocks'
 );
 
 const explainedFailureProgress = createProgressRunModel({

@@ -1506,12 +1506,17 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     MESSAGE_SWIPED: 'message_swiped'
   };
   fake.context.deactivateSendButtons = () => {
+    fake.controlEvents.push('lock');
     lockStarted = true;
     return lockGate;
   };
-  fake.context.activateSendButtons = () => {};
+  fake.context.activateSendButtons = () => {
+    fake.controlEvents.push('unlock');
+  };
   fake.context.swipe = {
-    hide() {},
+    hide() {
+      fake.controlEvents.push('hide-swipes');
+    },
     refresh() {}
   };
   fake.context.chat = [
@@ -1548,6 +1553,11 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     runCalls += 1;
     return { ok: true, committed: true };
   };
+  let warmCalls = 0;
+  activeRuntime.warmRapidScene = async () => {
+    warmCalls += 1;
+    return { ok: true };
+  };
   fake.context.chat.push({
     mesid: 2,
     is_user: false,
@@ -1558,6 +1568,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   });
   const ended = eventSource.emit('generation_ended', { mesid: 2 });
   await waitUntil(() => lockStarted, `${cancellation} did not reach the Post-process control lock`);
+  let stopEvent = null;
   if (cancellation === 'edit') {
     fake.context.chat[2].mes = 'Edited while the control lock was pending.';
     fake.context.chat[2].swipes[0] = fake.context.chat[2].mes;
@@ -1575,14 +1586,22 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     fake.context.chatId = `${fake.context.chatId}-changed`;
     await eventSource.emit('chat_changed');
   } else {
-    await activeRuntime.stopGeneration({
-      source: 'recursion-ui',
-      reason: 'stop-while-control-lock-pending'
-    });
+    stopEvent = eventSource.emit('generation_stopped', { mesid: 2 });
   }
   releaseLock();
+  if (stopEvent) await stopEvent;
   await ended;
   assertEqual(runCalls, 0, `${cancellation} cancellation during control lock prevents Post-process run`);
+  assertEqual(
+    fake.controlEvents.filter((event) => event === 'unlock').length,
+    1,
+    `${cancellation} cancellation during control lock unlocks native controls exactly once`
+  );
+  assert(
+    fake.controlEvents.indexOf('hide-swipes') < fake.controlEvents.indexOf('unlock'),
+    `${cancellation} cancellation waits for native lock settlement before unlocking`
+  );
+  assertEqual(warmCalls, 0, `${cancellation} cancellation during control lock suppresses Rapid warming`);
 
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;
@@ -1717,6 +1736,176 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
 }
 
 {
+  const fake = createFakeSillyTavernContext('post-process-native-control-lock-failure');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    GENERATION_ENDED: 'generation_ended'
+  };
+  fake.context.deactivateSendButtons = () => {
+    fake.controlEvents.push('lock');
+    throw new Error('native controls unavailable');
+  };
+  fake.context.chat = [
+    { mesid: 0, is_user: true, mes: 'Generate a response whose control lock fails.' }
+  ];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasoningLevel: 'medium',
+      postProcess: {
+        enabled: true,
+        applyMode: 'as-swipe',
+        rewriteFlow: 'unified',
+        contextMessages: 13
+      }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'normal');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  let runCalls = 0;
+  activeRuntime.runPostProcessForLatestAssistant = async () => {
+    runCalls += 1;
+    return { ok: true, committed: true };
+  };
+  fake.context.chat.push({
+    mesid: 1,
+    is_user: false,
+    mes: 'Response that must remain original.',
+    swipe_id: 0,
+    swipes: ['Response that must remain original.'],
+    swipe_info: [{ extra: {} }]
+  });
+  await eventSource.emit('generation_ended', fake.context.chat.length);
+  assertEqual(runCalls, 0, 'failed native control lock prevents Post-process guidance and rewrite');
+  assertEqual(activeRuntime.postProcessPending(), false, 'failed native control lock cancels the Post-process arm');
+  assertEqual(
+    fake.controlEvents.filter((event) => event === 'unlock').length,
+    1,
+    'failed native control lock performs one best-effort native unlock'
+  );
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const fake = createFakeSillyTavernContext('post-process-disabled-native-controls');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    GENERATION_ENDED: 'generation_ended'
+  };
+  fake.context.chat = [
+    { mesid: 0, is_user: true, mes: 'Generate without Post-process.' }
+  ];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasoningLevel: 'medium',
+      postProcess: {
+        enabled: false,
+        applyMode: 'as-swipe',
+        rewriteFlow: 'unified',
+        contextMessages: 13
+      }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'normal');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  assertEqual(activeRuntime.postProcessPending(), false, 'disabled Post-process does not arm finalization');
+  fake.context.chat.push({
+    mesid: 1,
+    is_user: false,
+    mes: 'Native response without Post-process.',
+    swipe_id: 0,
+    swipes: ['Native response without Post-process.'],
+    swipe_info: [{ extra: {} }]
+  });
+  await eventSource.emit('generation_ended', fake.context.chat.length);
+  assertDeepEqual(fake.controlEvents, [], 'disabled Post-process never takes over native send or Stop controls');
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const fake = createFakeSillyTavernContext('post-process-disabled-after-arm');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    GENERATION_ENDED: 'generation_ended'
+  };
+  fake.context.chat = [
+    { mesid: 0, is_user: true, mes: 'Arm Post-process, then turn it off.' }
+  ];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasoningLevel: 'medium',
+      postProcess: {
+        enabled: true,
+        applyMode: 'as-swipe',
+        rewriteFlow: 'unified',
+        contextMessages: 13
+      }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'normal');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  assertEqual(activeRuntime.postProcessPending(), true, 'enabled Post-process arms before being switched Off');
+  await activeRuntime.updateSettings({
+    postProcess: {
+      enabled: false,
+      applyMode: 'as-swipe',
+      rewriteFlow: 'unified',
+      contextMessages: 13
+    }
+  });
+  fake.context.chat.push({
+    mesid: 1,
+    is_user: false,
+    mes: 'Response landed after Post-process was switched Off.',
+    swipe_id: 0,
+    swipes: ['Response landed after Post-process was switched Off.'],
+    swipe_info: [{ extra: {} }]
+  });
+  await eventSource.emit('generation_ended', fake.context.chat.length);
+  assertDeepEqual(fake.controlEvents, [], 'switching Post-process Off after arming never takes over native controls');
+  assertEqual(activeRuntime.postProcessPending(), false, 'switching Post-process Off clears the stale arm at terminal settlement');
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const fake = createFakeSillyTavernContext('post-process-final-target-binding');
   const eventSource = createFakeEventSource();
   fake.context.eventSource = eventSource;
@@ -1763,6 +1952,11 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   await eventSource.emit('generation_ended', { mesid: 0 });
   assertEqual(runCalls, 0, 'generation-ended with no new assistant target cannot rewrite the prior response');
   assertEqual(activeRuntime.postProcessPending(), true, 'invalid early terminal event does not consume the pending arm');
+  assertEqual(
+    activeRuntime.view().hostGenerationActive,
+    false,
+    'invalid terminal target still settles host generation state'
+  );
 
   fake.context.chat.push({
     mesid: 2,
@@ -1775,8 +1969,8 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   await eventSource.emit('generation_ended', { mesid: 999 });
   assertEqual(runCalls, 0, 'mismatched terminal message id cannot consume the Post-process arm');
   assertEqual(activeRuntime.postProcessPending(), true, 'mismatched terminal event leaves the valid arm pending');
-  await eventSource.emit('generation_ended', { mesid: 2 });
-  assertEqual(runCalls, 1, 'matching newly landed final assistant target consumes the arm exactly once');
+  await eventSource.emit('generation_ended', fake.context.chat.length);
+  assertEqual(runCalls, 1, 'SillyTavern chat-length terminal event consumes the matching arm exactly once');
 
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;
@@ -1830,6 +2024,86 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   fake.context.chat[0].swipes[0] = fake.context.chat[0].mes;
   await eventSource.emit('generation_ended', { mesid: 4 });
   assertEqual(continuationRuns, 1, 'same-message continuation with changed text is a valid newly landed target');
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const fake = createFakeSillyTavernContext('post-process-native-stop-during-guidance');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    GENERATION_ENDED: 'generation_ended',
+    GENERATION_STOPPED: 'generation_stopped'
+  };
+  fake.context.chat = [
+    { mesid: 0, is_user: true, mes: 'Generate, then stop during Post-process guidance.' }
+  ];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasoningLevel: 'medium',
+      postProcess: {
+        enabled: true,
+        applyMode: 'as-swipe',
+        rewriteFlow: 'unified',
+        contextMessages: 13
+      }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'normal');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  fake.context.generateRaw = async () => ({
+    text: JSON.stringify({
+      schema: 'recursion.providerTest.v1',
+      ok: true
+    })
+  });
+  assertEqual((await activeRuntime.testProvider('utility')).ok, true, 'native Stop guidance fixture readies Utility');
+  let guidanceRequest = null;
+  let releaseGuidance;
+  const guidanceGate = new Promise((resolve) => { releaseGuidance = resolve; });
+  fake.context.generateRaw = async (request = {}) => {
+    guidanceRequest = request;
+    await guidanceGate;
+    return { text: '{}' };
+  };
+  const sourceText = 'Original response remains authoritative after native Stop.';
+  fake.context.chat.push({
+    mesid: 1,
+    is_user: false,
+    mes: sourceText,
+    swipe_id: 0,
+    swipes: [sourceText],
+    swipe_info: [{ extra: {} }]
+  });
+  const ended = eventSource.emit('generation_ended', fake.context.chat.length);
+  await waitUntil(
+    () => guidanceRequest?.signal,
+    'native Stop guidance fixture did not start actual provider guidance'
+  );
+  await eventSource.emit('generation_stopped', { mesid: 1 });
+  assertEqual(guidanceRequest.signal.aborted, true, 'native GENERATION_STOPPED aborts actual guidance signal');
+  releaseGuidance();
+  await ended;
+  assertEqual(fake.context.chat[1].mes, sourceText, 'native Stop during actual guidance preserves source text');
+  assertEqual(fake.context.chat[1].swipes.length, 1, 'native Stop during actual guidance prevents a late swipe commit');
+  assertEqual(
+    fake.controlEvents.filter((event) => event === 'unlock').length,
+    1,
+    'native Stop during actual guidance unlocks controls exactly once'
+  );
+  assertEqual(activeRuntime.postProcessRunning(), false, 'native Stop settles actual guidance runtime');
 
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;

@@ -18,6 +18,13 @@ Post-process is separate from Auto/Manual and Standard/Rapid/Fused. It runs only
 
 Before host generation, runtime prepares only the Pre-process prompt packet. Post-process is armed independently and begins only after a completed assistant response lands; its frozen-evidence and provider-readiness checks cannot block the original host generation.
 
+SillyTavern's scalar `GENERATION_ENDED` payload is `chat.length`, not a
+message id. The host adapter binds that scalar terminal event to the
+authoritative latest assistant identity; explicit object payload ids remain
+authoritative. Every terminal branch settles `hostGenerationActive`, including
+a missing, stale, or mismatched Post-process target, so an unverified target
+cannot leave Stop hanging after the host generation has ended.
+
 ## Auto Sequence
 
 The Standard pipeline is the reference foreground path for Auto and Manual:
@@ -261,6 +268,18 @@ When the entrypoint receives source mutation events such as `MESSAGE_DELETED`, `
 When the player cancels SillyTavern generation, the entrypoint receives `event_types.GENERATION_STOPPED` (`generation_stopped`). Runtime treats that as `host-generation-stopped`: it aborts active work, cancels any armed Enhancement pass, clears Recursion prompt keys, and refuses late installs. Cancellation is not source mutation: a committed Prepared Generation Artifact, including a zero-card hand, remains available for a later independently validated swipe retry, and scene cache is not invalidated solely because generation stopped. The progress outcome is `skipped`/neutral.
 
 The Recursion Bar Stop generation button calls `runtime.stopGeneration()`. Runtime first asks `host.generation.stop()` to run SillyTavern's own generation stop path, then runs the same host-stop cleanup path used by the host event. Duplicate stop notifications collapse onto the in-flight cleanup promise so a button click plus SillyTavern `GENERATION_STOPPED` event clears Recursion prompt lanes once. Assistant-landed events call `handleHostGenerationEnded()` to hide the stop affordance after a normal generation completes. SillyTavern `GENERATION_AFTER_COMMANDS` is intentionally not treated as assistant-landed because it fires near generation startup and must not hide Stop while the host model is still running.
+
+When Post-process is enabled and a valid final assistant target is claimed,
+Recursion calls SillyTavern's `deactivateSendButtons()` before guidance
+synthesis. This extends the native `#mes_stop` control across the complete
+Post-process window: guidance synthesis, native quiet rewrite, final source
+validation, and chat commit. The native click emits `GENERATION_STOPPED`, which
+aborts the shared Post-process signal and prevents a late commit. Controls
+unlock in `finally` after success, failure, stale cancellation, or Stop.
+Post-process Off never extends native Stop ownership beyond SillyTavern's
+ordinary generation, including when it is switched Off after the host
+generation was armed. Failure to acquire the native control lock cancels before
+guidance, performs one best-effort unlock, and suppresses Rapid warming.
 
 ```mermaid
 flowchart TD

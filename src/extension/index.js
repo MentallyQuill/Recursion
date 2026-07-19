@@ -13,6 +13,7 @@ let settingsBootstrapUnsubscribers = [];
 let settingsLoadEventObserved = false;
 
 let postProcessControlsLocked = false;
+let postProcessControlLockPromise = null;
 
 function hasSillyTavernContext() {
   return typeof globalThis.SillyTavern?.getContext === 'function'
@@ -41,20 +42,36 @@ function publishLiveHarnessRuntime(nextRuntime) {
 }
 
 async function lockPostProcessControls(currentHost = host) {
+  if (postProcessControlLockPromise) return postProcessControlLockPromise;
   if (postProcessControlsLocked) return { ok: true, locked: true, unchanged: true };
   postProcessControlsLocked = true;
+  const pending = (async () => {
+    try {
+      const result = await currentHost?.generation?.lockControls?.();
+      return result || { ok: true, locked: true };
+    } catch (error) {
+      warn('Post-process control lock failed.', error);
+      return { ok: false, locked: false, error };
+    }
+  })();
+  postProcessControlLockPromise = pending;
   try {
-    const result = await currentHost?.generation?.lockControls?.();
-    if (result?.ok === false) postProcessControlsLocked = false;
-    return result || { ok: true, locked: true };
-  } catch (error) {
-    postProcessControlsLocked = false;
-    warn('Post-process control lock failed.', error);
-    return { ok: false, locked: false, error };
+    return await pending;
+  } finally {
+    if (postProcessControlLockPromise === pending) {
+      postProcessControlLockPromise = null;
+    }
   }
 }
 
 async function unlockPostProcessControls(currentHost = host) {
+  if (postProcessControlLockPromise) {
+    try {
+      await postProcessControlLockPromise;
+    } catch {
+      // Lock failures are normalized; the best-effort unlock still follows.
+    }
+  }
   if (!postProcessControlsLocked) return { ok: true, locked: false, unchanged: true };
   postProcessControlsLocked = false;
   try {
@@ -82,6 +99,14 @@ function postProcessOwnedSourceMutation(details = {}, currentHost = host) {
     || details.messageId === null
     || String(activeIdentity?.messageId ?? '') === String(details.messageId);
   return activeIdentity?.postProcessOwned === true && sameMessage;
+}
+
+function runtimePostProcessEnabled(nextRuntime) {
+  try {
+    return nextRuntime?.view?.()?.settings?.postProcess?.enabled === true;
+  } catch {
+    return false;
+  }
 }
 
 function destroyUi() {
@@ -329,17 +354,38 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         if (!finalGenerationEvent) {
           return { ok: true, skipped: true, reason: 'post-process-awaiting-generation-ended' };
         }
+        if (!runtimePostProcessEnabled(nextRuntime)) {
+          nextRuntime.cancelPostProcess?.('post-process-disabled');
+          return generationEnded()
+            .then(() => ({
+              ok: true,
+              skipped: true,
+              reason: 'post-process-disabled'
+            }));
+        }
+        let shouldWarmRapid = false;
         return Promise.resolve(nextRuntime.postProcessFinalTargetReady?.(details))
           .then((target) => {
             if (target?.ready !== true) {
-              return {
-                ok: true,
-                skipped: true,
-                reason: target?.reason || 'post-process-final-target-unverified'
-              };
+              return generationEnded()
+                .then(() => ({
+                  ok: true,
+                  skipped: true,
+                  reason: target?.reason || 'post-process-final-target-unverified'
+                }));
             }
             return lockPostProcessControls(currentHost)
-              .then(() => nextRuntime.postProcessHostRunReady?.(target.operationToken))
+              .then((lockResult) => {
+                if (lockResult?.ok !== true || lockResult?.locked !== true) {
+                  nextRuntime.cancelPostProcess?.('post-process-control-lock-failed');
+                  return {
+                    ok: true,
+                    ready: false,
+                    reason: 'post-process-control-lock-failed'
+                  };
+                }
+                return nextRuntime.postProcessHostRunReady?.(target.operationToken);
+              })
               .then((runReady) => {
                 if (runReady?.ready !== true) {
                   return {
@@ -356,12 +402,18 @@ function registerHostEvents(nextRuntime, currentHost = host) {
                     operationToken: target.operationToken,
                     reason: 'assistant-message-landed'
                   }
-                );
+                ).then((result) => {
+                  shouldWarmRapid = result?.reason !== 'canceled';
+                  return result;
+                });
               })
               .then(() => generationEnded())
               .finally(() => unlockPostProcessControls(currentHost))
               .then(() => {
                 lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
+                if (!shouldWarmRapid) {
+                  return { ok: true, skipped: true, reason: 'post-process-warm-suppressed' };
+                }
                 return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
               });
           });

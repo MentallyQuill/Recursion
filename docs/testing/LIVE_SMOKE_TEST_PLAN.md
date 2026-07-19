@@ -4,7 +4,7 @@ The live smoke plan proves Recursion inside a real SillyTavern browser session. 
 
 It is not a long-form story soak or campaign certification run.
 
-Post-process smoke uses the same dedicated-user gate after the assistant response lands. It freezes the source and bounded evidence, verifies Unified and Progressive guidance/rewrite progress, checks native host quiet-generation settlement, and proves that As Swipe and Replace produce the documented marker and mutation shape. A Progressive category failure must retain the latest valid draft and settle only as a swipe; no failed or stale run may mutate the host message.
+Post-process smoke uses the same dedicated-user gate after the assistant response lands. It freezes the source and bounded evidence, verifies Unified and Progressive guidance/rewrite progress, checks native host quiet-generation settlement, and proves that As Swipe and Replace produce the documented marker and mutation shape. The event fixture must use SillyTavern's real scalar `GENERATION_ENDED` payload (`chat.length`) and prove it binds to the latest assistant. The Hero Pixel Array must show running and terminal Post-process blocks. SillyTavern's native Stop must remain visible from guidance synthesis through quiet rewrite and final commit, and clicking it during guidance or rewrite must abort without a late mutation. Post-process Off must not extend native Stop ownership. A Progressive category failure must retain the latest valid draft and settle only as a swipe; no failed or stale run may mutate the host message.
 
 ## Required Conditions
 

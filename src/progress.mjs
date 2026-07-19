@@ -1137,6 +1137,28 @@ function deriveProgressRun(view) {
       order: eventOrder
     }, eventOrder));
   }
+  const terminalPostProcessEvent = [...events].reverse().find((event) => (
+    cleanText(event.phase) === 'settled'
+    && (!runId || cleanText(event.runId) === runId)
+    && cleanText(event.runId).toLowerCase().startsWith('post-process-')
+  ));
+  if (terminalPostProcessEvent) {
+    const terminalState = ['canceled', 'skipped'].includes(cleanText(terminalPostProcessEvent.outcome).toLowerCase())
+      ? 'skipped'
+      : (cleanText(terminalPostProcessEvent.severity).toLowerCase() === 'error' ? 'failed' : 'done');
+    for (const [id, step] of steps.entries()) {
+      if (!id.startsWith('post-process-category-') || step.state !== 'running') continue;
+      steps.set(id, normalizeStep({
+        ...step,
+        state: terminalState,
+        children: step.children.map((child) => (
+          ['running', 'pending'].includes(child.state)
+            ? { ...child, state: terminalState }
+            : child
+        ))
+      }, step.order));
+    }
+  }
   appendRapidWarmStatusStep(steps, source, order++);
   const beforePlanSteps = [...steps.values()];
   const hasEnhancementStep = [...ENHANCEMENT_STEP_IDS].some((id) => steps.has(id));

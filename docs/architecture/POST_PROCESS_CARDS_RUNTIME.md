@@ -111,6 +111,22 @@ Post-process operation: they cannot arm or recurse into another operation.
 Host controls stay locked, normal Pre-process cleanup settles safely, and the
 transient prompt key is cleared in `finally`.
 
+Control ownership begins before guidance synthesis, not only when the quiet
+writer starts. SillyTavern's native `#mes_stop` therefore remains visible for
+guidance, its retry, the native rewrite and retry, source validation, and final
+commit. Its native `GENERATION_STOPPED` event is the authoritative cancellation
+input for both Recursion provider work and the host writer.
+If native control acquisition fails, Post-process cancels before guidance and
+performs one best-effort unlock. Switching Post-process Off after a generation
+was armed also cancels before control acquisition. Canceled work does not start
+Rapid warming, and terminal progress settles any running pixel blocks.
+
+SillyTavern emits scalar `GENERATION_ENDED` with `chat.length`. Recursion
+normalizes that count to the current latest assistant identity before final
+target validation. Explicit object message ids are preserved. Valid,
+invalid, and duplicate terminal events all settle host-generation state;
+only one verified target may claim the armed Post-process operation.
+
 ## Final Output, Marker, and Privacy
 
 Only the final result persists.  Unified success and fully successful

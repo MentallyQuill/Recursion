@@ -1122,6 +1122,10 @@ export function createPostProcessRuntime({
   async function postProcessHostRunReady(operationToken) {
     const arm = armed;
     const expected = finalizationClaim;
+    if (settingsStore?.get?.()?.postProcess?.enabled !== true) {
+      cancelPostProcess('post-process-disabled');
+      return { ok: true, ready: false, reason: 'post-process-disabled' };
+    }
     if (
       !arm
       || !expected

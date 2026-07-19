@@ -4,6 +4,7 @@ import {
 } from '../../src/post-process-runtime.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
 import { hashJson } from '../../src/core.mjs';
+import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const GUIDANCE_SCHEMA = 'recursion.postProcessGuidance.v1';
@@ -487,23 +488,50 @@ test('15. Complete Replace commits the final candidate in place', async () => {
 
 test('16. Stop aborts the operation and prevents commit', async () => {
   const guidanceGate = deferred();
+  const activity = createActivityReporter();
   const harness = createHarness({
     guidancePlan: [[guidanceGate.promise]],
-    hostPlan: ['must not be used']
+    hostPlan: ['must not be used'],
+    activity
   });
   const running = harness.runtime.runPostProcessForLatestAssistant();
   await waitUntil(
     () => harness.generationRouterCalls.length === 1,
     'stop fixture guidance did not start'
   );
+  const runningProgress = createProgressRunModel({
+    activity: activity.current(),
+    activityHistory: activity.history()
+  });
+  assert(
+    runningProgress.steps.some((step) => step.state === 'running'),
+    'actual gated guidance exposes a running progress row'
+  );
+  assert(
+    createHeroPixelBlocks(runningProgress).some((block) => block.state === 'running'),
+    'actual gated guidance exposes a running Hero Pixel Array block'
+  );
   const canceled = harness.runtime.cancelPostProcess();
   assertEqual(canceled.canceled, true, 'cancel reports an active operation');
+  assertEqual(
+    harness.generationRouterCalls[0].options.signal.aborted,
+    true,
+    'Stop aborts guidance synthesis during the full Post-process window'
+  );
   guidanceGate.resolve(true);
   const result = await running;
   assertEqual(result.committed, false, 'stopped operation does not commit');
   assertEqual(result.reason, 'canceled', 'stopped operation returns canceled');
   assertEqual(harness.hostCalls.length, 0, 'stopped operation does not proceed to host rewrite');
   assertEqual(harness.commitCalls.length, 0, 'stopped operation makes no commit call');
+  const completedProgress = createProgressRunModel({
+    activity: activity.current(),
+    activityHistory: activity.history()
+  });
+  assert(
+    createHeroPixelBlocks(completedProgress).every((block) => block.state !== 'running'),
+    'canceled actual guidance leaves no running Hero Pixel Array blocks'
+  );
 });
 
 test('17. Stale source before final commit makes no commit', async () => {
@@ -684,8 +712,16 @@ test('22. Arming is consumed once and cancellation aborts an active host rewrite
   await waitUntil(() => harness.hostCalls.length === 1, 'armed fixture host rewrite did not start');
   assertEqual(harness.runtime.postProcessPending(), false, 'starting consumes the pending arm');
   assertEqual(harness.runtime.postProcessRunning(), true, 'started operation reports running');
-  harness.runtime.cancelPostProcess('test-stop');
-  assertEqual(harness.hostCalls[0].signal.aborted, true, 'Stop aborts the active native quiet-generation signal');
+  const nativeEventSource = {
+    async emit(eventName) {
+      if (eventName === 'generation_stopped') {
+        return harness.runtime.cancelPostProcess('host-generation-stopped');
+      }
+      return { ok: true, skipped: true };
+    }
+  };
+  await nativeEventSource.emit('generation_stopped');
+  assertEqual(harness.hostCalls[0].signal.aborted, true, 'native stop event aborts the active quiet-generation signal');
   hostGate.resolve('must not commit');
   const result = await running;
   assertEqual(result.reason, 'canceled', 'active host rewrite cancels fail-soft');

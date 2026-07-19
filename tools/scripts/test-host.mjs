@@ -59,6 +59,44 @@ assertDeepEqual(
 );
 assert(!JSON.stringify(normalizedStopEvent).includes('must-not-be-recorded'), 'generation stop normalization excludes sensitive payload values');
 
+const generationEndedChat = [
+  { mesid: 0, is_user: false, mes: 'Earlier assistant response.' },
+  { mesid: 1, is_user: true, mes: 'Generate the next response.' },
+  { mesid: 2, is_user: false, mes: 'Latest assistant response.' }
+];
+const normalizedGenerationEndedCount = normalizeSillyTavernMessageEvent(
+  generationEndedChat.length,
+  { eventName: 'generation_ended', context: { chat: generationEndedChat } }
+);
+assertEqual(
+  normalizedGenerationEndedCount.messageId,
+  2,
+  'generation-ended chat length binds to latest assistant id'
+);
+assertEqual(
+  normalizedGenerationEndedCount.latestAssistant,
+  true,
+  'generation-ended chat length identifies the latest assistant'
+);
+const normalizedGenerationEndedObject = normalizeSillyTavernMessageEvent(
+  { mesid: 7 },
+  { eventName: 'generation_ended', context: { chat: generationEndedChat } }
+);
+assertEqual(
+  normalizedGenerationEndedObject.messageId,
+  7,
+  'generation-ended explicit object message id remains authoritative'
+);
+const normalizedGenerationEndedWrappedCount = normalizeSillyTavernMessageEvent(
+  { payload: generationEndedChat.length },
+  { eventName: 'generation_ended', context: { chat: generationEndedChat } }
+);
+assertEqual(
+  normalizedGenerationEndedWrappedCount.messageId,
+  2,
+  'generation-ended wrapped chat length binds to latest assistant id'
+);
+
 {
   const eventHost = createSillyTavernHost({
     contextFactory: () => ({

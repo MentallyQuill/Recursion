@@ -499,7 +499,12 @@ export function normalizeSillyTavernMessageEvent(event = {}, context = {}) {
   const rawMessageId = eventMessageId(event);
   const swiped = Boolean(source.swiped || eventName === 'message_swiped');
   const latestAssistant = latestAssistantMessage(context.context || context);
-  const messageId = rawMessageId ?? (swiped && latestAssistant ? latestAssistant.mesid : null);
+  const payload = eventPayload(event);
+  const generationEndedCountPayload = eventName === 'generation_ended'
+    && (typeof payload === 'number' || typeof payload === 'string');
+  const messageId = generationEndedCountPayload && latestAssistant
+    ? (latestAssistant.mesid ?? latestAssistant.index)
+    : (rawMessageId ?? (swiped && latestAssistant ? latestAssistant.mesid : null));
   return {
     eventName,
     messageId,

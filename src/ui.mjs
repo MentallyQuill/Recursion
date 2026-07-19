@@ -2515,7 +2515,7 @@ function postProcessDeleteConfirmation(deleteState = {}, deck = {}) {
 function renderPostProcessPanel(panel, view, {
   editorState = null,
   deleteState = null,
-  expandedCategoryKeys = new Set()
+  expandedCategoryKeys = null
 } = {}) {
   const deckSettings = normalizePostProcessDeckSettings(view.settings?.postProcessDecks);
   const deck = getActivePostProcessDeck(deckSettings);
@@ -2604,7 +2604,7 @@ function renderPostProcessPanel(panel, view, {
 
   const list = el('div', { className: 'recursion-post-process-list', dataset: { recursionPostProcessList: '' } });
   for (const category of orderedPostProcessCategories(deck)) {
-    const expanded = expandedCategoryKeys.size === 0 || expandedCategoryKeys.has(category.id);
+    const expanded = expandedCategoryKeys === null || expandedCategoryKeys.has(category.id);
     const cards = orderedPostProcessCards(deck, category.id);
     const runnableCount = cards.filter((card) => category.enabled !== false && card.enabled !== false && cleanText(card.name) && cleanText(card.promptText)).length;
     const categoryToggleLabel = `${category.name}: ${category.enabled === false ? 'Off' : 'On'}`;
@@ -4090,7 +4090,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let postProcessDeckDeleteState = null;
   let postProcessEditorFocusReturn = null;
   let postProcessDeleteFocusReturn = null;
-  let expandedPostProcessCategoryKeys = new Set();
+  let expandedPostProcessCategoryKeys = null;
   let postProcessDragState = null;
   let cardLongPressTimer = null;
   let cardLongPressPointer = null;
@@ -4671,7 +4671,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       postProcessDeckDeleteState = null;
       postProcessEditorFocusReturn = null;
       postProcessDeleteFocusReturn = null;
-      expandedPostProcessCategoryKeys = new Set();
+      expandedPostProcessCategoryKeys = null;
       postProcessPanelRenderKey = '';
     }
     if (open) {
@@ -4754,7 +4754,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       editor: postProcessEditorState,
       deleteState: postProcessDeleteState,
       deckDeleteState: postProcessDeckDeleteState ? { kind: 'deck' } : null,
-      expanded: [...expandedPostProcessCategoryKeys].sort()
+      expanded: expandedPostProcessCategoryKeys === null ? null : [...expandedPostProcessCategoryKeys].sort()
     });
   }
 
@@ -6157,7 +6157,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (postCategoryExpand) {
       consumeClickEvent(event);
       const id = postCategoryExpand.dataset.recursionPostProcessCategoryExpand;
-      if (expandedPostProcessCategoryKeys.size === 0) {
+      if (expandedPostProcessCategoryKeys === null) {
+        expandedPostProcessCategoryKeys = new Set();
         for (const category of orderedPostProcessCategories(getActivePostProcessDeck(currentView().settings?.postProcessDecks))) {
           expandedPostProcessCategoryKeys.add(category.id);
         }

@@ -2478,6 +2478,22 @@ try {
   assertEqual(root.querySelector('[data-recursion-post-process-deck-delete]').disabled, true, 'starter Post-process Deck delete is read-only');
   assertEqual(root.querySelector('[data-recursion-post-process-category-toggle]').disabled, true, 'starter category toggles are read-only');
   assertEqual(root.querySelector('[data-recursion-post-process-card-toggle]').disabled, true, 'starter card toggles are read-only');
+  const expandedPostProcessCount = () => root.querySelectorAll('[data-recursion-post-process-category-expand]')
+    .filter((button) => button.getAttribute('aria-expanded') === 'true')
+    .length;
+  assertEqual(expandedPostProcessCount(), 2, 'Post-process categories default expanded on the initial panel render');
+  root.querySelectorAll('[data-recursion-post-process-category-expand]')[0].click();
+  assertEqual(expandedPostProcessCount(), 1, 'collapsing the first Post-process category leaves only the second open');
+  ui.update();
+  assertEqual(expandedPostProcessCount(), 1, 'a partial Post-process disclosure state persists across rerender');
+  root.querySelectorAll('[data-recursion-post-process-category-expand]')
+    .find((button) => button.getAttribute('aria-expanded') === 'true')
+    .click();
+  assertEqual(expandedPostProcessCount(), 0, 'collapsing the final Post-process category leaves every category closed');
+  ui.update();
+  assertEqual(expandedPostProcessCount(), 0, 'the all-collapsed Post-process disclosure state persists across rerender');
+  root.querySelectorAll('[data-recursion-post-process-category-expand]')[0].click();
+  assertEqual(expandedPostProcessCount(), 1, 'an explicitly collapsed Post-process category can be re-expanded');
   root.querySelector('[data-recursion-post-process-deck-duplicate]').click();
   const postProcessDeckPatch = settingsUpdates.at(-1);
   assert(postProcessDeckPatch.postProcessDecks, 'duplicating the starter writes only the Post-process deck store');

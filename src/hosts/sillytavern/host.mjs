@@ -25,6 +25,7 @@ const PROMPT_KEYS = Object.freeze({
   cardEvidence: 'recursion.cardEvidence',
   guardrails: 'recursion.guardrails'
 });
+const POST_PROCESS_PROMPT_KEY = 'recursion.postProcessGuidance';
 
 const PLACEMENT_TYPES = Object.freeze({
   before_prompt: 'BEFORE_PROMPT',
@@ -676,6 +677,68 @@ function normalizeGenerationFailure(error) {
   };
 }
 
+function postProcessWriterUnavailableResult() {
+  return {
+    ok: false,
+    text: '',
+    error: {
+      code: 'RECURSION_POST_PROCESS_WRITER_UNAVAILABLE',
+      message: 'SillyTavern native quiet generation API is unavailable.'
+    }
+  };
+}
+
+function postProcessWriterFailedResult(error) {
+  const code = stringValue(error?.code || error?.name || 'RECURSION_POST_PROCESS_WRITER_FAILED').trim()
+    || 'RECURSION_POST_PROCESS_WRITER_FAILED';
+  const message = stringValue(error?.message || error || 'SillyTavern native Post-process writer failed.')
+    .replace(/\s+/g, ' ')
+    .trim()
+    || 'SillyTavern native Post-process writer failed.';
+  return {
+    ok: false,
+    text: '',
+    error: {
+      code: code.slice(0, 120),
+      message: message.slice(0, 300)
+    }
+  };
+}
+
+function normalizePostProcessRewrite(response) {
+  const text = generationResponseText(response).trim();
+  if (!text) {
+    return {
+      ok: false,
+      text: '',
+      error: {
+        code: 'RECURSION_POST_PROCESS_WRITER_EMPTY',
+        message: 'SillyTavern native Post-process writer returned empty text.'
+      }
+    };
+  }
+  return { ok: true, text };
+}
+
+function installTransientSystemPrompt(context, key, text) {
+  if (typeof context.setExtensionPrompt !== 'function') {
+    const error = new Error('SillyTavern setExtensionPrompt API is unavailable.');
+    error.code = 'RECURSION_PROMPT_INSTALL_UNAVAILABLE';
+    throw error;
+  }
+  const position = promptPosition(context, 'in_prompt');
+  const depth = 0;
+  const role = promptRole(context, 'system');
+  context.setExtensionPrompt(key, stringValue(text), position, depth, false, role);
+  assertPromptStored(context, {
+    key,
+    text: stringValue(text),
+    position,
+    depth,
+    role
+  });
+}
+
 function stopUnavailableResult() {
   return {
     ok: false,
@@ -1128,6 +1191,42 @@ export function createSillyTavernHost({
   };
 
   const generation = {
+    async rewriteWithPostProcess({
+      guidancePacket,
+      writerDirective,
+      signal
+    } = {}) {
+      const context = currentContext(contextFactory);
+      if (typeof context.generate !== 'function') {
+        return postProcessWriterUnavailableResult();
+      }
+
+      let result;
+      try {
+        installTransientSystemPrompt(
+          context,
+          POST_PROCESS_PROMPT_KEY,
+          String(guidancePacket || '')
+        );
+        const response = await context.generate('quiet', {
+          automatic_trigger: true,
+          quiet_prompt: String(writerDirective || ''),
+          quietToLoud: true,
+          skipWIAN: false,
+          signal
+        });
+        result = normalizePostProcessRewrite(response);
+      } catch (error) {
+        result = postProcessWriterFailedResult(error);
+      } finally {
+        try {
+          clearPromptKey(context, POST_PROCESS_PROMPT_KEY);
+        } catch (error) {
+          result = postProcessWriterFailedResult(error);
+        }
+      }
+      return result;
+    },
     async lockControls() {
       const context = currentContext(contextFactory);
       try {

@@ -4,6 +4,8 @@ import { createGenerationRouter } from '../../src/providers.mjs';
 import { hashJson } from '../../src/core.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
+await import('./test-post-process-host-writer.mjs');
+
 async function flushMicrotasks(count = 6) {
   for (let index = 0; index < count; index += 1) {
     await Promise.resolve();

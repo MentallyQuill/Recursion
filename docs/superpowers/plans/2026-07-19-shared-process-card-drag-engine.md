@@ -69,6 +69,6 @@
 - [x] Run `node tools/scripts/test-pre-process-decks.mjs`, `node tools/scripts/test-post-process-decks.mjs`, and `npm.cmd test`.
 - [x] Run `npm.cmd run prove:post-process-ui` and inspect desktop and compact pointer-drag scenarios.
 - [x] Run `npm.cmd run prove:card-system-ui` to prevent Pre-process drag regression.
-- [ ] Run `git diff --check`, review the complete diff, and commit the drag repair.
-- [ ] Review branch history and merge the verified branch into `card-system`.
+- [x] Run `git diff --check`, review the complete diff, and commit the drag repair.
+- [x] Review branch history and merge the verified branch into `card-system`.
 - [ ] Run the full suite on the integrated branch and verify installed copies before reporting completion.

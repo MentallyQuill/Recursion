@@ -235,6 +235,14 @@ Enhancement-era implementation for archaeology only. They are not current V1
 provider authority; current Post-process behavior is defined by
 [Post-process Cards Runtime](POST_PROCESS_CARDS_RUNTIME.md).
 
+The retired role identifiers were `generationReviewer`,
+`editorialDiagnostician`, `editorialTransformer`, `editorialVerifier`, and
+`editorialEffectivenessJudge`. They remain named here so migration audits and
+historical provider-contract tests can distinguish them from the current
+`postProcessGuidanceUtility` and `postProcessGuidanceReasoner` roles. They must
+not be added back to the active Generation Roles table or used by new runtime
+calls.
+
 ### Redirect contract (historical)
 
 Redirect is a trajectory correction, not a stronger Recompose. A `proceed`

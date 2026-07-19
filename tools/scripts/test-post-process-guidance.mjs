@@ -118,6 +118,23 @@ for (const [name, rawText, expectedCode] of [
   assertEqual(result.error.code, expectedCode, `${name} guidance output has a stable failure code`);
 }
 
+for (const [field, values] of Object.entries({
+  schema: [{ value: POST_PROCESS_GUIDANCE_SCHEMA }, 7, true],
+  snapshotHash: [{ value: baseInput.snapshotHash }, 7, true],
+  sourceHash: [{ value: baseInput.sourceHash }, 7, true],
+  guidanceText: [{ value: 'Apply the card.' }, 7, true]
+})) {
+  for (const value of values) {
+    const result = await routeResult(response({ [field]: value }));
+    assertEqual(result.ok, false, `${field} rejects ${typeof value} values`);
+    assertEqual(
+      result.error.code,
+      'RECURSION_POST_PROCESS_GUIDANCE_INVALID',
+      `${field} wrong-type output has a stable failure code`
+    );
+  }
+}
+
 const boundedGuidance = `  ${'g'.repeat(MAX_POST_PROCESS_GUIDANCE_LENGTH + 20)}  `;
 const boundedResult = await routeResult(response({ guidanceText: boundedGuidance }));
 assertEqual(boundedResult.ok, true, 'valid guidance envelope succeeds');

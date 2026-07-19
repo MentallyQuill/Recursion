@@ -2141,10 +2141,17 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
       throw unsupportedRoleError(resolvedRoleId);
     }
 
-    const lane = laneName(requestLane(resolvedRoleId, request));
-    const { settings, config } = providerConfigFor(settingsStore, lane);
     const postProcessGuidanceRole = resolvedRoleId === 'postProcessGuidanceUtility'
       || resolvedRoleId === 'postProcessGuidanceReasoner';
+    const lane = laneName(requestLane(resolvedRoleId, request));
+    if (postProcessGuidanceRole && lane !== roleLane(resolvedRoleId)) {
+      throw providerError(
+        'RECURSION_PROVIDER_ROLE_LANE_MISMATCH',
+        'Post-process guidance roles cannot be dispatched on a different provider lane.',
+        { retryable: false }
+      );
+    }
+    const { settings, config } = providerConfigFor(settingsStore, lane);
     const operation = resolvedRoleId === 'providerTest'
       ? 'provider-test'
       : postProcessGuidanceRole

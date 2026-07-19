@@ -135,10 +135,12 @@ for (const utilityRole of expectedUtilityRoles) {
   assertEqual(roleLane(utilityRole), 'utility', `${utilityRole} uses utility lane`);
 }
 const providerSpec = readFileSync(new URL('../../docs/architecture/PROVIDER_AND_GENERATION_SPEC.md', import.meta.url), 'utf8');
-for (const utilityRole of expectedUtilityRoles.filter((roleId) => roleId !== 'postProcessGuidanceUtility')) {
+for (const utilityRole of expectedUtilityRoles) {
   assert(providerSpec.includes(`\`${utilityRole}\``), `provider spec documents ${utilityRole}`);
 }
-assert(providerSpec.includes('`reasonerComposer`'), 'provider spec documents reasonerComposer');
+for (const reasonerRole of REASONER_ROLE_IDS) {
+  assert(providerSpec.includes(`\`${reasonerRole}\``), `provider spec documents ${reasonerRole}`);
+}
 assert(!/characterLensCard|environmentTextureCard/.test(providerSpec), 'provider spec omits legacy card role names');
 
 const delegatedProfiles = [
@@ -1307,17 +1309,36 @@ assertEqual(reasonerGuidance.ok, true, 'postProcessGuidanceReasoner route succee
 assertEqual(calls.at(-1).lane, 'reasoner', 'postProcessGuidanceReasoner stays on Reasoner');
 assertEqual(calls.at(-1).responseSchema, 'recursion.postProcessGuidance.v1', 'postProcessGuidanceReasoner requires the post-process response schema');
 
-const callsBeforePostProcessSubstitution = calls.length;
-const substitutedGuidance = await router.generate('postProcessGuidanceReasoner', {
-  lane: 'utility',
-  prompt: 'Do not substitute Utility.',
-  snapshotHash: 'post-process-reasoner-snapshot',
-  sourceHash: 'post-process-reasoner-source',
-  reasoningLevel: 'high'
-});
-assertEqual(substitutedGuidance.ok, false, 'post-process Reasoner role rejects a Utility lane override');
-assertEqual(substitutedGuidance.error.code, 'RECURSION_PROVIDER_NOT_READY', 'post-process lane substitution fails closed');
-assertEqual(calls.length, callsBeforePostProcessSubstitution, 'post-process lane substitution never reaches a provider');
+for (const substitution of [
+  {
+    roleId: 'postProcessGuidanceUtility',
+    lane: 'reasoner',
+    reasoningLevel: 'high',
+    label: 'Utility role on Reasoner'
+  },
+  {
+    roleId: 'postProcessGuidanceReasoner',
+    lane: 'utility',
+    reasoningLevel: 'low',
+    label: 'Reasoner role on Utility'
+  }
+]) {
+  const callsBeforePostProcessSubstitution = calls.length;
+  const substitutedGuidance = await router.generate(substitution.roleId, {
+    lane: substitution.lane,
+    prompt: 'Do not substitute provider roles across lanes.',
+    snapshotHash: 'post-process-substitution-snapshot',
+    sourceHash: 'post-process-substitution-source',
+    reasoningLevel: substitution.reasoningLevel
+  });
+  assertEqual(substitutedGuidance.ok, false, `${substitution.label} override fails closed`);
+  assertEqual(
+    substitutedGuidance.error.code,
+    'RECURSION_PROVIDER_ROLE_LANE_MISMATCH',
+    `${substitution.label} override has a stable boundary failure`
+  );
+  assertEqual(calls.length, callsBeforePostProcessSubstitution, `${substitution.label} never reaches a provider`);
+}
 
 const utilityOverride = await router.generate('reasonerComposer', { lane: 'utility', prompt: 'Use utility override' });
 assertEqual(utilityOverride.ok, true, 'reasoner role can be explicitly routed to utility');

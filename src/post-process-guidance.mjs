@@ -119,6 +119,11 @@ export function normalizePostProcessGuidanceResponse(data, request = {}) {
   if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
     throw guidanceError('Post-process guidance output must contain only the minimal guidance envelope.');
   }
+  for (const field of expectedKeys) {
+    if (typeof data[field] !== 'string') {
+      throw guidanceError(`Post-process guidance ${field} must be a string.`);
+    }
+  }
 
   const schema = boundedText(data.schema, 180);
   if (schema !== POST_PROCESS_GUIDANCE_SCHEMA) {

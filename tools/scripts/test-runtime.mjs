@@ -798,6 +798,7 @@ function createProseMessageHarness(initialText = 'She was angry. "Keep the door 
   const calls = [];
   const message = {
     chatKey: 'prose-runtime-chat',
+    chatIdentityHash: hashJson('prose-runtime-chat'),
     messageId: 8,
     swipeId: 0,
     text: initialText,
@@ -810,6 +811,9 @@ function createProseMessageHarness(initialText = 'She was angry. "Keep the door 
     calls,
     messages: {
       activeAssistantMessageIdentity() {
+        return { ...message };
+      },
+      async postProcessSourceIdentity() {
         return { ...message };
       },
       async holdAssistantMessage(messageId) {
@@ -968,6 +972,8 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
 
 function createLivePostProcessRuntimeHarness({
   chatId = 'Folder / Active Chat?! File.jsonl',
+  getCurrentChatId = null,
+  chatMetadata = null,
   characterId = '',
   groupId = '',
   applyMode = 'as-swipe',
@@ -983,7 +989,6 @@ function createLivePostProcessRuntimeHarness({
   const promptCalls = [];
   const initialSwipes = [...swipes];
   const context = {
-    chatId,
     characterId,
     groupId,
     chat: [
@@ -1019,6 +1024,9 @@ function createLivePostProcessRuntimeHarness({
       refresh() {}
     }
   };
+  if (chatId !== null) context.chatId = chatId;
+  if (typeof getCurrentChatId === 'function') context.getCurrentChatId = getCurrentChatId;
+  if (chatMetadata && typeof chatMetadata === 'object') context.chatMetadata = chatMetadata;
   const host = createSillyTavernHost({
     contextFactory: () => context,
     settingsRoot: {}
@@ -1084,6 +1092,7 @@ function createLivePostProcessRuntimeHarness({
     snapshot: {
       chatId: 'prose-runtime-chat',
       chatKey: 'prose-runtime-chat',
+      chatIdentityHash: hashJson('prose-runtime-chat'),
       sceneKey: 'prose-runtime-scene',
       sceneFingerprint: 'prose-runtime-scene-fp',
       sourceRevisionHash: 'prose-runtime-source',
@@ -1165,18 +1174,47 @@ function createLivePostProcessRuntimeHarness({
 {
   const writerGate = deferred();
   const live = createLivePostProcessRuntimeHarness({
+    chatId: 'Folder/Chat.jsonl',
     writer: async () => writerGate.promise
   });
   const originalSwipes = clone(live.assistant().swipes);
   const run = live.runtime.runPostProcessForLatestAssistant();
   await waitUntil(() => live.writerCalls.length === 1, 'real chat-staleness writer did not start');
-  live.context.chatId = 'Folder / Different Chat?! File.jsonl';
+  live.context.chatId = 'Folder Chat.jsonl';
   writerGate.resolve('Candidate from the old chat.');
   const result = await run;
-  assertEqual(result.committed, false, 'real runtime guard rejects an actual chat change');
-  assertEqual(result.reason, 'stale-source', 'actual chat change returns the stable stale-source reason');
-  assertDeepEqual(live.assistant().swipes, originalSwipes, 'actual chat change preserves every source swipe');
-  assertEqual(live.saveCalls.length, 0, 'actual chat change never reaches the host commit boundary');
+  assertEqual(result.committed, false, 'real runtime guard rejects chat ids that collide after safeId canonicalization');
+  assertEqual(result.reason, 'stale-source', 'lossy chat-key collision returns the stable stale-source reason');
+  assertDeepEqual(live.assistant().swipes, originalSwipes, 'lossy chat-key collision preserves every source swipe');
+  assertEqual(live.saveCalls.length, 0, 'lossy chat-key collision never reaches the host commit boundary');
+}
+
+{
+  const getterOnlyChatId = 'Getter/Only Runtime Chat.jsonl';
+  const live = createLivePostProcessRuntimeHarness({
+    chatId: null,
+    getCurrentChatId: async () => getterOnlyChatId
+  });
+  const result = await live.runtime.runPostProcessForLatestAssistant();
+  assertEqual(result.committed, true, 'real runtime guard accepts an unchanged getter-only chat');
+  assertEqual(live.saveCalls.length, 1, 'getter-only source identity reaches exactly one host commit');
+  assert(!JSON.stringify(result.diagnostics).includes(getterOnlyChatId), 'getter-only raw chat id is absent from Post-process diagnostics');
+}
+
+{
+  const getterPreferredChatId = 'Getter/Preferred Runtime Chat.jsonl';
+  const conflictingMetadataChatId = 'Metadata/Conflicting Runtime Chat.jsonl';
+  const live = createLivePostProcessRuntimeHarness({
+    chatId: null,
+    getCurrentChatId: async () => getterPreferredChatId,
+    chatMetadata: { chat_id: conflictingMetadataChatId }
+  });
+  const result = await live.runtime.runPostProcessForLatestAssistant();
+  assertEqual(result.committed, true, 'real runtime guard shares snapshot getter-over-metadata precedence');
+  assertEqual(live.saveCalls.length, 1, 'getter-preferred source identity reaches exactly one host commit');
+  const serializedDiagnostics = JSON.stringify(result.diagnostics);
+  assert(!serializedDiagnostics.includes(getterPreferredChatId), 'getter-preferred raw chat id is absent from Post-process diagnostics');
+  assert(!serializedDiagnostics.includes(conflictingMetadataChatId), 'conflicting metadata chat id is absent from Post-process diagnostics');
 }
 
 {

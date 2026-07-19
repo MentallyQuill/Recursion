@@ -1750,4 +1750,55 @@ assert(chatKeySnap.sceneFingerprint, 'scene fingerprint built');
 assert(chatKeySnap.sceneKey, 'scene key built');
 assert(chatKeySnap.turnFingerprint, 'turn fingerprint built');
 
+const getterOnlyChatId = 'Getter/Only Chat.jsonl';
+const getterOnlyHost = createSillyTavernHost({
+  contextFactory: () => ({
+    async getCurrentChatId() {
+      return getterOnlyChatId;
+    },
+    chat: [{
+      mesid: 1,
+      is_user: false,
+      mes: 'Getter-only assistant response.',
+      swipe_id: 0,
+      swipes: ['Getter-only assistant response.']
+    }]
+  }),
+  settingsRoot: {}
+});
+const getterOnlySnapshot = await getterOnlyHost.snapshot();
+assertEqual(typeof getterOnlyHost.messages.postProcessSourceIdentity, 'function', 'host exposes an async privacy-safe Post-process identity boundary');
+const getterOnlyIdentity = await getterOnlyHost.messages.postProcessSourceIdentity();
+assertEqual(getterOnlySnapshot.chatKey, 'Getter-Only-Chat.jsonl', 'snapshot resolves getter-only chat id');
+assertEqual(getterOnlySnapshot.chatIdentityHash, hashJson(getterOnlyChatId), 'snapshot hashes the resolved getter-only chat id');
+assertEqual(getterOnlyIdentity.chatKey, getterOnlySnapshot.chatKey, 'Post-process identity shares getter-only snapshot chat resolution');
+assertEqual(getterOnlyIdentity.chatIdentityHash, getterOnlySnapshot.chatIdentityHash, 'Post-process identity shares getter-only snapshot chat hash');
+assert(!JSON.stringify(getterOnlyIdentity).includes(getterOnlyChatId), 'Post-process identity never exposes the raw getter-only chat id');
+
+const getterPreferredChatId = 'Getter/Wins Chat.jsonl';
+const conflictingMetadataChatId = 'Metadata/Loses Chat.jsonl';
+const getterPreferredHost = createSillyTavernHost({
+  contextFactory: () => ({
+    async getCurrentChatId() {
+      return getterPreferredChatId;
+    },
+    chatMetadata: { chat_id: conflictingMetadataChatId },
+    chat: [{
+      mesid: 1,
+      is_user: false,
+      mes: 'Getter-precedence assistant response.',
+      swipe_id: 0,
+      swipes: ['Getter-precedence assistant response.']
+    }]
+  }),
+  settingsRoot: {}
+});
+const getterPreferredSnapshot = await getterPreferredHost.snapshot();
+const getterPreferredIdentity = await getterPreferredHost.messages.postProcessSourceIdentity();
+assertEqual(getterPreferredSnapshot.chatId, getterPreferredChatId, 'snapshot prefers getCurrentChatId over conflicting metadata');
+assertEqual(getterPreferredIdentity.chatKey, getterPreferredSnapshot.chatKey, 'Post-process identity uses snapshot getter-over-metadata precedence');
+assertEqual(getterPreferredIdentity.chatIdentityHash, hashJson(getterPreferredChatId), 'Post-process identity hashes the getter-selected chat id');
+assert(!JSON.stringify(getterPreferredIdentity).includes(getterPreferredChatId), 'getter-preferred Post-process identity omits the raw chat id');
+assert(!JSON.stringify(getterPreferredIdentity).includes(conflictingMetadataChatId), 'getter-preferred Post-process identity omits conflicting metadata chat id');
+
 console.log('[pass] host');

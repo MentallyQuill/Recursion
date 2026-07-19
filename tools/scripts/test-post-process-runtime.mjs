@@ -81,13 +81,14 @@ function settings(overrides = {}) {
 function snapshot(overrides = {}) {
   return {
     chatKey: 'post-process-chat',
+    chatIdentityHash: 'post-process-chat-identity-hash',
     sourceMessageId: 7,
     sourceSwipeId: 0,
     sourceHash: 'source-hash-v1',
     snapshotHash: 'snapshot-hash-v1',
     originalDraft: 'original',
-    activeCharacterId: 'character-1',
-    activeGroupId: '',
+    activeCharacterHash: 'character-hash-1',
+    activeGroupHash: '',
     supportingContext: {
       latestUserMessage: 'Continue.',
       boundedPriorMessages: ['Prior scene evidence.'],
@@ -558,14 +559,16 @@ test('19. Settings and deck mutation cannot alter the frozen plan', async () => 
     'card prompt is frozen before mutation'
   );
 
+  const rawChatId = 'PRIVATE/Frozen Chat ID.jsonl';
   const plan = buildPostProcessPlan({
     settings: mutableSettings,
     deck: mutableDeck,
-    snapshot: snapshot()
+    snapshot: snapshot({ chatId: rawChatId })
   });
   assert(Object.isFrozen(plan), 'pure plan is frozen');
   assert(Object.isFrozen(plan.snapshot.supportingContext), 'pure plan deeply freezes supporting context');
   assert(Object.isFrozen(plan.categories), 'pure plan deeply freezes category array');
+  assert(!JSON.stringify(plan).includes(rawChatId), 'frozen plan never retains a raw chat id');
 });
 
 test('20. Returned diagnostics never contain raw prose, guidance, prompts, or context', async () => {

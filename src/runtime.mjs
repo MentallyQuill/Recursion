@@ -25,7 +25,7 @@ import {
   getActiveCardDeck,
   normalizeCardDeckSettings
 } from './pre-process-decks.mjs';
-import { compact, hashJson, makeId, nowIso, redact, safeId, truncate } from './core.mjs';
+import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { boundEnhancementMessages, buildContextContract, contextMessageIdentity } from './context-contract.mjs';
 import { enhancementContextFromSnapshot } from './enhancement-context.mjs';
 import { ENHANCEMENT_EDIT_RATIO_MINIMUM, roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
@@ -2380,18 +2380,20 @@ export function createRecursionRuntime({
   let lastEditorialResult = null;
 
   async function postProcessSourceStillCurrent(source = {}) {
-    if (typeof host?.messages?.activeAssistantMessageIdentity !== 'function') return false;
+    if (typeof host?.messages?.postProcessSourceIdentity !== 'function') return false;
     let identity;
     try {
-      identity = await host.messages.activeAssistantMessageIdentity();
+      identity = await host.messages.postProcessSourceIdentity();
     } catch {
       return false;
     }
     if (!identity) return false;
+    const expectedChatIdentityHash = safeText(source.chatIdentityHash || '', 180);
+    const currentChatIdentityHash = safeText(identity.chatIdentityHash || '', 180);
     const currentHash = safeText(identity.originalHash || hashJson(String(identity.text ?? '')), 180);
     if (
-      safeId(safeText(identity.chatKey || '', 180), 'chat')
-        !== safeId(safeText(source.chatKey || '', 180), 'chat')
+      !expectedChatIdentityHash
+      || currentChatIdentityHash !== expectedChatIdentityHash
       || Number(identity.messageId) !== Number(source.sourceMessageId)
       || Number(identity.swipeId ?? 0) !== Number(source.sourceSwipeId ?? 0)
       || currentHash !== safeText(source.sourceHash || '', 180)

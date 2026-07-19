@@ -126,9 +126,14 @@ async function capturePostProcessSnapshot(rawSnapshot, settings, host) {
   const source = isObject(rawSnapshot) ? rawSnapshot : {};
   const messages = Array.isArray(source.messages) ? source.messages : [];
   let identity = null;
-  if (typeof host?.messages?.activeAssistantMessageIdentity === 'function') {
+  const identityProvider = typeof host?.messages?.postProcessSourceIdentity === 'function'
+    ? host.messages.postProcessSourceIdentity.bind(host.messages)
+    : typeof host?.messages?.activeAssistantMessageIdentity === 'function'
+      ? host.messages.activeAssistantMessageIdentity.bind(host.messages)
+      : null;
+  if (identityProvider) {
     try {
-      identity = await host.messages.activeAssistantMessageIdentity();
+      identity = await identityProvider();
     } catch {
       identity = null;
     }
@@ -160,6 +165,9 @@ async function capturePostProcessSnapshot(rawSnapshot, settings, host) {
       cleanText(source.chatKey || source.chatId || identity?.chatKey || 'chat'),
       'chat'
     ),
+    chatIdentityHash: cleanText(
+      source.chatIdentityHash || identity?.chatIdentityHash
+    ),
     sourceMessageId,
     sourceSwipeId: Number.isFinite(sourceSwipeId) ? Math.max(0, Math.round(sourceSwipeId)) : 0,
     sourceHash,
@@ -182,6 +190,9 @@ export function buildPostProcessPlan({
   snapshot = {}
 } = {}) {
   const frozenSnapshot = cloneValue(snapshot);
+  delete frozenSnapshot.chatId;
+  delete frozenSnapshot.chat_id;
+  delete frozenSnapshot.currentChatId;
   if (!cleanText(frozenSnapshot.sourceHash)) {
     frozenSnapshot.sourceHash = hashJson(String(frozenSnapshot.originalDraft ?? ''));
   }

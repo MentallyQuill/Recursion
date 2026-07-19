@@ -1083,6 +1083,7 @@ export function createSillyTavernHost({
       hostId: 'sillytavern',
       chatId,
       chatKey,
+      chatIdentityHash: hashJson(chatId),
       sceneFingerprint,
       sceneKey,
       sourceRevisionHash,
@@ -1402,30 +1403,44 @@ export function createSillyTavernHost({
     }
   };
 
+  function assistantMessageIdentity(context, chatIdentity = {}) {
+    const found = findRawAssistantMessage(context);
+    if (!found) return null;
+    const text = activeRawAssistantText(found.raw);
+    const swipeId = found.normalized.swipeId ?? finiteNonNegativeInteger(found.raw?.swipe_id) ?? 0;
+    const swipeInfo = Array.isArray(found.raw?.swipe_info) ? found.raw.swipe_info[swipeId] : null;
+    const swipeMarker = asObject(swipeInfo?.extra?.recursion?.enhancement);
+    const indexedMarker = Array.isArray(found.raw?.__recursionGenerationReviewSwipes)
+      ? asObject(found.raw.__recursionGenerationReviewSwipes[swipeId])
+      : {};
+    const replacementMarker = asObject(found.raw?.__recursionGenerationReview);
+    const enhancementOwned = [swipeMarker, indexedMarker, replacementMarker]
+      .some((marker) => markerMatchesSwipeText(marker, text));
+    return {
+      ...chatIdentity,
+      ...activeEntityIdentity(context),
+      messageId: found.normalized.mesid,
+      swipeId,
+      text,
+      originalHash: hashJson(text),
+      enhancementOwned
+    };
+  }
+
   const messagesApi = {
     activeAssistantMessageIdentity() {
       const context = currentContext(contextFactory);
-      const found = findRawAssistantMessage(context);
-      if (!found) return null;
-      const text = activeRawAssistantText(found.raw);
-      const swipeId = found.normalized.swipeId ?? finiteNonNegativeInteger(found.raw?.swipe_id) ?? 0;
-      const swipeInfo = Array.isArray(found.raw?.swipe_info) ? found.raw.swipe_info[swipeId] : null;
-      const swipeMarker = asObject(swipeInfo?.extra?.recursion?.enhancement);
-      const indexedMarker = Array.isArray(found.raw?.__recursionGenerationReviewSwipes)
-        ? asObject(found.raw.__recursionGenerationReviewSwipes[swipeId])
-        : {};
-      const replacementMarker = asObject(found.raw?.__recursionGenerationReview);
-      const enhancementOwned = [swipeMarker, indexedMarker, replacementMarker]
-        .some((marker) => markerMatchesSwipeText(marker, text));
-      return {
-        chatKey: immediateChatKey(context),
-        ...activeEntityIdentity(context),
-        messageId: found.normalized.mesid,
-        swipeId,
-        text,
-        originalHash: hashJson(text),
-        enhancementOwned
-      };
+      return assistantMessageIdentity(context, {
+        chatKey: immediateChatKey(context)
+      });
+    },
+    async postProcessSourceIdentity() {
+      const context = currentContext(contextFactory);
+      const chatId = await readChatId(context);
+      return assistantMessageIdentity(context, {
+        chatKey: safeId(chatId, 'chat'),
+        chatIdentityHash: hashJson(chatId)
+      });
     },
     async holdAssistantMessage(messageId) {
       const context = currentContext(contextFactory);

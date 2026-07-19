@@ -68,6 +68,7 @@ function assertNoProviderMarker(value, marker, message) {
 }
 
 function responseSchemaForRole(roleId) {
+  if (roleId === 'postProcessGuidanceUtility' || roleId === 'postProcessGuidanceReasoner') return 'recursion.postProcessGuidance.v1';
   if (roleId === 'reasonerComposer') return 'recursion.reasonerComposer.v1';
   if (roleId === 'utilityArbiter') return 'recursion.utilityArbiter.v1';
   if (roleId === 'rapidTurnDelta') return 'recursion.rapidTurnDelta.v2';
@@ -83,6 +84,9 @@ function responseSchemaForRole(roleId) {
 }
 
 function responseTextForRole(roleId, fields = {}) {
+  if (roleId === 'postProcessGuidanceUtility' || roleId === 'postProcessGuidanceReasoner') {
+    return JSON.stringify({ schema: responseSchemaForRole(roleId), ...fields });
+  }
   return JSON.stringify({ schema: responseSchemaForRole(roleId), ok: true, ...fields });
 }
 
@@ -118,17 +122,20 @@ const expectedUtilityRoles = [
   'editorialTransformer',
   'editorialVerifier',
   'editorialEffectivenessJudge',
+  'postProcessGuidanceUtility',
   'providerTest'
 ];
 assertDeepEqual(UTILITY_ROLE_IDS, expectedUtilityRoles, 'utility role catalog exactly matches Task 6 plan');
 assert(!UTILITY_ROLE_IDS.includes('briefUtilityComposer'), 'old brief utility composer role is removed');
-assertDeepEqual(REASONER_ROLE_IDS, ['reasonerComposer'], 'reasoner role catalog exactly matches Task 6 plan');
-assertEqual(PROVIDER_CONTRACT_VERSION, 5, 'provider contract version advances for shared capability enforcement');
+assertDeepEqual(REASONER_ROLE_IDS, ['reasonerComposer', 'postProcessGuidanceReasoner'], 'reasoner role catalog includes strict post-process guidance');
+assertEqual(PROVIDER_CONTRACT_VERSION, 6, 'provider contract version advances for post-process guidance');
+assertEqual(roleLane('postProcessGuidanceUtility'), 'utility', 'postProcessGuidanceUtility uses Utility');
+assertEqual(roleLane('postProcessGuidanceReasoner'), 'reasoner', 'postProcessGuidanceReasoner uses Reasoner');
 for (const utilityRole of expectedUtilityRoles) {
   assertEqual(roleLane(utilityRole), 'utility', `${utilityRole} uses utility lane`);
 }
 const providerSpec = readFileSync(new URL('../../docs/architecture/PROVIDER_AND_GENERATION_SPEC.md', import.meta.url), 'utf8');
-for (const utilityRole of expectedUtilityRoles) {
+for (const utilityRole of expectedUtilityRoles.filter((roleId) => roleId !== 'postProcessGuidanceUtility')) {
   assert(providerSpec.includes(`\`${utilityRole}\``), `provider spec documents ${utilityRole}`);
 }
 assert(providerSpec.includes('`reasonerComposer`'), 'provider spec documents reasonerComposer');
@@ -248,7 +255,15 @@ const host = {
   generation: {
     async generate(request) {
       calls.push(request);
-      return { text: responseTextForRole(request.roleId), providerId: 'fake-host', model: 'fake-model' };
+      const fields = request.roleId === 'postProcessGuidanceUtility'
+        || request.roleId === 'postProcessGuidanceReasoner'
+        ? {
+            snapshotHash: request.snapshotHash,
+            sourceHash: request.sourceHash,
+            guidanceText: 'Apply the selected cards without rewriting the story in the guidance response.'
+          }
+        : {};
+      return { text: responseTextForRole(request.roleId, fields), providerId: 'fake-host', model: 'fake-model' };
     },
     async batch(requests) {
       return Promise.all(requests.map((request) => this.generate(request)));
@@ -256,6 +271,7 @@ const host = {
   }
 };
 const store = createStore();
+configureReadyProvider(store, 'utility');
 const client = createProviderClient({ host, settingsStore: store });
 const router = createGenerationRouter({ client });
 const result = await router.generate('utilityArbiter', { prompt: 'Return JSON' });
@@ -273,6 +289,21 @@ assertEqual(calls.at(-1).responseSchema, 'recursion.rapidTurnDelta.v2', 'rapidTu
 await router.generate('guidanceComposer', { prompt: 'Guidance composer' });
 assertEqual(calls.at(-1).lane, 'utility', 'guidanceComposer uses utility lane');
 assertEqual(calls.at(-1).responseSchema, 'recursion.guidanceComposer.v1', 'guidanceComposer request carries expected response schema');
+store.update({ reasoningLevel: 'high' });
+const frozenPostProcessResult = await router.generate('postProcessGuidanceUtility', {
+  prompt: 'Post-process guidance',
+  snapshotHash: 'post-process-snapshot',
+  sourceHash: 'post-process-source',
+  reasoningLevel: 'medium'
+});
+assertEqual(frozenPostProcessResult.ok, true, 'post-process provider honors the request frozen reasoning level');
+store.update({ reasoningLevel: 'medium' });
+assertEqual(calls.at(-1).responseSchema, 'recursion.postProcessGuidance.v1', 'postProcessGuidanceUtility request carries post-process response schema');
+assertEqual(
+  machineJsonSchemaForRequest(calls.at(-1)).schema.properties.guidanceText.maxLength,
+  6000,
+  'post-process guidance machine schema bounds guidance text'
+);
 await router.generate('cardAuthoringAssist', { prompt: 'Card authoring assist' });
 assertEqual(calls.at(-1).lane, 'utility', 'cardAuthoringAssist uses utility lane');
 assertEqual(calls.at(-1).responseSchema, 'recursion.cardAuthoringAssist.v1', 'cardAuthoringAssist request carries expected response schema');
@@ -1264,6 +1295,29 @@ configureReadyProvider(store, 'reasoner');
 const reasoner = await router.generate('reasonerComposer', { prompt: 'Reason' });
 assertEqual(reasoner.ok, true, 'reasoner route succeeds');
 assertEqual(calls.at(-1).lane, 'reasoner', 'reasoner lane selected');
+
+store.update({ reasoningLevel: 'high' });
+const reasonerGuidance = await router.generate('postProcessGuidanceReasoner', {
+  prompt: 'Post-process guidance',
+  snapshotHash: 'post-process-reasoner-snapshot',
+  sourceHash: 'post-process-reasoner-source',
+  reasoningLevel: 'high'
+});
+assertEqual(reasonerGuidance.ok, true, 'postProcessGuidanceReasoner route succeeds');
+assertEqual(calls.at(-1).lane, 'reasoner', 'postProcessGuidanceReasoner stays on Reasoner');
+assertEqual(calls.at(-1).responseSchema, 'recursion.postProcessGuidance.v1', 'postProcessGuidanceReasoner requires the post-process response schema');
+
+const callsBeforePostProcessSubstitution = calls.length;
+const substitutedGuidance = await router.generate('postProcessGuidanceReasoner', {
+  lane: 'utility',
+  prompt: 'Do not substitute Utility.',
+  snapshotHash: 'post-process-reasoner-snapshot',
+  sourceHash: 'post-process-reasoner-source',
+  reasoningLevel: 'high'
+});
+assertEqual(substitutedGuidance.ok, false, 'post-process Reasoner role rejects a Utility lane override');
+assertEqual(substitutedGuidance.error.code, 'RECURSION_PROVIDER_NOT_READY', 'post-process lane substitution fails closed');
+assertEqual(calls.length, callsBeforePostProcessSubstitution, 'post-process lane substitution never reaches a provider');
 
 const utilityOverride = await router.generate('reasonerComposer', { lane: 'utility', prompt: 'Use utility override' });
 assertEqual(utilityOverride.ok, true, 'reasoner role can be explicitly routed to utility');

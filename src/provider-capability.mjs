@@ -10,7 +10,7 @@ export const PROVIDER_CAPABILITY_STATES = Object.freeze([
 const LANES = new Set(['utility', 'reasoner']);
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
 const HEALTH_STATES = new Set(['pass', 'fail']);
-const OPERATIONS = new Set(['prompt-packet', 'provider-test', 'redirect']);
+const OPERATIONS = new Set(['prompt-packet', 'provider-test', 'redirect', 'post-process']);
 const CONFIGURATION_REASON_CODES = new Set([
   'provider-current-model-unavailable',
   'provider-profile-missing',
@@ -140,7 +140,7 @@ function laneTitle(lane) {
 function capabilityMessage({ lane, state, required, configuration }) {
   const title = laneTitle(lane);
   if (state === 'ready') {
-    return required ? `${title} is ready and required for Redirect.` : `${title} is ready.`;
+    return required ? `${title} is ready and required for this operation.` : `${title} is ready.`;
   }
   if (state === 'untested') return `${title} is untested.`;
   if (state === 'unhealthy') return `${title} is unhealthy.`;
@@ -198,10 +198,17 @@ export function resolveProviderCapability({
         : 'unhealthy';
   const reasoningLevel = normalizeReasoningLevel(settings.reasoningLevel);
   const resolvedOperation = normalizeOperation(operation);
-  const required = resolvedLane === 'reasoner'
-    && resolvedOperation === 'redirect'
-    && reasoningLevel !== 'low';
-  const selectedByPolicy = resolvedLane === 'utility' || reasoningLevel !== 'low';
+  const postProcessLane = reasoningLevel === 'high' || reasoningLevel === 'ultra'
+    ? 'reasoner'
+    : 'utility';
+  const required = resolvedOperation === 'post-process'
+    ? resolvedLane === postProcessLane
+    : resolvedLane === 'reasoner'
+      && resolvedOperation === 'redirect'
+      && reasoningLevel !== 'low';
+  const selectedByPolicy = resolvedOperation === 'post-process'
+    ? resolvedLane === postProcessLane
+    : resolvedLane === 'utility' || reasoningLevel !== 'low';
   const eligible = resolvedOperation === 'provider-test'
     ? configuration.testable
     : selectedByPolicy && state === 'ready';

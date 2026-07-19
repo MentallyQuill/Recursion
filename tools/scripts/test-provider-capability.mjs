@@ -233,6 +233,51 @@ assertEqual(lowRedirectReasoner.selectedByPolicy, false, 'Low Redirect does not 
 assertEqual(lowRedirectReasoner.required, false, 'Low Redirect does not require Reasoner');
 assertEqual(lowRedirectUtility.eligible, true, 'Low Redirect selects ready Utility');
 
+for (const reasoningLevel of ['low', 'medium', 'high', 'ultra']) {
+  const expectedLane = reasoningLevel === 'high' || reasoningLevel === 'ultra'
+    ? 'reasoner'
+    : 'utility';
+  for (const lane of ['utility', 'reasoner']) {
+    const capability = resolveProviderCapability({
+      settings: settingsFor({
+        reasoningLevel,
+        [lane]: configuredProvider(lane, { status: 'pass' })
+      }),
+      lane,
+      operation: 'post-process',
+      host
+    });
+    assertEqual(
+      capability.selectedByPolicy,
+      lane === expectedLane,
+      `${reasoningLevel} post-process selects only ${expectedLane}`
+    );
+    assertEqual(
+      capability.required,
+      lane === expectedLane,
+      `${reasoningLevel} post-process requires only ${expectedLane}`
+    );
+    assertEqual(
+      capability.eligible,
+      lane === expectedLane,
+      `${reasoningLevel} post-process forbids provider-lane substitution`
+    );
+  }
+}
+
+const unavailableHighPostProcess = resolveProviderCapability({
+  settings: settingsFor({
+    reasoningLevel: 'high',
+    reasoner: configuredProvider('reasoner', { status: 'fail' }),
+    utility: configuredProvider('utility', { status: 'pass' })
+  }),
+  lane: 'reasoner',
+  operation: 'post-process',
+  host
+});
+assertEqual(unavailableHighPostProcess.required, true, 'High post-process still requires Reasoner when unhealthy');
+assertEqual(unavailableHighPostProcess.eligible, false, 'High post-process does not fall back to healthy Utility');
+
 const directProvider = {
   lane: 'reasoner',
   source: 'openai-compatible',

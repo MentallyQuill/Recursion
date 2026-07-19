@@ -27,6 +27,12 @@ import {
   REDIRECT_VERIFICATION_CHECKS
 } from './editorial-transform.mjs';
 import { providerFailure } from './failures.mjs';
+import {
+  MAX_POST_PROCESS_GUIDANCE_LENGTH,
+  POST_PROCESS_GUIDANCE_JSON_SCHEMA,
+  POST_PROCESS_GUIDANCE_SCHEMA,
+  normalizePostProcessGuidanceResponse
+} from './post-process-guidance.mjs';
 
 const LANES = new Set(['utility', 'reasoner']);
 const HOST_SOURCES = new Set(['host-current-model', 'host-connection-profile']);
@@ -68,10 +74,11 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'editorialTransformer',
   'editorialVerifier',
   'editorialEffectivenessJudge',
+  'postProcessGuidanceUtility',
   'providerTest'
 ]);
-export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer']);
-export const PROVIDER_CONTRACT_VERSION = 5;
+export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer', 'postProcessGuidanceReasoner']);
+export const PROVIDER_CONTRACT_VERSION = 6;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.card.v1',
@@ -94,7 +101,9 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   editorialTransformer: 'recursion.editorialPass.v1',
   editorialVerifier: 'recursion.editorialVerification.v1',
   editorialEffectivenessJudge: EDITORIAL_EFFECTIVENESS_SCHEMA,
+  postProcessGuidanceUtility: POST_PROCESS_GUIDANCE_SCHEMA,
   reasonerComposer: 'recursion.reasonerComposer.v1',
+  postProcessGuidanceReasoner: POST_PROCESS_GUIDANCE_SCHEMA,
   providerTest: 'recursion.providerTest.v1'
 });
 export const PROVIDER_CONTRACT_HASH = hashJson({
@@ -508,6 +517,29 @@ function editorialVerificationChecksSchema(validEvidenceIds) {
 export function machineJsonSchemaForRequest(request = {}) {
   const schema = String(request?.responseSchema || '').trim();
   if (!schema || request?.machineJson !== true) return null;
+  if (schema === POST_PROCESS_GUIDANCE_SCHEMA) {
+    const snapshotHash = String(request?.snapshotHash || '').trim();
+    const sourceHash = String(request?.sourceHash || '').trim();
+    return {
+      name: schemaSafeName(schema),
+      schema: {
+        ...POST_PROCESS_GUIDANCE_JSON_SCHEMA,
+        properties: {
+          ...POST_PROCESS_GUIDANCE_JSON_SCHEMA.properties,
+          snapshotHash: snapshotHash
+            ? { const: snapshotHash }
+            : POST_PROCESS_GUIDANCE_JSON_SCHEMA.properties.snapshotHash,
+          sourceHash: sourceHash
+            ? { const: sourceHash }
+            : POST_PROCESS_GUIDANCE_JSON_SCHEMA.properties.sourceHash,
+          guidanceText: {
+            ...POST_PROCESS_GUIDANCE_JSON_SCHEMA.properties.guidanceText,
+            maxLength: MAX_POST_PROCESS_GUIDANCE_LENGTH
+          }
+        }
+      }
+    };
+  }
   if (schema === 'recursion.generationReview.v1') {
     const sourceHash = String(request?.sourceHash || '').trim();
     const validTargetIds = [...new Set((Array.isArray(request?.validTargetIds) ? request.validTargetIds : [])
@@ -860,6 +892,9 @@ function normalizeRepairFailedCardIds(failedCardIds, request = {}) {
 
 function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
   if (!plainObject(data)) return data;
+  if (roleId === 'postProcessGuidanceUtility' || roleId === 'postProcessGuidanceReasoner') {
+    return normalizePostProcessGuidanceResponse(data, request);
+  }
   if (roleId === 'editorialEffectivenessJudge') {
     return {
       ...data,
@@ -1706,6 +1741,7 @@ function structuredOutputRecoveryKind(error, request = {}) {
   if (code === 'RECURSION_PROVIDER_TOKEN_LIMIT' && request?.machineJson === true) return 'token_limit_compact_retry';
   if (code === 'RECURSION_JSON_PARSE_FAILED'
     || code === 'RECURSION_JSON_OBJECT_REQUIRED'
+    || code === 'RECURSION_POST_PROCESS_GUIDANCE_INVALID'
     || code === 'RECURSION_PROVIDER_SCHEMA_MISMATCH') return 'slot_correction_retry';
   return '';
 }
@@ -1720,6 +1756,8 @@ function structuredOutputFieldHint(roleId, request = {}) {
   if (expected) fields.push(`"schema": "${expected}"`);
   const snapshotHash = String(request?.snapshotHash || '').trim();
   if (snapshotHash) fields.push(`"snapshotHash": "${snapshotHash}"`);
+  const sourceHash = String(request?.sourceHash || '').trim();
+  if (sourceHash) fields.push(`"sourceHash": "${sourceHash}"`);
   return fields.length
     ? `Required top-level fields include ${fields.join(', ')}.`
     : 'Required top-level fields must match the requested role contract.';
@@ -2105,15 +2143,25 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
 
     const lane = laneName(requestLane(resolvedRoleId, request));
     const { settings, config } = providerConfigFor(settingsStore, lane);
-    const operation = resolvedRoleId === 'providerTest' ? 'provider-test' : 'prompt-packet';
+    const postProcessGuidanceRole = resolvedRoleId === 'postProcessGuidanceUtility'
+      || resolvedRoleId === 'postProcessGuidanceReasoner';
+    const operation = resolvedRoleId === 'providerTest'
+      ? 'provider-test'
+      : postProcessGuidanceRole
+        ? 'post-process'
+        : 'prompt-packet';
+    const capabilitySettings = postProcessGuidanceRole
+      ? { ...settings, reasoningLevel: request.reasoningLevel }
+      : settings;
     const capability = resolveProviderCapability({
-      settings,
+      settings: capabilitySettings,
       lane,
       operation,
       host: providerCapabilityHost(host)
     });
     if (
       (resolvedRoleId === 'providerTest' && !capability.testable)
+      || (postProcessGuidanceRole && !capability.eligible)
       || (lane === 'reasoner' && resolvedRoleId !== 'providerTest' && !capability.eligible)
     ) {
       throw providerError(

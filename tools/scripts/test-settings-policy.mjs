@@ -5,7 +5,16 @@ import {
   runPolicyForEffectivePlan,
   summarizeBehaviorPolicyForDiagnostics
 } from '../../src/settings-policy.mjs';
+import { DEFAULT_RECURSION_SETTINGS, normalizeSettings } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
+
+const normalizedSettingsSurface = normalizeSettings({
+  enhancements: { mode: 'redirect', target: 'on' },
+  cardDecks: { activeCardDeckId: 'legacy' }
+});
+assert(!('enhancements' in normalizedSettingsSurface), 'behavior policy settings surface omits old enhancements');
+assert(!('cardDecks' in normalizedSettingsSurface), 'behavior policy settings surface omits old cardDecks');
+assertDeepEqual(normalizedSettingsSurface.postProcess, DEFAULT_RECURSION_SETTINGS.postProcess, 'behavior policy receives Post-process Off by default');
 
 const defaultPolicy = influencePolicyForSettings({});
 assertEqual(defaultPolicy.strength.level, 'balanced', 'default policy uses balanced strength');
@@ -14,6 +23,15 @@ assertEqual(defaultPolicy.footprint.level, 'compact', 'default policy uses compa
 assertDeepEqual(defaultPolicy.cardBudget, { minCards: 3, normalCards: 6, maxCards: 10 }, 'default policy exposes derived card budget range');
 assertDeepEqual(defaultPolicy.focus.boostedFamilies, [], 'balanced focus has no boosted families');
 assertDeepEqual(defaultPolicy.footprint.sectionBudgets, FOOTPRINT_SECTION_BUDGETS.compact, 'compact footprint exposes compact budgets');
+assertDeepEqual(
+  influencePolicyForSettings({
+    enhancements: { mode: 'redirect', target: 'on' },
+    cardDecks: { activeCardDeckId: 'legacy' },
+    postProcess: { enabled: true, applyMode: 'replace', rewriteFlow: 'progressive', contextMessages: 35 }
+  }),
+  defaultPolicy,
+  'post-process and ignored legacy settings do not alter pre-process behavior policy'
+);
 
 const strongPolicy = influencePolicyForSettings({
   strength: 'strong',

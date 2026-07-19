@@ -5,10 +5,10 @@ const payload = buildDiagnosticsPayload({
   createdAt: '2026-07-04T00:00:00.000Z',
   settings: {
     provider: { utility: { openAICompatible: { apiKey: 'sk-live-secret' } } },
-    cardDecks: {
+    preProcessDecks: {
       version: 1,
-      activeCardDeckId: 'custom',
-      customCardDecks: {
+      activeDeckId: 'custom',
+      customDecks: {
         custom: {
           id: 'custom',
           name: 'Custom Deck',

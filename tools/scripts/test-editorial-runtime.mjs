@@ -9,6 +9,23 @@ import { REDIRECT_ERROR_CODES, REDIRECT_VERIFICATION_CHECKS } from '../../src/ed
 import { buildGenerationReviewTargets } from '../../src/generation-review.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
+function createLegacyEnhancementSettingsStore() {
+  const settingsStore = createSettingsStore({ root: {} });
+  let enhancements = { mode: 'off', target: 'off', applyMode: 'as-swipe', contextMessages: 13 };
+  const canonicalGet = settingsStore.get.bind(settingsStore);
+  const canonicalUpdate = settingsStore.update.bind(settingsStore);
+  settingsStore.get = () => ({ ...canonicalGet(), enhancements: { ...enhancements } });
+  settingsStore.update = (patch = {}) => {
+    if (patch.enhancements && typeof patch.enhancements === 'object') {
+      enhancements = { ...enhancements, ...patch.enhancements };
+      if (enhancements.mode !== 'off') enhancements.target = 'on';
+    }
+    const { enhancements: ignoredEnhancements, ...canonicalPatch } = patch;
+    return { ...canonicalUpdate(canonicalPatch), enhancements: { ...enhancements } };
+  };
+  return settingsStore;
+}
+
 const source = 'She smiled. "Who sent you?" He told her the sender name, then reached for the latch.';
 const message = { messageId: 8, chatKey: 'editorial-chat', swipeId: 0, text: source, swipes: [source] };
 const calls = [];
@@ -80,7 +97,7 @@ const generationRouter = createGenerationRouter({
 const editorialStorage = createStorageRepository({ storage: createMemoryStorageAdapter() });
 const runtime = createRecursionRuntime({
   host,
-  settingsStore: createSettingsStore({ root: {} }),
+  settingsStore: createLegacyEnhancementSettingsStore(),
   storage: editorialStorage,
   activity,
   generationRouter
@@ -155,7 +172,7 @@ const pendingCommitRuntime = createRecursionRuntime({
     },
     prompt: { async install() { return { ok: true }; }, async clear() { return { ok: true }; } }
   },
-  settingsStore: createSettingsStore({ root: {} }),
+  settingsStore: createLegacyEnhancementSettingsStore(),
   storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity: createActivityReporter(),
   generationRouter
@@ -196,7 +213,7 @@ const concurrentRuntime = createRecursionRuntime({
     },
     prompt: { async install() { return { ok: true }; }, async clear() { return { ok: true }; } }
   },
-  settingsStore: createSettingsStore({ root: {} }),
+  settingsStore: createLegacyEnhancementSettingsStore(),
   storage: concurrentStorage,
   activity: createActivityReporter(),
   generationRouter: createGenerationRouter({
@@ -337,7 +354,7 @@ const transformCorrectionRouter = createGenerationRouter({
 });
 const transformCorrectionRuntime = createRecursionRuntime({
   host: transformHost,
-  settingsStore: createSettingsStore({ root: {} }),
+  settingsStore: createLegacyEnhancementSettingsStore(),
   storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity: createActivityReporter(),
   generationRouter: transformCorrectionRouter
@@ -419,7 +436,7 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
         async clear() { return { ok: true, cleared: true }; }
       }
     },
-    settingsStore: createSettingsStore({ root: {} }),
+    settingsStore: createLegacyEnhancementSettingsStore(),
     storage: repairStorage,
     activity: createActivityReporter(),
     generationRouter: {
@@ -603,7 +620,7 @@ const failedRuntime = createRecursionRuntime({
     },
     prompt: { async install() { return { ok: true }; }, async clear() { return { ok: true }; } }
   },
-  settingsStore: createSettingsStore({ root: {} }),
+  settingsStore: createLegacyEnhancementSettingsStore(),
   storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity: failedActivity,
   generationRouter: {
@@ -673,7 +690,7 @@ const noChangeRuntime = createRecursionRuntime({
     },
     prompt: { async install() { return { ok: true }; }, async clear() { return { ok: true }; } }
   },
-  settingsStore: createSettingsStore({ root: {} }),
+  settingsStore: createLegacyEnhancementSettingsStore(),
   storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity: createActivityReporter(),
   generationRouter: {
@@ -927,7 +944,7 @@ function createRedirectHarness({
       throw new Error(`Unexpected Redirect role ${roleId}`);
     }
   };
-  settingsStore = createSettingsStore({ root: {} });
+  settingsStore = createLegacyEnhancementSettingsStore();
   if (reasonerCapability === 'unconfigured') {
     settingsStore.updateProviderConfig('reasoner', {
       source: 'host-connection-profile',
@@ -1415,7 +1432,7 @@ assertEqual(missingDirectionResult.error?.code, REDIRECT_ERROR_CODES.CHANGE_MISS
 assertEqual(missingDirectionRedirect.state.appended.length, 0, 'missing Redirect trajectory adds no swipe');
 
 const effectivenessCalls = [];
-const effectivenessSettings = createSettingsStore({ root: {} });
+const effectivenessSettings = createLegacyEnhancementSettingsStore();
 effectivenessSettings.updateProviderConfig('reasoner', { source: 'host-current-model' });
 const effectivenessReasoner = effectivenessSettings.get().providers.reasoner;
 effectivenessSettings.recordProviderHealth('reasoner', {

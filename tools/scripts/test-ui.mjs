@@ -2751,8 +2751,8 @@ try {
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('beat constraint'), 'expanded category renders Default deck card names');
 
   root.querySelector('[data-recursion-card-deck-duplicate]').click();
-  const duplicatedDeckId = settingsUpdates.at(-1).cardDecks.activeCardDeckId;
-  let duplicatedDeck = settingsUpdates.at(-1).cardDecks.customCardDecks[duplicatedDeckId];
+  const duplicatedDeckId = settingsUpdates.at(-1).preProcessDecks.activeDeckId;
+  let duplicatedDeck = settingsUpdates.at(-1).preProcessDecks.customDecks[duplicatedDeckId];
   const disableCardId = Object.keys(duplicatedDeck.cards)[0];
   duplicatedDeck = {
     ...duplicatedDeck,
@@ -2768,10 +2768,10 @@ try {
     ...view,
     settings: {
       ...view.settings,
-      cardDecks: {
-        ...settingsUpdates.at(-1).cardDecks,
-        customCardDecks: {
-          ...settingsUpdates.at(-1).cardDecks.customCardDecks,
+      preProcessDecks: {
+        ...settingsUpdates.at(-1).preProcessDecks,
+        customDecks: {
+          ...settingsUpdates.at(-1).preProcessDecks.customDecks,
           [duplicatedDeckId]: duplicatedDeck
         }
       }
@@ -2782,30 +2782,30 @@ try {
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, false, 'Activate-all action enables when any runnable deck card is inactive');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').getAttribute('title'), 'Set all runnable cards to Active.', 'enabled activate-all action explains active deck restoration');
   root.querySelector('[data-recursion-card-deck-activate-all]').click();
-  const allDeckUpdate = settingsUpdates.at(-1).cardDecks;
-  assertEqual(allDeckUpdate.customCardDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Activate-all action enables inactive runnable cards');
+  const allDeckUpdate = settingsUpdates.at(-1).preProcessDecks;
+  assertEqual(allDeckUpdate.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Activate-all action enables inactive runnable cards');
   assert(!settingsUpdates.at(-1).cardScope, 'Deck All action does not write legacy cardScope');
-  view = { ...view, settings: { ...view.settings, cardDecks: allDeckUpdate }, activity: { phase: 'idle' }, progressRun: null };
+  view = { ...view, settings: { ...view.settings, preProcessDecks: allDeckUpdate }, activity: { phase: 'idle' }, progressRun: null };
   ui.update();
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, true, 'Activate-all action disables again after all runnable cards are normal active');
   root.querySelector('[data-recursion-card-category-toggle]').click();
   root.querySelector('[data-recursion-card-toggle-row]').click();
-  const priorityUpdate = settingsUpdates.at(-1).cardDecks;
-  assertEqual(priorityUpdate.customCardDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'priority', 'Auto row tap promotes active card to Priority');
+  const priorityUpdate = settingsUpdates.at(-1).preProcessDecks;
+  assertEqual(priorityUpdate.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'priority', 'Auto row tap promotes active card to Priority');
   assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Card prioritized.', 'Card System action feedback routes through main bar status');
-  view = { ...view, settings: { ...view.settings, cardDecks: priorityUpdate }, activity: { phase: 'idle' }, progressRun: null };
+  view = { ...view, settings: { ...view.settings, preProcessDecks: priorityUpdate }, activity: { phase: 'idle' }, progressRun: null };
   ui.update();
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('1 priority'), 'Cards header reports Priority count when cards are prioritized');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, false, 'Activate-all action enables when it can clear Priority states');
   root.querySelector('[data-recursion-card-deck-activate-all]').click();
-  const priorityClearedUpdate = settingsUpdates.at(-1).cardDecks;
-  assertEqual(priorityClearedUpdate.customCardDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Activate-all action clears Priority back to normal Active');
+  const priorityClearedUpdate = settingsUpdates.at(-1).preProcessDecks;
+  assertEqual(priorityClearedUpdate.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Activate-all action clears Priority back to normal Active');
   assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'All cards set Active.', 'Activate-all action reports through main bar status');
-  view = { ...view, settings: { ...view.settings, cardDecks: priorityClearedUpdate }, activity: { phase: 'idle' }, progressRun: null };
+  view = { ...view, settings: { ...view.settings, preProcessDecks: priorityClearedUpdate }, activity: { phase: 'idle' }, progressRun: null };
   ui.update();
   root.querySelector('[data-recursion-card-deck-deactivate-all]').click();
-  const deactivatedUpdate = settingsUpdates.at(-1).cardDecks;
-  assertEqual(deactivatedUpdate.customCardDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'off', 'Deactivate-all action turns runnable cards inactive');
+  const deactivatedUpdate = settingsUpdates.at(-1).preProcessDecks;
+  assertEqual(deactivatedUpdate.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'off', 'Deactivate-all action turns runnable cards inactive');
   assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'All cards disabled.', 'Deactivate-all action reports through main bar status');
   view = { ...view, activity: originalActivity, progressRun: originalProgressRun };
   ui.update();

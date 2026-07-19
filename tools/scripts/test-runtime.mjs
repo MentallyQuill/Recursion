@@ -29,7 +29,7 @@ import {
   setFamilyEnabled,
   setSubItemEnabled
 } from '../../src/card-scope.mjs';
-import { activeCardDeckRuntimeScope } from '../../src/card-decks.mjs';
+import { activeCardDeckRuntimeScope, createDefaultCardDeck } from '../../src/pre-process-decks.mjs';
 import { packetToPromptBlocks } from '../../src/prompt.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { hashJson } from '../../src/core.mjs';
@@ -97,7 +97,6 @@ const preparedGenerationSettings = {
   enabled: true,
   mode: 'auto',
   pipelineMode: 'fused',
-  cardScope: defaultCardScope(),
   strength: 'strong',
   minCards: 2,
   maxCards: 7,
@@ -142,7 +141,7 @@ const preparedGenerationSettings = {
       health: { status: 'unhealthy' }
     }
   },
-  enhancements: { mode: 'redirect', target: 'on', applyMode: 'replace', contextMessages: 21 },
+  postProcess: { enabled: true, applyMode: 'replace', rewriteFlow: 'progressive', contextMessages: 21 },
   diagnostics: { includeExcerpts: true },
   ui: { viewerOpen: true, tooltipsEnabled: false }
 };
@@ -262,7 +261,6 @@ const preparedGenerationSnapshot = {
     ['enabled', (settings) => { settings.enabled = false; }],
     ['mode', (settings) => { settings.mode = 'manual'; }],
     ['pipelineMode', (settings) => { settings.pipelineMode = 'rapid'; }],
-    ['cardScope', (settings) => { settings.cardScope.families['Scene Frame'].enabled = false; }],
     ['strength', (settings) => { settings.strength = 'light'; }],
     ['minCards', (settings) => { settings.minCards = 1; }],
     ['maxCards', (settings) => { settings.maxCards = 8; }],
@@ -304,9 +302,9 @@ const preparedGenerationSnapshot = {
 
 {
   const deckSettings = clone(preparedGenerationSettings);
-  deckSettings.cardDecks = {
-    activeCardDeckId: 'task-2a-deck',
-    customCardDecks: {
+  deckSettings.preProcessDecks = {
+    activeDeckId: 'task-2a-deck',
+    customDecks: {
       'task-2a-deck': {
         id: 'task-2a-deck',
         name: 'Task 2A Deck',
@@ -329,7 +327,7 @@ const preparedGenerationSnapshot = {
   const cardId = 'active-card';
   const before = activeDeckRevisionHash(deckSettings);
   const beforePacketInputHash = preparedGenerationContract(deckSettings).packetInputHash;
-  deckSettings.cardDecks.customCardDecks['task-2a-deck'].cards[cardId].promptText = 'Updated active card prompt.';
+  deckSettings.preProcessDecks.customDecks['task-2a-deck'].cards[cardId].promptText = 'Updated active card prompt.';
   assertNotEqual(activeDeckRevisionHash(deckSettings), before, 'active card prompt text changes the deck revision hash');
   assertNotEqual(preparedGenerationContract(deckSettings).packetInputHash, beforePacketInputHash, 'active card prompt text changes the packet-input hash');
 }
@@ -337,9 +335,10 @@ const preparedGenerationSnapshot = {
 {
   const baseline = preparedGenerationContract(preparedGenerationSettings).packetInputHash;
   const neutralMutations = [
-    ['enhancement mode', (settings) => { settings.enhancements.mode = 'repair'; }],
-    ['enhancement apply mode', (settings) => { settings.enhancements.applyMode = 'as-swipe'; }],
-    ['enhancement context', (settings) => { settings.enhancements.contextMessages = 7; }],
+    ['post-process enabled', (settings) => { settings.postProcess.enabled = false; }],
+    ['post-process apply mode', (settings) => { settings.postProcess.applyMode = 'as-swipe'; }],
+    ['post-process rewrite flow', (settings) => { settings.postProcess.rewriteFlow = 'unified'; }],
+    ['post-process context', (settings) => { settings.postProcess.contextMessages = 7; }],
     ['diagnostics', (settings) => { settings.diagnostics.includeExcerpts = false; }],
     ['ui', (settings) => { settings.ui.viewerOpen = false; }],
     ['utility health', (settings) => { settings.providers.utility.health.status = 'timeout'; }],
@@ -352,7 +351,7 @@ const preparedGenerationSnapshot = {
   }
   const signature = preparedGenerationSettingsSignature(preparedGenerationSettings);
   assertEqual(signature.reasonerUse, 'always', 'settings signature includes normalized reasoner use');
-  assertEqual(Object.hasOwn(signature, 'enhancements'), false, 'settings signature omits enhancement settings');
+  assertEqual(Object.hasOwn(signature, 'postProcess'), false, 'pre-process settings signature omits post-process settings');
   assertEqual(Object.hasOwn(signature, 'diagnostics'), false, 'settings signature omits diagnostics settings');
   assertEqual(Object.hasOwn(signature, 'ui'), false, 'settings signature omits UI settings');
 }
@@ -727,6 +726,27 @@ function scopeWithOnlyFamilies(families) {
   return scope;
 }
 
+function preProcessDecksForScope(scope) {
+  const normalizedScope = normalizeCardScope(scope);
+  const deck = createDefaultCardDeck();
+  deck.id = 'runtime-scope-deck';
+  deck.name = 'Runtime Scope Deck';
+  deck.bundled = false;
+  deck.readonly = false;
+  for (const card of Object.values(deck.cards)) {
+    const familyScope = normalizedScope.families[card.builtinFamily];
+    const selectedSubItems = Array.isArray(card.selectedSubItems) ? card.selectedSubItems : [];
+    const selected = familyScope?.enabled === true
+      && selectedSubItems.some((key) => familyScope.subItems?.[key] === true);
+    card.selectionState = selected ? 'active' : 'off';
+  }
+  return {
+    version: 1,
+    activeDeckId: deck.id,
+    customDecks: { [deck.id]: deck }
+  };
+}
+
 function runtimeSnapshotHash(snapshot) {
   const messages = (Array.isArray(snapshot.messages) ? snapshot.messages : []).map((message, index) => ({
     mesid: Number(message?.mesid ?? message?.id ?? message?.messageId ?? index),
@@ -860,6 +880,19 @@ function createRuntimeHarness({
   const storage = providedStorage || createStorageRepository({ storage: adapter });
   const settingsStore = createSettingsStore({ root: {} });
   settingsStore.update(settings);
+  if (settings.enhancements && typeof settings.enhancements === 'object') {
+    let legacyEnhancements = clone(settings.enhancements);
+    const canonicalGet = settingsStore.get.bind(settingsStore);
+    const canonicalUpdate = settingsStore.update.bind(settingsStore);
+    settingsStore.get = () => ({ ...canonicalGet(), enhancements: clone(legacyEnhancements) });
+    settingsStore.update = (patch = {}) => {
+      if (patch.enhancements && typeof patch.enhancements === 'object') {
+        legacyEnhancements = { ...legacyEnhancements, ...clone(patch.enhancements) };
+      }
+      const { enhancements: ignoredEnhancements, ...canonicalPatch } = patch;
+      return { ...canonicalUpdate(canonicalPatch), enhancements: clone(legacyEnhancements) };
+    };
+  }
   const utility = settingsStore.get().providers.utility;
   if (!['pass', 'fail'].includes(utility.health?.status)) {
     const health = settingsStore.recordProviderHealth('utility', {
@@ -1075,9 +1108,9 @@ if (false) {
 
 const eligibilitySettings = {
   mode: 'auto',
-  cardDecks: {
-    activeCardDeckId: 'eligibility-deck',
-    customCardDecks: {
+  preProcessDecks: {
+    activeDeckId: 'eligibility-deck',
+    customDecks: {
       'eligibility-deck': {
         id: 'eligibility-deck',
         name: 'Eligibility Deck',
@@ -1112,7 +1145,7 @@ assertEqual(filterCardsForCardEligibility([
   { id: 'runtime-cast', family: 'Active Cast' }
 ], eligibilitySettings).length, 1, 'Auto filters runtime family cards to eligible deck families');
 const changedEligibilitySettings = clone(eligibilitySettings);
-changedEligibilitySettings.cardDecks.customCardDecks['eligibility-deck'].cards['active-card'].selectionState = 'off';
+changedEligibilitySettings.preProcessDecks.customDecks['eligibility-deck'].cards['active-card'].selectionState = 'off';
 assertNotEqual(
   cacheContractVersions(eligibilitySettings).cardEligibilityHash,
   cacheContractVersions(changedEligibilitySettings).cardEligibilityHash,
@@ -3694,9 +3727,9 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   });
   assertEqual(noisyVersions.settingsHash, baselineVersions.settingsHash, 'cache settings hash ignores UI, diagnostics, test labels, and secrets');
   assertNotEqual(
-    cacheContractVersions({ mode: 'auto', cardScope: defaultCardScope() }).settingsHash,
-    cacheContractVersions({ mode: 'manual', cardScope: scopeWithFamilyDisabled('Environment') }).settingsHash,
-    'card scope participates in scene cache contract'
+    cacheContractVersions({ mode: 'auto', preProcessDecks: preProcessDecksForScope(defaultCardScope()) }).settingsHash,
+    cacheContractVersions({ mode: 'manual', preProcessDecks: preProcessDecksForScope(scopeWithFamilyDisabled('Environment')) }).settingsHash,
+    'Pre-process Deck participation state participates in scene cache contract'
   );
   const changedProviderVersions = cacheContractVersions({
     ...view.settings,
@@ -5838,8 +5871,12 @@ function createTrackedStorageRepository() {
   });
   const view = runtime.view();
   assertEqual(view.settings.cardScope, undefined, 'runtime view omits legacy raw card scope');
-  assertEqual(view.settings.cardDecks.defaultEnabledState['Scene Frame'].enabled, false, 'runtime view exposes migrated default deck enabled state');
-  assertEqual(view.settings.cardScopeSummary.counts.selectedSubItems, 31, 'runtime view exposes separate card scope summary');
+  assertEqual(Object.hasOwn(view.settings.preProcessDecks, 'defaultEnabledState'), false, 'runtime view does not migrate legacy card scope state');
+  assertEqual(
+    view.settings.cardScopeSummary.counts.selectedSubItems,
+    CARD_SCOPE_CATALOG.reduce((total, entry) => total + entry.subItems.length, 0),
+    'runtime view derives the default Pre-process Deck scope when legacy scope input is ignored'
+  );
 }
 
 {
@@ -5856,9 +5893,9 @@ function createTrackedStorageRepository() {
     settings: { mode: 'auto', maxCards: 2, cardScope: defaultCardScope(), reasonerUse: 'off' }
   });
   const update = await runtime.updateSettings({ mode: 'manual' });
-  const expected = CARD_SCOPE_CATALOG.slice(0, 2).map((entry) => entry.family);
-  assertDeepEqual(manualSelectedFamilies(activeCardDeckRuntimeScope(update.settings)), expected, 'Auto-to-Manual over cap trims by catalog priority without randomness');
-  assertDeepEqual(manualSelectedFamilies(activeCardDeckRuntimeScope(runtime.view().settings)), expected, 'trimmed Manual scope is visible in runtime view');
+  const expected = CARD_SCOPE_CATALOG.map((entry) => entry.family);
+  assertDeepEqual(manualSelectedFamilies(activeCardDeckRuntimeScope(update.settings)), expected, 'Auto-to-Manual does not persist a legacy cardScope overlay');
+  assertDeepEqual(manualSelectedFamilies(activeCardDeckRuntimeScope(runtime.view().settings)), expected, 'runtime view remains derived from the canonical Pre-process Deck');
 }
 
 {
@@ -5871,8 +5908,12 @@ function createTrackedStorageRepository() {
   });
   const update = await runtime.updateSettings({ mode: 'manual' });
   const updatedScope = activeCardDeckRuntimeScope(update.settings);
-  assertEqual(updatedScope.families['Scene Frame'].subItems[firstSceneFacet], false, 'under-cap Auto-to-Manual preserves selected facets');
-  assertDeepEqual(normalizeCardScope(updatedScope), normalizeCardScope(focused), 'under-cap Auto-to-Manual preserves selected families and facets exactly');
+  assertEqual(updatedScope.families['Scene Frame'].subItems[firstSceneFacet], true, 'legacy cardScope facets do not overlay the canonical Pre-process Deck');
+  assertDeepEqual(
+    manualSelectedFamilies(updatedScope),
+    CARD_SCOPE_CATALOG.map((entry) => entry.family),
+    'legacy selected families are ignored rather than migrated during Auto-to-Manual'
+  );
 }
 
 {
@@ -8888,7 +8929,7 @@ for (const scenario of [
   const manualNoScene = scopeWithOnlyFamilies(['Open Threads']);
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'manual', cardScope: manualNoScene, reasonerUse: 'off' },
+    settings: { mode: 'manual', preProcessDecks: preProcessDecksForScope(manualNoScene), reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push(roleId);
@@ -8945,14 +8986,14 @@ for (const scenario of [
   assertDeepEqual(view.lastPlan.cardJobs.map((job) => job.family || job.role), ['Open Threads'], 'manual scoped plan keeps only enabled card jobs');
   assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'manual scoped hand includes enabled provider card');
   assert(!view.lastHand.cards.some((card) => card.family === 'Scene Frame'), 'manual scoped hand excludes disabled Scene Frame');
-  assert(serializedPlan.includes('manual-scope-omitted:Scene Frame'), 'manual scoped diagnostics record omitted family');
+  assert(serializedPlan.includes('inactive-card-ineligible'), 'manual Pre-process Deck diagnostics record an ineligible card omission');
 }
 
 {
   const manualForcedScope = scopeWithOnlyFamilies(['Scene Frame', 'Open Threads']);
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'manual', maxCards: 2, cardScope: manualForcedScope, reasonerUse: 'off' },
+    settings: { mode: 'manual', maxCards: 2, preProcessDecks: preProcessDecksForScope(manualForcedScope), reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push(roleId);
@@ -9010,7 +9051,7 @@ for (const scenario of [
 {
   const manualScope = scopeWithOnlyFamilies(['Scene Frame', 'Open Threads']);
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'manual', maxCards: 2, cardScope: manualScope, reasonerUse: 'off' },
+    settings: { mode: 'manual', maxCards: 2, preProcessDecks: preProcessDecksForScope(manualScope), reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         if (roleId === 'utilityArbiter') {
@@ -9059,7 +9100,7 @@ for (const scenario of [
   const autoNoConstraints = scopeWithFamilyDisabled('Scene Constraints');
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', cardScope: autoNoConstraints, reasonerUse: 'off' },
+    settings: { mode: 'auto', preProcessDecks: preProcessDecksForScope(autoNoConstraints), reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push(roleId);
@@ -9089,23 +9130,8 @@ for (const scenario of [
       },
       async batch(requests) {
         routerCalls.push(...requests.map((request) => request.roleId));
-        assertDeepEqual(requests.map((request) => request.roleId), ['sceneConstraintsCard'], 'Auto keeps disabled-focus critical card job available');
-        assertDeepEqual(requests[0].cardScope.selectedSubItems, [], 'Auto request carries empty selected sub-item focus for disabled family');
-        return requests.map((request) => ({
-          ok: true,
-          roleId: request.roleId,
-          data: {
-            schema: 'recursion.card.v1',
-            role: request.metadata.role,
-            family: request.metadata.family,
-            snapshotHash: request.snapshotHash,
-            items: [{
-              promptText: 'Do not contradict the broken lamp.',
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 18
-            }]
-          }
-        }));
+        assertDeepEqual(requests, [], 'Auto Pre-process Deck eligibility filters an Off card before generation');
+        return [];
       }
     }
   });
@@ -9113,16 +9139,16 @@ for (const scenario of [
   const view = runtime.view();
   const serializedPlan = JSON.stringify(view.lastPlan);
   assertEqual(result.ok, true, 'auto scoped run installs prompt');
-  assert(routerCalls.includes('sceneConstraintsCard'), 'auto scoped run generates disabled-focus critical card');
-  assert(view.lastHand.cards.some((card) => card.family === 'Scene Constraints'), 'auto scoped hand can include critical disabled-focus exception');
-  assert(serializedPlan.includes('auto-scope-exception:Scene Constraints'), 'auto scoped diagnostics record compact exception family');
+  assert(!routerCalls.includes('sceneConstraintsCard'), 'auto Pre-process Deck run does not generate an Off card');
+  assert(!view.lastHand.cards.some((card) => card.family === 'Scene Constraints'), 'auto Pre-process Deck hand excludes an Off card');
+  assert(serializedPlan.includes('inactive-card-ineligible'), 'auto Pre-process Deck diagnostics record the filtered card');
   assert(!serializedPlan.includes('Do not contradict'), 'auto scope diagnostics do not include prompt text');
 }
 
 {
   const autoNoEnvironment = scopeWithFamilyDisabled('Environment');
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', cardScope: autoNoEnvironment, reasonerUse: 'off' },
+    settings: { mode: 'auto', preProcessDecks: preProcessDecksForScope(autoNoEnvironment), reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         if (roleId === 'utilityArbiter') {
@@ -9141,22 +9167,8 @@ for (const scenario of [
         throw new Error(`Auto non-continuity exception test expected batch routing, got generate ${roleId}`);
       },
       async batch(requests) {
-        assertDeepEqual(requests.map((request) => request.roleId), ['environmentAffordancesCard'], 'Auto allows disabled-focus non-continuity card when Arbiter marks it relevant');
-        return requests.map((request) => ({
-          ok: true,
-          roleId: request.roleId,
-          data: {
-            schema: 'recursion.card.v1',
-            role: request.metadata.role,
-            family: request.metadata.family,
-            snapshotHash: request.snapshotHash,
-            items: [{
-              promptText: 'Keep the response tight and concrete.',
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 18
-            }]
-          }
-        }));
+        assertDeepEqual(requests, [], 'Auto Pre-process Deck eligibility filters an Off non-continuity card');
+        return [];
       }
     }
   });
@@ -9164,8 +9176,8 @@ for (const scenario of [
   const view = runtime.view();
   const serializedPlan = JSON.stringify(view.lastPlan);
   assertEqual(result.ok, true, 'auto scoped non-continuity run installs prompt');
-  assert(view.lastHand.cards.some((card) => card.family === 'Environment'), 'auto scoped hand can include high-relevance disabled-focus non-continuity card');
-  assert(serializedPlan.includes('auto-scope-exception:Environment'), 'auto scoped diagnostics record compact exception for non-continuity family');
+  assert(!view.lastHand.cards.some((card) => card.family === 'Environment'), 'auto Pre-process Deck hand excludes an Off non-continuity card');
+  assert(serializedPlan.includes('inactive-card-ineligible'), 'auto Pre-process Deck diagnostics record the non-continuity omission');
   assert(!serializedPlan.includes('Keep the response tight'), 'auto non-continuity diagnostics do not include prompt text');
 }
 

@@ -3,7 +3,7 @@ import {
   cardScopeLabel,
   normalizeCardScope
 } from '../card-scope.mjs';
-import { activeCardDeckRuntimeScope, getActiveCardDeck, getAllCardDecks, normalizeCardDeckSettings } from '../card-decks.mjs';
+import { activeCardDeckRuntimeScope, getActiveCardDeck, getAllCardDecks, normalizeCardDeckSettings } from '../pre-process-decks.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from '../settings.mjs';
 
@@ -303,11 +303,11 @@ export function createRecursionViewModel(view = {}) {
     ? explicitEnhancementMode
     : normalizeEnhancementTarget(settings.enhancements?.target);
   const enhancementApplyMode = normalizeEnhancementApplyMode(settings.enhancements?.applyMode);
-  const cardDecks = normalizeCardDeckSettings(settings.cardDecks);
-  const deckSettings = settings.cardDecks ? { ...settings, cardDecks } : settings;
+  const preProcessDecks = normalizeCardDeckSettings(settings.preProcessDecks);
+  const deckSettings = settings.preProcessDecks ? { ...settings, preProcessDecks } : settings;
   const cardScope = normalizeCardScope(activeCardDeckRuntimeScope(deckSettings));
-  const activeCardDeck = getActiveCardDeck({ ...settings, cardDecks });
-  const cardDeckList = Object.values(getAllCardDecks({ ...settings, cardDecks }));
+  const activeCardDeck = getActiveCardDeck({ ...settings, preProcessDecks });
+  const cardDeckList = Object.values(getAllCardDecks({ ...settings, preProcessDecks }));
   const reviewHand = source.lastBriefHand === undefined ? source.lastHand : source.lastBriefHand;
   const reviewPacket = source.lastBriefPacket === undefined ? source.lastPacket : source.lastBriefPacket;
   const rawCards = Array.isArray(reviewHand?.cards) ? reviewHand.cards : [];
@@ -354,7 +354,7 @@ export function createRecursionViewModel(view = {}) {
       ? 'Off'
       : `${enhancementTargetLabel(enhancementTarget)}, ${enhancementApplyModeLabel(enhancementApplyMode)}`,
     cardScope,
-    cardDecks,
+    preProcessDecks,
     activeCardDeck,
     cardDeckList,
     cardScopeLabel: cardScopeLabel(cardScope),

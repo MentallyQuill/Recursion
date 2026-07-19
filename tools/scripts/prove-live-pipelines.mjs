@@ -314,33 +314,27 @@ async function ensureRunnableDeckFixture(page, timeoutMs) {
   await page.evaluate(async () => {
     const runtime = globalThis.__recursionLiveHarnessRuntime;
     const settings = runtime?.view?.()?.settings;
-    if (!runtime || !settings?.cardDecks) return;
-    const decks = settings.cardDecks;
-    const activeDeck = decks.customCardDecks?.[decks.activeCardDeckId];
+    if (!runtime || !settings?.preProcessDecks) return;
+    const decks = settings.preProcessDecks;
+    const activeDeck = decks.customDecks?.[decks.activeDeckId];
     if (activeDeck) {
       const cards = Object.fromEntries(Object.entries(activeDeck.cards || {}).map(([id, card]) => [id, {
         ...card,
         selectionState: 'active'
       }]));
       await runtime.updateSettings({
-        cardDecks: {
+        preProcessDecks: {
           ...decks,
-          customCardDecks: {
-            ...decks.customCardDecks,
+          customDecks: {
+            ...decks.customDecks,
             [activeDeck.id]: { ...activeDeck, cards }
           }
         }
       });
       return;
     }
-    const defaultEnabledState = structuredClone(decks.defaultEnabledState || settings.cardScope?.families || {});
-    for (const family of Object.values(defaultEnabledState)) {
-      if (!family || typeof family !== 'object') continue;
-      family.enabled = true;
-      for (const key of Object.keys(family.subItems || {})) family.subItems[key] = true;
-    }
     await runtime.updateSettings({
-      cardDecks: { ...decks, activeCardDeckId: 'default', defaultEnabledState }
+      preProcessDecks: { ...decks, activeDeckId: 'default' }
     });
   });
   await page.waitForFunction(() => /Hand\s+\d+/.test(String(document.querySelector('[data-recursion-hand-count]')?.textContent || '')), null, { timeout: timeoutMs }).catch(() => {});

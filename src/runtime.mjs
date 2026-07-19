@@ -24,7 +24,7 @@ import {
   deckPriorityFamilies,
   getActiveCardDeck,
   normalizeCardDeckSettings
-} from './card-decks.mjs';
+} from './pre-process-decks.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { boundEnhancementMessages, buildContextContract, contextMessageIdentity } from './context-contract.mjs';
 import { enhancementContextFromSnapshot } from './enhancement-context.mjs';
@@ -124,7 +124,7 @@ const PLAN_ACTIONS = new Set(['skip', 'reuse-cache', 'refresh-cards', 'compose-b
 const REASONER_DECISION_MODES = new Set(['use', 'skip']);
 const PROMPT_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const SCENE_STATUSES = new Set(['same-scene', 'soft-shift', 'hard-shift', 'unknown']);
-const PROMPT_NEUTRAL_SETTING_KEYS = new Set(['reasoningLevel', 'reasonerUse', 'enhancements']);
+const PROMPT_NEUTRAL_SETTING_KEYS = new Set(['reasoningLevel', 'reasonerUse', 'postProcess', 'postProcessDecks', 'enhancements']);
 const DEFAULT_LOW_REASONING_MAX_CARDS = 3;
 const DEFAULT_NORMAL_REASONING_MAX_CARDS = 6;
 const DEFAULT_ULTRA_REASONING_MAX_CARDS = 10;
@@ -242,15 +242,15 @@ function cacheProviderSettingsSignature(provider = {}) {
 
 function settingsWithRuntimeCardScope(settings = {}, options = {}) {
   const source = options.normalize === true ? normalizeSettings(settings) : asObject(settings);
-  const cardDecks = normalizeCardDeckSettings(source.cardDecks);
+  const preProcessDecks = normalizeCardDeckSettings(source.preProcessDecks);
   const normalized = {
     ...source,
-    cardDecks
+    preProcessDecks
   };
   return {
     ...normalized,
-    cardScope: source.cardDecks ? activeCardDeckRuntimeScope(normalized) : normalizeCardScope(source.cardScope),
-    cardEligibility: source.cardDecks ? activeCardDeckEligibility(normalized) : null
+    cardScope: source.preProcessDecks ? activeCardDeckRuntimeScope(normalized) : normalizeCardScope(source.cardScope),
+    cardEligibility: source.preProcessDecks ? activeCardDeckEligibility(normalized) : null
   };
 }
 
@@ -259,8 +259,8 @@ function runtimeScopePayload(settings = {}) {
 }
 
 function usesCardDeckEligibility(settings = {}) {
-  return Boolean(settings?.cardDecks)
-    && (settings.mode !== 'manual' || Object.keys(settings.cardDecks.customCardDecks || {}).length > 0);
+  return Boolean(settings?.preProcessDecks)
+    && (settings.mode !== 'manual' || Object.keys(settings.preProcessDecks.customDecks || {}).length > 0);
 }
 
 function filterCardJobsForRuntimeScope(cardJobs, settings = {}) {
@@ -1639,7 +1639,7 @@ function arbiterSafeSettings(settings, capabilityResolver = providerCapability) 
     enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
     cardDeck: {
-      activeCardDeckId: safeText(source.cardDecks?.activeCardDeckId || '', 120),
+      activeDeckId: safeText(source.preProcessDecks?.activeDeckId || '', 120),
       activeDeckName: safeText(getActiveCardDeck(source).name || '', 120)
     },
     cardScope: cardScopeSummary(source.cardScope),
@@ -1700,13 +1700,13 @@ function safeSettingsView(settings, capabilityResolver = providerCapability) {
   const cardScope = normalizeCardScope(source.cardScope);
   const cardBudget = normalizeCardBudgetSettings(source);
   const injection = normalizeInjectionSettings(source.injection);
-  const enhancements = normalizeSettings(source).enhancements;
-  const cardDecks = normalizeCardDeckSettings(source.cardDecks);
+  const normalizedSettings = normalizeSettings(source);
+  const preProcessDecks = normalizedSettings.preProcessDecks;
   return {
     enabled: source.enabled !== false,
     mode: safeText(source.mode || 'auto', 40),
     pipelineMode: safeText(source.pipelineMode || 'standard', 40),
-    cardDecks,
+    preProcessDecks,
     cardScopeSummary: cardScopeSummary(cardScope),
     strength: safeText(source.strength || 'balanced', 40),
     minCards: cardBudget.minCards,
@@ -1716,11 +1716,13 @@ function safeSettingsView(settings, capabilityResolver = providerCapability) {
     focus: safeText(source.focus || 'balanced', 80),
     reasonerUse: safeText(source.reasonerUse || 'auto', 40),
     storyFormOverride: safeText(source.storyFormOverride || 'auto', 40),
-    enhancements: {
-      mode: safeText(enhancements.mode || 'off', 40),
-      applyMode: safeText(enhancements.applyMode, 40),
-      contextMessages: numberOr(enhancements.contextMessages, 13)
+    postProcess: {
+      enabled: normalizedSettings.postProcess.enabled === true,
+      applyMode: safeText(normalizedSettings.postProcess.applyMode, 40),
+      rewriteFlow: safeText(normalizedSettings.postProcess.rewriteFlow, 40),
+      contextMessages: numberOr(normalizedSettings.postProcess.contextMessages, 13)
     },
+    postProcessDecks: normalizedSettings.postProcessDecks,
     injection: {
       placement: safeText(injection.placement, 40),
       role: safeText(injection.role, 40),
@@ -3130,7 +3132,7 @@ export function createRecursionRuntime({
       'promptFootprint',
       'injection',
       'ui',
-      'enhancements',
+      'postProcess',
       'retention',
       'diagnostics'
     ];

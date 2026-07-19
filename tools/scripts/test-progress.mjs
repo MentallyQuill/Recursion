@@ -262,9 +262,9 @@ assertEqual(cautionedSourceProgress.steps.find((step) => step.id === 'utility-ca
 
 const runningSourceCardProgress = createProgressRunModel({
   settings: {
-    cardDecks: {
-      activeCardDeckId: 'source-visible-deck',
-      customCardDecks: {
+    preProcessDecks: {
+      activeDeckId: 'source-visible-deck',
+      customDecks: {
         'source-visible-deck': {
           id: 'source-visible-deck',
           name: 'Source Visible Deck',
@@ -335,9 +335,9 @@ assertEqual(
 
 const mergedGeneratedAndPendingCategoryProgress = createProgressRunModel({
   settings: {
-    cardDecks: {
-      activeCardDeckId: 'source-visible-deck',
-      customCardDecks: {
+    preProcessDecks: {
+      activeDeckId: 'source-visible-deck',
+      customDecks: {
         'source-visible-deck': {
           id: 'source-visible-deck',
           name: 'Source Visible Deck',

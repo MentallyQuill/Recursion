@@ -111,12 +111,11 @@ function mapPlanSummary(plan) {
 }
 
 function mapCardDeckSettings(settings) {
-  const cardDecks = asObject(settings?.cardDecks);
-  const customDecks = asObject(cardDecks.customCardDecks);
+  const preProcessDecks = asObject(settings?.preProcessDecks);
+  const customDecks = asObject(preProcessDecks.customDecks);
   return safeDiagnosticValue({
-    version: numberOr(cardDecks.version, 0),
-    activeCardDeckId: safeText(cardDecks.activeCardDeckId, 120),
-    defaultEnabledFamilyCount: Object.keys(asObject(cardDecks.defaultEnabledState)).length,
+    version: numberOr(preProcessDecks.version, 0),
+    activeDeckId: safeText(preProcessDecks.activeDeckId, 120),
     customDeckCount: Object.keys(customDecks).length,
     customDecks: Object.fromEntries(Object.entries(customDecks).slice(0, 24).map(([deckId, deck]) => {
       const source = asObject(deck);
@@ -158,10 +157,11 @@ function mapSettingsSummary(settings) {
     focus: safeText(source.focus, 80),
     reasonerUse: safeText(source.reasonerUse, 40),
     storyFormOverride: safeText(source.storyFormOverride, 80),
-    enhancements: source.enhancements || null,
+    postProcess: source.postProcess || null,
     injection: source.injection || null,
     retention: source.retention || null,
-    cardDecks: mapCardDeckSettings(source)
+    preProcessDecks: mapCardDeckSettings(source),
+    postProcessDecks: mapCardDeckSettings({ preProcessDecks: source.postProcessDecks })
   }, 500);
 }
 

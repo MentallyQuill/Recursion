@@ -1,6 +1,6 @@
 import {
-  CARD_DECK_SETTINGS_VERSION,
-  DEFAULT_CARD_DECK_ID,
+  PRE_PROCESS_DECK_SETTINGS_VERSION,
+  DEFAULT_PRE_PROCESS_DECK_ID,
   NEW_CARD_NAME,
   cardNameWarning,
   createCategory,
@@ -29,14 +29,14 @@ import {
   reorderCategories,
   reorderCards,
   serializeCustomCardDecksForExport
-} from '../../src/card-decks.mjs';
+} from '../../src/pre-process-decks.mjs';
 import { normalizeSettings } from '../../src/settings.mjs';
-import { CARD_SCOPE_CATALOG, defaultCardScope } from '../../src/card-scope.mjs';
+import { CARD_SCOPE_CATALOG } from '../../src/card-scope.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const now = '2026-07-10T00:00:00.000Z';
 const defaultDeck = createDefaultCardDeck({ now });
-assertEqual(defaultDeck.id, DEFAULT_CARD_DECK_ID, 'Default deck id stable');
+assertEqual(defaultDeck.id, DEFAULT_PRE_PROCESS_DECK_ID, 'Default deck id stable');
 assertEqual(defaultDeck.name, 'Default Deck', 'Default deck name stable');
 assertEqual(defaultDeck.readonly, true, 'Default deck read-only');
 assertEqual(defaultDeck.bundled, true, 'Default deck bundled');
@@ -90,9 +90,9 @@ const eligibilityDeck = normalizeCustomDeck({
   }
 });
 const eligibility = activeCardDeckEligibility({
-  cardDecks: {
-    activeCardDeckId: eligibilityDeck.id,
-    customCardDecks: { [eligibilityDeck.id]: eligibilityDeck }
+  preProcessDecks: {
+    activeDeckId: eligibilityDeck.id,
+    customDecks: { [eligibilityDeck.id]: eligibilityDeck }
   }
 });
 assertDeepEqual(eligibility.allowedCardIds, ['priority-card', 'active-card'], 'Auto eligibility excludes inactive cards and keeps priority before active');
@@ -156,14 +156,14 @@ assertEqual(nextCardSelectionState({ selectionState: 'active' }, 'manual'), 'off
 assertEqual(nextCardSelectionState({ selectionState: 'priority' }, 'manual'), 'off', 'manual card cycle treats priority as active then disables');
 
 const normalizedDecks = normalizeCardDeckSettings({
-  activeCardDeckId: customDeck.id,
-  customCardDecks: {
+  activeDeckId: customDeck.id,
+  customDecks: {
     [customDeck.id]: customDeck
   }
 });
-assertEqual(normalizedDecks.version, CARD_DECK_SETTINGS_VERSION, 'card deck settings version is 1');
-assertEqual(normalizedDecks.activeCardDeckId, customDeck.id, 'active custom deck preserved');
-assertEqual(normalizeCardDeckSettings({ activeCardDeckId: 'missing', customCardDecks: {} }).activeCardDeckId, DEFAULT_CARD_DECK_ID, 'missing active deck falls back to Default');
+assertEqual(normalizedDecks.version, PRE_PROCESS_DECK_SETTINGS_VERSION, 'card deck settings version is 1');
+assertEqual(normalizedDecks.activeDeckId, customDeck.id, 'active custom deck preserved');
+assertEqual(normalizeCardDeckSettings({ activeDeckId: 'missing', customDecks: {} }).activeDeckId, DEFAULT_PRE_PROCESS_DECK_ID, 'missing active deck falls back to Default');
 
 assertEqual(duplicateDeckName('My Deck', { a: { name: 'My Deck' }, b: { name: 'My Deck Copy' } }), 'My Deck Copy 2', 'duplicate deck names increment');
 assertEqual(duplicateCardName('Scene Anchor Copy', [{ name: 'Scene Anchor' }, { name: 'Scene Anchor Copy' }]), 'Scene Anchor Copy 2', 'duplicate card names avoid Copy Copy');
@@ -175,29 +175,30 @@ const warningDeck = {
 };
 assertEqual(cardNameWarning(warningDeck.cards.one, warningDeck), 'duplicate-card-name', 'duplicate runnable card names warn');
 
-const exported = serializeCustomCardDecksForExport({ cardDecks: { customCardDecks: { [customDeck.id]: customDeck } } });
-assertEqual(exported.version, CARD_DECK_SETTINGS_VERSION, 'export shape carries deck version');
+const exported = serializeCustomCardDecksForExport({ preProcessDecks: { customDecks: { [customDeck.id]: customDeck } } });
+assertEqual(exported.version, PRE_PROCESS_DECK_SETTINGS_VERSION, 'export shape carries deck version');
 assert(exported.decks[customDeck.id], 'custom deck exports');
-assertEqual(exported.decks[DEFAULT_CARD_DECK_ID], undefined, 'Default deck is not exported as user-owned data');
+assertEqual(exported.decks[DEFAULT_PRE_PROCESS_DECK_ID], undefined, 'Default deck is not exported as user-owned data');
 JSON.parse(JSON.stringify(exported));
 
-const legacyScope = defaultCardScope();
-legacyScope.families['Open Threads'].enabled = false;
-for (const key of Object.keys(legacyScope.families['Open Threads'].subItems)) {
-  legacyScope.families['Open Threads'].subItems[key] = false;
-}
-const migrated = normalizeSettings({ cardScope: legacyScope });
-assertEqual(migrated.cardScope, undefined, 'legacy cardScope removed from normalized settings');
-assertEqual(migrated.cardDecks.version, CARD_DECK_SETTINGS_VERSION, 'settings normalize cardDecks version');
-assertEqual(migrated.cardDecks.activeCardDeckId, DEFAULT_CARD_DECK_ID, 'settings default active deck is Default');
-assert(migrated.cardDecks.defaultEnabledState, 'legacy default enabled state retained for one-time migration');
+const ignoredLegacy = normalizeSettings({
+  cardScope: { families: { 'Open Threads': { enabled: false } } },
+  cardDecks: { activeCardDeckId: 'legacy-deck' }
+});
+assertEqual(ignoredLegacy.cardScope, undefined, 'legacy cardScope is omitted from normalized settings');
+assertEqual(ignoredLegacy.cardDecks, undefined, 'legacy cardDecks are omitted from normalized settings');
+assertDeepEqual(ignoredLegacy.preProcessDecks, {
+  version: PRE_PROCESS_DECK_SETTINGS_VERSION,
+  activeDeckId: DEFAULT_PRE_PROCESS_DECK_ID,
+  customDecks: {}
+}, 'legacy card settings are ignored rather than migrated');
 
 const createdDecks = createCustomCardDeck({}, { name: 'Story Rules' });
-assertEqual(createdDecks.activeCardDeckId.startsWith('deck-'), true, 'creating a custom deck selects it');
-assertEqual(Object.values(createdDecks.customCardDecks)[0].categoryOrder[0], 'general', 'new custom deck starts with General category');
+assertEqual(createdDecks.activeDeckId.startsWith('deck-'), true, 'creating a custom deck selects it');
+assertEqual(Object.values(createdDecks.customDecks)[0].categoryOrder[0], 'general', 'new custom deck starts with General category');
 
-const duplicatedDefault = duplicateCardDeck({ cardDecks: createdDecks }, DEFAULT_CARD_DECK_ID);
-const duplicatedDeck = duplicatedDefault.customCardDecks[duplicatedDefault.activeCardDeckId];
+const duplicatedDefault = duplicateCardDeck({ preProcessDecks: createdDecks }, DEFAULT_PRE_PROCESS_DECK_ID);
+const duplicatedDeck = duplicatedDefault.customDecks[duplicatedDefault.activeDeckId];
 assertEqual(duplicatedDeck.name, 'Default Deck Copy', 'duplicating Default Deck creates an editable copy');
 assertEqual(duplicatedDeck.readonly, false, 'duplicated bundled deck is editable');
 assertEqual(Object.keys(duplicatedDeck.cards).length, CARD_SCOPE_CATALOG.reduce((sum, entry) => sum + entry.subItems.length, 0), 'duplicated Default retains bundled cards');
@@ -283,8 +284,8 @@ assertEqual(withoutCategory.categories[pressureCategory.id], undefined, 'deleteC
 assertEqual(withoutCategory.cards[duplicatedCard.id], undefined, 'deleteCategoryAndCards removes cards owned by the deleted category');
 assert(!Object.values(withoutCategory.cardOrderByCategory || {}).some((order) => order.includes(duplicatedCard.id)), 'deleteCategoryAndCards removes deleted cards from all category orders');
 
-const deleted = deleteCustomCardDeck({ cardDecks: duplicatedDefault }, duplicatedDefault.activeCardDeckId);
-assertEqual(deleted.activeCardDeckId, DEFAULT_CARD_DECK_ID, 'deleting active custom deck falls back to Default');
-assertEqual(deleted.customCardDecks[duplicatedDefault.activeCardDeckId], undefined, 'delete removes custom deck');
+const deleted = deleteCustomCardDeck({ preProcessDecks: duplicatedDefault }, duplicatedDefault.activeDeckId);
+assertEqual(deleted.activeDeckId, DEFAULT_PRE_PROCESS_DECK_ID, 'deleting active custom deck falls back to Default');
+assertEqual(deleted.customDecks[duplicatedDefault.activeDeckId], undefined, 'delete removes custom deck');
 
-console.log('[pass] card-decks');
+console.log('[pass] pre-process-decks');

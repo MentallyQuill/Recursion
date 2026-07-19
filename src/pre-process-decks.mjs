@@ -1,7 +1,7 @@
 import { CARD_SCOPE_CATALOG, CARD_SCOPE_VERSION } from './card-scope.mjs';
 
-export const DEFAULT_CARD_DECK_ID = 'default';
-export const CARD_DECK_SETTINGS_VERSION = 1;
+export const DEFAULT_PRE_PROCESS_DECK_ID = 'default';
+export const PRE_PROCESS_DECK_SETTINGS_VERSION = 1;
 export const NEW_CARD_NAME = 'New Card';
 export const CARD_SELECTION_STATES = Object.freeze(['off', 'active', 'priority']);
 
@@ -105,7 +105,7 @@ export function createDefaultCardDeck({ now = nowIso() } = {}) {
   }));
 
   return {
-    id: DEFAULT_CARD_DECK_ID,
+    id: DEFAULT_PRE_PROCESS_DECK_ID,
     name: 'Default Deck',
     description: 'Bundled Recursion card deck.',
     bundled: true,
@@ -266,7 +266,7 @@ export function normalizeCustomDeck(input, fallbackId = '', usedNames = new Set(
   if (!isObject(input)) return null;
   const now = nowIso();
   const id = normalizeId(input.id || fallbackId || `deck-${Date.now()}`);
-  if (!id || id === DEFAULT_CARD_DECK_ID) return null;
+  if (!id || id === DEFAULT_PRE_PROCESS_DECK_ID) return null;
   const categories = normalizeCategories(input.categories, now);
   const categoryOrder = normalizeIdOrder(input.categoryOrder, Object.keys(categories));
   const cards = normalizeCards(input.cards, categories, now);
@@ -302,63 +302,62 @@ export function normalizeCustomDecks(value) {
   return decks;
 }
 
-function resolveActiveDeckId(activeCardDeckId, customCardDecks) {
-  const id = String(activeCardDeckId || '').trim();
-  if (id === DEFAULT_CARD_DECK_ID) return DEFAULT_CARD_DECK_ID;
-  if (customCardDecks && Object.prototype.hasOwnProperty.call(customCardDecks, id)) return id;
-  return DEFAULT_CARD_DECK_ID;
+function resolveActiveDeckId(activeDeckId, customDecks) {
+  const id = String(activeDeckId || '').trim();
+  if (id === DEFAULT_PRE_PROCESS_DECK_ID) return DEFAULT_PRE_PROCESS_DECK_ID;
+  if (customDecks && Object.prototype.hasOwnProperty.call(customDecks, id)) return id;
+  return DEFAULT_PRE_PROCESS_DECK_ID;
 }
 
 export function normalizeCardDeckSettings(input = {}) {
   const source = isObject(input) ? input : {};
-  const customCardDecks = normalizeCustomDecks(source.customCardDecks);
+  const customDecks = normalizeCustomDecks(source.customDecks);
   return {
-    version: CARD_DECK_SETTINGS_VERSION,
-    activeCardDeckId: resolveActiveDeckId(source.activeCardDeckId, customCardDecks),
-    customCardDecks,
-    ...(isObject(source.defaultEnabledState) ? { defaultEnabledState: source.defaultEnabledState } : {})
+    version: PRE_PROCESS_DECK_SETTINGS_VERSION,
+    activeDeckId: resolveActiveDeckId(source.activeDeckId, customDecks),
+    customDecks
   };
 }
 
 export function getAllCardDecks(settings = {}) {
-  const normalized = normalizeCardDeckSettings(settings.cardDecks);
+  const normalized = normalizeCardDeckSettings(settings.preProcessDecks);
   return {
-    [DEFAULT_CARD_DECK_ID]: createDefaultCardDeck(),
-    ...normalized.customCardDecks
+    [DEFAULT_PRE_PROCESS_DECK_ID]: createDefaultCardDeck(),
+    ...normalized.customDecks
   };
 }
 
 export function getActiveCardDeck(settings = {}) {
-  const normalized = normalizeCardDeckSettings(settings.cardDecks);
-  return getAllCardDecks(settings)[normalized.activeCardDeckId] || createDefaultCardDeck();
+  const normalized = normalizeCardDeckSettings(settings.preProcessDecks);
+  return getAllCardDecks(settings)[normalized.activeDeckId] || createDefaultCardDeck();
 }
 
 export function upsertCustomCardDeck(settings = {}, deck) {
-  const source = normalizeCardDeckSettings(settings.cardDecks);
+  const source = normalizeCardDeckSettings(settings.preProcessDecks);
   const normalized = normalizeCustomDeck(deck, deck?.id, new Set([
     'default',
-    ...Object.values(source.customCardDecks)
+    ...Object.values(source.customDecks)
       .filter((entry) => entry.id !== deck?.id)
       .map((entry) => entry.name.toLowerCase())
   ]));
   if (!normalized) return source;
   return normalizeCardDeckSettings({
     ...source,
-    activeCardDeckId: normalized.id,
-    customCardDecks: {
-      ...source.customCardDecks,
+    activeDeckId: normalized.id,
+    customDecks: {
+      ...source.customDecks,
       [normalized.id]: normalized
     }
   });
 }
 
 export function createCustomCardDeck(settings = {}, { name = 'New Deck', description = '' } = {}) {
-  const source = normalizeCardDeckSettings(settings.cardDecks);
+  const source = normalizeCardDeckSettings(settings.preProcessDecks);
   const now = nowIso();
-  const id = newTimestampedId('deck', source.customCardDecks);
+  const id = newTimestampedId('deck', source.customDecks);
   return upsertCustomCardDeck(settings, {
     id,
-    name: uniqueName(name, Object.values(source.customCardDecks).map((deck) => deck.name)),
+    name: uniqueName(name, Object.values(source.customDecks).map((deck) => deck.name)),
     description,
     categories: {
       general: category('general', 'General', '', now)
@@ -374,9 +373,9 @@ export function createCustomCardDeck(settings = {}, { name = 'New Deck', descrip
 export function duplicateCardDeck(settings = {}, deckId = '') {
   const decks = getAllCardDecks(settings);
   const sourceDeck = decks[String(deckId || '')] || getActiveCardDeck(settings);
-  const source = normalizeCardDeckSettings(settings.cardDecks);
+  const source = normalizeCardDeckSettings(settings.preProcessDecks);
   const now = nowIso();
-  const id = newTimestampedId('deck', source.customCardDecks);
+  const id = newTimestampedId('deck', source.customDecks);
   const categoryIdMap = {};
   const categories = {};
   for (const categoryEntry of Object.values(sourceDeck.categories || {})) {
@@ -413,7 +412,7 @@ export function duplicateCardDeck(settings = {}, deckId = '') {
   return upsertCustomCardDeck(settings, {
     ...cloneJson(sourceDeck),
     id,
-    name: duplicateDeckName(sourceDeck.name, source.customCardDecks),
+    name: duplicateDeckName(sourceDeck.name, source.customDecks),
     description: sourceDeck.description || '',
     bundled: false,
     readonly: false,
@@ -427,15 +426,15 @@ export function duplicateCardDeck(settings = {}, deckId = '') {
 }
 
 export function deleteCustomCardDeck(settings = {}, deckId = '') {
-  const source = normalizeCardDeckSettings(settings.cardDecks);
+  const source = normalizeCardDeckSettings(settings.preProcessDecks);
   const id = normalizeId(deckId);
-  if (!id || id === DEFAULT_CARD_DECK_ID || !source.customCardDecks[id]) return source;
-  const customCardDecks = { ...source.customCardDecks };
-  delete customCardDecks[id];
+  if (!id || id === DEFAULT_PRE_PROCESS_DECK_ID || !source.customDecks[id]) return source;
+  const customDecks = { ...source.customDecks };
+  delete customDecks[id];
   return normalizeCardDeckSettings({
     ...source,
-    activeCardDeckId: source.activeCardDeckId === id ? DEFAULT_CARD_DECK_ID : source.activeCardDeckId,
-    customCardDecks
+    activeDeckId: source.activeDeckId === id ? DEFAULT_PRE_PROCESS_DECK_ID : source.activeDeckId,
+    customDecks
   });
 }
 
@@ -855,15 +854,7 @@ function enableCardScopeSubItems(scope, familyName, subItems) {
 }
 
 export function activeCardDeckRuntimeScope(settings = {}) {
-  if (!settings.cardDecks && settings.cardScope) return settings.cardScope;
   const deck = getActiveCardDeck(settings);
-  if (deck.id === DEFAULT_CARD_DECK_ID && isObject(settings.cardDecks?.defaultEnabledState)) {
-    return {
-      version: CARD_SCOPE_VERSION,
-      allowEmpty: true,
-      families: settings.cardDecks.defaultEnabledState
-    };
-  }
   const scope = emptyCardScope();
   for (const card of Object.values(deck.cards || {})) {
     if (!getDeckCardStatus(card).runnable) continue;
@@ -897,11 +888,11 @@ export function serializeCustomCardDeck(deck) {
 }
 
 export function serializeCustomCardDecksForExport(settings = {}) {
-  const normalized = normalizeCardDeckSettings(settings.cardDecks);
+  const normalized = normalizeCardDeckSettings(settings.preProcessDecks);
   return {
     version: normalized.version,
     exportedAt: nowIso(),
-    decks: Object.fromEntries(Object.entries(normalized.customCardDecks).map(([deckId, deck]) => [
+    decks: Object.fromEntries(Object.entries(normalized.customDecks).map(([deckId, deck]) => [
       deckId,
       serializeCustomCardDeck(deck)
     ]).filter(([, deck]) => deck))

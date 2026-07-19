@@ -1,4 +1,4 @@
-import { activeCardDeckSourceCards } from './card-decks.mjs';
+import { activeCardDeckSourceCards } from './pre-process-decks.mjs';
 
 const VALID_STATES = new Set(['pending', 'running', 'done', 'cached', 'warning', 'failed', 'skipped', 'info']);
 const VALID_PROVIDER_LANES = new Set(['utility', 'reasoner']);

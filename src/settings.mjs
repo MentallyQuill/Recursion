@@ -1,15 +1,18 @@
 import { cloneJson } from './core.mjs';
 import { providerConfigHash } from './provider-capability.mjs';
-import { defaultCardScope, normalizeCardScope } from './card-scope.mjs';
-import { CARD_DECK_SETTINGS_VERSION, DEFAULT_CARD_DECK_ID, normalizeCardDeckSettings } from './card-decks.mjs';
+import { PRE_PROCESS_DECK_SETTINGS_VERSION, DEFAULT_PRE_PROCESS_DECK_ID, normalizeCardDeckSettings } from './pre-process-decks.mjs';
+import {
+  POST_PROCESS_DECK_SETTINGS_VERSION,
+  STARTER_POST_PROCESS_DECK_ID,
+  normalizePostProcessDeckSettings
+} from './post-process-decks.mjs';
 import { DEFAULT_RETENTION_SETTINGS, normalizeRetentionSettings } from './retention-policy.mjs';
 import { STORY_FORM_OVERRIDE_OPTIONS } from './story-form.mjs';
 
 const MODES = new Set(['auto', 'manual']);
 const PIPELINE_MODES = new Set(['standard', 'rapid', 'fused']);
-const ENHANCEMENT_TARGETS = new Set(['off', 'on']);
-const EDITORIAL_ENHANCEMENT_MODES = new Set(['off', 'repair', 'recompose', 'redirect']);
-const ENHANCEMENT_APPLY_MODES = new Set(['as-swipe', 'replace']);
+const POST_PROCESS_APPLY_MODES = new Set(['as-swipe', 'replace']);
+const POST_PROCESS_REWRITE_FLOWS = new Set(['unified', 'progressive']);
 const STRENGTHS = new Set(['light', 'balanced', 'strong']);
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
 const FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
@@ -24,8 +27,8 @@ const UI_PROGRESS_LIST_MIN = 5;
 const UI_PROGRESS_LIST_MAX = 80;
 const CARD_BUDGET_MIN = 0;
 const CARD_BUDGET_MAX = 20;
-const ENHANCEMENT_CONTEXT_MIN = 0;
-const ENHANCEMENT_CONTEXT_MAX = 35;
+const POST_PROCESS_CONTEXT_MIN = 0;
+const POST_PROCESS_CONTEXT_MAX = 35;
 
 function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -37,10 +40,10 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   enabled: true,
   mode: 'auto',
   pipelineMode: 'standard',
-  cardDecks: {
-    version: CARD_DECK_SETTINGS_VERSION,
-    activeCardDeckId: DEFAULT_CARD_DECK_ID,
-    customCardDecks: {}
+  preProcessDecks: {
+    version: PRE_PROCESS_DECK_SETTINGS_VERSION,
+    activeDeckId: DEFAULT_PRE_PROCESS_DECK_ID,
+    customDecks: {}
   },
   strength: 'balanced',
   minCards: 3,
@@ -50,11 +53,16 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   focus: 'balanced',
   reasonerUse: 'auto',
   storyFormOverride: 'auto',
-  enhancements: {
-    mode: 'off',
-    target: 'off',
+  postProcess: {
+    enabled: false,
     applyMode: 'as-swipe',
+    rewriteFlow: 'unified',
     contextMessages: 13
+  },
+  postProcessDecks: {
+    version: POST_PROCESS_DECK_SETTINGS_VERSION,
+    activeDeckId: STARTER_POST_PROCESS_DECK_ID,
+    customDecks: {}
   },
   injection: {
     placement: 'in_prompt',
@@ -170,24 +178,17 @@ export function normalizeInjectionSettings(value = {}) {
   };
 }
 
-export function normalizeEnhancementsSettings(value = {}) {
+export function normalizePostProcessSettings(value = {}) {
   const source = value && typeof value === 'object' ? value : {};
-  const rawMode = String(source.mode ?? '').trim().toLowerCase();
-  const rawTarget = String(source.target ?? '').trim().toLowerCase();
-  const hasEditorialMode = EDITORIAL_ENHANCEMENT_MODES.has(rawMode);
-  const mode = hasEditorialMode ? rawMode : 'off';
-  const legacyTargetEnabled = ['on', 'prose', 'dialogue', 'prose-dialogue'].includes(rawTarget);
-  const target = hasEditorialMode ? (mode === 'off' && legacyTargetEnabled ? 'on' : (mode === 'off' ? 'off' : 'on')) : (legacyTargetEnabled ? 'on' : 'off');
-  const requestedApplyMode = enumValue(source.applyMode, ENHANCEMENT_APPLY_MODES, DEFAULT_RECURSION_SETTINGS.enhancements.applyMode);
   return {
-    mode,
-    target,
-    applyMode: mode === 'redirect' ? 'as-swipe' : requestedApplyMode,
+    enabled: source.enabled === true,
+    applyMode: enumValue(source.applyMode, POST_PROCESS_APPLY_MODES, DEFAULT_RECURSION_SETTINGS.postProcess.applyMode),
+    rewriteFlow: enumValue(source.rewriteFlow, POST_PROCESS_REWRITE_FLOWS, DEFAULT_RECURSION_SETTINGS.postProcess.rewriteFlow),
     contextMessages: Math.round(numberInRange(
       source.contextMessages,
-      DEFAULT_RECURSION_SETTINGS.enhancements.contextMessages,
-      ENHANCEMENT_CONTEXT_MIN,
-      ENHANCEMENT_CONTEXT_MAX
+      DEFAULT_RECURSION_SETTINGS.postProcess.contextMessages,
+      POST_PROCESS_CONTEXT_MIN,
+      POST_PROCESS_CONTEXT_MAX
     ))
   };
 }
@@ -210,16 +211,11 @@ function mergePlainObjects(base, patch) {
 function mergeSettingsPatch(base, patch) {
   const result = mergePlainObjects(base, patch);
   if (!isPlainObject(patch)) return result;
-  if (Object.prototype.hasOwnProperty.call(patch, 'cardDecks')) {
-    result.cardDecks = normalizeCardDeckSettings(patch.cardDecks);
+  if (Object.prototype.hasOwnProperty.call(patch, 'preProcessDecks')) {
+    result.preProcessDecks = normalizeCardDeckSettings(patch.preProcessDecks);
   }
-  if (Object.prototype.hasOwnProperty.call(patch, 'cardScope')) {
-    result.cardDecks = {
-      ...(isPlainObject(result.cardDecks) ? result.cardDecks : {}),
-      activeCardDeckId: DEFAULT_CARD_DECK_ID,
-      defaultEnabledState: normalizeCardScope(patch.cardScope).families
-    };
-    delete result.cardScope;
+  if (Object.prototype.hasOwnProperty.call(patch, 'postProcessDecks')) {
+    result.postProcessDecks = normalizePostProcessDeckSettings(patch.postProcessDecks);
   }
   const hasMinCards = Object.prototype.hasOwnProperty.call(patch, 'minCards');
   const hasMaxCards = Object.prototype.hasOwnProperty.call(patch, 'maxCards');
@@ -355,14 +351,12 @@ export function normalizeSettings(value = {}, secretStore = null) {
   const source = value && typeof value === 'object' ? value : {};
   const reasoningLevel = enumValue(source.reasoningLevel, REASONING_LEVELS, DEFAULT_RECURSION_SETTINGS.reasoningLevel);
   const cardBudget = normalizeCardBudgetSettings(source);
-  const cardDecks = normalizeCardDeckSettings(
-    source.cardDecks || migrateLegacyCardScopeToDeckSettings(source.cardScope)
-  );
+  const preProcessDecks = normalizeCardDeckSettings(source.preProcessDecks);
   return {
     enabled: source.enabled !== false,
     mode: enumValue(source.mode, MODES, DEFAULT_RECURSION_SETTINGS.mode),
     pipelineMode: enumValue(source.pipelineMode, PIPELINE_MODES, DEFAULT_RECURSION_SETTINGS.pipelineMode),
-    cardDecks,
+    preProcessDecks,
     strength: enumValue(source.strength, STRENGTHS, DEFAULT_RECURSION_SETTINGS.strength),
     minCards: cardBudget.minCards,
     maxCards: cardBudget.maxCards,
@@ -371,7 +365,8 @@ export function normalizeSettings(value = {}, secretStore = null) {
     focus: enumValue(source.focus, FOCUS, DEFAULT_RECURSION_SETTINGS.focus),
     reasonerUse: reasonerUseForReasoningLevel(reasoningLevel),
     storyFormOverride: enumValue(source.storyFormOverride, new Set(STORY_FORM_OVERRIDE_OPTIONS), DEFAULT_RECURSION_SETTINGS.storyFormOverride),
-    enhancements: normalizeEnhancementsSettings(source.enhancements),
+    postProcess: normalizePostProcessSettings(source.postProcess),
+    postProcessDecks: normalizePostProcessDeckSettings(source.postProcessDecks),
     injection: normalizeInjectionSettings(source.injection),
     diagnostics: {
       includeExcerpts: source.diagnostics?.includeExcerpts === true
@@ -410,23 +405,14 @@ export function resetSettingsMenuValue(value = {}, secretStore = null) {
     pipelineMode: current.pipelineMode,
     reasoningLevel: current.reasoningLevel,
     storyFormOverride: current.storyFormOverride,
-    cardDecks: current.cardDecks,
+    preProcessDecks: current.preProcessDecks,
+    postProcessDecks: current.postProcessDecks,
     providers: current.providers,
     ui: {
       ...defaults.ui,
       viewerOpen: current.ui.viewerOpen
     }
   }, secretStore);
-}
-
-function migrateLegacyCardScopeToDeckSettings(cardScope) {
-  const normalizedScope = normalizeCardScope(cardScope);
-  return {
-    version: CARD_DECK_SETTINGS_VERSION,
-    activeCardDeckId: DEFAULT_CARD_DECK_ID,
-    customCardDecks: {},
-    defaultEnabledState: normalizedScope.families
-  };
 }
 
 export function createSessionSecretStore() {

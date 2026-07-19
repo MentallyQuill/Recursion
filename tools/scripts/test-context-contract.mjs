@@ -14,7 +14,7 @@ const contract = buildContextContract(snapshot, {
     sourceWindowCharacters: 12000,
     providerVisibleMessages: 12
   },
-  enhancements: { contextMessages: 35 }
+  postProcess: { contextMessages: 35 }
 });
 assertEqual(contract.sourceWindow.actualMessages, 18, 'context contract records bounded source count');
 assertEqual(contract.providerContext.effectiveMessages, 12, 'context contract caps provider messages');

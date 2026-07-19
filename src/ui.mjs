@@ -5,7 +5,7 @@ import {
   normalizeCardScope,
 } from './card-scope.mjs';
 import {
-  DEFAULT_CARD_DECK_ID,
+  DEFAULT_PRE_PROCESS_DECK_ID,
   NEW_CARD_NAME,
   createCategory,
   createCustomCardDeck,
@@ -28,7 +28,7 @@ import {
   updateCardSelectionState,
   updateCategory,
   upsertCustomCardDeck
-} from './card-decks.mjs';
+} from './pre-process-decks.mjs';
 import { packetToPromptBlocks } from './prompt.mjs';
 import {
   providerModelStatus,
@@ -2363,8 +2363,8 @@ function renderDeckDeleteConfirm(activeDeck, deckDeleteState = null) {
 
 function renderCardsPanel(panel, view, model, notice = '', editorState = null, categoryEditorState = null, deleteState = null, deckDeleteState = null, deckRenameState = null, expandedCategoryKeys = new Set()) {
   panel.replaceChildren();
-  const cardDecks = normalizeCardDeckSettings(view.settings?.cardDecks);
-  const deckView = { ...view.settings, cardDecks };
+  const preProcessDecks = normalizeCardDeckSettings(view.settings?.preProcessDecks);
+  const deckView = { ...view.settings, preProcessDecks };
   const activeDeck = getActiveCardDeck(deckView);
   const decks = Object.values(getAllCardDecks(deckView));
   const counts = deckCardCounts(activeDeck);
@@ -2620,7 +2620,7 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     controlRow('Progress Rows', progressListControl)
   ], { tooltip: SETTINGS_TOOLTIPS.ui, tooltipsEnabled }));
   const enhancementContextControl = integerInputControl({
-    value: integerInRange(enhancements.contextMessages, DEFAULT_RECURSION_SETTINGS.enhancements.contextMessages, 0, 35),
+    value: integerInRange(enhancements.contextMessages, DEFAULT_RECURSION_SETTINGS.postProcess.contextMessages, 0, 35),
     min: 0,
     max: 35,
     step: 1,
@@ -4474,7 +4474,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       mode: normalizeMode(settings.mode),
       maxCards: settings.maxCards,
       cardScope: normalizeCardScope(settings.cardScope || defaultCardScope()),
-      cardDecks: normalizeCardDeckSettings(settings.cardDecks),
+      preProcessDecks: normalizeCardDeckSettings(settings.preProcessDecks),
       editor: editorState ? {
         deckId: editorState.deckId,
         cardId: editorState.cardId,
@@ -4524,11 +4524,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }), () => update());
   }
 
-  function applyCardDeckSettings(cardDecks, notice = '') {
+  function applyCardDeckSettings(preProcessDecks, notice = '') {
     pendingCardScope = null;
     cardScopeNotice = '';
     const statusLabel = cleanText(notice);
-    const action = runtime?.updateSettings?.({ cardDecks: normalizeCardDeckSettings(cardDecks) });
+    const action = runtime?.updateSettings?.({ preProcessDecks: normalizeCardDeckSettings(preProcessDecks) });
     if (!action) {
       if (statusLabel) showCardSystemStatus(statusLabel);
       return;
@@ -5529,11 +5529,11 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const target = event?.target;
     if (!target?.dataset || !Object.hasOwn(target.dataset, 'recursionCardDeckSelect')) return;
     deckDeleteConfirmState = null;
-    const cardDecks = normalizeCardDeckSettings({
-      ...currentView().settings?.cardDecks,
-      activeCardDeckId: target.value
+    const preProcessDecks = normalizeCardDeckSettings({
+      ...currentView().settings?.preProcessDecks,
+      activeDeckId: target.value
     });
-    applyCardDeckSettings(cardDecks);
+    applyCardDeckSettings(preProcessDecks);
   });
   cardsPanel.addEventListener?.('input', (event) => {
     const target = event?.target;
@@ -6349,8 +6349,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         target: normalizeEnhancementTarget(currentView().settings?.enhancements?.target),
         applyMode: normalizeEnhancementApplyMode(currentView().settings?.enhancements?.applyMode),
         contextMessages: integerInRange(
-          controlNumber(sourceRoot, '[data-recursion-setting-enhancement-context-messages]', DEFAULT_RECURSION_SETTINGS.enhancements.contextMessages),
-          DEFAULT_RECURSION_SETTINGS.enhancements.contextMessages,
+          controlNumber(sourceRoot, '[data-recursion-setting-enhancement-context-messages]', DEFAULT_RECURSION_SETTINGS.postProcess.contextMessages),
+          DEFAULT_RECURSION_SETTINGS.postProcess.contextMessages,
           0,
           35
         )

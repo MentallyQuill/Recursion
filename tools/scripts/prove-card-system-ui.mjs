@@ -230,7 +230,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   try {
     await page.waitForFunction(() => {
       const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-      return view.settings?.cardDecks?.activeCardDeckId && view.settings.cardDecks.activeCardDeckId !== 'default';
+      return view.settings?.preProcessDecks?.activeDeckId && view.settings.preProcessDecks.activeDeckId !== 'default';
     }, null, { timeout: timeoutMs });
   } catch {
     fail(report, 'deck-duplicate', 'Duplicating Default did not activate a custom Card Deck.', await cardSystemState(page));
@@ -240,7 +240,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   await page.locator('[data-recursion-card-category-new]').first().click({ timeout: timeoutMs });
   await page.waitForFunction((previousCount) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
     return Object.keys(deck?.categories || {}).length > previousCount;
   }, duplicatedState.categoryCount, { timeout: timeoutMs });
   const categorizedState = await cardSystemState(page);
@@ -248,7 +248,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   await page.waitForSelector('[data-recursion-card-editor]', { timeout: timeoutMs });
   await page.waitForFunction((previousCount) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
     return Object.keys(deck?.cards || {}).length > previousCount;
   }, categorizedState.cardCount, { timeout: timeoutMs });
   await page.waitForFunction(() => Boolean(document.querySelector('[data-recursion-card-editor-name]')), null, { timeout: timeoutMs });
@@ -299,7 +299,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   try {
     await page.waitForFunction((expectedName) => {
       const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-      const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+      const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
       return Object.values(deck?.cards || {}).some((card) => card.name === expectedName && card.promptText);
     }, cardName, { timeout: timeoutMs });
   } catch {
@@ -311,10 +311,10 @@ async function runCardSystemScenario(page, report, timeoutMs) {
 
   const custom = await page.evaluate((expectedName) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const decks = view.settings?.cardDecks?.customCardDecks || {};
-    const deck = decks[view.settings?.cardDecks?.activeCardDeckId] || Object.values(decks)[0] || {};
+    const decks = view.settings?.preProcessDecks?.customDecks || {};
+    const deck = decks[view.settings?.preProcessDecks?.activeDeckId] || Object.values(decks)[0] || {};
     return {
-      activeDeckId: view.settings?.cardDecks?.activeCardDeckId || '',
+      activeDeckId: view.settings?.preProcessDecks?.activeDeckId || '',
       categoryCount: Object.keys(deck.categories || {}).length,
       cardCount: Object.keys(deck.cards || {}).length,
       hasSceneBoundary: Object.values(deck.cards || {}).some((card) => card.name === expectedName),
@@ -334,7 +334,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
 
   const createdCardId = await page.evaluate((expectedName) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
     return Object.values(deck?.cards || {}).find((card) => card.name === expectedName)?.id || '';
   }, cardName);
   if (!createdCardId) fail(report, 'card-row-state', 'Could not locate saved card id for row-state proof.', await cardSystemState(page));
@@ -343,7 +343,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   await page.waitForFunction((cardId) => {
     const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
     return row?.classList?.contains('is-priority') && deck?.cards?.[cardId]?.selectionState === 'priority';
   }, createdCardId, { timeout: timeoutMs });
   const priorityStatus = await page.evaluate((cardId) => {
@@ -365,7 +365,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   await page.waitForFunction((cardId) => {
     const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
     return row?.classList?.contains('is-active') && deck?.cards?.[cardId]?.selectionState === 'active';
   }, createdCardId, { timeout: timeoutMs });
   const activateAllState = await page.evaluate((cardId) => {
@@ -383,7 +383,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   await page.waitForFunction((cardId) => {
     const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
     return row?.classList?.contains('is-inactive') && deck?.cards?.[cardId]?.selectionState === 'off';
   }, createdCardId, { timeout: timeoutMs });
   const deactivateAllState = await page.evaluate((cardId) => {
@@ -401,14 +401,14 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   await page.waitForFunction((cardId) => {
     const row = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
     return row?.classList?.contains('is-active') && deck?.cards?.[cardId]?.selectionState === 'active';
   }, createdCardId, { timeout: timeoutMs });
   addCheck(report, 'card-row-state', 'pass', 'Card row and deck bulk actions use eye-state icons for Active, Priority, and Inactive.', await cardSystemState(page));
 
   const dragSetup = await page.evaluate((cardId) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
     const categories = Array.from(document.querySelectorAll('[data-recursion-card-deck-category]'));
     const sourceRow = document.querySelector(`[data-recursion-card-id="${cardId}"]`);
     const sourceCategory = sourceRow?.closest('[data-recursion-card-deck-category]');
@@ -468,7 +468,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   try {
     await page.waitForFunction(({ cardId, targetCategoryId }) => {
       const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-      const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+      const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
       return deck?.cards?.[cardId]?.categoryId === targetCategoryId
         && deck?.cardOrderByCategory?.[targetCategoryId]?.includes(cardId);
     }, { cardId: createdCardId, targetCategoryId: dragSetup.targetCategoryId }, { timeout: timeoutMs });
@@ -480,7 +480,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
       state: await cardSystemState(page),
       cardCategory: await page.evaluate((cardId) => {
         const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-        const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+        const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
         return deck?.cards?.[cardId]?.categoryId || '';
       }, createdCardId)
     });
@@ -510,7 +510,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   try {
     await page.waitForFunction((categoryId) => {
       const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-      const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+      const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
       return deck?.categoryOrder?.[0] === categoryId;
     }, dragSetup.secondCategoryId, { timeout: timeoutMs });
   } catch (error) {
@@ -520,7 +520,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
       state: await cardSystemState(page),
       categoryOrder: await page.evaluate(() => {
         const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-        const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+        const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
         return deck?.categoryOrder || [];
       })
     });
@@ -530,7 +530,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   addCheck(report, 'card-drag-handles', 'pass', 'Card and category drag handles replaced move mode and persisted deck order changes.', await cardSystemState(page));
   const cardCategoryAfterDrag = await page.evaluate((cardId) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
     return deck?.cards?.[cardId]?.categoryId || '';
   }, createdCardId);
   if (cardCategoryAfterDrag) {
@@ -548,7 +548,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   await page.locator(`${rowSelector} [data-recursion-card-delete-confirm]`).click({ timeout: timeoutMs });
   await page.waitForFunction((cardId) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const deck = view.settings?.cardDecks?.customCardDecks?.[view.settings?.cardDecks?.activeCardDeckId];
+    const deck = view.settings?.preProcessDecks?.customDecks?.[view.settings?.preProcessDecks?.activeDeckId];
     return !deck?.cards?.[cardId] && !document.querySelector(`[data-recursion-card-id="${cardId}"]`);
   }, createdCardId, { timeout: timeoutMs });
   addCheck(report, 'card-delete-confirm', 'pass', 'Card delete cancel preserved the card and confirm removed it.', await cardSystemState(page));
@@ -559,7 +559,7 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   const armedDeckDelete = await page.evaluate((deckId) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
     return {
-      deckStillExists: Boolean(view.settings?.cardDecks?.customCardDecks?.[deckId]),
+      deckStillExists: Boolean(view.settings?.preProcessDecks?.customDecks?.[deckId]),
       confirmDisabled: document.querySelector('[data-recursion-card-deck-delete-confirm]')?.disabled === true,
       hasTypedInput: Boolean(document.querySelector('[data-recursion-card-deck-delete-text]')),
       hintText: String(document.querySelector('.recursion-card-deck-delete-hint')?.textContent || '')
@@ -585,8 +585,8 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   await page.locator('[data-recursion-card-deck-delete-confirm]').click({ timeout: timeoutMs });
   await page.waitForFunction((deckId) => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    return !view.settings?.cardDecks?.customCardDecks?.[deckId]
-      && view.settings?.cardDecks?.activeCardDeckId !== deckId;
+    return !view.settings?.preProcessDecks?.customDecks?.[deckId]
+      && view.settings?.preProcessDecks?.activeDeckId !== deckId;
   }, deckBeforeDelete.activeDeckId, { timeout: timeoutMs });
   addCheck(report, 'deck-delete-confirm', 'pass', 'Card Deck delete required typed delete confirmation and accepted mixed case.', {
     deletedDeckId: deckBeforeDelete.activeDeckId,
@@ -604,8 +604,8 @@ async function screenshotCards(page, artifactDir, name, timeoutMs) {
 async function cardSystemState(page) {
   return page.evaluate(() => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
-    const decks = view.settings?.cardDecks?.customCardDecks || {};
-    const activeDeckId = view.settings?.cardDecks?.activeCardDeckId || '';
+    const decks = view.settings?.preProcessDecks?.customDecks || {};
+    const activeDeckId = view.settings?.preProcessDecks?.activeDeckId || '';
     const deck = decks[activeDeckId] || {};
     return {
       activeDeckId,

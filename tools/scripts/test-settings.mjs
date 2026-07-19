@@ -2,20 +2,24 @@ import {
   DEFAULT_RECURSION_SETTINGS,
   createSessionSecretStore,
   createSettingsStore,
-  normalizeEnhancementsSettings,
   normalizeProviderSettings,
   normalizeSettings
 } from '../../src/settings.mjs';
 import { providerConfigHash } from '../../src/provider-capability.mjs';
 import {
-  CARD_DECK_SETTINGS_VERSION,
-  DEFAULT_CARD_DECK_ID,
+  PRE_PROCESS_DECK_SETTINGS_VERSION,
+  DEFAULT_PRE_PROCESS_DECK_ID,
   createDraftCard,
   createCustomCardDeck,
   deleteCard,
   getActiveCardDeck,
   upsertCustomCardDeck
-} from '../../src/card-decks.mjs';
+} from '../../src/pre-process-decks.mjs';
+import {
+  POST_PROCESS_DECK_SETTINGS_VERSION,
+  STARTER_POST_PROCESS_DECK_ID,
+  createCustomPostProcessDeck
+} from '../../src/post-process-decks.mjs';
 import {
   CARD_SCOPE_TOTAL_SUB_ITEMS,
   cardScopeCounts,
@@ -54,15 +58,43 @@ assertEqual(normalizeSettings({ pipelineMode: 'fused' }).pipelineMode, 'fused', 
 assertEqual(normalizeSettings({ pipelineMode: 'FUSED' }).pipelineMode, 'fused', 'Fused pipeline mode normalizes case-insensitively');
 assertEqual(normalizeSettings({ pipelineMode: 'standard' }).pipelineMode, 'standard', 'Standard pipeline mode is accepted');
 assertEqual(normalizeSettings({ pipelineMode: 'fast' }).pipelineMode, 'standard', 'invalid pipeline mode normalizes to Standard');
-assertDeepEqual(normalizeEnhancementsSettings({}), { mode: 'off', target: 'off', applyMode: 'as-swipe', contextMessages: 13 }, 'enhancements direct normalizer defaults safely');
-assertEqual(normalizeEnhancementsSettings({}).mode, 'off', 'editorial enhancement mode defaults off');
-assertEqual(normalizeEnhancementsSettings({ mode: 'recompose', applyMode: 'replace' }).mode, 'recompose', 'Recompose mode is accepted');
-assertDeepEqual(normalizeEnhancementsSettings({ mode: 'redirect', applyMode: 'replace' }), { mode: 'redirect', target: 'on', applyMode: 'as-swipe', contextMessages: 13 }, 'Redirect forces As Swipe');
-assertDeepEqual(normalizeSettings({}).enhancements, { mode: 'off', target: 'off', applyMode: 'as-swipe', contextMessages: 13 }, 'enhancements default off with bounded context');
-assertDeepEqual(normalizeSettings({ enhancements: { target: 'on', applyMode: 'as-swipe', contextMessages: '35' } }).enhancements, { mode: 'off', target: 'on', applyMode: 'as-swipe', contextMessages: 35 }, 'legacy enabled setting remains isolated from editorial mode');
-assertDeepEqual(normalizeSettings({ enhancements: { target: 'on', applyMode: 'replace', contextMessages: '-3' } }).enhancements, { mode: 'off', target: 'on', applyMode: 'replace', contextMessages: 0 }, 'legacy enabled setting remains isolated from editorial mode');
-assertDeepEqual(normalizeSettings({ enhancements: { target: 'prose-dialogue', applyMode: 'as-swipe', contextMessages: 21 } }).enhancements, { mode: 'off', target: 'on', applyMode: 'as-swipe', contextMessages: 21 }, 'legacy prose/dialogue setting remains isolated from editorial mode');
-assertDeepEqual(normalizeSettings({ enhancements: { target: 'bad', applyMode: 'sidecar', contextMessages: '' } }).enhancements, { mode: 'off', target: 'off', applyMode: 'as-swipe', contextMessages: 13 }, 'invalid enhancement setting normalizes to Off safely');
+assertDeepEqual(DEFAULT_RECURSION_SETTINGS.postProcess, {
+  enabled: false,
+  applyMode: 'as-swipe',
+  rewriteFlow: 'unified',
+  contextMessages: 13
+}, 'post-process defaults are exact');
+assertDeepEqual(DEFAULT_RECURSION_SETTINGS.postProcessDecks, {
+  version: POST_PROCESS_DECK_SETTINGS_VERSION,
+  activeDeckId: STARTER_POST_PROCESS_DECK_ID,
+  customDecks: {}
+}, 'post-process deck defaults are exact');
+assertDeepEqual(normalizeSettings({}).postProcess, DEFAULT_RECURSION_SETTINGS.postProcess, 'post-process remains Off by default');
+assertEqual(normalizeSettings({}).postProcess.enabled, false, 'post-process feature defaults Off');
+assertEqual(normalizeSettings({ postProcess: { enabled: true } }).postProcess.enabled, true, 'post-process feature can be enabled');
+assertDeepEqual(
+  normalizeSettings({ postProcess: { enabled: true, applyMode: 'REPLACE', rewriteFlow: 'PROGRESSIVE', contextMessages: '35' } }).postProcess,
+  { enabled: true, applyMode: 'replace', rewriteFlow: 'progressive', contextMessages: 35 },
+  'post-process settings normalize the V1 values'
+);
+assertDeepEqual(
+  normalizeSettings({ postProcess: { enabled: true, applyMode: 'sidecar', rewriteFlow: 'per-card', contextMessages: '' } }).postProcess,
+  { ...DEFAULT_RECURSION_SETTINGS.postProcess, enabled: true },
+  'invalid post-process apply and flow values fall back safely'
+);
+assertEqual(normalizeSettings({ postProcess: { contextMessages: -3 } }).postProcess.contextMessages, 0, 'post-process context messages clamp low');
+assertEqual(normalizeSettings({ postProcess: { contextMessages: 99 } }).postProcess.contextMessages, 35, 'post-process context messages clamp high');
+const ignoredOldContracts = normalizeSettings({
+  enhancements: { mode: 'redirect', target: 'on', applyMode: 'replace', contextMessages: 35 },
+  cardDecks: { activeCardDeckId: 'legacy-deck', customCardDecks: { 'legacy-deck': { id: 'legacy-deck', name: 'Legacy' } } },
+  cardScope: { families: { 'Open Threads': { enabled: false } } },
+  postProcess: { target: 'on', mode: 'recompose' }
+});
+assert(!('enhancements' in ignoredOldContracts), 'old enhancements settings are ignored');
+assert(!('cardDecks' in ignoredOldContracts), 'old cardDecks settings are ignored');
+assert(!('cardScope' in ignoredOldContracts), 'legacy card scope is ignored');
+assertDeepEqual(ignoredOldContracts.postProcess, DEFAULT_RECURSION_SETTINGS.postProcess, 'legacy enhancement targets and modes do not enable post-process');
+assertDeepEqual(ignoredOldContracts.preProcessDecks, DEFAULT_RECURSION_SETTINGS.preProcessDecks, 'old cardDecks do not migrate into pre-process decks');
 assertEqual(normalizeSettings({ mode: 'manual', pipelineMode: 'rapid' }).mode, 'manual', 'Rapid does not replace Auto/Manual mode');
 assertEqual(normalizeSettings({ mode: 'manual', pipelineMode: 'fused' }).mode, 'manual', 'Fused does not replace Auto/Manual mode');
 assertEqual(normalized.enabled, false, 'power toggle disabled state preserved');
@@ -70,29 +102,24 @@ assertEqual(normalizeSettings({ focus: 'constraints' }).focus, 'constraints', 'c
 assertEqual(normalizeSettings({ focus: 'scene' }).focus, 'scene', 'scene focus is accepted');
 assertEqual(normalizeSettings({ focus: 'continuity' }).focus, 'balanced', 'removed continuity focus normalizes to balanced');
 assertEqual(normalizeSettings({ focus: 'pr' + 'ose' }).focus, 'balanced', 'removed craft focus normalizes to balanced');
-const normalizedDefaultDecks = normalizeSettings({}).cardDecks;
-assertEqual(normalizedDefaultDecks.version, CARD_DECK_SETTINGS_VERSION, 'settings default card decks version is current');
-assertEqual(normalizedDefaultDecks.activeCardDeckId, DEFAULT_CARD_DECK_ID, 'settings default active deck is Default');
+const normalizedDefaultDecks = normalizeSettings({}).preProcessDecks;
+assertEqual(normalizedDefaultDecks.version, PRE_PROCESS_DECK_SETTINGS_VERSION, 'settings default card decks version is current');
+assertEqual(normalizedDefaultDecks.activeDeckId, DEFAULT_PRE_PROCESS_DECK_ID, 'settings default pre-process deck is Default');
 
-const cardDeckStoreRoot = { recursion: { cardDecks: createCustomCardDeck({}, { name: 'Delete Merge Test' }) } };
+const cardDeckStoreRoot = { recursion: { preProcessDecks: createCustomCardDeck({}, { name: 'Delete Merge Test' }) } };
 const cardDeckStore = createSettingsStore({ root: cardDeckStoreRoot, save: () => {} });
 const seededDeck = createDraftCard(getActiveCardDeck(cardDeckStore.get()), '');
 const seededCardId = Object.keys(seededDeck.cards).find((id) => seededDeck.cards[id].name === 'New Card');
-cardDeckStore.update({ cardDecks: upsertCustomCardDeck(cardDeckStore.get(), seededDeck) });
-assert(cardDeckStore.get().cardDecks.customCardDecks[seededDeck.id].cards[seededCardId], 'settings store card deck update can add draft card');
+cardDeckStore.update({ preProcessDecks: upsertCustomCardDeck(cardDeckStore.get(), seededDeck) });
+assert(cardDeckStore.get().preProcessDecks.customDecks[seededDeck.id].cards[seededCardId], 'settings store card deck update can add draft card');
 const deletedDeck = deleteCard(getActiveCardDeck(cardDeckStore.get()), seededCardId);
-cardDeckStore.update({ cardDecks: upsertCustomCardDeck(cardDeckStore.get(), deletedDeck) });
-assertEqual(cardDeckStore.get().cardDecks.customCardDecks[deletedDeck.id].cards[seededCardId], undefined, 'settings store replaces cardDecks so deleted cards do not survive deep merge');
+cardDeckStore.update({ preProcessDecks: upsertCustomCardDeck(cardDeckStore.get(), deletedDeck) });
+assertEqual(cardDeckStore.get().preProcessDecks.customDecks[deletedDeck.id].cards[seededCardId], undefined, 'settings store replaces preProcessDecks so deleted cards do not survive deep merge');
 
-const partialScope = defaultCardScope();
-partialScope.families['Open Threads'].enabled = false;
-for (const key of Object.keys(partialScope.families['Open Threads'].subItems)) {
-  partialScope.families['Open Threads'].subItems[key] = false;
-}
-const normalizedPartial = normalizeSettings({ mode: 'manual', cardScope: partialScope });
-assertEqual(normalizedPartial.mode, 'manual', 'manual mode survives card-scope normalization');
+const normalizedPartial = normalizeSettings({ mode: 'manual', cardScope: defaultCardScope() });
+assertEqual(normalizedPartial.mode, 'manual', 'manual mode survives ignored legacy card scope');
 assertEqual(normalizedPartial.cardScope, undefined, 'legacy cardScope is removed from normalized settings');
-assertEqual(normalizedPartial.cardDecks.defaultEnabledState['Open Threads'].enabled, false, 'disabled legacy current family persists in card deck migration state');
+assertDeepEqual(normalizedPartial.preProcessDecks, DEFAULT_RECURSION_SETTINGS.preProcessDecks, 'legacy cardScope is not migrated');
 assertDeepEqual(
   normalizeSettings({}).injection,
   { placement: 'in_prompt', role: 'system', depth: 1 },
@@ -224,7 +251,7 @@ assertEqual(normalizeSettings({ minCards: -20, maxCards: 99 }).minCards, 0, 'min
 assertEqual(normalizeSettings({ minCards: -20, maxCards: 99 }).maxCards, 20, 'maximum cards clamps high');
 const zeroMaxManual = normalizeSettings({ mode: 'manual', maxCards: 0 });
 assertEqual(zeroMaxManual.maxCards, 0, 'stored Max Cards can remain zero for existing card budget semantics');
-assert(zeroMaxManual.cardDecks, 'manual settings still normalize card decks');
+assert(zeroMaxManual.preProcessDecks, 'manual settings still normalize card decks');
 const highMax = normalizeSettings({ mode: 'manual', maxCards: 50 });
 assertEqual(highMax.maxCards, 20, 'Max Cards remains capped at twenty');
 
@@ -497,19 +524,28 @@ assertEqual(root.recursion.injection.placement, 'in_chat', 'partial injection up
 assertEqual(root.recursion.injection.role, 'assistant', 'partial injection update preserves role');
 assertEqual(root.recursion.injection.depth, 2, 'partial injection update changes depth');
 
-store.update({ enhancements: { mode: 'repair' } });
-store.update({ enhancements: { applyMode: 'replace' } });
-store.update({ enhancements: { contextMessages: 21 } });
-assertDeepEqual(root.recursion.enhancements, { mode: 'repair', target: 'on', applyMode: 'replace', contextMessages: 21 }, 'partial enhancements update preserves mode and apply mode while changing context');
+store.update({ postProcess: { enabled: true } });
+store.update({ postProcess: { applyMode: 'replace' } });
+store.update({ postProcess: { rewriteFlow: 'progressive' } });
+store.update({ postProcess: { contextMessages: 21 } });
+assertDeepEqual(
+  root.recursion.postProcess,
+  { enabled: true, applyMode: 'replace', rewriteFlow: 'progressive', contextMessages: 21 },
+  'partial post-process updates preserve the rest of the clean contract'
+);
 
-const preservedDecks = cardDeckStore.get().cardDecks;
+const preservedDecks = cardDeckStore.get().preProcessDecks;
+const preservedPostProcessDecks = createCustomPostProcessDeck({}, {
+  name: 'Reset Preserve Test',
+  now: '2026-07-18T00:00:00.000Z'
+});
 store.update({
   enabled: false,
   mode: 'manual',
   pipelineMode: 'rapid',
   reasoningLevel: 'high',
   storyFormOverride: 'present-third-limited',
-  cardDecks: preservedDecks,
+  preProcessDecks: preservedDecks,
   strength: 'strong',
   minCards: 8,
   maxCards: 16,
@@ -517,7 +553,8 @@ store.update({
   promptFootprint: 'rich',
   injection: { placement: 'in_chat', role: 'assistant', depth: 8 },
   ui: { tooltipsEnabled: false, progressChildVisibleLimit: 12, progressListVisibleLimit: 40 },
-  enhancements: { mode: 'recompose', applyMode: 'replace', contextMessages: 30 },
+  postProcess: { enabled: true, applyMode: 'replace', rewriteFlow: 'progressive', contextMessages: 30 },
+  postProcessDecks: preservedPostProcessDecks,
   retention: { sourceWindowMessages: 80 },
   diagnostics: { includeExcerpts: true }
 });
@@ -530,7 +567,10 @@ store.updateProviderConfig('utility', {
 const beforeMenuReset = store.get();
 const resetSettings = store.resetSettingsMenu();
 assertDeepEqual(resetSettings.providers, beforeMenuReset.providers, 'menu reset preserves provider settings');
-assertDeepEqual(resetSettings.cardDecks, beforeMenuReset.cardDecks, 'menu reset preserves custom decks and scope');
+assertDeepEqual(resetSettings.preProcessDecks, beforeMenuReset.preProcessDecks, 'menu reset preserves custom pre-process decks');
+assertDeepEqual(resetSettings.postProcessDecks, beforeMenuReset.postProcessDecks, 'menu reset preserves custom post-process decks');
+assertEqual(resetSettings.preProcessDecks.activeDeckId, beforeMenuReset.preProcessDecks.activeDeckId, 'menu reset preserves active pre-process deck id');
+assertEqual(resetSettings.postProcessDecks.activeDeckId, beforeMenuReset.postProcessDecks.activeDeckId, 'menu reset preserves active post-process deck id');
 assertEqual(resetSettings.enabled, beforeMenuReset.enabled, 'menu reset preserves compact-bar enabled state');
 assertEqual(resetSettings.mode, beforeMenuReset.mode, 'menu reset preserves compact-bar mode');
 assertEqual(resetSettings.pipelineMode, beforeMenuReset.pipelineMode, 'menu reset preserves compact-bar pipeline');
@@ -541,7 +581,7 @@ assertEqual(resetSettings.minCards, DEFAULT_RECURSION_SETTINGS.minCards, 'menu r
 assertEqual(resetSettings.maxCards, DEFAULT_RECURSION_SETTINGS.maxCards, 'menu reset restores maximum cards');
 assertDeepEqual(resetSettings.injection, DEFAULT_RECURSION_SETTINGS.injection, 'menu reset restores injection settings');
 assertDeepEqual(resetSettings.ui, { ...DEFAULT_RECURSION_SETTINGS.ui, viewerOpen: beforeMenuReset.ui.viewerOpen }, 'menu reset restores UI settings while preserving viewer state');
-assertDeepEqual(resetSettings.enhancements, DEFAULT_RECURSION_SETTINGS.enhancements, 'menu reset restores enhancement settings');
+assertDeepEqual(resetSettings.postProcess, DEFAULT_RECURSION_SETTINGS.postProcess, 'menu reset restores post-process settings');
 assertDeepEqual(resetSettings.retention, DEFAULT_RECURSION_SETTINGS.retention, 'menu reset restores retention settings');
 assertDeepEqual(resetSettings.diagnostics, DEFAULT_RECURSION_SETTINGS.diagnostics, 'menu reset restores diagnostic settings');
 assertEqual(secrets.get('utility'), 'preserved-secret', 'menu reset preserves provider session secret');

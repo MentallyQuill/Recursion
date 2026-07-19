@@ -1220,24 +1220,6 @@ function manualForcedProofScript() {
         context?.extensionSettings?.recursion,
         context?.extension_settings?.recursion
       ].filter((entry) => entry && typeof entry === 'object');
-      const settingsFamiliesFor = (entry) => {
-        if (entry?.cardScope?.families && typeof entry.cardScope.families === 'object') return entry.cardScope.families;
-        if (entry?.cardDecks?.defaultEnabledState && typeof entry.cardDecks.defaultEnabledState === 'object') return entry.cardDecks.defaultEnabledState;
-        return null;
-      };
-      const settingsSelectedFamilies = () => {
-        const families = settingsFamiliesFor(settingsRoots.find((entry) => settingsFamiliesFor(entry))) || {};
-        return Object.entries(families)
-          .filter(([, state]) => {
-            if (!state || typeof state !== 'object') return false;
-            if (state.enabled === true) return true;
-            const subItems = state.subItems && typeof state.subItems === 'object' ? state.subItems : {};
-            return Object.values(subItems).some((value) => value === true);
-          })
-          .map(([family]) => String(family || '').trim())
-          .filter(Boolean);
-      };
-      const hasSettingsCardConfig = () => settingsRoots.some((entry) => settingsFamiliesFor(entry));
       for (const settings of settingsRoots) {
         settings.mode = 'manual';
         settings.maxCards = proof.cap;
@@ -1324,13 +1306,6 @@ function manualForcedProofScript() {
         }
         await waitForCondition(() => selectedFamilies.every((family) => selectedFamiliesNow().includes(family)), 3000);
         await waitForCondition(() => cardsLabel().includes(`/${proof.cap}`), 3000);
-        if (hasSettingsCardConfig()) {
-          await waitForCondition(() => {
-            const persisted = settingsSelectedFamilies();
-            return persisted.length === selectedFamilies.length
-              && selectedFamilies.every((family) => persisted.includes(family));
-          }, 5000);
-        }
         const blockFamily = (!desired.has(blocked) && toggleFor(blocked) ? blocked : '')
           || familyNamesNow().find((family) => family && !desired.has(family) && !selectedFamiliesNow().includes(family))
           || '';
@@ -1347,10 +1322,7 @@ function manualForcedProofScript() {
           ? (noticeText.match(/Max Cards is \d+\. Change it in Settings to select more\./)?.[0] || noticeText)
           : '';
         proof.capBlocked = proof.capNotice.includes(`Max Cards is ${proof.cap}.`);
-        const persistedSelected = settingsSelectedFamilies().filter((family) => desired.has(family));
-        proof.selectedFamilies = persistedSelected.length
-          ? persistedSelected
-          : selectedFamiliesNow().filter((family) => desired.has(family));
+        proof.selectedFamilies = selectedFamiliesNow().filter((family) => desired.has(family));
         return storeProof();
       }
 

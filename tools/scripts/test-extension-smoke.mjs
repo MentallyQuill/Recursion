@@ -9,6 +9,25 @@ const RECURSION_PROMPT_KEYS = [
 
 const extensionModule = await import('../../src/extension/index.js');
 
+function legacyEnhancementSettingsRoot(settings = {}) {
+  const legacyEnhancements = { ...(settings.enhancements || {}) };
+  let canonicalSettings = { ...settings };
+  delete canonicalSettings.enhancements;
+  const root = {};
+  Object.defineProperty(root, 'recursion', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return { ...canonicalSettings, enhancements: { ...legacyEnhancements } };
+    },
+    set(value) {
+      canonicalSettings = { ...(value && typeof value === 'object' ? value : {}) };
+      delete canonicalSettings.enhancements;
+    }
+  });
+  return root;
+}
+
 assertEqual(typeof extensionModule.createProviderJournal, 'function', 'extension exposes its provider journal adapter for contract testing');
 const providerJournalEntries = [];
 const providerJournal = extensionModule.createProviderJournal({
@@ -286,7 +305,7 @@ if (lifecycleFailures.length) {
     await eventSource.emit('extension_settings_loaded');
     assertEqual(eventSource.listenerCount('extension_settings_loaded'), 0, 'settings-load bootstrap unsubscribes retry listener');
     assertEqual(delayedContext.extensionSettings.recursion.mode, 'manual', 'deferred bootstrap uses loaded SillyTavern settings');
-    assert(delayedContext.extensionSettings.recursion.cardDecks, 'deferred bootstrap normalizes loaded Card Deck settings in place');
+    assert(delayedContext.extensionSettings.recursion.preProcessDecks, 'deferred bootstrap normalizes loaded Card Deck settings in place');
     assertEqual(delayedContext.extensionSettings.recursion.cardScope, undefined, 'deferred bootstrap removes legacy cardScope');
     await globalThis.recursionOnDelete();
     assertEqual(warnings.length, 0, 'deferred settings bootstrap does not emit harness warnings');
@@ -615,15 +634,13 @@ if (lifecycleFailures.length) {
       })
     };
   };
-  globalThis.extension_settings = {
-    recursion: {
-      pipelineMode: 'fused',
-      mode: 'auto',
-      reasoningLevel: 'medium',
-      reasonerUse: 'off',
-      enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
-    }
-  };
+  globalThis.extension_settings = legacyEnhancementSettingsRoot({
+    pipelineMode: 'fused',
+    mode: 'auto',
+    reasoningLevel: 'medium',
+    reasonerUse: 'off',
+    enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
+  });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -686,13 +703,11 @@ if (lifecycleFailures.length) {
     { mesid: 0, is_user: true, mes: 'Keep the response grounded.' },
     { mesid: 1, is_user: false, mes: 'The grounded response landed.' }
   ];
-  globalThis.extension_settings = {
-    recursion: {
-      mode: 'auto',
-      reasonerUse: 'off',
-      enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
-    }
-  };
+  globalThis.extension_settings = legacyEnhancementSettingsRoot({
+    mode: 'auto',
+    reasonerUse: 'off',
+    enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
+  });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -732,13 +747,11 @@ if (lifecycleFailures.length) {
   fake.context.chat = [
     { mesid: 0, is_user: true, mes: 'Generate one reply.' }
   ];
-  globalThis.extension_settings = {
-    recursion: {
-      mode: 'auto',
-      reasonerUse: 'off',
-      enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
-    }
-  };
+  globalThis.extension_settings = legacyEnhancementSettingsRoot({
+    mode: 'auto',
+    reasonerUse: 'off',
+    enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
+  });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -901,14 +914,12 @@ if (lifecycleFailures.length) {
     }
   };
   globalThis.__recursionLiveHarness = true;
-  globalThis.extension_settings = {
-    recursion: {
-      mode: 'auto',
-      pipelineMode: 'standard',
-      reasonerUse: 'off',
-      enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: 3 }
-    }
-  };
+  globalThis.extension_settings = legacyEnhancementSettingsRoot({
+    mode: 'auto',
+    pipelineMode: 'standard',
+    reasonerUse: 'off',
+    enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: 3 }
+  });
   globalThis.SillyTavern = { getContext: () => context };
 
   await globalThis.recursionOnDelete();
@@ -1010,14 +1021,12 @@ if (lifecycleFailures.length) {
     }
   };
   globalThis.__recursionLiveHarness = true;
-  globalThis.extension_settings = {
-    recursion: {
-      mode: 'auto',
-      pipelineMode: 'standard',
-      reasonerUse: 'off',
-      enhancements: { target: 'on', applyMode: 'replace', contextMessages: 3 }
-    }
-  };
+  globalThis.extension_settings = legacyEnhancementSettingsRoot({
+    mode: 'auto',
+    pipelineMode: 'standard',
+    reasonerUse: 'off',
+    enhancements: { target: 'on', applyMode: 'replace', contextMessages: 3 }
+  });
   globalThis.SillyTavern = { getContext: () => context };
 
   await globalThis.recursionOnDelete();

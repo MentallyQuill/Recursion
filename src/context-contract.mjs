@@ -15,7 +15,7 @@ export function buildContextContract(snapshot = {}, settings = {}) {
   const retention = normalizeRetentionSettings(settings.retention);
   const messages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
   const requestedEnhancementMessages = boundedInteger(
-    settings.enhancements?.contextMessages,
+    settings.postProcess?.contextMessages,
     13,
     ENHANCEMENT_MESSAGE_MIN,
     ENHANCEMENT_MESSAGE_MAX

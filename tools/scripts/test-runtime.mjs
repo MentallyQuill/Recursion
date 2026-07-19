@@ -965,6 +965,93 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   };
 }
 
+{
+  const proseHost = createProseMessageHarness('Original runtime post-process response.');
+  const routerCalls = [];
+  const writerCalls = [];
+  const { runtime } = createRuntimeHarness({
+    settings: {
+      reasoningLevel: 'medium',
+      postProcess: {
+        enabled: true,
+        applyMode: 'as-swipe',
+        rewriteFlow: 'unified',
+        contextMessages: 13
+      }
+    },
+    snapshot: {
+      chatId: 'prose-runtime-chat',
+      chatKey: 'prose-runtime-chat',
+      sceneKey: 'prose-runtime-scene',
+      sceneFingerprint: 'prose-runtime-scene-fp',
+      sourceRevisionHash: 'prose-runtime-source',
+      turnFingerprint: 'prose-runtime-turn',
+      latestMesId: 8,
+      messages: [
+        { mesid: 7, role: 'user', text: 'Continue the scene.', visible: true },
+        {
+          mesid: 8,
+          role: 'assistant',
+          text: 'Original runtime post-process response.',
+          swipeId: 0,
+          swipeCount: 1,
+          activeSwipeTextHash: hashJson('Original runtime post-process response.'),
+          visible: true
+        }
+      ]
+    },
+    hostMessages: proseHost.messages,
+    hostGeneration: {
+      async rewriteWithPostProcess(input) {
+        writerCalls.push(input);
+        return { ok: true, text: 'Runtime delegated post-process response.' };
+      }
+    },
+    generationRouter: {
+      async generate(roleId, request, options) {
+        routerCalls.push({ roleId, request, options });
+        return {
+          ok: true,
+          roleId,
+          lane: request.lane,
+          data: {
+            schema: 'recursion.postProcessGuidance.v1',
+            snapshotHash: request.snapshotHash,
+            sourceHash: request.sourceHash,
+            guidanceText: 'Apply the selected Post-process cards.'
+          },
+          diagnostics: { retryCount: 0 }
+        };
+      }
+    }
+  });
+
+  for (const method of [
+    'postProcessPending',
+    'postProcessRunning',
+    'runPostProcessForLatestAssistant',
+    'cancelPostProcess',
+    'postProcessDiagnostics'
+  ]) {
+    assertEqual(typeof runtime[method], 'function', `runtime delegates ${method}`);
+  }
+  const result = await runtime.runPostProcessForLatestAssistant();
+  assertEqual(result.committed, true, 'delegated Post-process runtime commits');
+  assertEqual(routerCalls.length, 1, 'delegated runtime makes one Unified guidance call');
+  assertEqual(writerCalls.length, 1, 'delegated runtime makes one Unified host rewrite');
+  assertEqual(
+    proseHost.calls.filter((call) => call.type === 'append').length,
+    1,
+    'delegated runtime commits one final swipe through the existing host boundary'
+  );
+  assertEqual(runtime.postProcessRunning(), false, 'delegated runtime clears running state');
+  assertEqual(runtime.postProcessPending(), false, 'delegated runtime clears pending state');
+  assert(
+    !JSON.stringify(runtime.postProcessDiagnostics()).includes('Runtime delegated post-process response.'),
+    'delegated runtime diagnostics omit candidate prose'
+  );
+}
+
 // Replaced V1 contract: dialogue/prose pass fixtures are retained as historical
 // examples until the dedicated generation-review harness supersedes them.
 if (false) {

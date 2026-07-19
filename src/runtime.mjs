@@ -55,6 +55,7 @@ import { STORY_FORM_SCHEMA, UNKNOWN_STORY_FORM, arbiterStoryFormContractLine, fo
 import { createMemoryStorageAdapter, createStorageRepository } from './storage.mjs';
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { asObject } from './safe-values.mjs';
+import { createPostProcessRuntime } from './post-process-runtime.mjs';
 import {
   applyGenerationReviewPatches,
   buildGenerationReviewRequest,
@@ -2377,6 +2378,49 @@ export function createRecursionRuntime({
   let activeProseEnhancementLifecycle = null;
   let canceledProseEnhancement = null;
   let lastEditorialResult = null;
+
+  async function postProcessSourceStillCurrent(source = {}) {
+    if (typeof host?.messages?.activeAssistantMessageIdentity !== 'function') return false;
+    let identity;
+    try {
+      identity = await host.messages.activeAssistantMessageIdentity();
+    } catch {
+      return false;
+    }
+    if (!identity) return false;
+    const currentHash = safeText(identity.originalHash || hashJson(String(identity.text ?? '')), 180);
+    if (
+      safeText(identity.chatKey || '', 180) !== safeText(source.chatKey || '', 180)
+      || Number(identity.messageId) !== Number(source.sourceMessageId)
+      || Number(identity.swipeId ?? 0) !== Number(source.sourceSwipeId ?? 0)
+      || currentHash !== safeText(source.sourceHash || '', 180)
+    ) {
+      return false;
+    }
+    if (!source.activeCharacterId && !source.activeGroupId) return true;
+    try {
+      const currentSnapshot = typeof host.snapshot === 'function' ? await host.snapshot() : {};
+      return safeText(currentSnapshot?.activeCharacterId || currentSnapshot?.characterId || '', 180)
+          === safeText(source.activeCharacterId || '', 180)
+        && safeText(currentSnapshot?.activeGroupId || currentSnapshot?.groupId || '', 180)
+          === safeText(source.activeGroupId || '', 180);
+    } catch {
+      return false;
+    }
+  }
+
+  const postProcessRuntime = createPostProcessRuntime({
+    host,
+    generationRouter,
+    settingsStore,
+    activity,
+    snapshotProvider: async () => ({
+      ...(await host.snapshot()),
+      preProcessPromptPacket: lastBriefPacket,
+      storyForm: lastBriefPacket?.storyForm ?? null
+    }),
+    sourceGuard: postProcessSourceStillCurrent
+  });
 
   function createPreparedGenerationCandidate(packet, hand, snapshot, settings) {
     const basis = generationBasisForSnapshot(snapshot, settings);
@@ -8025,6 +8069,11 @@ export function createRecursionRuntime({
     handleLatestAssistantSwipeRetry: markLatestAssistantSwipeRetry,
     handleHostGenerationStopped,
     handleHostGenerationEnded,
+    postProcessPending: postProcessRuntime.postProcessPending,
+    postProcessRunning: postProcessRuntime.postProcessRunning,
+    runPostProcessForLatestAssistant: postProcessRuntime.runPostProcessForLatestAssistant,
+    cancelPostProcess: postProcessRuntime.cancelPostProcess,
+    postProcessDiagnostics: postProcessRuntime.postProcessDiagnostics,
     enhanceLatestAssistantMessage,
     proseEnhancementPending,
     proseEnhancementRunning,

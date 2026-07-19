@@ -2581,6 +2581,103 @@ try {
       .find((button) => button.dataset.recursionPostProcessCardEdit === cancelEditCardId),
     'Escape returns focus to the card editor launcher'
   );
+
+  const deckDeleteLauncher = root.querySelector('[data-recursion-post-process-deck-delete]');
+  const customDeckName = view.settings.postProcessDecks.customDecks[customPostProcessDeckId].name;
+  deckDeleteLauncher.click();
+  const deckDeleteDialog = root.querySelector('[data-recursion-post-process-delete-confirm]');
+  assertEqual(deckDeleteDialog.getAttribute('role'), 'alertdialog', 'deck delete confirmation uses alertdialog semantics');
+  assertEqual(deckDeleteDialog.getAttribute('aria-label'), `Delete ${customDeckName}`, 'deck delete confirmation is labeled with the deck name');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-delete-text]'), 'deck delete confirmation focuses its typed-name input');
+  root.querySelector('[data-recursion-post-process-delete-cancel]').click();
+  assertEqual(root.querySelector('[data-recursion-post-process-delete-confirm]'), null, 'deck delete Cancel closes only the confirmation');
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'deck delete Cancel keeps the Post-process panel open');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-deck-delete]'), 'deck delete Cancel restores its exact launcher');
+  root.querySelector('[data-recursion-post-process-deck-delete]').click();
+  fakeDocument.body.keydown({ key: 'Escape' });
+  assertEqual(root.querySelector('[data-recursion-post-process-delete-confirm]'), null, 'document Escape closes the deck delete confirmation');
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'document Escape keeps the panel open after deck delete dismissal');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-deck-delete]'), 'document Escape restores the exact deck delete launcher');
+
+  const polishDeleteLauncher = root.querySelectorAll('[data-recursion-post-process-category-delete]')
+    .find((button) => button.dataset.recursionPostProcessCategoryDelete === revisedPolishCategory.id);
+  polishDeleteLauncher.click();
+  const categoryDeleteDialog = root.querySelector('[data-recursion-post-process-delete-confirm]');
+  assertEqual(categoryDeleteDialog.getAttribute('role'), 'alertdialog', 'category delete confirmation uses alertdialog semantics');
+  assertEqual(categoryDeleteDialog.getAttribute('aria-label'), 'Delete Polish revised', 'category delete confirmation is labeled with the category name');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-delete-cancel]'), 'category delete confirmation focuses its first actionable button');
+  root.querySelector('[data-recursion-post-process-delete-cancel]').click();
+  assertEqual(root.querySelector('[data-recursion-post-process-delete-confirm]'), null, 'category delete Cancel closes only the confirmation');
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'category delete Cancel keeps the Post-process panel open');
+  assertEqual(
+    fakeDocument.activeElement,
+    root.querySelectorAll('[data-recursion-post-process-category-delete]')
+      .find((button) => button.dataset.recursionPostProcessCategoryDelete === revisedPolishCategory.id),
+    'category delete Cancel restores its exact launcher'
+  );
+  root.querySelectorAll('[data-recursion-post-process-category-delete]')
+    .find((button) => button.dataset.recursionPostProcessCategoryDelete === revisedPolishCategory.id)
+    .click();
+  fakeDocument.body.keydown({ key: 'Escape' });
+  assertEqual(root.querySelector('[data-recursion-post-process-delete-confirm]'), null, 'document Escape closes the category delete confirmation');
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'document Escape keeps the panel open after category delete dismissal');
+  assertEqual(
+    fakeDocument.activeElement,
+    root.querySelectorAll('[data-recursion-post-process-category-delete]')
+      .find((button) => button.dataset.recursionPostProcessCategoryDelete === revisedPolishCategory.id),
+    'document Escape restores the exact category delete launcher'
+  );
+
+  const tightenDeleteLauncher = root.querySelectorAll('[data-recursion-post-process-card-delete]')
+    .find((button) => button.dataset.recursionPostProcessCardDelete === tightenCard.id);
+  tightenDeleteLauncher.click();
+  const cardDeleteDialog = root.querySelector('[data-recursion-post-process-delete-confirm]');
+  assertEqual(cardDeleteDialog.getAttribute('role'), 'alertdialog', 'card delete confirmation uses alertdialog semantics');
+  assertEqual(cardDeleteDialog.getAttribute('aria-label'), 'Delete Tighten revised', 'card delete confirmation is labeled with the card name');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-delete-cancel]'), 'card delete confirmation focuses its first actionable button');
+  root.querySelector('[data-recursion-post-process-delete-cancel]').click();
+  assertEqual(root.querySelector('[data-recursion-post-process-delete-confirm]'), null, 'card delete Cancel closes only the confirmation');
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'card delete Cancel keeps the Post-process panel open');
+  assertEqual(
+    fakeDocument.activeElement,
+    root.querySelectorAll('[data-recursion-post-process-card-delete]')
+      .find((button) => button.dataset.recursionPostProcessCardDelete === tightenCard.id),
+    'card delete Cancel restores its exact launcher'
+  );
+  root.querySelectorAll('[data-recursion-post-process-card-delete]')
+    .find((button) => button.dataset.recursionPostProcessCardDelete === tightenCard.id)
+    .click();
+  fakeDocument.body.keydown({ key: 'Escape' });
+  assertEqual(root.querySelector('[data-recursion-post-process-delete-confirm]'), null, 'document Escape closes the card delete confirmation');
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'document Escape keeps the panel open after card delete dismissal');
+  assertEqual(
+    fakeDocument.activeElement,
+    root.querySelectorAll('[data-recursion-post-process-card-delete]')
+      .find((button) => button.dataset.recursionPostProcessCardDelete === tightenCard.id),
+    'document Escape restores the exact card delete launcher'
+  );
+
+  root.querySelectorAll('[data-recursion-post-process-card-delete]')
+    .find((button) => button.dataset.recursionPostProcessCardDelete === tightenCard.id)
+    .click();
+  root.querySelector('[data-recursion-post-process-delete-commit]').click();
+  assertEqual(
+    fakeDocument.activeElement,
+    root.querySelectorAll('[data-recursion-post-process-card-create]')
+      .find((button) => button.dataset.recursionPostProcessCardCreate === revisedPolishCategory.id),
+    'successful card deletion focuses Add Card in the same category'
+  );
+  root.querySelectorAll('[data-recursion-post-process-category-delete]')
+    .find((button) => button.dataset.recursionPostProcessCategoryDelete === revisedPolishCategory.id)
+    .click();
+  root.querySelector('[data-recursion-post-process-delete-commit]').click();
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-category-create]'), 'successful category deletion focuses New Category');
+  root.querySelector('[data-recursion-post-process-deck-delete]').click();
+  root.querySelector('[data-recursion-post-process-delete-text]').value = customDeckName;
+  root.querySelector('[data-recursion-post-process-delete-commit]').click();
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'successful deck deletion keeps the Post-process panel open');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-deck-select]'), 'successful deck deletion focuses the surviving deck selector');
+
   const postProcessDeckSelect = root.querySelector('[data-recursion-post-process-deck-select]');
   postProcessDeckSelect.value = 'starter-post-process';
   postProcessDeckSelect.dispatchEvent({ type: 'change' });

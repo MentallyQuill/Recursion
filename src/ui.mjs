@@ -4089,6 +4089,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let postProcessDeleteState = null;
   let postProcessDeckDeleteState = null;
   let postProcessEditorFocusReturn = null;
+  let postProcessDeleteFocusReturn = null;
   let expandedPostProcessCategoryKeys = new Set();
   let postProcessDragState = null;
   let cardLongPressTimer = null;
@@ -4152,6 +4153,59 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     postProcessPanelRenderKey = '';
     renderPostProcessPanelForView(currentView());
     focusNode(postProcessPanel.querySelector('[data-recursion-post-process-editor-name]'));
+  }
+
+  function postProcessControlResolver(selector, datasetKey = '', expectedValue = '') {
+    return () => {
+      const candidates = [...(postProcessPanel.querySelectorAll?.(selector) || [])];
+      if (!datasetKey) return candidates[0] || null;
+      return candidates.find((candidate) => cleanText(candidate.dataset?.[datasetKey]) === cleanText(expectedValue)) || null;
+    };
+  }
+
+  function openPostProcessDeleteConfirmation({
+    state,
+    launcher,
+    launcherSelector,
+    launcherDatasetKey = '',
+    successSelector,
+    successDatasetKey = '',
+    successValue = ''
+  }) {
+    postProcessDeleteFocusReturn = {
+      launcher: postProcessControlResolver(
+        launcherSelector,
+        launcherDatasetKey,
+        launcherDatasetKey ? launcher?.dataset?.[launcherDatasetKey] : ''
+      ),
+      success: postProcessControlResolver(successSelector, successDatasetKey, successValue)
+    };
+    if (state.kind === 'deck') postProcessDeckDeleteState = state;
+    else postProcessDeleteState = state;
+    postProcessPanelRenderKey = '';
+    renderPostProcessPanelForView(currentView());
+    focusNode(postProcessPanel.querySelector(
+      state.kind === 'deck'
+        ? '[data-recursion-post-process-delete-text]'
+        : '[data-recursion-post-process-delete-cancel]'
+    ));
+  }
+
+  function restorePostProcessDeleteFocus({ success = false } = {}) {
+    const focusReturn = postProcessDeleteFocusReturn;
+    postProcessDeleteFocusReturn = null;
+    const target = success
+      ? focusReturn?.success?.()
+      : focusReturn?.launcher?.() || focusReturn?.success?.();
+    focusNode(target || postProcessPanel.querySelector('[data-recursion-post-process-deck-select]') || postProcessButton);
+  }
+
+  function dismissPostProcessDeleteConfirmation() {
+    postProcessDeleteState = null;
+    postProcessDeckDeleteState = null;
+    postProcessPanelRenderKey = '';
+    renderPostProcessPanelForView(currentView());
+    restorePostProcessDeleteFocus();
   }
 
   function clearRibbonRevealTimer() {
@@ -4616,6 +4670,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       postProcessDeleteState = null;
       postProcessDeckDeleteState = null;
       postProcessEditorFocusReturn = null;
+      postProcessDeleteFocusReturn = null;
       expandedPostProcessCategoryKeys = new Set();
       postProcessPanelRenderKey = '';
     }
@@ -5946,17 +6001,18 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (event?.key === 'Escape') {
       consumeClickEvent(event);
       const editorWasOpen = Boolean(postProcessEditorState);
-      if (postProcessEditorState || postProcessDeleteState || postProcessDeckDeleteState) {
+      const deleteWasOpen = Boolean(postProcessDeleteState || postProcessDeckDeleteState);
+      if (postProcessEditorState) {
         postProcessEditorState = null;
-        postProcessDeleteState = null;
-        postProcessDeckDeleteState = null;
         postProcessPanelRenderKey = '';
         renderPostProcessPanelForView(currentView());
+      } else if (deleteWasOpen) {
+        dismissPostProcessDeleteConfirmation();
       } else {
         setPostProcessPanelOpen(false);
       }
       if (editorWasOpen) restorePostProcessEditorFocus();
-      else if (!postProcessPanel.hidden) focusNode(postProcessPanel.querySelector('[data-recursion-post-process-deck-select]'));
+      else if (!deleteWasOpen && !postProcessPanel.hidden) focusNode(postProcessPanel.querySelector('[data-recursion-post-process-deck-select]'));
       return;
     }
     const handle = closestPostProcessDragHandle(event?.target);
@@ -5990,7 +6046,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
   });
 
-  function mutateActivePostProcessDeck(mutator, status = '') {
+  function mutateActivePostProcessDeck(mutator, status = '', after = null) {
     const view = currentView();
     const deckSettings = normalizePostProcessDeckSettings(view.settings?.postProcessDecks);
     const deck = getActivePostProcessDeck(deckSettings);
@@ -6000,6 +6056,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     runAction(action, () => {
       postProcessPanelRenderKey = '';
       if (!postProcessPanel.hidden) renderPostProcessPanelForView(currentView());
+      after?.();
     });
   }
 
@@ -6088,9 +6145,12 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       consumeClickEvent(event);
       const deck = getActivePostProcessDeck(currentView().settings?.postProcessDecks);
       if (!deck.readonly) {
-        postProcessDeckDeleteState = { kind: 'deck', id: deck.id };
-        postProcessPanelRenderKey = '';
-        renderPostProcessPanelForView(currentView());
+        openPostProcessDeleteConfirmation({
+          state: { kind: 'deck', id: deck.id },
+          launcher: control('recursionPostProcessDeckDelete'),
+          launcherSelector: '[data-recursion-post-process-deck-delete]',
+          successSelector: '[data-recursion-post-process-deck-select]'
+        });
       }
     }
     const postCategoryExpand = control('recursionPostProcessCategoryExpand');
@@ -6149,9 +6209,13 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const postCategoryDelete = control('recursionPostProcessCategoryDelete');
     if (postCategoryDelete) {
       consumeClickEvent(event);
-      postProcessDeleteState = { kind: 'category', id: postCategoryDelete.dataset.recursionPostProcessCategoryDelete };
-      postProcessPanelRenderKey = '';
-      renderPostProcessPanelForView(currentView());
+      openPostProcessDeleteConfirmation({
+        state: { kind: 'category', id: postCategoryDelete.dataset.recursionPostProcessCategoryDelete },
+        launcher: postCategoryDelete,
+        launcherSelector: '[data-recursion-post-process-category-delete]',
+        launcherDatasetKey: 'recursionPostProcessCategoryDelete',
+        successSelector: '[data-recursion-post-process-category-create]'
+      });
     }
     const postCardCreate = control('recursionPostProcessCardCreate');
     if (postCardCreate) {
@@ -6184,9 +6248,18 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const postCardDelete = control('recursionPostProcessCardDelete');
     if (postCardDelete) {
       consumeClickEvent(event);
-      postProcessDeleteState = { kind: 'card', id: postCardDelete.dataset.recursionPostProcessCardDelete };
-      postProcessPanelRenderKey = '';
-      renderPostProcessPanelForView(currentView());
+      const cardId = postCardDelete.dataset.recursionPostProcessCardDelete;
+      const deck = getActivePostProcessDeck(currentView().settings?.postProcessDecks);
+      const categoryId = cleanText(deck.cards?.[cardId]?.categoryId);
+      openPostProcessDeleteConfirmation({
+        state: { kind: 'card', id: cardId, categoryId },
+        launcher: postCardDelete,
+        launcherSelector: '[data-recursion-post-process-card-delete]',
+        launcherDatasetKey: 'recursionPostProcessCardDelete',
+        successSelector: '[data-recursion-post-process-card-create]',
+        successDatasetKey: 'recursionPostProcessCardCreate',
+        successValue: categoryId
+      });
     }
     if (control('recursionPostProcessEditorCancel')) {
       consumeClickEvent(event);
@@ -6201,29 +6274,43 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     if (control('recursionPostProcessDeleteCancel')) {
       consumeClickEvent(event);
-      postProcessDeleteState = null;
-      postProcessDeckDeleteState = null;
-      postProcessPanelRenderKey = '';
-      renderPostProcessPanelForView(currentView());
+      dismissPostProcessDeleteConfirmation();
     }
     if (control('recursionPostProcessDeleteCommit')) {
       consumeClickEvent(event);
       const deck = getActivePostProcessDeck(currentView().settings?.postProcessDecks);
       const state = postProcessDeckDeleteState || postProcessDeleteState;
       if (state?.kind === 'deck') {
-        const typed = cleanText(postProcessPanel.querySelector('[data-recursion-post-process-delete-text]')?.value);
+        const typedInput = postProcessPanel.querySelector('[data-recursion-post-process-delete-text]');
+        const typed = cleanText(typedInput?.value);
         if (typed === deck.name) {
           postProcessDeckDeleteState = null;
-          runAction(applyPostProcessDeckSettings(deleteCustomPostProcessDeck(currentView().settings?.postProcessDecks, deck.id), 'Post-process Deck deleted.'));
+          runAction(
+            applyPostProcessDeckSettings(deleteCustomPostProcessDeck(currentView().settings?.postProcessDecks, deck.id), 'Post-process Deck deleted.'),
+            () => {
+              postProcessPanelRenderKey = '';
+              if (!postProcessPanel.hidden) renderPostProcessPanelForView(currentView());
+              restorePostProcessDeleteFocus({ success: true });
+            }
+          );
         } else {
           showCardSystemStatus(`Type ${deck.name} to confirm deletion.`, 'warning');
+          focusNode(typedInput);
         }
       } else if (state?.kind === 'category') {
         postProcessDeleteState = null;
-        mutateActivePostProcessDeck((source) => deletePostProcessCategory(source, state.id), 'Post-process category deleted.');
+        mutateActivePostProcessDeck(
+          (source) => deletePostProcessCategory(source, state.id),
+          'Post-process category deleted.',
+          () => restorePostProcessDeleteFocus({ success: true })
+        );
       } else if (state?.kind === 'card') {
         postProcessDeleteState = null;
-        mutateActivePostProcessDeck((source) => deletePostProcessCard(source, state.id), 'Post-process card deleted.');
+        mutateActivePostProcessDeck(
+          (source) => deletePostProcessCard(source, state.id),
+          'Post-process card deleted.',
+          () => restorePostProcessDeleteFocus({ success: true })
+        );
       }
     }
     const deleteConfirmControl = control('recursionCardDeleteConfirm')
@@ -6798,13 +6885,16 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       event.preventDefault?.();
       return;
     }
-    if (postProcessEditorState || postProcessDeleteState || postProcessDeckDeleteState) {
+    if (postProcessEditorState) {
       postProcessEditorState = null;
-      postProcessDeleteState = null;
-      postProcessDeckDeleteState = null;
       postProcessPanelRenderKey = '';
       renderPostProcessPanelForView(currentView());
-      focusNode(postProcessButton);
+      restorePostProcessEditorFocus();
+      event.preventDefault?.();
+      return;
+    }
+    if (postProcessDeleteState || postProcessDeckDeleteState) {
+      dismissPostProcessDeleteConfirmation();
       event.preventDefault?.();
       return;
     }

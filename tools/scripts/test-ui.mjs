@@ -2543,8 +2543,10 @@ try {
     'off',
     'category Off exposes each child card as effectively Off'
   );
+  root.querySelector('[data-recursion-post-process-panel]').scrollTop = 120;
   root.querySelector('[data-recursion-post-process-category-create]').click();
   assert(root.querySelector('[data-recursion-post-process-card-editor]'), 'new category opens the shared Post-process editor');
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').scrollTop, 0, 'opening a Post-process editor keeps the fixed panel shell header visible');
   assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-editor-name]'), 'category editor focuses its name field');
   root.querySelector('[data-recursion-post-process-editor-name]').value = 'Polish';
   root.querySelector('[data-recursion-post-process-editor-description]').value = 'Final polish pass.';
@@ -2604,8 +2606,10 @@ try {
 
   const deckDeleteLauncher = root.querySelector('[data-recursion-post-process-deck-delete]');
   const customDeckName = view.settings.postProcessDecks.customDecks[customPostProcessDeckId].name;
+  root.querySelector('[data-recursion-post-process-panel]').scrollTop = 120;
   deckDeleteLauncher.click();
   const deckDeleteDialog = root.querySelector('[data-recursion-post-process-delete-confirm]');
+  assertEqual(root.querySelector('[data-recursion-post-process-panel]').scrollTop, 0, 'opening Post-process delete confirmation keeps the fixed panel shell header visible');
   assertEqual(deckDeleteDialog.getAttribute('role'), 'alertdialog', 'deck delete confirmation uses alertdialog semantics');
   assertEqual(deckDeleteDialog.getAttribute('aria-label'), `Delete ${customDeckName}`, 'deck delete confirmation is labeled with the deck name');
   assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-delete-text]'), 'deck delete confirmation focuses its typed-name input');

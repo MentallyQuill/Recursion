@@ -4153,6 +4153,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     postProcessPanelRenderKey = '';
     renderPostProcessPanelForView(currentView());
     focusNode(postProcessPanel.querySelector('[data-recursion-post-process-editor-name]'));
+    postProcessPanel.scrollTop = 0;
   }
 
   function postProcessControlResolver(selector, datasetKey = '', expectedValue = '') {
@@ -4189,6 +4190,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         ? '[data-recursion-post-process-delete-text]'
         : '[data-recursion-post-process-delete-cancel]'
     ));
+    postProcessPanel.scrollTop = 0;
   }
 
   function restorePostProcessDeleteFocus({ success = false } = {}) {

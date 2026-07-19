@@ -820,6 +820,10 @@ assert(
   'Post-process panel keeps its ordered deck list as the primary scroll surface'
 );
 assert(
+  /\.recursion-post-process-button:focus-visible[\s\S]*?outline:\s*1px solid/.test(recursionCss),
+  'Post-process toolbar button has the shared visible keyboard focus outline'
+);
+assert(
   /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-post-process-panel\s*\{[\s\S]*?100dvh/.test(recursionCss),
   'Post-process panel clamps to the dynamic mobile viewport'
 );

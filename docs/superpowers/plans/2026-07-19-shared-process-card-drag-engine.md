@@ -71,4 +71,4 @@
 - [x] Run `npm.cmd run prove:card-system-ui` to prevent Pre-process drag regression.
 - [x] Run `git diff --check`, review the complete diff, and commit the drag repair.
 - [x] Review branch history and merge the verified branch into `card-system`.
-- [ ] Run the full suite on the integrated branch and verify installed copies before reporting completion.
+- [x] Run the full suite on the integrated branch and verify installed copies before reporting completion.

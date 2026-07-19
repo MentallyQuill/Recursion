@@ -1143,6 +1143,8 @@ function createLivePostProcessRuntimeHarness({
     'postProcessRunning',
     'runPostProcessForLatestAssistant',
     'cancelPostProcess',
+    'waitForPostProcessSettlement',
+    'postProcessFinalTargetReady',
     'postProcessDiagnostics'
   ]) {
     assertEqual(typeof runtime[method], 'function', `runtime delegates ${method}`);
@@ -1180,6 +1182,34 @@ function createLivePostProcessRuntimeHarness({
 }
 
 {
+  const writerGate = deferred();
+  const live = createLivePostProcessRuntimeHarness({
+    chatId: 'post-process-immediate-next-generation',
+    writer: async () => writerGate.promise
+  });
+  const firstRun = live.runtime.runPostProcessForLatestAssistant();
+  await waitUntil(() => live.writerCalls.length === 1, 'delayed prior Post-process writer did not start');
+  let nextPreparationSettled = false;
+  const nextPreparation = live.runtime.prepareForGeneration({
+    userMessage: 'Begin the immediate next host generation.',
+    hostGeneration: true,
+    generationType: 'normal'
+  }).then((result) => {
+    nextPreparationSettled = true;
+    return result;
+  });
+  await Promise.resolve();
+  assertEqual(nextPreparationSettled, false, 'next generation waits for canceled Post-process settlement before arming');
+  writerGate.resolve('Canceled prior candidate must not commit.');
+  const priorResult = await firstRun;
+  await nextPreparation;
+  assertEqual(priorResult.committed, false, 'canceled prior Post-process operation cannot commit');
+  assertEqual(priorResult.reason, 'canceled', 'canceled prior operation settles with the stable canceled reason');
+  assertEqual(live.runtime.postProcessPending(), true, 'immediate next generation reliably arms after prior cancellation settles');
+  assertEqual(live.assistant().swipes.length, 1, 'canceled prior operation leaves the assistant response unchanged');
+}
+
+{
   const live = createLivePostProcessRuntimeHarness();
   const result = await live.runtime.runPostProcessForLatestAssistant();
   assertEqual(result.committed, true, 'real runtime guard accepts an unchanged source with spaces and punctuation in its chat id');
@@ -1209,6 +1239,60 @@ function createLivePostProcessRuntimeHarness({
   assertEqual(result.reason, 'stale-source', 'lossy chat-key collision returns the stable stale-source reason');
   assertDeepEqual(live.assistant().swipes, originalSwipes, 'lossy chat-key collision preserves every source swipe');
   assertEqual(live.saveCalls.length, 0, 'lossy chat-key collision never reaches the host commit boundary');
+}
+
+for (const applyMode of ['as-swipe', 'replace']) {
+  for (const mutation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
+    const commitGate = deferred();
+    let commitBoundaryStarted = false;
+    let getterCalls = 0;
+    let resolvedChatId = `outer-guard-${applyMode}-${mutation}`;
+    const live = createLivePostProcessRuntimeHarness({
+      chatId: null,
+      applyMode,
+      getCurrentChatId: async () => {
+        getterCalls += 1;
+        if (getterCalls >= 4) {
+          commitBoundaryStarted = true;
+          await commitGate.promise;
+        }
+        return resolvedChatId;
+      },
+      writer: async () => `Outer guard ${applyMode} candidate.`
+    });
+    const originalAssistant = live.assistant();
+    const originalSwipes = clone(originalAssistant.swipes);
+    const run = live.runtime.runPostProcessForLatestAssistant();
+    await waitUntil(
+      () => commitBoundaryStarted,
+      `${applyMode} ${mutation} did not reach host commit after outer guard`
+    );
+    assert(getterCalls >= 4, `${applyMode} ${mutation} resolves snapshot, capture, and outer guard before host commit gate`);
+    if (mutation === 'edit') {
+      originalAssistant.mes = 'Edited inside the host commit window.';
+      originalAssistant.swipes[originalAssistant.swipe_id] = originalAssistant.mes;
+    } else if (mutation === 'swipe') {
+      originalAssistant.swipes.push('Swiped inside the host commit window.');
+      originalAssistant.swipe_info.push({ extra: {} });
+      originalAssistant.swipe_id = originalAssistant.swipes.length - 1;
+      originalAssistant.mes = originalAssistant.swipes[originalAssistant.swipe_id];
+    } else if (mutation === 'delete') {
+      live.context.chat.splice(1, 1);
+    } else if (mutation === 'chat-change') {
+      resolvedChatId = `changed-${resolvedChatId}`;
+    } else {
+      live.runtime.cancelPostProcess('stop-during-host-commit');
+    }
+    commitGate.resolve();
+    const result = await run;
+    assertEqual(result.committed, false, `${applyMode} ${mutation} cannot commit after the outer guard`);
+    assertEqual(live.saveCalls.length, 0, `${applyMode} ${mutation} performs no host save`);
+    assert(!originalAssistant.swipes.includes(`Outer guard ${applyMode} candidate.`), `${applyMode} ${mutation} appends no candidate`);
+    assert(originalAssistant.mes !== `Outer guard ${applyMode} candidate.`, `${applyMode} ${mutation} replaces no candidate`);
+    if (mutation === 'stop') {
+      assertDeepEqual(originalAssistant.swipes, originalSwipes, `${applyMode} Stop preserves the exact source swipe array`);
+    }
+  }
 }
 
 {

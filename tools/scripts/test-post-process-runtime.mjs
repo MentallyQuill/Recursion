@@ -661,7 +661,11 @@ test('22. Arming is consumed once and cancellation aborts an active host rewrite
     hostPlan: [hostGate.promise],
     activity
   });
-  assertEqual(harness.runtime.armPostProcess().armed, true, 'Post-process operation arms');
+  assertEqual(
+    harness.runtime.armPostProcess({ requireFinalTargetVerification: false }).armed,
+    true,
+    'Post-process operation arms'
+  );
   assertEqual(harness.runtime.postProcessPending(), true, 'armed operation reports pending');
   const running = harness.runtime.runPostProcessForLatestAssistant();
   await waitUntil(() => harness.hostCalls.length === 1, 'armed fixture host rewrite did not start');

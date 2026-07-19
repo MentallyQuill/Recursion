@@ -1475,6 +1475,56 @@ export function createSillyTavernHost({
     };
   }
 
+  async function validatePostProcessCommitSource(context, options = {}) {
+    const signal = options.signal;
+    const expected = asObject(options.expectedSourceIdentity);
+    const canceled = () => ({
+      ok: false,
+      error: {
+        code: 'RECURSION_POST_PROCESS_COMMIT_CANCELED',
+        message: 'Post-process commit was canceled before mutation.'
+      }
+    });
+    const stale = () => ({
+      ok: false,
+      error: {
+        code: 'RECURSION_POST_PROCESS_SOURCE_STALE',
+        message: 'Post-process source changed before final commit.'
+      }
+    });
+    if (signal?.aborted) return canceled();
+    if (
+      !stringValue(expected.chatIdentityHash)
+      || expected.messageId === undefined
+      || expected.messageId === null
+      || !stringValue(expected.sourceTextHash || expected.originalHash)
+    ) {
+      return stale();
+    }
+    let chatId;
+    try {
+      chatId = await readChatId(context);
+    } catch {
+      return stale();
+    }
+    if (signal?.aborted) return canceled();
+    const current = assistantMessageIdentity(context, {
+      chatKey: safeId(chatId, 'chat'),
+      chatIdentityHash: hashJson(chatId)
+    });
+    if (!current) return stale();
+    const expectedSourceTextHash = stringValue(expected.sourceTextHash || expected.originalHash);
+    const matches = current.chatIdentityHash === stringValue(expected.chatIdentityHash)
+      && Number(current.messageId) === Number(expected.messageId)
+      && Number(current.swipeId ?? 0) === Number(expected.swipeId ?? 0)
+      && current.originalHash === expectedSourceTextHash
+      && current.activeCharacterHash === stringValue(expected.activeCharacterHash || '')
+      && current.activeGroupHash === stringValue(expected.activeGroupHash || '');
+    if (!matches) return stale();
+    if (signal?.aborted) return canceled();
+    return { ok: true, current };
+  }
+
   const messagesApi = {
     activeAssistantMessageIdentity() {
       const context = currentContext(contextFactory);
@@ -1521,6 +1571,10 @@ export function createSillyTavernHost({
     },
     async replaceAssistantMessageText(messageId, text, options = {}) {
       const context = currentContext(contextFactory);
+      if (options.markerNamespace === 'postProcess') {
+        const validation = await validatePostProcessCommitSource(context, options);
+        if (!validation.ok) return validation;
+      }
       const found = findRawAssistantMessage(context, messageId);
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
       const original = cloneJsonSafe(found.raw);
@@ -1562,6 +1616,10 @@ export function createSillyTavernHost({
     },
     async appendAssistantMessageSwipe(messageId, text, options = {}) {
       const context = currentContext(contextFactory);
+      if (options.markerNamespace === 'postProcess') {
+        const validation = await validatePostProcessCommitSource(context, options);
+        if (!validation.ok) return validation;
+      }
       const found = findRawAssistantMessage(context, messageId);
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
       const original = cloneJsonSafe(found.raw);

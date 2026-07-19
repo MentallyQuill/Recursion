@@ -329,17 +329,27 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         if (!finalGenerationEvent) {
           return { ok: true, skipped: true, reason: 'post-process-awaiting-generation-ended' };
         }
-        return lockPostProcessControls(currentHost)
-          .then(() => invokeRuntimeCleanup(
-            'runPostProcessForLatestAssistant',
-            'Post-processing failed.',
-            { reason: 'assistant-message-landed' }
-          ))
-          .then(() => generationEnded())
-          .finally(() => unlockPostProcessControls(currentHost))
-          .then(() => {
-            lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
-            return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
+        return Promise.resolve(nextRuntime.postProcessFinalTargetReady?.(details))
+          .then((target) => {
+            if (target?.ready !== true) {
+              return {
+                ok: true,
+                skipped: true,
+                reason: target?.reason || 'post-process-final-target-unverified'
+              };
+            }
+            return lockPostProcessControls(currentHost)
+              .then(() => invokeRuntimeCleanup(
+                'runPostProcessForLatestAssistant',
+                'Post-processing failed.',
+                { reason: 'assistant-message-landed' }
+              ))
+              .then(() => generationEnded())
+              .finally(() => unlockPostProcessControls(currentHost))
+              .then(() => {
+                lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
+                return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
+              });
           });
       }
       if (!nextAssistantIdentity || nextAssistantIdentity === lastAssistantIdentity) {

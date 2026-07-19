@@ -1836,9 +1836,14 @@ assert(!JSON.stringify(getterPreferredIdentity).includes(conflictingMetadataChat
     partial: false,
     categories: []
   };
+  const expectedSwipeSource = await markerHost.messages.postProcessSourceIdentity();
   const appended = await markerHost.messages.appendAssistantMessageSwipe(12, swipeText, {
     markerNamespace: 'postProcess',
     marker: swipeMarker,
+    expectedSourceIdentity: {
+      ...expectedSwipeSource,
+      sourceTextHash: expectedSwipeSource.originalHash
+    },
     select: true
   });
   assertEqual(appended.ok, true, 'generic host API appends a Post-process swipe');
@@ -1865,9 +1870,14 @@ assert(!JSON.stringify(getterPreferredIdentity).includes(conflictingMetadataChat
     committedApplyMode: 'replace'
   };
   const beforeReplaceCount = markerContext.chat[0].swipes.length;
+  const expectedReplaceSource = await markerHost.messages.postProcessSourceIdentity();
   const replaced = await markerHost.messages.replaceAssistantMessageText(12, replaceText, {
     markerNamespace: 'postProcess',
-    marker: replacementMarker
+    marker: replacementMarker,
+    expectedSourceIdentity: {
+      ...expectedReplaceSource,
+      sourceTextHash: expectedReplaceSource.originalHash
+    }
   });
   assertEqual(replaced.ok, true, 'generic host API replaces a Post-process response');
   assertEqual(markerContext.chat[0].swipes.length, beforeReplaceCount, 'Post-process Replace preserves swipe count');
@@ -1878,6 +1888,100 @@ assert(!JSON.stringify(getterPreferredIdentity).includes(conflictingMetadataChat
     'Post-process replacement aligns selected swipe metadata'
   );
   assertEqual(markerHost.messages.activeAssistantMessageIdentity().postProcessOwned, true, 'active Post-process replacement is recognized');
+}
+
+for (const mode of ['as-swipe', 'replace']) {
+  for (const mutation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
+    const sourceText = `Atomic ${mode} source.`;
+    let saveCount = 0;
+    let releaseChatId;
+    let getterStarted = false;
+    const chatIdGate = new Promise((resolve) => { releaseChatId = resolve; });
+    const controller = new AbortController();
+    const context = {
+      chatId: `atomic-${mode}-${mutation}`,
+      characterId: 'atomic-character',
+      groupId: 'atomic-group',
+      chat: [{
+        mesid: 21,
+        is_user: false,
+        mes: sourceText,
+        swipe_id: 0,
+        swipes: [sourceText],
+        swipe_info: [{ extra: {} }]
+      }],
+      saveChat() {
+        saveCount += 1;
+      },
+      updateMessageBlock() {},
+      swipe: { refresh() {} }
+    };
+    const atomicHost = createSillyTavernHost({
+      contextFactory: () => context,
+      settingsRoot: {}
+    });
+    const expectedSourceIdentity = await atomicHost.messages.postProcessSourceIdentity();
+    let resolvedChatId = context.chatId;
+    delete context.chatId;
+    context.getCurrentChatId = async () => {
+      getterStarted = true;
+      await chatIdGate;
+      return resolvedChatId;
+    };
+    const candidate = `Atomic ${mode} candidate.`;
+    const marker = {
+      schema: 'recursion.postProcessMarker.v1',
+      operationId: `atomic-${mode}-${mutation}`,
+      sourceHash: hashJson(sourceText),
+      candidateHash: hashJson(candidate),
+      deckId: 'starter-post-process',
+      rewriteFlow: 'unified',
+      requestedApplyMode: mode,
+      committedApplyMode: mode,
+      lane: 'utility',
+      partial: false,
+      categories: []
+    };
+    const options = {
+      markerNamespace: 'postProcess',
+      marker,
+      expectedSourceIdentity,
+      signal: controller.signal,
+      ...(mode === 'as-swipe' ? { select: true } : {})
+    };
+    const commit = mode === 'as-swipe'
+      ? atomicHost.messages.appendAssistantMessageSwipe(21, candidate, options)
+      : atomicHost.messages.replaceAssistantMessageText(21, candidate, options);
+    for (let attempt = 0; attempt < 20 && !getterStarted; attempt += 1) {
+      await Promise.resolve();
+    }
+    assertEqual(getterStarted, true, `${mode} ${mutation} reaches the gated host commit identity check`);
+    if (mutation === 'edit') {
+      context.chat[0].mes = 'Edited after outer guard.';
+      context.chat[0].swipes[0] = context.chat[0].mes;
+    } else if (mutation === 'swipe') {
+      context.chat[0].swipes.push('Swiped after outer guard.');
+      context.chat[0].swipe_info.push({ extra: {} });
+      context.chat[0].swipe_id = 1;
+      context.chat[0].mes = context.chat[0].swipes[1];
+    } else if (mutation === 'delete') {
+      context.chat = [];
+    } else if (mutation === 'chat-change') {
+      resolvedChatId = `changed-${resolvedChatId}`;
+    } else {
+      controller.abort();
+    }
+    releaseChatId();
+    const result = await commit;
+    assertEqual(result.ok, false, `${mode} ${mutation} is rejected inside the host mutation boundary`);
+    assertEqual(saveCount, 0, `${mode} ${mutation} never saves a mutation`);
+    if (context.chat[0]) {
+      assert(!context.chat[0].swipes.includes(candidate), `${mode} ${mutation} never appends candidate text`);
+      assert(context.chat[0].mes !== candidate, `${mode} ${mutation} never replaces visible text`);
+      assertEqual(context.chat[0].__recursionPostProcess, undefined, `${mode} ${mutation} persists no replacement marker`);
+      assertEqual(context.chat[0].__recursionPostProcessSwipes, undefined, `${mode} ${mutation} persists no swipe marker`);
+    }
+  }
 }
 
 console.log('[pass] host');

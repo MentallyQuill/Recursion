@@ -1491,6 +1491,77 @@ if (false) {
 }
 
 {
+  const fake = createFakeSillyTavernContext('post-process-final-target-binding');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    GENERATION_ENDED: 'generation_ended'
+  };
+  fake.context.chat = [
+    {
+      mesid: 0,
+      is_user: false,
+      mes: 'Prior assistant response must not be rewritten.',
+      swipe_id: 0,
+      swipes: ['Prior assistant response must not be rewritten.'],
+      swipe_info: [{ extra: {} }]
+    },
+    { mesid: 1, is_user: true, mes: 'Generate a genuinely new response.' }
+  ];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasoningLevel: 'medium',
+      postProcess: {
+        enabled: true,
+        applyMode: 'as-swipe',
+        rewriteFlow: 'unified',
+        contextMessages: 13
+      }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'normal');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  assertEqual(activeRuntime.postProcessPending(), true, 'final-target fixture arms Post-process');
+  let runCalls = 0;
+  activeRuntime.runPostProcessForLatestAssistant = async () => {
+    runCalls += 1;
+    activeRuntime.cancelPostProcess('test-consumed');
+    return { ok: true, committed: false, skipped: true };
+  };
+
+  await eventSource.emit('generation_ended', { mesid: 0 });
+  assertEqual(runCalls, 0, 'generation-ended with no new assistant target cannot rewrite the prior response');
+  assertEqual(activeRuntime.postProcessPending(), true, 'invalid early terminal event does not consume the pending arm');
+
+  fake.context.chat.push({
+    mesid: 2,
+    is_user: false,
+    mes: 'The newly landed final assistant response.',
+    swipe_id: 0,
+    swipes: ['The newly landed final assistant response.'],
+    swipe_info: [{ extra: {} }]
+  });
+  await eventSource.emit('generation_ended', { mesid: 999 });
+  assertEqual(runCalls, 0, 'mismatched terminal message id cannot consume the Post-process arm');
+  assertEqual(activeRuntime.postProcessPending(), true, 'mismatched terminal event leaves the valid arm pending');
+  await eventSource.emit('generation_ended', { mesid: 2 });
+  assertEqual(runCalls, 1, 'matching newly landed final assistant target consumes the arm exactly once');
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const fake = createFakeSillyTavernContext('post-process-lifecycle-events');
   const eventSource = createFakeEventSource();
   fake.context.eventSource = eventSource;

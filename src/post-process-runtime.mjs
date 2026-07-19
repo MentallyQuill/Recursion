@@ -615,13 +615,17 @@ async function defaultCommitResult(host, input) {
   if (input.mode === 'replace' && typeof messages?.replaceAssistantMessageText === 'function') {
     return messages.replaceAssistantMessageText(messageId, input.text, {
       markerNamespace: input.markerNamespace,
-      marker: input.marker
+      marker: input.marker,
+      expectedSourceIdentity: input.expectedSourceIdentity,
+      signal: input.signal
     });
   }
   if (input.mode === 'as-swipe' && typeof messages?.appendAssistantMessageSwipe === 'function') {
     return messages.appendAssistantMessageSwipe(messageId, input.text, {
       markerNamespace: input.markerNamespace,
       marker: input.marker,
+      expectedSourceIdentity: input.expectedSourceIdentity,
+      signal: input.signal,
       select: true
     });
   }
@@ -644,7 +648,8 @@ export function createPostProcessRuntime({
   commitResult = (input) => defaultCommitResult(host, input)
 } = {}) {
   let active = null;
-  let armed = false;
+  let armed = null;
+  let verifiedFinalTarget = null;
   let lastDiagnostics = diagnosticsFor(null);
 
   function publish(method, event) {
@@ -772,6 +777,20 @@ export function createPostProcessRuntime({
         currentSettings,
         host
       );
+      if (record.expectedFinalTarget) {
+        const expected = record.expectedFinalTarget;
+        const matchesVerifiedTarget = capturedSnapshot.chatIdentityHash === expected.chatIdentityHash
+          && Number(capturedSnapshot.sourceMessageId) === Number(expected.messageId)
+          && Number(capturedSnapshot.sourceSwipeId ?? 0) === Number(expected.swipeId ?? 0)
+          && capturedSnapshot.sourceHash === expected.sourceTextHash
+          && capturedSnapshot.activeCharacterHash === expected.activeCharacterHash
+          && capturedSnapshot.activeGroupHash === expected.activeGroupHash;
+        if (!matchesVerifiedTarget) {
+          return finishWithoutCommit(null, 'stale-source', [], {}, record);
+        }
+      } else if (record.consumedArm && record.consumedArm.requireFinalTargetVerification !== false) {
+        return finishWithoutCommit(null, 'final-target-unverified', [], {}, record);
+      }
       const deck = await deckProvider(currentSettings);
       operation = {
         ...buildPostProcessPlan({
@@ -853,6 +872,14 @@ export function createPostProcessRuntime({
           outcomes: diagnosticCategories(outcomes),
           markerNamespace: 'postProcess',
           marker,
+          expectedSourceIdentity: {
+            chatIdentityHash: operation.snapshot.chatIdentityHash,
+            messageId: operation.snapshot.sourceMessageId,
+            swipeId: operation.snapshot.sourceSwipeId,
+            sourceTextHash: marker.sourceHash,
+            activeCharacterHash: operation.snapshot.activeCharacterHash,
+            activeGroupHash: operation.snapshot.activeGroupHash
+          },
           text: candidate,
           signal: operation.signal
         });
@@ -940,12 +967,17 @@ export function createPostProcessRuntime({
 
   function runPostProcessForLatestAssistant() {
     if (active?.promise) return active.promise;
-    armed = false;
+    const consumedArm = armed;
+    const expectedFinalTarget = verifiedFinalTarget;
+    armed = null;
+    verifiedFinalTarget = null;
     const record = {
       controller: new AbortController(),
       phase: 'pending',
       activityStarted: false,
       activitySettled: false,
+      consumedArm,
+      expectedFinalTarget,
       promise: null
     };
     active = record;
@@ -955,27 +987,113 @@ export function createPostProcessRuntime({
     return record.promise;
   }
 
-  function armPostProcess() {
+  function armPostProcess(input = {}) {
     if (settingsStore?.get?.()?.postProcess?.enabled !== true) {
-      armed = false;
+      armed = null;
+      verifiedFinalTarget = null;
       return { ok: true, armed: false, reason: 'disabled' };
     }
     if (active) return { ok: true, armed: false, reason: 'running' };
-    armed = true;
+    const before = isObject(input.preGenerationSourceIdentity)
+      ? {
+          chatIdentityHash: cleanText(input.preGenerationSourceIdentity.chatIdentityHash),
+          messageId: input.preGenerationSourceIdentity.messageId ?? null,
+          swipeId: Number(input.preGenerationSourceIdentity.swipeId ?? 0),
+          sourceTextHash: cleanText(
+            input.preGenerationSourceIdentity.sourceTextHash
+            || input.preGenerationSourceIdentity.originalHash
+          ),
+          activeCharacterHash: cleanText(input.preGenerationSourceIdentity.activeCharacterHash),
+          activeGroupHash: cleanText(input.preGenerationSourceIdentity.activeGroupHash)
+        }
+      : null;
+    armed = deepFreeze({
+      generationType: cleanText(input.generationType || 'normal').toLowerCase(),
+      requireFinalTargetVerification: input.requireFinalTargetVerification !== false,
+      before
+    });
+    verifiedFinalTarget = null;
     return { ok: true, armed: true };
   }
 
   function cancelPostProcess() {
-    const canceled = armed || Boolean(active);
-    armed = false;
+    const canceled = Boolean(armed || active);
+    armed = null;
+    verifiedFinalTarget = null;
     if (!active) return { ok: true, canceled };
     active.controller.abort();
     return { ok: true, canceled: true };
   }
 
+  async function waitForPostProcessSettlement() {
+    const pendingRun = active?.promise;
+    if (!pendingRun) return { ok: true, settled: true, active: false };
+    try {
+      await pendingRun;
+    } catch {
+      // Execute normalizes failures, but settlement must remain fail-soft.
+    }
+    return { ok: true, settled: true, active: Boolean(active) };
+  }
+
+  async function postProcessFinalTargetReady(details = {}) {
+    const arm = armed;
+    if (!arm) return { ok: true, ready: false, reason: 'post-process-not-armed' };
+    if (typeof host?.messages?.postProcessSourceIdentity !== 'function') {
+      return { ok: true, ready: false, reason: 'post-process-target-unavailable' };
+    }
+    let current;
+    try {
+      current = await host.messages.postProcessSourceIdentity();
+    } catch {
+      current = null;
+    }
+    if (!current || !cleanText(current.text) || !cleanText(current.originalHash)) {
+      return { ok: true, ready: false, reason: 'post-process-final-target-missing' };
+    }
+    const eventMessageId = details?.messageId ?? details?.mesid ?? details?.id ?? null;
+    if (
+      eventMessageId !== null
+      && eventMessageId !== undefined
+      && String(eventMessageId) !== String(current.messageId)
+    ) {
+      return { ok: true, ready: false, reason: 'post-process-final-target-mismatch' };
+    }
+    const before = arm.before;
+    if (before) {
+      if (
+        cleanText(current.chatIdentityHash) !== before.chatIdentityHash
+        || cleanText(current.activeCharacterHash) !== before.activeCharacterHash
+        || cleanText(current.activeGroupHash) !== before.activeGroupHash
+      ) {
+        return { ok: true, ready: false, reason: 'post-process-final-target-context-changed' };
+      }
+      const messageChanged = Number(current.messageId) !== Number(before.messageId);
+      const swipeChanged = Number(current.swipeId ?? 0) !== Number(before.swipeId ?? 0);
+      const textChanged = cleanText(current.originalHash) !== before.sourceTextHash;
+      const requiresNewMessage = !['swipe', 'regenerate'].includes(arm.generationType);
+      if (requiresNewMessage ? !messageChanged : !(messageChanged || swipeChanged || textChanged)) {
+        return { ok: true, ready: false, reason: 'post-process-final-target-unchanged' };
+      }
+    }
+    verifiedFinalTarget = deepFreeze({
+      chatIdentityHash: cleanText(current.chatIdentityHash),
+      messageId: current.messageId,
+      swipeId: Number(current.swipeId ?? 0),
+      sourceTextHash: cleanText(current.originalHash),
+      activeCharacterHash: cleanText(current.activeCharacterHash),
+      activeGroupHash: cleanText(current.activeGroupHash)
+    });
+    return {
+      ok: true,
+      ready: true,
+      target: cloneValue(verifiedFinalTarget)
+    };
+  }
+
   return {
     postProcessPending() {
-      return armed;
+      return Boolean(armed);
     },
     armPostProcess,
     postProcessRunning() {
@@ -983,6 +1101,8 @@ export function createPostProcessRuntime({
     },
     runPostProcessForLatestAssistant,
     cancelPostProcess,
+    waitForPostProcessSettlement,
+    postProcessFinalTargetReady,
     postProcessDiagnostics() {
       return cloneValue(lastDiagnostics);
     }

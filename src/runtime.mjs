@@ -7299,6 +7299,7 @@ export function createRecursionRuntime({
     }
     if (hostGeneration === true && postProcessRuntime.postProcessRunning()) {
       postProcessRuntime.cancelPostProcess(explicitSwipe ? 'latest-assistant-swipe' : 'new-host-generation');
+      await postProcessRuntime.waitForPostProcessSettlement();
     }
     setHostGenerationActive(hostGeneration);
     if (settings.enabled === false) {
@@ -7329,7 +7330,18 @@ export function createRecursionRuntime({
     await waitForExternalMutations();
     let pendingUserMessage = normalizePendingUserMessage(userMessage);
     const runId = makeId('run');
-    if (hostGeneration === true) postProcessRuntime.armPostProcess();
+    if (hostGeneration === true) {
+      let preGenerationSourceIdentity = null;
+      try {
+        preGenerationSourceIdentity = await host?.messages?.postProcessSourceIdentity?.() || null;
+      } catch {
+        preGenerationSourceIdentity = null;
+      }
+      postProcessRuntime.armPostProcess({
+        preGenerationSourceIdentity,
+        generationType: hostGenerationType || 'normal'
+      });
+    }
     else postProcessRuntime.cancelPostProcess('not-host-generation');
     if (hostGeneration === true) armProseEnhancementForHostGeneration(settings, runId);
     else clearPendingProseEnhancement();
@@ -8081,6 +8093,8 @@ export function createRecursionRuntime({
     armPostProcess: postProcessRuntime.armPostProcess,
     runPostProcessForLatestAssistant: postProcessRuntime.runPostProcessForLatestAssistant,
     cancelPostProcess: postProcessRuntime.cancelPostProcess,
+    waitForPostProcessSettlement: postProcessRuntime.waitForPostProcessSettlement,
+    postProcessFinalTargetReady: postProcessRuntime.postProcessFinalTargetReady,
     postProcessDiagnostics: postProcessRuntime.postProcessDiagnostics,
     enhanceLatestAssistantMessage,
     proseEnhancementPending,

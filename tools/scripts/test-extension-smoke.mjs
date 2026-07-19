@@ -1594,6 +1594,129 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
 }
 
 {
+  const fake = createFakeSillyTavernContext('post-process-duplicate-terminal-claim');
+  const eventSource = createFakeEventSource();
+  let releaseLock;
+  const lockGate = new Promise((resolve) => { releaseLock = resolve; });
+  let lockStarted = false;
+  let releaseWriter;
+  const writerGate = new Promise((resolve) => { releaseWriter = resolve; });
+  let writerSettled = false;
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    GENERATION_ENDED: 'generation_ended'
+  };
+  fake.context.deactivateSendButtons = () => {
+    fake.controlEvents.push('lock');
+    lockStarted = true;
+    return lockGate;
+  };
+  fake.context.activateSendButtons = () => {
+    fake.controlEvents.push('unlock');
+  };
+  fake.context.swipe = {
+    hide() {
+      fake.controlEvents.push('hide-swipes');
+    },
+    refresh() {}
+  };
+  fake.context.chat = [
+    { mesid: 0, is_user: true, mes: 'Generate one response despite duplicate terminal events.' }
+  ];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasoningLevel: 'medium',
+      postProcess: {
+        enabled: true,
+        applyMode: 'as-swipe',
+        rewriteFlow: 'unified',
+        contextMessages: 13
+      }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'normal');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  const originalTargetReady = activeRuntime.postProcessFinalTargetReady;
+  let finalTargetChecks = 0;
+  let finalizationClaims = 0;
+  let finalizationSkips = 0;
+  activeRuntime.postProcessFinalTargetReady = async (...args) => {
+    const result = await originalTargetReady(...args);
+    finalTargetChecks += 1;
+    if (result?.ready === true) finalizationClaims += 1;
+    if (result?.reason === 'post-process-finalization-in-progress') finalizationSkips += 1;
+    return result;
+  };
+  let runCalls = 0;
+  activeRuntime.runPostProcessForLatestAssistant = async () => {
+    runCalls += 1;
+    await writerGate;
+    writerSettled = true;
+    return { ok: true, committed: true };
+  };
+  let warmCalls = 0;
+  activeRuntime.warmRapidScene = async () => {
+    warmCalls += 1;
+    fake.controlEvents.push('warm');
+    return { ok: true };
+  };
+
+  const sourceText = 'The final response arrived once.';
+  fake.context.chat.push({
+    mesid: 1,
+    is_user: false,
+    mes: sourceText,
+    swipe_id: 0,
+    swipes: [sourceText],
+    swipe_info: [{ extra: {} }]
+  });
+  const firstEnd = eventSource.emit('generation_ended', { mesid: 1 });
+  await waitUntil(
+    () => lockStarted && finalizationClaims === 1,
+    'first terminal event did not claim finalization before the delayed control lock'
+  );
+  const duplicateEnd = eventSource.emit('generation_ended', { mesid: 1 });
+  await waitUntil(
+    () => finalTargetChecks === 2,
+    'duplicate terminal event did not resolve against the claimed finalization'
+  );
+  assertEqual(finalizationClaims, 1, 'duplicate terminal event cannot claim the same Post-process operation twice');
+  assertEqual(finalizationSkips, 1, 'duplicate terminal event skips as finalization already in progress');
+  assertEqual(runCalls, 0, 'duplicate terminal event cannot bypass the delayed control lock');
+  assertEqual(fake.controlEvents.filter((event) => event === 'unlock').length, 0, 'duplicate terminal event cannot unlock controls early');
+  assertEqual(warmCalls, 0, 'duplicate terminal event cannot warm Rapid early');
+
+  releaseLock();
+  await waitUntil(() => runCalls === 1, 'claimed finalization did not start one Post-process writer after lock');
+  assertEqual(writerSettled, false, 'Post-process writer remains pending behind the writer gate');
+  assertEqual(fake.controlEvents.filter((event) => event === 'unlock').length, 0, 'controls stay locked while the Post-process writer is pending');
+  assertEqual(warmCalls, 0, 'Rapid warming waits for the Post-process writer to settle');
+  releaseWriter();
+  await Promise.all([firstEnd, duplicateEnd]);
+  assertEqual(writerSettled, true, 'the one claimed Post-process writer settles');
+  assertEqual(runCalls, 1, 'duplicate terminal events start exactly one Post-process writer');
+  assertEqual(fake.controlEvents.filter((event) => event === 'unlock').length, 1, 'the claimed finalization unlocks controls exactly once');
+  assertEqual(warmCalls, 1, 'Rapid warms exactly once after the writer settles');
+  assert(
+    fake.controlEvents.indexOf('unlock') < fake.controlEvents.indexOf('warm'),
+    'final unlock precedes the one post-settlement Rapid warm'
+  );
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
   const fake = createFakeSillyTavernContext('post-process-final-target-binding');
   const eventSource = createFakeEventSource();
   fake.context.eventSource = eventSource;

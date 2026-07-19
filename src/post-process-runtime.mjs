@@ -649,7 +649,7 @@ export function createPostProcessRuntime({
 } = {}) {
   let active = null;
   let armed = null;
-  let verifiedFinalTarget = null;
+  let finalizationClaim = null;
   let lastDiagnostics = diagnosticsFor(null);
 
   function publish(method, event) {
@@ -971,9 +971,9 @@ export function createPostProcessRuntime({
       options.hostTriggered === true
       && (
         !armed
-        || !verifiedFinalTarget
+        || !finalizationClaim
         || cleanText(options.operationToken) !== armed.operationToken
-        || verifiedFinalTarget.operationToken !== armed.operationToken
+        || finalizationClaim.operationToken !== armed.operationToken
       )
     ) {
       return Promise.resolve({
@@ -984,9 +984,9 @@ export function createPostProcessRuntime({
       });
     }
     const consumedArm = armed;
-    const expectedFinalTarget = verifiedFinalTarget;
+    const expectedFinalTarget = finalizationClaim;
     armed = null;
-    verifiedFinalTarget = null;
+    finalizationClaim = null;
     const record = {
       controller: new AbortController(),
       phase: 'pending',
@@ -1006,7 +1006,7 @@ export function createPostProcessRuntime({
   function armPostProcess(input = {}) {
     if (settingsStore?.get?.()?.postProcess?.enabled !== true) {
       armed = null;
-      verifiedFinalTarget = null;
+      finalizationClaim = null;
       return { ok: true, armed: false, reason: 'disabled' };
     }
     if (active) return { ok: true, armed: false, reason: 'running' };
@@ -1029,14 +1029,14 @@ export function createPostProcessRuntime({
       requireFinalTargetVerification: input.requireFinalTargetVerification !== false,
       before
     });
-    verifiedFinalTarget = null;
+    finalizationClaim = null;
     return { ok: true, armed: true };
   }
 
   function cancelPostProcess() {
     const canceled = Boolean(armed || active);
     armed = null;
-    verifiedFinalTarget = null;
+    finalizationClaim = null;
     if (!active) return { ok: true, canceled };
     active.controller.abort();
     return { ok: true, canceled: true };
@@ -1056,6 +1056,9 @@ export function createPostProcessRuntime({
   async function postProcessFinalTargetReady(details = {}) {
     const arm = armed;
     if (!arm) return { ok: true, ready: false, reason: 'post-process-not-armed' };
+    if (finalizationClaim?.operationToken === arm.operationToken) {
+      return { ok: true, ready: false, reason: 'post-process-finalization-in-progress' };
+    }
     if (typeof host?.messages?.postProcessSourceIdentity !== 'function') {
       return { ok: true, ready: false, reason: 'post-process-target-unavailable' };
     }
@@ -1064,6 +1067,12 @@ export function createPostProcessRuntime({
       current = await host.messages.postProcessSourceIdentity();
     } catch {
       current = null;
+    }
+    if (armed !== arm) {
+      return { ok: true, ready: false, reason: 'post-process-arm-canceled' };
+    }
+    if (finalizationClaim) {
+      return { ok: true, ready: false, reason: 'post-process-finalization-in-progress' };
     }
     if (!current || !cleanText(current.text) || !cleanText(current.originalHash)) {
       return { ok: true, ready: false, reason: 'post-process-final-target-missing' };
@@ -1093,7 +1102,7 @@ export function createPostProcessRuntime({
         return { ok: true, ready: false, reason: 'post-process-final-target-unchanged' };
       }
     }
-    verifiedFinalTarget = deepFreeze({
+    finalizationClaim = deepFreeze({
       operationToken: arm.operationToken,
       chatIdentityHash: cleanText(current.chatIdentityHash),
       messageId: current.messageId,
@@ -1106,13 +1115,13 @@ export function createPostProcessRuntime({
       ok: true,
       ready: true,
       operationToken: arm.operationToken,
-      target: cloneValue(verifiedFinalTarget)
+      target: cloneValue(finalizationClaim)
     };
   }
 
   async function postProcessHostRunReady(operationToken) {
     const arm = armed;
-    const expected = verifiedFinalTarget;
+    const expected = finalizationClaim;
     if (
       !arm
       || !expected
@@ -1132,7 +1141,7 @@ export function createPostProcessRuntime({
     }
     if (
       armed !== arm
-      || verifiedFinalTarget !== expected
+      || finalizationClaim !== expected
       || cleanText(operationToken) !== arm.operationToken
     ) {
       return { ok: true, ready: false, reason: 'post-process-arm-canceled' };

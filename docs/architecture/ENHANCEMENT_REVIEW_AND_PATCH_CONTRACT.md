@@ -494,7 +494,7 @@ await appendJournalSafe(runId, identity.chatKey, {
 | `src/runtime.mjs` | Replace the sequential full-message Dialogue/Prose loop with one review call, one capped retry, generation-snapshot persistence, cache identity, and review progress. |
 | `src/dialogue-enhancement.mjs` | Move reusable dialogue detection rules into generation-review helpers, then remove the full-message request/validator path. |
 | `src/prose-enhancement.mjs` | Move `dialogueSpans` and the common slop list into generation-review helpers, then remove the full-message request/validator path. |
-| `src/card-decks.mjs`, `src/cards.mjs` | Expose a stable generation-time deck/installed-hand manifest and preserve individual source-card lineage through Standard and Fused results. |
+| `src/pre-process-decks.mjs`, `src/cards.mjs` | Expose a stable generation-time deck/installed-hand manifest and preserve individual source-card lineage through Standard and Fused results. |
 | `src/enhancement-context.mjs` | Supply bounded Prompt Packet, Last Brief, installed-card evidence, character evidence, and context identifiers. |
 | `src/progress.mjs`, `src/ui.mjs`, `src/ui/view-model.mjs` | Render the fixed Generation Review tree, card-outcome children, concise detail, and truthful cached/partial/failure states. |
 | `src/settings.mjs` and user docs | Replace separate Prose/Dialogue user controls and copy with one Enhancement operation. |

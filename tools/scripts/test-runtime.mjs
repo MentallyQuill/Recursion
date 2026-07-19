@@ -5880,6 +5880,28 @@ function createTrackedStorageRepository() {
 }
 
 {
+  const disabledSceneScope = setFamilyEnabled(defaultCardScope(), 'Scene Frame', false).scope;
+  const rawSettingsStore = createSettingsStore({ root: {} });
+  const canonicalGet = rawSettingsStore.get.bind(rawSettingsStore);
+  rawSettingsStore.get = () => {
+    const { preProcessDecks: omittedPreProcessDecks, ...rawSettings } = canonicalGet();
+    return { ...rawSettings, cardScope: disabledSceneScope };
+  };
+  const runtime = createRecursionRuntime({ settingsStore: rawSettingsStore });
+  const view = runtime.view();
+  assertEqual(
+    view.settings.cardScopeSummary.counts.selectedSubItems,
+    CARD_SCOPE_CATALOG.reduce((total, entry) => total + entry.subItems.length, 0),
+    'runtime ignores legacy cardScope from a raw custom settings store and derives the default Pre-process Deck scope'
+  );
+  assertEqual(
+    filterCardsForCardEligibility([{ id: 'raw-store-scene', family: 'Scene Frame' }], rawSettingsStore.get()).length,
+    1,
+    'runtime eligibility ignores legacy cardScope from a raw custom settings store and derives the default Pre-process Deck'
+  );
+}
+
+{
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'manual', maxCards: 5, reasonerUse: 'off' }
   });

@@ -249,8 +249,8 @@ function settingsWithRuntimeCardScope(settings = {}, options = {}) {
   };
   return {
     ...normalized,
-    cardScope: source.preProcessDecks ? activeCardDeckRuntimeScope(normalized) : normalizeCardScope(source.cardScope),
-    cardEligibility: source.preProcessDecks ? activeCardDeckEligibility(normalized) : null
+    cardScope: activeCardDeckRuntimeScope(normalized),
+    cardEligibility: activeCardDeckEligibility(normalized)
   };
 }
 
@@ -259,8 +259,8 @@ function runtimeScopePayload(settings = {}) {
 }
 
 function usesCardDeckEligibility(settings = {}) {
-  return Boolean(settings?.preProcessDecks)
-    && (settings.mode !== 'manual' || Object.keys(settings.preProcessDecks.customDecks || {}).length > 0);
+  const preProcessDecks = normalizeCardDeckSettings(settings?.preProcessDecks);
+  return settings.mode !== 'manual' || Object.keys(preProcessDecks.customDecks).length > 0;
 }
 
 function filterCardJobsForRuntimeScope(cardJobs, settings = {}) {

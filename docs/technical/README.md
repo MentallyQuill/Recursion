@@ -35,7 +35,7 @@ These manuals explain how Recursion works behind the SillyTavern UI. They are re
 
 | Source Area | Primary Manual |
 | --- | --- |
-| `src/runtime.mjs`, `src/card-decks.mjs`, `src/editorial-transform.mjs`, `src/failures.mjs`, `src/progress.mjs` | [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md), [Card Deck And Hand](CARD_DECK_AND_HAND.md), and [Generation Review Contract](../architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) |
+| `src/runtime.mjs`, `src/pre-process-decks.mjs`, `src/editorial-transform.mjs`, `src/failures.mjs`, `src/progress.mjs` | [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md), [Card Deck And Hand](CARD_DECK_AND_HAND.md), and [Generation Review Contract](../architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) |
 | `src/cards.mjs`, `src/card-scope.mjs` | [Card Deck And Hand](CARD_DECK_AND_HAND.md) and [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) |
 | `src/prompt.mjs` | [Prompt Packet And Injection](PROMPT_PACKET_AND_INJECTION.md) and [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) |
 | `src/providers.mjs`, provider settings in `src/settings.mjs`, `src/settings-policy.mjs`, `src/retention-policy.mjs` | [Model Calls And Provider Routing](MODEL_CALLS_AND_PROVIDER_ROUTING.md) and [Recursion Cost Research](RECURSION_COST_RESEARCH.md) |

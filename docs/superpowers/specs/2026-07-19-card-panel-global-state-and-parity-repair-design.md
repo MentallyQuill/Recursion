@@ -1,7 +1,7 @@
 # Card Panel Global State and Parity Repair Design
 
-**Date:** 2026-07-19  
-**Status:** Approved design  
+**Date:** 2026-07-19
+**Status:** Approved design
 **Scope:** Recursion Bar Pre-process/Post-process icons and both card-deck dropdowns
 
 ## Goal

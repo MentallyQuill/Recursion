@@ -905,13 +905,13 @@ Do not copy another large deck renderer into `src/ui.mjs`. Move presentation-onl
 export function renderDeckBar(options) { /* shared geometry */ }
 export function renderDeckCategory(options) { /* shared shell */ }
 export function renderDeckCard(options) { /* shared shell */ }
-export function createDeckDragController(options) { /* shared drag behavior */ }
 ```
 
 Keep semantics injected:
 
 - Pre-process cards supply Off/Active/Priority controls.
 - Post-process cards supply Off/On controls.
+- Both panels bind the same pointer-drag engine in `src/ui.mjs`.
 
 ### Step 3: Replace the toolbar control and panel
 

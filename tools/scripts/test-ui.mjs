@@ -11,7 +11,6 @@ import { createUiActionStatus, normalizeUiActionFailure } from '../../src/ui/act
 import { renderCompactBar } from '../../src/ui/bar.mjs';
 import {
   cardsPanelState,
-  createDeckDragController,
   renderDeckCard,
   renderDeckCategory,
   renderDeckPanelHeader,
@@ -129,70 +128,6 @@ assertEqual(cardsPanelState({ lastHand: { cards: [{ id: 'c1' }] } }).count, 1, '
   });
   assert(editableCard.className.includes('has-actions'), 'editable rows opt into the action rail');
   assertEqual(editableCard.children.length, 2, 'editable rows render main and action regions');
-}
-{
-  let heldCallback = null;
-  let nextFrameId = 0;
-  const frames = new Map();
-  const cancelledFrames = [];
-  const moves = [];
-  const scrollHost = {
-    scrollTop: 20,
-    getBoundingClientRect: () => ({ top: 100, bottom: 300 })
-  };
-  const dragController = createDeckDragController({
-    holdMs: 180,
-    setTimer(callback) {
-      heldCallback = callback;
-      return 1;
-    },
-    clearTimer() {
-      heldCallback = null;
-    },
-    requestFrame(callback) {
-      const id = ++nextFrameId;
-      frames.set(id, callback);
-      return id;
-    },
-    cancelFrame(id) {
-      cancelledFrames.push(id);
-      frames.delete(id);
-    },
-    onCategoryMove: (categoryId, beforeId) => moves.push({ categoryId, beforeId })
-  });
-  const runFrame = () => {
-    const entry = frames.entries().next().value;
-    assert(entry, 'continuous edge scrolling schedules another animation frame');
-    frames.delete(entry[0]);
-    entry[1]();
-  };
-
-  dragController.begin({ kind: 'category', id: 'category-a' }, { touch: true });
-  assertEqual(dragController.active(), null, 'touch drag waits for the short hold');
-  assertEqual(typeof heldCallback, 'function', 'touch drag exposes a cancellable hold callback');
-  heldCallback();
-  assertEqual(dragController.active().id, 'category-a', 'touch drag activates after the hold');
-  dragController.setEdgeScroll({ host: scrollHost, clientY: 292 });
-  runFrame();
-  const firstScrollTop = scrollHost.scrollTop;
-  assert(firstScrollTop > 20, 'touch drag scrolls while held stationary near the lower edge');
-  runFrame();
-  assert(scrollHost.scrollTop > firstScrollTop, 'touch edge scroll continues across animation frames without pointer movement');
-  assertEqual(dragController.drop({ beforeId: 'category-b' }), true, 'active touch drag drops normally after continuous scrolling');
-  assertDeepEqual(moves.at(-1), { categoryId: 'category-a', beforeId: 'category-b' }, 'drop preserves the requested category target');
-  assertEqual(frames.size, 0, 'drop cancels the edge-scroll animation loop');
-
-  dragController.begin({ kind: 'category', id: 'category-a' }, { touch: true });
-  heldCallback();
-  dragController.setEdgeScroll({ host: scrollHost, clientY: 108 });
-  dragController.cancel();
-  assertEqual(frames.size, 0, 'cancel tears down the edge-scroll animation loop');
-  assert(cancelledFrames.length >= 2, 'drop and cancel both cancel scheduled animation frames');
-
-  dragController.begin({ kind: 'category', id: 'category-a' }, { touch: true });
-  dragController.destroy();
-  assertEqual(heldCallback, null, 'destroy tears down a pending touch hold');
-  assertEqual(dragController.active(), null, 'destroy leaves no active drag');
 }
 const savedProviderDraft = {
   source: 'host-connection-profile',
@@ -1131,10 +1066,19 @@ assert(/\.recursion-card-drag-ghost\s*\{[\s\S]*?max-width:\s*none;/.test(recursi
   && /\.recursion-card-drag-ghost\.is-visible\s*\{[\s\S]*?opacity:\s*\.85;/.test(recursionCss), 'production Card System keeps the ghost width stable and uses 85 percent opacity');
 assert(/cardDragGhost = createCardDragGhost\(sourceNode\)[\s\S]*?sourceNode\.classList\?\.add\('is-dragging'\)/.test(recursionUi), 'production Card System clones the drag ghost before hiding the source row');
 assert(/ghost\.classList\?\.remove\('is-dragging'\)/.test(recursionUi), 'production Card System strips source drag state from the ghost clone');
-assert(/\.recursion-card-deck-card\.is-dragging,[\s\S]*?\.recursion-card-deck-category\.is-dragging\s*\{[\s\S]*?display:\s*none;/.test(recursionCss), 'production Card System removes the source row from layout while dragging');
+assert(/\.recursion-card-panel-card\.is-dragging,[\s\S]*?\.recursion-card-panel-category\.is-dragging\s*\{[\s\S]*?display:\s*none;/.test(recursionCss), 'both process Card panels remove the source row from layout while dragging');
 assert(/function cardDragAnimatedRows\(\)[\s\S]*?!node\.classList\?\.contains\('is-dragging'\)[\s\S]*?!node\.classList\?\.contains\('recursion-card-drag-placeholder'\)/.test(recursionUi), 'production Card System excludes transient drag nodes from reflow measurement');
 assert(!/recursion-card-drop-line/.test(recursionCss), 'production Card System no longer uses a thin drop-line as the primary drag insertion affordance');
 assert(/document\.addEventListener\?\.\('pointerup',\s*commitCardDrag,\s*true\)/.test(recursionUi), 'production Card System commits active drags from the document pointerup path');
+assert(/function bindCardPanelPointerDrag/.test(recursionUi), 'process Card panels share one pointer-drag event binder');
+assert(/bindCardPanelPointerDrag\(cardsPanel,\s*'pre'\)/.test(recursionUi), 'Pre-process binds the shared pointer-drag engine');
+assert(/bindCardPanelPointerDrag\(postProcessPanel,\s*'post'\)/.test(recursionUi), 'Post-process binds the shared pointer-drag engine');
+assert(!/postProcessPanel\.addEventListener\?\.\('dragstart'/.test(recursionUi), 'Post-process does not retain a separate native HTML drag path');
+assert(!/createDeckDragController/.test(recursionUi), 'production UI does not retain a separate Post-process drag controller');
+assert(
+  /if \(pointerType\) return pointerType === 'touch' \|\| pointerType === 'pen';/.test(recursionUi),
+  'shared card drag honors an explicit mouse pointer on coarse or convertible viewports'
+);
 assert(/function cardDragReducedMotion/.test(recursionUi), 'production Card System exposes a reduced-motion guard for drag animations');
 assert(/const eased = ratio \* ratio/.test(recursionUi), 'production Card System auto-scroll ramps drag velocity quadratically near panel edges');
 assert(/\.recursion-card-panel-category-head\s*\{[\s\S]*?cursor:\s*pointer;[\s\S]*?grid-template-columns:\s*24px minmax\(0,\s*1fr\);/.test(recursionCss), 'shared Category headers expose a full-row disclosure target with a left arrow column');
@@ -2737,6 +2681,10 @@ try {
   assert(root.querySelectorAll('[data-recursion-post-process-card-drag-handle]').length >= 6, 'editable duplicate exposes card drag handles');
   assert(root.querySelector('[data-recursion-post-process-category-drag-handle]').className.includes('recursion-card-drag-region-category'), 'editable Post-process category uses the shared category handle visual');
   assert(root.querySelector('[data-recursion-post-process-card-drag-handle]').className.includes('recursion-card-drag-region-card'), 'editable Post-process card uses the shared card handle visual');
+  assert(root.querySelector('[data-recursion-post-process-category]').dataset.recursionCardDeckCategory, 'Post-process categories expose the shared drag category dataset');
+  assert(root.querySelector('[data-recursion-post-process-card]').dataset.recursionCardId, 'Post-process cards expose the shared drag card dataset');
+  assertEqual(root.querySelector('[data-recursion-post-process-category-drag-handle]').getAttribute('draggable'), null, 'Post-process category drag uses pointer events instead of native draggable');
+  assertEqual(root.querySelector('[data-recursion-post-process-card-drag-handle]').getAttribute('draggable'), null, 'Post-process card drag uses pointer events instead of native draggable');
   assert(root.querySelector('[data-recursion-post-process-category-create]').className.includes('recursion-card-deck-tool-add'), 'editable Post-process deck uses the shared category creation plus');
   assert(root.querySelector('[data-recursion-post-process-card-create]'), 'editable Post-process category exposes a header create-card plus');
   assertEqual(root.querySelectorAll('[data-recursion-post-process-category-toggle]').length, 0, 'editable Post-process category headers also omit visibility eyes');
@@ -3193,12 +3141,12 @@ try {
   assertEqual(root.querySelector('[data-recursion-card-deck-deactivate-all]').getAttribute('aria-label'), 'Set all runnable cards to Inactive.', 'Default deck deactivate-all action explains its state change');
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-family]').length, 0, 'Cards dropdown removes legacy Card Scope family rows');
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]').length, 0, 'Cards dropdown removes legacy Card Scope sub-item rows');
-  assertEqual(root.querySelectorAll('[data-recursion-card-deck-category]').length, CARD_SCOPE_CATALOG.length, 'Cards dropdown renders Default deck categories as the primary surface');
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').querySelectorAll('[data-recursion-card-deck-category]').length, CARD_SCOPE_CATALOG.length, 'Cards dropdown renders Default deck categories as the primary surface');
   assert(root.querySelector('[data-recursion-card-deck-bar]').className.includes('recursion-card-panel-deck-bar'), 'Pre-process uses the shared deck toolbar');
   assert(root.querySelector('[data-recursion-card-deck-list]').className.includes('recursion-card-panel-list'), 'Pre-process uses the shared list');
   assert(root.querySelector('[data-recursion-cards-panel]').children.some((child) => child.className?.includes('recursion-card-panel-head')), 'Pre-process uses the shared header');
   assert(root.querySelector('[data-recursion-cards-panel]').children.some((child) => child.className?.includes('recursion-card-panel-foot')), 'Pre-process uses the shared footer');
-  assertEqual(root.querySelectorAll('[data-recursion-card-id]').length, 0, 'Cards dropdown defaults categories to collapsed instead of rendering every card');
+  assertEqual(root.querySelector('[data-recursion-cards-panel]').querySelectorAll('[data-recursion-card-id]').length, 0, 'Cards dropdown defaults categories to collapsed instead of rendering every card');
   assertEqual(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('aria-expanded'), 'false', 'collapsed category headers expose aria-expanded false');
   assertEqual(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('title'), CARD_SCOPE_CATALOG[0].description, 'Pre-process category description is available as hover text');
   assert(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('aria-label').includes(CARD_SCOPE_CATALOG[0].description), 'Pre-process category description remains in the accessible disclosure label');

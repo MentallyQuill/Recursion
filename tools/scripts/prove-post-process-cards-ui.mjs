@@ -8,6 +8,7 @@ import {
 import { basename, join, relative, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { chromium } from 'playwright';
+import { DEFAULT_PRE_PROCESS_DECK_ID } from '../../src/pre-process-decks.mjs';
 import { assertVisualBaselineBuffer } from './lib/visual-regression.mjs';
 import { runWithRetainedTrace } from './lib/trace-lifecycle.mjs';
 import {
@@ -30,7 +31,6 @@ const STATES = Object.freeze([
   'starter-progressive',
   'custom-deck',
   'card-editor',
-  'category-disabled',
   'delete-confirm'
 ]);
 const REQUIRED_SELECTORS = Object.freeze([
@@ -48,7 +48,6 @@ const REQUIRED_SELECTORS = Object.freeze([
   'data-recursion-post-process-flow-unified',
   'data-recursion-post-process-flow-progressive',
   'data-recursion-post-process-category',
-  'data-recursion-post-process-category-toggle',
   'data-recursion-post-process-category-drag-handle',
   'data-recursion-post-process-card',
   'data-recursion-post-process-card-toggle',
@@ -370,14 +369,14 @@ async function independentDeckProof(page) {
     return {
       enabled: settings.postProcess?.enabled === true,
       activeDeckId: deck,
-      summary: document.querySelector('[data-recursion-post-process-header]')?.textContent || '',
+      summary: document.querySelector('[data-recursion-post-process-header] .recursion-card-panel-summary')?.textContent?.trim() || '',
       editDisabled: document.querySelector('[data-recursion-post-process-deck-edit]')?.disabled === true,
       deleteDisabled: document.querySelector('[data-recursion-post-process-deck-delete]')?.disabled === true
     };
   });
   check(starter.enabled === false, 'Post-process Cards must be Off by default for the starter proof.');
   check(starter.activeDeckId === STARTER_DECK_ID, 'Starter Post-process Deck was not active.');
-  check(/6\/6 active/i.test(starter.summary), 'Starter Post-process Deck header did not use the shared count-only summary.');
+  check(starter.summary === 'Off', `Disabled Post-process header did not report Off: ${JSON.stringify(starter.summary)}`);
   check(starter.editDisabled && starter.deleteDisabled, 'Starter Post-process Deck did not communicate read-only structure through disabled authoring controls.');
   for (const name of ['Natural Prose', 'Follow Through']) await expandCategory(page, name, true);
   const starterRows = await page.evaluate(() => ({
@@ -443,6 +442,34 @@ async function dragTo(page, source, target) {
   }
 }
 
+async function selectPreProcessDeck(page, deckId) {
+  const select = page.locator('[data-recursion-card-deck-select]').first();
+  await select.selectOption(deckId);
+  await page.waitForFunction((expected) => (
+    globalThis.__recursionLiveHarnessRuntime?.view?.().settings?.preProcessDecks?.activeDeckId === expected
+  ), deckId, { timeout: TIMEOUT_MS });
+}
+
+async function pointerDragTo(page, source, target) {
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  check(sourceBox && targetBox, 'Pointer drag controls could not be measured.');
+  const start = {
+    x: sourceBox.x + sourceBox.width / 2,
+    y: sourceBox.y + sourceBox.height / 2
+  };
+  const end = {
+    x: targetBox.x + targetBox.width / 2,
+    y: targetBox.y + Math.min(12, targetBox.height / 4)
+  };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 12 });
+  await page.mouse.up();
+}
+
 async function bodyMustNotReorder(page, movingCategoryId, targetCategoryId) {
   const before = (await activePostDeck(page)).categoryOrder;
   await dragTo(
@@ -485,7 +512,10 @@ async function touchDrag(page, source, target) {
   check(sourceBox && targetBox, 'Touch drag controls could not be measured.');
   const session = await page.context().newCDPSession(page);
   const start = { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 };
-  const end = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 };
+  const end = {
+    x: targetBox.x + targetBox.width / 2,
+    y: targetBox.y + Math.min(12, targetBox.height / 4)
+  };
   await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...start, radiusX: 2, radiusY: 2 }] });
   await page.waitForTimeout(220);
   await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...end, radiusX: 2, radiusY: 2 }] });
@@ -521,18 +551,6 @@ async function createAndExerciseCustomDeck(page, customDeckId, { compact = false
     ]?.cards?.[id]?.enabled === false
   ), card.id, { timeout: TIMEOUT_MS });
   await page.locator(`[data-recursion-post-process-card-toggle="${card.id}"]`).first().click();
-  const categoryToggle = page.locator(`[data-recursion-post-process-category-toggle="${category.id}"]`).first();
-  await categoryToggle.click();
-  await page.waitForFunction((id) => (
-    globalThis.__recursionLiveHarnessRuntime?.view?.().settings?.postProcessDecks?.customDecks?.[
-      globalThis.__recursionLiveHarnessRuntime?.view?.().settings?.postProcessDecks?.activeDeckId
-    ]?.categories?.[id]?.enabled === false
-  ), category.id, { timeout: TIMEOUT_MS });
-  const disabledChild = page.locator(`[data-recursion-post-process-card-toggle="${card.id}"]`).first();
-  check((await disabledChild.getAttribute('aria-pressed')) === 'true', 'Category Off changed the card saved On state.');
-  check((await disabledChild.getAttribute('data-effective-state')) === 'off', 'Category Off did not make the child effectively Off.');
-  await page.locator(`[data-recursion-post-process-category-toggle="${category.id}"]`).first().click();
-
   deck = await activePostDeck(page);
   const natural = deck.categories.find((entry) => entry.name === 'Natural Prose');
   check(natural, 'Duplicated deck is missing Natural Prose.');
@@ -542,7 +560,7 @@ async function createAndExerciseCustomDeck(page, customDeckId, { compact = false
   await expandCategory(page, CUSTOM_CATEGORY_NAME, true);
   await expandCategory(page, 'Natural Prose', true);
   await cardBodyMustNotReorder(page, card.id, naturalCard.id);
-  await dragTo(
+  await pointerDragTo(
     page,
     page.locator(`[data-recursion-post-process-category-drag-handle="${category.id}"]`).first(),
     page.locator(`[data-recursion-post-process-category="${natural.id}"]`).first()
@@ -553,7 +571,7 @@ async function createAndExerciseCustomDeck(page, customDeckId, { compact = false
     return deckValue?.categoryOrder?.indexOf(moving) < deckValue?.categoryOrder?.indexOf(target);
   }, { moving: category.id, target: natural.id }, { timeout: TIMEOUT_MS });
 
-  await dragTo(
+  await pointerDragTo(
     page,
     page.locator(`[data-recursion-post-process-card-drag-handle="${card.id}"]`).first(),
     page.locator(`[data-recursion-post-process-category="${natural.id}"]`).first()
@@ -569,7 +587,9 @@ async function createAndExerciseCustomDeck(page, customDeckId, { compact = false
     const settings = globalThis.__recursionLiveHarnessRuntime?.view?.().settings?.postProcessDecks;
     return settings?.customDecks?.[settings.activeDeckId]?.cardOrderByCategory?.[categoryId] || [];
   }, { categoryId: natural.id });
-  await cardHandle.press('ArrowUp');
+  check(orderBeforeKeyboard.length > 1, 'Keyboard reorder requires at least two cards in the target category.');
+  const keyboardDirection = orderBeforeKeyboard.indexOf(card.id) > 0 ? 'ArrowUp' : 'ArrowDown';
+  await cardHandle.press(keyboardDirection);
   const orderAfterKeyboard = await page.evaluate(({ categoryId }) => {
     const settings = globalThis.__recursionLiveHarnessRuntime?.view?.().settings?.postProcessDecks;
     return settings?.customDecks?.[settings.activeDeckId]?.cardOrderByCategory?.[categoryId] || [];
@@ -802,6 +822,7 @@ async function measureSharedCardPanel(page, panelSelector) {
 async function assertSharedPanelGeometry(page, viewport) {
   await closePostProcess(page).catch(() => {});
   await openPreProcess(page);
+  await selectPreProcessDeck(page, DEFAULT_PRE_PROCESS_DECK_ID);
   const preCategory = page.locator('[data-recursion-card-category-toggle]').first();
   if (await preCategory.getAttribute('aria-expanded') !== 'true') await preCategory.click();
   const pre = await measureSharedCardPanel(page, '[data-recursion-cards-panel]');
@@ -819,7 +840,10 @@ async function assertSharedPanelGeometry(page, viewport) {
   const closeEnough = (left, right, tolerance = 1.5) => Math.abs(Number(left) - Number(right)) <= tolerance;
   for (const key of ['panel', 'deckBar', 'deckSelector', 'list', 'category', 'categoryHead', 'card', 'cardMain']) {
     check(closeEnough(pre[key].x, post[key].x), `${key} left edge differs between Pre-process and Post-process.`);
-    check(closeEnough(pre[key].width, post[key].width), `${key} width differs between Pre-process and Post-process.`);
+    check(
+      closeEnough(pre[key].width, post[key].width),
+      `${key} width differs between Pre-process and Post-process: pre=${pre[key].width}, post=${post[key].width}.`
+    );
   }
   check(closeEnough(pre.deckBar.height, post.deckBar.height), 'Deck toolbar height differs between Pre-process and Post-process.');
   check(closeEnough(pre.disclosureInset, post.disclosureInset), 'Category disclosure inset differs between Pre-process and Post-process.');
@@ -928,6 +952,7 @@ async function setStarterState(page, { enabled, applyMode, rewriteFlow, expanded
 }
 
 async function runViewport(page, report, viewport, artifactDir) {
+  await bestEffortDisablePostProcess(page);
   const selection = await independentDeckProof(page);
   await assertSharedPanelGeometry(page, viewport);
   await openPostProcess(page);
@@ -946,26 +971,16 @@ async function runViewport(page, report, viewport, artifactDir) {
   await captureCase({ page, report, viewport, state: 'card-editor', artifactDir });
   await page.getByRole('button', { name: 'Cancel' }).last().click();
 
-  await page.locator(`[data-recursion-post-process-category-toggle="${custom.naturalCategoryId}"]`).first().click();
-  await page.waitForFunction((id) => (
-    globalThis.__recursionLiveHarnessRuntime?.view?.().settings?.postProcessDecks?.customDecks?.[
-      globalThis.__recursionLiveHarnessRuntime?.view?.().settings?.postProcessDecks?.activeDeckId
-    ]?.categories?.[id]?.enabled === false
-  ), custom.naturalCategoryId, { timeout: TIMEOUT_MS });
-  await captureCase({ page, report, viewport, state: 'category-disabled', artifactDir });
-  await page.locator(`[data-recursion-post-process-category-toggle="${custom.naturalCategoryId}"]`).first().click();
-
   await page.locator('[data-recursion-post-process-deck-delete]').first().click();
-  const deckDialog = page.getByRole('alertdialog', { name: new RegExp(`Delete ${CUSTOM_DECK_NAME}`) });
-  await deckDialog.getByLabel(new RegExp(`Type ${CUSTOM_DECK_NAME}`)).fill(CUSTOM_DECK_NAME);
+  const deckDeleteInput = page.locator('[data-recursion-post-process-deck-delete-text]').first();
+  await deckDeleteInput.fill('delete');
   await captureCase({ page, report, viewport, state: 'delete-confirm', artifactDir });
-  await deckDialog.getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('[data-recursion-post-process-deck-delete-cancel]').first().click();
 
   await setPressed(page, '[data-recursion-post-process-enabled]', false);
   await page.locator('[data-recursion-post-process-deck-delete]').first().click();
-  const teardownDialog = page.getByRole('alertdialog', { name: new RegExp(`Delete ${CUSTOM_DECK_NAME}`) });
-  await teardownDialog.getByLabel(new RegExp(`Type ${CUSTOM_DECK_NAME}`)).fill(CUSTOM_DECK_NAME);
-  await teardownDialog.getByRole('button', { name: 'Delete' }).click();
+  await page.locator('[data-recursion-post-process-deck-delete-text]').first().fill('delete');
+  await page.locator('[data-recursion-post-process-deck-delete-confirm]').first().click();
   await waitForPostDeck(page, STARTER_DECK_ID);
 
   await page.locator('[data-recursion-post-process-deck-select]').first().press('Escape');
@@ -1106,7 +1121,7 @@ async function main() {
       report.generationRequestCount += viewportResult.generationRequests;
     }
     await reducedMotionProof(browser, baseUrl, session.playwrightCookies());
-    check(report.cases.length === VIEWPORTS.length * STATES.length, 'UI proof did not capture all 14 required cases.');
+    check(report.cases.length === VIEWPORTS.length * STATES.length, 'UI proof did not capture every required case.');
   } catch (error) {
     report.status = /Unsafe user/.test(String(error?.message || error)) ? 'unsafe-user'
       : /Installed-copy|Served-copy/.test(String(error?.message || error)) ? 'stale-extension'

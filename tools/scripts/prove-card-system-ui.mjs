@@ -203,12 +203,22 @@ async function runCardSystemScenario(page, report, timeoutMs) {
     const select = document.querySelector('[data-recursion-card-deck-select]');
     return select?.value === 'default';
   }, null, { timeout: timeoutMs });
+  for (let remaining = 20; remaining > 0; remaining -= 1) {
+    const expandedToggles = page.locator('[data-recursion-card-category-toggle][aria-expanded="true"]');
+    const expandedCount = await expandedToggles.count();
+    if (!expandedCount) break;
+    await expandedToggles.first().click({ timeout: timeoutMs });
+    await page.waitForFunction((before) => (
+      document.querySelectorAll('[data-recursion-card-category-toggle][aria-expanded="true"]').length < before
+    ), expandedCount, { timeout: timeoutMs });
+  }
   const initial = await page.evaluate(() => ({
     panelVisible: document.querySelector('[data-recursion-cards-panel]')?.hidden === false,
     deckSelect: Boolean(document.querySelector('[data-recursion-card-deck-select]')),
     localNoticeRows: document.querySelectorAll('.recursion-card-scope-notice').length,
     categoryRows: document.querySelectorAll('[data-recursion-card-deck-category]').length,
-    visibleCardRows: document.querySelectorAll('[data-recursion-card-id]').length,
+    visibleCardRows: [...document.querySelectorAll('[data-recursion-card-id]')]
+      .filter((node) => !node.closest('[hidden]')).length,
     firstCategoryExpanded: document.querySelector('[data-recursion-card-category-toggle]')?.getAttribute('aria-expanded') || '',
     legacyScopeRows: document.querySelectorAll('[data-recursion-card-scope-family]').length
   }));
@@ -219,12 +229,13 @@ async function runCardSystemScenario(page, report, timeoutMs) {
   await page.locator('[data-recursion-card-category-toggle]').first().click({ timeout: timeoutMs });
   const expandedDefault = await page.evaluate(() => ({
     firstCategoryExpanded: document.querySelector('[data-recursion-card-category-toggle]')?.getAttribute('aria-expanded') || '',
-    visibleCardRows: document.querySelectorAll('[data-recursion-card-id]').length
+    visibleCardRows: [...document.querySelectorAll('[data-recursion-card-id]')]
+      .filter((node) => !node.closest('[hidden]')).length
   }));
   if (expandedDefault.firstCategoryExpanded !== 'true' || expandedDefault.visibleCardRows < 1) {
     fail(report, 'category-disclosure', 'Category header click did not expand collapsed category cards.', expandedDefault);
   }
-  addCheck(report, 'category-disclosure', 'pass', 'Categories default collapsed and expand from the full header row.', expandedDefault);
+  addCheck(report, 'category-disclosure', 'pass', 'Categories collapse and expand from the full header row.', expandedDefault);
 
   await page.locator('[data-recursion-card-deck-duplicate]').first().click({ timeout: timeoutMs });
   try {

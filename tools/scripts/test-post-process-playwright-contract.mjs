@@ -37,11 +37,10 @@ const states = [
   'starter-progressive',
   'custom-deck',
   'card-editor',
-  'category-disabled',
   'delete-confirm'
 ];
 const expectedKeys = report.viewports.flatMap((viewport) => states.map((state) => `${viewport}-${state}`));
-assert.deepEqual(report.cases.map((entry) => entry.key), expectedKeys, 'all 14 viewport/state cases are enumerated in stable order');
+assert.deepEqual(report.cases.map((entry) => entry.key), expectedKeys, 'all 12 viewport/state cases are enumerated in stable order');
 assert(report.cases.every((entry) => entry.interaction === 'planned'
   && entry.accessibility === 'planned'
   && entry.layout === 'planned'), 'dry-run enumerates interaction, accessibility, and layout proof');
@@ -75,7 +74,6 @@ const requiredSelectors = [
   'data-recursion-post-process-flow-unified',
   'data-recursion-post-process-flow-progressive',
   'data-recursion-post-process-category',
-  'data-recursion-post-process-category-toggle',
   'data-recursion-post-process-category-drag-handle',
   'data-recursion-post-process-card',
   'data-recursion-post-process-card-toggle',
@@ -102,6 +100,7 @@ assert(source.includes("zIndex: '9999'"), 'visual backing remains immediately be
 assert(source.includes('previousListScrollTop'), 'layout proof preserves the visual state before checking the final scrollable row');
 assert(source.includes('node.scrollTop = scrollTop'), 'layout proof restores the inner list scroll before capture');
 assert(source.includes('async function assertSharedPanelGeometry'), 'proof compares Pre-process and Post-process shared panel geometry');
+assert(source.includes('await selectPreProcessDeck(page, DEFAULT_PRE_PROCESS_DECK_ID)'), 'geometry proof compares matching read-only starter deck structures');
 assert(source.includes("measureSharedCardPanel(page, '[data-recursion-cards-panel]')"), 'proof measures the Pre-process shared panel');
 assert(source.includes("measureSharedCardPanel(page, '[data-recursion-post-process-panel]')"), 'proof measures the Post-process shared panel');
 assert(source.includes("'deckSelector', 'list', 'category', 'categoryHead', 'card', 'cardMain'"), 'proof compares shared deck selector and card-main bounds');
@@ -110,7 +109,7 @@ assert(source.includes('Card eye right margin differs between Pre-process and Po
 assert(source.includes('Read-only Card rows rendered an empty action rail.'), 'proof rejects empty read-only action rails');
 assert(source.includes('A shared Card list is not the primary scroll surface.'), 'proof enforces shared list overflow behavior');
 assert(source.includes('A shared Card list does not reserve a stable scrollbar gutter.'), 'proof enforces stable shared list scrollbar geometry');
-assert(source.includes('Starter Post-process Deck header did not use the shared count-only summary.'), 'proof enforces the shared count-only starter header');
+assert(source.includes('Disabled Post-process header did not report Off:'), 'proof enforces the global Off header summary');
 assert(source.includes('read-only structure through disabled authoring controls'), 'proof checks read-only state through disabled authoring controls');
 const captureCaseSource = source.match(/async function captureCase[\s\S]*?\n\}/)?.[0] || '';
 assert.equal((captureCaseSource.match(/\.screenshot\(/g) || []).length, 1, 'each visual case captures exactly one PNG');
@@ -126,6 +125,10 @@ assert(source.includes("openPostProcess(page, { keyboardKey: 'Enter' })"), 'inte
 assert(source.includes("openPostProcess(page, { keyboardKey: 'Space' })"), 'interaction matrix opens the panel with Space');
 assert(source.includes('Dragging a category row body reordered the deck.'), 'interaction matrix includes the category-body negative drag');
 assert(source.includes('Dragging a card row body reordered the deck.'), 'interaction matrix includes the card-body negative drag');
+assert(source.includes('async function pointerDragTo'), 'successful reorder proof uses a real pointer helper');
+assert(source.includes('page.mouse.down()'), 'successful reorder proof presses the real mouse button');
+assert(source.includes("page.mouse.move(end.x, end.y, { steps: 12 })"), 'successful reorder proof moves the held pointer across intermediate positions');
+assert.equal((source.match(/await pointerDragTo\(/g) || []).length, 2, 'category and card reorder proofs both use the real pointer helper');
 assert(
   source.includes('await bestEffortDisablePostProcess(page).catch(() => {})'),
   'each viewport disables Post-process through the visible UI on success or failure without masking the primary error'

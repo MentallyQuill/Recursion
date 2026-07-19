@@ -440,7 +440,6 @@ Update the `src/ui.mjs` import to consume:
 
 ```js
 import {
-  createDeckDragController,
   renderDeckCard,
   renderDeckCategory,
   renderDeckPanelHeader,

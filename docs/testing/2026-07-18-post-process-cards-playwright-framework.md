@@ -108,7 +108,6 @@ data-recursion-post-process-apply-replace
 data-recursion-post-process-flow-unified
 data-recursion-post-process-flow-progressive
 data-recursion-post-process-category
-data-recursion-post-process-category-toggle
 data-recursion-post-process-category-drag-handle
 data-recursion-post-process-card
 data-recursion-post-process-card-toggle
@@ -256,7 +255,6 @@ Each state is captured for desktop and compact viewports.
 | `starter-progressive` | Feature On, Progressive and Replace selected, both categories expanded. |
 | `custom-deck` | Editable duplicated deck with deck/category/card actions visible. |
 | `card-editor` | Card editor open with name, description, prompt field, accept/cancel controls. |
-| `category-disabled` | Category Off with child saved-On/effectively-disabled treatment visible. |
 | `delete-confirm` | Typed-confirmation deck delete state with complete controls in bounds. |
 
 Baseline layout:
@@ -269,10 +267,9 @@ tests/visual-baselines/post-process-cards/
 │  ├─ starter-progressive.png
 │  ├─ custom-deck.png
 │  ├─ card-editor.png
-│  ├─ category-disabled.png
 │  └─ delete-confirm.png
 └─ compact/
-   └─ same seven files
+   └─ same six files
 ```
 
 ### Visual comparison behavior
@@ -354,7 +351,6 @@ const CASES = [
   "starter-progressive",
   "custom-deck",
   "card-editor",
-  "category-disabled",
   "delete-confirm"
 ];
 
@@ -632,7 +628,7 @@ Do not convert a runtime or privacy failure into a warning.
 Post-process Cards are not integration-complete until:
 
 - all deterministic tests pass;
-- all 14 reviewed visual baselines match;
+- all 12 reviewed visual baselines match;
 - independent deck state survives reload;
 - keyboard/mobile interaction passes;
 - Low/Medium Utility routing passes;

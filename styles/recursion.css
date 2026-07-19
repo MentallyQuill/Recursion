@@ -2021,8 +2021,8 @@
     transform 90ms var(--recursion-card-drag-ease);
 }
 
-.recursion-card-deck-card.is-dragging,
-.recursion-card-deck-category.is-dragging {
+.recursion-card-panel-card.is-dragging,
+.recursion-card-panel-category.is-dragging {
   display: none;
   opacity: 0;
   pointer-events: none;

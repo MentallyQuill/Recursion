@@ -173,7 +173,7 @@ Post-process Cards uses the same compact deck layout after generation. Its cards
 
 The bundled Starter Post-process Deck is structurally read-only, but its category, card, and bulk enabled states are editable. Duplicate it only to rename, add, remove, reorder, or rewrite deck content.
 
-Editable Post-process decks use the same compact `Categories` plus row as Pre-process. Add cards with the plus in the owning category header. Category and card rows use different drag-handle shapes so their reorder targets remain visually distinct.
+Editable Post-process decks use the same compact `Categories` plus row and the same drag behavior as Pre-process. Add cards with the plus in the owning category header. Category and card rows use different drag-handle shapes so their reorder targets remain visually distinct. Dragging works with mouse or pen; on touch, hold the handle briefly before moving.
 
 ### Scope and caps
 

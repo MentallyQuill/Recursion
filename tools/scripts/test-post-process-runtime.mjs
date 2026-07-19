@@ -4,6 +4,7 @@ import {
 } from '../../src/post-process-runtime.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
 import { hashJson } from '../../src/core.mjs';
+import { createSillyTavernHost } from '../../src/hosts/sillytavern/host.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
@@ -732,6 +733,65 @@ test('22. Arming is consumed once and cancellation aborts an active host rewrite
   assert(events.some((event) => event.phase === 'settled' && event.outcome === 'canceled'), 'activity records neutral cancellation');
 });
 
+test('23. Enabled As Swipe is not complete unless the persisted assistant gains exactly one selected Post-process swipe', async () => {
+  const sourceText = 'Persisted source response.';
+  const candidateText = 'Persisted Post-process response.';
+  const context = {
+    chatId: 'post-process-runtime-as-swipe',
+    chat: [{
+      mesid: 7,
+      is_user: false,
+      mes: sourceText,
+      swipe_id: 0,
+      swipes: [sourceText],
+      swipe_info: [{ extra: { api: 'native' } }]
+    }],
+    saveChat() {},
+    updateMessageBlock() {},
+    swipe: { refresh() {} }
+  };
+  const sillyTavernHost = createSillyTavernHost({
+    contextFactory: () => context,
+    settingsRoot: {}
+  });
+  const beforeSwipeCount = context.chat[0].swipes.length;
+  const expectedSourceIdentity = await sillyTavernHost.messages.postProcessSourceIdentity();
+  const harness = createHarness({
+    initialSnapshot: snapshot({
+      sourceMessageId: 7,
+      sourceSwipeId: 0,
+      originalDraft: sourceText,
+      sourceHash: hashJson(sourceText)
+    }),
+    hostPlan: [candidateText],
+    commitImpl: (input) => sillyTavernHost.messages.appendAssistantMessageSwipe(7, input.text, {
+      markerNamespace: input.markerNamespace,
+      marker: input.marker,
+      expectedSourceIdentity: {
+        ...expectedSourceIdentity,
+        sourceTextHash: expectedSourceIdentity.originalHash
+      },
+      select: true
+    })
+  });
+
+  const result = await harness.runtime.runPostProcessForLatestAssistant();
+  assertEqual(result.committed, true, 'As Swipe reports committed only after the host mutation succeeds');
+  assertEqual(context.chat[0].swipes.length, beforeSwipeCount + 1, 'As Swipe persists exactly one second swipe');
+  assertEqual(context.chat[0].swipe_id, beforeSwipeCount, 'As Swipe selects the appended swipe');
+  assertEqual(context.chat[0].swipes[beforeSwipeCount], candidateText, 'the selected second swipe is the Post-process candidate');
+  assertEqual(
+    context.chat[0].swipe_info.length,
+    context.chat[0].swipes.length,
+    'As Swipe persists aligned native swipe metadata'
+  );
+  assertEqual(
+    context.chat[0].swipe_info[beforeSwipeCount].extra.recursion.postProcess.schema,
+    'recursion.postProcessMarker.v1',
+    'the second swipe persists the V1 Post-process marker'
+  );
+});
+
 let passed = 0;
 for (const entry of cases) {
   try {
@@ -743,5 +803,5 @@ for (const entry of cases) {
   }
 }
 
-assertEqual(passed, 23, 'the complete 23-case state-machine matrix ran');
-console.log('[pass] post-process runtime (23 cases)');
+assertEqual(passed, 24, 'the complete 24-case state-machine matrix ran');
+console.log('[pass] post-process runtime (24 cases)');

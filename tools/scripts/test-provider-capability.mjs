@@ -176,7 +176,9 @@ for (const lane of ['utility', 'reasoner']) {
         assertEqual(capability.state, state, `${lane} ${reasoningLevel} ${operation} ${state} matrix state`);
         assertEqual(
           capability.eligible,
-          operation === 'provider-test' ? testable : selected && state === 'ready',
+          operation === 'provider-test'
+            ? testable
+            : selected && (state === 'ready' || state === 'untested'),
           `${lane} ${reasoningLevel} ${operation} ${state} matrix eligibility`
         );
       }
@@ -198,7 +200,11 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
     });
     assertEqual(ordinary.state, state, `${reasoningLevel} ordinary ${state} state`);
     assertEqual(ordinary.required, false, `${reasoningLevel} ordinary work does not require Reasoner`);
-    assertEqual(ordinary.eligible, false, `${reasoningLevel} ordinary ${state} falls back`);
+    assertEqual(
+      ordinary.eligible,
+      state === 'untested',
+      `${reasoningLevel} ordinary ${state} only treats untested as routable caution`
+    );
 
     const redirect = resolveProviderCapability({
       settings: settingsFor({ reasoningLevel, reasoner }),
@@ -207,7 +213,11 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
       host
     });
     assertEqual(redirect.required, true, `${reasoningLevel} Redirect requires Reasoner`);
-    assertEqual(redirect.eligible, false, `${reasoningLevel} Redirect blocks for ${state}`);
+    assertEqual(
+      redirect.eligible,
+      state === 'untested',
+      `${reasoningLevel} Redirect only treats untested as routable caution`
+    );
   }
 }
 
@@ -277,6 +287,21 @@ const unavailableHighPostProcess = resolveProviderCapability({
 });
 assertEqual(unavailableHighPostProcess.required, true, 'High post-process still requires Reasoner when unhealthy');
 assertEqual(unavailableHighPostProcess.eligible, false, 'High post-process does not fall back to healthy Utility');
+
+const untestedMediumUtilityPostProcess = resolveProviderCapability({
+  settings: settingsFor({
+    reasoningLevel: 'medium',
+    utility: configuredProvider('utility', { status: 'not-run' })
+  }),
+  lane: 'utility',
+  operation: 'post-process',
+  host
+});
+assertEqual(
+  untestedMediumUtilityPostProcess.eligible,
+  true,
+  'Medium post-process may use a configured Utility lane without a separate provider test'
+);
 
 const directProvider = {
   lane: 'reasoner',

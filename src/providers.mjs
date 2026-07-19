@@ -2494,8 +2494,9 @@ export function createGenerationRouter({ client, activity = null, journal = null
     let structuredRecoverySpent = options.allowStructuredRecovery === false;
     let structuredOutputRecovery = '';
     let lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
+    const nestedActivityLifecycle = options.activityLifecycle === 'nested';
 
-    const activityRunId = activityStart(activity, {
+    const startedActivityEvent = {
       runId,
       phase: 'providerCallStarted',
       mode: 'background',
@@ -2504,9 +2505,23 @@ export function createGenerationRouter({ client, activity = null, journal = null
       composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
       label: `${lane === 'reasoner' ? 'Reasoner' : 'Utility'} provider call started.`,
       detail: lastDiagnostics
-    });
+    };
+    const activityRunId = nestedActivityLifecycle
+      ? (activityStage(activity, startedActivityEvent), runId)
+      : activityStart(activity, startedActivityEvent);
     if (options.lockRunId !== true) runId = activityRunId || runId;
     lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
+    const settleProviderActivity = (event) => {
+      if (nestedActivityLifecycle) {
+        activityStage(activity, {
+          ...event,
+          phase: 'providerCallSettled',
+          severity: event.outcome === 'error' ? 'error' : (event.outcome === 'warning' ? 'warning' : 'success')
+        });
+        return;
+      }
+      activitySettle(activity, event);
+    };
     queueJournalAppend({
       ...lastDiagnostics,
       status: 'started',
@@ -2573,7 +2588,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
             status: 'success',
             recordedAt: nowIso()
           });
-          activitySettle(activity, {
+          settleProviderActivity({
             runId,
             phase: 'settled',
             outcome: 'success',
@@ -2646,7 +2661,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
             status: statusForError(error),
             recordedAt: nowIso()
           });
-          activitySettle(activity, {
+          settleProviderActivity({
             runId,
             phase: 'settled',
             outcome: 'error',

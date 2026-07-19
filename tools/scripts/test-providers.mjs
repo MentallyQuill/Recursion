@@ -306,6 +306,25 @@ assertEqual(
   6000,
   'post-process guidance machine schema bounds guidance text'
 );
+
+const untestedUtilityStore = createStore();
+updateProviderConfig(untestedUtilityStore, 'utility', {
+  source: 'host-current-model'
+});
+untestedUtilityStore.update({ reasoningLevel: 'medium' });
+const untestedUtilityClient = createProviderClient({ host, settingsStore: untestedUtilityStore });
+const untestedUtilityRouter = createGenerationRouter({ client: untestedUtilityClient });
+const untestedUtilityGuidance = await untestedUtilityRouter.generate('postProcessGuidanceUtility', {
+  prompt: 'Post-process guidance after successful ordinary Utility use.',
+  snapshotHash: 'untested-utility-post-process-snapshot',
+  sourceHash: 'untested-utility-post-process-source',
+  reasoningLevel: 'medium'
+});
+assertEqual(
+  untestedUtilityGuidance.ok,
+  true,
+  'configured Utility post-process guidance does not require a separate provider test'
+);
 await router.generate('cardAuthoringAssist', { prompt: 'Card authoring assist' });
 assertEqual(calls.at(-1).lane, 'utility', 'cardAuthoringAssist uses utility lane');
 assertEqual(calls.at(-1).responseSchema, 'recursion.cardAuthoringAssist.v1', 'cardAuthoringAssist request carries expected response schema');
@@ -1511,8 +1530,8 @@ const reasonerOverrideRouter = createGenerationRouter({
   client: createProviderClient({ host, settingsStore: reasonerOverrideStore })
 });
 const untestedLaneOverride = await reasonerOverrideRouter.generate('utilityArbiter', { lane: 'reasoner', prompt: 'Untested reasoner override' });
-assertEqual(untestedLaneOverride.ok, false, 'utility role cannot use untested Reasoner lane');
-assertEqual(untestedLaneOverride.error.code, 'RECURSION_PROVIDER_NOT_READY', 'untested lane override exposes stable readiness code');
+assertEqual(untestedLaneOverride.ok, true, 'untested Reasoner override proceeds with advisory capability status');
+assertEqual(calls.at(-1).lane, 'reasoner', 'untested explicit Reasoner lane still reaches the selected provider');
 reasonerOverrideStore.update({ reasonerUse: 'always' });
 recordProviderHealth(reasonerOverrideStore, 'reasoner');
 const readyLaneOverride = await reasonerOverrideRouter.generate('utilityArbiter', { lane: 'reasoner', prompt: 'Ready reasoner override' });
@@ -1914,7 +1933,7 @@ async function rejectedReasonerForState(state) {
         generation: {
           async generate(request) {
             generationCalls.push(request);
-            return { text: '{"schema":"should.not.call"}' };
+            return { text: responseTextForRole(request.roleId) };
           }
         }
       },
@@ -1927,9 +1946,14 @@ async function rejectedReasonerForState(state) {
 
 for (const state of ['unconfigured', 'untested', 'unhealthy']) {
   const rejected = await rejectedReasonerForState(state);
-  assertEqual(rejected.result.ok, false, `${state} Reasoner returns failure result`);
-  assertEqual(rejected.result.error.code, 'RECURSION_PROVIDER_NOT_READY', `${state} Reasoner exposes stable readiness code`);
-  assertEqual(rejected.generationCalls.length, 0, `${state} Reasoner does not call host`);
+  if (state === 'untested') {
+    assertEqual(rejected.result.ok, true, 'untested Reasoner proceeds with caution');
+    assertEqual(rejected.generationCalls.length, 1, 'untested Reasoner reaches the configured host');
+  } else {
+    assertEqual(rejected.result.ok, false, `${state} Reasoner returns failure result`);
+    assertEqual(rejected.result.error.code, 'RECURSION_PROVIDER_NOT_READY', `${state} Reasoner exposes stable readiness code`);
+    assertEqual(rejected.generationCalls.length, 0, `${state} Reasoner does not call host`);
+  }
 }
 
 let missingKeyFetches = 0;
@@ -2963,6 +2987,60 @@ assertNoSecret(redacted.diagnostics, 'diagnostics do not leak API keys');
 assertNoSecret(redactionActivityEvents, 'activity events do not leak API keys');
 assertNoSecret(redactionJournalEntries, 'journal entries do not leak API keys');
 assert(!JSON.stringify(redactionJournalEntries).includes('Do not log'), 'journal does not include raw prompts');
+
+const nestedActivityReporter = createActivityReporter();
+nestedActivityReporter.start({
+  runId: 'post-process-parent-run',
+  phase: 'postProcessStarted',
+  mode: 'review',
+  label: 'Post-processing response...'
+});
+const nestedActivityStore = createStore();
+configureReadyProvider(nestedActivityStore, 'utility', {
+  source: 'openai-compatible',
+  apiKey: 'nested-activity-key',
+  openAICompatible: { baseUrl: 'https://nested-activity.test/v1', model: 'nested-activity-model' }
+});
+const nestedActivityRouter = createGenerationRouter({
+  client: createProviderClient({
+    settingsStore: nestedActivityStore,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'nested-activity-model',
+        choices: [{
+          message: {
+            content: responseTextForRole('postProcessGuidanceUtility', {
+              snapshotHash: 'nested-snapshot',
+              sourceHash: 'nested-source',
+              guidanceText: 'Preserve the scene while tightening the response.'
+            })
+          }
+        }]
+      })
+    })
+  }),
+  activity: nestedActivityReporter
+});
+const nestedActivityResult = await nestedActivityRouter.generate('postProcessGuidanceUtility', {
+  lane: 'utility',
+  reasoningLevel: 'medium',
+  snapshotHash: 'nested-snapshot',
+  sourceHash: 'nested-source',
+  categories: [{ id: 'unified', name: 'Unified', cards: [] }]
+}, {
+  runId: 'post-process-parent-run',
+  activityLifecycle: 'nested'
+});
+assertEqual(nestedActivityResult.ok, true, 'nested Post-process provider call succeeds');
+assertEqual(nestedActivityReporter.current().phase, 'providerCallSettled', 'nested provider completion is a stage, not a parent settlement');
+nestedActivityReporter.stage({
+  runId: 'post-process-parent-run',
+  phase: 'postProcessCategory',
+  label: 'Unified',
+  detail: { categoryId: 'unified', state: 'running', activeStage: 'host-rewrite', guidanceAttempts: 1 }
+});
+assertEqual(nestedActivityReporter.current().phase, 'postProcessCategory', 'Post-process parent remains active after nested provider completion');
 
 let asyncOrderJournal = [];
 const asyncOrderRouter = createGenerationRouter({

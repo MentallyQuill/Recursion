@@ -29,6 +29,7 @@
     "prove:card-system-assist": "node tools/scripts/prove-card-system-assist.mjs",
     "prove:editorial-ui": "node tools/scripts/prove-editorial-transformation-ui.mjs",
     "prove:post-process-ui": "node tools/scripts/prove-post-process-cards-ui.mjs",
+    "prove:post-process-live": "node tools/scripts/prove-live-post-process-as-swipe.mjs --live",
     "prove:card-progress-live": "node tools/scripts/prove-live-card-progress.mjs",
     "prove:swipe-reuse-live": "node tools/scripts/prove-live-swipe-reuse.mjs --live",
     "prove:enhancements-live": "node tools/scripts/prove-live-enhancements.mjs"

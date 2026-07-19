@@ -2674,6 +2674,9 @@ export function createRecursionRuntime({
         : {}),
       ...(redirectCapability?.required && !redirectCapability.eligible
         ? { blockedCapability: sanitizeProviderCapability(redirectCapability) }
+        : {}),
+      ...(redirectCapability?.required && redirectCapability.eligible && redirectCapability.state === 'untested'
+        ? { cautionCapability: sanitizeProviderCapability(redirectCapability) }
         : {})
     };
     return true;
@@ -4140,6 +4143,18 @@ export function createRecursionRuntime({
       };
     }
     const runId = makeId('editorial');
+    if (pendingProseEnhancement?.cautionCapability && !pendingProseEnhancement.cautionReported) {
+      stageRuntimeActivity({
+        runId,
+        phase: 'providerCaution',
+        severity: 'warning',
+        outcome: 'warning',
+        label: pendingProseEnhancement.cautionCapability.message,
+        chips: ['Enhancement', 'Provider untested'],
+        detail: pendingProseEnhancement.cautionCapability
+      });
+      pendingProseEnhancement.cautionReported = true;
+    }
     const messageId = identity.messageId;
     const sourceText = String(identity.text || '');
     const sourceHash = identity.originalHash || hashJson(sourceText);
@@ -7369,6 +7384,18 @@ export function createRecursionRuntime({
         chips: ['Enhancement', 'Redirect', 'Skipped'],
         detail: pendingProseEnhancement.blockedCapability
       });
+    }
+    if (pendingProseEnhancement?.cautionCapability) {
+      stageRuntimeActivity({
+        runId,
+        phase: 'providerCaution',
+        severity: 'warning',
+        outcome: 'warning',
+        label: pendingProseEnhancement.cautionCapability.message,
+        chips: ['Enhancement', 'Provider untested'],
+        detail: pendingProseEnhancement.cautionCapability
+      });
+      pendingProseEnhancement.cautionReported = true;
     }
     if (explicitSwipe && !runState.current().pendingLatestAssistantSwipeRetry) {
       // SillyTavern passes `swipe` directly to the interceptor after changing the active swipe.

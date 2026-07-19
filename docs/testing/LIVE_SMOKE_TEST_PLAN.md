@@ -6,6 +6,19 @@ It is not a long-form story soak or campaign certification run.
 
 Post-process smoke uses the same dedicated-user gate after the assistant response lands. It freezes the source and bounded evidence, verifies Unified and Progressive guidance/rewrite progress, checks native host quiet-generation settlement, and proves that As Swipe and Replace produce the documented marker and mutation shape. The event fixture must use SillyTavern's real scalar `GENERATION_ENDED` payload (`chat.length`) and prove it binds to the latest assistant. The Hero Pixel Array must show running and terminal Post-process blocks. SillyTavern's native Stop must remain visible from guidance synthesis through quiet rewrite and final commit, and clicking it during guidance or rewrite must abort without a late mutation. Post-process Off must not extend native Stop ownership. A Progressive category failure must retain the latest valid draft and settle only as a swipe; no failed or stale run may mutate the host message.
 
+Every enabled Post-process certification run uses **As Swipe**. It is a failed
+test unless the same assistant message changes from `N` swipes to exactly
+`N + 1`, selects the appended swipe, persists aligned `swipe_info`, and binds a
+`recursion.postProcessMarker.v1` marker to the source and candidate. Provider
+success, progress completion, or a returned candidate without that second
+persisted swipe is not a pass.
+
+Run the strict dedicated-user proof with:
+
+```powershell
+npm.cmd run prove:post-process-live
+```
+
 ## Required Conditions
 
 Before a live smoke can mutate host state:
@@ -130,7 +143,7 @@ Live Editorial Enhancement proofs use `tools/scripts/lib/live-enhancement-run-or
 | Storage probe | files only | no | Dedicated user can write/read/delete Recursion-owned files and records are isolated from other users. |
 | Manual smoke | optional | Utility | Manual applies as a distinct mode, blocks over-cap family selection, forces selected family coverage, installs prompts, and records sanitized proof for the Manual branch. |
 | Utility provider smoke | yes | Utility | Arbiter/card/composer work runs, progress menu reports it, prompt packet installs, and generation continues. |
-| Reasoner fallback smoke | yes | Utility and Reasoner | Reasoner can compose when healthy and falls back to Utility when off, timed out, or invalid. |
+| Reasoner fallback smoke | yes | Utility and Reasoner | Ready and configured Untested Reasoner can compose; unconfigured, unhealthy, timed-out, or invalid routes fall back to Utility. |
 | Prompt cleanup smoke | no | no | Power-off, disable, teardown, and chat change clear Recursion prompt keys. |
 | Failure smoke | optional | simulated or real failing lane | Provider/storage/injection failure reports visible fallback and does not block host generation. |
 | Responsive UI smoke | no | no | Desktop and phone viewport screenshots show no overlap with chat controls. |

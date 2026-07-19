@@ -2093,4 +2093,77 @@ for (const mode of ['as-swipe', 'replace']) {
   }
 }
 
+{
+  const sourceText = 'Commit-save cancellation source.';
+  const candidate = 'Commit-save cancellation candidate.';
+  const controller = new AbortController();
+  let releaseFirstSave;
+  let firstSaveStarted;
+  const firstSaveGate = new Promise((resolve) => { releaseFirstSave = resolve; });
+  const firstSaveStartedGate = new Promise((resolve) => { firstSaveStarted = resolve; });
+  let saveCount = 0;
+  let persistedMessage = null;
+  const context = {
+    chatId: 'post-process-commit-save-cancel',
+    chat: [{
+      mesid: 41,
+      is_user: false,
+      mes: sourceText,
+      swipe_id: 0,
+      swipes: [sourceText],
+      swipe_info: [{ extra: {} }]
+    }],
+    async saveChat() {
+      saveCount += 1;
+      if (saveCount === 1) {
+        firstSaveStarted();
+        await firstSaveGate;
+      }
+      persistedMessage = JSON.parse(JSON.stringify(context.chat[0]));
+    },
+    updateMessageBlock() {},
+    swipe: { refresh() {} }
+  };
+  const commitSaveHost = createSillyTavernHost({
+    contextFactory: () => context,
+    settingsRoot: {}
+  });
+  const expectedSourceIdentity = await commitSaveHost.messages.postProcessSourceIdentity();
+  const marker = {
+    schema: 'recursion.postProcessMarker.v1',
+    operationId: 'post-process-commit-save-cancel',
+    sourceHash: hashJson(sourceText),
+    candidateHash: hashJson(candidate),
+    deckId: 'starter-post-process',
+    rewriteFlow: 'unified',
+    requestedApplyMode: 'as-swipe',
+    committedApplyMode: 'as-swipe',
+    lane: 'utility',
+    partial: false,
+    categories: []
+  };
+  const commit = commitSaveHost.messages.appendAssistantMessageSwipe(41, candidate, {
+    markerNamespace: 'postProcess',
+    marker,
+    expectedSourceIdentity: {
+      ...expectedSourceIdentity,
+      sourceTextHash: expectedSourceIdentity.originalHash
+    },
+    signal: controller.signal,
+    select: true
+  });
+  await firstSaveStartedGate;
+  controller.abort();
+  releaseFirstSave();
+  const result = await commit;
+  assertEqual(result.ok, false, 'Stop during Post-process commit save cancels the commit');
+  assertEqual(result.error.code, 'RECURSION_POST_PROCESS_COMMIT_CANCELED', 'commit-save cancellation exposes the stable code');
+  assertEqual(saveCount, 2, 'commit-save cancellation persists one compensating rollback');
+  assertEqual(context.chat[0].swipes.length, 1, 'commit-save cancellation restores in-memory swipe count');
+  assertEqual(context.chat[0].swipe_id, 0, 'commit-save cancellation restores the selected source swipe');
+  assertEqual(context.chat[0].mes, sourceText, 'commit-save cancellation restores visible source text');
+  assertEqual(persistedMessage.swipes.length, 1, 'commit-save cancellation persists no appended swipe');
+  assertEqual(persistedMessage.mes, sourceText, 'commit-save cancellation persists the source response');
+}
+
 console.log('[pass] host');

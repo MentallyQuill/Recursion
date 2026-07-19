@@ -77,6 +77,12 @@ configuration hash:
 | `ready` | A passing health result matches the current configuration hash. |
 | `unhealthy` | A failing health result matches the current configuration hash. |
 
+A configured provider whose health is `untested` remains routable and is shown
+as a caution. Untested status never blocks generation. An incomplete
+configuration or an explicitly unhealthy lane may still block an operation
+whose routing contract requires that lane. Provider testing remains the action
+that promotes an untested lane to `ready` or marks it `unhealthy`.
+
 Configuration and health mutations are separate. A field-scoped configuration
 commit supplies the exact expected `configRevision`; a successful material
 change increments the revision and invalidates prior health. A no-op preserves
@@ -84,7 +90,7 @@ both. Provider-test completion records only pass/fail health for the hash it
 tested, so a stale result cannot overwrite newer configuration or establish
 readiness for it.
 
-The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `medium`. V1 derives the internal Reasoner route preference from it: Low selects Utility-only routing, while Medium, High, and Ultra use Reasoner for policy-selected work when its capability is `ready`. The companion card-budget settings are `minCards` and `maxCards`; runtime derives `normalCards = floor((minCards + maxCards) / 2)`.
+The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `medium`. V1 derives the internal Reasoner route preference from it: Low selects Utility-only routing, while Medium, High, and Ultra use Reasoner for policy-selected work when its configured capability is `ready` or `untested`. The companion card-budget settings are `minCards` and `maxCards`; runtime derives `normalCards = floor((minCards + maxCards) / 2)`.
 
 Reasoning Level also controls runtime lane preference and card pressure:
 
@@ -92,13 +98,15 @@ Reasoning Level also controls runtime lane preference and card pressure:
 | --- | --- | --- | --- | --- |
 | Low | Utility | Utility | Utility | Cap positive `maxCards` at Min Cards. |
 | Medium | Utility | Utility | Reasoner | Cap positive `maxCards` at Normal Cards. |
-| High | Reasoner when healthy | Reasoner for high-priority families, Utility for lower-priority families | Reasoner | Cap positive `maxCards` at Normal Cards. |
-| Ultra | Reasoner when healthy | Reasoner when healthy | Reasoner | Raise and cap positive `maxCards` at Max Cards. |
+| High | Reasoner when routable | Reasoner for high-priority families, Utility for lower-priority families | Reasoner | Cap positive `maxCards` at Normal Cards. |
+| Ultra | Reasoner when routable | Reasoner when routable | Reasoner | Raise and cap positive `maxCards` at Max Cards. |
 
-If Reasoner is not `ready`, ordinary Medium/High/Ultra work falls back to
-Utility for Pre-process work instead of blocking host generation. Post-process
-guidance is lane-sticky: Low/Medium use Utility and High/Ultra require a ready
-Reasoner, failing soft without cross-lane fallback.
+If Reasoner is `unconfigured` or `unhealthy`, ordinary Medium/High/Ultra work
+falls back to Utility for Pre-process work instead of blocking host generation.
+An `untested` configured Reasoner remains selected and exposes a caution.
+Post-process guidance is lane-sticky: Low/Medium use Utility and High/Ultra
+require a configured routable Reasoner, failing soft without cross-lane
+fallback only when that lane is unconfigured or unhealthy.
 
 Reasoning Level also maps to provider-level reasoning intent for model calls that actually use the Reasoner lane:
 
@@ -140,13 +148,14 @@ Machine JSON calls carry the expected response schema as provider request metada
 
 Host current-model calls pass normalized `reasoningIntent`, `reasoningCategory`, and nested `reasoning` metadata to raw host adapters when a caller provides reasoning intent. Host connection-profile calls pass both Recursion's normalized `parameters.reasoning = { intent, category, exclude: true }` metadata and SillyTavern's native `reasoning_effort` plus `include_reasoning: false` fields. The native fields are required for Connection Manager's OpenRouter backend to apply the requested effort instead of silently using a `:thinking` model's default reasoning budget. Recursion never stores or exposes hidden reasoning content.
 
-Utility always has a settings object. If its capability is not `ready`,
+Utility always has a settings object. If its capability is `unconfigured` or `unhealthy`,
 Recursion degrades to cached/local behavior and does not block normal
 SillyTavern generation.
 
 Reasoner is optional. Medium, High, and Ultra keep their selected UI level when
-its capability is not `ready`; ordinary work falls back to Utility, while
-Medium+ Redirect remains visibly unavailable.
+its capability changes. An `untested` configured Reasoner remains routable with
+a caution; `unconfigured` or `unhealthy` ordinary work falls back to Utility,
+while Medium+ Redirect remains visibly unavailable.
 
 Provider Test is single-flight per lane. Concurrent callers for the same lane
 share the in-flight test. A test requested while production work is active on
@@ -187,18 +196,18 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 | Role | Default lane | Purpose | Failure behavior |
 | --- | --- | --- | --- |
-| `utilityArbiter` | Utility, Reasoner at High/Ultra when healthy | Decide whether Recursion should skip, reuse cache, refresh cards, compose a packet, infer story tense/POV, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
-| `sceneFrameCard` | Utility, Reasoner at High/Ultra when healthy | Produce compact current-scene frame data | Omit card with diagnostic |
-| `activeCastCard` | Utility, Reasoner at High/Ultra when healthy | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
-| `characterMotivationCard` | Utility, Reasoner at High/Ultra when healthy | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
-| `dialogueRelationshipCard` | Utility, Reasoner at Ultra when healthy | Capture current conversational tension, relationship texture, promises, conflicts, and voice constraints | Omit card with diagnostic |
-| `socialSubtextCard` | Utility, Reasoner at Ultra when healthy | Capture scene-observable implied social meaning such as humor, veiled pressure, invitation, boundaries, status, and face | Omit card with diagnostic |
-| `sceneConstraintsCard` | Utility, Reasoner at High/Ultra when healthy | Identify hard scene constraints, contradiction traps, timing, access, and plausibility risks for the next generation | Omit card with diagnostic |
-| `knowledgeSecretsCard` | Utility, Reasoner at High/Ultra when healthy | Capture concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries | Omit card with diagnostic |
-| `clocksConsequencesCard` | Utility, Reasoner at High/Ultra when healthy | Capture deadlines, countdowns, delayed consequences, and escalation triggers | Omit card with diagnostic |
-| `environmentAffordancesCard` | Utility, Reasoner at Ultra when healthy | Capture spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances | Omit card with diagnostic |
-| `possessionsItemsCard` | Utility, Reasoner at Ultra when healthy | Capture important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them | Omit card with diagnostic |
-| `openThreadsCard` | Utility, Reasoner at Ultra when healthy | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
+| `utilityArbiter` | Utility, configured Ready or Untested Reasoner at High/Ultra | Decide whether Recursion should skip, reuse cache, refresh cards, compose a packet, infer story tense/POV, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
+| `sceneFrameCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Produce compact current-scene frame data | Omit card with diagnostic |
+| `activeCastCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
+| `characterMotivationCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
+| `dialogueRelationshipCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture current conversational tension, relationship texture, promises, conflicts, and voice constraints | Omit card with diagnostic |
+| `socialSubtextCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture scene-observable implied social meaning such as humor, veiled pressure, invitation, boundaries, status, and face | Omit card with diagnostic |
+| `sceneConstraintsCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Identify hard scene constraints, contradiction traps, timing, access, and plausibility risks for the next generation | Omit card with diagnostic |
+| `knowledgeSecretsCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries | Omit card with diagnostic |
+| `clocksConsequencesCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture deadlines, countdowns, delayed consequences, and escalation triggers | Omit card with diagnostic |
+| `environmentAffordancesCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances | Omit card with diagnostic |
+| `possessionsItemsCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them | Omit card with diagnostic |
+| `openThreadsCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
 | `fusedCardBundle` | Utility by default, Reasoner when Fused routing selects it | Generate every requested card family together in one structured foreground bundle | Fused bundle validation reports accepted, invalid, rejected, omitted, and missing requested families. Runtime uses that structure to rerun only damaged or missing requested families when at least one fused item is trustworthy. |
 | `rapidTurnDelta` | Utility | Select warm raw cards and write provider-authored turn guidance for the Rapid foreground path | Escalate to Standard only when a missing card is mandatory |
 | `guidanceComposer` | Utility | Write provider-authored direction for using selected raw cards in the next generation | Fall back to raw-card-only packet when invalid or unavailable |
@@ -302,9 +311,10 @@ objective, required and forbidden beats, and private character-pressure map. The
 provider returns only `failedChecks` plus a short reason. The provider boundary
 derives accept/reject and constructs all nine canonical evidence-bound check rows
 locally. Unknown, duplicate, or malformed failed-check names remain invalid. The
-hash still binds identity; it is not a substitute for the semantic input. Low
-Low Redirect uses Utility for diagnosis, transformation, and verification. Medium,
-High, and Ultra require Reasoner capability `ready` before host generation.
+hash still binds identity; it is not a substitute for the semantic input.
+Low Redirect uses Utility for diagnosis, transformation, and verification.
+Medium, High, and Ultra require a configured Reasoner capability in `ready` or
+`untested` state before host generation.
 Diagnosis remains on its normal Utility-first policy; transformation and
 verification remain on the exact armed Reasoner configuration with no Utility
 fallback. Runtime revalidates that configuration before diagnosis and before
@@ -393,9 +403,9 @@ The provider router only receives card jobs that can fit the effective hand budg
 Invalid or unsupported `storyForm` values normalize to `unknown` rather than failing the whole plan. Runtime also runs a heuristic cross-check against the latest assistant narration. If obvious tense cues disagree with a confident Arbiter result, runtime lowers story form to `unknown` and records the disagreement reason. If stable-tense assistant narration has strong mixed POV evidence, runtime preserves that as mixed POV even when the Arbiter chose a single viewpoint family. Unknown story form produces conservative downstream prompt text that tells card and story models to match the active chat's established form.
 
 The Arbiter is allowed to choose `reasonerDecision.mode: "use"` only when the
-shared resolver reports Reasoner `ready`. For `unconfigured`, `untested`, or
-`unhealthy`, runtime normalizes the decision to `skip` and records a compact
-capability reason.
+shared resolver reports a configured Reasoner in `ready` or `untested` state.
+For `unconfigured` or `unhealthy`, runtime normalizes the decision to `skip`
+and records a compact capability reason.
 
 `promptFootprint` is a current-turn override only. Runtime accepts only `compact`, `normal`, or `rich`; invalid or missing values fall back to the stored user setting and must not appear in the sanitized plan. The override is passed to Prompt Composition for the packet being installed, but it does not mutate the stored setting.
 
@@ -463,14 +473,14 @@ Reasoner is appropriate when:
 - accepted cards exceed the normal prompt budget;
 - Utility cards conflict or overlap in a way bounded runtime validation cannot cleanly resolve;
 - multiple active characters have tense or subtle visible posture that needs careful fusion;
-- the Arbiter selected Reasoner in its initial response and the shared resolver reports it `ready`.
+- the Arbiter selected Reasoner in its initial response and the shared resolver reports it configured as `ready` or `untested`.
 
 Reasoner is not appropriate when:
 
 - the hand is small and non-conflicting;
 - Utility produced invalid or insufficient card data;
 - Reasoning Level policy selects Utility;
-- Reasoner capability is `unconfigured`, `untested`, or `unhealthy`.
+- Reasoner capability is `unconfigured` or `unhealthy`.
 
 Required output shape:
 
@@ -506,11 +516,12 @@ Auto lane selection follows this order:
 2. Utility Arbiter decides the run action, card jobs, and Reasoner use where possible.
 3. Utility card calls generate the structured hand.
 4. Runtime validation accepts or omits cards, while the Utility Arbiter owns semantic hand selection.
-5. Reasoner runs only if the Arbiter selected it, the shared resolver reports it `ready`, and accepted card data is sufficient.
+5. Reasoner runs only if policy selects it, the shared resolver reports a configured `ready` or `untested` lane, and accepted card data is sufficient.
 6. Prompt composition installs the Utility-only or Reasoner-assisted packet.
 
-Auto must be Utility-first. A ready Reasoner is eligible under the selected
-Reasoning Level; readiness must not cause every run to use Reasoner.
+Auto must be Utility-first. A configured Ready or Untested Reasoner is eligible
+under the selected Reasoning Level; routability must not cause every run to use
+Reasoner.
 
 Advanced job routing may expose `Auto Route`, `Utility Provider`, and `Reasoner Provider` for internal roles, but v1 should keep that surface secondary to the main Utility and Reasoner provider cards.
 
@@ -523,7 +534,7 @@ The first end-to-end loop should prove both composer paths even if the default s
 3. Generate or reuse a small accepted hand.
 4. Compose a prompt packet through `guidanceComposer`, injecting guidance plus full raw selected card evidence.
 5. Compose through `reasonerComposer` when the setting and Arbiter decision permit it.
-6. Keep Utility guidance plus raw selected Card Evidence if Reasoner is not ready, fails, times out, or returns invalid schema.
+6. Keep Utility guidance plus raw selected Card Evidence if Reasoner is unconfigured, unhealthy, fails, times out, or returns invalid schema.
 7. Install, skip, or clear the Recursion prompt packet through the host adapter.
 8. Emit visible progress stages and sanitized model-call journal entries for the route taken.
 

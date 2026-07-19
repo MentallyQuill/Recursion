@@ -15,6 +15,7 @@ The first executable slice has these files:
 | `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety and storage preflight. It rejects unsafe users before mutation, logs into dedicated users, writes/reads/verifies/deletes Recursion-owned probe files, and checks cross-user isolation when two or more users are configured. |
 | `tools/scripts/smoke-sillytavern-live.mjs` | Focused live smoke. It validates the dedicated user and base URL gate, authenticates, compares served Recursion files, verifies the Recursion Bar, Hero Pixel Array progress menu, options/settings menu, provider controls, Last Brief dropdown, Full Viewer access, and bridge hooks with Playwright, and writes screenshots/trace for no-generation UI runs when artifacts are enabled. With generation flags, it drives visible send controls when available, records the trigger source, proves host generation continued for UI sends, suppresses binary artifacts, and proves Recursion-owned prompt keys can install and clear without storing raw prompt text. |
 | `tools/scripts/prove-post-process-cards-ui.mjs` | Dedicated-user Post-process Cards UI contract: independent deck persistence, card/category ordering, binary card state, Unified/Progressive and As Swipe/Replace controls, editor behavior, and privacy-safe evidence. |
+| `tools/scripts/prove-live-post-process-as-swipe.mjs` | Strict dedicated-user native generation proof: forces As Swipe, requires the native swipe plus exactly one selected Post-process swipe, validates aligned marker metadata, and reloads the chat before passing. |
 | `tools/scripts/test-live-harness.mjs` | Deterministic contract tests for the guardrail behavior. |
 
 The harness should be a library, not a second runtime. Runtime behavior stays in `src/`; the harness drives the public host/UI surface and reads documented diagnostics.
@@ -201,7 +202,7 @@ When only one user is configured, the script verifies that user's storage but em
 - open the Hero Pixel Array progress menu;
 - switch disabled power, Standard/Rapid/Fused Pipeline, Auto, and Manual states;
 - render Utility and Reasoner capability as Configure, Untested, Ready, or Unhealthy with no provider enable control;
-- keep Medium+ Redirect visible but unavailable until Reasoner is Ready, preserve the prior Enhancement selection on an unavailable click, and keep Low Redirect available through Utility;
+- keep Medium+ Redirect visible but unavailable when Reasoner is unconfigured or unhealthy, show Untested as a routable caution, preserve the prior Enhancement selection on an unavailable click, and keep Low Redirect available through Utility;
 - seed and clear a Recursion-owned prompt sentinel during no-generation mode smoke;
 - run Test Provider actions through visible controls when configured;
 - send a safe test message only when the live run explicitly allows chat mutation;

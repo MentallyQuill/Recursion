@@ -211,7 +211,7 @@ export function resolveProviderCapability({
     : resolvedLane === 'utility' || reasoningLevel !== 'low';
   const eligible = resolvedOperation === 'provider-test'
     ? configuration.testable
-    : selectedByPolicy && state === 'ready';
+    : selectedByPolicy && (state === 'ready' || state === 'untested');
   const reasonCode = capabilityReasonCode({
     lane: resolvedLane,
     state,

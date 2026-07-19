@@ -7,7 +7,7 @@ Provider routing is implemented by `src/providers.mjs`, configured by `src/setti
 | Lane | Required | Uses | Fallback |
 | --- | --- | --- | --- |
 | Utility | Yes | Low/Medium Arbiter, Low/Medium card generation, Low/Medium Fused bundles, lower-priority High cards, provider tests, Pre-process guidance, and Post-process guidance when selected. | Local fallback plan, cache reuse, raw-card-only packet, prompt clear, original-message reveal, or skip. |
-| Reasoner | No | Medium+ guidance, High/Ultra Arbiter, High/Ultra Fused bundles when healthy, high-priority High cards, Ultra card generation, and Post-process guidance when ready. | Utility guidance plus raw card evidence. |
+| Reasoner | No | Medium+ guidance, High/Ultra Arbiter, High/Ultra Fused bundles when routable, high-priority High cards, Ultra card generation, and Post-process guidance when configured Ready or Untested. | Utility guidance plus raw card evidence. |
 
 Utility remains the required operational lane. Reasoner eligibility comes from
 one shared capability resolver plus Reasoning Level policy; there is no provider
@@ -17,9 +17,11 @@ The resolver reports `unconfigured`, `untested`, `ready`, or `unhealthy`.
 Configuration completeness, host support, and session credentials establish
 whether a lane is testable. Only pass/fail health evidence bound to the current
 configuration hash establishes `ready` or `unhealthy`; stale health is neutral.
-Ordinary Medium/High/Ultra work falls back to Utility unless Reasoner is
-`ready`. Medium+ Redirect instead remains unavailable and is skipped before
-provider work. Low Redirect uses Utility.
+Ordinary Medium/High/Ultra work routes through configured `ready` or `untested`
+Reasoner according to policy; `untested` is caution-only. `Unconfigured` or
+`unhealthy` ordinary work falls back to Utility. Medium+ Redirect is unavailable
+and skipped before provider work only for those blocking states. Low Redirect
+uses Utility.
 
 ## Provider Sources
 
@@ -55,12 +57,12 @@ Recursion exposes route visibility as a compact Reasoning Level summary rather t
 
 | Role | Lane | Current use |
 | --- | --- | --- |
-| `utilityArbiter` | Utility by default; Reasoner at High/Ultra when healthy | Plan action, scene status, card jobs, Reasoner decision, budgets, and compact diagnostics. |
-| Card roles | Utility by default; Reasoner for high-priority High cards and Ultra card calls when healthy | Generate fixed-family card JSON from the frozen snapshot. |
-| `fusedCardBundle` | Utility at Low/Medium; Reasoner at High/Ultra when healthy | Generate all requested card families in one structured bundle for the Fused pipeline. |
+| `utilityArbiter` | Utility by default; configured Ready or Untested Reasoner at High/Ultra | Plan action, scene status, card jobs, Reasoner decision, budgets, and compact diagnostics. |
+| Card roles | Utility by default; configured Ready or Untested Reasoner for high-priority High cards and Ultra card calls | Generate fixed-family card JSON from the frozen snapshot. |
+| `fusedCardBundle` | Utility at Low/Medium; configured Ready or Untested Reasoner at High/Ultra | Generate all requested card families in one structured bundle for the Fused pipeline. |
 | `guidanceComposer` | Utility | Provider-authored direction for using selected raw card evidence in Standard, Rapid warm, Fused packets, and Post-process operations. Guidance remains structured; native host quiet generation writes prose. |
 | `rapidTurnDelta` | Utility | Foreground Rapid role that selects from warmed raw cards and emits a small user-message guidance delta. |
-| `reasonerComposer` | Reasoner | Medium+ synthesis for Pre-process and Post-process Guidance when the lane is ready. |
+| `reasonerComposer` | Reasoner | Medium+ synthesis for Pre-process and Post-process Guidance when the configured lane is ready or untested. |
 | `postProcessGuidance` | Utility or sticky Reasoner lane | Structured guidance for one frozen completed response and the active Post-process deck. It never writes prose. |
 | `editorialDiagnostician` | Utility for Repair/Recompose; Redirect follows its readiness-specific lane | Diagnoses the frozen response and emits the mode-bound editorial brief before any candidate or patch is written. |
 | `editorialTransformer` | Same Editorial lane as diagnosis, with Redirect-specific Reasoner rules | Emits a complete Recompose candidate, Redirect text, or Repair bounded patches. Repair never accepts a full candidate. |

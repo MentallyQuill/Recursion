@@ -105,6 +105,51 @@ assert(
   'Post-process guidance exposes a running Hero Pixel Array block'
 );
 
+const rewritingPostProcessProgress = createProgressRunModel({
+  activityHistory: [{
+    runId: 'post-process-rewriting',
+    phase: 'postProcessStarted',
+    severity: 'info',
+    label: 'Post-processing response...',
+    providerLane: 'utility'
+  }],
+  activity: {
+    runId: 'post-process-rewriting',
+    phase: 'postProcessCategory',
+    severity: 'info',
+    label: 'Unified',
+    providerLane: 'utility',
+    detail: {
+      categoryId: 'unified',
+      categoryName: 'Unified',
+      state: 'running',
+      activeStage: 'host-rewrite',
+      guidanceAttempts: 1,
+      hostAttempts: 0
+    }
+  }
+});
+const rewritingPostProcessStep = rewritingPostProcessProgress.steps.find((step) => step.id === 'post-process-category-unified');
+assertEqual(rewritingPostProcessStep.children[0].state, 'done', 'completed Post-process guidance pixel turns green during host rewrite');
+assertEqual(rewritingPostProcessStep.children[1].state, 'running', 'SillyTavern rewrite pixel runs for the writer phase');
+assert(
+  createHeroPixelBlocks(rewritingPostProcessProgress).some((block) => block.state === 'running'),
+  'SillyTavern rewrite keeps a running Hero Pixel Array block'
+);
+
+const committingPostProcessProgress = createProgressRunModel({
+  activity: {
+    runId: 'post-process-committing',
+    phase: 'postProcessCommitting',
+    severity: 'info',
+    label: 'Adding Post-process swipe...',
+    providerLane: 'utility',
+    detail: { committedApplyMode: 'as-swipe' }
+  }
+});
+assertEqual(committingPostProcessProgress.steps[0].id, 'post-process-commit', 'Post-process commit exposes a dedicated progress pixel');
+assertEqual(committingPostProcessProgress.steps[0].state, 'running', 'Post-process commit pixel runs while the swipe is being added');
+
 const progressivePostProcessProgress = createProgressRunModel({
   activityHistory: [
     {

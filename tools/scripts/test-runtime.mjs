@@ -7446,12 +7446,40 @@ for (const scenario of [
   assertEqual(view.lastPacket.diagnostics.behaviorPolicy.effectiveFootprint, 'rich', 'diagnostics record effective rich footprint during override');
 }
 
-for (const scenario of [
-  {
-    label: 'untested reasoner',
+{
+  const routerCalls = [];
+  const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', promptFootprint: 'rich' },
-    expectedReason: 'reasoner-untested'
-  },
+    generationRouter: {
+      async generate(roleId, request) {
+        routerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') {
+          return {
+            ok: true,
+            data: {
+              schema: UTILITY_ARBITER_SCHEMA,
+              snapshotHash: request.snapshotHash,
+              reasonerDecision: { mode: 'use', reason: 'Untested is advisory.', signals: ['provider-caution'] },
+              budgets: { targetBriefTokens: 900, maxCards: 6 }
+            }
+          };
+        }
+        if (roleId === 'reasonerComposer') {
+          return reasonerComposerResponse(request, 'Use the configured untested Reasoner.');
+        }
+        return cardProviderResponse(roleId, request);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Proceed through an untested configured Reasoner.' });
+  assertEqual(result.ok, true, 'untested configured Reasoner still installs the prompt packet');
+  assert(routerCalls.includes('reasonerComposer'), 'untested configured Reasoner reaches generation');
+  assertEqual(result.plan.reasonerDecision.mode, 'use', 'untested configured Reasoner preserves the Arbiter routing decision');
+  assert(!result.plan.diagnostics.includes('reasoner-unavailable'), 'untested configured Reasoner is not diagnosed as unavailable');
+  assertEqual(runtime.providerCapability('reasoner', 'prompt-packet').state, 'untested', 'untested provider state remains visible as caution status');
+}
+
+for (const scenario of [
   {
     label: 'failed reasoner test',
     settings: providerHealthSettings({
@@ -8299,7 +8327,11 @@ for (const scenario of [
   });
   const result = await runtime.prepareForGeneration({ userMessage: `Reject ${scenario.label} Arbiter hash.` });
   assertEqual(result.ok, true, `${scenario.label} arbiter snapshot hash falls back fail-soft`);
-  assertDeepEqual(routerCalls, ['utilityArbiter', 'guidanceComposer'], `${scenario.label} arbiter snapshot hash only launches guidance after fallback`);
+  assertDeepEqual(
+    routerCalls,
+    ['utilityArbiter', 'guidanceComposer', 'reasonerComposer'],
+    `${scenario.label} arbiter snapshot hash launches the configured guidance and untested Reasoner lanes after fallback`
+  );
   assertEqual(result.plan.action, 'compose-brief', `${scenario.label} arbiter snapshot hash uses local fallback plan`);
   assertEqual(result.plan.cardJobs.length, 0, `${scenario.label} arbiter snapshot hash drops provider card jobs`);
   assert(result.plan.diagnostics.includes('utility-arbiter-fallback'), `${scenario.label} arbiter snapshot hash records fallback diagnostic`);
@@ -8555,6 +8587,7 @@ for (const scenario of [
             ok: true,
             data: {
               schema: 'recursion.reasonerComposer.v1',
+              snapshotHash: request.snapshotHash,
               instructionPatch: 'This should not be used.',
               keptCardIds: [],
               droppedCardIds: []
@@ -8567,8 +8600,9 @@ for (const scenario of [
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Skip reasoner on rich auto.' });
   assertEqual(result.ok, true, 'rich auto run still installs when arbiter skips reasoner');
-  assert(!routerCalls.includes('reasonerComposer'), 'arbiter reasoner skip suppresses reasoner composer for rich auto prompts');
-  assertEqual(runtime.view().lastPacket.diagnostics.reasonerStatus, 'skipped', 'reasoner status stays skipped when arbiter skips reasoner');
+  assertEqual(result.plan.reasonerDecision.mode, 'skip', 'rich auto plan preserves the Arbiter reasoner skip');
+  assert(routerCalls.includes('reasonerComposer'), 'Medium reasoning keeps its configured Reasoner lane routable despite an advisory Arbiter skip');
+  assertEqual(runtime.view().lastPacket.diagnostics.reasonerStatus, 'used', 'Medium reasoning records the configured Reasoner composer');
 }
 
 {
@@ -9277,6 +9311,9 @@ for (const scenario of [
             }
           };
         }
+        if (roleId === 'reasonerComposer') {
+          return reasonerComposerResponse(request, 'Keep the budgeted generated card families only.');
+        }
         generatedRoles.push(roleId);
         return {
           ok: true,
@@ -9662,6 +9699,9 @@ for (const scenario of [
             }
           };
         }
+        if (roleId === 'reasonerComposer') {
+          return reasonerComposerResponse(request, 'Preserve the sequential card guidance.');
+        }
         cardStarts.push({ roleId, firstCardCompletedAtStart: firstCardCompleted });
         cardSnapshots.push({ roleId, runId: request.runId, snapshotHash: request.snapshotHash, signal: request.signal, hasSignal: isAbortSignal(request.signal) });
         if (roleId === 'sceneConstraintsCard') {
@@ -9706,7 +9746,11 @@ for (const scenario of [
   const view = runtime.view();
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assertEqual(result.ok, true, 'sequential provider card job run installs prompt');
-  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard', 'guidanceComposer'], 'router without batch runs card jobs sequentially then composes guidance');
+  assertDeepEqual(
+    routerCalls,
+    ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard', 'guidanceComposer', 'reasonerComposer'],
+    'router without batch runs card jobs sequentially then composes guidance through the configured untested Reasoner'
+  );
   assertEqual(cardStarts[1].firstCardCompletedAtStart, true, 'second sequential card starts after first resolves');
   assertEqual(cardSnapshots.length, 2, 'sequential card jobs capture frozen requests');
   assert(cardSnapshots.every((entry) => entry.snapshotHash === result.plan.snapshotHash), 'sequential card jobs use frozen plan snapshot hash');
@@ -9824,6 +9868,9 @@ for (const scenario of [
             }
           };
         }
+        if (roleId === 'reasonerComposer') {
+          return reasonerComposerResponse(request, 'Preserve the surviving sequential card.');
+        }
         if (roleId === 'sceneConstraintsCard') {
           throw new Error('sequential card provider failed');
         }
@@ -9849,7 +9896,11 @@ for (const scenario of [
   const view = runtime.view();
   const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
   assertEqual(result.ok, true, 'sequential thrown card job run still installs prompt');
-  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard', 'guidanceComposer'], 'throwing sequential card job is attempted after first card then composes guidance');
+  assertDeepEqual(
+    routerCalls,
+    ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard', 'guidanceComposer', 'reasonerComposer'],
+    'throwing sequential card job is attempted after first card then composes through the configured untested Reasoner'
+  );
   assert(cache.cards.some((card) => card.family === 'Open Threads'), 'successful sequential card persists despite later throw');
   assert(!cache.cards.some((card) => card.family === 'Scene Constraints'), 'throwing sequential card is omitted independently');
   assert(view.lastPacket.sections.cardEvidence.includes('survives a later card failure'), 'successful sequential card reaches prompt after later throw');
@@ -12599,7 +12650,17 @@ for (const scenario of [
 for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasoningLevel, reasonerUse: 'auto' },
+    settings: {
+      mode: 'auto',
+      reasoningLevel,
+      reasonerUse: 'auto',
+      providers: {
+        reasoner: {
+          source: 'host-connection-profile',
+          hostConnectionProfileId: ''
+        }
+      }
+    },
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push({ roleId, request });
@@ -12634,7 +12695,13 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
       mode: 'auto',
       reasoningLevel: 'medium',
       reasonerUse: 'auto',
-      enhancements: { mode: 'redirect', applyMode: 'as-swipe', contextMessages: 13 }
+      enhancements: { mode: 'redirect', applyMode: 'as-swipe', contextMessages: 13 },
+      providers: {
+        reasoner: {
+          source: 'host-connection-profile',
+          hostConnectionProfileId: ''
+        }
+      }
     },
     hostMessages: proseHost.messages,
     generationRouter: {
@@ -12670,7 +12737,7 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   const settled = await runtime.enhanceLatestAssistantMessage({ reason: 'assistant-message-landed' });
   assertEqual(settled.ok, true, 'blocked Redirect settles without a critical error');
   assertEqual(settled.skipped, true, 'blocked Redirect settles as skipped');
-  assertEqual(settled.reason, 'reasoner-untested', 'blocked Redirect reports the stable readiness reason');
+  assertEqual(settled.reason, 'provider-profile-missing', 'blocked Redirect reports the stable readiness reason');
   assertEqual(runtime.proseEnhancementPending(), false, 'blocked Redirect clears its pending marker after settlement');
   assertEqual(runtime.view().editorialResult.status, 'skipped', 'blocked Redirect exposes skipped Editorial status');
   assertEqual(runtime.view().editorialResult.outcome, 'provider-not-ready', 'blocked Redirect exposes provider readiness outcome');

@@ -1046,7 +1046,41 @@ assertEqual(
   'Low Redirect final writing stays on Utility'
 );
 
-for (const reasonerCapability of ['unconfigured', 'untested', 'unhealthy']) {
+{
+  const cautionedMediumRedirect = createRedirectHarness({ reasonerCapability: 'untested' });
+  await cautionedMediumRedirect.runtime.updateSettings({
+    reasoningLevel: 'medium',
+    enhancements: { mode: 'redirect', applyMode: 'as-swipe' }
+  });
+  const setup = await cautionedMediumRedirect.runtime.prepareForGeneration({
+    userMessage: 'Carter wants to test the transport method now.',
+    hostGeneration: true
+  });
+  assertEqual(setup.ok, true, 'Medium Redirect with an untested Reasoner preserves host generation');
+  assertEqual(
+    cautionedMediumRedirect.runtime.providerCapability('reasoner', 'redirect').state,
+    'untested',
+    'Medium Redirect caution fixture exposes the intended provider state'
+  );
+  const providerCaution = cautionedMediumRedirect.state.activityEvents.find((event) => (
+    event.phase === 'providerCaution'
+    && event.severity === 'warning'
+    && event.outcome === 'warning'
+  ));
+  assertEqual(Boolean(providerCaution), true, 'Medium Redirect exposes untested Reasoner as a status caution');
+  assertEqual(providerCaution?.detail?.state, 'untested', 'Medium Redirect caution names the provider state');
+  const cautionedResult = await cautionedMediumRedirect.runtime.enhanceLatestAssistantMessage({
+    reason: 'assistant-message-landed'
+  });
+  assertEqual(cautionedResult.ok, true, 'Medium Redirect proceeds through an untested configured Reasoner');
+  assertEqual(cautionedMediumRedirect.state.appended.length, 1, 'Medium Redirect with an untested Reasoner appends its swipe');
+  assert(
+    cautionedMediumRedirect.state.calls.some((call) => call.roleId === 'editorialTransformer'),
+    'Medium Redirect with an untested Reasoner reaches Editorial generation'
+  );
+}
+
+for (const reasonerCapability of ['unconfigured', 'unhealthy']) {
   const blockedMediumRedirect = createRedirectHarness({ reasonerCapability });
   await blockedMediumRedirect.runtime.updateSettings({
     reasoningLevel: 'medium',

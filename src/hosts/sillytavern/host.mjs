@@ -1576,6 +1576,40 @@ export function createSillyTavernHost({
     return { ok: true };
   }
 
+  function canceledPostProcessCommit() {
+    return {
+      ok: false,
+      error: {
+        code: 'RECURSION_POST_PROCESS_COMMIT_CANCELED',
+        message: 'Post-process commit was canceled.'
+      }
+    };
+  }
+
+  async function persistAssistantMutation(context, target, original, options = {}) {
+    const saved = await saveChatRequired(context);
+    if (!saved.ok) {
+      restoreJsonObject(target, original);
+      return saved;
+    }
+    if (options.markerNamespace !== 'postProcess' || !options.signal?.aborted) {
+      return { ok: true };
+    }
+    restoreJsonObject(target, original);
+    const rollback = await saveChatRequired(context);
+    if (!rollback.ok) {
+      return {
+        ok: false,
+        error: {
+          code: 'RECURSION_POST_PROCESS_ROLLBACK_SAVE_FAILED',
+          message: 'Post-process was canceled, but SillyTavern could not persist the restored source response.',
+          cause: rollback.error
+        }
+      };
+    }
+    return canceledPostProcessCommit();
+  }
+
   const messagesApi = {
     activeAssistantMessageIdentity() {
       const context = currentContext(contextFactory);
@@ -1662,11 +1696,8 @@ export function createSillyTavernHost({
       } else {
         found.raw.__recursionGenerationReview = asObject(options.marker);
       }
-      const saved = await saveChatRequired(context);
-      if (!saved.ok) {
-        restoreJsonObject(found.raw, original);
-        return saved;
-      }
+      const saved = await persistAssistantMutation(context, found.raw, original, options);
+      if (!saved.ok) return saved;
       updateMessageBlockBestEffort(context, found.index, found.raw);
       return { ok: true, messageId: found.normalized.mesid, text: stringValue(text) };
     },
@@ -1722,11 +1753,8 @@ export function createSillyTavernHost({
       }
       delete found.raw.__recursionHeldText;
       delete found.raw.__recursionHeldSwipeId;
-      const saved = await saveChatRequired(context);
-      if (!saved.ok) {
-        restoreJsonObject(found.raw, original);
-        return saved;
-      }
+      const saved = await persistAssistantMutation(context, found.raw, original, options);
+      if (!saved.ok) return saved;
       updateMessageBlockBestEffort(context, found.index, found.raw);
       refreshSwipeControlsBestEffort(context);
       return { ok: true, messageId: found.normalized.mesid, index, text: stringValue(text) };

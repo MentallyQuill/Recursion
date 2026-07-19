@@ -1203,7 +1203,7 @@ Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must 
 - High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner guidance composition; card pressure capped at Normal Cards.
 - Ultra: Reasoner-heavy Arbiter, card generation, and guidance composition with card pressure raised/capped at Max Cards.
 
-`reasoningLevel` is persisted as `low | medium | high | ultra`, default `medium`. It is the authoritative user-facing provider-bias setting. Low keeps ordinary work on Utility. Medium, High, and Ultra use Reasoner only for policy-selected work when its derived capability is `ready`; otherwise ordinary Pre-process work falls back to Utility without changing the selected level. Post-process guidance is lane-sticky: Low and Medium use Utility, High and Ultra require Reasoner, and failed same-lane attempts fail soft without crossing lanes.
+`reasoningLevel` is persisted as `low | medium | high | ultra`, default `medium`. It is the authoritative user-facing provider-bias setting. Low keeps ordinary work on Utility. Medium, High, and Ultra use Reasoner for policy-selected work when its configured capability is `ready` or `untested`; an untested lane is shown as a caution, not a blocker. Unconfigured or unhealthy Reasoner routes ordinary Pre-process work to Utility without changing the selected level. Post-process guidance is lane-sticky: Low and Medium use Utility, High and Ultra require Reasoner, and failed same-lane attempts fail soft without crossing lanes.
 
 Providers contains the complete provider setup surface in collapsible lane sections:
 

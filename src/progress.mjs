@@ -112,6 +112,7 @@ const STEP_DEFINITIONS = Object.freeze({
   'saving-scene-cache': { label: 'Saving scene cache', providerLane: 'utility' },
   'composing-prompt-packet': { label: 'Composing prompt packet', providerLane: 'utility' },
   'reasoner-guidance': { label: 'Reasoner guidance', providerLane: 'reasoner' },
+  'post-process-commit': { label: 'Adding Post-process swipe', providerLane: 'utility' },
   'installing-recursion-prompt': { label: 'Installing Recursion prompt', providerLane: 'utility' },
   'clearing-recursion-prompt': { label: 'Clearing Recursion prompt', providerLane: 'utility' },
   'recursion-prompt-ready': { label: 'Recursion prompt ready', providerLane: 'utility' }
@@ -426,6 +427,7 @@ function eventStepId(event) {
     return `post-process-category-${idFromText(detail.categoryId || detail.categoryName, 'category')}`;
   }
   if (phase === 'postProcessCommitted') return 'post-process-commit';
+  if (phase === 'postProcessCommitting') return 'post-process-commit';
   if (phase === 'settled' && cleanText(event.runId).toLowerCase().startsWith('post-process-')) {
     return 'post-process-commit';
   }
@@ -460,6 +462,7 @@ function eventState(event, isCurrent) {
     return 'running';
   }
   if (phase === 'postProcessCommitted') return detail.partial === true ? 'warning' : 'done';
+  if (phase === 'postProcessCommitting') return 'running';
   if (phase === 'cardProgress' && detail.state) return normalizeStateWithRetry(detail.state, retryCount);
   if (phase === 'cacheWarning') return severity === 'error' ? 'failed' : 'done';
   if (phase === 'providerCallSettled' || isProviderSettledEvent(event)) {
@@ -489,13 +492,14 @@ function childStepFromEvent(event, state, order = 0) {
     const failureStage = cleanText(detail.failureStage).toLowerCase();
     const guidanceAttempts = normalizeRetryCount(detail.guidanceAttempts);
     const hostAttempts = normalizeRetryCount(detail.hostAttempts);
+    const activeStage = cleanText(detail.activeStage).toLowerCase();
     const guidanceState = categoryState === 'running'
-      ? 'running'
+      ? (activeStage === 'host-rewrite' ? 'done' : 'running')
       : (categoryState === 'failed' && failureStage === 'guidance'
           ? 'failed'
           : (guidanceAttempts > 1 ? 'warning' : 'done'));
     const hostState = categoryState === 'running'
-      ? 'pending'
+      ? (activeStage === 'host-rewrite' ? 'running' : 'pending')
       : (categoryState === 'failed'
           ? (failureStage === 'host-rewrite' ? 'failed' : 'skipped')
           : (hostAttempts > 1 ? 'warning' : 'done'));

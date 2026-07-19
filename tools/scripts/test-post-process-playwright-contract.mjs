@@ -12,6 +12,16 @@ import { runWithRetainedTrace } from './lib/trace-lifecycle.mjs';
 
 const proofPath = resolve('tools', 'scripts', 'prove-post-process-cards-ui.mjs');
 assert.equal(existsSync(proofPath), true, 'Post-process UI proof script exists');
+const liveProofPath = resolve('tools', 'scripts', 'prove-live-post-process-as-swipe.mjs');
+assert.equal(existsSync(liveProofPath), true, 'strict live Post-process As Swipe proof exists');
+const liveProofSource = readFileSync(liveProofPath, 'utf8');
+assert(liveProofSource.includes("argv.includes('--live')"), 'live Post-process proof requires explicit mutation opt-in');
+assert(liveProofSource.includes('validateSoakUserHandle'), 'live Post-process proof rejects default-user');
+assert(liveProofSource.includes("applyMode: 'as-swipe'"), 'live Post-process proof forces As Swipe');
+assert(liveProofSource.includes('postProcessSourceSwipeCount + 1'), 'live Post-process proof requires exactly one swipe after its completed native source');
+assert(liveProofSource.includes('recursion.postProcessMarker.v1'), 'live Post-process proof requires the persisted V1 marker');
+assert(liveProofSource.includes('swipeInfo.length'), 'live Post-process proof requires aligned swipe metadata');
+assert(liveProofSource.includes('openCharacterChat'), 'live Post-process proof reloads the persisted chat before passing');
 
 const result = spawnSync(process.execPath, [proofPath, '--dry-run'], {
   cwd: process.cwd(),

@@ -3,9 +3,9 @@
 Recursion uses two provider lanes:
 
 - Utility: required, default, and used for Arbiter planning, scene/card extraction, card generation, lifecycle support, structured diagnostics, guidance composition, and fail-soft fallback guidance.
-- Reasoner: optional, used by Medium/High/Ultra Reasoning Level routing when its capability is `ready`, with Utility fallback for ordinary work when unavailable.
+- Reasoner: optional, used by Medium/High/Ultra Reasoning Level routing when its configured capability is `ready` or `untested`, with Utility fallback for ordinary work when unavailable.
 
-Reasoner is not a better default Utility. Utility remains the required path and the fallback path. The compact-bar Reasoning Level chain controls how much Recursion tries to use Reasoner: Low is Utility-only, Medium uses Reasoner for guidance composition when ready, High adds Reasoner for Arbiter, priority card families, and Fused bundles when ready, and Ultra is Reasoner-heavy when the lane is ready.
+Reasoner is not a better default Utility. Utility remains the required path and the fallback path. The compact-bar Reasoning Level chain controls how much Recursion tries to use Reasoner: Low is Utility-only, Medium uses a configured Reasoner for guidance composition, High adds Reasoner for Arbiter, priority card families, and Fused bundles, and Ultra is Reasoner-heavy. An untested configured lane remains routable and shows a caution until Test Provider records health.
 
 ![Utility and Reasoner provider controls with session-only key state](../../assets/documentation/renders/recursion-provider-controls-utility-reasoner.png)
 
@@ -42,14 +42,15 @@ Utility is healthy when the test passes and the bar or provider card shows a rea
 2. Choose a provider source.
 3. Fill the required fields.
 4. Run `Test Provider`.
-5. Use the compact-bar Reasoning Level chain for broad provider bias; Low forces Utility-only behavior, while Medium, High, and Ultra keep their selected level and use Reasoner only when it is ready.
+5. Use the compact-bar Reasoning Level chain for broad provider bias; Low forces Utility-only behavior, while Medium, High, and Ultra keep their selected level and use Reasoner when it is configured and either Ready or Untested.
 
 There is no Reasoner enable switch. Its provider card shows one derived state:
 `Configure` when the selected route is incomplete, `Untested` when configuration
 is complete but lacks current health evidence, `Ready` after a passing test for
 the current configuration hash, or `Unhealthy` after a matching failed test.
-Reasoner is eligible only when `Ready` and selected by Reasoning Level plus
-runtime policy.
+Reasoner is eligible when `Ready` or `Untested` and selected by Reasoning Level
+plus runtime policy. `Untested` remains a visible caution until health evidence
+is recorded.
 
 Reasoning Level also sets the amount of provider-side reasoning Recursion requests for Reasoner work:
 
@@ -60,7 +61,7 @@ Reasoning Level also sets the amount of provider-side reasoning Recursion reques
 | High | medium | Post-process guidance medium, Arbiter medium, cards and Fused bundles minimal |
 | Ultra | high | Post-process guidance high, Arbiter medium, cards and Fused bundles medium |
 
-Post-process guidance routing is lane-sticky: Low and Medium use Utility, while High and Ultra require Reasoner `Ready`. If the required lane is not ready, the operation or category fails soft without crossing lanes. Pre-process work may use Utility fallback according to the selected Reasoning Level policy.
+Post-process guidance routing is lane-sticky: Low and Medium use Utility, while High and Ultra require a configured Reasoner that is `Ready` or `Untested`. If the required lane is unconfigured, unhealthy, or fails its routed call, the operation or category fails soft without crossing lanes. Pre-process work may use Utility fallback according to the selected Reasoning Level policy.
 
 Post-process uses the configured Evidence Messages count to build a bounded, sender-aware frozen operation snapshot. Recent visible transcript messages, character evidence, the generation-time Pre-process Prompt Packet, ordered Post-process cards, pipeline provenance, and the current writable draft become evidence for guidance synthesis. The guidance response is structured and never replaces prose; SillyTavern's native quiet-generation path writes the draft.
 
@@ -155,7 +156,7 @@ Expected fallback behavior:
 - Utility timeout: retry once for transient transport failure only if the request is not aborted and the current snapshot is still current, then skip or reuse safe cache.
 - Utility invalid structured output: repair safe JSON syntax when possible, then reject any output that still misses the required schema or snapshot hash and use conservative local behavior.
 - Card job failure: omit failed card and keep valid sibling cards.
-- Reasoner unconfigured or untested: Utility composes for ordinary work.
+- Reasoner unconfigured: Utility composes for ordinary work. A configured Untested Reasoner remains routable with caution status.
 - Reasoner missing key: Utility composes.
 - Reasoner timeout or invalid output: Utility composes and the fallback is recorded.
 - Prompt install failure after provider success: generation continues without Recursion guidance.
@@ -172,8 +173,8 @@ Post-process recovery is bounded separately from ordinary provider fallback. Gui
 | --- | --- | --- |
 | Utility not ready | Missing source, model, profile, or session key. | Open Utility provider card, complete setup, run Test Provider. |
 | Provider test failed | Bad key, base URL, model name, network, or incompatible response. | Re-enter session key, verify endpoint/model, test again. |
-| Reasoner never runs | Unconfigured, untested, unhealthy, or not selected by policy. | Complete its configuration, run Test Provider, and choose an appropriate Reasoning Level. |
-| High/Ultra Post-process guidance is unavailable | Reasoner is not `Ready` for the current configuration hash. | Use Test Reasoner or choose Low/Medium so guidance uses Utility. |
+| Reasoner never runs | Unconfigured, unhealthy, or not selected by policy. | Complete its configuration, run Test Provider, and choose an appropriate Reasoning Level. |
+| High/Ultra Post-process guidance is unavailable | Reasoner is unconfigured or unhealthy. | Complete or repair Reasoner, or choose Low/Medium so guidance uses Utility. |
 | Reasoner failed but generation continued | Expected fallback path. | Inspect Activity and Prompt Packet to confirm Utility guidance plus raw selected Card Evidence. |
 | Prompt not installed | Power is off, Utility unavailable, stale run, or injection failure. | Check power state, mode, Activity, Provider status, and Prompt Packet metadata. |
 | Session key disappeared | Browser session reset or Clear Session Key used. | Re-enter key and run Test Provider. |

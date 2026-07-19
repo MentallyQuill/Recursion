@@ -207,9 +207,10 @@ Runtime validates and normalizes the plan. If the Utility provider is unavailabl
 After the Arbiter plan is normalized, scoped, and shaped by Reasoning Level plus behavior policy, runtime budgets `cardJobs` before any provider card calls. Over-budget card jobs are recorded as `card-jobs-budgeted` diagnostics and are not sent to Utility or Reasoner. Final hand selection should not normally omit freshly generated cards for `max-cards`; that reason indicates cache/manual/fallback competition, not routine provider over-generation.
 
 Reasoner decisions are advisory after normalization. When the Arbiter requests
-Reasoner but the shared capability state is `unconfigured`, `untested`, or
-`unhealthy`, runtime rewrites the decision to `skip`, records a stable sanitized
-capability diagnostic, and composes through Utility only.
+Reasoner but the shared capability state is `unconfigured` or `unhealthy`,
+runtime rewrites the decision to `skip`, records a stable sanitized capability
+diagnostic, and composes through Utility only. A configured `untested` Reasoner
+remains routable and surfaces caution status.
 
 ## Card Jobs And Deck Update
 
@@ -319,8 +320,9 @@ Malformed provider output may use local JSON repair and at most one shared corre
 | Card batch failure | Continue with accepted siblings and local fallback cards after a valid or locally recoverable plan. |
 | Invalid cached card | Ignore the card and show neutral cache-inspection progress; warn only if the run must skip because no reusable cache remains. |
 | No reusable cache for `reuse-cache` | Clear Recursion prompt and return a warning skip. |
-| Reasoner `unconfigured`, `untested`, or `unhealthy` | Skip Reasoner before ordinary composer work and compose through Utility. |
-| Medium+ Redirect with Reasoner not `ready` | Warn before host generation, preserve the original, make no Editorial calls, and settle Redirect `skipped`. |
+| Reasoner `unconfigured` or `unhealthy` | Skip Reasoner before ordinary composer work and compose through Utility. |
+| Reasoner `untested` | Route through the configured lane and expose caution status without blocking. |
+| Medium+ Redirect with Reasoner `unconfigured` or `unhealthy` | Warn before host generation, preserve the original, make no Editorial calls, and settle Redirect `skipped`. |
 | Reasoner call failed | Compose with Utility and record Reasoner fallback metadata. |
 | Prompt install failed | Record warning; normal SillyTavern generation continues. |
 | Prompt clear failed | Record warning because a stale prompt may remain in host state. |

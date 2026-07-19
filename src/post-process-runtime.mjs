@@ -277,7 +277,13 @@ async function synthesizeCategoryGuidance(stage, operation, generationRouter) {
     result = await generationRouter.generate(
       operation.route.roleId,
       guidanceRequestForStage(stage, operation),
-      { maxAttempts: 2, signal: operation.signal }
+      {
+        maxAttempts: 2,
+        signal: operation.signal,
+        runId: operation.operationId,
+        lockRunId: true,
+        activityLifecycle: 'nested'
+      }
     );
   } catch (error) {
     if (operation.signal.aborted || error?.name === 'AbortError') throw error;
@@ -449,6 +455,10 @@ async function runUnified(operation, dependencies) {
       ))
     };
   }
+  dependencies.stageCategory?.(operation, progressCategory, 'running', {
+    activeStage: 'host-rewrite',
+    guidanceAttempts: guidance.attempts
+  });
   const rewrite = await rewriteWithRetry(
     stage,
     guidance,
@@ -512,6 +522,10 @@ async function runProgressive(operation, dependencies) {
       dependencies.stageCategory?.(operation, category, 'failed', failed);
       continue;
     }
+    dependencies.stageCategory?.(operation, category, 'running', {
+      activeStage: 'host-rewrite',
+      guidanceAttempts: guidance.attempts
+    });
     const rewrite = await rewriteWithRetry(
       stage,
       guidance,
@@ -698,6 +712,7 @@ export function createPostProcessRuntime({
         categoryId: safeId(category?.id, 'category'),
         categoryName: cleanText(category?.name || category?.id || 'Post-process category'),
         state,
+        activeStage: cleanText(details.activeStage),
         guidanceAttempts: Number(details.guidanceAttempts || 0),
         hostAttempts: Number(details.hostAttempts || 0),
         ...(retried ? { cautionReason: 'Post-process stage recovered after retry.' } : {}),
@@ -855,6 +870,22 @@ export function createPostProcessRuntime({
         committedApplyMode,
         partial
       );
+      publish('stage', {
+        runId: operation.operationId,
+        operationId: operation.operationId,
+        phase: 'postProcessCommitting',
+        mode: 'review',
+        severity: 'info',
+        label: committedApplyMode === 'replace'
+          ? 'Replacing response...'
+          : 'Adding Post-process swipe...',
+        chips: ['Post-process', committedApplyMode === 'replace' ? 'Replace' : 'As Swipe'],
+        detail: {
+          partial,
+          requestedApplyMode: operation.applyMode,
+          committedApplyMode
+        }
+      });
       let commit;
       try {
         commit = await commitResult({

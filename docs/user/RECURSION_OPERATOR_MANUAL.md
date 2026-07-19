@@ -336,7 +336,7 @@ Context-window caps are local Recursion tuning controls. Lower Source Freshness 
 Recursion has two provider lanes:
 
 - Utility: required, default, and used for Arbiter planning, structured card work, provider tests, guidance composition, and fail-soft fallback guidance.
-- Reasoner: optional, selected by Reasoning Level and a `Ready` capability for synthesis, priority routing, crowded hands, conflicted cards, or subtle composition work.
+- Reasoner: optional, selected by Reasoning Level and a configured `Ready` or `Untested` capability for synthesis, priority routing, crowded hands, conflicted cards, or subtle composition work. `Untested` is caution-only.
 
 Each lane may support:
 
@@ -352,10 +352,12 @@ Each lane may support:
 Provider fields auto-save when changed. Source changes switch the visible field context immediately while preserving hidden alternate-source values. Session API keys stay in browser-session memory and are never persisted.
 
 Utility must be configured for normal operation. Reasoner can remain
-unconfigured; if Medium, High, or Ultra is selected while Reasoner is not ready,
-Recursion keeps the selected Reasoning Level and falls back through Utility for
-ordinary Pre-process work. High and Ultra Post-process guidance require a ready
-Reasoner lane and fail soft without crossing to Utility. See
+unconfigured; if Medium, High, or Ultra is selected while Reasoner is
+unconfigured or unhealthy, Recursion keeps the selected Reasoning Level and
+falls back through Utility for ordinary Pre-process work. A configured Untested
+Reasoner remains routable with caution status. High and Ultra Post-process
+guidance require a configured Ready or Untested Reasoner lane and fail soft
+without crossing to Utility when that route is unavailable or fails. See
 [Provider Setup](PROVIDER_SETUP.md).
 
 ## First Run
@@ -403,7 +405,7 @@ Expected behavior:
 - Rapid invalid output or mandatory gap: escalate the current turn to Standard.
 - Bar Regenerate: arm one fresh-next-generation token without starting provider or host generation; the next send or swipe consumes it once, bypasses cached cards, Rapid warm, Fused bundle reuse, and same-turn/swipe packet reuse for that run, then returns to the selected pipeline.
 - Card failure: omit failed cards and keep valid siblings.
-- Reasoner unconfigured, untested, unhealthy, or missing credentials: compose ordinary Pre-process work with Utility when policy allows; fail High/Ultra Post-process guidance soft without crossing lanes.
+- Reasoner unconfigured, unhealthy, or missing credentials: compose ordinary Pre-process work with Utility when policy allows; fail High/Ultra Post-process guidance soft without crossing lanes. A configured Untested lane remains routable with caution status.
 - Player Stop / host generation stop, including the Recursion Bar Stop generation button: abort active Recursion work, stop the host generation when the SillyTavern stop seam is available, clear owned prompt keys, and show skipped/canceled progress rather than a provider warning.
 - Storage write failure: continue with memory state when safe and report a warning.
 - Prompt install failure: allow SillyTavern generation to continue without Recursion guidance.

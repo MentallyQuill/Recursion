@@ -10,6 +10,16 @@ It reads the active chat, reasons over the immediate scene, builds a compact dec
 
 Recursion is a scene reasoning layer for the reply in front of you.
 
+## How It Works
+
+Recursion starts with a broad scene deck, selects a compact turn hand, and injects only the guidance and evidence that matter for the next reply. The selection step keeps the prompt focused without turning the deck into durable memory.
+
+![Dynamic card selection from the full scene deck to the injected guidance packet](assets/documentation/renders/recursion-dynamic-card-selection.png)
+
+Before SillyTavern generates, Recursion prepares the focused guidance packet. After the host response lands, optional Enhancements can review and refine it as a separate post-generation pass.
+
+![Recursion pre-process, SillyTavern generation, and optional post-process pipeline](assets/documentation/renders/recursion-processing-pipeline.png)
+
 ## At A Glance
 
 - Builds scene cards for motivations, social subtext, consequences, knowledge, environment, items, and open threads.

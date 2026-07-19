@@ -92,9 +92,9 @@ Live host screenshots must use dedicated `recursion-soak-*` users. Automated evi
 
 Explanatory pipeline, storage, provider, redaction, testing, card, prompt, host-boundary, diagnostics, and behavior-policy diagrams are maintained directly in Markdown as Mermaid graphs or tables. They are not promoted as PNG assets and should not be counted in the render inventory.
 
-## Promoted Live UI Renders
+## Promoted Documentation Renders
 
-These assets are promoted live UI documentation renders and may be embedded directly from `assets/documentation/renders/`.
+These assets are promoted documentation renders and may be embedded directly from `assets/documentation/renders/`. Live UI captures use the `live host` source type; the two overview infographics use `supplied screenshot` because they were provided as reviewed explanatory assets rather than captured from SillyTavern.
 
 | Asset | Source Type | Current Primary Doc | Visual Scope |
 | --- | --- | --- | --- |
@@ -131,10 +131,12 @@ These assets are promoted live UI documentation renders and may be embedded dire
 | `recursion-first-run-enhancement-result.png` | live host | `docs/user/FIRST_RUN_WORKFLOW.md` | First-session Enhancement progress showing diagnosis, candidate, verification, and swipe settlement. |
 | `recursion-operator-editorial-recovery-states.png` | live host | `README.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md` | Enhancement menu with Repair, Recompose, experimental Redirect, and verified result inspector. |
 | `recursion-provider-failure-reason-inline.png` | live host | `docs/user/PROVIDER_SETUP.md` | Normalized provider failure reason with Utility fallback and redacted status. |
+| `recursion-dynamic-card-selection.png` | supplied screenshot | `README.md`, `docs/technical/CARD_DECK_AND_HAND.md` | Full scene deck narrowed to a compact turn hand and converted into injected guidance, card evidence, and guardrails. |
+| `recursion-processing-pipeline.png` | supplied screenshot | `README.md`, `docs/technical/RUNTIME_TURN_SEQUENCE.md` | Recursion pre-process, normal SillyTavern generation, and optional post-generation Enhancement flow. |
 
 ## Open Render Inventory
 
-All live-host render slots currently tracked by the documentation plan have been promoted and wired into their primary documents. Future captures should add a tracking row and documentation reference in the same change.
+All render slots currently tracked by the documentation plan have been promoted and wired into their primary documents. Future captures should add a tracking row and documentation reference in the same change.
 
 ## Verification Commands
 

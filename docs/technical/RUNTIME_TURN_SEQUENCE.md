@@ -29,6 +29,8 @@ diagnosis/writer/verifier calls, and journals
 
 The Standard pipeline is the reference foreground path for Auto and Manual:
 
+![Recursion pre-process, SillyTavern generation, and optional post-process pipeline](../../assets/documentation/renders/recursion-processing-pipeline.png)
+
 ```mermaid
 sequenceDiagram
     participant Host as SillyTavern Host

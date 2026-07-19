@@ -52,6 +52,10 @@ flowchart TD
     Jobs --> Hand[Select and order turn hand]
 ```
 
+The deck-to-hand boundary is the central card-system contract: the full scene deck contains possible signals, while the turn hand contains only the bounded cards selected for the current reply. Guidance composition then converts that hand into prompt-facing guidance, card evidence, and guardrails.
+
+![Dynamic card selection from the full scene deck to the injected guidance packet](../../assets/documentation/renders/recursion-dynamic-card-selection.png)
+
 ![Card deck control showing categories, cards, and off/active/priority eye states](../../assets/documentation/renders/recursion-card-control.png)
 
 The card system is Recursion's scene-local reasoning cache. It is implemented by `src/cards.mjs`, coordinated by `src/runtime.mjs`, persisted by `src/storage.mjs`, and inspected through `src/ui.mjs`.

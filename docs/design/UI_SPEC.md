@@ -164,12 +164,14 @@ Pre-process and Post-process card rows show a concise description beneath the ca
 
 Category descriptions are different from card descriptions: neither phase renders category descriptions as visible header copy. When tooltips are enabled, the disclosure header uses the category description as its hover title. When tooltips are disabled, that title is absent while the category name and description remain in the accessible disclosure label.
 
+Category summaries show active valid cards over the total valid cards in that category as `3/3 Active Cards`, `1/4 Active Cards`, or `0/6 Active Cards`. Pre-process Priority cards count as Active and append a compact `N Priority` suffix so their elevated selection state remains visible. Inactive cards remain in the denominator; draft or incomplete cards are excluded from both counts.
+
 - Pre-process cards cycle `Inactive → Active → Priority → Inactive` in Auto and `Inactive → Active → Inactive` in Manual.
 - Post-process cards remain binary `On` / `Off` through card-row eyes. Categories persist no independent participation state and expose no visibility eye or state-marker column; their active/inactive presentation derives from child-card state.
 - Bundled Default and Starter deck names, content, category structure, and order are read-only.
 - Bundled operator state remains writable. Individual card controls and both bulk eye actions work without duplicating the deck.
 
-All operator-selected deck state is global Recursion extension state: active Pre-process and Post-process deck IDs, Pre-process card Active/Priority/Inactive state, Post-process card On/Off state, and per-deck category disclosure. Categories in both phases have no independent On/Off control. Post-process category activity is derived: any On card makes the category active, while all cards Off makes it inactive. State survives dropdown close/reopen, chat changes, UI remounts, and page reloads. Pre-process categories default collapsed and Post-process categories default expanded until changed. New categories start expanded, duplicated decks inherit disclosure, and deleted decks/categories prune obsolete disclosure entries.
+All operator-selected deck state is global Recursion extension state: active Pre-process and Post-process deck IDs, Pre-process card Active/Priority/Inactive state, Post-process card On/Off state, and per-deck category disclosure. Categories in both phases have no independent On/Off control. Post-process category activity is derived: any On card makes the category active, while all cards Off makes it inactive. State survives dropdown close/reopen, chat changes, UI remounts, and page reloads. Pre-process and Post-process categories default collapsed until changed. New categories start collapsed, duplicated decks inherit disclosure, and deleted decks/categories prune obsolete disclosure entries.
 
 Custom deck deletion is identical in both phases. Clicking the deck trash action replaces the right-side deck action rail with the shared inline confirmation beside the deck selector: a text box with `delete` placeholder, visible `type delete` hint, confirm icon disabled until the entered value equals `delete` case-insensitively, and cancel icon. Enter confirms only when valid; Escape cancels. Deck deletion never uses the category/card alert-dialog confirmation or require typing the deck name.
 
@@ -186,6 +188,8 @@ The Pre-process dropdown header title is `Pre-Process Cards`. The Post-process h
 `As Swipe` keeps the original output, adds the rewritten output as a sibling swipe, and selects it. `Replace` replaces the active output with the rewritten text. `Unified` applies the active cards in one rewrite pass. `Progressive` applies them sequentially. Bulk actions are disabled only when no runnable card exists or the requested state is already satisfied.
 
 Every Apply and Flow segment uses the compact graphite hover and keyboard-focus highlight so both selected and unselected choices visibly respond before activation.
+
+Apply, Flow, and global On/Off changes acknowledge immediately in the main current-step status and mobile status drawer with concise copy: `As Swipe Set - Preserves original response`, `Replace Set - Replaces original response`, `Unified Mode Set - One combined pass`, `Progressive Mode Set - Each step carried over`, `Post-process On - Rewrites completed responses`, or `Post-process Off - Leaves responses unchanged`. These acknowledgements temporarily take precedence over active progress text without creating a progress row.
 
 When the global Post-process feature is Off, the header summary reads `Off`; it must not report preserved per-card selections as active. Turning the feature back on restores the active-card count without changing those selections.
 

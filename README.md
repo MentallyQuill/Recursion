@@ -16,14 +16,15 @@ Recursion starts with a broad scene deck, selects a compact turn hand, and injec
 
 ![Dynamic card selection from the full scene deck to the injected guidance packet](assets/documentation/renders/recursion-dynamic-card-selection.png)
 
-Before SillyTavern generates, Recursion prepares the focused guidance packet. After the host response lands, optional Enhancements can review and refine it as a separate post-generation pass.
+Before SillyTavern generates, Recursion's Pre-process Cards prepare the focused guidance packet. After the host response lands, optional Post-process Cards can revise it through the host's native quiet-generation path.
 
-![Recursion pre-process, SillyTavern generation, and optional post-process pipeline](assets/documentation/renders/recursion-processing-pipeline.png)
+![Recursion Post-process Cards Unified controls after the host response lands](assets/documentation/renders/recursion-post-process-panel-unified.png)
 
 ## At A Glance
 
 - Builds scene cards for motivations, social subtext, consequences, knowledge, environment, items, and open threads.
-- Lets you use the bundled card catalog or build custom decks with categories, authored cards, ordering, and card Assist.
+- Gives you an independent Pre-process Cards deck for scene evidence and an independent Post-process Cards deck for response revision.
+- Lets you use bundled starter decks or build custom decks with categories, authored cards, ordering, and card Assist where supported.
 - Gives every editable card `off`, `active`, and `priority` states so you can control focus without rewriting the scene.
 - Lets you duplicate the bundled Default Deck, create categories and authored cards, drag to reorder, and use Card Assist before committing edits.
 - Selects a focused turn hand so the prompt gets what matters now, not every possible note.
@@ -33,7 +34,7 @@ Before SillyTavern generates, Recursion prepares the focused guidance packet. Af
 - Installs Recursion-owned SillyTavern prompt entries, then shows exactly what was prepared through Last Brief, progress states, and the Full Viewer.
 - Keeps provider secrets and raw model I/O out of saved settings, prompt packets, run journals, diagnostics, browser storage, and SillyTavern file storage.
 
-![Cards control with the active deck and card-state summary](assets/documentation/renders/recursion-card-control.png)
+![Pre-process Cards control with the active deck and card-state summary](assets/documentation/renders/recursion-pre-process-cards-panel.png)
 
 ## Feature Surfaces
 
@@ -52,9 +53,9 @@ Before SillyTavern generates, Recursion prepares the focused guidance packet. Af
   </tr>
   <tr>
     <td width="50%">
-      <div align="center"><img src="assets/documentation/renders/recursion-card-control.png" alt="Recursion card deck control with categories and card states" style="max-width:100%;height:auto"></div><br>
-      <strong>Cards &amp; Decks</strong><br>
-      Start with the fixed scene-card catalog, then duplicate it into an editable deck with categories, authored cards, drag ordering, priority states, and card Assist.
+      <div align="center"><img src="assets/documentation/renders/recursion-pre-process-cards-panel.png" alt="Recursion Pre-process Cards deck control with categories and card states" style="max-width:100%;height:auto"></div><br>
+      <strong>Pre-process Cards</strong><br>
+      Prepare scene evidence before generation. Use the fixed catalog or duplicate it into an editable deck with categories, authored cards, drag ordering, and priority states.
     </td>
     <td width="50%">
       <div align="center"><img src="assets/documentation/renders/recursion-operator-last-brief-states.png" alt="Recursion selected card hand inspection" style="max-width:100%;height:auto"></div><br>
@@ -64,9 +65,9 @@ Before SillyTavern generates, Recursion prepares the focused guidance packet. Af
   </tr>
   <tr>
     <td width="50%">
-      <div align="center"><img src="assets/documentation/renders/recursion-operator-editorial-recovery-states.png" alt="Recursion editorial recovery controls" style="max-width:100%;height:auto"></div><br>
-      <strong>Enhancements</strong><br>
-      Review the reply that just landed with one card-aware operation, then apply a validated Repair, Recompose, or Redirect result as a swipe or replacement.
+      <div align="center"><img src="assets/documentation/renders/recursion-post-process-panel-unified.png" alt="Recursion Post-process Cards Unified controls" style="max-width:100%;height:auto"></div><br>
+      <strong>Post-process Cards</strong><br>
+      Revise the completed reply with ordered cards through Unified or Progressive flow, then keep the result as a swipe or replace the selected response.
     </td>
     <td width="50%">
       <div align="center"><img src="assets/documentation/renders/recursion-operator-story-form-controls.png" alt="Recursion tense and point of view controls" style="max-width:100%;height:auto"></div><br>
@@ -116,28 +117,30 @@ Pipeline controls decide how Recursion schedules scene work. Auto and Manual dec
 
 ### Cost Shape
 
-Recursion adds provider work before the host model writes: Arbiter planning, card generation or a Fused bundle, Utility guidance composition, optional Reasoner synthesis, and optional post-generation Enhancements for bounded repair, recomposition, or redirect recovery. It also injects a bounded prompt packet into the normal SillyTavern generation, so Prompt Footprint affects the final host context size.
+Recursion adds provider work around the host model's normal generation: Pre-process planning and card guidance before the host writes, followed by optional Post-process guidance and native quiet rewriting after the response lands. Utility or Reasoner supplies structured guidance; SillyTavern remains the prose writer. Prompt Footprint affects the final Pre-process packet, while Post-process Evidence Messages bounds only Recursion's frozen evidence window.
 
 Cost depends most on pipeline, Reasoning Level, card count, footprint, cache reuse, provider hidden reasoning, and any external model multiplier. For the detailed call breakdown and planning estimates, see [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md).
 
 Under the medium-reasoning Standard example in that research, Recursion adds roughly 1-1.5 cents per turn on top of normal SillyTavern generation.
 
-## Enhancements And Recovery
+## Post-process Cards
 
-Enhancements review the assistant reply that just landed against the frozen user turn, bounded visible context, installed card hand, Prompt Packet, story form, character evidence, and anti-slop profile. The menu exposes one operation with four modes: `Off`, `Repair`, `Recompose`, and `Redirect`. `Repair` makes bounded local changes, `Recompose` may restructure a larger passage, and `Redirect` replaces a failed trajectory using an evidence-backed replacement objective. Apply the accepted result `As Swipe` or `Replace`.
+Post-process Cards run after the assistant reply lands. Recursion freezes the source response, bounded visible evidence, the Pre-process Prompt Packet, the active Post-process Deck, and the selected operation settings. Utility or Reasoner synthesizes contextual guidance; SillyTavern's native quiet-generation path writes the revised response using the active host preset and context.
 
-Every accepted candidate is checked against its source hash, exact target text, patch bounds, evidence references, installed-card coverage, and semantic verification. Redirect additionally requires a complete verifier result; a rejected or incomplete candidate is never presented as a successful enhancement. The progress surface reports `applied`, `partial-failed`, `validation-failed`, `provider-failed`, `requires-regeneration`, or `skipped` with an inline reason, while the original host generation remains intact.
+Choose `Unified` to synthesize all enabled categories together and perform one host rewrite. Choose `Progressive` to rewrite one enabled category at a time in deck order, carrying each valid draft forward. The Post-process feature is off by default, and each card is independently On or Off.
 
-| Enhancement feature | Function | Use it when |
+Every operation checks source identity, stale-state boundaries, guidance shape, host output, exact no-op results, cancellation, and final application safety. A failed Unified operation leaves the original unchanged. A failed Progressive category leaves the last valid draft in place and later categories may continue; partial Progressive output commits only as a new swipe so the original remains available.
+
+| Post-process feature | Function | Use it when |
 | --- | --- | --- |
-| `Off` | Leaves the SillyTavern response unchanged. | The generated response is already usable, or you do not want a post-generation review. |
-| `Repair` | Applies bounded, exact patches to diagnosed spans while preserving the response structure. | The direction is sound but there are local defects such as repetition, awkward phrasing, or unsupported details. |
-| `Recompose` | Produces a complete replacement candidate grounded in the frozen turn, card evidence, and review diagnosis. | The response needs a broader rewrite but its underlying intent and trajectory are still supported. |
-| `Redirect` *(experimental)* | Replaces a drifted trajectory with a new evidence-grounded response and requires independent verification before settlement. | The response followed the wrong objective, beat, or scene direction. Redirect always settles as a new swipe. |
-| `As Swipe` | Keeps the original response and adds the accepted result as a new selected swipe. | You want to compare or return to the original response. |
-| `Replace` | Replaces the active response with the accepted result without adding a sibling swipe. | You want the accepted result to become the active response directly. |
+| `Off` | Leaves the host response unchanged. | You do not want a post-generation rewrite. |
+| `Unified` | Synthesizes all enabled categories together, then performs one native host rewrite. | Categories reinforce one another and one combined revision is preferable. |
+| `Progressive` | Runs enabled categories in order, carrying each valid draft into the next category. | You want visible category ordering and independent fail-soft boundaries. |
+| `As Swipe` | Keeps the original and appends/selects one final rewritten swipe. | You want to compare or return to the original. |
+| `Replace` | Replaces the selected response only after complete success. | You want the rewritten result to become the active response directly. |
+| Post-process card `On` / `Off` | Enables or skips one ordered revision instruction; category activity derives from child cards. | You want to tune the deck without changing Pre-process selection. |
 
-![Enhancement menu with Repair, Recompose, experimental Redirect, and verified result state](assets/documentation/renders/recursion-operator-editorial-recovery-states.png)
+![Post-process Cards progress showing frozen evidence, guidance, native host rewrite, and swipe settlement](assets/documentation/renders/recursion-first-run-post-process-result.png)
 
 ## What You Can Inspect
 
@@ -145,7 +148,7 @@ Every accepted candidate is checked against its source hash, exact target text, 
 - Full Viewer: Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics.
 - Prompt Packet: guidance, card evidence, guardrails, references, omissions, fallbacks, and metadata.
 - Progress States: live pass status, fallback paths, repair work, install state, and readiness.
-- Enhancement Results: bounded patches, card-outcome coverage, verification checks, swipe/replace settlement, and explicit failure reasons.
+- Post-process Results: guidance status, category outcomes, retries, host-writer settlement, swipe/replace behavior, and explicit failure reasons.
 - Tense & PoV: Auto story-form detection or a forced past/present first-, second-, third-person, or mixed POV form for the next prompt contract.
 - Provider Health: Utility and Reasoner tests, session-only direct keys, fallback visibility, and lane status.
 
@@ -157,14 +160,14 @@ Every accepted candidate is checked against its source hash, exact target text, 
 4. Start with the Standard pipeline while you confirm behavior in a scene.
 5. Use Auto for normal hands-off preparation, or Manual when you want explicit control.
 6. Open Last Brief after generation to inspect what Recursion prepared.
-7. If the reply needs cleanup, try Enhancement in `Repair` first; use `Redirect` only when the response followed the wrong trajectory and the replacement objective is clear.
+7. If the completed reply needs revision, enable Post-process Cards, choose a starter deck, and try `Unified` with `As Swipe` first.
 
 For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md). For the full surface-by-surface guide, use the [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md).
 
 ## Documentation
 
 - [Documentation Index](docs/DOCUMENTATION_INDEX.md) - Canonical map for user, technical, design, testing, release, and planning docs.
-- [Post-alpha.1 Feature Highlights](docs/release/post-alpha.1-feature-highlights.md) - Postable summary of the Enhancements work added after the first pre-alpha checkpoint.
+- [Post-process Cards Runtime](docs/architecture/POST_PROCESS_CARDS_RUNTIME.md) - Current operation boundary, writer ownership, flows, retries, persistence, and privacy.
 - [Release Notes](docs/release/README.md) - Current pre-alpha checkpoints, verification, and known constraints.
 - [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md) - First-session path from installation through Manual, Auto, inspection, and cleanup.
 - [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md) - Complete guide for UI surfaces, modes, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
@@ -174,7 +177,7 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 - [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md) - Provider call counts, token-budget ranges, example estimates, and cost-tuning levers.
 - [Testing Strategy](docs/testing/TESTING_STRATEGY.md) - Deterministic gates, Playwright readiness, guarded live smoke, artifacts, and documentation render checks.
 - [Cache Use And Reuse Spec](docs/architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-source cache, swipe reuse, invalidation, and fresh-next-generation rules.
-- [Enhancement Review Contract](docs/architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - Card-aware review, bounded edits, Redirect verification, and shared recovery budget.
+- [Post-process Cards Design](docs/superpowers/specs/2026-07-18-recursion-post-process-cards-design.md) - Current product and data contract for Post-process decks and host rewriting.
 
 ## Security And Privacy
 

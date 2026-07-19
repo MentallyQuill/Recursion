@@ -21,6 +21,10 @@ flowchart LR
 
 The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, offline Playwright readiness, SillyTavern storage probes when dedicated users are available, no-generation SillyTavern UI evidence, pipeline-specific visible-send proof, and opt-in generation bridge evidence when Recursion is installed for a dedicated user.
 
+## Current Pre-process/Post-process Proof
+
+Pre-process proof covers independent deck configuration, ordered categories, `off`/`active`/`priority` participation, Manual whitelist behavior, hand selection, prompt composition, and prompt installation before host generation. Post-process proof covers an independent ordered deck, binary card `On`/`Off`, frozen completed-response evidence, sticky guidance-lane routing, one same-lane correction retry, Unified and Progressive sequencing, native host quiet-generation ownership, As Swipe/Replace settlement, source-bound markers, stale/cancel guards, and Progressive partial settlement only as a swipe. The current browser fixture and visual baseline family live under `tests/visual-baselines/post-process-cards/`; historical Editorial/Enhancement proof sections below are retired archaeology.
+
 ## Core Invariants
 
 Highest-priority invariants:

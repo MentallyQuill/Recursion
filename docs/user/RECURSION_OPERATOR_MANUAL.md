@@ -171,6 +171,8 @@ Post-process Cards uses the same compact deck layout after generation. Its cards
 - the open eye enables all runnable cards;
 - the slashed eye disables all runnable cards.
 
+Changing Apply, Flow, or the global feature state briefly reports the change in the main status line and mobile status drawer. The concise acknowledgements explain the selected behavior without creating a generation-progress row.
+
 The bundled Starter Post-process Deck is structurally read-only, but its card and bulk enabled states are editable. Duplicate it only to rename, add, remove, reorder, or rewrite deck content.
 
 On a fresh starter deck, the six cards under Natural Prose and Follow Through are On. `Strip False Weight`, `Earn the Attraction`, and `Ground the Deflection` are Off, leaving their optional Concrete Meaning and Character-Specific Relationships categories inactive. Categories have no On/Off control in either card phase. Turning on any child card automatically makes its category active; turning every child card Off makes it inactive. Concrete Meaning removes manufactured profundity by restoring concrete meaning, behavior, or consequence. Character-Specific Relationships repairs stock attraction and defensive scripts through established character, relationship, consent, and boundary evidence.
@@ -185,11 +187,11 @@ Auto lets the Arbiter choose relevant cards from the active deck. Manual lets yo
 
 Last Brief shows the latest selected hand, card families, state/emphasis, concise evidence, omissions, and packet metadata. The Full Viewer expands the deck/hand relationship and shows why cards were omitted. Use Regenerate when the current hand is stale; do not treat the hand as durable memory.
 
-![Card deck control with categories, card counts, and eye-state controls](../../assets/documentation/renders/recursion-card-control.png)
+![Pre-process Cards deck control with categories, card counts, and participation states](../../assets/documentation/renders/recursion-pre-process-cards-panel.png)
 
-![Authored card edit box with Card Assist and save/cancel controls](../../assets/documentation/renders/recursion-card-authored-card-editor.png)
+![Pre-process authored card edit box with Card Assist and save/cancel controls](../../assets/documentation/renders/recursion-pre-process-card-editor.png)
 
-![Last Brief hand inspection with selected cards, omissions, and packet metadata](../../assets/documentation/renders/recursion-card-hand-inspection.png)
+![Last Brief hand inspection with selected cards, omissions, and packet metadata](../../assets/documentation/renders/recursion-operator-last-brief-states.png)
 
 ## Post-processing
 
@@ -213,7 +215,7 @@ Auto lets Recursion compile and install the next prompt packet. It should finish
 
 ### Manual
 
-Manual uses the Cards selector as a force list. Selected family rows are mandatory cards up to `Max Cards`; disabled families stay out of planning, deck reuse, hand selection, composition, and injection. If the Arbiter omits a selected family, runtime either reuses a valid cached card for that family or generates the missing card.
+Manual uses the Pre-process Cards selector as a force list. Selected family rows are mandatory cards up to `Max Cards`; disabled families stay out of planning, deck reuse, hand selection, composition, and injection. If the Arbiter omits a selected family, runtime either reuses a valid cached card for that family or generates the missing card.
 
 Sub-items under a selected family are focus facets. They shape that one family card and do not count as extra cards. If `Max Cards` is `5`, Manual allows at most five selected family rows and shows `Max Cards is 5. Change it in Settings to select more.` when another family is blocked.
 

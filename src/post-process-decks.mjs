@@ -126,12 +126,12 @@ function normalizeCategoryExpansion(value, customDecks, starter) {
   const normalized = {};
   for (const [deckId, deck] of Object.entries(decks)) {
     const deckSource = isObject(source[deckId]) ? source[deckId] : {};
-    const collapsed = Object.fromEntries(
+    const expansion = Object.fromEntries(
       Object.keys(deck.categories || {})
-        .filter((categoryId) => deckSource[categoryId] === false)
-        .map((categoryId) => [categoryId, false])
+        .filter((categoryId) => typeof deckSource[categoryId] === 'boolean')
+        .map((categoryId) => [categoryId, deckSource[categoryId]])
     );
-    if (Object.keys(collapsed).length) normalized[deckId] = collapsed;
+    if (Object.keys(expansion).length) normalized[deckId] = expansion;
   }
   return normalized;
 }
@@ -157,7 +157,7 @@ export function postProcessCategoryExpanded(settings = {}, deckId = '', category
   const normalized = normalizePostProcessDeckSettings(settings, { now });
   const cleanDeckId = normalizePostProcessId(deckId);
   const cleanCategoryId = normalizePostProcessId(categoryId);
-  return normalized.categoryExpansion[cleanDeckId]?.[cleanCategoryId] !== false;
+  return normalized.categoryExpansion[cleanDeckId]?.[cleanCategoryId] === true;
 }
 
 export function setPostProcessCategoryExpanded(
@@ -177,8 +177,7 @@ export function setPostProcessCategoryExpanded(
   if (!decks[cleanDeckId]?.categories?.[cleanCategoryId]) return normalized;
   const categoryExpansion = clone(normalized.categoryExpansion);
   const deckExpansion = { ...(categoryExpansion[cleanDeckId] || {}) };
-  if (expanded === false) deckExpansion[cleanCategoryId] = false;
-  else delete deckExpansion[cleanCategoryId];
+  deckExpansion[cleanCategoryId] = expanded === true;
   if (Object.keys(deckExpansion).length) categoryExpansion[cleanDeckId] = deckExpansion;
   else delete categoryExpansion[cleanDeckId];
   return normalizePostProcessDeckSettings({ ...normalized, categoryExpansion }, { now });
@@ -259,12 +258,12 @@ export function duplicatePostProcessDeck(settings = {}, deckId = '', { now = now
     customDecks: { ...normalized.customDecks, [id]: deck }
   }, { now });
   for (const sourceCategoryId of source.categoryOrder) {
-    if (!postProcessCategoryExpanded(normalized, source.id, sourceCategoryId, { now })) {
+    if (postProcessCategoryExpanded(normalized, source.id, sourceCategoryId, { now })) {
       duplicatedSettings = setPostProcessCategoryExpanded(
         duplicatedSettings,
         id,
         categoryIdMap[sourceCategoryId],
-        false,
+        true,
         { now }
       );
     }

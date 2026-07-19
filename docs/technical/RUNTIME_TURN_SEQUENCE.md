@@ -14,22 +14,15 @@ This manual describes the turn lifecycle implemented by `src/runtime.mjs` and th
 
 Pipeline selection is separate from Auto/Manual. The compact bar owns the Pipeline selector as an icon-only dropdown immediately to the left of the Mode button. `Standard` runs the full foreground pipeline on send. `Rapid` warms a provider-generated card packet in the background and uses a short foreground Utility delta on send. `Fused` runs the foreground Arbiter and then generates all requested cards through one structured bundle call before the shared deck/hand/compose/install stages. Settings may persist `pipelineMode`, but Settings must not render a second Standard/Rapid/Fused toggle.
 
-Enhancement is separate from Auto/Manual and Standard/Rapid/Fused. It runs only after SillyTavern has produced an assistant message and only when `settings.enhancements.mode` is `repair`, `recompose`, or `redirect`. `Off` leaves the host output untouched. `As Swipe` preserves the original host output, appends one enhanced sibling swipe, and selects it when safe patches were applied. `Replace` replaces the active assistant text only after safe patches validate. Ordinary Repair/Recompose routing uses Reasoner only when its capability is `ready` and otherwise follows the bounded Utility fallback contract. Redirect is stricter: Low uses Utility, while Medium/High/Ultra require Reasoner `ready` before generation. Parser/schema recovery and semantic review recovery share one correction budget; a malformed, unsafe, or unresolved result reveals the original unless independently safe patches can truthfully apply as `partial-failed`.
+Post-process is separate from Auto/Manual and Standard/Rapid/Fused. It runs only after SillyTavern has produced an assistant message and only when `settings.postProcess` is enabled. `Off` leaves the host output untouched. `Unified` synthesizes all enabled Post-process categories together and performs one native host rewrite. `Progressive` rewrites category-by-category while carrying the latest valid draft forward. `As Swipe` appends one selected Recursion-owned swipe; `Replace` updates the selected response only after a complete successful run. Guidance stays on one selected provider lane with one same-lane correction retry; SillyTavern native quiet generation remains the sole prose writer.
 
-Before arming host generation, runtime resolves Redirect readiness from the same
-provider-capability resolver used by routing and the UI. If Medium+ Redirect is
-selected while Reasoner is `unconfigured`, `untested`, or `unhealthy`, runtime
-retains a blocked pending marker, publishes one sanitized pre-generation
-warning, and allows normal host generation to continue. When the assistant
-lands, the Editorial pass settles `skipped`, preserves the original, spends no
-diagnosis/writer/verifier calls, and journals
-`editorial.preflight.skipped`. Low Redirect bypasses this guard and uses Utility.
+Before host generation, runtime prepares only the Pre-process prompt packet. Post-process is armed independently and begins only after a completed assistant response lands; its frozen-evidence and provider-readiness checks cannot block the original host generation.
 
 ## Auto Sequence
 
 The Standard pipeline is the reference foreground path for Auto and Manual:
 
-![Recursion pre-process, SillyTavern generation, and optional post-process pipeline](../../assets/documentation/renders/recursion-processing-pipeline.png)
+![Post-process Cards progress after the host response lands](../../assets/documentation/renders/recursion-first-run-post-process-result.png)
 
 ```mermaid
 sequenceDiagram
@@ -94,7 +87,7 @@ sequenceDiagram
 
 Background warm:
 
-1. After an assistant message lands, Generation Review and Enhancement runs first when enabled. Only after it settles does `warmRapidScene()` capture the current source revision for Rapid. The runtime-level Rapid warm entrypoint waits behind any active or pending review barrier, so settings-triggered or event-triggered Rapid warm cannot snapshot an unfinalized assistant text.
+1. After an assistant message lands, enabled Post-process work settles before `warmRapidScene()` captures the current source revision for Rapid. The runtime-level Rapid warm entrypoint waits behind any active or pending Post-process barrier, so settings-triggered or event-triggered Rapid warm cannot snapshot an unfinalized assistant text.
 2. Runtime uses the provider Arbiter and provider card roles to build or refresh a scene deck for that exact revision.
 3. Runtime saves the active scene cache variant with `variant.rapid` metadata, including the warm artifact id, source revision hash, selected card ids, guidance metadata, contract hashes, and Rapid pipeline version.
 4. Background warm does not compose a final prompt packet, does not call the SillyTavern prompt adapter, and never installs Recursion prompt keys.
@@ -110,7 +103,9 @@ Foreground send:
 
 Rapid foreground roles are small Utility jobs. They may hedge by starting a primary call immediately and a backup after the configured short delay; the first valid structured output wins and diagnostics record the winning hedge source. Hedging is not used for Story generation.
 
-## Enhancements Post-Generation Sequence
+## Historical Editorial Sequence (retired)
+
+The remainder of this section records the pre-`postProcess` Editorial/Enhancement implementation for archaeology only. It is not a current runtime contract. Current behavior is defined by `docs/architecture/POST_PROCESS_CARDS_RUNTIME.md` and the Post-process section above.
 
 Enhancements are post-generation provider passes, not prompt-packet conditioning. They do not change the prompt installed before the host model writes. They mutate only the just-landed assistant message after validation.
 

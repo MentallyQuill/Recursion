@@ -4,6 +4,8 @@ The live smoke plan proves Recursion inside a real SillyTavern browser session. 
 
 It is not a long-form story soak or campaign certification run.
 
+Post-process smoke uses the same dedicated-user gate after the assistant response lands. It freezes the source and bounded evidence, verifies Unified and Progressive guidance/rewrite progress, checks native host quiet-generation settlement, and proves that As Swipe and Replace produce the documented marker and mutation shape. A Progressive category failure must retain the latest valid draft and settle only as a swipe; no failed or stale run may mutate the host message.
+
 ## Required Conditions
 
 Before a live smoke can mutate host state:

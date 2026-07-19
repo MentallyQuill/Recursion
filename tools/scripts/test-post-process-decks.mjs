@@ -117,24 +117,24 @@ equal(overlaidStarter.cards['cut-echoes'].enabled, false, 'starter card override
 assert(overlaidStarter.readonly, 'starter state overrides do not make bundled content structurally editable');
 equal(
   postProcessCategoryExpanded(normalizedStarterStates, STARTER_POST_PROCESS_DECK_ID, 'natural-prose'),
-  true,
-  'Post-process categories default expanded when no operator override exists'
+  false,
+  'Post-process categories default collapsed when no operator override exists'
 );
-const collapsedStarterSettings = setPostProcessCategoryExpanded(
+const expandedStarterSettings = setPostProcessCategoryExpanded(
   normalizedStarterStates,
   STARTER_POST_PROCESS_DECK_ID,
   'natural-prose',
-  false,
+  true,
   { now }
 );
 equal(
   postProcessCategoryExpanded(
-    normalizePostProcessDeckSettings(JSON.parse(JSON.stringify(collapsedStarterSettings)), { now }),
+    normalizePostProcessDeckSettings(JSON.parse(JSON.stringify(expandedStarterSettings)), { now }),
     STARTER_POST_PROCESS_DECK_ID,
     'natural-prose'
   ),
-  false,
-  'Post-process category collapse survives serialized settings normalization'
+  true,
+  'Post-process category expansion survives serialized settings normalization'
 );
 
 const starterOff = setAllPostProcessCardsEnabled(

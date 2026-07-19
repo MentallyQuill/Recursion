@@ -7,8 +7,8 @@ These manuals explain how Recursion works behind the SillyTavern UI. They are re
 | Manual | Purpose |
 | --- | --- |
 | [Recursion Technical Manual](RECURSION_TECHNICAL_MANUAL.md) | System overview, boundaries, runtime spine, Standard/Rapid/Fused pipelines, component ownership, UI observability, fail-soft invariants, evidence, and non-goals. |
-| [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md) | Power toggle, Auto/Manual lifecycle, Standard foreground flow, Rapid warm/delta flow, card scope, injection, storage, cancellation, and failure branches. |
-| [Generation Review and Enhancement Contract](../architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) | Frozen post-generation review, bounded Repair/Recompose/Redirect patches, card-outcome coverage, verification, settlement, and shared recovery. |
+| [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md) | Power toggle, Auto/Manual lifecycle, Standard foreground flow, Rapid warm/delta flow, independent Pre-process/Post-process phases, injection, storage, cancellation, and failure branches. |
+| [Post-process Cards Runtime](../architecture/POST_PROCESS_CARDS_RUNTIME.md) | Frozen post-generation evidence, guidance synthesis, native host rewriting, Unified/Progressive flow, retries, settlement, and privacy. |
 | [Card Deck And Hand](CARD_DECK_AND_HAND.md) | Fixed V1 card families, card contract, deck lifecycle, hand selection, invalidation, Character Motivation safety, and inspector visibility. |
 | [Prompt Packet And Injection](PROMPT_PACKET_AND_INJECTION.md) | Guidance, Card Evidence, Guardrails, composer inputs, Utility/Reasoner composition, budgets, omissions, injection lanes, cleanup, and privacy guardrails. |
 | [Model Calls And Provider Routing](MODEL_CALLS_AND_PROVIDER_ROUTING.md) | Utility and Reasoner lanes, provider sources, machine-JSON schema metadata, generation roles, structured output validation, retries, fallbacks, journals, secrets, aborts, and provider status. |
@@ -35,7 +35,7 @@ These manuals explain how Recursion works behind the SillyTavern UI. They are re
 
 | Source Area | Primary Manual |
 | --- | --- |
-| `src/runtime.mjs`, `src/pre-process-decks.mjs`, `src/editorial-transform.mjs`, `src/failures.mjs`, `src/progress.mjs` | [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md), [Card Deck And Hand](CARD_DECK_AND_HAND.md), and [Generation Review Contract](../architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) |
+| `src/runtime.mjs`, `src/pre-process-decks.mjs`, `src/post-process-decks.mjs`, `src/post-process-runtime.mjs`, `src/failures.mjs`, `src/progress.mjs` | [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md), [Card Deck And Hand](CARD_DECK_AND_HAND.md), and [Post-process Cards Runtime](../architecture/POST_PROCESS_CARDS_RUNTIME.md) |
 | `src/cards.mjs`, `src/card-scope.mjs` | [Card Deck And Hand](CARD_DECK_AND_HAND.md) and [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) |
 | `src/prompt.mjs` | [Prompt Packet And Injection](PROMPT_PACKET_AND_INJECTION.md) and [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) |
 | `src/providers.mjs`, provider settings in `src/settings.mjs`, `src/settings-policy.mjs`, `src/retention-policy.mjs` | [Model Calls And Provider Routing](MODEL_CALLS_AND_PROVIDER_ROUTING.md) and [Recursion Cost Research](RECURSION_COST_RESEARCH.md) |

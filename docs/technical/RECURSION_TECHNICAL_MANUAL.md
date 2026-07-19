@@ -105,7 +105,7 @@ Recursion has two provider lanes:
 
 Each lane can use the current host model, a host connection profile when the host supports it, or an OpenAI-compatible endpoint. Direct endpoint API keys live only in the session secret store and are never persisted. OpenAI-compatible model discovery is read-only against `/models`; it may use the session key but does not save secrets, write journals, clear prompts, or invalidate scene cache.
 
-Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses ready Reasoner for guidance composition, High adds ready Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when ready. Unconfigured, untested, or unhealthy Reasoner routes fall back to Utility without blocking normal chat generation. Medium+ Redirect is the exception: it remains unavailable and settles as a pre-generation skip until Reasoner is ready.
+Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses ready Reasoner for guidance composition, High adds ready Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy when ready. Unconfigured, untested, or unhealthy Reasoner routes fall back to Utility without blocking normal chat generation. Post-process guidance stays on the selected lane for its operation and falls back safely when that lane is unavailable.
 
 ## Card And Hand System
 
@@ -130,6 +130,12 @@ The model-facing artifact is the prompt packet, not the raw scene deck. V3 packe
 | Guardrails | Compact constraints that protect scene plausibility, player intent, privacy, and scope. |
 
 Prompt packets include selected-card references, omissions, injection metadata, diagnostics, section hashes, and composition lane status. The Last Brief Prompt Packet panel and Full Viewer show the final injected packet text with bounded redaction so users can inspect what Recursion actually installed.
+
+## Pre-process And Post-process Boundaries
+
+Pre-process Cards are the scene-evidence deck used before the host writes a response. Post-process Cards are an independent ordered deck evaluated only after an assistant response lands. Post-process guidance is structured provider output; SillyTavern's native quiet-generation path is the only prose writer. Unified performs one guidance synthesis and one host rewrite for all enabled categories. Progressive rewrites category-by-category while carrying the latest valid draft forward. As Swipe appends the result as a selected swipe; Replace updates the selected response in place only after a complete successful run.
+
+Post-process freezes the source response, bounded visible evidence, Pre-process packet, active Post-process deck, and operation settings before provider work. Guidance uses one sticky provider lane with at most one same-lane correction retry. Failed or stale work never commits a response mutation, and one sanitized Post-process marker records a successful settlement.
 
 ## Storage And Diagnostics
 
@@ -198,8 +204,8 @@ The `card-system` runtime adds three related boundaries that all callers must pr
 
 - Card Deck configuration is persistent operator state; the scene deck and turn hand remain disposable runtime artifacts. `off`, `active`, and `priority` cards become runtime scope only when they are runnable and belong to the active deck.
 - Rapid and swipe reuse are exact-source optimizations. A warm artifact, cached hand, or prior swipe may be reused only when source identity, packet contract, pipeline provenance, and invalidation checks match. Regenerate bypasses those reuse paths once for the next send or swipe.
-- Enhancement is a post-generation semantic pipeline, not a generic rewrite. Diagnosis, bounded transformation, verification, and settlement bind to one frozen source. Redirect cannot write without evidence-grounded diagnosis and a passing verifier; failure reasons remain visible and host generation remains safe.
-- Enhancement `As Swipe` certification is mutation-strict: live proof requires exactly one new selected Recursion-owned swipe with a source-bound marker, healthy terminal Editorial settlement, current-run progress/provider evidence, and matching before/after text hashes. Repair card audits remain dynamic and locally canonicalized; live certification runs only against dedicated `recursion-soak-*` users.
+- Post-process is a post-generation revision pipeline, not a generic rewrite. Guidance synthesis and native host rewriting bind to one frozen source and one ordered Post-process deck; failure reasons remain visible and host generation remains safe.
+- Post-process `As Swipe` certification is mutation-strict: live proof requires exactly one new selected Recursion-owned swipe with a source-bound marker, healthy terminal Post-process settlement, current-run progress/provider evidence, and matching before/after text hashes. Progressive partial output may settle only as a swipe; Replace requires a complete successful result.
 
 ## Non-Goals
 

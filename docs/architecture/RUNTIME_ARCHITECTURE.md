@@ -139,6 +139,12 @@ Pipeline controls change when work happens:
 
 Pipeline is selected from the compact bar dropdown immediately left of Mode. It is not duplicated in Settings.
 
+### Post-process runtime
+
+Post-process Cards are an independent after-generation deck. When enabled, the runtime freezes the completed assistant response, bounded visible evidence, the Pre-process packet, the active Post-process deck, and operation settings. It synthesizes structured guidance on one sticky Utility or ready Reasoner lane, then delegates prose writing to SillyTavern native quiet generation. Unified performs one rewrite for all enabled categories; Progressive rewrites in deck order and carries the latest valid draft forward. As Swipe appends a selected swipe, while Replace updates the selected response only after complete success. A failed or stale operation never commits a mutation; Progressive partial output can settle only as a swipe.
+
+The older Generation Review/Editorial/Enhancement branches are retired. Their historical specifications remain indexed for archaeology, but `docs/architecture/POST_PROCESS_CARDS_RUNTIME.md` is the current authority.
+
 Regenerate is a one-shot fresh-next-generation override from the Recursion Bar command slot. The bar calls `runtime.requestFreshNextGeneration({ source: 'bar' })`, runtime records a pending token and leaves Last Brief on the previous completed packet; no provider work, prompt installation, prompt clearing, Last Brief clearing, or host generation starts on click. The next `prepareForGeneration({ hostGeneration: true })` consumes the token once, clears Last Brief with reason `user-fresh-next-generation` as the send or swipe begins, bypasses the volatile Prepared Generation Artifact, bypasses Rapid foreground warm, soft-invalidates the current scene cache with reason `user-fresh-next-generation`, prevents cached cards from entering the prompt-eligible hand, and records diagnostics such as `fresh-next-generation:cache-bypassed` and `fresh-next-generation:rapid-bypassed`. Pipeline selection remains a deferred scheduling setting; changing Standard/Rapid/Fused does not start generation or Rapid warming.
 
 `lastPreparedGeneration` is the sole volatile owner of the installed packet and

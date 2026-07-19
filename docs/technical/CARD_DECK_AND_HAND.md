@@ -56,7 +56,7 @@ The deck-to-hand boundary is the central card-system contract: the full scene de
 
 ![Dynamic card selection from the full scene deck to the injected guidance packet](../../assets/documentation/renders/recursion-dynamic-card-selection.png)
 
-![Card deck control showing categories, cards, and off/active/priority eye states](../../assets/documentation/renders/recursion-card-control.png)
+![Pre-process Cards deck control showing categories, cards, and participation states](../../assets/documentation/renders/recursion-pre-process-cards-panel.png)
 
 The card system is Recursion's scene-local reasoning cache. It is implemented by `src/cards.mjs`, coordinated by `src/runtime.mjs`, persisted by `src/storage.mjs`, and inspected through `src/ui.mjs`.
 

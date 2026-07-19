@@ -2,6 +2,8 @@
 
 The Recursion Playwright harness is the shared test utility layer for browser readiness checks and focused live SillyTavern smoke tests. It borrows Directive's useful testing discipline while keeping Recursion's scope smaller: prove host integration, visible status, prompt injection, storage probes, and fail-soft behavior.
 
+The current post-generation browser contract is Post-process Cards. The harness must drive the independent Post-process deck, verify Unified/Progressive and As Swipe/Replace controls, and inspect native host quiet-generation settlement. The older Enhancement mutation section is retained only as historical test archaeology; new proof must use `postProcess` settings, Post-process progress rows, and the current marker contract.
+
 ## Current Guardrail Files
 
 The first executable slice has these files:
@@ -12,7 +14,7 @@ The first executable slice has these files:
 | `tools/scripts/check-playwright-readiness.mjs` | Offline browser readiness probe. It dynamically imports Playwright, launches Chromium when available, drives a local fixture, and never contacts SillyTavern. |
 | `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety and storage preflight. It rejects unsafe users before mutation, logs into dedicated users, writes/reads/verifies/deletes Recursion-owned probe files, and checks cross-user isolation when two or more users are configured. |
 | `tools/scripts/smoke-sillytavern-live.mjs` | Focused live smoke. It validates the dedicated user and base URL gate, authenticates, compares served Recursion files, verifies the Recursion Bar, Hero Pixel Array progress menu, options/settings menu, provider controls, Last Brief dropdown, Full Viewer access, and bridge hooks with Playwright, and writes screenshots/trace for no-generation UI runs when artifacts are enabled. With generation flags, it drives visible send controls when available, records the trigger source, proves host generation continued for UI sends, suppresses binary artifacts, and proves Recursion-owned prompt keys can install and clear without storing raw prompt text. |
-| `tools/scripts/prove-live-enhancements.mjs` | Real-provider Repair and Redirect certification across Standard, Rapid, and Fused. It requires a dedicated soak user and a concrete before/after mutation certificate; green progress or provider completion without the required selected second swipe is a failure. |
+| `tools/scripts/prove-post-process-cards-ui.mjs` | Dedicated-user Post-process Cards UI contract: independent deck persistence, card/category ordering, binary card state, Unified/Progressive and As Swipe/Replace controls, editor behavior, and privacy-safe evidence. |
 | `tools/scripts/test-live-harness.mjs` | Deterministic contract tests for the guardrail behavior. |
 
 The harness should be a library, not a second runtime. Runtime behavior stays in `src/`; the harness drives the public host/UI surface and reads documented diagnostics.

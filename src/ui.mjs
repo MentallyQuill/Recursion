@@ -1114,19 +1114,18 @@ function focusNode(node) {
 
 function focusPanel(panel) {
   if (!panel) return;
-  if (panel.dataset?.recursionCardsPanel !== undefined) {
-    const deckSelect = panel.querySelector?.('[data-recursion-card-deck-select]');
-    if (isFocusableNode(deckSelect)) {
-      focusNode(deckSelect);
-      return;
-    }
-  }
+  const isCardPanel = panel.dataset?.recursionCardsPanel !== undefined
+    || panel.dataset?.recursionPostProcessPanel !== undefined;
   const seen = new Set();
   const focusable = [];
   for (const selector of FOCUSABLE_SELECTORS) {
     for (const node of panel.querySelectorAll?.(selector) || []) {
       if (seen.has(node)) continue;
       seen.add(node);
+      if (isCardPanel && (
+        Object.hasOwn(node.dataset || {}, 'recursionCardDeckSelect')
+        || Object.hasOwn(node.dataset || {}, 'recursionPostProcessDeckSelect')
+      )) continue;
       focusable.push(node);
     }
   }
@@ -2376,9 +2375,13 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
   const deckList = el('div', { className: 'recursion-card-panel-list recursion-card-deck-list', dataset: { recursionCardDeckList: '' } });
   for (const category of orderedDeckCategories(activeDeck)) {
     const categoryCards = orderedDeckCards(activeDeck, category.id);
-    const runnableCategoryCards = categoryCards.filter((card) => getDeckCardStatus(card).runnable);
-    const priorityCategoryCards = runnableCategoryCards.filter((card) => cardSelectionState(card) === 'priority');
-    const categoryDensityWarning = runnableCategoryCards.length >= 5;
+    const eligibleCategoryCards = categoryCards.filter((card) => {
+      const status = getDeckCardStatus(card);
+      return status.runnable || status.reason === 'disabled';
+    });
+    const activeCategoryCards = eligibleCategoryCards.filter((card) => cardSelectionState(card) !== 'off');
+    const priorityCategoryCards = activeCategoryCards.filter((card) => cardSelectionState(card) === 'priority');
+    const categoryDensityWarning = activeCategoryCards.length >= 5;
     const categoryExpanded = preProcessCategoryExpanded(preProcessDecks, activeDeck.id, category.id);
     const categoryDeletePending = deleteConfirmFor(deleteState, 'category', activeDeck.id, category.id);
     const categoryActions = !activeDeck.readonly ? [
@@ -2442,7 +2445,7 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
       disclosure: cardSystemIconSvg(categoryExpanded ? 'chevron-up' : 'chevron-down'),
       copy: el('span', { className: 'recursion-card-panel-category-copy recursion-card-deck-category-copy' }, [
         el('strong', { text: category.name }),
-        el('span', { text: `${runnableCategoryCards.length} source card${runnableCategoryCards.length === 1 ? '' : 's'}${priorityCategoryCards.length ? ` - ${priorityCategoryCards.length} priority` : ''}${categoryDensityWarning ? ' - focus may be diluted' : ''}` })
+        el('span', { text: `${activeCategoryCards.length}/${eligibleCategoryCards.length} Active Cards${priorityCategoryCards.length ? ` · ${priorityCategoryCards.length} Priority` : ''}${categoryDensityWarning ? ' - focus may be diluted' : ''}` })
       ]),
       actions: categoryActions,
       auxiliary: categoryEditor ? [categoryEditor] : [],
@@ -2459,8 +2462,7 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
   }
   panel.appendChild(deckList);
   panel.appendChild(el('footer', { className: 'recursion-card-panel-foot recursion-cards-foot' }, [
-    el('span', { text: 'Active Card Deck is global. Draft cards do not run.' }),
-    el('span', { className: 'recursion-mini-chip', text: 'Esc' })
+    el('span', { text: 'Active Card Deck is global. Draft cards do not run.' })
   ]));
 }
 
@@ -2737,7 +2739,8 @@ function renderPostProcessPanel(panel, view, {
     const expanded = postProcessCategoryExpanded(deckSettings, deck.id, category.id);
     const cards = orderedPostProcessCards(deck, category.id);
     const categoryEnabled = cards.some((card) => card.enabled !== false);
-    const runnableCount = cards.filter((card) => card.enabled !== false && cleanText(card.name) && cleanText(card.promptText)).length;
+    const eligibleCards = cards.filter((card) => cleanText(card.name) && cleanText(card.promptText));
+    const activeCards = eligibleCards.filter((card) => card.enabled !== false);
     const categoryActions = deck.readonly ? [] : [
       cardSystemIconButton('plus', 'Create a new Card in category', { recursionPostProcessCardCreate: category.id }),
       cardSystemIconButton('pencil', `Edit ${category.name}`, { recursionPostProcessCategoryEdit: category.id }),
@@ -2794,7 +2797,7 @@ function renderPostProcessPanel(panel, view, {
       disclosure: cardSystemIconSvg(expanded ? 'chevron-up' : 'chevron-down'),
       copy: el('span', { className: 'recursion-card-panel-category-copy recursion-post-process-category-copy' }, [
         el('strong', { className: 'recursion-post-process-category-name', text: category.name }),
-        el('span', { className: 'recursion-post-process-category-meta', text: `${runnableCount} runnable card${runnableCount === 1 ? '' : 's'}` })
+        el('span', { className: 'recursion-post-process-category-meta', text: `${activeCards.length}/${eligibleCards.length} Active Cards` })
       ]),
       actions: categoryActions,
       actionsClassName: 'recursion-post-process-row-actions',
@@ -2815,8 +2818,7 @@ function renderPostProcessPanel(panel, view, {
   if (editorState) panel.appendChild(postProcessEditor(editorState, deck));
   if (deleteState) panel.appendChild(postProcessDeleteConfirmation(deleteState, deck));
   panel.appendChild(el('footer', { className: 'recursion-card-panel-foot recursion-post-process-foot' }, [
-    el('span', { text: 'Active Post-process Deck is global. Structure-only changes require a custom deck.' }),
-    el('span', { className: 'recursion-mini-chip', text: 'Esc' })
+    el('span', { text: 'Active Post-process Deck is global. Structure-only changes require a custom deck.' })
   ]));
 }
 
@@ -4425,6 +4427,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function showCardSystemStatus(text, severity = 'info') {
     const label = cleanText(text);
     if (!label) return;
+    clearTransientCurrentStepText({ updateView: false });
     uiActionStatus.set(label, severity);
     update();
   }
@@ -4782,8 +4785,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     }
     if (open) {
       renderPostProcessPanelForView(currentView());
-      focusOriginByPanel.set(postProcessPanel, postProcessButton);
-      focusNode(postProcessPanel.querySelector('[data-recursion-post-process-deck-select]'));
+      rememberPanelFocus(postProcessPanel, postProcessButton);
     } else {
       restorePanelFocus(postProcessPanel, postProcessButton);
     }
@@ -4901,7 +4903,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   function applyPostProcessSettings(postProcess, status = '') {
     const patch = { postProcess: { ...asObject(currentView().settings?.postProcess), ...postProcess } };
     const action = runtime?.updateSettings?.(patch);
-    if (status) showCardSystemStatus(status);
+    if (status) showTransientCurrentStepText(status);
     return action;
   }
 
@@ -6327,23 +6329,28 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (control('recursionPostProcessEnabled')) {
       consumeClickEvent(event);
       const enabled = currentView().settings?.postProcess?.enabled === true;
-      runAction(applyPostProcessSettings({ enabled: !enabled }, `Post-process Cards ${enabled ? 'Off' : 'On'}.`));
+      runAction(applyPostProcessSettings(
+        { enabled: !enabled },
+        enabled
+          ? 'Post-process Off - Leaves responses unchanged'
+          : 'Post-process On - Rewrites completed responses'
+      ));
     }
     if (control('recursionPostProcessApplyAsSwipe')) {
       consumeClickEvent(event);
-      runAction(applyPostProcessSettings({ applyMode: 'as-swipe' }, 'Post-process results will be added As Swipe.'));
+      runAction(applyPostProcessSettings({ applyMode: 'as-swipe' }, 'As Swipe Set - Preserves original response'));
     }
     if (control('recursionPostProcessApplyReplace')) {
       consumeClickEvent(event);
-      runAction(applyPostProcessSettings({ applyMode: 'replace' }, 'Post-process results will replace complete responses.'));
+      runAction(applyPostProcessSettings({ applyMode: 'replace' }, 'Replace Set - Replaces original response'));
     }
     if (control('recursionPostProcessFlowUnified')) {
       consumeClickEvent(event);
-      runAction(applyPostProcessSettings({ rewriteFlow: 'unified' }, 'Unified rewrite flow selected.'));
+      runAction(applyPostProcessSettings({ rewriteFlow: 'unified' }, 'Unified Mode Set - One combined pass'));
     }
     if (control('recursionPostProcessFlowProgressive')) {
       consumeClickEvent(event);
-      runAction(applyPostProcessSettings({ rewriteFlow: 'progressive' }, 'Progressive rewrite flow selected.'));
+      runAction(applyPostProcessSettings({ rewriteFlow: 'progressive' }, 'Progressive Mode Set - Each step carried over'));
     }
     const postProcessActivateAll = control('recursionPostProcessActivateAll');
     if (postProcessActivateAll && postProcessActivateAll.disabled !== true) {

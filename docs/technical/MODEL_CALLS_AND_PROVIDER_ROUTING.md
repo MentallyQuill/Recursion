@@ -6,8 +6,8 @@ Provider routing is implemented by `src/providers.mjs`, configured by `src/setti
 
 | Lane | Required | Uses | Fallback |
 | --- | --- | --- | --- |
-| Utility | Yes | Low/Medium Arbiter, Low/Medium card generation, Low/Medium Fused bundles, lower-priority High cards, provider tests, `guidanceComposer`, and Low/Medium post-generation Generation Review. | Local fallback plan, cache reuse, raw-card-only packet, prompt clear, original-message reveal, or skip. |
-| Reasoner | No | Medium+ guidance augmentation, High/Ultra Arbiter, High/Ultra Fused bundles when healthy, high-priority High cards, Ultra card generation. | Utility guidance plus raw card evidence. |
+| Utility | Yes | Low/Medium Arbiter, Low/Medium card generation, Low/Medium Fused bundles, lower-priority High cards, provider tests, Pre-process guidance, and Post-process guidance when selected. | Local fallback plan, cache reuse, raw-card-only packet, prompt clear, original-message reveal, or skip. |
+| Reasoner | No | Medium+ guidance, High/Ultra Arbiter, High/Ultra Fused bundles when healthy, high-priority High cards, Ultra card generation, and Post-process guidance when ready. | Utility guidance plus raw card evidence. |
 
 Utility remains the required operational lane. Reasoner eligibility comes from
 one shared capability resolver plus Reasoning Level policy; there is no provider
@@ -58,10 +58,10 @@ Recursion exposes route visibility as a compact Reasoning Level summary rather t
 | `utilityArbiter` | Utility by default; Reasoner at High/Ultra when healthy | Plan action, scene status, card jobs, Reasoner decision, budgets, and compact diagnostics. |
 | Card roles | Utility by default; Reasoner for high-priority High cards and Ultra card calls when healthy | Generate fixed-family card JSON from the frozen snapshot. |
 | `fusedCardBundle` | Utility at Low/Medium; Reasoner at High/Ultra when healthy | Generate all requested card families in one structured bundle for the Fused pipeline. |
-| `guidanceComposer` | Utility | Provider-authored direction for using selected raw card evidence in Standard, Rapid warm, and Fused packets. |
+| `guidanceComposer` | Utility | Provider-authored direction for using selected raw card evidence in Standard, Rapid warm, Fused packets, and Post-process operations. Guidance remains structured; native host quiet generation writes prose. |
 | `rapidTurnDelta` | Utility | Foreground Rapid role that selects from warmed raw cards and emits a small user-message guidance delta. |
-| `reasonerComposer` | Reasoner | Medium+ synthesis patch for Guidance. |
-| `generationReviewer` | Utility at Low/Medium; Reasoner at High/Ultra when healthy | Legacy/general generation-review contract. One post-generation review of the frozen response, hand, packet, context, provenance, and anti-slop profile. |
+| `reasonerComposer` | Reasoner | Medium+ synthesis for Pre-process and Post-process Guidance when the lane is ready. |
+| `postProcessGuidance` | Utility or sticky Reasoner lane | Structured guidance for one frozen completed response and the active Post-process deck. It never writes prose. |
 | `editorialDiagnostician` | Utility for Repair/Recompose; Redirect follows its readiness-specific lane | Diagnoses the frozen response and emits the mode-bound editorial brief before any candidate or patch is written. |
 | `editorialTransformer` | Same Editorial lane as diagnosis, with Redirect-specific Reasoner rules | Emits a complete Recompose candidate, Redirect text, or Repair bounded patches. Repair never accepts a full candidate. |
 | `editorialVerifier` | Same Editorial lane; required for Redirect and Repair card-audit paths | Verifies Redirect's canonical checks or receives compact Repair `failedCardIds`; Recursion derives canonical Repair outcomes locally. |
@@ -103,7 +103,9 @@ flowchart TD
 
 All provider work normally returns a JSON object. OpenAI-compatible responses are normalized before JSON parsing so empty visible output, reasoning-only payloads, and token-limit truncation are reported as provider failures with stable error codes. The router rejects undeclared role ids, parses visible text through the structured JSON parser, validates the expected role schema, and returns either `ok: true` with parsed data or `ok: false` with sanitized diagnostics. Runtime consumers still validate role-specific payload details; for example, provider tests pass only when the router succeeds and the parsed payload contains `schema: "recursion.providerTest.v1"` plus explicit `ok: true`.
 
-`generationReviewer` is not an exception to strict visible JSON. It must return `recursion.generationReview.v1`; Recursion never wraps a visible rewrite as a review result. The parser first applies the shared Structured Output Recovery policy. Once a result parses and matches its role schema, the legacy/general Generation Review path validates source hash, exact target text, non-overlap, installed-card coverage, outcome labels, and evidence target IDs.
+Current Post-process guidance uses strict visible JSON under `recursion.postProcessGuidance.v1`. The request carries the frozen source hash, bounded evidence, ordered enabled categories, operation mode, and apply mode. Runtime validates source identity, category coverage, guidance text, and retry limits before passing guidance to native host quiet generation. Provider-layer retries stay on the same selected lane; native host generation is the only prose-writing step.
+
+The legacy `generationReviewer` and Editorial role contracts below are retained as historical implementation notes only. They are not callable roles in the current Post-process runtime.
 
 The active Enhancement path uses the mode-specific Editorial roles. Repair's
 Transformer request has one candidate-free envelope with bounded `patches` and

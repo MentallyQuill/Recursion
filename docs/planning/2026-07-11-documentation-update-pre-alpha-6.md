@@ -226,18 +226,14 @@ All captures must be live-host renders from a sterile `recursion-soak-*` profile
 
 | Target asset | Required visual |
 | --- | --- |
-| `recursion-operator-card-control.png` | Compact Recursion Bar with the Cards control visible in idle/ready state. |
-| `recursion-card-scope-auto.png` | Cards scope surface showing Auto behavior and the default catalog. |
-| `recursion-card-scope-manual.png` | Manual family/sub-item focus selection with selected counts and scope summary. |
-| `recursion-card-priority-states.png` | Card rows showing off, active, and priority eye-state visuals and labels. |
-| `recursion-card-deck-overview.png` | Deck selector with Default Deck and custom-deck affordances. |
-| `recursion-card-deck-editor.png` | Custom deck editor with categories, cards, authored/generated distinction, and ordering controls. |
-| `recursion-card-category-editor.png` | Category create/edit/delete surface with drag handle treatment. |
-| `recursion-card-authored-card-editor.png` | Authored card creation/edit surface with name, content, category, and state controls. |
-| `recursion-card-assist.png` | Card Assist input/result state showing bounded suggestion workflow and commit boundary. |
-| `recursion-card-mobile-editor.png` | Narrow-screen card/deck editing state with usable touch targets and no clipped controls. |
-| `recursion-card-hand-inspection.png` | Last Brief or Full Viewer showing selected hand, card evidence, counts, and omissions. |
-| `recursion-card-fallback-state.png` | Fail-soft card/provider state where the original usable packet remains visible. |
+| `recursion-pre-process-cards-panel.png` | Pre-process Cards deck with categories, descriptions, and off/active/priority participation states. |
+| `recursion-pre-process-card-editor.png` | Pre-process authored-card editor with description, prompt, Card Assist, and save/cancel controls. |
+| `recursion-post-process-panel-starter-off.png` | Disabled Starter Post-process Deck with Unified/Progressive and As Swipe/Replace controls. |
+| `recursion-post-process-panel-unified.png` | Enabled Post-process deck using Unified flow and As Swipe. |
+| `recursion-post-process-panel-progressive.png` | Enabled Post-process deck using Progressive flow and Replace. |
+| `recursion-post-process-card-editor.png` | Post-process authored-card editor with description, prompt, and save/cancel controls. |
+| `recursion-first-run-post-process-result.png` | Post-process progress showing frozen evidence, structured guidance, native host rewrite, and swipe settlement. |
+| `recursion-post-process-progressive-partial.png` | Progressive partial settlement with failed category, retained draft, and safe swipe outcome. |
 
 ### Recommended contact sheets
 
@@ -254,7 +250,7 @@ Use contact sheets where the purpose is to show a state family rather than one i
 Each required render must be linked from the document section that explains it. Until captured, place a visible marker in that target document using the existing contract:
 
 ```markdown
-![Cards control visible in the ready state](../../assets/documentation/renders/recursion-card-control.png)
+![Pre-process Cards control visible in the ready state](../../assets/documentation/renders/recursion-pre-process-cards-panel.png)
 ```
 
 Do not use screenshots to replace Mermaid diagrams. Do not promote fixture-only images as live UI evidence.

@@ -19,12 +19,12 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Docs Folder Guide](README.md) - Folder-level guide for this documentation tree.
 - [User Guides](user/README.md) - Operator-facing table of contents.
 - [First Run Workflow](user/FIRST_RUN_WORKFLOW.md) - First-session path from install through Standard Auto, Tense & PoV Auto, Manual, Rapid trial, inspection, and power-toggle cleanup.
-- [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for UI surfaces, Standard/Rapid/Fused pipelines, modes, Tense & PoV, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
+- [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for Pre-process and Post-process Cards, UI surfaces, Standard/Rapid/Fused pipelines, modes, Tense & PoV, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
 
 ## Provider, Privacy, And Safety Docs
 
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md) - Current provider lanes, source routing, machine-JSON schema metadata, structured calls, validation, and secret handling contract.
-- [Structured Output Recovery Design](superpowers/specs/2026-07-13-recursion-structured-output-recovery-design.md) - Shared one-budget recovery contract for malformed provider output, batch slots, Fused fragments, raw-text reformat, and Generation Review semantic correction.
+- [Structured Output Recovery Design](superpowers/specs/2026-07-13-recursion-structured-output-recovery-design.md) - Shared one-budget recovery contract for malformed provider output, batch slots, Fused fragments, raw-text reformat, and structured Post-process guidance recovery.
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md) - Current storage, journal, diagnostics, redaction, and retention contract.
 - [Provider Setup](user/PROVIDER_SETUP.md) - Utility and Reasoner setup, source options, autosaving provider fields, model discovery, session-only keys, provider tests, fallback behavior, and safe verification.
 - [Prompt Privacy And Safety](user/PROMPT_PRIVACY_AND_SAFETY.md) - Prompt packet contents, injection boundary, storage limits, redaction, external extension coexistence, and safety checks.
@@ -53,18 +53,18 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Post-process Cards Design](superpowers/specs/2026-07-18-recursion-post-process-cards-design.md) - Approved V1 product, data, guidance, host-writer, persistence, and privacy contract.
 - [Post-process Cards Implementation Plan](superpowers/plans/2026-07-18-recursion-post-process-cards.md) - Approved task sequence for replacing the old Enhancement feature family.
 - [Post-process Cards Playwright Test Framework](testing/2026-07-18-post-process-cards-playwright-framework.md) - Required browser, visual, runtime-integration, and privacy proof framework.
-- [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - **Superseded by Post-process Cards; retained as historical context until Task 11 rewrites or removes affected documentation.**
-- [Editorial Transformation Design](superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md) - **Superseded by Post-process Cards; retained as historical context until Task 11 rewrites or removes affected documentation.**
+- [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - **Superseded by Post-process Cards; retained as historical context only.**
+- [Editorial Transformation Design](superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md) - **Superseded by Post-process Cards; retained as historical context only.**
 - [Layered Failure Recovery Design](superpowers/specs/2026-07-17-recursion-layered-failure-recovery-design.md) - Provider repair, semantic correction, safe partial results, and explicit failure severity.
-- [Redirect Improvement Design](superpowers/specs/2026-07-15-recursion-redirect-improvement-design.md) - **Superseded by Post-process Cards; retained as historical context until Task 11 rewrites or removes affected documentation.**
-- [Editorial Transformation Implementation Plan](superpowers/plans/2026-07-13-recursion-editorial-transformation.md) - **Superseded by Post-process Cards; retained as historical context until Task 11 rewrites or removes affected documentation.**
+- [Redirect Improvement Design](superpowers/specs/2026-07-15-recursion-redirect-improvement-design.md) - **Superseded by Post-process Cards; retained as historical context only.**
+- [Editorial Transformation Implementation Plan](superpowers/plans/2026-07-13-recursion-editorial-transformation.md) - **Superseded by Post-process Cards; retained as historical context only.**
 - [Design Folder Guide](design/README.md)
 
 ## Architecture Specs
 
 - [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md)
 - [Post-process Cards Runtime Boundary](architecture/POST_PROCESS_CARDS_RUNTIME.md) - Frozen evidence, native SillyTavern writer ownership, Unified/Progressive sequencing, retry/fail-soft, final persistence, and privacy contract.
-- [Generation Review and Enhancement Contract](architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - **Superseded by Post-process Cards; retained as historical context until Task 11 rewrites or removes affected documentation.**
+- [Generation Review and Enhancement Contract](architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - **Superseded by Post-process Cards; retained as historical context only.**
 - [Cache Use And Reuse Spec](architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-source reuse, Rapid warm artifacts, swipe variants, invalidation, and fresh-next-generation bypasses.
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md)

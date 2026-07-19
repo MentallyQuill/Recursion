@@ -57,12 +57,12 @@ Reasoning Level also sets the amount of provider-side reasoning Recursion reques
 | --- | --- | --- |
 | Low | minimal | minimal |
 | Medium | medium | minimal |
-| High | medium | Enhancements medium, Arbiter medium, cards and Fused bundles minimal |
-| Ultra | high | Enhancements high, Arbiter medium, cards and Fused bundles medium |
+| High | medium | Post-process guidance medium, Arbiter medium, cards and Fused bundles minimal |
+| Ultra | high | Post-process guidance high, Arbiter medium, cards and Fused bundles medium |
 
-Ordinary Repair/Recompose routing uses Reasoner only when it is ready and otherwise follows its bounded Utility fallback. Redirect is stricter: Low uses Utility, while Medium, High, and Ultra require Reasoner `Ready`. If it is not ready, Redirect remains visible but unavailable, explains whether to configure or test Reasoner, and the turn settles Redirect as skipped without Editorial provider calls. Medium+ Redirect never silently routes its writer or verifier through Utility.
+Post-process guidance routing is lane-sticky: Low and Medium use Utility, while High and Ultra require Reasoner `Ready`. If the required lane is not ready, the operation or category fails soft without crossing lanes. Pre-process work may use Utility fallback according to the selected Reasoning Level policy.
 
-Enhancement uses the configured context-message count to build a bounded, sender-aware review snapshot. Recent visible transcript messages, character evidence, the generation-time Prompt Packet, installed-card lineage, pipeline provenance, and compact selected-card context give Editorial roles concrete evidence for prose, dialogue, pacing, subtext, scene fidelity, and anti-slop. Repair returns bounded patches and a compact dynamic card audit; Recompose returns a complete candidate; Redirect returns replacement text plus independent verification. Recursion does not accept a plain rewritten message as a fallback.
+Post-process uses the configured Evidence Messages count to build a bounded, sender-aware frozen operation snapshot. Recent visible transcript messages, character evidence, the generation-time Pre-process Prompt Packet, ordered Post-process cards, pipeline provenance, and the current writable draft become evidence for guidance synthesis. The guidance response is structured and never replaces prose; SillyTavern's native quiet-generation path writes the draft.
 
 The router may repair common JSON formatting damage or make one correction request for an eligible malformed provider response. Repair reserves that single correction for runtime semantic validation: an empty, malformed, stale, overlapping, or otherwise invalid bounded-patch result receives one explicit correction request while provider-authored fallback signals remain untrusted. Repair card audits return only dynamic `failedCardIds`; Recursion derives the complete ledger locally, preserving resolved rows even when the audit rejects. A safe local patch with unresolved card coverage produces explicit `partial-failed`; unsafe patches are rejected and never applied.
 
@@ -162,7 +162,7 @@ Expected fallback behavior:
 
 Provider failures should degrade Recursion, not block normal SillyTavern generation.
 
-Enhancement recovery is bounded separately from ordinary provider fallback. Repair's initial diagnosis and Transformer reserve one shared runtime semantic-correction request instead of spending it on provider-layer structured retry. If safe patches remain after correction but required coverage is unresolved, result is visibly `partial-failed`. Redirect uses its bounded correction policy and then requires complete verifier checks; it does not retry a rejected semantic result in a loop.
+Post-process recovery is bounded separately from ordinary provider fallback. Guidance receives one same-lane correction retry, and a failed host rewrite may retry with the same guidance without repeating synthesis. Unified failure preserves the original. Progressive records the failed category, keeps the last valid draft, and continues later categories when possible; partial output settles only as a swipe.
 
 ![Provider failure surface with normalized reason, Utility fallback, and redacted status](../../assets/documentation/renders/recursion-provider-failure-reason-inline.png)
 
@@ -173,7 +173,7 @@ Enhancement recovery is bounded separately from ordinary provider fallback. Repa
 | Utility not ready | Missing source, model, profile, or session key. | Open Utility provider card, complete setup, run Test Provider. |
 | Provider test failed | Bad key, base URL, model name, network, or incompatible response. | Re-enter session key, verify endpoint/model, test again. |
 | Reasoner never runs | Unconfigured, untested, unhealthy, or not selected by policy. | Complete its configuration, run Test Provider, and choose an appropriate Reasoning Level. |
-| Medium+ Redirect is unavailable | Reasoner is not `Ready` for the current configuration hash. | Use Test Reasoner or complete the Reasoner route; Low Redirect remains available through Utility. |
+| High/Ultra Post-process guidance is unavailable | Reasoner is not `Ready` for the current configuration hash. | Use Test Reasoner or choose Low/Medium so guidance uses Utility. |
 | Reasoner failed but generation continued | Expected fallback path. | Inspect Activity and Prompt Packet to confirm Utility guidance plus raw selected Card Evidence. |
 | Prompt not installed | Power is off, Utility unavailable, stale run, or injection failure. | Check power state, mode, Activity, Provider status, and Prompt Packet metadata. |
 | Session key disappeared | Browser session reset or Clear Session Key used. | Re-enter key and run Test Provider. |
@@ -186,7 +186,7 @@ For manual verification:
 
 1. Do not show provider secret fields in screenshots.
 2. Run Utility Test Provider.
-3. Run Reasoner Test Provider when you want Medium+ Reasoner routing or Redirect.
+3. Run Reasoner Test Provider when you want High/Ultra Post-process guidance or Reasoner-heavy Pre-process routing.
 4. Turn power off and confirm no prompt is installed.
 5. Set Auto only when you intend Recursion to affect the next prompt.
 6. Inspect Activity for route and fallback details.

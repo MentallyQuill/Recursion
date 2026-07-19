@@ -975,6 +975,7 @@ assert(/renderDeckCategory/.test(recursionUi) && /categoryExpanded \? 'chevron-u
 assert(/if \(categoryExpanded\) \{[\s\S]*?for \(const card of categoryCards\)/.test(recursionUi), 'production Card System hides category cards while collapsed');
 assert(/recursionCardCategoryAction/.test(recursionUi), 'production Card System marks category action buttons so they do not toggle disclosure');
 assert(/Object\.hasOwn\(target\.dataset,\s*'recursionCardDeckSelect'\)/.test(recursionUi), 'production Card System deck selector handles empty-string data marker values');
+assert(!/function focusPanel\(panel\) \{[\s\S]*?recursionCardsPanel[\s\S]*?data-recursion-card-deck-select[\s\S]*?focusNode\(deckSelect\)/.test(recursionUi), 'opening a Card panel does not auto-focus its deck selector');
 assert(/value === undefined \|\| value === null \|\| value === false/.test(recursionUi), 'production element helper omits undefined attrs so select options do not all become selected');
 assert(/function cardSystemIconButton/.test(recursionUi), 'production Card System uses a dedicated icon-only button helper');
 assert(!/className: 'recursion-mini-button'[^)\n]*text:/.test(recursionUi), 'production Card System mini buttons do not render visible command text');
@@ -2298,6 +2299,7 @@ try {
   const postPanel = root.querySelector('[data-recursion-post-process-panel]');
   for (const panel of [prePanel, postPanel]) {
     assert(panel.className.includes('recursion-card-panel'), 'both phases use the shared panel shell');
+    assert(!fakeDocument.textTree(panel).includes('Esc'), 'card dropdown footers omit the Esc affordance');
   }
   assert(root.querySelector('[data-recursion-post-process-header]').className.includes('recursion-card-panel-head'), 'Post-process uses the shared header');
   assert(root.querySelector('[data-recursion-post-process-deck-bar]').className.includes('recursion-card-panel-deck-bar'), 'Post-process uses the shared deck toolbar');
@@ -2634,22 +2636,44 @@ try {
   root.querySelector('[data-recursion-post-process-cards-button]').click();
   assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'Post-process Cards button opens the panel');
   assertEqual(root.querySelector('[data-recursion-post-process-cards-button]').getAttribute('aria-expanded'), 'true', 'Post-process Cards button reflects open panel');
-  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-deck-select]'), 'opening Post-process Cards focuses its deck selector');
+  assert(fakeDocument.activeElement !== root.querySelector('[data-recursion-post-process-deck-select]'), 'opening Post-process Cards does not focus its deck selector');
   assert(root.querySelector('[data-recursion-post-process-progress]'), 'generation status exposes the stable Post-process progress selector');
   root.querySelector('[data-recursion-post-process-enabled]').click();
   assertDeepEqual(settingsUpdates.at(-1), { postProcess: { enabled: true } }, 'Post-process feature toggles On independently');
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Post-process On - Rewrites completed responses', 'Post-process On reports a concise status update');
   root.querySelector('[data-recursion-post-process-apply-replace]').click();
   assertDeepEqual(settingsUpdates.at(-1), { postProcess: { enabled: true, applyMode: 'replace' } }, 'Post-process Apply selects Replace');
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Replace Set - Replaces original response', 'Replace reports a concise status update');
   root.querySelector('[data-recursion-post-process-flow-progressive]').click();
   assertDeepEqual(
     settingsUpdates.at(-1),
     { postProcess: { enabled: true, applyMode: 'replace', rewriteFlow: 'progressive' } },
     'Post-process Rewrite Flow selects Progressive'
   );
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Progressive Mode Set - Each step carried over', 'Progressive reports a concise status update');
+  root.querySelector('[data-recursion-post-process-apply-as-swipe]').click();
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'As Swipe Set - Preserves original response', 'As Swipe reports a concise status update');
+  root.querySelector('[data-recursion-post-process-flow-unified]').click();
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Unified Mode Set - One combined pass', 'Unified reports a concise status update');
+  root.querySelector('[data-recursion-post-process-enabled]').click();
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Post-process Off - Leaves responses unchanged', 'Post-process Off reports a concise status update');
+  view = {
+    ...view,
+    settings: {
+      ...view.settings,
+      postProcess: { ...view.settings.postProcess, enabled: true, applyMode: 'replace', rewriteFlow: 'progressive' }
+    }
+  };
+  ui.update();
   assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'segmented controls keep the Post-process panel open');
   assert(root.querySelector('[data-recursion-post-process-deck-new]'), 'Post-process Deck exposes the stable new-deck selector');
   assertEqual(root.querySelector('[data-recursion-post-process-deck-edit]').disabled, true, 'starter Post-process Deck edit is read-only');
   assertEqual(root.querySelector('[data-recursion-post-process-deck-delete]').disabled, true, 'starter Post-process Deck delete is read-only');
+  const starterPostCategoryMeta = (categoryId) => root.querySelectorAll('[data-recursion-card-deck-category]')
+    .find((node) => node.dataset.recursionCardDeckCategory === categoryId)
+    ?.children?.[0]?.children?.[1]?.children?.[1]?.textContent;
+  assertEqual(starterPostCategoryMeta('natural-prose'), '3/3 Active Cards', 'Post-process category summary shows active cards over total cards');
+  assertEqual(starterPostCategoryMeta('concrete-meaning'), '0/1 Active Cards', 'Post-process inactive category summary keeps inactive cards in the denominator');
   assertEqual(root.querySelector('[data-recursion-post-process-category-toggle]'), null, 'starter category headers do not expose visibility controls');
   assertEqual(root.querySelector('[data-recursion-post-process-card-toggle]').disabled, false, 'starter card state remains operator-controllable');
   const stripFalseWeightToggle = root.querySelectorAll('[data-recursion-post-process-card-toggle]')
@@ -2686,20 +2710,20 @@ try {
   const expandedPostProcessCount = () => root.querySelectorAll('[data-recursion-post-process-category-expand]')
     .filter((button) => button.getAttribute('aria-expanded') === 'true')
     .length;
-  assertEqual(expandedPostProcessCount(), 4, 'Post-process categories default expanded on the initial panel render');
+  assertEqual(expandedPostProcessCount(), 0, 'Post-process categories default collapsed on the initial panel render');
   const firstPostProcessCategoryId = root.querySelectorAll('[data-recursion-post-process-category-expand]')[0].dataset.recursionPostProcessCategoryExpand;
   root.querySelectorAll('[data-recursion-post-process-category-expand]')[0].click();
-  assertEqual(expandedPostProcessCount(), 3, 'collapsing the first Post-process category leaves the other three open');
+  assertEqual(expandedPostProcessCount(), 1, 'expanding the first Post-process category leaves the other three closed');
   assertEqual(
     settingsUpdates.at(-1).postProcessDecks.categoryExpansion[STARTER_POST_PROCESS_DECK_ID][firstPostProcessCategoryId],
-    false,
-    'Post-process disclosure writes the collapsed category to global deck settings'
+    true,
+    'Post-process disclosure writes the expanded category to global deck settings'
   );
   ui.update();
-  assertEqual(expandedPostProcessCount(), 3, 'a partial Post-process disclosure state persists across rerender');
+  assertEqual(expandedPostProcessCount(), 1, 'a partial Post-process disclosure state persists across rerender');
   root.querySelector('[data-recursion-post-process-cards-button]').click();
   root.querySelector('[data-recursion-post-process-cards-button]').click();
-  assertEqual(expandedPostProcessCount(), 3, 'Post-process disclosure survives panel close and reopen');
+  assertEqual(expandedPostProcessCount(), 1, 'Post-process disclosure survives panel close and reopen');
   while (expandedPostProcessCount() > 0) {
     root.querySelectorAll('[data-recursion-post-process-category-expand]')
       .find((button) => button.getAttribute('aria-expanded') === 'true')
@@ -2709,7 +2733,7 @@ try {
   ui.update();
   assertEqual(expandedPostProcessCount(), 0, 'the all-collapsed Post-process disclosure state persists across rerender');
   root.querySelectorAll('[data-recursion-post-process-category-expand]')[0].click();
-  assertEqual(expandedPostProcessCount(), 1, 'an explicitly collapsed Post-process category can be re-expanded');
+  assertEqual(expandedPostProcessCount(), 1, 'a collapsed Post-process category can be re-expanded');
   root.querySelector('[data-recursion-post-process-deck-duplicate]').click();
   const postProcessDeckPatch = settingsUpdates.at(-1);
   assert(postProcessDeckPatch.postProcessDecks, 'duplicating the starter writes only the Post-process deck store');
@@ -3146,10 +3170,9 @@ try {
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.left, '0px', 'Cards dropdown aligns to the full bar left edge');
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.width, '640px', 'Cards dropdown spans the full bar width');
   assertEqual(root.querySelector('[data-recursion-cards-panel]').style.maxHeight, '471px', 'Cards dropdown clamps to mobile visual viewport height with bottom gutter');
-  assertEqual(
-    fakeDocument.activeElement,
-    root.querySelector('[data-recursion-card-deck-select]'),
-    'opening Cards moves focus to the first enabled dropdown control'
+  assert(
+    fakeDocument.activeElement !== root.querySelector('[data-recursion-card-deck-select]'),
+    'opening Cards does not focus the deck selector'
   );
   globalThis.visualViewport.height = 360;
   globalThis.visualViewport.emit('resize');
@@ -3185,6 +3208,7 @@ try {
   assert(root.querySelector('[data-recursion-card-deck-list]').className.includes('recursion-card-panel-list'), 'Pre-process uses the shared list');
   assert(root.querySelector('[data-recursion-cards-panel]').children.some((child) => child.className?.includes('recursion-card-panel-head')), 'Pre-process uses the shared header');
   assert(root.querySelector('[data-recursion-cards-panel]').children.some((child) => child.className?.includes('recursion-card-panel-foot')), 'Pre-process uses the shared footer');
+  assert(!fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('Esc'), 'Pre-process footer omits the Esc affordance');
   assertEqual(root.querySelector('[data-recursion-cards-panel]').querySelectorAll('[data-recursion-card-id]').length, 0, 'Cards dropdown defaults categories to collapsed instead of rendering every card');
   assertEqual(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('aria-expanded'), 'false', 'collapsed category headers expose aria-expanded false');
   assertEqual(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('title'), CARD_SCOPE_CATALOG[0].description, 'Pre-process category description is available as hover text');
@@ -3192,6 +3216,11 @@ try {
   assert(root.querySelector('[data-recursion-card-category-toggle]').children[0]?.className.includes('recursion-card-panel-disclosure'), 'collapsed category headers render the shared disclosure arrow');
   const defaultDeckText = fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]'));
   assert(!defaultDeckText.includes(CARD_SCOPE_CATALOG[0].description), 'Pre-process category descriptions are absent from visible category copy');
+  assertEqual(
+    fakeDocument.textTree(root.querySelector('[data-recursion-card-deck-category]').children[0].children[1]),
+    ' Scene Frame 3/3 Active Cards',
+    'Pre-process category summary shows active cards over total cards'
+  );
   assert(defaultDeckText.includes('34/34 active'), 'Cards header summarizes active cards in the active deck');
   assert(!defaultDeckText.includes('Default is read-only'), 'Cards dropdown removes read-only status notice rows');
   const firstPreCategoryId = root.querySelector('[data-recursion-card-category-toggle]').dataset.recursionCardCategoryToggle;
@@ -3275,6 +3304,17 @@ try {
   if (disabledCardCategoryToggle.getAttribute('aria-expanded') !== 'true') {
     disabledCardCategoryToggle.click();
   }
+  assertEqual(
+    root.querySelectorAll('[data-recursion-card-deck-category]')
+      .find((node) => node.dataset.recursionCardDeckCategory === disableCardCategoryId)
+      && fakeDocument.textTree(
+        root.querySelectorAll('[data-recursion-card-deck-category]')
+          .find((node) => node.dataset.recursionCardDeckCategory === disableCardCategoryId)
+          .children[0].children[1]
+      ),
+    ' Scene Frame 2/3 Active Cards',
+    'Pre-process category summary keeps inactive cards in the denominator'
+  );
   const emptyDescriptionCard = root.querySelectorAll('[data-recursion-card-id]')
     .find((node) => node.dataset.recursionCardId === disableCardId);
   assert(
@@ -3297,6 +3337,16 @@ try {
   assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Card prioritized.', 'Card System action feedback routes through main bar status');
   view = { ...view, settings: { ...view.settings, preProcessDecks: priorityUpdate }, activity: { phase: 'idle' }, progressRun: null };
   ui.update();
+  assert(
+    root.querySelectorAll('[data-recursion-card-deck-category]')
+      .find((node) => node.dataset.recursionCardDeckCategory === disableCardCategoryId)
+      .children[0].children[1] && fakeDocument.textTree(
+        root.querySelectorAll('[data-recursion-card-deck-category]')
+          .find((node) => node.dataset.recursionCardDeckCategory === disableCardCategoryId)
+          .children[0].children[1]
+      ).includes('1 Priority'),
+    'Pre-process category summary reports Priority cards separately'
+  );
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('1 priority'), 'Cards header reports Priority count when cards are prioritized');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, false, 'Activate-all action enables when it can clear Priority states');
   root.querySelector('[data-recursion-card-deck-activate-all]').click();

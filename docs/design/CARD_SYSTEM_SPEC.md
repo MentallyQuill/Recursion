@@ -29,6 +29,12 @@ Related design docs:
 - [Storage and Diagnostics](../architecture/STORAGE_AND_DIAGNOSTICS.md)
 - [UI Spec](UI_SPEC.md)
 
+## Pre-process And Post-process Decks
+
+The editable deck surface has two independent phases. Pre-process Cards are the scene-evidence catalog used before host generation and retain `off`, `active`, and `priority` participation states. Post-process Cards are an ordered response-revision catalog evaluated after an assistant response lands; each card is binary `On` or `Off`, with category activity derived from its enabled child cards. A Post-process deck does not change the Pre-process hand or prompt packet.
+
+Post-process cards carry a description and structured prompt instruction. Runtime freezes the completed response, bounded evidence, Pre-process packet, active Post-process deck, and operation settings before guidance synthesis. `Unified` combines enabled categories into one structured guidance request and one native host rewrite. `Progressive` runs enabled categories in deck order, carrying the latest valid draft forward. `As Swipe` appends a selected Recursion-owned swipe; `Replace` updates the selected response only after complete success. The provider supplies guidance, never prose; SillyTavern native quiet generation remains the sole writer.
+
 ## Card Families
 
 V1 uses the audited fixed catalog below. The Arbiter receives this predetermined catalog as a menu and decides what is already represented, what is missing, and what should be generated for the current scene.

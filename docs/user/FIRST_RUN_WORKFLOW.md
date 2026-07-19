@@ -13,7 +13,7 @@ Recursion is a current-scene prompt compiler. It observes the active chat, build
 
 ![SillyTavern with Recursion enabled and the Recursion Bar mounted](../../assets/documentation/renders/recursion-first-run-install-enable.png)
 
-The bar should expose the power toggle, icon-only Pipeline control, icon-only mode control, Cards selector, Tense & PoV control, Hero Pixel Array plus current-step text, active-only Stop generation button during a running turn, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, the Tense & PoV label compacts while the menu remains available.
+The bar should expose the power toggle, icon-only Pipeline control, icon-only mode control, adjacent Pre-process Cards and Post-process Cards controls, Tense & PoV control, Hero Pixel Array plus current-step text, active-only Stop generation button during a running turn, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, the process controls compact while their menus remain available.
 
 ![Recursion Bar mounted below the SillyTavern chat header](../../assets/documentation/renders/recursion-first-run-bar-mounted.png)
 
@@ -37,7 +37,7 @@ Session API keys are memory-only for the browser session. Recursion may remember
 
 Reasoner is optional. Leave it unconfigured for the first pass unless you intentionally want Medium/High/Ultra routing to use the extra synthesis lane.
 
-Reasoning Level controls how strongly Recursion tries to use Reasoner. Low is Utility-only. Medium uses ready Reasoner for guidance composition. High adds ready Reasoner for Arbiter and priority card families. Ultra is Reasoner-heavy when ready. If Reasoner is unconfigured, untested, unhealthy, or a routed call fails, Recursion keeps the selected level visible and falls back to Utility for ordinary work. Medium+ Redirect remains unavailable until Reasoner is `Ready`.
+Reasoning Level controls how strongly Recursion tries to use Reasoner. Low is Utility-only. Medium uses ready Reasoner for Post-process guidance. High adds ready Reasoner for Arbiter and priority card families. Ultra is Reasoner-heavy when ready. If Reasoner is unconfigured, untested, unhealthy, or a routed call fails, Recursion keeps the selected level visible and falls back to Utility for ordinary Pre-process work. High/Ultra Post-process guidance fails soft until Reasoner is `Ready`.
 
 ## 4. Run The First Auto Pass
 
@@ -61,7 +61,7 @@ Tense & PoV controls the story-form contract used by card generation and guidanc
 
 ## 5. Try Manual
 
-Manual uses the Cards selector as a strict whitelist. Disabled families stay out of planning, deck reuse, hand selection, composition, and injection.
+Manual uses the Pre-process Cards selector as a strict whitelist. Disabled families stay out of planning, deck reuse, hand selection, composition, and injection.
 
 1. Set mode to `Manual`.
 2. Send a safe, ordinary chat message.
@@ -73,10 +73,10 @@ A normal Auto pass may show stages such as reading the current turn, planning th
 
 ## 6. Try The Card Deck
 
-After the first pass, open the Cards surface and inspect the bundled Default Deck.
+After the first pass, open the Pre-process Cards surface and inspect the bundled Default Deck.
 
 1. Review the fixed card families and their focus sub-items.
-2. Duplicate the Default Deck so it becomes editable.
+2. Duplicate the Pre-process Default Deck so it becomes editable.
 3. Create or rename a category and add an authored card.
 4. Cycle one card through `off`, `active`, and `priority` in Auto mode.
 5. Drag a category or card handle to change its order.
@@ -163,13 +163,13 @@ The first run is healthy when:
 - Last Brief and Full Viewer inspection are available.
 - Prompt Packet inspection shows bounded current-scene guidance.
 - Power-off or extension disable removes Recursion from the next prompt path.
-- An optional Enhancement trial reports diagnosis, candidate, verification, and swipe/replace settlement, or a specific safe failure reason without changing the original response.
+- An optional Post-process Cards trial reports guidance, host rewrite, category settlement, and swipe/replace outcome, or a specific safe failure reason without changing the original response.
 
-## 11. Optional Enhancement Trial
+## 11. Optional Post-process Cards Trial
 
-After a normal assistant response lands, open Enhancements and start with `Repair` plus `As Swipe`. Confirm that the progress tree shows a diagnosis, candidate, verification, and swipe settlement, or a specific safe failure reason. Try `Redirect` only on a response that clearly missed the requested turn or followed the wrong scene direction; it must show an evidence-backed replacement objective and verified result before it can write a swipe.
+After a normal assistant response lands, open Post-process Cards, enable the Starter Post-process Deck, and start with `Unified` plus `As Swipe`. Confirm that the progress tree shows guidance synthesis, native host rewrite, and swipe settlement, or a specific safe failure reason. Then try `Progressive` with one optional card enabled and confirm category order and partial-failure behavior leave the original available.
 
-![First-session Enhancement result with diagnosis, verification, and swipe settlement](../../assets/documentation/renders/recursion-first-run-enhancement-result.png)
+![First-session Post-process Cards result with frozen evidence, guidance, host rewrite, and swipe settlement](../../assets/documentation/renders/recursion-first-run-post-process-result.png)
 
 Related docs:
 

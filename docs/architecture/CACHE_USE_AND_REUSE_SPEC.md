@@ -165,7 +165,13 @@ Prompt installation can reuse `lastPacket` without model work when
 generation reuse, and should be reported separately in diagnostics and
 progress.
 
-### 7. Enhancement swipe deduplication
+### 7. Post-process settlement identity
+
+Post-process reuse is bound to the frozen source response, visible evidence window, Pre-process packet, active Post-process deck, operation settings, guidance contract, and apply mode. A successful `As Swipe` settlement may be deduplicated only when those identities match and the existing Recursion marker is healthy. `Replace` requires a complete successful result and never converts a Progressive partial into an in-place mutation. Failed, stale, canceled, or mismatched Post-process work is a miss and cannot mutate the host message.
+
+The historical Enhancement swipe contract below is retained only for migration archaeology.
+
+### 7a. Historical Enhancement swipe deduplication
 
 Generation Review outputs are stored in SillyTavern swipe variants. The
 `generationReviewKey()` path prevents duplicate work only when the full frozen
@@ -257,18 +263,18 @@ purposes remain distinct but must be reported together.
 | `retention.sourceWindowMessages` | 20 | Recent visible messages used for source freshness and cache identity |
 | `retention.sourceWindowCharacters` | 12000 | Character cap for the source freshness window |
 | `retention.providerVisibleMessages` | 12 | Recent messages sent to Arbiter, Standard card, Fused card, and guidance calls |
-| `enhancements.contextMessages` | 13 | Requested recent-message count for the Generation Review snapshot |
+| `postProcess.contextMessages` | 13 | Recent visible-message count used for frozen Post-process evidence |
 
 The source window walks backward from the latest visible non-system message
 until the message cap or character budget is reached.
 
 ### Effective context
 
-Enhancement context is bounded by the already-bounded source window:
+Post-process evidence is bounded by the already-bounded source window:
 
 ```js
-const effectiveEnhancementMessages = Math.min(
-  settings.enhancements.contextMessages,
+const effectivePostProcessMessages = Math.min(
+  settings.postProcess.contextMessages,
   snapshot.messages.length
 );
 ```
@@ -278,7 +284,7 @@ The effective contract is:
 ```text
 Source freshness: up to sourceWindowMessages and sourceWindowCharacters
 Recursive providers: up to providerVisibleMessages from the source window
-Enhancements: up to enhancements.contextMessages from the source window
+Post-process: up to postProcess.contextMessages from the source window
 ```
 
 These settings control Recursion analysis and Enhancement requests only. The
@@ -363,7 +369,7 @@ function providerSafeSnapshotWithContract(snapshot, settings) {
 }
 ```
 
-### Enhancement request context
+### Historical Enhancement request context
 
 Generation Review uses the same bounded context builder as recursive work, then
 adds the frozen generation-time packet and card evidence:

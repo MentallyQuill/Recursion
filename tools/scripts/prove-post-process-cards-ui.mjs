@@ -355,16 +355,20 @@ async function switchPreProcessDeck(page, initialId) {
 async function independentDeckProof(page) {
   await openPreProcess(page);
   const initialPreProcessId = await page.locator('[data-recursion-card-deck-select]').first().inputValue();
+  check(
+    await page.evaluate(() => document.activeElement?.hasAttribute('data-recursion-card-deck-select') === false),
+    'Opening Pre-process Cards unexpectedly focused the deck selector.'
+  );
   await closePreProcess(page);
 
   await openPostProcess(page, { keyboardKey: 'Enter' });
   const focused = await page.evaluate(() => document.activeElement?.hasAttribute('data-recursion-post-process-deck-select'));
-  check(focused, 'Opening Post-process Cards with Enter did not focus the deck selector.');
+  check(!focused, 'Opening Post-process Cards with Enter unexpectedly focused the deck selector.');
   await closePostProcess(page);
   await openPostProcess(page, { keyboardKey: 'Space' });
   check(
-    await page.evaluate(() => document.activeElement?.hasAttribute('data-recursion-post-process-deck-select')),
-    'Opening Post-process Cards with Space did not focus the deck selector.'
+    await page.evaluate(() => document.activeElement?.hasAttribute('data-recursion-post-process-deck-select') === false),
+    'Opening Post-process Cards with Space unexpectedly focused the deck selector.'
   );
   const defaultPostProcessEnabled = (await runtimeSettings(page)).postProcess?.enabled === true;
   check(defaultPostProcessEnabled === false, 'Post-process Cards must be Off before the proof mutates its setting.');

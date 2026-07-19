@@ -96,9 +96,9 @@ Reasoning Level also controls runtime lane preference and card pressure:
 | Ultra | Reasoner when healthy | Reasoner when healthy | Reasoner | Raise and cap positive `maxCards` at Max Cards. |
 
 If Reasoner is not `ready`, ordinary Medium/High/Ultra work falls back to
-Utility instead of blocking host generation. Medium+ Redirect is the deliberate
-exception: it is unavailable and settles as a preflight skip because its writer
-and verifier require Reasoner. Low Redirect remains on Utility.
+Utility for Pre-process work instead of blocking host generation. Post-process
+guidance is lane-sticky: Low/Medium use Utility and High/Ultra require a ready
+Reasoner, failing soft without cross-lane fallback.
 
 Reasoning Level also maps to provider-level reasoning intent for model calls that actually use the Reasoner lane:
 
@@ -203,11 +203,6 @@ Generation roles describe why a model call exists. They are not the same thing a
 | `rapidTurnDelta` | Utility | Select warm raw cards and write provider-authored turn guidance for the Rapid foreground path | Escalate to Standard only when a missing card is mandatory |
 | `guidanceComposer` | Utility | Write provider-authored direction for using selected raw cards in the next generation | Fall back to raw-card-only packet when invalid or unavailable |
 | `cardAuthoringAssist` | Utility | Rewrite a user draft or intent into a compact high-value Recursion card suggestion | Keep the user draft as local fallback and expose provider-fallback diagnostics |
-| `generationReviewer` | Utility at Low/Medium; Reasoner at High/Ultra when healthy | General frozen-generation review contract; return bounded patches and per-installed-card outcome ledger | Parse/schema and semantic recovery share one correction budget. Apply only safe patches; unresolved outcome coverage is explicit `partial-failed`, while unsafe patches and unrecoverable fidelity defects fail or return `requires-regeneration`. |
-| `editorialDiagnostician` | Utility at Low/Medium; Reasoner at High/Ultra when healthy | Propose a bounded diagnosis against frozen evidence; never return candidate prose | Runtime validates identity, shape, bounds, and request-known evidence IDs. Redirect citation authority and relevance remain semantic questions for the mandatory Verifier. |
-| `editorialTransformer` | Repair/Recompose retain normal Enhancement routing. Redirect uses Utility at Low and Reasoner at Medium/High/Ultra. | Apply the Repair/Recompose brief or Redirect proposal as bounded patches or one complete candidate | Medium+ Redirect permits exactly two actual Reasoner writer calls, sends the first failure into the second correction prompt, and fails without Utility fallback when both attempts fail. Recursion pins source/snapshot/diagnosis identity from the frozen request; mechanical candidate safety passes before verification or host mutation. |
-| `editorialVerifier` | Utility for Low Redirect; ready Reasoner for Medium/High/Ultra Redirect; Reasoner at High/Ultra for Recompose with ordinary Utility fallback | Judge the proposed Redirect diagnosis and produced candidate against complete frozen evidence, return binary accept/reject for Recompose, or audit Repair with dynamic `failedCardIds` | Medium+ Redirect is skipped before provider work unless Reasoner is ready. No rewrite, ranking, or alternate candidate. Repair audit IDs are validated against the frozen installed hand and canonical outcomes are built locally. A valid rejection preserves resolved rows and leaves only failed IDs unresolved. |
-| `editorialEffectivenessJudge` | Utility, live evaluation harness only | Independently judge Redirect trajectory, forbidden beats, character pressure, and evidence/constraints | Never runs during normal chat generation; malformed, skipped, or incomplete judge output fails strict model evaluation. |
 | `postProcessGuidanceUtility` | Utility at Low/Medium only | Analyze where and how the frozen ordered Post-process cards apply; return concise structured guidance, never revised story prose | One same-role Utility correction retry at most; invalid or unavailable guidance fails the operation/category without Reasoner fallback |
 | `postProcessGuidanceReasoner` | Reasoner at High/Ultra only | Analyze where and how the frozen ordered Post-process cards apply; return concise structured guidance, never revised story prose | One same-role Reasoner correction retry at most; invalid or unavailable guidance fails the operation/category without Utility fallback |
 | `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility guidance plus raw selected Card Evidence |
@@ -215,12 +210,32 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 Card names should align with [Card System Spec](../design/CARD_SYSTEM_SPEC.md). Prompt installation and depth decisions belong to [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md), not provider routing.
 
-The literal `compose-brief` Arbiter action is retained as a V1 enum name, but it now means compose the V3 Guidance/Card Evidence/Guardrails packet. The router rejects undeclared role ids and requires each role to return its expected schema before reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use `recursion.card.v1`, Fused card bundles use `recursion.cardBundle.v1`, Rapid foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses `recursion.guidanceComposer.v1`, Card Authoring Assist uses `recursion.cardAuthoringAssist.v1`, Generation Reviewer uses `recursion.generationReview.v1`, Editorial Diagnostician uses `recursion.editorialDiagnosis.v1`, Editorial Transformer uses `recursion.editorialPass.v1`, Editorial Verifier uses `recursion.editorialVerification.v1`, Editorial Effectiveness Judge uses `recursion.redirectEffectivenessJudge.v1`, Reasoner Composer uses `recursion.reasonerComposer.v1`, and Provider Test uses `recursion.providerTest.v1`. Editorial machine-JSON requests constrain selected mode, frozen identities, output shape, bounds, installed-card IDs, repair-target IDs, and citations to request-known evidence IDs. Repair and Recompose retain their narrower preservation-reference contract. Repair Transformer requests carry complete frozen target records, use a candidate-free bounded-patch envelope, and require at least one effective patch. Provider normalization derives known patch domains from the trusted target and recovers visibly swapped evidence/domain fields only when the displaced values are all request-known evidence IDs. Repair's initial diagnosis and Transformer calls disable provider-layer structured retry while preserving one runtime semantic-correction budget across primary and fallback calls. Redirect deliberately permits any request-known evidence ID in its citation fields: authority labels remain attached to the frozen evidence, but the mandatory Verifier model decides whether each diagnosis claim is actually grounded, whether source prose was mistaken for canon, and whether the proposed trajectory is feasible. Unknown Redirect bookkeeping references are dropped with path-specific private diagnostics and are never replaced with guessed evidence. Runtime constructs the private canonical `diagnosis.brief` after structural validation, then sends the complete proposal and any dropped-reference diagnostics to Transform and Verifier. Redirect transform remains flat and mode-specific: the provider returns only frozen identity and top-level `text`; runtime constructs bounded audit metadata mechanically. Because not every host provider enforces JSON Schema `const`, the provider boundary replaces Editorial identity echoes with trusted request values. Identity, known-ID provenance, output bounds, candidate difference, presentation envelope, source stability, and host mutation remain deterministic safety checks; editorial relevance and evidence support do not. Redirect always requires the production Verifier before host mutation. The normal path remains exactly three model calls. If the first valid verifier result rejects the first candidate and the writer budget remains, runtime sends that rejection into one corrected writer call and verifies the second candidate. A second valid rejection preserves the original. Diagnosis and Verifier retain the operation-scoped malformed-output recovery token. At Medium and above, Transform owns a literal two-call Reasoner writer budget: provider-internal retry is disabled for each call, and no Utility writer fallback is allowed. A provider/schema failure on the first writer consumes the same second-writer budget used by verifier-directed correction, so runtime never makes a third writer call. Consequently, a Redirect run is capped at five production model calls: one diagnosis, two writers, and two verifications. Recompose retains its source-relative candidate-length bound, while Redirect may rebuild a short failed source up to the shared absolute 16,000-character bound. Editorial roles inherit the selected Utility or Reasoner lane's configured max-token ceiling. The bounded transcript is exposed as `message:N` evidence alongside packet, card, brief, story-form, and source evidence.
+The literal `compose-brief` Arbiter action remains a V1 enum name for the
+Pre-process Guidance/Card Evidence/Guardrails packet. The router rejects
+undeclared role ids and requires each role to return its expected schema before
+reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use
+`recursion.card.v1`, Fused card bundles use `recursion.cardBundle.v1`, Rapid
+foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses
+`recursion.guidanceComposer.v1`, Card Authoring Assist uses
+`recursion.cardAuthoringAssist.v1`, Post-process guidance uses
+`recursion.postProcessGuidance.v1`, Reasoner Composer uses
+`recursion.reasonerComposer.v1`, and Provider Test uses
+`recursion.providerTest.v1`. Post-process guidance requests carry frozen
+operation identity, ordered card records, bounded evidence, and the writable
+draft; they return guidance only. SillyTavern's native quiet-generation path is
+the sole Post-process prose writer.
 
 Post-process Guidance Utility and Post-process Guidance Reasoner both use the
 `recursion.postProcessGuidance.v1` response schema.
 
-### Redirect contract
+## Historical Editorial Contract
+
+The remaining Redirect and Editorial sections below document the retired
+Enhancement-era implementation for archaeology only. They are not current V1
+provider authority; current Post-process behavior is defined by
+[Post-process Cards Runtime](POST_PROCESS_CARDS_RUNTIME.md).
+
+### Redirect contract (historical)
 
 Redirect is a trajectory correction, not a stronger Recompose. A `proceed`
 diagnosis requires `sourceFailure`, `replacementObjective`, non-empty

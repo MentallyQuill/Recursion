@@ -50,11 +50,11 @@ That path is ignored because it is tooling output. Promotion means copying only 
 
 All render slots from the card-system documentation pass have now been promoted as reviewed live-host captures. Future gaps should follow the same marker and promotion workflow.
 
-The 2026-07-10 render refresh promoted 32 live UI screenshot assets. The 2026-07-17 card-system refresh updates the live UI family and promotes the new card, hand, editorial, Enhancement, and provider-state captures, for 38 promoted PNG/JPG assets total. Explanatory pipeline, storage, provider, redaction, testing, and behavior-policy diagrams remain text-native in Markdown as Mermaid graphs or tables. UI renders were captured through the local `.recursion-doc-renderer/` harness against the live host with redaction-safe documentation fixture state, so final assets show the actual mounted UI without provider secrets, raw provider payloads, or private transcripts.
+The 2026-07-19 post-process refresh replaces the stale card/editorial image family with current Pre-process and Post-process Cards captures. Explanatory pipeline, storage, provider, redaction, testing, and behavior-policy diagrams remain text-native in Markdown as Mermaid graphs or tables. UI renders were captured through the local `.recursion-doc-renderer/` harness against the live host with redaction-safe documentation fixture state, so final assets show the actual mounted UI without provider secrets, raw provider payloads, or private transcripts.
 
 State-set renders such as bar states, progress states, Last Brief states, and fail-soft states are contact sheets composed from fresh live-mounted source captures. Their raw source tiles stay in `.recursion-doc-renderer/` and are not promoted separately.
 
-The 2026-07-10 UI refresh found two post-alpha.1 bar changes that needed dedicated renders: the icon-only Enhancements menu with apply mode plus target rows, and the redesigned Tense & PoV two-axis selector. Both are now promoted live UI renders.
+The 2026-07-19 refresh adds dedicated live captures for the independent Pre-process and Post-process deck editors, Unified and Progressive operation controls, native host rewrite progress, and safe Progressive partial settlement.
 
 Future live screenshots should be promoted only when all of these are true:
 
@@ -125,14 +125,16 @@ These assets are promoted documentation renders and may be embedded directly fro
 | `recursion-operator-retention-settings.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Advanced Retention controls showing source-window, provider-message, scene-cache, source-variant, and run-journal caps. |
 | `recursion-provider-test-busy-state.png` | live host | `docs/user/PROVIDER_SETUP.md` | Reasoner Provider disclosure staying open while the clicked Test Provider button shows lane-local `Testing...` busy state. |
 | `recursion-prompt-packet-instruction-card-evidence.png` | live host | `docs/user/PROMPT_PRIVACY_AND_SAFETY.md` | Prompt Packet viewer showing instruction-shaped Card Evidence, Guidance status, selected refs, and sanitized route metadata. |
-| `recursion-card-control.png` | live host | `README.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md`, `docs/technical/CARD_DECK_AND_HAND.md` | Card-system control showing the bundled deck, categories, counts, and state controls. |
-| `recursion-card-authored-card-editor.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Authored-card edit box showing name, description, prompt text, Card Assist, and save/cancel controls. |
-| `recursion-card-hand-inspection.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Last Brief hand inspection showing selected cards, omissions, and packet metadata. |
-| `recursion-first-run-enhancement-result.png` | live host | `docs/user/FIRST_RUN_WORKFLOW.md` | First-session Enhancement progress showing diagnosis, candidate, verification, and swipe settlement. |
-| `recursion-operator-editorial-recovery-states.png` | live host | `README.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md` | Enhancement menu with Repair, Recompose, experimental Redirect, and verified result inspector. |
+| `recursion-pre-process-cards-panel.png` | live host | `README.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md`, `docs/technical/CARD_DECK_AND_HAND.md` | Pre-process Cards deck with categories, descriptions, and off/active/priority participation controls. |
+| `recursion-pre-process-card-editor.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Pre-process authored-card editor with name, description, prompt text, Card Assist, and save/cancel controls. |
+| `recursion-post-process-panel-starter-off.png` | live host | `README.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md` | Disabled Starter Post-process Deck with Unified/Progressive and As Swipe/Replace controls visible. |
+| `recursion-post-process-panel-unified.png` | live host | `README.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md` | Enabled Post-process deck using Unified flow and As Swipe. |
+| `recursion-post-process-panel-progressive.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Enabled Post-process deck using Progressive flow and Replace. |
+| `recursion-post-process-card-editor.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md` | Post-process authored-card editor with description, prompt, and save/cancel controls. |
+| `recursion-first-run-post-process-result.png` | live host | `README.md`, `docs/user/FIRST_RUN_WORKFLOW.md`, `docs/technical/RUNTIME_TURN_SEQUENCE.md` | Post-process progress showing frozen evidence, structured guidance, native host rewrite, and swipe settlement. |
+| `recursion-post-process-progressive-partial.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md`, `docs/testing/LIVE_SMOKE_TEST_PLAN.md` | Progressive Post-process partial settlement showing one failed category, retained latest valid draft, and safe swipe outcome. |
 | `recursion-provider-failure-reason-inline.png` | live host | `docs/user/PROVIDER_SETUP.md` | Normalized provider failure reason with Utility fallback and redacted status. |
 | `recursion-dynamic-card-selection.png` | supplied screenshot | `README.md`, `docs/technical/CARD_DECK_AND_HAND.md` | Full scene deck narrowed to a compact turn hand and converted into injected guidance, card evidence, and guardrails. |
-| `recursion-processing-pipeline.png` | supplied screenshot | `README.md`, `docs/technical/RUNTIME_TURN_SEQUENCE.md` | Recursion pre-process, normal SillyTavern generation, and optional post-generation Enhancement flow. |
 
 ## Open Render Inventory
 

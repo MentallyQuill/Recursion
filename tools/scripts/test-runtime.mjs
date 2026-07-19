@@ -14,6 +14,7 @@ import { createActivityReporter } from '../../src/activity.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
 import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
+import { createSillyTavernHost } from '../../src/hosts/sillytavern/host.mjs';
 import { createRuntimeRunState } from '../../src/runtime/run-state.mjs';
 import { preparedGenerationIntegrityIsValid } from '../../src/runtime/prepared-generation.mjs';
 import { clearPromptBestEffort, installPrompt } from '../../src/runtime/prompt-install.mjs';
@@ -965,6 +966,107 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   };
 }
 
+function createLivePostProcessRuntimeHarness({
+  chatId = 'Folder / Active Chat?! File.jsonl',
+  characterId = '',
+  groupId = '',
+  applyMode = 'as-swipe',
+  originalText = 'Original live Post-process response.',
+  swipes = [originalText],
+  swipeId = 0,
+  writer = async () => 'Rewritten live Post-process response.'
+} = {}) {
+  const writerCalls = [];
+  const routerCalls = [];
+  const saveCalls = [];
+  const updateCalls = [];
+  const promptCalls = [];
+  const initialSwipes = [...swipes];
+  const context = {
+    chatId,
+    characterId,
+    groupId,
+    chat: [
+      { mesid: 7, is_user: true, mes: 'Continue the live scene.' },
+      {
+        mesid: 8,
+        is_user: false,
+        mes: initialSwipes[swipeId] ?? originalText,
+        swipe_id: swipeId,
+        swipes: initialSwipes,
+        swipe_info: initialSwipes.map(() => ({
+          send_date: '2026-07-19T00:00:00.000Z',
+          extra: {}
+        }))
+      }
+    ],
+    extension_prompt_types: { IN_PROMPT: 0, IN_CHAT: 1, BEFORE_PROMPT: 2 },
+    extension_prompt_roles: { SYSTEM: 0, USER: 1, ASSISTANT: 2 },
+    setExtensionPrompt(...args) {
+      promptCalls.push(args);
+    },
+    async generate(type, options) {
+      writerCalls.push({ type, options });
+      return writer({ context, type, options, callIndex: writerCalls.length - 1 });
+    },
+    async saveChat() {
+      saveCalls.push(true);
+    },
+    updateMessageBlock(messageId, message) {
+      updateCalls.push({ messageId, message });
+    },
+    swipe: {
+      refresh() {}
+    }
+  };
+  const host = createSillyTavernHost({
+    contextFactory: () => context,
+    settingsRoot: {}
+  });
+  host.settingsStore.update({
+    reasoningLevel: 'medium',
+    postProcess: {
+      enabled: true,
+      applyMode,
+      rewriteFlow: 'unified',
+      contextMessages: 13
+    }
+  });
+  const generationRouter = {
+    async generate(roleId, request, options) {
+      routerCalls.push({ roleId, request, options });
+      return {
+        ok: true,
+        roleId,
+        lane: request.lane,
+        data: {
+          schema: 'recursion.postProcessGuidance.v1',
+          snapshotHash: request.snapshotHash,
+          sourceHash: request.sourceHash,
+          guidanceText: 'Apply the frozen live Post-process guidance.'
+        },
+        diagnostics: { retryCount: 0 }
+      };
+    }
+  };
+  const runtime = createRecursionRuntime({
+    host,
+    settingsStore: host.settingsStore,
+    generationRouter
+  });
+  return {
+    context,
+    host,
+    runtime,
+    writerCalls,
+    routerCalls,
+    saveCalls,
+    updateCalls,
+    promptCalls,
+    assistant: () => context.chat[1]
+  };
+}
+
 {
   const proseHost = createProseMessageHarness('Original runtime post-process response.');
   const routerCalls = [];
@@ -1050,6 +1152,91 @@ function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
     !JSON.stringify(runtime.postProcessDiagnostics()).includes('Runtime delegated post-process response.'),
     'delegated runtime diagnostics omit candidate prose'
   );
+}
+
+{
+  const live = createLivePostProcessRuntimeHarness();
+  const result = await live.runtime.runPostProcessForLatestAssistant();
+  assertEqual(result.committed, true, 'real runtime guard accepts an unchanged source with spaces and punctuation in its chat id');
+  assertEqual(live.assistant().swipes.length, 2, 'unchanged punctuation chat commits through the real host swipe boundary');
+  assertEqual(live.saveCalls.length, 1, 'unchanged punctuation chat saves exactly one committed swipe');
+}
+
+{
+  const writerGate = deferred();
+  const live = createLivePostProcessRuntimeHarness({
+    writer: async () => writerGate.promise
+  });
+  const originalSwipes = clone(live.assistant().swipes);
+  const run = live.runtime.runPostProcessForLatestAssistant();
+  await waitUntil(() => live.writerCalls.length === 1, 'real chat-staleness writer did not start');
+  live.context.chatId = 'Folder / Different Chat?! File.jsonl';
+  writerGate.resolve('Candidate from the old chat.');
+  const result = await run;
+  assertEqual(result.committed, false, 'real runtime guard rejects an actual chat change');
+  assertEqual(result.reason, 'stale-source', 'actual chat change returns the stable stale-source reason');
+  assertDeepEqual(live.assistant().swipes, originalSwipes, 'actual chat change preserves every source swipe');
+  assertEqual(live.saveCalls.length, 0, 'actual chat change never reaches the host commit boundary');
+}
+
+{
+  const writerGate = deferred();
+  const live = createLivePostProcessRuntimeHarness({
+    chatId: 'character-staleness-chat',
+    characterId: 'character-a',
+    writer: async () => writerGate.promise
+  });
+  const originalSwipes = clone(live.assistant().swipes);
+  const run = live.runtime.runPostProcessForLatestAssistant();
+  await waitUntil(() => live.writerCalls.length === 1, 'real character-staleness writer did not start');
+  live.context.characterId = 'character-b';
+  writerGate.resolve('Candidate from the old character.');
+  const result = await run;
+  assertEqual(result.committed, false, 'real runtime guard rejects an active character change');
+  assertEqual(result.reason, 'stale-source', 'active character change returns the stable stale-source reason');
+  assertDeepEqual(live.assistant().swipes, originalSwipes, 'active character change preserves every source swipe');
+  assertEqual(live.saveCalls.length, 0, 'active character change never reaches the host commit boundary');
+}
+
+{
+  const writerGate = deferred();
+  const live = createLivePostProcessRuntimeHarness({
+    chatId: 'group-staleness-chat',
+    groupId: 'group-a',
+    writer: async () => writerGate.promise
+  });
+  const originalSwipes = clone(live.assistant().swipes);
+  const run = live.runtime.runPostProcessForLatestAssistant();
+  await waitUntil(() => live.writerCalls.length === 1, 'real group-staleness writer did not start');
+  live.context.groupId = 'group-b';
+  writerGate.resolve('Candidate from the old group.');
+  const result = await run;
+  assertEqual(result.committed, false, 'real runtime guard rejects an active group change');
+  assertEqual(result.reason, 'stale-source', 'active group change returns the stable stale-source reason');
+  assertDeepEqual(live.assistant().swipes, originalSwipes, 'active group change preserves every source swipe');
+  assertEqual(live.saveCalls.length, 0, 'active group change never reaches the host commit boundary');
+}
+
+{
+  const originalText = 'Selected source text for default Replace.';
+  const live = createLivePostProcessRuntimeHarness({
+    chatId: 'replace-boundary-chat',
+    applyMode: 'replace',
+    originalText,
+    swipes: ['Earlier alternate text.', originalText],
+    swipeId: 1,
+    writer: async () => 'In-place replacement from the real runtime boundary.'
+  });
+  const originalSwipeCount = live.assistant().swipes.length;
+  const originalSwipeId = live.assistant().swipe_id;
+  const result = await live.runtime.runPostProcessForLatestAssistant();
+  assertEqual(result.committed, true, 'complete real-host run commits the requested Replace mode');
+  assertEqual(result.committedApplyMode, 'replace', 'default commit boundary reports Replace');
+  assertEqual(live.assistant().mes, 'In-place replacement from the real runtime boundary.', 'Replace updates visible selected assistant text in place');
+  assertEqual(live.assistant().swipes[originalSwipeId], live.assistant().mes, 'Replace updates the selected swipe text in place');
+  assertEqual(live.assistant().swipes.length, originalSwipeCount, 'Replace preserves the source swipe count');
+  assertEqual(live.assistant().swipe_id, originalSwipeId, 'Replace preserves the selected swipe index');
+  assertEqual(live.saveCalls.length, 1, 'Replace saves exactly one host mutation');
 }
 
 // Replaced V1 contract: dialogue/prose pass fixtures are retained as historical

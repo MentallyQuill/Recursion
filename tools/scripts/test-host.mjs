@@ -1594,18 +1594,57 @@ assertEqual(metadataChatSnapshot.chatKey, 'Metadata-Chat-File.jsonl', 'metadata 
 const entitySceneContext = {
   chatId: 'entity-scene-chat',
   characterId: 'character-a',
-  chat: [{ mesid: 1, is_user: true, mes: 'Scene anchor test.' }]
+  chat: [
+    { mesid: 1, is_user: true, mes: 'Scene anchor test.' },
+    {
+      mesid: 2,
+      is_user: false,
+      mes: 'Entity-bound assistant response.',
+      swipe_id: 0,
+      swipes: ['Entity-bound assistant response.']
+    }
+  ]
 };
 const entitySceneHost = createSillyTavernHost({
   contextFactory: () => entitySceneContext,
   settingsRoot: {}
 });
 const firstEntityScene = await entitySceneHost.snapshot();
+const firstEntityIdentity = entitySceneHost.messages.activeAssistantMessageIdentity();
+assertEqual(firstEntityScene.activeCharacterHash, hashJson('character-a'), 'host snapshot exposes privacy-safe active character hash');
+assertEqual(firstEntityScene.activeGroupHash, '', 'character host snapshot leaves active group hash empty');
+assertEqual(firstEntityIdentity.activeCharacterHash, firstEntityScene.activeCharacterHash, 'assistant identity uses the snapshot character identity contract');
+assertEqual(firstEntityIdentity.activeGroupHash, firstEntityScene.activeGroupHash, 'assistant identity uses the snapshot group identity contract');
+assert(!JSON.stringify({ firstEntityScene, firstEntityIdentity }).includes('character-a'), 'host identity surfaces never expose the raw character id');
 entitySceneContext.characterId = 'character-b';
 const secondEntityScene = await entitySceneHost.snapshot();
 assertEqual(secondEntityScene.chatKey, firstEntityScene.chatKey, 'entity scene anchor keeps chat key stable');
+assertEqual(secondEntityScene.activeCharacterHash, hashJson('character-b'), 'character mutation updates the privacy-safe active identity hash');
 assert(secondEntityScene.sceneFingerprint !== firstEntityScene.sceneFingerprint, 'entity change updates host scene fingerprint');
 assert(secondEntityScene.sceneKey !== firstEntityScene.sceneKey, 'entity change updates host scene cache key');
+
+const groupSceneContext = {
+  chatId: 'group-scene-chat',
+  groupId: 'group-a',
+  characterId: 'character-shadowed-by-group',
+  chat: [{
+    mesid: 1,
+    is_user: false,
+    mes: 'Group-bound assistant response.',
+    swipe_id: 0,
+    swipes: ['Group-bound assistant response.']
+  }]
+};
+const groupSceneHost = createSillyTavernHost({
+  contextFactory: () => groupSceneContext,
+  settingsRoot: {}
+});
+const groupSceneSnapshot = await groupSceneHost.snapshot();
+const groupSceneIdentity = groupSceneHost.messages.activeAssistantMessageIdentity();
+assertEqual(groupSceneSnapshot.activeCharacterHash, '', 'group scene does not expose a shadowed character identity');
+assertEqual(groupSceneSnapshot.activeGroupHash, hashJson('group-a'), 'host snapshot exposes privacy-safe active group hash');
+assertEqual(groupSceneIdentity.activeGroupHash, groupSceneSnapshot.activeGroupHash, 'assistant identity uses the snapshot group hash');
+assert(!JSON.stringify({ groupSceneSnapshot, groupSceneIdentity }).includes('group-a'), 'host identity surfaces never expose the raw group id');
 
 const rawCalls = [];
 const rawResponse = await host.generation.generate({
@@ -1699,8 +1738,10 @@ const chatKeyHost = createSillyTavernHost({
   settingsRoot: {}
 });
 const chatKeySnap = await chatKeyHost.snapshot();
+const chatKeyIdentity = chatKeyHost.messages.activeAssistantMessageIdentity();
 assertEqual(chatKeySnap.chatId, 'Folder/Chat File.jsonl', 'chat_id fallback read');
 assertEqual(chatKeySnap.chatKey, 'Folder-Chat-File.jsonl', 'chat key normalized');
+assertEqual(chatKeyIdentity.chatKey, chatKeySnap.chatKey, 'active assistant identity canonicalizes the same chat key as snapshot');
 assertEqual(chatKeySnap.messages.length, 1, 'snapshot excludes system and hidden rows from source window');
 assertEqual(chatKeySnap.messages[0].sender, 'Mara', 'sender name preserved');
 assertEqual(chatKeySnap.messages[0].visible, true, 'visible source row stays visible in snapshot');

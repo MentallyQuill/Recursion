@@ -1,4 +1,4 @@
-import { hashJson, makeId } from './core.mjs';
+import { hashJson, makeId, safeId as canonicalId } from './core.mjs';
 import {
   getActivePostProcessDeck,
   orderedRunnablePostProcessCategories
@@ -156,13 +156,20 @@ async function capturePostProcessSnapshot(rawSnapshot, settings, host) {
     latestAssistant?.index ?? -1
   );
   const normalized = {
-    chatKey: cleanText(source.chatKey || source.chatId || identity?.chatKey || 'chat'),
+    chatKey: canonicalId(
+      cleanText(source.chatKey || source.chatId || identity?.chatKey || 'chat'),
+      'chat'
+    ),
     sourceMessageId,
     sourceSwipeId: Number.isFinite(sourceSwipeId) ? Math.max(0, Math.round(sourceSwipeId)) : 0,
     sourceHash,
     originalDraft,
-    activeCharacterId: cleanText(source.activeCharacterId || source.characterId),
-    activeGroupId: cleanText(source.activeGroupId || source.groupId),
+    activeCharacterHash: cleanText(
+      source.activeCharacterHash || identity?.activeCharacterHash
+    ),
+    activeGroupHash: cleanText(
+      source.activeGroupHash || identity?.activeGroupHash
+    ),
     supportingContext
   };
   normalized.snapshotHash = cleanText(source.snapshotHash) || hashJson(normalized);

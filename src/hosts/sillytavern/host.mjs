@@ -120,6 +120,31 @@ function sceneAnchor(context) {
   return { type: 'chat' };
 }
 
+function activeEntityIdentity(context) {
+  const anchor = sceneAnchor(context);
+  return {
+    activeCharacterHash: anchor.type === 'character'
+      ? anchor.idHash
+      : anchor.type === 'character-name'
+        ? anchor.nameHash
+        : '',
+    activeGroupHash: anchor.type === 'group' ? anchor.idHash : ''
+  };
+}
+
+function immediateChatKey(context) {
+  const metadata = chatMetadataObject(context);
+  const chatId = firstNonEmpty([
+    context?.chatId,
+    context?.chat_id,
+    context?.currentChatId,
+    metadata.chat_id,
+    metadata.chatId,
+    metadata.currentChatId
+  ]);
+  return safeId(chatId || 'unknown-chat', 'chat');
+}
+
 function numericMessageId(message, index) {
   for (const key of ['mesid', 'id', 'index']) {
     const numeric = Number(message?.[key]);
@@ -1035,6 +1060,7 @@ export function createSillyTavernHost({
     const context = currentContext(contextFactory);
     const chatId = await readChatId(context);
     const chatKey = safeId(chatId, 'chat');
+    const entityIdentity = activeEntityIdentity(context);
     const retention = normalizeRetentionSettings(settingsStore.get().retention);
     const rawChat = Array.isArray(context.chat) ? context.chat : [];
     const bounded = selectBoundedSourceWindow(rawChat, retention);
@@ -1061,6 +1087,7 @@ export function createSillyTavernHost({
       sceneKey,
       sourceRevisionHash,
       turnFingerprint,
+      ...entityIdentity,
       latestMesId,
       messages,
       ...bounded.metadata
@@ -1391,7 +1418,8 @@ export function createSillyTavernHost({
       const enhancementOwned = [swipeMarker, indexedMarker, replacementMarker]
         .some((marker) => markerMatchesSwipeText(marker, text));
       return {
-        chatKey: stringValue(context?.chatId || context?.chat_id || context?.currentChatId || 'chat'),
+        chatKey: immediateChatKey(context),
+        ...activeEntityIdentity(context),
         messageId: found.normalized.mesid,
         swipeId,
         text,

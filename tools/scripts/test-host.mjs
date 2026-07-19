@@ -1801,4 +1801,83 @@ assertEqual(getterPreferredIdentity.chatIdentityHash, hashJson(getterPreferredCh
 assert(!JSON.stringify(getterPreferredIdentity).includes(getterPreferredChatId), 'getter-preferred Post-process identity omits the raw chat id');
 assert(!JSON.stringify(getterPreferredIdentity).includes(conflictingMetadataChatId), 'getter-preferred Post-process identity omits conflicting metadata chat id');
 
+{
+  const sourceText = 'Original Post-process source.';
+  const swipeText = 'Final Post-process swipe.';
+  const replaceText = 'Final Post-process replacement.';
+  const markerContext = {
+    chatId: 'post-process-marker-chat',
+    chat: [{
+      mesid: 12,
+      is_user: false,
+      mes: sourceText,
+      swipe_id: 0,
+      swipes: [sourceText],
+      swipe_info: [{ extra: { api: 'native' } }]
+    }],
+    saveChat() {},
+    updateMessageBlock() {},
+    swipe: { refresh() {} }
+  };
+  const markerHost = createSillyTavernHost({
+    contextFactory: () => markerContext,
+    settingsRoot: {}
+  });
+  const swipeMarker = {
+    schema: 'recursion.postProcessMarker.v1',
+    operationId: 'post-process-swipe',
+    sourceHash: hashJson(sourceText),
+    candidateHash: hashJson(swipeText),
+    deckId: 'starter-post-process',
+    rewriteFlow: 'unified',
+    requestedApplyMode: 'as-swipe',
+    committedApplyMode: 'as-swipe',
+    lane: 'utility',
+    partial: false,
+    categories: []
+  };
+  const appended = await markerHost.messages.appendAssistantMessageSwipe(12, swipeText, {
+    markerNamespace: 'postProcess',
+    marker: swipeMarker,
+    select: true
+  });
+  assertEqual(appended.ok, true, 'generic host API appends a Post-process swipe');
+  assertEqual(markerContext.chat[0].swipes.length, 2, 'Post-process append adds exactly one swipe');
+  assertEqual(markerContext.chat[0].swipe_id, 1, 'Post-process append selects the new swipe');
+  assertDeepEqual(
+    markerContext.chat[0].swipe_info[1].extra.recursion.postProcess,
+    swipeMarker,
+    'Post-process swipe marker persists in native swipe metadata'
+  );
+  assertDeepEqual(
+    markerContext.chat[0].__recursionPostProcessSwipes[1],
+    swipeMarker,
+    'Post-process swipe marker persists in the structural parallel index'
+  );
+  assertEqual(markerHost.messages.activeAssistantMessageIdentity().postProcessOwned, true, 'active Post-process swipe is recognized by its candidate hash');
+
+  const replacementMarker = {
+    ...swipeMarker,
+    operationId: 'post-process-replace',
+    sourceHash: hashJson(swipeText),
+    candidateHash: hashJson(replaceText),
+    requestedApplyMode: 'replace',
+    committedApplyMode: 'replace'
+  };
+  const beforeReplaceCount = markerContext.chat[0].swipes.length;
+  const replaced = await markerHost.messages.replaceAssistantMessageText(12, replaceText, {
+    markerNamespace: 'postProcess',
+    marker: replacementMarker
+  });
+  assertEqual(replaced.ok, true, 'generic host API replaces a Post-process response');
+  assertEqual(markerContext.chat[0].swipes.length, beforeReplaceCount, 'Post-process Replace preserves swipe count');
+  assertDeepEqual(markerContext.chat[0].__recursionPostProcess, replacementMarker, 'Post-process replacement stores one root marker');
+  assertDeepEqual(
+    markerContext.chat[0].swipe_info[1].extra.recursion.postProcess,
+    replacementMarker,
+    'Post-process replacement aligns selected swipe metadata'
+  );
+  assertEqual(markerHost.messages.activeAssistantMessageIdentity().postProcessOwned, true, 'active Post-process replacement is recognized');
+}
+
 console.log('[pass] host');

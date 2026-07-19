@@ -13,6 +13,22 @@ const OUTCOME_SEVERITY = new Map([
   ['error', 'error']
 ]);
 const SECRET_TEXT_PATTERN = /(sk-[a-z0-9_-]+|bearer\s+[a-z0-9._-]+|secret[-_\s]*value|private[-_\s]*key[-_\s]*material)/ig;
+const PRIVATE_PROSE_KEYS = new Set([
+  'sourcetext',
+  'sourceprose',
+  'originaldraft',
+  'draft',
+  'candidate',
+  'candidatetext',
+  'candidateprose',
+  'guidance',
+  'guidancetext',
+  'prompt',
+  'prompttext',
+  'provideroutput',
+  'transcriptexcerpt',
+  'intermediatedraft'
+]);
 
 function cloneSafe(value, fallback = undefined) {
   try {
@@ -30,7 +46,7 @@ function cleanText(value, limit) {
 
 function cleanStructured(value, maxString = 500) {
   if (value === undefined || value === null) return undefined;
-  return scrubSecretText(redact(cloneSafe(value, undefined), { maxString }));
+  return scrubPrivateProse(scrubSecretText(redact(cloneSafe(value, undefined), { maxString })));
 }
 
 function scrubSecretText(value) {
@@ -38,6 +54,16 @@ function scrubSecretText(value) {
   if (!value || typeof value !== 'object') return value;
   if (Array.isArray(value)) return value.map((entry) => scrubSecretText(entry));
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, scrubSecretText(child)]));
+}
+
+function scrubPrivateProse(value) {
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((entry) => scrubPrivateProse(entry));
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !PRIVATE_PROSE_KEYS.has(String(key).replace(/[^a-z0-9]/gi, '').toLowerCase()))
+      .map(([key, child]) => [key, scrubPrivateProse(child)])
+  );
 }
 
 function cleanChips(value) {

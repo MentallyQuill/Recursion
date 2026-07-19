@@ -526,6 +526,10 @@ if (lifecycleFailures.length) {
   else globalThis.extension_settings = previousGlobals.extensionSettings;
 }
 
+// Superseded Enhancement/Editorial event-order fixtures remain historical until
+// Task 11 removes their dead runtime modules. Post-process lifecycle coverage
+// below owns the current event contract.
+if (false) {
 {
   const fake = createFakeSillyTavernContext('editorial-swipe-overlap');
   const eventSource = createFakeEventSource();
@@ -795,6 +799,8 @@ if (lifecycleFailures.length) {
   else globalThis.extension_settings = previousGlobals.extensionSettings;
 }
 
+}
+
 {
   const fake = createFakeSillyTavernContext('generation-stopped-event');
   const eventSource = createFakeEventSource();
@@ -872,6 +878,9 @@ if (lifecycleFailures.length) {
   else globalThis.extension_settings = previousGlobals.extensionSettings;
 }
 
+// Historical held-message and Generation Review visibility fixtures are
+// superseded by the non-mutating native quiet Post-process writer.
+if (false) {
 {
   const context = {
     chatId: 'prose-stale-held-recovery-chat',
@@ -1107,6 +1116,8 @@ if (lifecycleFailures.length) {
   else globalThis.SillyTavern = previousGlobals.SillyTavern;
   if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
   else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
 }
 
 {
@@ -1477,6 +1488,108 @@ if (lifecycleFailures.length) {
   else globalThis.extension_settings = previousGlobals.extensionSettings;
   if (previousGlobals.fetch === undefined) delete globalThis.fetch;
   else globalThis.fetch = previousGlobals.fetch;
+}
+
+{
+  const fake = createFakeSillyTavernContext('post-process-lifecycle-events');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    CHAT_CHANGED: 'chat_changed',
+    GENERATION_ENDED: 'generation_ended',
+    MESSAGE_RECEIVED: 'message_received',
+    MESSAGE_UPDATED: 'message_updated',
+    MESSAGE_DELETED: 'message_deleted',
+    MESSAGE_SWIPED: 'message_swiped',
+    STREAM_TOKEN_RECEIVED: 'stream_token_received'
+  };
+  fake.context.chat = [
+    { mesid: 0, is_user: true, mes: 'Generate and revise one response.' }
+  ];
+  globalThis.extension_settings = {
+    recursion: {
+      mode: 'auto',
+      reasoningLevel: 'medium',
+      postProcess: {
+        enabled: true,
+        applyMode: 'as-swipe',
+        rewriteFlow: 'unified',
+        contextMessages: 13
+      }
+    }
+  };
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  globalThis.__recursionLiveHarness = true;
+
+  await globalThis.recursionOnDelete();
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'normal');
+  const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
+  assertEqual(activeRuntime.postProcessPending(), true, 'prepareForGeneration arms Post-process work');
+
+  let pending = true;
+  let running = false;
+  let runCalls = 0;
+  let cancelCalls = 0;
+  let releaseRewrite;
+  const rewriteGate = new Promise((resolve) => { releaseRewrite = resolve; });
+  activeRuntime.postProcessPending = () => pending;
+  activeRuntime.postProcessRunning = () => running;
+  activeRuntime.runPostProcessForLatestAssistant = async () => {
+    runCalls += 1;
+    pending = false;
+    running = true;
+    await rewriteGate;
+    running = false;
+    return { ok: true, committed: true };
+  };
+  activeRuntime.cancelPostProcess = () => {
+    cancelCalls += 1;
+    pending = false;
+    running = false;
+    return { ok: true, canceled: true };
+  };
+
+  const sourceText = 'The original response remains visible.';
+  fake.context.chat.push({
+    mesid: 1,
+    is_user: false,
+    mes: sourceText,
+    swipe_id: 0,
+    swipes: [sourceText],
+    swipe_info: [{ extra: {} }]
+  });
+  await eventSource.emit('stream_token_received', { mesid: 1 });
+  await eventSource.emit('message_received', { mesid: 1 });
+  assertEqual(runCalls, 0, 'streaming and message-received events do not start Post-process work');
+  assertEqual(fake.context.chat[1].mes, sourceText, 'streaming events never hide the original assistant response');
+
+  const firstEnd = eventSource.emit('generation_ended', { mesid: 1 });
+  await waitUntil(() => runCalls === 1 && running, 'final generation event did not start Post-process work');
+  await eventSource.emit('generation_ended', { mesid: 1 });
+  assertEqual(runCalls, 1, 'internal quiet-generation completion cannot recursively start Post-process work');
+  releaseRewrite();
+  await firstEnd;
+
+  pending = true;
+  await eventSource.emit('message_updated', { mesid: 1 });
+  assertEqual(cancelCalls, 1, 'source edits cancel armed Post-process work');
+  pending = true;
+  await eventSource.emit('message_deleted', { mesid: 1 });
+  assertEqual(cancelCalls, 2, 'source deletion cancels armed Post-process work');
+  pending = true;
+  await eventSource.emit('message_swiped', { mesid: 1 });
+  assertEqual(cancelCalls, 3, 'source swipe changes cancel armed Post-process work');
+  pending = true;
+  await eventSource.emit('chat_changed');
+  assertEqual(cancelCalls, 4, 'chat changes cancel armed Post-process work');
+
+  await globalThis.recursionOnDelete();
+  delete globalThis.__recursionLiveHarness;
+  delete globalThis.__recursionLiveHarnessRuntime;
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
 }
 
 console.log('[pass] extension smoke');

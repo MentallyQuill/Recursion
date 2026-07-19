@@ -415,6 +415,11 @@ function outcomeForCategories(categories, create) {
 }
 
 async function runUnified(operation, dependencies) {
+  const progressCategory = {
+    id: 'unified',
+    name: 'Unified'
+  };
+  dependencies.stageCategory?.(operation, progressCategory, 'running');
   const stage = stageInput(
     operation,
     operation.categories,
@@ -427,6 +432,11 @@ async function runUnified(operation, dependencies) {
   );
   if (guidance.canceled) return { canceled: true, outcomes: [] };
   if (!guidance.ok) {
+    dependencies.stageCategory?.(operation, progressCategory, 'failed', {
+      failureStage: 'guidance',
+      guidanceAttempts: guidance.attempts,
+      failureCode: guidance.failureCode
+    });
     return {
       candidate: '',
       outcomes: outcomeForCategories(operation.categories, (category) => failedOutcome(
@@ -447,6 +457,12 @@ async function runUnified(operation, dependencies) {
   );
   if (rewrite.canceled) return { canceled: true, outcomes: [] };
   if (!rewrite.ok) {
+    dependencies.stageCategory?.(operation, progressCategory, 'failed', {
+      failureStage: 'host-rewrite',
+      guidanceAttempts: guidance.attempts,
+      hostAttempts: rewrite.attempts,
+      failureCode: rewrite.failureCode
+    });
     return {
       candidate: '',
       outcomes: outcomeForCategories(operation.categories, (category) => failedOutcome(
@@ -460,6 +476,10 @@ async function runUnified(operation, dependencies) {
       ))
     };
   }
+  dependencies.stageCategory?.(operation, progressCategory, 'success', {
+    guidanceAttempts: guidance.attempts,
+    hostAttempts: rewrite.attempts
+  });
   return {
     candidate: rewrite.text,
     outcomes: outcomeForCategories(operation.categories, (category) => successfulOutcome(
@@ -476,6 +496,7 @@ async function runProgressive(operation, dependencies) {
   for (const category of operation.categories) {
     if (operation.signal.aborted) return { canceled: true, outcomes: [] };
     const stage = stageInput(operation, [category], latestDraft);
+    dependencies.stageCategory?.(operation, category, 'running');
     const guidance = await synthesizeCategoryGuidance(
       stage,
       operation,
@@ -483,10 +504,12 @@ async function runProgressive(operation, dependencies) {
     );
     if (guidance.canceled) return { canceled: true, outcomes: [] };
     if (!guidance.ok) {
-      outcomes.push(failedOutcome(category, 'guidance', {
+      const failed = failedOutcome(category, 'guidance', {
         guidanceAttempts: guidance.attempts,
         failureCode: guidance.failureCode
-      }));
+      });
+      outcomes.push(failed);
+      dependencies.stageCategory?.(operation, category, 'failed', failed);
       continue;
     }
     const rewrite = await rewriteWithRetry(
@@ -497,15 +520,19 @@ async function runProgressive(operation, dependencies) {
     );
     if (rewrite.canceled) return { canceled: true, outcomes: [] };
     if (!rewrite.ok) {
-      outcomes.push(failedOutcome(category, 'host-rewrite', {
+      const failed = failedOutcome(category, 'host-rewrite', {
         guidanceAttempts: guidance.attempts,
         hostAttempts: rewrite.attempts,
         failureCode: rewrite.failureCode
-      }));
+      });
+      outcomes.push(failed);
+      dependencies.stageCategory?.(operation, category, 'failed', failed);
       continue;
     }
     latestDraft = rewrite.text;
-    outcomes.push(successfulOutcome(category, guidance, rewrite));
+    const success = successfulOutcome(category, guidance, rewrite);
+    outcomes.push(success);
+    dependencies.stageCategory?.(operation, category, 'success', success);
   }
   return { candidate: latestDraft, outcomes };
 }
@@ -519,6 +546,22 @@ function diagnosticCategories(outcomes = []) {
     ...(outcome.failureStage ? { failureStage: outcome.failureStage } : {}),
     ...(outcome.failureCode ? { failureCode: safeCode(outcome.failureCode, 'RECURSION_POST_PROCESS_STAGE_FAILED') } : {})
   }));
+}
+
+function markerForCommit(operation, candidate, outcomes, committedApplyMode, partial) {
+  return deepFreeze({
+    schema: 'recursion.postProcessMarker.v1',
+    operationId: operation.operationId,
+    sourceHash: hashJson(String(operation.snapshot.originalDraft ?? '')),
+    candidateHash: hashJson(String(candidate ?? '')),
+    deckId: operation.deckId,
+    rewriteFlow: operation.rewriteFlow,
+    requestedApplyMode: operation.applyMode,
+    committedApplyMode,
+    lane: operation.route.lane,
+    partial: partial === true,
+    categories: diagnosticCategories(outcomes)
+  });
 }
 
 function diagnosticsFor(operation, {
@@ -570,10 +613,17 @@ async function defaultCommitResult(host, input) {
   const messages = host?.messages;
   const messageId = input.sourceMessageId;
   if (input.mode === 'replace' && typeof messages?.replaceAssistantMessageText === 'function') {
-    return messages.replaceAssistantMessageText(messageId, input.text);
+    return messages.replaceAssistantMessageText(messageId, input.text, {
+      markerNamespace: input.markerNamespace,
+      marker: input.marker
+    });
   }
   if (input.mode === 'as-swipe' && typeof messages?.appendAssistantMessageSwipe === 'function') {
-    return messages.appendAssistantMessageSwipe(messageId, input.text, { select: true });
+    return messages.appendAssistantMessageSwipe(messageId, input.text, {
+      markerNamespace: input.markerNamespace,
+      marker: input.marker,
+      select: true
+    });
   }
   return {
     ok: false,
@@ -594,16 +644,112 @@ export function createPostProcessRuntime({
   commitResult = (input) => defaultCommitResult(host, input)
 } = {}) {
   let active = null;
-  let pending = false;
+  let armed = false;
   let lastDiagnostics = diagnosticsFor(null);
-  void activity;
 
-  function finishWithoutCommit(operation, reason, outcomes = [], extra = {}) {
+  function publish(method, event) {
+    try {
+      return activity?.[method]?.(event) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function startActivity(record, operation) {
+    record.activityStarted = true;
+    publish('start', {
+      runId: operation.operationId,
+      operationId: operation.operationId,
+      phase: 'postProcessStarted',
+      mode: 'review',
+      label: 'Post-processing response...',
+      providerLane: operation.route.lane,
+      chips: ['Post-process', operation.rewriteFlow === 'progressive' ? 'Progressive' : 'Unified'],
+      detail: {
+        deckId: operation.deckId,
+        rewriteFlow: operation.rewriteFlow,
+        requestedApplyMode: operation.applyMode,
+        categoryCount: operation.categories.length,
+        sourceHash: operation.sourceHash,
+        snapshotHash: operation.snapshotHash
+      }
+    });
+  }
+
+  function stageCategory(operation, category, state, details = {}) {
+    const failureStage = cleanText(details.failureStage);
+    const failed = state === 'failed';
+    const retried = Number(details.guidanceAttempts || 0) > 1 || Number(details.hostAttempts || 0) > 1;
+    publish('stage', {
+      runId: operation.operationId,
+      operationId: operation.operationId,
+      phase: 'postProcessCategory',
+      mode: 'review',
+      severity: failed ? 'error' : (retried ? 'warning' : (state === 'success' ? 'success' : 'info')),
+      label: cleanText(category?.name || category?.id || 'Post-process category'),
+      providerLane: operation.route.lane,
+      chips: ['Post-process', cleanText(category?.name || category?.id || 'Category')],
+      detail: {
+        categoryId: safeId(category?.id, 'category'),
+        categoryName: cleanText(category?.name || category?.id || 'Post-process category'),
+        state,
+        guidanceAttempts: Number(details.guidanceAttempts || 0),
+        hostAttempts: Number(details.hostAttempts || 0),
+        ...(retried ? { cautionReason: 'Post-process stage recovered after retry.' } : {}),
+        ...(failureStage ? { failureStage } : {}),
+        ...(failed
+          ? {
+              failure: {
+                code: safeCode(details.failureCode, 'RECURSION_POST_PROCESS_STAGE_FAILED'),
+                stage: failureStage ? `post-process-${failureStage}` : 'post-process',
+                category: 'post-process',
+                message: failureStage === 'guidance'
+                  ? 'Guidance synthesis failed after retry.'
+                  : 'SillyTavern rewrite failed after retry.'
+              }
+            }
+          : {})
+      }
+    });
+  }
+
+  function settleActivity(record, operation, {
+    outcome = 'success',
+    label,
+    detail = null
+  } = {}) {
+    if (!record?.activityStarted || record.activitySettled) return;
+    record.activitySettled = true;
+    publish('settle', {
+      runId: operation?.operationId,
+      operationId: operation?.operationId,
+      outcome,
+      mode: 'review',
+      label,
+      chips: ['Post-process'],
+      detail
+    });
+  }
+
+  function finishWithoutCommit(operation, reason, outcomes = [], extra = {}, record = active) {
     lastDiagnostics = diagnosticsFor(operation, {
       outcomes,
       status: reason === 'canceled' ? 'canceled' : 'skipped',
       reason,
       partial: extra.partial === true
+    });
+    const canceled = reason === 'canceled';
+    const failed = ['all-stages-failed', 'runtime-failed', 'commit-failed'].includes(reason);
+    settleActivity(record, operation, {
+      outcome: canceled ? 'canceled' : (failed ? 'error' : 'skipped'),
+      label: canceled
+        ? 'Post-processing canceled. Original kept.'
+        : (failed ? 'Post-processing failed. Original kept.' : 'Post-processing skipped. Original kept.'),
+      detail: {
+        reason: safeId(reason, 'skipped'),
+        partial: extra.partial === true,
+        categories: diagnosticCategories(outcomes)
+      }
     });
     return {
       ...skippedResult(reason, lastDiagnostics, outcomes),
@@ -635,35 +781,35 @@ export function createPostProcessRuntime({
         }),
         signal: record.controller.signal
       };
-      pending = false;
       record.phase = 'running';
 
       if (!cleanText(operation.snapshot.originalDraft)) {
-        return finishWithoutCommit(operation, 'empty-source');
+        return finishWithoutCommit(operation, 'empty-source', [], {}, record);
       }
       if (operation.categories.length === 0) {
-        return finishWithoutCommit(operation, 'no-runnable-cards');
+        return finishWithoutCommit(operation, 'no-runnable-cards', [], {}, record);
       }
+      startActivity(record, operation);
 
       const runResult = operation.rewriteFlow === 'progressive'
-        ? await runProgressive(operation, { generationRouter, host })
-        : await runUnified(operation, { generationRouter, host });
+        ? await runProgressive(operation, { generationRouter, host, stageCategory })
+        : await runUnified(operation, { generationRouter, host, stageCategory });
       if (record.controller.signal.aborted || runResult.canceled) {
-        return finishWithoutCommit(operation, 'canceled');
+        return finishWithoutCommit(operation, 'canceled', [], {}, record);
       }
 
       const outcomes = runResult.outcomes || [];
       const successes = outcomes.filter((outcome) => outcome.status === 'success');
       if (successes.length === 0) {
-        return finishWithoutCommit(operation, 'all-stages-failed', outcomes);
+        return finishWithoutCommit(operation, 'all-stages-failed', outcomes, {}, record);
       }
       const partial = successes.length < outcomes.length;
       const candidate = cleanText(runResult.candidate);
       if (!candidate) {
-        return finishWithoutCommit(operation, 'empty-candidate', outcomes, { partial });
+        return finishWithoutCommit(operation, 'empty-candidate', outcomes, { partial }, record);
       }
       if (candidate === cleanText(operation.snapshot.originalDraft)) {
-        return finishWithoutCommit(operation, 'no-op-candidate', outcomes, { partial });
+        return finishWithoutCommit(operation, 'no-op-candidate', outcomes, { partial }, record);
       }
 
       let current = false;
@@ -673,16 +819,23 @@ export function createPostProcessRuntime({
         current = false;
       }
       if (record.controller.signal.aborted) {
-        return finishWithoutCommit(operation, 'canceled');
+        return finishWithoutCommit(operation, 'canceled', [], {}, record);
       }
       if (!current) {
         return finishWithoutCommit(operation, 'stale-source', outcomes, {
           partial,
           candidate
-        });
+        }, record);
       }
 
       const committedApplyMode = partial ? 'as-swipe' : operation.applyMode;
+      const marker = markerForCommit(
+        operation,
+        candidate,
+        outcomes,
+        committedApplyMode,
+        partial
+      );
       let commit;
       try {
         commit = await commitResult({
@@ -698,6 +851,8 @@ export function createPostProcessRuntime({
           lane: operation.route.lane,
           partial,
           outcomes: diagnosticCategories(outcomes),
+          markerNamespace: 'postProcess',
+          marker,
           text: candidate,
           signal: operation.signal
         });
@@ -705,16 +860,16 @@ export function createPostProcessRuntime({
         return finishWithoutCommit(operation, 'commit-failed', outcomes, {
           partial,
           candidate
-        });
+        }, record);
       }
       if (record.controller.signal.aborted) {
-        return finishWithoutCommit(operation, 'canceled');
+        return finishWithoutCommit(operation, 'canceled', [], {}, record);
       }
       if (commit?.ok === false) {
         return finishWithoutCommit(operation, 'commit-failed', outcomes, {
           partial,
           candidate
-        });
+        }, record);
       }
 
       lastDiagnostics = diagnosticsFor(operation, {
@@ -722,6 +877,43 @@ export function createPostProcessRuntime({
         status: 'committed',
         partial,
         committedApplyMode
+      });
+      publish('stage', {
+        runId: operation.operationId,
+        operationId: operation.operationId,
+        phase: 'postProcessCommitted',
+        mode: 'review',
+        severity: partial ? 'warning' : 'success',
+        outcome: partial ? 'warning' : 'success',
+        label: committedApplyMode === 'replace'
+          ? 'Post-process response replaced.'
+          : (partial ? 'Post-process swipe added with failed categories.' : 'Post-process swipe added.'),
+        chips: ['Post-process', committedApplyMode === 'replace' ? 'Replace' : 'As Swipe'],
+        detail: {
+          partial,
+          requestedApplyMode: operation.applyMode,
+          committedApplyMode,
+          sourceHash: marker.sourceHash,
+          candidateHash: marker.candidateHash,
+          ...(partial
+            ? { cautionReason: 'Replace was withheld because at least one Post-process category failed.' }
+            : {})
+        }
+      });
+      settleActivity(record, operation, {
+        outcome: partial ? 'warning' : 'success',
+        label: partial ? 'Post-processing completed with failed categories.' : 'Post-processing complete.',
+        detail: {
+          partial,
+          requestedApplyMode: operation.applyMode,
+          committedApplyMode,
+          sourceHash: marker.sourceHash,
+          candidateHash: marker.candidateHash,
+          ...(partial
+            ? { cautionReason: 'Replace was withheld because at least one Post-process category failed.' }
+            : {}),
+          categories: diagnosticCategories(outcomes)
+        }
       });
       return {
         ok: true,
@@ -738,37 +930,54 @@ export function createPostProcessRuntime({
       const canceled = record.controller.signal.aborted || error?.name === 'AbortError';
       return finishWithoutCommit(
         operation,
-        canceled ? 'canceled' : 'runtime-failed'
+        canceled ? 'canceled' : 'runtime-failed',
+        [],
+        {},
+        record
       );
     }
   }
 
   function runPostProcessForLatestAssistant() {
     if (active?.promise) return active.promise;
+    armed = false;
     const record = {
       controller: new AbortController(),
       phase: 'pending',
+      activityStarted: false,
+      activitySettled: false,
       promise: null
     };
-    pending = true;
     active = record;
     record.promise = execute(record).finally(() => {
       if (active === record) active = null;
-      pending = false;
     });
     return record.promise;
   }
 
+  function armPostProcess() {
+    if (settingsStore?.get?.()?.postProcess?.enabled !== true) {
+      armed = false;
+      return { ok: true, armed: false, reason: 'disabled' };
+    }
+    if (active) return { ok: true, armed: false, reason: 'running' };
+    armed = true;
+    return { ok: true, armed: true };
+  }
+
   function cancelPostProcess() {
-    if (!active) return { ok: true, canceled: false };
+    const canceled = armed || Boolean(active);
+    armed = false;
+    if (!active) return { ok: true, canceled };
     active.controller.abort();
     return { ok: true, canceled: true };
   }
 
   return {
     postProcessPending() {
-      return pending;
+      return armed;
     },
+    armPostProcess,
     postProcessRunning() {
       return Boolean(active);
     },

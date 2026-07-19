@@ -12,7 +12,7 @@ let hostEventUnsubscribers = [];
 let settingsBootstrapUnsubscribers = [];
 let settingsLoadEventObserved = false;
 
-let enhancementControlsLocked = false;
+let postProcessControlsLocked = false;
 
 function hasSillyTavernContext() {
   return typeof globalThis.SillyTavern?.getContext === 'function'
@@ -40,38 +40,27 @@ function publishLiveHarnessRuntime(nextRuntime) {
   }
 }
 
-function setEnhancementCaptureActive() {
-  // The original SillyTavern response remains visible while Generation Review runs.
-}
-
-function refreshEnhancementCaptureState(activeRuntime = runtime) {
-  const active = typeof activeRuntime?.proseEnhancementPending === 'function'
-    && activeRuntime.proseEnhancementPending();
-  setEnhancementCaptureActive(active);
-  return active;
-}
-
-async function lockEnhancementControls(currentHost = host) {
-  if (enhancementControlsLocked) return { ok: true, locked: true, unchanged: true };
-  enhancementControlsLocked = true;
+async function lockPostProcessControls(currentHost = host) {
+  if (postProcessControlsLocked) return { ok: true, locked: true, unchanged: true };
+  postProcessControlsLocked = true;
   try {
     const result = await currentHost?.generation?.lockControls?.();
-    if (result?.ok === false) enhancementControlsLocked = false;
+    if (result?.ok === false) postProcessControlsLocked = false;
     return result || { ok: true, locked: true };
   } catch (error) {
-    enhancementControlsLocked = false;
-    warn('Enhancement control lock failed.', error);
+    postProcessControlsLocked = false;
+    warn('Post-process control lock failed.', error);
     return { ok: false, locked: false, error };
   }
 }
 
-async function unlockEnhancementControls(currentHost = host) {
-  if (!enhancementControlsLocked) return { ok: true, locked: false, unchanged: true };
-  enhancementControlsLocked = false;
+async function unlockPostProcessControls(currentHost = host) {
+  if (!postProcessControlsLocked) return { ok: true, locked: false, unchanged: true };
+  postProcessControlsLocked = false;
   try {
     return await currentHost?.generation?.unlockControls?.() || { ok: true, locked: false };
   } catch (error) {
-    warn('Enhancement control unlock failed.', error);
+    warn('Post-process control unlock failed.', error);
     return { ok: false, locked: false, error };
   }
 }
@@ -84,7 +73,7 @@ function activeAssistantIdentityFromHost(currentHost) {
   }
 }
 
-function enhancementOwnedSourceMutation(details = {}, currentHost = host) {
+function postProcessOwnedSourceMutation(details = {}, currentHost = host) {
   if (details?.deleted) return false;
   if (!details?.latestAssistant) return false;
   if (!details.edited && !details.swiped) return false;
@@ -92,14 +81,7 @@ function enhancementOwnedSourceMutation(details = {}, currentHost = host) {
   const sameMessage = details.messageId === undefined
     || details.messageId === null
     || String(activeIdentity?.messageId ?? '') === String(details.messageId);
-  return activeIdentity?.enhancementOwned === true && sameMessage;
-}
-
-function scheduleHeldEnhancementRecovery(activeRuntime = runtime, reason = 'bootstrap') {
-  if (typeof activeRuntime?.recoverHeldProseEnhancementMessages !== 'function') return;
-  Promise.resolve()
-    .then(() => activeRuntime.recoverHeldProseEnhancementMessages({ reason }))
-    .catch((error) => warn('Enhancement stale hold recovery failed.', error));
+  return activeIdentity?.postProcessOwned === true && sameMessage;
 }
 
 function destroyUi() {
@@ -276,55 +258,41 @@ function registerHostEvents(nextRuntime, currentHost = host) {
   const chatChangedEvent = resolveChatChangedEvent(context);
   registerRuntimeHostEvent(eventSource, chatChangedEvent, () => {
     const nextAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
-    const enhancementOwnedChatMutation = activeAssistantIdentityFromHost(currentHost)?.enhancementOwned === true
+    const postProcessOwnedChatMutation = activeAssistantIdentityFromHost(currentHost)?.postProcessOwned === true
       && Boolean(nextAssistantIdentity)
       && nextAssistantIdentity === lastAssistantIdentity;
     lastAssistantIdentity = nextAssistantIdentity;
     runtime ||= nextRuntime;
-    if (enhancementOwnedChatMutation) {
-      setEnhancementCaptureActive(false);
-      return { ok: true, skipped: true, reason: 'enhancement-owned-chat-mutation' };
+    if (postProcessOwnedChatMutation) {
+      return { ok: true, skipped: true, reason: 'post-process-owned-chat-mutation' };
     }
-    setEnhancementCaptureActive(false);
+    nextRuntime.cancelPostProcess?.('chat-changed');
     return invokeRuntimeCleanup('handleChatChanged', 'Chat change cleanup failed.');
   });
   for (const eventName of resolveSourceChangedEvents(context)) {
     registerRuntimeHostEvent(eventSource, eventName, (payload) => {
       const details = normalizeHostMessageEvent(currentHost, eventName, payload);
       runtime ||= nextRuntime;
-      if (
-        typeof nextRuntime.proseEnhancementPending === 'function'
-        && nextRuntime.proseEnhancementPending()
-        && details.edited
-        && !details.deleted
-        && !details.swiped
-      ) {
-        setEnhancementCaptureActive(true);
-        return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement streaming hold failed.', details)
-          .then(() => ({ ok: true, skipped: true, reason: 'enhancement-streaming-update' }));
+      if (postProcessOwnedSourceMutation(details, currentHost)) {
+        return { ok: true, skipped: true, reason: 'post-process-owned-source-mutation' };
       }
-      if (enhancementOwnedSourceMutation(details, currentHost)) {
-        return { ok: true, skipped: true, reason: 'enhancement-owned-source-mutation' };
-      }
+      nextRuntime.cancelPostProcess?.(
+        details.deleted
+          ? 'source-deleted'
+          : (details.swiped ? 'source-swiped' : 'source-edited')
+      );
       if (details.swiped && details.latestAssistant) {
         refreshAssistantSignature();
         return invokeRuntimeCleanup('handleLatestAssistantSwipeRetry', 'Latest assistant swipe retry marker failed.', details);
       }
       refreshAssistantSignature();
-      setEnhancementCaptureActive(false);
       return invokeRuntimeCleanup('handleSourceChanged', 'Source change cleanup failed.', details);
     });
   }
   for (const eventName of resolveAssistantStreamingEvents(context)) {
-    registerRuntimeHostEvent(eventSource, eventName, (payload) => {
+    registerRuntimeHostEvent(eventSource, eventName, () => {
       runtime ||= nextRuntime;
-      if (typeof nextRuntime.proseEnhancementPending === 'function' && nextRuntime.proseEnhancementPending()) {
-        setEnhancementCaptureActive(true);
-        const details = normalizeHostMessageEvent(currentHost, eventName, payload);
-        return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement streaming hold failed.', details)
-          .then(() => ({ ok: true, skipped: true, reason: 'enhancement-stream-token' }));
-      }
-      return { ok: true, skipped: true, reason: 'enhancement-not-pending' };
+      return { ok: true, skipped: true, reason: 'post-process-awaiting-final-response' };
     });
   }
   for (const eventName of resolveGenerationStoppedEvents(context)) {
@@ -332,10 +300,10 @@ function registerHostEvents(nextRuntime, currentHost = host) {
       refreshAssistantSignature();
       runtime ||= nextRuntime;
       const details = normalizeHostMessageEvent(currentHost, eventName, payload);
-      details.enhancementControlsLocked = enhancementControlsLocked;
+      details.postProcessControlsLocked = postProcessControlsLocked;
+      nextRuntime.cancelPostProcess?.('host-generation-stopped');
       return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', details)
-        .finally(() => unlockEnhancementControls(currentHost))
-        .finally(() => setEnhancementCaptureActive(false));
+        .finally(() => unlockPostProcessControls(currentHost));
     });
   }
   for (const eventName of resolveAssistantLandedEvents(context)) {
@@ -347,58 +315,40 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         || String(details.eventName || '').toLowerCase() === 'generation_ended';
       if (
         finalGenerationEvent
-        && typeof nextRuntime.proseEnhancementRunning === 'function'
-        && nextRuntime.proseEnhancementRunning()
+        && typeof nextRuntime.postProcessRunning === 'function'
+        && nextRuntime.postProcessRunning()
       ) {
-        return { ok: true, skipped: true, reason: 'enhancement-owned-generation-ended' };
+        return { ok: true, skipped: true, reason: 'post-process-owned-generation-ended' };
       }
-      const sanitizeEnhancementMarker = () => {
-        if (!finalGenerationEvent || typeof currentHost?.messages?.sanitizeAssistantEnhancementMarker !== 'function') {
-          return Promise.resolve({ ok: true, skipped: true, reason: 'marker-sanitation-unavailable' });
-        }
-        return Promise.resolve(currentHost.messages.sanitizeAssistantEnhancementMarker(details.messageId)).catch((error) => {
-          warn('Enhancement marker sanitation failed.', error);
-          return { ok: false, error };
-        });
-      };
       const generationEnded = () => invokeRuntimeCleanup(
         'handleHostGenerationEnded',
         'Generation end cleanup failed.',
         details
       );
-      if (typeof nextRuntime.proseEnhancementPending === 'function' && nextRuntime.proseEnhancementPending()) {
-        setEnhancementCaptureActive(true);
+      if (typeof nextRuntime.postProcessPending === 'function' && nextRuntime.postProcessPending()) {
         if (!finalGenerationEvent) {
-          return invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement assistant hold failed.', details)
-            .then(() => ({ ok: true, skipped: true, reason: 'enhancement-awaiting-generation-ended' }));
+          return { ok: true, skipped: true, reason: 'post-process-awaiting-generation-ended' };
         }
-        return sanitizeEnhancementMarker()
-          .then(() => lockEnhancementControls(currentHost))
-          .then(() => invokeRuntimeCleanup('holdPendingProseEnhancementMessage', 'Enhancement assistant hold failed.', details))
-          .then(() => invokeRuntimeCleanup('enhanceLatestAssistantMessage', 'Enhancement failed.', { reason: 'assistant-message-landed' }))
+        return lockPostProcessControls(currentHost)
+          .then(() => invokeRuntimeCleanup(
+            'runPostProcessForLatestAssistant',
+            'Post-processing failed.',
+            { reason: 'assistant-message-landed' }
+          ))
           .then(() => generationEnded())
-          .finally(() => unlockEnhancementControls(currentHost))
+          .finally(() => unlockPostProcessControls(currentHost))
           .then(() => {
             lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
             return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
-          })
-          .finally(() => {
-            setEnhancementCaptureActive(false);
           });
       }
       if (!nextAssistantIdentity || nextAssistantIdentity === lastAssistantIdentity) {
-        return sanitizeEnhancementMarker()
-          .then(() => generationEnded())
-          .then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }))
-          .finally(() => setEnhancementCaptureActive(false));
+        return generationEnded()
+          .then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }));
       }
       lastAssistantIdentity = nextAssistantIdentity;
-      return sanitizeEnhancementMarker()
-        .then(() => generationEnded())
-        .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }))
-        .finally(() => {
-          setEnhancementCaptureActive(false);
-        });
+      return generationEnded()
+        .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }));
     });
   }
 }
@@ -533,7 +483,6 @@ export function bootstrapRecursion() {
     ui = nextUi;
     publishLiveHarnessRuntime(nextRuntime);
     registerHostEvents(nextRuntime, nextHost);
-    scheduleHeldEnhancementRecovery(nextRuntime, 'bootstrap');
     return runtime;
   } catch (error) {
     warn('Bootstrap failed.', error);
@@ -559,8 +508,7 @@ async function teardownRecursion(label) {
   clearSettingsBootstrapSubscriptions();
   clearHostEventSubscriptions();
   settingsLoadEventObserved = false;
-  setEnhancementCaptureActive(false);
-  await unlockEnhancementControls(host);
+  await unlockPostProcessControls(host);
   try {
     await runtime?.dispose?.();
   } catch (error) {
@@ -583,9 +531,7 @@ export async function recursionGenerationInterceptor(chat, _contextSize, _abort,
       hostGeneration: true,
       generationType
     });
-    refreshEnhancementCaptureState(activeRuntime);
   } catch (error) {
-    setEnhancementCaptureActive(false);
     warn('Generation preparation failed.', error);
   }
   return chat;

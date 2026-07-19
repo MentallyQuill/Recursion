@@ -2,6 +2,8 @@ import {
   buildPostProcessPlan,
   createPostProcessRuntime
 } from '../../src/post-process-runtime.mjs';
+import { createActivityReporter } from '../../src/activity.mjs';
+import { hashJson } from '../../src/core.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const GUIDANCE_SCHEMA = 'recursion.postProcessGuidance.v1';
@@ -158,7 +160,8 @@ function createHarness({
   guidancePlan = [],
   hostPlan = [],
   sourceGuard = async () => true,
-  commitImpl = async () => ({ ok: true })
+  commitImpl = async () => ({ ok: true }),
+  activity = null
 } = {}) {
   const settingsRef = { current: initialSettings };
   const deckRef = { current: initialDeck };
@@ -222,6 +225,7 @@ function createHarness({
     },
     snapshotProvider: async () => structuredClone(snapshotRef.current),
     deckProvider: () => deckRef.current,
+    activity,
     async sourceGuard(input) {
       guardCalls.push(input);
       return sourceGuard(input);
@@ -627,6 +631,54 @@ test('20. Returned diagnostics never contain raw prose, guidance, prompts, or co
   assertEqual(result.diagnostics.categories[0].categoryId, 'private-failure', 'diagnostics retain safe category id');
 });
 
+test('21. Final commit receives a structural marker bound to actual source and candidate text', async () => {
+  const sourceText = 'Actual source response.';
+  const candidateText = 'Actual revised response.';
+  const harness = createHarness({
+    initialSnapshot: snapshot({
+      originalDraft: sourceText,
+      sourceHash: hashJson(sourceText)
+    }),
+    hostPlan: [candidateText]
+  });
+  const result = await harness.runtime.runPostProcessForLatestAssistant();
+  assertEqual(result.committed, true, 'marker fixture commits');
+  const commit = harness.commitCalls[0];
+  assertEqual(commit.markerNamespace, 'postProcess', 'commit uses the Post-process marker namespace');
+  assertEqual(commit.marker.schema, 'recursion.postProcessMarker.v1', 'commit uses the V1 Post-process marker schema');
+  assertEqual(commit.marker.sourceHash, hashJson(sourceText), 'marker source hash binds to actual source prose');
+  assertEqual(commit.marker.candidateHash, hashJson(candidateText), 'marker candidate hash binds to actual candidate prose');
+  const markerSerialized = JSON.stringify(commit.marker);
+  assert(!markerSerialized.includes(sourceText), 'marker omits source prose');
+  assert(!markerSerialized.includes(candidateText), 'marker omits candidate prose');
+});
+
+test('22. Arming is consumed once and cancellation aborts an active host rewrite', async () => {
+  const hostGate = deferred();
+  const events = [];
+  const activity = createActivityReporter({ onEvent: (event) => events.push(event) });
+  const harness = createHarness({
+    hostPlan: [hostGate.promise],
+    activity
+  });
+  assertEqual(harness.runtime.armPostProcess().armed, true, 'Post-process operation arms');
+  assertEqual(harness.runtime.postProcessPending(), true, 'armed operation reports pending');
+  const running = harness.runtime.runPostProcessForLatestAssistant();
+  await waitUntil(() => harness.hostCalls.length === 1, 'armed fixture host rewrite did not start');
+  assertEqual(harness.runtime.postProcessPending(), false, 'starting consumes the pending arm');
+  assertEqual(harness.runtime.postProcessRunning(), true, 'started operation reports running');
+  harness.runtime.cancelPostProcess('test-stop');
+  assertEqual(harness.hostCalls[0].signal.aborted, true, 'Stop aborts the active native quiet-generation signal');
+  hostGate.resolve('must not commit');
+  const result = await running;
+  assertEqual(result.reason, 'canceled', 'active host rewrite cancels fail-soft');
+  assertEqual(harness.commitCalls.length, 0, 'canceled host rewrite cannot commit');
+  const serialized = JSON.stringify(events);
+  assert(!serialized.includes('must not commit'), 'activity omits canceled candidate prose');
+  assert(events.some((event) => event.phase === 'postProcessStarted'), 'activity records Post-process start');
+  assert(events.some((event) => event.phase === 'settled' && event.outcome === 'canceled'), 'activity records neutral cancellation');
+});
+
 let passed = 0;
 for (const entry of cases) {
   try {
@@ -638,5 +690,5 @@ for (const entry of cases) {
   }
 }
 
-assertEqual(passed, 20, 'the complete 20-case state-machine matrix ran');
-console.log('[pass] post-process runtime (20 cases)');
+assertEqual(passed, 22, 'the complete 22-case state-machine matrix ran');
+console.log('[pass] post-process runtime (22 cases)');

@@ -1138,6 +1138,7 @@ function createLivePostProcessRuntimeHarness({
   });
 
   for (const method of [
+    'armPostProcess',
     'postProcessPending',
     'postProcessRunning',
     'runPostProcessForLatestAssistant',
@@ -1164,11 +1165,32 @@ function createLivePostProcessRuntimeHarness({
 }
 
 {
+  const live = createLivePostProcessRuntimeHarness({
+    chatId: 'post-process-arming-chat'
+  });
+  await live.runtime.prepareForGeneration({
+    userMessage: 'Arm Post-process for the next host response.',
+    hostGeneration: true,
+    generationType: 'normal'
+  });
+  assertEqual(live.runtime.postProcessPending(), true, 'host generation preparation arms Post-process exactly once');
+  const canceled = live.runtime.cancelPostProcess('source-edited');
+  assertEqual(canceled.canceled, true, 'source mutation can cancel an armed Post-process operation');
+  assertEqual(live.runtime.postProcessPending(), false, 'cancel clears the pending Post-process arm');
+}
+
+{
   const live = createLivePostProcessRuntimeHarness();
   const result = await live.runtime.runPostProcessForLatestAssistant();
   assertEqual(result.committed, true, 'real runtime guard accepts an unchanged source with spaces and punctuation in its chat id');
   assertEqual(live.assistant().swipes.length, 2, 'unchanged punctuation chat commits through the real host swipe boundary');
   assertEqual(live.saveCalls.length, 1, 'unchanged punctuation chat saves exactly one committed swipe');
+  const committedMarker = live.assistant().__recursionPostProcessSwipes[1];
+  assertEqual(committedMarker.schema, 'recursion.postProcessMarker.v1', 'real runtime persists the Post-process V1 marker');
+  assertEqual(committedMarker.sourceHash, hashJson('Original live Post-process response.'), 'real runtime marker binds to actual source text');
+  assertEqual(committedMarker.candidateHash, hashJson('Rewritten live Post-process response.'), 'real runtime marker binds to actual candidate text');
+  assert(!JSON.stringify(committedMarker).includes('Original live Post-process response.'), 'real runtime marker omits source prose');
+  assert(!JSON.stringify(committedMarker).includes('Rewritten live Post-process response.'), 'real runtime marker omits candidate prose');
 }
 
 {
@@ -1275,6 +1297,7 @@ function createLivePostProcessRuntimeHarness({
   assertEqual(live.assistant().swipes.length, originalSwipeCount, 'Replace preserves the source swipe count');
   assertEqual(live.assistant().swipe_id, originalSwipeId, 'Replace preserves the selected swipe index');
   assertEqual(live.saveCalls.length, 1, 'Replace saves exactly one host mutation');
+  assertEqual(live.assistant().__recursionPostProcess.committedApplyMode, 'replace', 'Replace persists one Post-process replacement marker');
 }
 
 // Replaced V1 contract: dialogue/prose pass fixtures are retained as historical
@@ -11766,7 +11789,8 @@ for (const scenario of [
   assertEqual(stopEntry.severity, 'warn', 'unexpected host generation stop is warning severity');
   assertEqual(stopEntry.details.recursionRequested, false, 'host event is distinguished from an explicit Recursion stop');
   assertEqual(stopEntry.details.hostGenerationActive, true, 'stop journal captures host generation state before cleanup');
-  assertEqual(stopEntry.details.enhancementPending, false, 'stop journal captures pending Enhancement state before cleanup');
+  assertEqual(stopEntry.details.postProcessPending, false, 'stop journal captures pending Post-process state before cleanup');
+  assertEqual(stopEntry.details.postProcessActive, false, 'stop journal captures active Post-process state before cleanup');
   assertEqual(stopEntry.details.eventName, 'generation_stopped', 'stop journal records normalized event name');
   assertEqual(stopEntry.details.source, 'host-runtime', 'stop journal records normalized source');
   assertEqual(stopEntry.details.reason, 'generation-aborted', 'stop journal records normalized reason');

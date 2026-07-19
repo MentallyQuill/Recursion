@@ -285,4 +285,30 @@ assertEqual(storageProgress.operationId, 'storage-op-1', 'activity preserves sto
 assertEqual(storageProgress.logicalStage, 'Updating scene cache', 'activity preserves logical storage stage');
 assertEventShape(storageProgress, 'storage progress event uses stable key shape');
 
+const postProcessPrivacyReporter = createActivityReporter();
+const privateSource = 'PRIVATE SOURCE PROSE';
+const privateCandidate = 'PRIVATE CANDIDATE PROSE';
+const privateGuidance = 'PRIVATE GUIDANCE PROSE';
+const privatePrompt = 'PRIVATE CARD PROMPT';
+const privacyRun = postProcessPrivacyReporter.start({
+  runId: 'post-process-privacy',
+  phase: 'postProcessStarted',
+  label: 'Post-processing response...',
+  detail: {
+    operationId: 'post-process-op',
+    sourceText: privateSource,
+    candidateText: privateCandidate,
+    guidanceText: privateGuidance,
+    promptText: privatePrompt,
+    sourceHash: 'safe-source-hash',
+    candidateHash: 'safe-candidate-hash'
+  }
+});
+const privacySerialized = JSON.stringify(privacyRun);
+for (const prose of [privateSource, privateCandidate, privateGuidance, privatePrompt]) {
+  assert(!privacySerialized.includes(prose), `Post-process activity omits ${prose}`);
+}
+assert(privacySerialized.includes('safe-source-hash'), 'Post-process activity preserves structural source hashes');
+assert(privacySerialized.includes('safe-candidate-hash'), 'Post-process activity preserves structural candidate hashes');
+
 console.log('[pass] activity');

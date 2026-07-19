@@ -291,6 +291,7 @@ function cloneJsonSafe(value) {
 function swipeInfoFromMessage(message = {}) {
   const extra = cloneJsonSafe(message.extra);
   removeEnhancementMarkerFromExtra(extra);
+  removePostProcessMarkerFromExtra(extra);
   return {
     send_date: stringValue(message.send_date || new Date().toISOString()),
     gen_started: message.gen_started ?? null,
@@ -401,6 +402,9 @@ function eventSourceObject(event) {
 
 function markerMatchesSwipeText(marker = {}, text = '') {
   const candidate = asObject(marker);
+  if (candidate.schema === 'recursion.postProcessMarker.v1') {
+    return stringValue(candidate.candidateHash) === hashJson(stringValue(text));
+  }
   if (candidate.schema === 'recursion.editorialMarker.v1') {
     return stringValue(candidate.candidateHash) === hashJson(stringValue(text));
   }
@@ -417,6 +421,24 @@ function removeEnhancementMarkerFromExtra(extra = {}) {
   delete recursion.enhancement;
   if (!Object.keys(recursion).length) delete extra.recursion;
   return true;
+}
+
+function removePostProcessMarkerFromExtra(extra = {}) {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return false;
+  const recursion = extra.recursion;
+  if (!recursion || typeof recursion !== 'object' || Array.isArray(recursion) || !recursion.postProcess) return false;
+  delete recursion.postProcess;
+  if (!Object.keys(recursion).length) delete extra.recursion;
+  return true;
+}
+
+function setPostProcessMarkerOnExtra(extra = {}, marker = {}) {
+  const target = extra && typeof extra === 'object' && !Array.isArray(extra) ? extra : {};
+  target.recursion = {
+    ...asObject(target.recursion),
+    postProcess: cloneJsonSafe(marker)
+  };
+  return target;
 }
 
 function eventPayloadShape(event) {
@@ -709,6 +731,21 @@ function postProcessWriterUnavailableResult() {
     error: {
       code: 'RECURSION_POST_PROCESS_WRITER_UNAVAILABLE',
       message: 'SillyTavern native quiet generation API is unavailable.'
+    }
+  };
+}
+
+function postProcessSwipeInfo(marker = {}) {
+  return {
+    send_date: new Date().toISOString(),
+    gen_started: null,
+    gen_finished: null,
+    extra: {
+      api: 'recursion',
+      model: 'post-process',
+      recursion: {
+        postProcess: cloneJsonSafe(marker)
+      }
     }
   };
 }
@@ -1416,6 +1453,16 @@ export function createSillyTavernHost({
     const replacementMarker = asObject(found.raw?.__recursionGenerationReview);
     const enhancementOwned = [swipeMarker, indexedMarker, replacementMarker]
       .some((marker) => markerMatchesSwipeText(marker, text));
+    const postProcessSwipeMarker = asObject(swipeInfo?.extra?.recursion?.postProcess);
+    const postProcessIndexedMarker = Array.isArray(found.raw?.__recursionPostProcessSwipes)
+      ? asObject(found.raw.__recursionPostProcessSwipes[swipeId])
+      : {};
+    const postProcessReplacementMarker = asObject(found.raw?.__recursionPostProcess);
+    const postProcessOwned = [
+      postProcessSwipeMarker,
+      postProcessIndexedMarker,
+      postProcessReplacementMarker
+    ].some((marker) => markerMatchesSwipeText(marker, text));
     return {
       ...chatIdentity,
       ...activeEntityIdentity(context),
@@ -1423,7 +1470,8 @@ export function createSillyTavernHost({
       swipeId,
       text,
       originalHash: hashJson(text),
-      enhancementOwned
+      enhancementOwned,
+      postProcessOwned
     };
   }
 
@@ -1480,7 +1528,30 @@ export function createSillyTavernHost({
       setRawAssistantText(found.raw, text);
       delete found.raw.__recursionHeldText;
       delete found.raw.__recursionHeldSwipeId;
-      found.raw.__recursionGenerationReview = asObject(options.marker);
+      if (options.markerNamespace === 'postProcess') {
+        const marker = asObject(options.marker);
+        if (!markerMatchesSwipeText(marker, text)) {
+          restoreJsonObject(found.raw, original);
+          return {
+            ok: false,
+            error: {
+              code: 'RECURSION_POST_PROCESS_MARKER_MISMATCH',
+              message: 'Post-process marker candidate hash does not match replacement text.'
+            }
+          };
+        }
+        found.raw.__recursionPostProcess = cloneJsonSafe(marker);
+        if (Array.isArray(found.raw.swipe_info)) {
+          const index = finiteNonNegativeInteger(found.raw.swipe_id) ?? 0;
+          const info = found.raw.swipe_info[index] || (found.raw.swipe_info[index] = swipeInfoFromMessage(found.raw));
+          info.extra = setPostProcessMarkerOnExtra(cloneJsonSafe(info.extra), marker);
+          found.raw.extra = cloneJsonSafe(info.extra);
+        } else {
+          found.raw.extra = setPostProcessMarkerOnExtra(cloneJsonSafe(found.raw.extra), marker);
+        }
+      } else {
+        found.raw.__recursionGenerationReview = asObject(options.marker);
+      }
       const saved = await saveChatRequired(context);
       if (!saved.ok) {
         restoreJsonObject(found.raw, original);
@@ -1494,15 +1565,37 @@ export function createSillyTavernHost({
       const found = findRawAssistantMessage(context, messageId);
       if (!found) return { ok: false, error: { code: 'RECURSION_MESSAGE_NOT_FOUND', message: 'Assistant message not found.' } };
       const original = cloneJsonSafe(found.raw);
+      if (
+        options.markerNamespace === 'postProcess'
+        && stringValue(text).trim() === activeRawAssistantText(found.raw).trim()
+      ) {
+        return { ok: true, skipped: true, reason: 'duplicate-post-process-candidate' };
+      }
       if (!Array.isArray(found.raw.swipes)) found.raw.swipes = [activeRawAssistantText(found.raw)];
       ensureSwipeInfoArray(found.raw);
       const marker = asObject(options.marker);
+      if (options.markerNamespace === 'postProcess' && !markerMatchesSwipeText(marker, text)) {
+        return {
+          ok: false,
+          error: {
+            code: 'RECURSION_POST_PROCESS_MARKER_MISMATCH',
+            message: 'Post-process marker candidate hash does not match swipe text.'
+          }
+        };
+      }
       const index = found.raw.swipes.length;
-      const swipeInfo = enhancedSwipeInfo(marker);
+      const swipeInfo = options.markerNamespace === 'postProcess'
+        ? postProcessSwipeInfo(marker)
+        : enhancedSwipeInfo(marker);
       found.raw.swipes.push(stringValue(text));
       found.raw.swipe_info.push(swipeInfo);
-      if (!Array.isArray(found.raw.__recursionGenerationReviewSwipes)) found.raw.__recursionGenerationReviewSwipes = [];
-      found.raw.__recursionGenerationReviewSwipes[index] = marker;
+      if (options.markerNamespace === 'postProcess') {
+        if (!Array.isArray(found.raw.__recursionPostProcessSwipes)) found.raw.__recursionPostProcessSwipes = [];
+        found.raw.__recursionPostProcessSwipes[index] = cloneJsonSafe(marker);
+      } else {
+        if (!Array.isArray(found.raw.__recursionGenerationReviewSwipes)) found.raw.__recursionGenerationReviewSwipes = [];
+        found.raw.__recursionGenerationReviewSwipes[index] = marker;
+      }
       if (options.select !== false) {
         found.raw.swipe_id = index;
         setRawAssistantText(found.raw, text);
@@ -1589,6 +1682,9 @@ export function createSillyTavernHost({
       const originalMarkers = Array.isArray(found.raw.__recursionGenerationReviewSwipes)
         ? [...found.raw.__recursionGenerationReviewSwipes]
         : null;
+      const originalPostProcessMarkers = Array.isArray(found.raw.__recursionPostProcessSwipes)
+        ? [...found.raw.__recursionPostProcessSwipes]
+        : null;
       const activeIndex = Math.max(0, Math.min(finiteNonNegativeInteger(found.raw.swipe_id) ?? 0, originalSwipes.length - 1));
       let keptIndices = originalSwipes
         .map((text, index) => (stringValue(text).trim() ? index : null))
@@ -1603,6 +1699,9 @@ export function createSillyTavernHost({
       found.raw.swipe_info = keptIndices.map((index) => originalSwipeInfo[index]);
       if (originalMarkers) {
         found.raw.__recursionGenerationReviewSwipes = keptIndices.map((index) => originalMarkers[index]);
+      }
+      if (originalPostProcessMarkers) {
+        found.raw.__recursionPostProcessSwipes = keptIndices.map((index) => originalPostProcessMarkers[index]);
       }
       const index = keptIndices.indexOf(selectedOriginalIndex);
       found.raw.swipe_id = index;

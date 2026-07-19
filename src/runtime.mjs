@@ -3601,6 +3601,7 @@ export function createRecursionRuntime({
     invalidateCache = true,
     clearSwipeRetry = true
   }) {
+    postProcessRuntime.cancelPostProcess(reason);
     const runId = makeId(idPrefix);
     if (clearSwipeRetry) clearPendingLatestAssistantSwipeRetry();
     clearPendingFreshNextGeneration();
@@ -3704,15 +3705,16 @@ export function createRecursionRuntime({
                 .filter(Boolean)
                 .slice(0, 40),
               hostGenerationActive: Boolean(beforeStop.hostGenerationActive),
-              enhancementPending: Boolean(pendingProseEnhancement),
-              enhancementActive: Boolean(activeProseEnhancementPromise),
+              postProcessPending: postProcessRuntime.postProcessPending(),
+              postProcessActive: postProcessRuntime.postProcessRunning(),
               activeRunId: safeText(beforeStop.activeRunId || '', 160),
               activeAttemptKind: safeText(beforeStop.activeAttempt?.kind || '', 80),
-              enhancementControlsLocked: source.enhancementControlsLocked === true,
+              postProcessControlsLocked: source.postProcessControlsLocked === true,
               ...(recursionStopRequest ? { recursionStopRequest: redact(recursionStopRequest) } : {})
             }
           })
         : Promise.resolve(null);
+      postProcessRuntime.cancelPostProcess('host-generation-stopped');
       const cancellation = cancelActiveProseEnhancement('prose-enhancement-canceled');
       await Promise.all([cancellation, stopJournal]);
       try {
@@ -5384,6 +5386,7 @@ export function createRecursionRuntime({
   }
 
   async function stopGeneration(details = {}) {
+    postProcessRuntime.cancelPostProcess('stop-generation');
     cancelPendingProseEnhancement('prose-enhancement-canceled');
     supersedeActiveRun();
     recursionStopRequest = {
@@ -7294,8 +7297,12 @@ export function createRecursionRuntime({
     if (hostGeneration === true && activeProseEnhancementPromise) {
       await cancelActiveProseEnhancement(explicitSwipe ? 'latest-assistant-swipe' : 'new-host-generation');
     }
+    if (hostGeneration === true && postProcessRuntime.postProcessRunning()) {
+      postProcessRuntime.cancelPostProcess(explicitSwipe ? 'latest-assistant-swipe' : 'new-host-generation');
+    }
     setHostGenerationActive(hostGeneration);
     if (settings.enabled === false) {
+      postProcessRuntime.cancelPostProcess('recursion-disabled');
       clearPendingProseEnhancement();
       clearPendingLatestAssistantSwipeRetry();
       clearPendingFreshNextGeneration();
@@ -7322,6 +7329,8 @@ export function createRecursionRuntime({
     await waitForExternalMutations();
     let pendingUserMessage = normalizePendingUserMessage(userMessage);
     const runId = makeId('run');
+    if (hostGeneration === true) postProcessRuntime.armPostProcess();
+    else postProcessRuntime.cancelPostProcess('not-host-generation');
     if (hostGeneration === true) armProseEnhancementForHostGeneration(settings, runId);
     else clearPendingProseEnhancement();
     const signal = startRun(runId);
@@ -8049,6 +8058,7 @@ export function createRecursionRuntime({
     clearFreshNextGeneration,
     async dispose() {
       supersedeActiveRun();
+      postProcessRuntime.cancelPostProcess('runtime-disposed');
       abortActiveRapidWarmRun('stale');
       clearPendingFreshNextGeneration();
       await waitForExternalMutations();
@@ -8068,6 +8078,7 @@ export function createRecursionRuntime({
     handleHostGenerationEnded,
     postProcessPending: postProcessRuntime.postProcessPending,
     postProcessRunning: postProcessRuntime.postProcessRunning,
+    armPostProcess: postProcessRuntime.armPostProcess,
     runPostProcessForLatestAssistant: postProcessRuntime.runPostProcessForLatestAssistant,
     cancelPostProcess: postProcessRuntime.cancelPostProcess,
     postProcessDiagnostics: postProcessRuntime.postProcessDiagnostics,

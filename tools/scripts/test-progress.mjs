@@ -59,6 +59,73 @@ assertEqual(safeProgress.steps[0].label, 'Checking token: a brass coin', 'safe s
 const blocks = createHeroPixelBlocks(safeProgress);
 assertEqual(blocks[0].label, 'Checking token: a brass coin', 'hero blocks inherit safe labels');
 
+const progressivePostProcessProgress = createProgressRunModel({
+  activityHistory: [
+    {
+      runId: 'post-process-progressive',
+      phase: 'postProcessCategory',
+      severity: 'warning',
+      label: 'Natural Prose',
+      providerLane: 'utility',
+      detail: {
+        categoryId: 'natural-prose',
+        categoryName: 'Natural Prose',
+        state: 'success',
+        guidanceAttempts: 2,
+        hostAttempts: 1,
+        cautionReason: 'Post-process stage recovered after retry.'
+      }
+    },
+    {
+      runId: 'post-process-progressive',
+      phase: 'postProcessCategory',
+      severity: 'error',
+      label: 'Follow Through',
+      providerLane: 'utility',
+      detail: {
+        categoryId: 'follow-through',
+        categoryName: 'Follow Through',
+        state: 'failed',
+        failureStage: 'guidance',
+        guidanceAttempts: 2,
+        hostAttempts: 0,
+        failure: {
+          code: 'RECURSION_POST_PROCESS_GUIDANCE_FAILED',
+          stage: 'post-process-guidance',
+          category: 'provider-output',
+          message: 'Guidance synthesis failed after retry.'
+        }
+      }
+    }
+  ],
+  activity: {
+    runId: 'post-process-progressive',
+    phase: 'postProcessCommitted',
+    severity: 'warning',
+    outcome: 'warning',
+    label: 'Post-process swipe added with one failed category.',
+    detail: {
+      partial: true,
+      committedApplyMode: 'as-swipe',
+      cautionReason: 'Replace was withheld because at least one Post-process category failed.'
+    }
+  }
+});
+assertEqual(progressivePostProcessProgress.steps.length, 3, 'Post-process progress renders two category parents and one commit row');
+assertEqual(progressivePostProcessProgress.steps[0].label, 'Natural Prose', 'Post-process category retains its product label');
+assertEqual(progressivePostProcessProgress.steps[0].state, 'warning', 'retried Post-process category success is amber');
+assertEqual(progressivePostProcessProgress.steps[0].children.length, 2, 'Post-process category has guidance and host children');
+assertEqual(progressivePostProcessProgress.steps[0].children[0].state, 'warning', 'retried guidance child is amber');
+assertEqual(progressivePostProcessProgress.steps[0].children[1].state, 'done', 'first-attempt host child is green');
+assertEqual(progressivePostProcessProgress.steps[1].state, 'failed', 'failed Post-process category is red');
+assertEqual(progressivePostProcessProgress.steps[1].children[0].state, 'failed', 'failed guidance child is red');
+assertEqual(progressivePostProcessProgress.steps[1].children[1].state, 'skipped', 'unreached host child is muted');
+assertEqual(progressivePostProcessProgress.steps[2].state, 'warning', 'committed partial parent is amber');
+assert(
+  progressivePostProcessProgress.steps[2].reason.includes('Replace was withheld'),
+  'committed partial parent explains why Replace was withheld'
+);
+
 const explainedFailureProgress = createProgressRunModel({
   progressRun: {
     runId: 'explained-failure',

@@ -309,6 +309,13 @@ function metaForState(state, source = '', reason = '', retryCount = 0) {
 function eventRetryCount(event) {
   const phase = cleanText(event.phase);
   const detail = asObject(event.detail);
+  if (phase === 'postProcessCategory') {
+    return Math.max(
+      0,
+      normalizeRetryCount(detail.guidanceAttempts) - 1,
+      normalizeRetryCount(detail.hostAttempts) - 1
+    );
+  }
   if (phase === 'providerCallRetrying') {
     return normalizeRetryCount(detail.retryCount ?? detail.attempt ?? 1);
   }
@@ -415,9 +422,22 @@ function isProviderSettledEvent(event) {
 function eventStepId(event) {
   const phase = cleanText(event.phase);
   const detail = asObject(event.detail);
+  if (phase === 'postProcessCategory') {
+    return `post-process-category-${idFromText(detail.categoryId || detail.categoryName, 'category')}`;
+  }
+  if (phase === 'postProcessCommitted') return 'post-process-commit';
+  if (phase === 'settled' && cleanText(event.runId).toLowerCase().startsWith('post-process-')) {
+    return 'post-process-commit';
+  }
   if (phase === 'settled' && cleanText(event.runId).toLowerCase().startsWith('editorial-')) return 'editorial-result';
   if (phase === 'cardProgress') return cleanText(detail.parentStepId, 'utility-card-batch');
   if (isProviderTestEvent(event)) return 'provider-test';
+  if (
+    phase.startsWith('providerCall')
+    && ['postProcessGuidanceUtility', 'postProcessGuidanceReasoner'].includes(cleanText(detail.roleId || event.roleId))
+  ) {
+    return null;
+  }
   if (phase.startsWith('providerCall')) return roleStepId(event) || 'utility-card-batch';
   if (isProviderSettledEvent(event)) return roleStepId(event);
   return PHASE_STEP_IDS[phase] || null;
@@ -429,6 +449,17 @@ function eventState(event, isCurrent) {
   const outcome = cleanText(event.outcome).toLowerCase();
   const detail = asObject(event.detail);
   const retryCount = eventRetryCount(event);
+  if (phase === 'postProcessCategory') {
+    const stageState = cleanText(detail.state).toLowerCase();
+    if (stageState === 'failed') return 'failed';
+    if (stageState === 'success') {
+      return Number(detail.guidanceAttempts || 0) > 1 || Number(detail.hostAttempts || 0) > 1
+        ? 'warning'
+        : 'done';
+    }
+    return 'running';
+  }
+  if (phase === 'postProcessCommitted') return detail.partial === true ? 'warning' : 'done';
   if (phase === 'cardProgress' && detail.state) return normalizeStateWithRetry(detail.state, retryCount);
   if (phase === 'cacheWarning') return severity === 'error' ? 'failed' : 'done';
   if (phase === 'providerCallSettled' || isProviderSettledEvent(event)) {
@@ -452,6 +483,45 @@ function childStepFromEvent(event, state, order = 0) {
   const detail = asObject(event.detail);
   const retryCount = eventRetryCount(event);
   const reason = eventReason(event, state);
+  if (phase === 'postProcessCategory') {
+    const categoryId = idFromText(detail.categoryId || detail.categoryName, 'category');
+    const categoryState = cleanText(detail.state).toLowerCase();
+    const failureStage = cleanText(detail.failureStage).toLowerCase();
+    const guidanceAttempts = normalizeRetryCount(detail.guidanceAttempts);
+    const hostAttempts = normalizeRetryCount(detail.hostAttempts);
+    const guidanceState = categoryState === 'running'
+      ? 'running'
+      : (categoryState === 'failed' && failureStage === 'guidance'
+          ? 'failed'
+          : (guidanceAttempts > 1 ? 'warning' : 'done'));
+    const hostState = categoryState === 'running'
+      ? 'pending'
+      : (categoryState === 'failed'
+          ? (failureStage === 'host-rewrite' ? 'failed' : 'skipped')
+          : (hostAttempts > 1 ? 'warning' : 'done'));
+    return [
+      normalizeChildStep({
+        id: `${categoryId}-guidance`,
+        label: 'Synthesizing guidance',
+        providerLane: event.providerLane || detail.lane || 'utility',
+        state: guidanceState,
+        retryCount: Math.max(0, guidanceAttempts - 1),
+        reason: guidanceState === 'failed' ? reason : '',
+        sourcePhase: phase,
+        order
+      }, order),
+      normalizeChildStep({
+        id: `${categoryId}-host-rewrite`,
+        label: 'Rewriting with SillyTavern',
+        providerLane: 'utility',
+        state: hostState,
+        retryCount: Math.max(0, hostAttempts - 1),
+        reason: hostState === 'failed' ? reason : '',
+        sourcePhase: phase,
+        order: order + 1
+      }, order + 1)
+    ];
+  }
   if (phase === 'promptReasonerFallback') {
     return normalizeChildStep({
       id: 'utility-fallback',
@@ -1063,14 +1133,15 @@ function deriveProgressRun(view) {
       reason,
       sourcePhase: event.phase,
       sourceRoleId: asObject(event.detail).roleId,
-      children: child ? [child] : [],
+      children: Array.isArray(child) ? child : (child ? [child] : []),
       order: eventOrder
     }, eventOrder));
   }
   appendRapidWarmStatusStep(steps, source, order++);
   const beforePlanSteps = [...steps.values()];
   const hasEnhancementStep = [...ENHANCEMENT_STEP_IDS].some((id) => steps.has(id));
-  if (!isControlOnlyProgress(runId, beforePlanSteps) && !hasEnhancementStep) {
+  const hasPostProcessStep = [...steps.keys()].some((id) => id.startsWith('post-process-'));
+  if (!isControlOnlyProgress(runId, beforePlanSteps) && !hasEnhancementStep && !hasPostProcessStep) {
     appendPendingPlanSteps(steps, view, order);
     appendPendingChildSteps(steps, view, order);
   }

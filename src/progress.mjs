@@ -710,7 +710,16 @@ function normalizeChildStep(input, index = 0) {
   const retryCount = retryCountFromSource(source);
   const state = normalizeStateWithRetry(source.state, retryCount);
   const childSource = normalizeChildSource(source.source || source.sourceType || (state === 'cached' ? 'cache' : ''));
-  const reason = reasonFromSource(source, state, retryCount, childSource);
+  const reason = usefulReasonText(
+    source.reason
+    || source.statusReason
+    || source.cautionReason
+    || source.failureReason
+    || source.fallbackReason
+    || source.failure?.message
+    || source.error?.message
+    || source.compactError
+  ) || aggregateReason(children) || reasonFromSource(source, state, retryCount, childSource);
   const step = {
     id,
     label,

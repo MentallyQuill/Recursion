@@ -294,6 +294,31 @@ Artifact rules are strict:
   target, overlap, evidence, presentation, and commit-time identity check,
   Recursion may apply those patches only as `partial-failed`. Recompose remains
   strict because Recursion never applies a partly trustworthy full rewrite.
+- A narrower deterministic exception applies when the frozen source contains
+  adjacent repeated tokens and provider normalization has produced a
+  machine-owned exact-proposal signal bound to each trusted target ID and its
+  before/after hashes. Generic repetition wording, lexical equality, or the
+  number of repeated tokens cannot authorize an edit. If card coverage remains incomplete, Recursion may discard every
+  provider-authored semantic patch and derive only exact duplicate-token
+  deletions from known non-overlapping dialogue/prose targets. Missing dynamic
+  card rows remain unresolved and the result remains `partial-failed`; lexical
+  safety does not prove card fidelity. Unknown, duplicate, overlapping, or
+  review-only beat target IDs still fail.
+- A separate post-transform card audit may resolve missing dynamic card rows.
+  The verifier receives the transformed candidate and exact frozen installed
+  hand, and returns only the dynamic IDs that still fail or remain unclear.
+  Recursion validates that compact `failedCardIds` list against the frozen hand,
+  derives accept/reject, and constructs complete canonical card rows locally.
+  Unknown, duplicate, or malformed IDs fail; a nonempty valid list remains a
+  semantic reject while preserving locally resolved card rows. Provider-authored
+  fallback signals are stripped; deterministic duplicate removal requires a
+  locally derived exact-proposal signal bound to a frozen target and hashes.
+- Repair pass requests carry full frozen target records, not only target IDs.
+  Known patch domains are restored from those records. Visibly swapped
+  `domain`/`evidenceRefs` values recover only when every displaced reference is
+  frozen evidence and the opposite field contains only a legal domain token.
+  Repair uses one candidate-free top-level shape, requires at least one
+  effective patch, and reserves its one extra call for semantic correction.
 - A candidate whose `diagnosisHash` does not exactly match the accepted
   diagnosis is stale and fails. A writer cannot replace the independently
   approved editorial brief with a new rationale.

@@ -30,6 +30,12 @@ import { providerFailure } from './failures.mjs';
 
 const LANES = new Set(['utility', 'reasoner']);
 const HOST_SOURCES = new Set(['host-current-model', 'host-connection-profile']);
+const EDITORIAL_PATCH_DOMAINS = new Set([
+  'dialogue',
+  'narrative-execution',
+  'anti-slop',
+  'card-fidelity'
+]);
 const TRANSIENT_CODES = new Set([
   'ECONNRESET',
   'ETIMEDOUT',
@@ -246,6 +252,34 @@ function uniqueRequestStrings(value) {
   return [...new Set((Array.isArray(value) ? value : [])
     .map((entry) => String(entry || '').trim())
     .filter(Boolean))];
+}
+
+function hasAdjacentRepeatedWord(value = '') {
+  const source = String(value || '');
+  const match = source.match(/\b([\p{L}\p{N}'’-]+)\s+\1\b/iu);
+  return Boolean(match);
+}
+
+const AMBIGUOUS_ADJACENT_REPEAT_TOKENS = new Set([
+  'had', 'that', 'is', 'was', 'were', 'do', 'did', 'very', 'no', 'yes', 'bye', 'go'
+]);
+
+function removeDeterministicAdjacentRepeatedWords(value = '') {
+  return String(value).replace(/\b([\p{L}\p{N}'’-]+)\s+\1\b/giu, (match, token) => (
+    AMBIGUOUS_ADJACENT_REPEAT_TOKENS.has(String(token).toLowerCase()) ? match : token
+  ));
+}
+
+function indicatesAdjacentRepeatDefect(value) {
+  let serialized = '';
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    serialized = String(value ?? '');
+  }
+  const bounded = serialized.slice(0, 6000);
+  return /\b(?:adjacent(?:ly)?\s+)?(?:duplicate(?:d)?|repeat(?:ed|ing)?|repetition|double(?:d)?|redundan\w*|typo(?:graphical)?|extra\s+(?:word|token)|(?:wording|copy)\s+error)\b/iu.test(bounded)
+    || /\b(?:word|token)\b.{0,40}\btwice\b/iu.test(bounded);
 }
 
 function requestStringSchema(values) {
@@ -655,7 +689,7 @@ export function machineJsonSchemaForRequest(request = {}) {
     };
   }
   if (schema === 'recursion.editorialVerification.v1') {
-    const mode = ['recompose', 'redirect'].includes(String(request?.mode || '').trim())
+    const mode = ['repair', 'recompose', 'redirect'].includes(String(request?.mode || '').trim())
       ? String(request.mode).trim()
       : '';
     const sourceHash = String(request?.sourceHash || '').trim();
@@ -665,12 +699,36 @@ export function machineJsonSchemaForRequest(request = {}) {
     const validEvidenceIds = uniqueRequestStrings(request?.validEvidenceIds);
     const identityProperties = {
       schema: { const: schema },
-      mode: mode ? { const: mode } : { enum: ['recompose', 'redirect'] },
+      mode: mode ? { const: mode } : { enum: ['repair', 'recompose', 'redirect'] },
       sourceHash: sourceHash ? { const: sourceHash } : { type: 'string' },
       snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
       diagnosisHash: diagnosisHash ? { const: diagnosisHash } : { type: 'string' },
       candidateHash: candidateHash ? { const: candidateHash } : { type: 'string' }
     };
+    if (mode === 'repair') {
+      const installedCardIds = uniqueRequestStrings(request?.installedCardIds);
+      return {
+        name: schemaSafeName(schema),
+        schema: {
+          type: 'object',
+          properties: {
+            ...identityProperties,
+            failedCardIds: {
+              type: 'array',
+              minItems: 0,
+              maxItems: installedCardIds.length,
+              uniqueItems: true,
+              items: requestStringSchema(installedCardIds)
+            },
+            reason: { type: 'string' }
+          },
+          required: [
+            'schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash', 'failedCardIds', 'reason'
+          ],
+          additionalProperties: false
+        }
+      };
+    }
     if (mode === 'redirect') {
       return {
         name: schemaSafeName(schema),
@@ -783,6 +841,23 @@ function validateRoleResponseSchema(roleId, data) {
   }
 }
 
+function normalizeRepairFailedCardIds(failedCardIds, request = {}) {
+  if (!Array.isArray(failedCardIds)) return null;
+  const installedCardIds = uniqueRequestStrings(request?.installedCardIds);
+  const installed = new Set(installedCardIds);
+  const normalized = failedCardIds.map((entry) => {
+    const returnedCardId = String(entry || '').trim();
+    if (installed.has(returnedCardId)) return returnedCardId;
+    if (returnedCardId.startsWith('card:') && installed.has(returnedCardId.slice(5))) {
+      return returnedCardId.slice(5);
+    }
+    if (installed.has(`card:${returnedCardId}`)) return `card:${returnedCardId}`;
+    return '';
+  });
+  if (normalized.some((cardId) => !cardId) || new Set(normalized).size !== normalized.length) return null;
+  return normalized;
+}
+
 function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
   if (!plainObject(data)) return data;
   if (roleId === 'editorialEffectivenessJudge') {
@@ -802,9 +877,89 @@ function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
     const mode = String(request?.mode || '').trim();
     if (mode) normalized.mode = mode;
     if (roleId === 'editorialDiagnostician') {
+      delete normalized.repairSignals;
+      const displacedDecision = String(data.schema || '').trim();
       normalized.schema = expectedResponseSchema(roleId);
       if (mode && mode !== 'redirect' && plainObject(normalized.brief)) {
         normalized.brief = { ...normalized.brief, mode };
+      }
+      if (mode && mode !== 'redirect') {
+        const legalDecisions = mode === 'repair'
+          ? new Set(['proceed', 'no-change', 'requires-recompose', 'requires-redirect'])
+          : new Set(['proceed', 'no-change', 'requires-redirect']);
+        if (!legalDecisions.has(normalized.decision) && legalDecisions.has(displacedDecision)) {
+          normalized.decision = displacedDecision;
+        } else if (mode === 'repair' && !legalDecisions.has(normalized.decision) && Array.isArray(normalized.decision)) {
+          const validEvidenceIds = new Set(uniqueRequestStrings(request?.validEvidenceIds));
+          const validTargetIds = new Set(uniqueRequestStrings(request?.validTargetIds));
+          const validTargets = new Map(
+            (Array.isArray(request?.repairTargets) ? request.repairTargets : [])
+              .filter(plainObject)
+              .map((entry) => [String(entry.id || ''), entry])
+              .filter(([id]) => validTargetIds.has(id))
+          );
+          const defectList = normalized.decision;
+          const displacedDefectList = defectList.length > 0
+            && defectList.length <= 12
+            && indicatesAdjacentRepeatDefect(defectList)
+            && plainObject(normalized.brief)
+            && defectList.every((entry) => {
+              if (!plainObject(entry)) return false;
+              const reason = String(entry.reason || entry.problem || '').trim();
+              const evidenceIds = uniqueRequestStrings(
+                entry.evidenceRefs
+                || [entry.sourceId, entry.evidenceId, entry.evidence_id]
+              );
+              return Boolean(reason)
+                && evidenceIds.length > 0
+                && evidenceIds.every((id) => validEvidenceIds.has(id));
+            });
+          const displacedPatchList = defectList.length > 0
+            && defectList.length <= 120
+            && validTargetIds.size > 0
+            && defectList.every((entry) => {
+              if (!plainObject(entry)) return false;
+              const id = String(entry.id || '').trim();
+              const before = String(entry.before || '');
+              const after = String(entry.after || '');
+              return validTargetIds.has(id)
+                && Boolean(before)
+                && Boolean(after.trim())
+                && after !== before;
+            });
+          const exactAdjacentDuplicateProposalSignals = displacedPatchList ? defectList.flatMap((entry) => {
+            const target = validTargets.get(String(entry.id || ''));
+            if (!target) return [];
+            const trustedBefore = String(target.before || '');
+            const deterministicAfter = removeDeterministicAdjacentRepeatedWords(trustedBefore);
+            const exact = deterministicAfter !== trustedBefore
+              && String(entry.before || '') === trustedBefore
+              && String(entry.after || '') === deterministicAfter;
+            return exact
+              ? [{
+                  kind: 'exact-adjacent-duplicate-proposal',
+                  targetId: String(entry.id || ''),
+                  beforeHash: hashJson(trustedBefore),
+                  afterHash: hashJson(deterministicAfter)
+                }]
+              : [];
+          }) : [];
+          if (displacedDefectList || displacedPatchList) normalized.decision = 'proceed';
+          if (exactAdjacentDuplicateProposalSignals.length) {
+            normalized.repairSignals = exactAdjacentDuplicateProposalSignals;
+          }
+        }
+        if (
+          mode === 'repair'
+          && !legalDecisions.has(normalized.decision)
+          && hasAdjacentRepeatedWord(request?.sourceText)
+          && indicatesAdjacentRepeatDefect({
+            decision: normalized.decision,
+            brief: normalized.brief
+          })
+        ) {
+          normalized.decision = 'proceed';
+        }
       }
       if (mode === 'redirect') {
         const flat = {
@@ -841,6 +996,58 @@ function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
             : [],
           riskFlags: []
         }
+      };
+    }
+    if (roleId === 'editorialTransformer' && mode === 'repair' && Array.isArray(normalized.patches)) {
+      const validEvidenceIds = new Set(uniqueRequestStrings(request?.validEvidenceIds));
+      const repairTargets = new Map(
+        (Array.isArray(request?.repairTargets) ? request.repairTargets : [])
+          .filter(plainObject)
+          .map((entry) => [String(entry.id || '').trim(), entry])
+          .filter(([id, entry]) => id && EDITORIAL_PATCH_DOMAINS.has(String(entry.domain || '').trim()))
+      );
+      normalized.patches = normalized.patches.map((patch) => {
+        if (!plainObject(patch)) return patch;
+        const target = repairTargets.get(String(patch.id || '').trim());
+        if (!target) return patch;
+        const evidenceRefs = uniqueRequestStrings(patch.evidenceRefs);
+        const displacedEvidenceRefs = uniqueRequestStrings(patch.domain);
+        const evidenceFieldContainsOnlyDomains = evidenceRefs.length > 0
+          && evidenceRefs.every((entry) => EDITORIAL_PATCH_DOMAINS.has(entry));
+        const domainFieldContainsOnlyEvidence = displacedEvidenceRefs.length > 0
+          && displacedEvidenceRefs.every((entry) => validEvidenceIds.has(entry));
+        return {
+          ...patch,
+          domain: String(target.domain),
+          evidenceRefs: evidenceFieldContainsOnlyDomains && domainFieldContainsOnlyEvidence
+            ? displacedEvidenceRefs
+            : patch.evidenceRefs
+        };
+      });
+    }
+    if (roleId === 'editorialVerifier' && mode === 'repair') {
+      const installedCardIds = uniqueRequestStrings(request?.installedCardIds);
+      const validEvidenceIds = new Set(uniqueRequestStrings(request?.validEvidenceIds));
+      const failedCardIds = normalizeRepairFailedCardIds(normalized.failedCardIds, request);
+      const validFailedCardIds = failedCardIds !== null
+        && installedCardIds.every((cardId) => validEvidenceIds.has(`card:${cardId}`));
+      const failed = new Set(validFailedCardIds ? failedCardIds : []);
+      return {
+        schema: expectedResponseSchema(roleId),
+        mode,
+        sourceHash: normalized.sourceHash,
+        snapshotHash: normalized.snapshotHash,
+        diagnosisHash: String(request?.diagnosisHash || '').trim(),
+        candidateHash: String(request?.candidateHash || '').trim(),
+        decision: validFailedCardIds ? (failed.size ? 'reject' : 'accept') : 'invalid',
+        cardOutcomes: validFailedCardIds
+          ? installedCardIds.map((cardId) => ({
+              cardId,
+              status: failed.has(cardId) ? 'partially-reflected' : 'honored',
+              evidenceRefs: [`card:${cardId}`]
+            }))
+          : [],
+        reason: String(normalized.reason || '').trim()
       };
     }
     if (roleId === 'editorialVerifier' && mode === 'redirect') {
@@ -2265,7 +2472,17 @@ export function createGenerationRouter({ client, activity = null, journal = null
           providerLane: lane,
           composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
           label: attempt === 0 ? 'Provider call running.' : 'Retrying provider call.',
-          detail: { roleId, lane, attempt }
+          detail: {
+            roleId,
+            lane,
+            attempt,
+            ...(attempt > 0
+              ? {
+                  retryCount: attempt,
+                  reason: 'Provider call is retrying after a recoverable failure.'
+                }
+              : {})
+          }
         });
 
         try {

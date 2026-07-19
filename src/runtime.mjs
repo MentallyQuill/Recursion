@@ -72,8 +72,10 @@ import {
   buildEditorialEvidence,
   buildEditorialPassRequest,
   buildEditorialVerificationRequest,
+  editorialCardAuditDiagnostics,
   editorialPassKey,
   editorialVerificationRequired,
+  mergeRepairCardAudit,
   validateEditorialDiagnosis,
   validateEditorialPass,
   validateEditorialVerification,
@@ -4336,8 +4338,10 @@ export function createRecursionRuntime({
         allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true,
         ...(options.maxAttempts === 1 ? { maxAttempts: 1 } : {})
       });
+      const preserveProviderRecoveryBudget = options.allowStructuredRecovery === false
+        && options.preserveRecoveryBudget === true;
       const primaryRecoverySpent = primary?.recoverySpent === true
-        && !(options.allowStructuredRecovery === false && options.preserveRecoveryBudget === true);
+        && !preserveProviderRecoveryBudget;
       if (primaryRecoverySpent) recoveryToken.spent = true;
       if (primary?.ok === true || primaryLane !== 'reasoner' || options.allowLaneFallback === false) {
         return { result: primary, lane: primaryLane };
@@ -4352,7 +4356,7 @@ export function createRecursionRuntime({
         signal: enhancementSignal,
         allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true
       });
-      if (fallback?.recoverySpent === true) recoveryToken.spent = true;
+      if (fallback?.recoverySpent === true && !preserveProviderRecoveryBudget) recoveryToken.spent = true;
       return { result: fallback, lane: fallback?.ok === true ? 'utility' : primaryLane };
     }
     try {
@@ -4364,7 +4368,7 @@ export function createRecursionRuntime({
       }
       stageRuntimeActivity({ runId, phase: 'editorialDiagnosing', label: 'Diagnosing response...', providerLane: editorialLane, composerLane: editorialLane, chips: ['Enhancement', editorialMode] });
       const diagnosisRequest = {
-        ...buildEditorialDiagnosisRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot, lane: editorialLane }),
+        ...buildEditorialDiagnosisRequest({ mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot, targets, lane: editorialLane }),
         ...reasonerRequestMetadata(settings, 'editorial-transform', editorialLane),
         reasoningIntent: 'low'
       };
@@ -4372,15 +4376,32 @@ export function createRecursionRuntime({
         'editorialDiagnostician',
         diagnosisRequest,
         {
-          allowStructuredRecovery: editorialMode !== 'redirect',
-          preserveRecoveryBudget: editorialMode === 'redirect'
+          allowStructuredRecovery: editorialMode === 'recompose',
+          preserveRecoveryBudget: editorialMode !== 'recompose'
         }
       );
       if (enhancementSignal?.aborted) return canceledEditorialResult();
       let diagnosisValidation = diagnosisResponse.result?.ok === true
         ? validateEditorialDiagnosis(diagnosisResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot })
         : { ok: false, error: diagnosisResponse.result?.error || { code: 'RECURSION_EDITORIAL_DIAGNOSIS_FAILED', message: 'Editorial diagnosis failed.' } };
-      const runtimeCorrectionAvailable = diagnosisResponse.result?.ok === true || editorialMode === 'redirect';
+      const correctableProviderOutputCodes = new Set([
+        'RECURSION_JSON_PARSE_FAILED',
+        'RECURSION_JSON_OBJECT_REQUIRED',
+        'RECURSION_PROVIDER_EMPTY_RESPONSE',
+        'RECURSION_PROVIDER_REASONING_ONLY',
+        'RECURSION_PROVIDER_RESPONSE_JSON_INVALID',
+        'RECURSION_PROVIDER_SCHEMA_MISMATCH'
+      ]);
+      const recoverableRepairCardCoverageCodes = new Set([
+        'RECURSION_EDITORIAL_CARD_COVERAGE_MISSING',
+        'RECURSION_EDITORIAL_CARD_OUTCOME_INVALID'
+      ]);
+      const runtimeCorrectionAvailable = diagnosisResponse.result?.ok === true
+        || editorialMode === 'redirect'
+        || (
+          recoveryToken.spent !== true
+          && correctableProviderOutputCodes.has(safeText(diagnosisResponse.result?.error?.code, 120))
+        );
       if (!diagnosisValidation.ok && runtimeCorrectionAvailable && recoveryToken.spent !== true) {
         recoveryToken.spent = true;
         const correctionLane = editorialMode === 'redirect'
@@ -4395,6 +4416,7 @@ export function createRecursionRuntime({
             sourceHash,
             snapshotHash,
             snapshot: publicSnapshot,
+            targets,
             lane: correctionLane,
             retry: diagnosisValidation.error
           }),
@@ -4438,7 +4460,9 @@ export function createRecursionRuntime({
       const strictReasonerWriter = editorialMode === 'redirect' && transformLane === 'reasoner';
       const transformOptions = strictReasonerWriter
         ? { allowStructuredRecovery: false, allowLaneFallback: false, maxAttempts: 1 }
-        : {};
+        : editorialMode === 'repair'
+          ? { allowStructuredRecovery: false, preserveRecoveryBudget: true }
+          : {};
       const transformReadinessSkip = strictReasonerWriter
         ? await skipIfRedirectCapabilityChanged('before-transform')
         : null;
@@ -4453,8 +4477,32 @@ export function createRecursionRuntime({
       let validation = transformResponse.result?.ok === true
         ? validateEditorialPass(transformResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis: diagnosisValidation.value, snapshot: publicSnapshot, targets })
         : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
+      if (
+        editorialMode === 'repair'
+        && transformResponse.result?.ok === true
+        && !validation.ok
+        && recoverableRepairCardCoverageCodes.has(safeText(validation.error?.code, 120))
+      ) {
+        validation = validateEditorialPass(transformResponse.result.data, {
+          mode: editorialMode,
+          sourceText,
+          sourceHash,
+          snapshotHash,
+          diagnosisHash,
+          diagnosis: diagnosisValidation.value,
+          snapshot: publicSnapshot,
+          targets,
+          recoverCardCoverage: true
+        });
+      }
       const transformCorrectionAvailable = strictReasonerWriter
-        || (transformResponse.result?.ok === true && recoveryToken.spent !== true);
+        || (
+          recoveryToken.spent !== true
+          && (
+            transformResponse.result?.ok === true
+            || correctableProviderOutputCodes.has(safeText(transformResponse.result?.error?.code, 120))
+          )
+        );
       if (!validation.ok && transformCorrectionAvailable) {
         if (!strictReasonerWriter) recoveryToken.spent = true;
         transformAttemptCount += 1;
@@ -4496,7 +4544,119 @@ export function createRecursionRuntime({
             })
           : { ok: false, error: transformResponse.result?.error || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' } };
       }
-      if (!validation.ok) return { ...failEditorial(validation.error), validation };
+      if (!validation.ok) {
+        return {
+          ...failEditorial(validation.error),
+          validation,
+          diagnosisDecision: safeText(diagnosisValidation.value?.decision, 80),
+          diagnosisDiagnostics: asObject(diagnosisValidation.diagnostics)
+        };
+      }
+      if (
+        editorialMode === 'repair'
+        && validation.partialFailed === true
+        && Array.isArray(validation.unresolvedCardIds)
+        && validation.unresolvedCardIds.length > 0
+      ) {
+        const repairedCandidateText = applyEditorialArtifact(sourceText, validation.artifact, targets);
+        stageRuntimeActivity({
+          runId,
+          phase: 'editorialVerifying',
+          label: 'Auditing installed cards...',
+          providerLane: transformResponse.lane,
+          composerLane: transformResponse.lane,
+          chips: ['Enhancement', 'Repair', 'Card audit']
+        });
+        const buildRepairAuditRequest = (retry = null) => buildEditorialVerificationRequest({
+          mode: 'repair',
+          sourceHash,
+          snapshotHash,
+          diagnosisHash,
+          evidence,
+          snapshot: publicSnapshot,
+          candidate: { text: repairedCandidateText },
+          lane: transformResponse.lane,
+          retry
+        });
+        let auditRequest = buildRepairAuditRequest();
+        let auditResponse = await generateEditorialRole('editorialVerifier', {
+          ...auditRequest,
+          ...reasonerRequestMetadata(settings, 'editorial-transform', transformResponse.lane)
+        }, { allowStructuredRecovery: false });
+        if (enhancementSignal?.aborted) return canceledEditorialResult();
+        let auditValidation = auditResponse.result?.ok === true
+          ? validateEditorialVerification(auditResponse.result.data, {
+              mode: 'repair',
+              sourceHash,
+              snapshotHash,
+              diagnosisHash,
+              candidateHash: auditRequest.candidateHash,
+              evidence,
+              snapshot: publicSnapshot
+            })
+          : {
+              ok: false,
+              error: auditResponse.result?.error || {
+                code: 'RECURSION_EDITORIAL_CARD_AUDIT_FAILED',
+                message: 'Repair card audit failed.'
+              }
+            };
+        const auditFailureCode = safeText(auditValidation.error?.code, 120);
+        if (
+          !auditValidation.ok
+          && (
+            recoverableRepairCardCoverageCodes.has(auditFailureCode)
+            || auditFailureCode === 'RECURSION_EDITORIAL_VERIFICATION_INVALID'
+            || correctableProviderOutputCodes.has(auditFailureCode)
+          )
+        ) {
+          stageRuntimeActivity({
+            runId,
+            phase: 'editorialVerifying',
+            severity: 'warning',
+            label: 'Correcting installed-card audit...',
+            providerLane: transformResponse.lane,
+            composerLane: transformResponse.lane,
+            chips: ['Enhancement', 'Repair', 'Card audit'],
+            detail: { reason: auditValidation.error?.message || 'Installed-card audit was structurally incomplete.' }
+          });
+          auditRequest = buildRepairAuditRequest(auditValidation.error);
+          auditResponse = await generateEditorialRole('editorialVerifier', {
+            ...auditRequest,
+            ...reasonerRequestMetadata(settings, 'editorial-transform', transformResponse.lane)
+          }, { allowStructuredRecovery: false });
+          if (enhancementSignal?.aborted) return canceledEditorialResult();
+          auditValidation = auditResponse.result?.ok === true
+            ? validateEditorialVerification(auditResponse.result.data, {
+                mode: 'repair',
+                sourceHash,
+                snapshotHash,
+                diagnosisHash,
+                candidateHash: auditRequest.candidateHash,
+                evidence,
+                snapshot: publicSnapshot
+              })
+            : {
+                ok: false,
+                error: auditResponse.result?.error || {
+                  code: 'RECURSION_EDITORIAL_CARD_AUDIT_FAILED',
+                  message: 'Repair card audit correction failed.'
+                }
+              };
+        }
+        if (auditValidation.ok) {
+          validation = mergeRepairCardAudit(validation, auditValidation);
+        } else {
+          validation = {
+            ...validation,
+            cardAudit: {
+              decision: safeText(auditValidation.decision || 'invalid', 40),
+              errorCode: safeText(auditValidation.error?.code, 120),
+              diagnostics: editorialCardAuditDiagnostics(auditResponse.result?.data)
+            }
+          };
+        }
+      }
       editorialLane = transformResponse.lane;
       let candidateHash = validation.artifact?.kind === 'candidate'
         ? hashJson(String(validation.artifact.candidate?.text || validation.artifact.text || ''))
@@ -4623,7 +4783,14 @@ export function createRecursionRuntime({
                 error: transformResponse.result?.error
                   || { code: 'RECURSION_EDITORIAL_TRANSFORM_FAILED', message: 'Editorial transform failed.' }
               };
-          if (!validation.ok) return { ...failEditorial(validation.error), validation };
+          if (!validation.ok) {
+            return {
+              ...failEditorial(validation.error),
+              validation,
+              diagnosisDecision: safeText(diagnosisValidation.value?.decision, 80),
+              diagnosisDiagnostics: asObject(diagnosisValidation.diagnostics)
+            };
+          }
           editorialLane = transformResponse.lane;
           candidateHash = validation.artifact?.kind === 'candidate'
             ? hashJson(String(validation.artifact.candidate?.text || validation.artifact.text || ''))
@@ -4722,12 +4889,14 @@ export function createRecursionRuntime({
           applyMode,
           verification: verificationResult.decision,
           partialFailed: editorialPartialFailed,
+          ...(editorialPartialFailed ? { reason: 'Installed-card audit remains unresolved.' } : {}),
           cardOutcomes: marker.cardOutcomes,
           unresolvedCardIds: marker.unresolvedCardIds
         }
       });
       return {
         ok: true,
+        runId,
         partialFailed: editorialPartialFailed,
         unresolvedCardIds: marker.unresolvedCardIds,
         mode: editorialMode,
@@ -4736,6 +4905,7 @@ export function createRecursionRuntime({
         enhancedHash: marker.candidateHash,
         marker,
         artifact: validation.artifact,
+        cardAudit: asObject(validation.cardAudit),
         verification: verificationResult
       };
     } catch (error) {

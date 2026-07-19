@@ -9,6 +9,8 @@ import {
   buildEditorialDiagnosisRequest,
   buildEditorialPassRequest,
   buildEditorialVerificationRequest,
+  editorialCardAuditDiagnostics,
+  mergeRepairCardAudit,
   validateEditorialDiagnosis,
   validateEditorialPass,
   validateEditorialVerification,
@@ -17,7 +19,7 @@ import {
 } from '../../src/editorial-transform.mjs';
 import { assert, assertEqual, assertDeepEqual } from '../../tests/helpers/assert.mjs';
 import { hashJson } from '../../src/core.mjs';
-import { buildGenerationReviewTargets, publicGenerationReviewSnapshot } from '../../src/generation-review.mjs';
+import { buildGenerationReviewTargets, eligibleGenerationReviewTargets, publicGenerationReviewSnapshot } from '../../src/generation-review.mjs';
 
 const sourceText = 'She smiled. “Who sent you?” He told her the sender’s name, then reached for the latch.';
 const snapshot = {
@@ -197,6 +199,19 @@ const sourcePreservation = validateEditorialDiagnosis({
 assertEqual(sourcePreservation.ok, false, 'source-draft cannot preserve a fact');
 const staleDiagnosis = validateEditorialDiagnosis(diagnosis, { mode: 'recompose', sourceText, sourceHash: 'stale', snapshotHash, snapshot });
 assertEqual(staleDiagnosis.error.code, 'RECURSION_EDITORIAL_DIAGNOSIS_STALE', 'stale diagnosis rejected');
+const invalidRepairDecision = validateEditorialDiagnosis({
+  ...diagnosis,
+  mode: 'repair',
+  decision: 'requires-repair',
+  brief: { ...diagnosis.brief, mode: 'repair' }
+}, { mode: 'repair', sourceText, sourceHash, snapshotHash, snapshot });
+assertEqual(invalidRepairDecision.error.code, 'RECURSION_EDITORIAL_DIAGNOSIS_DECISION_INVALID', 'unknown Repair decision is rejected');
+assertEqual(invalidRepairDecision.receivedDecision, 'requires-repair', 'invalid diagnosis reports the bounded received decision');
+assertDeepEqual(
+  invalidRepairDecision.allowedDecisions,
+  ['proceed', 'no-change', 'requires-recompose', 'requires-redirect'],
+  'invalid diagnosis reports the selected mode decision contract'
+);
 
 const validRedirectBrief = {
   mode: 'redirect',
@@ -572,10 +587,10 @@ assertDeepEqual(
   redirectWithoutCardOutcomes.cardOutcomes,
   [{
     cardId: 'relationship',
-    status: 'partially-reflected',
+    status: 'not-applicable',
     evidenceRefs: ['card:relationship']
   }],
-  'Redirect canonicalizes missing card audit rows from the frozen installed hand'
+  'Redirect canonicalizes missing audit-only card rows without reporting a false warning'
 );
 const redirectWithInvalidCardOutcome = validateEditorialPass({
   ...redirectCandidate,
@@ -738,6 +753,488 @@ assertEqual(
 );
 const repairCandidate = validateEditorialPass({ ...candidate, mode: 'repair' }, { mode: 'repair', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot, targets: {} });
 assertEqual(repairCandidate.ok, false, 'Repair rejects full candidate');
+assertDeepEqual(
+  repairCandidate.receivedFields,
+  ['candidate', 'cardOutcomes', 'diagnosisHash', 'mode', 'schema', 'snapshotHash', 'sourceHash'],
+  'invalid Repair shape reports only sorted top-level field names'
+);
+assertDeepEqual(
+  repairCandidate.candidateFields,
+  ['changeLedger', 'preservationLedger', 'riskFlags', 'text'],
+  'invalid Repair shape reports only nested candidate field names'
+);
+assertEqual(repairCandidate.patchCount, 0, 'invalid Repair shape reports bounded patch count');
+const repairTargets = buildGenerationReviewTargets(sourceText);
+const invalidRepairPatch = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: [{
+    id: 'paragraph-99',
+    before: 'Unknown source span.',
+    after: 'Changed source span.',
+    domain: 'narrative-execution',
+    evidenceRefs: ['source:0']
+  }]
+}, { mode: 'repair', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot, targets: repairTargets });
+assertEqual(invalidRepairPatch.error.code, 'RECURSION_EDITORIAL_REPAIR_INVALID', 'Repair rejects an unknown patch identity');
+assertDeepEqual(
+  invalidRepairPatch.invalidPatches,
+  [{
+    index: 0,
+    id: 'paragraph-99',
+    domain: 'narrative-execution',
+    knownTarget: false,
+    duplicateTarget: false,
+    validDomain: true,
+    hasAfter: true,
+    changesTarget: false,
+    validEvidence: true,
+    fields: ['after', 'before', 'domain', 'evidenceRefs', 'id'],
+    fieldTypes: {
+      after: 'string',
+      before: 'string',
+      domain: 'string',
+      evidenceRefs: 'array',
+      id: 'string'
+    }
+  }],
+  'invalid Repair reports bounded structural diagnostics without source or replacement prose'
+);
+const repairTargetEntries = Object.values(repairTargets).flat();
+assert(repairTargetEntries.length >= 2, 'Repair no-op recovery fixture has multiple bounded targets');
+const effectiveRepairTarget = repairTargetEntries[0];
+const noOpRepairTarget = repairTargetEntries[1];
+const repairWithExplicitNoOp = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: [{
+    id: effectiveRepairTarget.id,
+    before: effectiveRepairTarget.before,
+    after: `${effectiveRepairTarget.before} Revised.`,
+    domain: effectiveRepairTarget.domain,
+    evidenceRefs: ['source:0']
+  }, {
+    id: noOpRepairTarget.id,
+    before: noOpRepairTarget.before,
+    after: noOpRepairTarget.before,
+    domain: noOpRepairTarget.domain,
+    evidenceRefs: ['source:0']
+  }]
+}, { mode: 'repair', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot, targets: repairTargets });
+assertEqual(repairWithExplicitNoOp.ok, true, 'Repair omits an explicit no-op row when another bounded patch is effective');
+assertDeepEqual(
+  repairWithExplicitNoOp.artifact.patches.map((patch) => patch.id),
+  [effectiveRepairTarget.id],
+  'Repair artifact contains only effective patch targets'
+);
+assertDeepEqual(
+  repairWithExplicitNoOp.ignoredNoOpPatchIds,
+  [noOpRepairTarget.id],
+  'Repair reports bounded no-op targets omitted during canonicalization'
+);
+const genericReplaceDomainRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: [{
+    id: effectiveRepairTarget.id,
+    before: effectiveRepairTarget.before,
+    after: `${effectiveRepairTarget.before} Revised again.`,
+    domain: 'replace',
+    evidenceRefs: ['source:0']
+  }]
+}, { mode: 'repair', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot, targets: repairTargets });
+assertEqual(genericReplaceDomainRepair.ok, true, 'Repair derives patch domain from a known deterministic target ID');
+assertEqual(
+  genericReplaceDomainRepair.artifact.patches[0].domain,
+  effectiveRepairTarget.domain,
+  'Repair ignores a provider-authored generic operation token and keeps the trusted target domain'
+);
+const allNoOpRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: [{
+    id: effectiveRepairTarget.id,
+    before: effectiveRepairTarget.before,
+    after: effectiveRepairTarget.before,
+    domain: effectiveRepairTarget.domain,
+    evidenceRefs: ['source:0']
+  }]
+}, { mode: 'repair', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot, targets: repairTargets });
+assertEqual(allNoOpRepair.error.code, 'RECURSION_EDITORIAL_NO_EFFECT', 'Repair still fails when every returned patch is a no-op');
+const overlappingProviderSource = 'Carter leaned forward. Daniel nodded once.';
+const overlappingProviderTargets = {
+  prose: [
+    {
+      id: 'prose:1',
+      domain: 'narrative-execution',
+      start: 0,
+      end: overlappingProviderSource.length,
+      before: overlappingProviderSource
+    },
+    {
+      id: 'prose:2',
+      domain: 'narrative-execution',
+      start: overlappingProviderSource.indexOf('Daniel'),
+      end: overlappingProviderSource.length,
+      before: 'Daniel nodded once.'
+    }
+  ]
+};
+const overlappingProviderRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash: 'overlapping-provider-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: [
+    {
+      id: 'prose:1',
+      domain: 'narrative-execution',
+      after: 'Carter stood. Daniel nodded once.',
+      evidenceRefs: ['source:0']
+    },
+    {
+      id: 'prose:2',
+      domain: 'narrative-execution',
+      after: 'Daniel nodded twice.',
+      evidenceRefs: ['source:0']
+    }
+  ]
+}, {
+  mode: 'repair',
+  sourceText: overlappingProviderSource,
+  sourceHash: 'overlapping-provider-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  diagnosis,
+  snapshot,
+  targets: overlappingProviderTargets
+});
+assertEqual(
+  overlappingProviderRepair.error?.code,
+  'RECURSION_EDITORIAL_REPAIR_INVALID',
+  'Repair rejects intersecting provider-authored target ranges'
+);
+const reviewOnlyBeatTarget = buildGenerationReviewTargets(sourceText).beats[0];
+const reviewOnlyBeatRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: [{
+    id: reviewOnlyBeatTarget.id,
+    domain: reviewOnlyBeatTarget.domain,
+    after: `${reviewOnlyBeatTarget.before} Revised.`,
+    evidenceRefs: ['source:0']
+  }]
+}, { mode: 'repair', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot, targets: repairTargets });
+assertEqual(
+  reviewOnlyBeatRepair.error?.code,
+  'RECURSION_EDITORIAL_REPAIR_INVALID',
+  'Repair rejects review-only beat IDs as patch targets'
+);
+const duplicateRepairSource = 'Carter leaned leaned forward.';
+const duplicateRepairTargets = buildGenerationReviewTargets(duplicateRepairSource);
+const duplicateRepairSignalTarget = duplicateRepairTargets.prose[0];
+const duplicateRepairDiagnosis = {
+  ...diagnosis,
+  mode: 'repair',
+  decision: 'proceed',
+  repairSignals: [{
+    kind: 'exact-adjacent-duplicate-proposal',
+    targetId: duplicateRepairSignalTarget.id,
+    beforeHash: hashJson(duplicateRepairSignalTarget.before),
+    afterHash: hashJson('Carter leaned forward.')
+  }],
+  brief: {
+    ...diagnosis.brief,
+    mode: 'repair',
+    diagnosis: [{
+      dimension: 'mechanical-correctness',
+      problem: 'The source contains redundant wording.',
+      evidenceRefs: ['source:0']
+    }],
+    allowedChanges: ['Remove the extra token only.']
+  }
+};
+const deterministicDuplicateRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: []
+}, {
+  mode: 'repair',
+  sourceText: duplicateRepairSource,
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  diagnosis: duplicateRepairDiagnosis,
+  snapshot,
+  targets: duplicateRepairTargets
+});
+assertEqual(deterministicDuplicateRepair.ok, true, 'Repair recovers an empty provider patch list from deterministic adjacent repetition');
+assertEqual(deterministicDuplicateRepair.artifact.patches.length, 1, 'deterministic duplicate recovery emits one bounded patch');
+assertEqual(deterministicDuplicateRepair.artifact.patches[0].after, 'Carter leaned forward.', 'deterministic duplicate recovery removes only the adjacent repeated token');
+assertDeepEqual(
+  deterministicDuplicateRepair.recoveredDeterministicPatchIds,
+  [deterministicDuplicateRepair.artifact.patches[0].id],
+  'Repair reports exact target IDs recovered without model-authored prose'
+);
+const grammaticalRepeatSource = 'He had had enough.';
+const grammaticalRepeatRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash: 'grammatical-repeat-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: []
+}, {
+  mode: 'repair',
+  sourceText: grammaticalRepeatSource,
+  sourceHash: 'grammatical-repeat-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  diagnosis: duplicateRepairDiagnosis,
+  snapshot,
+  targets: buildGenerationReviewTargets(grammaticalRepeatSource)
+});
+assertEqual(
+  grammaticalRepeatRepair.error?.code,
+  'RECURSION_EDITORIAL_REPAIR_INVALID',
+  'Repair never deletes grammatical adjacent repetition without validated defect evidence'
+);
+const homographRepeatSource = 'I can can the food before sunset.';
+const homographRepeatRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash: 'homograph-repeat-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: []
+}, {
+  mode: 'repair',
+  sourceText: homographRepeatSource,
+  sourceHash: 'homograph-repeat-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  diagnosis: { ...duplicateRepairDiagnosis, repairSignals: [] },
+  snapshot,
+  targets: buildGenerationReviewTargets(homographRepeatSource)
+});
+assertEqual(
+  homographRepeatRepair.error?.code,
+  'RECURSION_EDITORIAL_REPAIR_INVALID',
+  'generic repetition diagnosis cannot delete a valid adjacent homograph'
+);
+const overlappingDuplicateSource = 'Carter leaned leaned forward. Daniel nodded nodded once.';
+const secondDuplicateStart = overlappingDuplicateSource.indexOf('Daniel');
+const overlappingDuplicateTargets = {
+  prose: [
+    {
+      id: 'prose:1',
+      domain: 'narrative-execution',
+      start: 0,
+      end: secondDuplicateStart - 1,
+      before: overlappingDuplicateSource.slice(0, secondDuplicateStart - 1)
+    },
+    {
+      id: 'prose:2',
+      domain: 'narrative-execution',
+      start: secondDuplicateStart,
+      end: overlappingDuplicateSource.length,
+      before: overlappingDuplicateSource.slice(secondDuplicateStart)
+    }
+  ],
+  beats: [{
+    id: 'beat:1',
+    domain: 'narrative-execution',
+    start: 0,
+    end: overlappingDuplicateSource.length,
+    before: overlappingDuplicateSource
+  }]
+};
+const nonOverlappingDuplicateRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash: 'overlapping-duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: []
+}, {
+  mode: 'repair',
+  sourceText: overlappingDuplicateSource,
+  sourceHash: 'overlapping-duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  diagnosis: {
+    ...diagnosis,
+    repairSignals: overlappingDuplicateTargets.prose.map((target) => ({
+      kind: 'exact-adjacent-duplicate-proposal',
+      targetId: target.id,
+      beforeHash: hashJson(target.before),
+      afterHash: hashJson(target.before.replace(/\b(\w+)\s+\1\b/giu, '$1'))
+    }))
+  },
+  snapshot,
+  targets: overlappingDuplicateTargets
+});
+assertEqual(nonOverlappingDuplicateRepair.ok, true, 'deterministic duplicate recovery accepts nested trusted targets');
+assertDeepEqual(
+  nonOverlappingDuplicateRepair.artifact.patches.map((patch) => patch.id),
+  ['prose:1', 'prose:2'],
+  'deterministic duplicate recovery selects the smallest non-overlapping target set'
+);
+assertEqual(
+  applyEditorialArtifact(overlappingDuplicateSource, nonOverlappingDuplicateRepair.artifact, overlappingDuplicateTargets),
+  'Carter leaned forward. Daniel nodded once.',
+  'non-overlapping deterministic patches remove each duplicate exactly once'
+);
+const deterministicDuplicateRepairWithMissingAudit = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: [],
+  patches: []
+}, {
+  mode: 'repair',
+  sourceText: duplicateRepairSource,
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  diagnosis: duplicateRepairDiagnosis,
+  snapshot,
+  targets: duplicateRepairTargets,
+  recoverCardCoverage: true
+});
+assertEqual(deterministicDuplicateRepairWithMissingAudit.ok, true, 'deterministic duplicate Repair can recover a missing dynamic card audit');
+assertEqual(deterministicDuplicateRepairWithMissingAudit.partialFailed, true, 'duplicate-only Repair cannot certify an omitted dynamic card audit');
+assertDeepEqual(deterministicDuplicateRepairWithMissingAudit.unresolvedCardIds, ['relationship'], 'duplicate-only Repair reports the unresolved dynamic card row');
+assertDeepEqual(
+  deterministicDuplicateRepairWithMissingAudit.cardOutcomes,
+  [{ cardId: 'relationship', status: 'partially-reflected', evidenceRefs: ['card:relationship'] }],
+  'duplicate-only Repair preserves an explicit unresolved card outcome instead of inventing honored status'
+);
+const semanticPatchWithMissingAudit = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: [],
+  patches: [{
+    id: deterministicDuplicateRepair.artifact.patches[0].id,
+    before: duplicateRepairSource,
+    after: 'Carter quickly leaned forward.',
+    domain: 'narrative-execution',
+    evidenceRefs: ['source:0']
+  }]
+}, {
+  mode: 'repair',
+  sourceText: duplicateRepairSource,
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  diagnosis: duplicateRepairDiagnosis,
+  snapshot,
+  targets: duplicateRepairTargets,
+  recoverCardCoverage: true
+});
+assertEqual(semanticPatchWithMissingAudit.ok, true, 'Repair preserves a fully trusted deterministic subset when provider card audit is incomplete');
+assertEqual(semanticPatchWithMissingAudit.partialFailed, true, 'deterministic safe subset remains partial-failed when card audit is incomplete');
+assertEqual(
+  semanticPatchWithMissingAudit.artifact.patches[0].after,
+  'Carter leaned forward.',
+  'incomplete audit discards provider-authored semantic prose and keeps only local duplicate removal'
+);
+const duplicateRepairTarget = Object.values(duplicateRepairTargets).flat().find((target) => target.id === 'prose:1');
+const malformedKnownDuplicateRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: [{
+    id: duplicateRepairTarget.id,
+    before: duplicateRepairTarget.before,
+    after: '',
+    domain: ['source:0'],
+    evidenceRefs: []
+  }]
+}, {
+  mode: 'repair',
+  sourceText: duplicateRepairSource,
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  diagnosis: duplicateRepairDiagnosis,
+  snapshot,
+  targets: duplicateRepairTargets
+});
+assertEqual(malformedKnownDuplicateRepair.ok, true, 'Repair replaces malformed patch slots with deterministic duplicate removal when every target ID is known');
+assertEqual(malformedKnownDuplicateRepair.artifact.patches[0].after, 'Carter leaned forward.', 'malformed-slot recovery never trusts provider replacement prose');
+const malformedUnknownDuplicateRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: [{
+    id: 'prose:99',
+    before: duplicateRepairTarget.before,
+    after: '',
+    domain: ['source:0'],
+    evidenceRefs: []
+  }]
+}, {
+  mode: 'repair',
+  sourceText: duplicateRepairSource,
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  diagnosisHash,
+  diagnosis: duplicateRepairDiagnosis,
+  snapshot,
+  targets: duplicateRepairTargets
+});
+assertEqual(malformedUnknownDuplicateRepair.error.code, 'RECURSION_EDITORIAL_REPAIR_INVALID', 'deterministic duplicate recovery never accepts an unknown provider target ID');
+const cleanEmptyRepair = validateEditorialPass({
+  schema: EDITORIAL_PASS_SCHEMA,
+  mode: 'repair',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  cardOutcomes: candidate.cardOutcomes,
+  patches: []
+}, { mode: 'repair', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot, targets: repairTargets });
+assertEqual(cleanEmptyRepair.error.code, 'RECURSION_EDITORIAL_REPAIR_INVALID', 'empty Repair patches remain invalid when no deterministic bounded defect exists');
 const badEvidence = validateEditorialPass({ ...candidate, candidate: { ...candidate.candidate, changeLedger: [{ kind: 'rewrite', summary: 'bad', evidenceRefs: ['missing'] }] } }, { mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot });
 assertEqual(badEvidence.error.code, 'RECURSION_EDITORIAL_EVIDENCE_INVALID', 'unknown evidence rejected');
 const inventedPreservation = validateEditorialPass({ ...candidate, candidate: { ...candidate.candidate, preservationLedger: [{ claim: 'Invented ledger claim.', evidenceRefs: ['user:0'] }] } }, { mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot });
@@ -757,7 +1254,7 @@ const formattedValidation = validateEditorialPass(formattedCandidate, {
   sourceHash,
   snapshotHash,
   diagnosisHash,
-  diagnosis,
+  diagnosis: duplicateRepairDiagnosis,
   snapshot
 });
 assertEqual(formattedValidation.ok, true, 'Editorial accepts a candidate that preserves the leading scene-header boundary');
@@ -786,6 +1283,30 @@ assert(diagnosisRequest.prompt.includes('Recompose can replace the entire respon
 assert(diagnosisRequest.prompt.includes('Never choose requires-redirect only for repetition'), 'diagnosis prompt prevents slop-only redirect misclassification');
 assertEqual(diagnosisRequest.responseLength, undefined, 'diagnosis inherits the selected provider lane max tokens');
 assertDeepEqual(diagnosisRequest.validEvidenceIds, evidence.map((entry) => entry.id), 'diagnosis request exposes the frozen evidence ids as structured provider fields');
+const repairDiagnosisRequest = buildEditorialDiagnosisRequest({
+  mode: 'repair',
+  sourceText: duplicateRepairSource,
+  sourceHash: 'duplicate-source-hash',
+  snapshotHash,
+  snapshot,
+  targets: duplicateRepairTargets,
+  lane: 'reasoner'
+});
+assert(
+  repairDiagnosisRequest.prompt.includes('choose proceed whenever at least one supplied bounded target can be safely improved'),
+  'Repair diagnosis proceeds when any safe bounded improvement exists'
+);
+assert(repairDiagnosisRequest.prompt.includes('<repair_targets>'), 'Repair diagnosis receives exact eligible dialogue/prose targets');
+assertDeepEqual(
+  repairDiagnosisRequest.validTargetIds,
+  eligibleGenerationReviewTargets(duplicateRepairTargets).map((target) => target.id),
+  'Repair diagnosis exposes only eligible dynamic target IDs for bounded slot recovery'
+);
+assertDeepEqual(
+  repairDiagnosisRequest.repairTargets,
+  eligibleGenerationReviewTargets(duplicateRepairTargets).map(({ id, domain, before }) => ({ id, domain, before })),
+  'Repair diagnosis exposes trusted target text for exact local recovery checks'
+);
 const redirectDiagnosisRequest = buildEditorialDiagnosisRequest({ mode: 'redirect', sourceText, sourceHash, snapshotHash, snapshot, lane: 'reasoner' });
 assertDeepEqual(
   redirectDiagnosisRequest.validSourceEvidenceIds,
@@ -793,6 +1314,10 @@ assertDeepEqual(
   'Redirect diagnosis request exposes source-only evidence ids separately'
 );
 assert(redirectDiagnosisRequest.prompt.includes('Redirect is a turn-level correction, not a more aggressive Recompose.'), 'Redirect diagnosis prompt distinguishes trajectory from prose quality');
+assert(
+  redirectDiagnosisRequest.prompt.includes('Never ask the user to repeat, clarify, or restate information already supplied in the latest user turn'),
+  'Redirect diagnosis treats paraphrased requests for supplied information as forbidden repetition'
+);
 assert(redirectDiagnosisRequest.prompt.includes('Decision must be proceed because Redirect is already selected.'), 'Redirect diagnosis prompt gives one unambiguous valid decision');
 assert(!redirectDiagnosisRequest.prompt.includes('Choose proceed, no-change, requires-recompose, or requires-redirect according to the selected mode.'), 'Redirect diagnosis prompt omits the contradictory generic decision list');
 const redirectDiagnosisEnvelope = JSON.stringify({
@@ -875,6 +1400,34 @@ assertDeepEqual(passRequest.validEvidenceIds, evidence.map((entry) => entry.id),
 assertDeepEqual(passRequest.requiredPreservationLedger, diagnosis.brief.preserve, 'transform freezes the validated diagnosis preservation ledger');
 assert(passRequest.prompt.includes('Copy diagnosis.brief.preserve exactly'), 'transform explicitly forbids invented preservation claims or evidence ids');
 assertDeepEqual(passRequest.installedCardIds, ['relationship'], 'transform request exposes frozen installed card ids');
+const repairPassRequest = buildEditorialPassRequest({
+  mode: 'repair',
+  sourceText,
+  sourceHash,
+  snapshotHash,
+  diagnosis,
+  evidence,
+  snapshot,
+  targets: repairTargets,
+  lane: 'utility'
+});
+assertDeepEqual(
+  repairPassRequest.repairTargets.map((target) => target.id),
+  repairPassRequest.validTargetIds,
+  'Repair transform request carries the complete frozen target metadata used by provider normalization'
+);
+assert(
+  repairPassRequest.prompt.includes('Return exactly these Repair top-level keys: schema, mode, sourceHash, snapshotHash, diagnosisHash, cardOutcomes, patches.'),
+  'Repair transform prompt names one unambiguous bounded-patch envelope'
+);
+assert(
+  repairPassRequest.prompt.includes('patches must contain at least one effective row'),
+  'Repair transform prompt explicitly rejects an empty patch list'
+);
+assert(
+  !repairPassRequest.prompt.includes('candidate.preservationLedger'),
+  'Repair transform prompt does not contain contradictory Recompose candidate instructions'
+);
 const cardCoverageCorrectionRequest = buildEditorialPassRequest({
   mode: 'recompose',
   sourceText,
@@ -943,6 +1496,10 @@ assert(
   redirectPassRequest.prompt.includes('Return candidate prose only in the top-level text field.'),
   'Redirect transform prompt prevents candidate prose from shifting into a nested object'
 );
+assert(
+  redirectPassRequest.prompt.includes('Compare every candidate question against the latest user-turn evidence before returning'),
+  'Redirect transformer checks candidate questions for semantic repetition'
+);
 assertDeepEqual(
   redirectPassRequest.redirectChangeEvidenceRefs,
   ['user:0'],
@@ -988,6 +1545,24 @@ assert(verifierRequest.prompt.includes('Return only accept or reject'), 'verifie
 assertEqual(verifierRequest.responseLength, undefined, 'verifier inherits the selected provider lane max tokens');
 assertEqual(verifierRequest.candidateHash, candidateHash, 'verifier request binds exact candidate text');
 assert(verifierRequest.prompt.includes(`<candidate_hash>${candidateHash}</candidate_hash>`), 'verifier prompt includes candidate identity');
+const repairCardAuditRequest = buildEditorialVerificationRequest({
+  mode: 'repair',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  evidence,
+  snapshot,
+  candidate: { text: 'Carter leaned forward.' }
+});
+assertDeepEqual(repairCardAuditRequest.installedCardIds, ['relationship'], 'Repair card-audit request derives dynamic card IDs from the frozen installed hand');
+assert(
+  repairCardAuditRequest.prompt.includes('Include every card ID that remains partially reflected, violated, unsupported, or unclear.'),
+  'Repair card-audit request explicitly defines complete dynamic failure coverage'
+);
+assert(
+  repairCardAuditRequest.prompt.includes('Return failedCardIds using only this exact dynamic ID list: ["relationship"]'),
+  'Repair card-audit request supplies the exact dynamic failed-card ID contract'
+);
 const redirectVerifierRequest = buildEditorialVerificationRequest({
   mode: 'redirect',
   sourceHash,
@@ -1022,6 +1597,10 @@ assert(
 assert(
   redirectVerifierRequest.prompt.includes('A plan to act after another task, check, location change, or future beat still retains a forbidden deferral'),
   'Redirect verifier rejects renamed prerequisites and delayed-action paraphrases'
+);
+assert(
+  redirectVerifierRequest.prompt.includes('A paraphrased question still fails when it asks for information already supplied by the latest user turn'),
+  'Redirect verifier rejects semantic repetition instead of relying on lexical overlap'
 );
 assert(
   redirectVerifierRequest.prompt.includes('Required beats must be materially explicit in the candidate; adjacent or passive behavior is not equivalent to a required action'),
@@ -1087,6 +1666,85 @@ for (const [index, check] of REDIRECT_VERIFICATION_CHECKS.entries()) {
 const verification = validateEditorialVerification({ schema: EDITORIAL_VERIFICATION_SCHEMA, mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, decision: 'accept', evidenceRefs: ['packet:constraint'] }, { mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, evidence });
 assertEqual(verification.ok, true, 'accepted verifier result passes');
 assertEqual(validateEditorialVerification({ schema: EDITORIAL_VERIFICATION_SCHEMA, mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, decision: 'rewrite' }, { mode: 'recompose', sourceHash, snapshotHash, diagnosisHash, candidateHash, evidence }).ok, false, 'verifier cannot return rewrite');
+const repairCardAuditCandidateHash = hashJson('Carter leaned forward.');
+const repairCardAudit = validateEditorialVerification({
+  schema: EDITORIAL_VERIFICATION_SCHEMA,
+  mode: 'repair',
+  sourceHash,
+  snapshotHash,
+  diagnosisHash,
+  candidateHash: repairCardAuditCandidateHash,
+  decision: 'accept',
+  cardOutcomes: candidate.cardOutcomes
+}, { mode: 'repair', sourceHash, snapshotHash, diagnosisHash, candidateHash: repairCardAuditCandidateHash, evidence, snapshot });
+assertEqual(repairCardAudit.ok, true, 'complete accepted Repair card audit validates');
+assertDeepEqual(repairCardAudit.cardOutcomes, candidate.cardOutcomes, 'Repair card audit preserves exact dynamic outcomes');
+assertDeepEqual(
+  mergeRepairCardAudit({
+    cardOutcomes: [
+      { cardId: 'relationship', status: 'partially-reflected', evidenceRefs: ['card:relationship'] },
+      { cardId: 'scene-constraint', status: 'partially-reflected', evidenceRefs: ['card:scene-constraint'] }
+    ],
+    partialFailed: true,
+    unresolvedCardIds: ['relationship', 'scene-constraint']
+  }, {
+    ok: true,
+    decision: 'reject',
+    cardOutcomes: [
+      { cardId: 'relationship', status: 'honored', evidenceRefs: ['card:relationship'] },
+      { cardId: 'scene-constraint', status: 'partially-reflected', evidenceRefs: ['card:scene-constraint'] }
+    ]
+  }),
+  {
+    cardOutcomes: [
+      { cardId: 'relationship', status: 'honored', evidenceRefs: ['card:relationship'] },
+      { cardId: 'scene-constraint', status: 'partially-reflected', evidenceRefs: ['card:scene-constraint'] }
+    ],
+    partialFailed: true,
+    unresolvedCardIds: ['scene-constraint'],
+    cardAudit: { decision: 'reject' }
+  },
+  'valid rejected Repair audit preserves resolved dynamic outcomes and only failed IDs remain unresolved'
+);
+assertDeepEqual(
+  editorialCardAuditDiagnostics({
+    schema: EDITORIAL_VERIFICATION_SCHEMA,
+    decision: 'accept',
+    prose: 'must not leak',
+    cardOutcomes: [{
+      cardId: 'relationship',
+      status: 'honored',
+      evidenceRefs: ['card:relationship'],
+      explanation: 'must not leak'
+    }]
+  }),
+  {
+    responseFields: ['cardOutcomes', 'decision', 'prose', 'schema'],
+    cardOutcomesType: 'array',
+    cardOutcomeCount: 1,
+    rows: [{
+      fields: ['cardId', 'evidenceRefs', 'explanation', 'status'],
+      cardId: 'relationship',
+      status: 'honored',
+      evidenceRefs: ['card:relationship']
+    }]
+  },
+  'Repair card-audit diagnostics expose bounded structure and IDs without provider prose'
+);
+assertEqual(
+  validateEditorialVerification({
+    schema: EDITORIAL_VERIFICATION_SCHEMA,
+    mode: 'repair',
+    sourceHash,
+    snapshotHash,
+    diagnosisHash,
+    candidateHash: repairCardAuditCandidateHash,
+    decision: 'accept',
+    cardOutcomes: []
+  }, { mode: 'repair', sourceHash, snapshotHash, diagnosisHash, candidateHash: repairCardAuditCandidateHash, evidence, snapshot }).error?.code,
+  'RECURSION_EDITORIAL_CARD_COVERAGE_MISSING',
+  'Repair card audit rejects incomplete dynamic card coverage'
+);
 
 const redirectCandidateHash = hashJson(redirectCandidate.candidate.text);
 const passingRedirectChecks = REDIRECT_VERIFICATION_CHECKS.map((check) => ({
@@ -1153,6 +1811,10 @@ assertEqual(effectivenessRequest.sourceHash, hashJson(sourceText), 'effectivenes
 assertEqual(effectivenessRequest.candidateHash, redirectCandidateHash, 'effectiveness request hashes the judged candidate');
 assert(effectivenessRequest.prompt.includes('independent effectiveness judge'), 'effectiveness prompt does not replay the production verifier');
 assert(effectivenessRequest.prompt.includes('Do not trust the production marker'), 'effectiveness prompt treats marker claims as untrusted evidence');
+assert(
+  effectivenessRequest.prompt.includes('responseRequired false means the candidate need not explicitly depict, mention, or intensify that pressure'),
+  'effectiveness judge treats advisory non-required pressure as a coherence constraint rather than a mandatory beat'
+);
 const passingEffectivenessCriteria = editorialTransform.REDIRECT_EFFECTIVENESS_CRITERIA.map((criterion) => ({
   criterion,
   status: 'pass',

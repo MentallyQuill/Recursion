@@ -152,6 +152,19 @@ assertEqual(nonJsonRun.detail, null, 'non-json detail fails soft to null');
 assertEqual(nonJsonRun.cardCounts, null, 'non-json cardCounts fails soft to null');
 assertEventShape(nonJsonRun, 'non-json fallback event uses stable key shape');
 
+const decisionReporter = createActivityReporter();
+const decisionRun = decisionReporter.start({ runId: 'decision-run', label: 'Decision run' });
+const decisionSettlement = decisionReporter.settle({
+  runId: decisionRun.runId,
+  outcome: 'warning',
+  label: 'Editorial requires-recompose; original kept.',
+  detail: { decision: 'requires-recompose' }
+});
+assert(
+  decisionSettlement.detail?.failure?.message === 'requires-recompose',
+  'warning Editorial decisions become explicit activity reasons'
+);
+
 const laneReporter = createActivityReporter();
 const laneRun = laneReporter.start({
   phase: 'reading',

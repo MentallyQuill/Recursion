@@ -93,9 +93,49 @@ An enabled Enhancement review with a repairable defect must not silently succeed
 
 ### Partial-result policy
 
-The first combined result may contain a valid narrative patch while omitting a repairable card-fidelity or anti-slop ledger entry. Recursion preserves only independently safe patches, then spends at most one shared correction request against the **same frozen source, target IDs, review snapshot, and pipeline provenance**. That request is selected by the Structured Output Recovery policy: raw reformat for complete damaged JSON, schema correction for a role contract mismatch, or semantic correction for a structurally valid but incomplete review ledger. A normal enhancement therefore uses one provider call; a deficient first result can use at most one corrective provider request total.
+The first combined result may contain a valid narrative patch while omitting a repairable card-fidelity or anti-slop ledger entry. Recursion preserves only independently safe patches, then spends at most one shared correction request against the **same frozen source, target IDs, review snapshot, and pipeline provenance**. That request is selected by the Structured Output Recovery policy: raw reformat for complete damaged JSON, schema correction for a role contract mismatch, or semantic correction for a structurally valid but incomplete review ledger. A normal enhancement therefore uses one provider call; a deficient first result can use at most one corrective provider request total. Initial Repair diagnosis and Transformer calls reserve that one extra request for runtime-owned semantic correction instead of provider-layer raw reformatting; the correction includes the exact validator error and repeats the frozen contract.
 
 If the permitted correction still leaves a repairable review finding unresolved, Recursion may apply the independently safe patches, but the overall enhancement outcome is `partial-failed`, never `success` or a generic `caution`. The correction repeats the complete installed-card ledger because the validator always requires one outcome for every installed card; it never asks the provider for only the malformed entry. The progress tree is explicit: resolved domains are green; unresolved findings are red with their reason. `replace` and `as-swipe` use the same policy, so the user can see and retain a valid paid-for improvement without mistaking it for a complete review result. Any unsafe patch invalidates the provider result rather than being selectively applied.
+
+One deterministic safe-subset exception exists for adjacent repeated tokens.
+When the frozen source and known non-overlapping target ranges prove exact
+duplicate-token deletions, Recursion may discard malformed or unaudited
+provider-authored semantic patches and apply only those local deletions. Missing
+dynamic installed-card rows remain `partially-reflected`, so the overall result
+stays `partial-failed`; lexical safety is not evidence that every configured card
+was honored. The exception never accepts an unknown, duplicate, overlapping, or
+review-only beat target ID and never derives new prose. It requires a
+machine-owned signal created only from an exact provider proposal and bound to
+the trusted target ID plus before/after hashes. Generic diagnosis prose, lexical
+equality, and duplicate count alone provide no edit authority.
+
+When the Transformer omits dynamic card rows, Recursion runs a separate
+Editorial Verifier card audit over the transformed candidate. The audit receives
+the exact installed card IDs from the frozen hand and returns only
+`failedCardIds`. The response schema constrains every returned ID to that dynamic
+set. Recursion derives `accept` from an empty validated failure list and `reject`
+from a nonempty list, then constructs the complete canonical `cardOutcomes`
+ledger locally in frozen-hand order using each card's trusted `card:<id>`
+evidence. Failed IDs become `partially-reflected`; all other IDs become
+`honored`. Unknown, duplicate, or malformed failure IDs remain invalid. A
+structurally invalid audit may receive one bounded correction; a semantic
+`reject` is authoritative and is never retried. A valid rejection still
+preserves the complete locally derived ledger, so satisfied cards remain
+resolved and only the returned failed IDs remain unresolved.
+
+Provider-authored `repairSignals` are never trusted. Recursion removes that
+field at the provider boundary and may attach a fallback signal only while
+normalizing an exact displaced patch proposal against the frozen target ID,
+trusted source text, and locally computed before/after hashes.
+
+Repair pass requests carry complete frozen target records as structured
+metadata. Normalization derives each known patch domain from its trusted target.
+It may recover visibly swapped `domain` and `evidenceRefs` fields only when the
+displaced values are entirely known frozen evidence IDs and the opposite field
+contains only a legal domain token. Unknown targets or arbitrary evidence still
+fail. Repair prompts use one candidate-free bounded-patch envelope and require
+at least one effective patch; an empty list remains invalid after the one
+semantic correction.
 
 ## Generation review scope
 

@@ -58,6 +58,7 @@ const healthyEnhancementResult = {
   ok: true,
   partialFailed: false,
   mode: 'repair',
+  runId: 'editorial-proof',
   marker: healthyMarker
 };
 const healthyEditorialResult = {
@@ -70,6 +71,7 @@ const mutationInput = {
   enhancement: { enabled: true, mode: 'repair', applyMode: 'as-swipe' },
   before: beforeMutation,
   after: afterMutation,
+  prepared: { ok: true },
   enhancementResult: healthyEnhancementResult,
   editorialResult: healthyEditorialResult
 };
@@ -300,7 +302,7 @@ const negativeControls = [
     finalRows: doneRows,
     journalDelta: [{
       id: 'journal-failed',
-      runId: 'editorial-1',
+      runId: 'editorial-proof',
       severity: 'error',
       event: 'provider.call.failed',
       details: { roleId: 'editorialTransformer' }
@@ -338,12 +340,13 @@ assert(
 const explainedUnhealthy = evaluate({
   transitions: [
     { label: 'Editorial candidate', state: 'failed', reason: 'Provider call timed out.' },
+    { title: 'Issue', state: 'failed' },
     { label: 'Editorial candidate', state: 'done' }
   ],
   finalRows: doneRows,
   journalDelta: [{
     id: 'journal-explained-failure',
-    runId: 'editorial-explained',
+    runId: 'editorial-proof',
     severity: 'error',
     event: 'provider.call.failed',
     details: {
@@ -373,7 +376,7 @@ const unmatchedProvider = evaluate({
   finalRows: doneRows,
   journalDelta: [{
     id: 'journal-started',
-    runId: 'editorial-2',
+    runId: 'editorial-proof',
     severity: 'info',
     event: 'provider.call.started',
     details: { roleId: 'editorialDiagnostician' },
@@ -383,6 +386,59 @@ const unmatchedProvider = evaluate({
 });
 assertEqual(unmatchedProvider.ok, false, 'strict live enhancement oracle rejects unmatched provider starts');
 
+const healthyRepairProviderJournal = [
+  {
+    id: 'diagnosis-started',
+    runId: 'editorial-proof',
+    severity: 'info',
+    event: 'provider.call.started',
+    details: { roleId: 'editorialDiagnostician' },
+    hashes: { requestHash: 'request-diagnosis' }
+  },
+  {
+    id: 'diagnosis-completed',
+    runId: 'editorial-proof',
+    severity: 'info',
+    event: 'provider.call.completed',
+    details: { roleId: 'editorialDiagnostician' },
+    hashes: { requestHash: 'request-diagnosis' }
+  },
+  {
+    id: 'transform-started',
+    runId: 'editorial-proof',
+    severity: 'info',
+    event: 'provider.call.started',
+    details: { roleId: 'editorialTransformer' },
+    hashes: { requestHash: 'request-transform' }
+  },
+  {
+    id: 'transform-completed',
+    runId: 'editorial-proof',
+    severity: 'info',
+    event: 'provider.call.completed',
+    details: { roleId: 'editorialTransformer' },
+    hashes: { requestHash: 'request-transform' }
+  }
+];
+const healthyRepairCardAuditJournal = [
+  ...healthyRepairProviderJournal,
+  {
+    id: 'verifier-started',
+    runId: 'editorial-proof',
+    severity: 'info',
+    event: 'provider.call.started',
+    details: { roleId: 'editorialVerifier' },
+    hashes: { requestHash: 'request-verifier' }
+  },
+  {
+    id: 'verifier-completed',
+    runId: 'editorial-proof',
+    severity: 'info',
+    event: 'provider.call.completed',
+    details: { roleId: 'editorialVerifier' },
+    hashes: { requestHash: 'request-verifier' }
+  }
+];
 const healthy = evaluate({
   transitions: [
     { label: 'Editorial diagnosis', state: 'running' },
@@ -394,37 +450,148 @@ const healthy = evaluate({
     { label: 'Recursion prompt ready', state: 'done' }
   ],
   finalRows: doneRows,
+  journalDelta: healthyRepairCardAuditJournal,
+  ...mutationInput
+});
+assertEqual(healthy.ok, true, 'strict live enhancement oracle accepts a fully healthy concrete enhancement');
+assert(
+  evaluate({
+    transitions: doneRows,
+    finalRows: doneRows,
+    journalDelta: healthyRepairCardAuditJournal,
+    ...mutationInput,
+    prepared: { ok: false }
+  }).failures.includes('prepared-generation-unhealthy'),
+  'strict live enhancement oracle rejects stale prompt-ready DOM when current preparation failed'
+);
+const stalePromptReadyOnly = evaluate({
+  transitions: [
+    { label: 'Editorial diagnosis', state: 'done' },
+    { label: 'Editorial candidate', state: 'done' },
+    { label: 'Editorial verification', state: 'done' }
+  ],
+  finalRows: doneRows,
+  journalDelta: healthyRepairCardAuditJournal,
+  ...mutationInput,
+  prepared: { ok: true }
+});
+assert(
+  stalePromptReadyOnly.failures.includes('missing-recursion-prompt-ready'),
+  'strict live enhancement oracle rejects stale final prompt-ready DOM without a current transition'
+);
+const foreignSameRoleJournal = healthyRepairCardAuditJournal.map((entry) => ({
+  ...entry,
+  id: `foreign-${entry.id}`,
+  runId: 'editorial-foreign'
+}));
+const foreignSameRoleEvidence = evaluate({
+  transitions: doneRows,
+  finalRows: doneRows,
+  journalDelta: foreignSameRoleJournal,
+  ...mutationInput
+});
+assert(
+  foreignSameRoleEvidence.failures.includes('provider-role-missing-editorialdiagnostician')
+    && foreignSameRoleEvidence.failures.includes('provider-role-missing-editorialtransformer')
+    && foreignSameRoleEvidence.failures.includes('provider-role-missing-editorialverifier'),
+  'strict live enhancement oracle rejects same-role provider evidence from a foreign editorial run'
+);
+const healthyRecoveredRetry = evaluate({
+  transitions: [
+    { label: 'Editorial diagnosis', state: 'done' },
+    { label: 'Editorial candidate', state: 'done' },
+    { label: 'Editorial verification', state: 'warning', reason: 'Provider call is retrying after a recoverable failure.' },
+    { label: 'Editorial verification', state: 'done' },
+    { label: 'Editorial result', state: 'warning', reason: 'Provider call retried once before completing.' },
+    { label: 'Recursion prompt ready', state: 'done' }
+  ],
+  finalRows: [
+    ...doneRows,
+    { label: 'Editorial result', state: 'warning', reason: 'Provider call retried once before completing.' }
+  ],
+  journalDelta: healthyRepairCardAuditJournal,
+  ...mutationInput
+});
+assertEqual(
+  healthyRecoveredRetry.ok,
+  true,
+  'strict live enhancement oracle accepts an explained recovered retry with healthy provider settlement and mutation'
+);
+const repairAuditWithoutVerifierCall = evaluate({
+  transitions: [
+    { label: 'Editorial diagnosis', state: 'done' },
+    { label: 'Editorial candidate', state: 'done' },
+    { label: 'Editorial verification', state: 'done' },
+    { label: 'Recursion prompt ready', state: 'done' }
+  ],
+  finalRows: doneRows,
+  journalDelta: healthyRepairProviderJournal,
+  ...mutationInput
+});
+assert(
+  repairAuditWithoutVerifierCall.failures.includes('provider-role-missing-editorialverifier'),
+  'strict live enhancement oracle requires a matched verifier call when Repair card-audit progress is current'
+);
+const healthyWithUnrelatedWarmCalls = evaluate({
+  transitions: [
+    { label: 'Editorial diagnosis', state: 'running' },
+    { label: 'Editorial diagnosis', state: 'done' },
+    { label: 'Editorial candidate', state: 'running' },
+    { label: 'Editorial candidate', state: 'done' },
+    { label: 'Recursion prompt ready', state: 'done' }
+  ],
+  finalRows: doneRows,
   journalDelta: [
+    ...healthyRepairProviderJournal,
     {
-      id: 'journal-started',
-      runId: 'editorial-3',
+      id: 'rapid-warm-started',
+      runId: 'rapid-warm-1',
       severity: 'info',
       event: 'provider.call.started',
-      details: { roleId: 'editorialDiagnostician' },
-      hashes: { requestHash: 'request-2' }
+      details: { roleId: 'utilityArbiter' },
+      hashes: { requestHash: 'request-warm' }
     },
     {
-      id: 'journal-completed',
-      runId: 'editorial-3',
-      severity: 'info',
-      event: 'provider.call.completed',
-      details: { roleId: 'editorialDiagnostician' },
-      hashes: { requestHash: 'request-2' }
+      id: 'rapid-delta-failed',
+      runId: 'rapid-turn-1',
+      severity: 'error',
+      event: 'provider.call.failed',
+      details: {
+        roleId: 'rapidTurnDelta',
+        failure: { message: 'Unrelated background warm-state call failed.' }
+      },
+      hashes: { requestHash: 'request-rapid-delta' }
     }
   ],
   ...mutationInput
 });
-assertEqual(healthy.ok, true, 'strict live enhancement oracle accepts a fully healthy concrete enhancement');
+assertEqual(
+  healthyWithUnrelatedWarmCalls.ok,
+  true,
+  'strict live enhancement oracle ignores unrelated background provider calls in the same observation window'
+);
 const repairRowsWithoutVerifier = doneRows.filter((row) => row.label !== 'Editorial verification');
+const repairWithoutProviderCalls = evaluate({
+  transitions: repairRowsWithoutVerifier,
+  finalRows: repairRowsWithoutVerifier,
+  journalDelta: [],
+  ...mutationInput
+});
+assertEqual(repairWithoutProviderCalls.ok, false, 'strict live enhancement oracle rejects a mutation with no current-run provider calls');
+assert(
+  repairWithoutProviderCalls.failures.includes('provider-role-missing-editorialdiagnostician')
+    && repairWithoutProviderCalls.failures.includes('provider-role-missing-editorialtransformer'),
+  'strict live enhancement oracle identifies every missing mandatory Repair role'
+);
 assertEqual(
   evaluate({
     transitions: repairRowsWithoutVerifier,
     finalRows: repairRowsWithoutVerifier,
-    journalDelta: [],
+    journalDelta: healthyRepairProviderJournal,
     ...mutationInput
   }).ok,
   true,
-  'strict live enhancement oracle does not require a verifier row for Repair'
+  'strict live enhancement oracle requires diagnosis and transform but not verifier for Repair'
 );
 assert(
   evaluate({
@@ -449,7 +616,7 @@ const healthyReplacedTree = evaluate({
     { label: 'Utility card batch', state: 'done' },
     { label: 'Recursion prompt ready', state: 'done' }
   ],
-  journalDelta: [],
+  journalDelta: healthyRepairCardAuditJournal,
   ...mutationInput
 });
 assertEqual(
@@ -457,9 +624,23 @@ assertEqual(
   true,
   'strict live enhancement oracle accepts required done rows that were later replaced while retaining historical health'
 );
+const staleFinalRowsOnly = evaluate({
+  transitions: [],
+  finalRows: repairRowsWithoutVerifier,
+  journalDelta: healthyRepairProviderJournal,
+  ...mutationInput
+});
+assertEqual(staleFinalRowsOnly.ok, false, 'strict live enhancement oracle cannot certify execution from stale final rows');
+assert(
+  staleFinalRowsOnly.failures.includes('missing-editorial-diagnosis')
+    && staleFinalRowsOnly.failures.includes('missing-editorial-candidate'),
+  'strict live enhancement oracle requires current-run progress transitions'
+);
 assert(oracleSource.includes('attributeOldValue: true'), 'browser oracle requests progress attribute old values');
 assert(oracleSource.includes('mutation.oldValue'), 'browser oracle records transient progress states from mutation old values');
 assert(oracleSource.includes('data-recursion-progress-reason'), 'browser oracle records visible progress reasons');
+assert(!oracleSource.includes("captureTree('initial')"), 'browser oracle does not certify stale progress rows from a previous scenario');
+assert(oracleSource.includes('seedTreeBaseline'), 'browser oracle seeds row signatures before observing the current scenario');
 
 for (const scriptPath of [
   'tools/scripts/lib/live-editorial-effectiveness.mjs',

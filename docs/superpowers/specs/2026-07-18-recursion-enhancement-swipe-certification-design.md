@@ -1,7 +1,7 @@
 # Recursion Enhancement Swipe Certification Design
 
 **Date:** 2026-07-18  
-**Status:** Approved for implementation planning
+**Status:** Implemented and live-certified
 
 ## Problem
 
@@ -129,6 +129,66 @@ command exits nonzero even when every provider call returned parseable JSON.
 The proof remains restricted to `recursion-soak-*` users. It must not mutate
 `default-user`.
 
+### Provider and Harness Hardening
+
+Certification uses one pinned synthetic SillyTavern context with an own
+synthetic `chat` array. The live provider/settings capabilities remain inherited
+from the real context, while the runtime and oracle observe the same assistant
+message identity. A context mismatch fails closed as
+`live-source-context-drift`.
+
+The oracle seeds existing progress-row signatures without recording them as
+current-run transitions. Rows retained from an earlier scenario cannot make a
+later scenario pass or fail.
+
+Repair keeps bounded target identity authoritative:
+
+- configured card IDs and target IDs always come from the frozen request;
+- legal diagnosis decisions displaced into the schema slot are recovered;
+- an adjacent repeated token in the frozen source is deterministic evidence
+  that Repair may proceed even when the provider puts diagnosis prose or a
+  brief object in `decision`;
+- provider patch domains are replaced by the trusted domain of the known target
+  ID;
+- Repair requests carry complete frozen target metadata. A visibly displaced
+  evidence list may be restored from `domain` only when every value is known
+  frozen evidence and the opposite field contains only a legal domain token;
+- Repair uses one candidate-free bounded-patch envelope, rejects empty patch
+  lists, and reserves its single extra provider call for semantic correction;
+- explicit no-op rows are omitted while at least one effective patch remains;
+- empty or malformed known-ID patch rows may recover only to locally derived
+  adjacent-repeat deletion patches carrying a machine-owned exact-proposal
+  signal bound to the trusted target ID and before/after hashes;
+- grammatical repetition is never rewritten from lexical equality alone;
+- unknown, duplicate, overlapping, or review-only beat patch IDs still fail;
+- when the provider's installed-card audit remains incomplete, Recursion may
+  apply only that deterministic duplicate-removal subset, but dynamic card rows
+  remain unresolved and the result remains `partial-failed`;
+- Recursion then runs a dedicated Repair card audit through the Editorial
+  Verifier. It receives the transformed candidate and exact request-derived
+  installed card IDs. The provider returns only `failedCardIds`; Recursion
+  validates those IDs against the dynamic frozen set and constructs the complete
+  canonical ledger locally. An empty validated list accepts and clears the
+  unresolved rows; a nonempty list rejects while retaining locally resolved
+  rows, and malformed coverage remains `partial-failed`. Provider-authored
+  `repairSignals` are stripped; only an exact displaced patch proposal can
+  produce a locally derived target-and-hash-bound fallback signal.
+
+The strict live oracle requires current-run progress transitions plus matched
+completed calls for the Editorial Diagnostician and Transformer, and additionally
+the Editorial Verifier for Redirect or a Repair card audit. Retained final DOM
+rows cannot certify a new run. Unrelated Rapid warm-state calls are outside this
+Editorial scope, and same-role calls from another Editorial run cannot satisfy
+the proof: provider evidence must match the successful Enhancement result's exact
+run ID. Current `prepareForGeneration()` evidence must also report `ok: true`; a
+stale prompt-ready DOM row is insufficient, and prompt readiness must appear as
+a current transition. A recovered retry with an explicit safe reason and
+successful terminal provider settlement is recorded separately from unhealthy
+warnings.
+
+Redirect's independent judge treats `responseRequired: false` pressure as an
+advisory coherence constraint, not a mandatory rendered beat.
+
 ## Deterministic Test Methodology
 
 Focused oracle tests cover:
@@ -157,6 +217,11 @@ Runtime tests retain mode-specific semantic validation:
 
 Harness tests prove that every live Enhancement script installs and collects the
 shared oracle and gates its final status on the oracle verdict.
+
+Focused provider/validator tests also cover displaced Repair decisions,
+malformed known-ID patch slots, generic `replace` domains, no-op omission,
+empty-patch duplicate recovery, unknown-ID rejection, dynamic card-audit safe
+subsets, stale progress baselines, and synthetic context drift.
 
 ## Progress Semantics
 

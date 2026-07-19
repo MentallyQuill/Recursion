@@ -902,6 +902,11 @@ assertEqual(editorialPartialFailedResult?.state, 'failed', 'partial-failed Edito
 assertEqual(editorialPartialFailedCards?.children?.length, 2, 'partial-failed Editorial result lists every dynamic installed-card outcome');
 assertEqual(editorialPartialFailedCards?.children?.[0]?.state, 'done', 'valid Editorial card outcome remains resolved');
 assertEqual(editorialPartialFailedCards?.children?.[1]?.state, 'failed', 'reconstructed missing Editorial card outcome renders red');
+assertEqual(
+  editorialPartialFailedCards?.reason,
+  'Provider did not return one valid outcome for this installed card.',
+  'failed installed-card parent surfaces its concrete failed-child reason'
+);
 
 const hostStoppedProgress = createProgressRunModel({
   activityHistory: [

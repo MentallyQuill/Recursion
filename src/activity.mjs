@@ -67,6 +67,7 @@ function ensureUnhealthyFailure(event) {
     || detail.reason
     || detail.statusReason
     || detail.cautionReason
+    || detail.decision
     || event.fallbackReason;
   const failure = failureFrom(cause, {
     code: 'RECURSION_ACTIVITY_REASON_MISSING',

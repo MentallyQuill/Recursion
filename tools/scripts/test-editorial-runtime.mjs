@@ -369,7 +369,26 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
     latestMesId: 1,
     messages: [{ mesid: 1, role: 'user', text: 'Keep the diner loop grounded.', visible: true }]
   };
+  const repairDiagnosisOptions = [];
   let repairTransformAttempts = 0;
+  const repairTransformOptions = [];
+  let repairAuditAttempts = 0;
+  const repairVerifierRouter = createGenerationRouter({
+    client: {
+      async generate() {
+        repairAuditAttempts += 1;
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.editorialVerification.v1',
+            failedCardIds: repairAuditAttempts === 1 ? ['unknown-card'] : [],
+            reason: repairAuditAttempts === 1
+              ? 'Malformed dynamic failed-card coverage.'
+              : 'Every installed card is satisfied.'
+          })
+        };
+      }
+    }
+  });
   const appendedRepairSwipes = [];
   const repairStorage = createStorageRepository({ storage: createMemoryStorageAdapter() });
   const repairRuntime = createRecursionRuntime({
@@ -404,7 +423,7 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
     storage: repairStorage,
     activity: createActivityReporter(),
     generationRouter: {
-      async generate(roleId, request) {
+      async generate(roleId, request, options = {}) {
         if (roleId === 'utilityArbiter') {
           return {
             ok: true,
@@ -448,8 +467,10 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
           };
         }
         if (roleId === 'editorialDiagnostician') {
+          repairDiagnosisOptions.push(options);
           return {
             ok: true,
+            recoverySpent: options.allowStructuredRecovery === false,
             data: {
               schema: 'recursion.editorialDiagnosis.v1',
               mode: 'repair',
@@ -472,9 +493,11 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
           };
         }
         if (roleId === 'editorialTransformer') {
+          repairTransformOptions.push(options);
           repairTransformAttempts += 1;
           return {
             ok: true,
+            recoverySpent: options.allowStructuredRecovery === false,
             data: {
               schema: 'recursion.editorialPass.v1',
               mode: 'repair',
@@ -482,15 +505,23 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
               snapshotHash: request.snapshotHash,
               diagnosisHash: request.diagnosisHash,
               cardOutcomes: [],
-              patches: [{
-                id: repairTarget.id,
-                before: repairTarget.before,
-                after: 'The waitress reset the same table with the precision of a machine.',
-                domain: 'narrative-execution',
-                evidenceRefs: ['source:0']
-              }]
+              patches: repairTransformAttempts === 1
+                ? []
+                : [{
+                    id: repairTarget.id,
+                    before: repairTarget.before,
+                    after: 'The waitress reset the same table with the precision of a machine.',
+                    domain: 'narrative-execution',
+                    evidenceRefs: ['source:0']
+                  }]
             }
           };
+        }
+        if (roleId === 'editorialVerifier') {
+          return repairVerifierRouter.generate(roleId, request, {
+            allowStructuredRecovery: false,
+            maxAttempts: 1
+          });
         }
         throw new Error(`unexpected repair coverage role ${roleId}`);
       }
@@ -509,29 +540,40 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
   };
   await repairRuntime.updateSettings({ enhancements: { mode: 'repair', applyMode: 'as-swipe' } });
   const repaired = await repairRuntime.enhanceLatestAssistantMessage({ reason: 'repair-card-coverage-regression' });
-  assertEqual(repairTransformAttempts, 2, 'Repair first spends its one semantic correction on missing card coverage');
-  assertEqual(repaired.ok, true, 'Repair retains an independently safe patch after repeated card-ledger failure');
-  assertEqual(repaired.partialFailed, true, 'Repair reports recovered card-ledger coverage as partial-failed');
-  assertEqual(appendedRepairSwipes.length, 1, 'partial-failed Repair appends exactly one safe swipe');
-  assertEqual(repairRuntime.view().editorialResult?.status, 'partial-failed', 'partial-failed Repair remains visibly unhealthy');
+  assertEqual(repairDiagnosisOptions[0]?.allowStructuredRecovery, false, 'Repair reserves diagnosis recovery for runtime semantic correction');
+  assertEqual(repairTransformAttempts, 2, 'Repair uses exactly one runtime semantic correction for an empty bounded-patch list');
+  assertEqual(
+    repairTransformOptions[0]?.allowStructuredRecovery,
+    false,
+    'Repair reserves its single recovery call for a runtime-owned semantic transform correction'
+  );
+  assert(
+    repairTransformOptions[1]?.allowStructuredRecovery === false,
+    'Repair semantic transform correction keeps provider-layer structured recovery disabled'
+  );
+  assertEqual(repairAuditAttempts, 2, 'Repair corrects one raw unknown-ID compact card audit through the provider normalizer');
+  assertEqual(repaired.ok, true, 'Repair applies bounded patches after corrected card-audit coverage');
+  assertEqual(repaired.partialFailed, false, 'accepted corrected card audit resolves recovered card coverage');
+  assertEqual(appendedRepairSwipes.length, 1, 'corrected Repair appends exactly one safe swipe');
+  assertEqual(repairRuntime.view().editorialResult?.status, 'success', 'corrected Repair settles visibly healthy');
   assertDeepEqual(
     repairRuntime.view().activity?.detail?.unresolvedCardIds,
     repaired.unresolvedCardIds,
-    'partial-failed Repair exposes its dynamic unresolved installed-card IDs to progress rendering'
+    'corrected Repair clears dynamic unresolved installed-card IDs'
   );
   assertDeepEqual(
     repairRuntime.view().activity?.detail?.cardOutcomes,
     repaired.marker.cardOutcomes,
-    'partial-failed Repair exposes the recovered card ledger to progress rendering'
+    'corrected Repair exposes the accepted dynamic card ledger to progress rendering'
   );
   assert(
-    repaired.marker.cardOutcomes.every((outcome) => outcome.status === 'partially-reflected'),
-    'partial-failed Repair marks reconstructed card outcomes as unresolved'
+    repaired.marker.cardOutcomes.every((outcome) => outcome.status === 'honored'),
+    'corrected Repair preserves locally derived accepted card outcomes'
   );
   const repairJournal = await repairStorage.loadRunJournal(repairMessage.chatKey);
   const repairSettlement = repairJournal.entries.find((entry) => entry.event === 'editorial.run.settled');
-  assertEqual(repairSettlement.severity, 'error', 'partial-failed Repair persists an unhealthy terminal severity');
-  assertEqual(repairSettlement.details.status, 'partial-failed', 'partial-failed Repair persists its exact terminal status');
+  assertEqual(repairSettlement.severity, 'info', 'corrected Repair persists a healthy terminal severity');
+  assertEqual(repairSettlement.details.status, 'success', 'corrected Repair persists its exact terminal status');
 }
 
 const failedSource = 'Mara kept her hand on the latch.';

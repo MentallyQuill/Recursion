@@ -85,6 +85,14 @@ A successful structural retry still goes through ordinary semantic validation. I
 
 The provider correction must stay on the original lane, source, model configuration, frozen source hash, review snapshot, and pipeline provenance. Reasoner-to-Utility fallback remains a routing failure policy, not a second structured-output recovery budget.
 
+Repair Editorial calls are a deliberate exception to provider-layer retry
+timing. Initial `editorialDiagnostician` and `editorialTransformer` calls set
+provider structured recovery off while preserving the shared budget for the
+runtime semantic correction. This prevents a provider parser retry from
+consuming the only correction before Repair's bounded-patch validator sees an
+empty, malformed, or semantically invalid result. Primary and lane-fallback
+calls apply the same preservation rule.
+
 ## Generation Review semantic recovery
 
 `generationReviewer` uses the normal parser and router, then adds one role-owned semantic validator. It distinguishes unsafe patches from repairable ledger defects:

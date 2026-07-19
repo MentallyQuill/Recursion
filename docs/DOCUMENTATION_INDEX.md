@@ -53,6 +53,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - Approved product and UX direction for the unified Enhancement feature.
 - [Editorial Transformation Design](superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md) - Approved Repair, Recompose, and Redirect direction for evidence-led editorial transformation; supersedes the patch-only product boundary.
 - [Layered Failure Recovery Design](superpowers/specs/2026-07-17-recursion-layered-failure-recovery-design.md) - Provider repair, semantic correction, safe partial results, and explicit failure severity.
+- [Enhancement Swipe Certification Design](superpowers/specs/2026-07-18-recursion-enhancement-swipe-certification-design.md) - Strict live proof for exact `As Swipe` mutation, dynamic Repair audits, current-run oracle evidence, and soak-user boundaries.
 - [Redirect Improvement Design](superpowers/specs/2026-07-15-recursion-redirect-improvement-design.md) - Supplemental Redirect contract for evidence-paired source failures, replacement objectives, character-pressure guidance, mandatory verification, and semantic regressions.
 - [Editorial Transformation Implementation Plan](superpowers/plans/2026-07-13-recursion-editorial-transformation.md) - V1 implementation sequence, real module contracts, tests, UI behavior, and verification for Repair, Recompose, and Redirect.
 - [Design Folder Guide](design/README.md)
@@ -61,6 +62,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 
 - [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md)
 - [Generation Review and Enhancement Contract](architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - Card-aware response review, bounded patches, anti-slop, cache, progress, and semantic validation under the shared structured-output recovery policy.
+- [Enhancement Swipe Certification Plan](superpowers/plans/2026-07-18-recursion-enhancement-swipe-certification.md) - Implemented deterministic gates, installed-copy parity, and Standard/Rapid/Fused real-provider certification.
 - [Cache Use And Reuse Spec](architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-source reuse, Rapid warm artifacts, swipe variants, invalidation, and fresh-next-generation bypasses.
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md)

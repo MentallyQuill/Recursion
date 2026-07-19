@@ -1,4 +1,5 @@
 import { compact, hashJson, truncate } from './core.mjs';
+import { eligibleGenerationReviewTargets } from './generation-review.mjs';
 
 export const EDITORIAL_DIAGNOSIS_SCHEMA = 'recursion.editorialDiagnosis.v1';
 export const EDITORIAL_PASS_SCHEMA = 'recursion.editorialPass.v1';
@@ -379,7 +380,20 @@ export function validateEditorialDiagnosis(result = {}, { mode = '', sourceText 
   if (raw.schema !== EDITORIAL_DIAGNOSIS_SCHEMA) return fail('RECURSION_EDITORIAL_DIAGNOSIS_SCHEMA_MISMATCH', 'Editorial diagnosis returned the wrong schema.');
   if (raw.mode !== mode || raw.sourceHash !== sourceHash || raw.snapshotHash !== snapshotHash) return fail('RECURSION_EDITORIAL_DIAGNOSIS_STALE', 'Editorial diagnosis does not match the frozen source.');
   const data = mode === 'redirect' ? { ...raw, decision: 'proceed' } : raw;
-  if (!DIAGNOSIS_DECISIONS[data.mode]?.has(data.decision)) return fail('RECURSION_EDITORIAL_DIAGNOSIS_DECISION_INVALID', 'Editorial diagnosis returned an invalid decision for this mode.');
+  if (!DIAGNOSIS_DECISIONS[data.mode]?.has(data.decision)) {
+    const receivedDecision = safeText(
+      typeof data.decision === 'string' ? data.decision : JSON.stringify(data.decision),
+      120
+    );
+    return fail(
+      'RECURSION_EDITORIAL_DIAGNOSIS_DECISION_INVALID',
+      'Editorial diagnosis returned an invalid decision for this mode.',
+      {
+        receivedDecision,
+        allowedDecisions: [...(DIAGNOSIS_DECISIONS[data.mode] || [])]
+      }
+    );
+  }
   const evidence = buildEditorialEvidence(snapshot, sourceText);
   if (mode === 'redirect') {
     const hasOwn = (key) => Object.prototype.hasOwnProperty.call(data, key);
@@ -429,10 +443,21 @@ export function validateEditorialDiagnosis(result = {}, { mode = '', sourceText 
   const diagnosisBrief = data.brief;
   const briefResult = validateEditorialBrief(diagnosisBrief, evidence);
   if (!briefResult.ok) return briefResult;
-  return { ok: true, value: { ...data, brief: briefResult.value }, hash: editorialDiagnosisHash({ ...data, brief: briefResult.value }) };
+  const value = { ...data, brief: briefResult.value };
+  return {
+    ok: true,
+    value,
+    hash: editorialDiagnosisHash(value),
+    ...(mode === 'repair'
+      ? { diagnostics: { adjacentRepeatDefect: diagnosisSupportsAdjacentRepeat(value) } }
+      : {})
+  };
 }
 
-function cardOutcomeValidation(cardOutcomes, installedHand, known, { recoverMissing = false } = {}) {
+function cardOutcomeValidation(cardOutcomes, installedHand, known, {
+  recoverMissing = false,
+  recoveredStatus = 'partially-reflected'
+} = {}) {
   const cards = array(installedHand).map((card) => String(card?.cardId || card?.id || '')).filter(Boolean);
   const seen = new Set();
   const validOutcomes = new Map();
@@ -467,7 +492,7 @@ function cardOutcomeValidation(cardOutcomes, installedHand, known, { recoverMiss
       unresolvedCardIds.push(cardId);
       const evidenceId = `card:${cardId}`;
       return known.has(evidenceId)
-        ? { cardId, status: 'partially-reflected', evidenceRefs: [evidenceId] }
+        ? { cardId, status: recoveredStatus, evidenceRefs: [evidenceId] }
         : null;
     });
     if (recovered.some((outcome) => !outcome)) {
@@ -483,6 +508,95 @@ function maxCandidateLength(sourceLength, mode = '') {
   return Math.min(MAX_CANDIDATE, Math.max(1500, Math.ceil(Math.max(1, sourceLength) * 1.75)));
 }
 
+const AMBIGUOUS_ADJACENT_REPEAT_TOKENS = new Set([
+  'had', 'that', 'is', 'was', 'were', 'do', 'did', 'very', 'no', 'yes', 'bye', 'go'
+]);
+
+function removeAdjacentRepeatedWords(value = '') {
+  return String(value).replace(/\b([\p{L}\p{N}'’-]+)\s+\1\b/giu, (match, token) => (
+    AMBIGUOUS_ADJACENT_REPEAT_TOKENS.has(String(token).toLowerCase()) ? match : token
+  ));
+}
+
+function diagnosisSupportsAdjacentRepeat(diagnosis = {}, target = null) {
+  const signals = array(object(diagnosis).repairSignals)
+    .map(object)
+    .filter((signal) => (
+      signal.kind === 'exact-adjacent-duplicate-proposal'
+      && safeText(signal.targetId, 180)
+      && safeText(signal.beforeHash, 180)
+      && safeText(signal.afterHash, 180)
+    ));
+  if (!target) return signals.length > 0;
+  return signals.some((signal) => (
+    signal.targetId === String(target.id || '')
+    && signal.beforeHash === hashJson(String(target.before || ''))
+    && signal.afterHash === hashJson(String(target.after || ''))
+  ));
+}
+
+function deterministicAdjacentRepeatPatches(targets = {}, known = new Map(), diagnosis = {}) {
+  if (!known.has('source:0')) return [];
+  const seenRanges = new Set();
+  const candidates = eligibleGenerationReviewTargets(targets).flatMap((entry, order) => {
+    const before = String(entry?.before || '');
+    const after = removeAdjacentRepeatedWords(before);
+    const start = Number(entry?.start);
+    const end = Number(entry?.end);
+    const rangeKey = `${start}:${end}:${before}`;
+    if (
+      !before
+      || after === before
+      || !diagnosisSupportsAdjacentRepeat(diagnosis, { id: entry.id, before, after })
+      || !DOMAINS.has(entry?.domain)
+      || !Number.isInteger(start)
+      || !Number.isInteger(end)
+      || start < 0
+      || end <= start
+      || seenRanges.has(rangeKey)
+    ) return [];
+    seenRanges.add(rangeKey);
+    return [{
+      id: String(entry.id),
+      domain: entry.domain,
+      start,
+      end,
+      before,
+      after,
+      evidenceRefs: ['source:0'],
+      order
+    }];
+  });
+  const selected = [];
+  for (const candidate of candidates.sort((left, right) => (
+    (left.end - left.start) - (right.end - right.start)
+    || left.start - right.start
+    || left.order - right.order
+  ))) {
+    const overlaps = selected.some((entry) => candidate.start < entry.end && entry.start < candidate.end);
+    if (!overlaps) selected.push(candidate);
+  }
+  return selected
+    .sort((left, right) => left.start - right.start || left.order - right.order)
+    .map(({ start, end, order, ...patch }) => patch);
+}
+
+function overlappingPatchTargetIds(patches = [], byId = new Map()) {
+  const overlaps = new Set();
+  const ranges = patches.map((patch) => byId.get(String(patch?.id))).filter(Boolean);
+  for (let leftIndex = 0; leftIndex < ranges.length; leftIndex += 1) {
+    const left = ranges[leftIndex];
+    for (let rightIndex = leftIndex + 1; rightIndex < ranges.length; rightIndex += 1) {
+      const right = ranges[rightIndex];
+      if (Number(left.start) < Number(right.end) && Number(right.start) < Number(left.end)) {
+        overlaps.add(String(left.id));
+        overlaps.add(String(right.id));
+      }
+    }
+  }
+  return [...overlaps];
+}
+
 export function validateEditorialPass(result = {}, { mode = '', sourceText = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', diagnosis = {}, snapshot = {}, targets = {}, recoverCardCoverage = false } = {}) {
   const data = object(result);
   if (data.schema !== EDITORIAL_PASS_SCHEMA) return fail('RECURSION_EDITORIAL_SCHEMA_MISMATCH', 'Editorial pass returned the wrong schema.');
@@ -491,7 +605,8 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
   const evidence = buildEditorialEvidence(snapshot, sourceText);
   const known = evidenceMap(evidence);
   const cards = cardOutcomeValidation(data.cardOutcomes, snapshot.installedHand, known, {
-    recoverMissing: mode === 'redirect' || (mode === 'repair' && recoverCardCoverage === true)
+    recoverMissing: mode === 'redirect' || (mode === 'repair' && recoverCardCoverage === true),
+    recoveredStatus: mode === 'redirect' ? 'not-applicable' : 'partially-reflected'
   });
   if (!cards.ok) return cards;
   const recoveredRepairCoverage = mode === 'repair'
@@ -536,18 +651,119 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
       evidence
     };
   }
-  if (data.candidate !== undefined || !Array.isArray(data.patches) || data.patches.length === 0) return fail('RECURSION_EDITORIAL_REPAIR_INVALID', 'Repair requires bounded patches and cannot return a full candidate.');
-  const targetEntries = Object.values(targets || {}).flat().filter(Boolean);
+  const targetEntries = eligibleGenerationReviewTargets(targets);
+  let recoveredDeterministicPatches = mode === 'repair'
+    && data.candidate === undefined
+    && Array.isArray(data.patches)
+    && data.patches.length === 0
+    ? deterministicAdjacentRepeatPatches(targets, known, diagnosis)
+    : [];
+  const inputPatches = Array.isArray(data.patches) && data.patches.length
+    ? data.patches
+    : recoveredDeterministicPatches;
+  if (data.candidate !== undefined || !Array.isArray(data.patches) || inputPatches.length === 0) {
+    const safeFieldNames = (value) => Object.keys(object(value))
+      .filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key))
+      .sort()
+      .slice(0, 24);
+    return fail(
+      'RECURSION_EDITORIAL_REPAIR_INVALID',
+      'Repair requires bounded patches and cannot return a full candidate.',
+      {
+        receivedFields: safeFieldNames(data),
+        candidateFields: safeFieldNames(data.candidate),
+        patchCount: array(data.patches).length
+      }
+    );
+  }
   const byId = new Map(targetEntries.map((entry) => [String(entry.id), entry]));
   const seen = new Set();
-  const patches = data.patches.map((patch) => {
+  const invalidPatches = [];
+  const ignoredNoOpPatchIds = [];
+  const patches = [];
+  inputPatches.forEach((patch, index) => {
     const entry = byId.get(String(patch?.id));
     const evidenceRefs = refs(patch?.evidenceRefs, known);
-    if (!entry || seen.has(entry.id) || !DOMAINS.has(patch?.domain) || !String(patch?.after || '').trim() || patch.after === entry.before || !evidenceRefs) return null;
+    const duplicateTarget = Boolean(entry && seen.has(entry.id));
+    const validDomain = DOMAINS.has(patch?.domain);
+    const trustedDomainValid = Boolean(entry && DOMAINS.has(entry.domain));
+    const hasAfter = Boolean(String(patch?.after || '').trim());
+    const changesTarget = Boolean(entry && hasAfter && patch.after !== entry.before);
+    if (!entry || duplicateTarget || !trustedDomainValid || !hasAfter || !evidenceRefs) {
+      const fields = Object.keys(object(patch))
+        .filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key))
+        .sort()
+        .slice(0, 16);
+      const fieldTypes = Object.fromEntries(fields.map((field) => [
+        field,
+        Array.isArray(patch[field]) ? 'array' : (patch[field] === null ? 'null' : typeof patch[field])
+      ]));
+      invalidPatches.push({
+        index,
+        id: safeText(patch?.id, 120),
+        domain: safeText(patch?.domain, 120),
+        knownTarget: Boolean(entry),
+        duplicateTarget,
+        validDomain,
+        hasAfter,
+        changesTarget,
+        validEvidence: Boolean(evidenceRefs),
+        fields,
+        fieldTypes
+      });
+      return;
+    }
     seen.add(entry.id);
-    return { id: entry.id, domain: patch.domain, before: entry.before, after: String(patch.after), evidenceRefs };
+    if (!changesTarget) {
+      ignoredNoOpPatchIds.push(entry.id);
+      return;
+    }
+    patches.push({ id: entry.id, domain: entry.domain, before: entry.before, after: String(patch.after), evidenceRefs });
   });
-  if (patches.some((patch) => !patch)) return fail('RECURSION_EDITORIAL_REPAIR_INVALID', 'Repair returned an unknown, duplicate, or invalid patch target.');
+  if (invalidPatches.length) {
+    const receivedIds = inputPatches.map((patch) => String(patch?.id || ''));
+    const identitiesSafe = receivedIds.length > 0
+      && new Set(receivedIds).size === receivedIds.length
+      && receivedIds.every((id) => byId.has(id));
+    const deterministicFallback = identitiesSafe
+      ? deterministicAdjacentRepeatPatches(targets, known, diagnosis)
+      : [];
+    if (deterministicFallback.length) {
+      recoveredDeterministicPatches = deterministicFallback;
+      patches.splice(0, patches.length, ...deterministicFallback);
+      invalidPatches.splice(0, invalidPatches.length);
+      ignoredNoOpPatchIds.splice(0, ignoredNoOpPatchIds.length);
+    } else {
+      return fail(
+        'RECURSION_EDITORIAL_REPAIR_INVALID',
+        'Repair returned an unknown, duplicate, or invalid patch target.',
+        { invalidPatches }
+      );
+    }
+  }
+  if (!patches.length) {
+    return fail(
+      'RECURSION_EDITORIAL_NO_EFFECT',
+      'Editorial repair did not change any bounded target.',
+      { ignoredNoOpPatchIds }
+    );
+  }
+  if (recoveredRepairCoverage) {
+    const deterministicSafeSubset = deterministicAdjacentRepeatPatches(targets, known, diagnosis);
+    if (deterministicSafeSubset.length) {
+      recoveredDeterministicPatches = deterministicSafeSubset;
+      patches.splice(0, patches.length, ...deterministicSafeSubset);
+      ignoredNoOpPatchIds.splice(0, ignoredNoOpPatchIds.length);
+    }
+  }
+  const overlappingPatchIds = overlappingPatchTargetIds(patches, byId);
+  if (overlappingPatchIds.length) {
+    return fail(
+      'RECURSION_EDITORIAL_REPAIR_INVALID',
+      'Repair returned overlapping patch targets.',
+      { overlappingPatchIds }
+    );
+  }
   if (!preservesPresentationEnvelope(sourceText, applyEditorialArtifact(sourceText, { kind: 'patches', mode: 'repair', patches }, targets))) {
     return fail('RECURSION_EDITORIAL_PRESENTATION_INVALID', 'Editorial repair changed or collapsed the leading presentation envelope.');
   }
@@ -557,6 +773,8 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
     cardOutcomes: cards.cardOutcomes,
     partialFailed: recoveredRepairCoverage,
     unresolvedCardIds: recoveredRepairCoverage ? (cards.unresolvedCardIds || []) : [],
+    ignoredNoOpPatchIds,
+    recoveredDeterministicPatchIds: recoveredDeterministicPatches.map((patch) => patch.id),
     evidence
   };
 }
@@ -592,7 +810,7 @@ function validateRedirectVerificationChecks(checks, known, decision) {
 }
 
 export function validateEditorialVerification(result = {}, {
-  mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', candidateHash = '', evidence = []
+  mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', candidateHash = '', evidence = [], snapshot = {}
 } = {}) {
   const data = object(result);
   if (data.schema !== EDITORIAL_VERIFICATION_SCHEMA
@@ -606,6 +824,17 @@ export function validateEditorialVerification(result = {}, {
   if (!['accept', 'reject'].includes(data.decision)) return fail('RECURSION_EDITORIAL_VERIFICATION_INVALID', 'Editorial verifier must return accept or reject.');
   const known = evidenceMap(evidence);
   if (data.evidenceRefs !== undefined && !refs(data.evidenceRefs, known)) return fail('RECURSION_EDITORIAL_EVIDENCE_INVALID', 'Editorial verification cited unknown evidence.');
+  const repairCards = mode === 'repair'
+    ? cardOutcomeValidation(data.cardOutcomes, snapshot.installedHand, known)
+    : { ok: true, cardOutcomes: [] };
+  if (!repairCards.ok) return repairCards;
+  if (
+    mode === 'repair'
+    && data.decision === 'accept'
+    && repairCards.cardOutcomes.some((outcome) => ['partially-reflected', 'violated', 'requires-regeneration'].includes(outcome.status))
+  ) {
+    return fail('RECURSION_EDITORIAL_CARD_AUDIT_ACCEPT_INVALID', 'Repair card audit cannot accept unresolved or violated installed cards.');
+  }
   const redirectChecks = mode === 'redirect'
     ? validateRedirectVerificationChecks(data.checks, known, data.decision)
     : { ok: true, checks: [] };
@@ -614,8 +843,61 @@ export function validateEditorialVerification(result = {}, {
     ok: true,
     decision: data.decision,
     checks: redirectChecks.checks,
+    cardOutcomes: repairCards.cardOutcomes,
     evidenceRefs: array(data.evidenceRefs).map(String),
     reason: safeText(data.reason || '', 600)
+  };
+}
+
+export function editorialCardAuditDiagnostics(result = {}) {
+  const data = object(result);
+  const rawOutcomes = data.cardOutcomes;
+  return {
+    responseFields: Object.keys(data)
+      .filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key))
+      .sort()
+      .slice(0, 24),
+    cardOutcomesType: Array.isArray(rawOutcomes)
+      ? 'array'
+      : rawOutcomes === null
+        ? 'null'
+        : typeof rawOutcomes,
+    cardOutcomeCount: Array.isArray(rawOutcomes) ? rawOutcomes.length : 0,
+    rows: array(rawOutcomes).slice(0, 24).map((row) => {
+      const value = object(row);
+      return {
+        fields: Object.keys(value)
+          .filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key))
+          .sort()
+          .slice(0, 16),
+        cardId: safeText(value.cardId, 180),
+        status: safeText(value.status, 80),
+        evidenceRefs: array(value.evidenceRefs).map((ref) => safeText(ref, 180)).filter(Boolean).slice(0, 8)
+      };
+    })
+  };
+}
+
+export function mergeRepairCardAudit(validation = {}, auditValidation = {}) {
+  if (auditValidation?.ok !== true || !['accept', 'reject'].includes(auditValidation?.decision)) {
+    return validation;
+  }
+  const cardOutcomes = array(auditValidation.cardOutcomes).map((outcome) => ({
+    cardId: String(outcome?.cardId || ''),
+    status: String(outcome?.status || ''),
+    evidenceRefs: array(outcome?.evidenceRefs).map(String)
+  }));
+  const unresolvedCardIds = cardOutcomes
+    .filter((outcome) => ['partially-reflected', 'violated', 'requires-regeneration'].includes(outcome.status))
+    .map((outcome) => outcome.cardId)
+    .filter(Boolean);
+  const accepted = auditValidation.decision === 'accept';
+  return {
+    ...validation,
+    cardOutcomes,
+    partialFailed: !accepted,
+    unresolvedCardIds: accepted ? [] : unresolvedCardIds,
+    cardAudit: { decision: auditValidation.decision }
   };
 }
 
@@ -631,7 +913,7 @@ function requestBase(schema, prompt, lane = '') {
   };
 }
 
-export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', snapshot = {}, lane = '', retry = null } = {}) {
+export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sourceHash = '', snapshotHash = '', snapshot = {}, targets = {}, lane = '', retry = null } = {}) {
   const evidence = buildEditorialEvidence(snapshot, sourceText);
   const preservedSource = preservedText(sourceText, MAX_SOURCE);
   const presentationEnvelope = leadingPresentationEnvelope(sourceText);
@@ -642,6 +924,11 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
     .filter((entry) => ['source-draft', 'source-negative'].includes(entry.authority))
     .map((entry) => entry.id);
   const validEvidenceIds = evidence.map((entry) => entry.id);
+  const repairTargets = mode === 'repair'
+    ? eligibleGenerationReviewTargets(targets)
+        .map((entry) => ({ id: entry.id, domain: entry.domain, before: entry.before }))
+        .slice(0, 120)
+    : [];
   const correction = retry
     ? mode === 'redirect'
       ? [
@@ -677,6 +964,7 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
         'requiredBeats and forbiddenSourceBeats must be non-empty arrays of structured objects.',
         'sceneCharacters and characterPressure must be non-empty arrays with exactly one row per established scene character.',
         'Treat the latest user-turn evidence as completed player-authored action or dialogue that the assistant response must answer. Never replay, paraphrase, or assign that completed user content to the candidate response.',
+        'Never ask the user to repeat, clarify, or restate information already supplied in the latest user turn; a paraphrased request for the same information is still repetition.',
         'Pair established non-source evidence with the conflicting source passages.',
         'Define one supported replacement objective, required beats, and forbidden source beats.',
         'If the latest user turn proposes or requests an action, moving it behind another task, location change, check, conversation, or future beat is a deferral unless frozen non-source evidence independently requires that delay.',
@@ -686,6 +974,14 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
         'When an immediate want is unsupported, immediateWant must be null, wantEvidenceRefs and sourceEvidenceRefs must both be empty arrays, and sourcePressureEffect must be unclear.',
         'When an immediate want is supported, immediateWant must be a non-empty string, wantEvidenceRefs must cite established non-source evidence, and sourceEvidenceRefs must cite source-draft evidence.',
         'Character pressure is advisory evidence; do not require every character to speak or act.'
+      ]
+    : [];
+  const repairRules = mode === 'repair'
+    ? [
+        'For selected Repair, choose proceed whenever at least one supplied bounded target can be safely improved without changing supported intent or direction.',
+        'Multiple local defects are still Repair work; do not choose requires-recompose merely because more than one bounded patch is needed.',
+        'Choose no-change only when none of the supplied targets needs a safe bounded correction.',
+        'Choose requires-recompose only when no safe bounded target can improve the response and the identified defect requires a full rewrite.'
       ]
     : [];
   const decisionRule = mode === 'redirect'
@@ -701,10 +997,12 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
     'For selected Recompose, choose proceed for repetition, slop, pacing, voice, phrasing, scene execution, or any defect fixable by a full rewrite that keeps the supported intent.',
     'Never choose requires-redirect only for repetition, verbosity, awkward execution, or other quality defects that Recompose can remove.',
     ...redirectRules,
+    ...repairRules,
     ...(presentationEnvelope ? ['Preserve the presentation envelope exactly: keep the leading scene header unchanged and retain a blank line before body prose.'] : []),
     ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
+    ...(mode === 'repair' ? [`<repair_targets>${JSON.stringify(repairTargets)}</repair_targets>`] : []),
     `<evidence>${JSON.stringify(evidence)}</evidence>`,
     `<presentation_envelope>${JSON.stringify(presentationEnvelope)}</presentation_envelope>`,
     `<source_json>${JSON.stringify(preservedSource)}</source_json>`
@@ -718,7 +1016,9 @@ export function buildEditorialDiagnosisRequest({ mode = '', sourceText = '', sou
     presentationEnvelope,
     validEvidenceIds,
     validPreservationEvidenceIds,
-    validSourceEvidenceIds
+    validSourceEvidenceIds,
+    validTargetIds: repairTargets.map((entry) => String(entry.id || '')).filter(Boolean),
+    repairTargets
   };
 }
 
@@ -743,7 +1043,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
   const full = FULL_MODES.has(mode);
   const preservedSource = preservedText(sourceText, MAX_SOURCE);
   const presentationEnvelope = leadingPresentationEnvelope(sourceText);
-  const targetList = Object.values(targets || {}).flat().map((entry) => ({ id: entry.id, domain: entry.domain, before: entry.before })).slice(0, 120);
+  const targetList = eligibleGenerationReviewTargets(targets).map((entry) => ({ id: entry.id, domain: entry.domain, before: entry.before })).slice(0, 120);
   const validPreservationEvidenceIds = array(evidence)
     .filter((entry) => !['source-draft', 'source-negative'].includes(entry?.authority))
     .map((entry) => String(entry?.id || ''))
@@ -776,6 +1076,7 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
         'Include the supported substance of every required beat.',
         'Do not weaken an active required beat into passive attention, agreement, observation, or internal feeling.',
         'Do not preserve any forbidden source beat, even with different wording.',
+        'Compare every candidate question against the latest user-turn evidence before returning; remove any question that asks for information the user already supplied.',
         'Planning to act after another task, check, location change, or future beat still preserves a forbidden deferral; engage a current-turn required beat directly.',
         'Use diagnosis.brief.characterPressure as advisory dramatic evidence. Rising pressure makes a stronger response more likely but never mandatory.',
         'Silence, restraint, refusal, and delayed action remain valid when supported.',
@@ -791,11 +1092,20 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
         'Return candidate prose only in the top-level text field.',
         'Recursion constructs preservation, change-ledger, and audit metadata locally after structural validation.'
       ]
-    : [
-        `Copy diagnosis.brief.preserve exactly into candidate.preservationLedger: ${JSON.stringify(requiredPreservationLedger)}. Do not add, remove, or rewrite preservation claims or evidence IDs.`,
-        `Return cardOutcomes in this exact cardId order, once each: ${JSON.stringify(installedCardIds)}.`,
-        'Every preservation claim, major change, patch, and card outcome must cite only supplied evidence IDs.'
-      ];
+    : mode === 'repair'
+      ? [
+          'Return exactly these Repair top-level keys: schema, mode, sourceHash, snapshotHash, diagnosisHash, cardOutcomes, patches.',
+          'Do not return candidate, preservationLedger, changeLedger, or riskFlags.',
+          'For Repair, patches must contain at least one effective row and every row must change its supplied target.',
+          'Each patch row must contain exactly id, before, after, domain, and evidenceRefs. Keep domain as one domain string and evidenceRefs as an array of supplied evidence IDs.',
+          `Return cardOutcomes in this exact cardId order, once each: ${JSON.stringify(installedCardIds)}.`,
+          'Every patch and card outcome must cite only supplied evidence IDs.'
+        ]
+      : [
+          `Copy diagnosis.brief.preserve exactly into candidate.preservationLedger: ${JSON.stringify(requiredPreservationLedger)}. Do not add, remove, or rewrite preservation claims or evidence IDs.`,
+          `Return cardOutcomes in this exact cardId order, once each: ${JSON.stringify(installedCardIds)}.`,
+          'Every preservation claim, major change, and card outcome must cite only supplied evidence IDs.'
+        ];
   const prompt = [
     'Return only one valid Recursion Editorial Pass JSON object.',
     `Selected mode: ${mode}.`,
@@ -837,13 +1147,17 @@ export function buildEditorialPassRequest({ mode = '', sourceText = '', sourceHa
     requiredPreservationLedger,
     redirectChangeEvidenceRefs,
     installedCardIds,
-    validTargetIds: targetList.map((entry) => String(entry.id || '')).filter(Boolean)
+    validTargetIds: targetList.map((entry) => String(entry.id || '')).filter(Boolean),
+    ...(mode === 'repair' ? { repairTargets: targetList } : {})
   };
 }
 
-export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', diagnosis = null, diagnosisDiagnostics = {}, evidence = [], candidate = {}, lane = '', retry = null } = {}) {
+export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', snapshotHash = '', diagnosisHash = '', diagnosis = null, diagnosisDiagnostics = {}, evidence = [], snapshot = {}, candidate = {}, lane = '', retry = null } = {}) {
   const candidateHash = hashJson(String(candidate?.text || ''));
   const validEvidenceIds = array(evidence).map((entry) => String(entry?.id || '')).filter(Boolean);
+  const installedCardIds = array(snapshot?.installedHand)
+    .map((card) => String(card?.cardId || card?.id || ''))
+    .filter(Boolean);
   const verificationEvidenceRefs = mode === 'redirect'
     ? [...new Set([
         ...array(diagnosis?.brief?.replacementObjective?.evidenceRefs).map(String),
@@ -859,6 +1173,8 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
         `The previous verification could not be accepted: ${safeText(retry?.code || 'RECURSION_EDITORIAL_VERIFICATION_INVALID', 120)} - ${safeText(retry?.message || 'Invalid verification.', 360)}`,
         ...(mode === 'redirect'
           ? ['failedChecks may use only the required check names listed below.']
+          : mode === 'repair'
+            ? [`failedCardIds may use only these exact dynamic IDs: ${JSON.stringify(installedCardIds)}.`]
           : [`Check evidenceRefs may use only these evidence IDs: ${JSON.stringify(validEvidenceIds)}.`]),
         'Return a corrected verdict for the same candidate; do not rewrite or replace the candidate.'
       ]
@@ -877,16 +1193,29 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
         'Return one short user-safe reason. Do not return decision, checks, evidenceRefs, prose analysis, or a rewritten candidate.',
         'Required beats must be materially explicit in the candidate; adjacent or passive behavior is not equivalent to a required action.',
         'A plan to act after another task, check, location change, or future beat still retains a forbidden deferral, even when the wording differs from the source.',
+        'A paraphrased question still fails when it asks for information already supplied by the latest user turn; mark forbidden-source-beats-excluded and user-turn-answered as failed.',
         'Reject if the candidate omits any required beat, retains any forbidden source beat, or contradicts the advisory character-pressure map.'
+      ]
+    : [];
+  const repairRules = mode === 'repair'
+    ? [
+        `Return failedCardIds using only this exact dynamic ID list: ${JSON.stringify(installedCardIds)}.`,
+        'Judge the transformed candidate against each installed card and the complete frozen evidence.',
+        'Include every card ID that remains partially reflected, violated, unsupported, or unclear.',
+        'Return an empty failedCardIds array only when every installed card is honored, repaired, or genuinely not applicable.',
+        'Return one short reason. Do not return decision, cardOutcomes, patches, or rewritten candidate prose.'
       ]
     : [];
   const prompt = [
     mode === 'redirect'
       ? 'Return only one compact Redirect verification result for this candidate.'
+      : mode === 'repair'
+        ? 'Return only one complete installed-card audit for this repaired candidate.'
       : 'Return only accept or reject for this one editorial candidate.',
     'Do not rewrite, score, compare, rank, or propose another candidate.',
     `Mode: ${mode}.`,
     ...redirectRules,
+    ...repairRules,
     ...correction,
     `<source_hash>${safeText(sourceHash, 180)}</source_hash>`,
     `<snapshot_hash>${safeText(snapshotHash, 180)}</snapshot_hash>`,
@@ -909,6 +1238,7 @@ export function buildEditorialVerificationRequest({ mode = '', sourceHash = '', 
     candidate,
     ...(mode === 'redirect' ? { diagnosis: object(diagnosis) } : {}),
     validEvidenceIds,
+    installedCardIds,
     verificationEvidenceRefs
   };
 }
@@ -950,6 +1280,8 @@ export function buildRedirectEffectivenessRequest({
     'Evaluate trajectory and frozen evidence, not lexical edit distance or prose polish.',
     'Do not trust the production marker, verifier, or ledger self-report; use them only as identity and audit context.',
     'Return each required criterion exactly once. Decision pass requires every criterion to pass.',
+    'For character-pressure, judge contradiction and required response behavior exactly as declared by oracle.pressureExpectations.',
+    'responseRequired false means the candidate need not explicitly depict, mention, or intensify that pressure; pass when the candidate does not contradict it.',
     `<scenario_id>${safeText(scenarioId, 180)}</scenario_id>`,
     `<source_hash>${sourceHash}</source_hash>`,
     `<candidate_hash>${candidateHash}</candidate_hash>`,

@@ -199,6 +199,7 @@ The `card-system` runtime adds three related boundaries that all callers must pr
 - Card Deck configuration is persistent operator state; the scene deck and turn hand remain disposable runtime artifacts. `off`, `active`, and `priority` cards become runtime scope only when they are runnable and belong to the active deck.
 - Rapid and swipe reuse are exact-source optimizations. A warm artifact, cached hand, or prior swipe may be reused only when source identity, packet contract, pipeline provenance, and invalidation checks match. Regenerate bypasses those reuse paths once for the next send or swipe.
 - Enhancement is a post-generation semantic pipeline, not a generic rewrite. Diagnosis, bounded transformation, verification, and settlement bind to one frozen source. Redirect cannot write without evidence-grounded diagnosis and a passing verifier; failure reasons remain visible and host generation remains safe.
+- Enhancement `As Swipe` certification is mutation-strict: live proof requires exactly one new selected Recursion-owned swipe with a source-bound marker, healthy terminal Editorial settlement, current-run progress/provider evidence, and matching before/after text hashes. Repair card audits remain dynamic and locally canonicalized; live certification runs only against dedicated `recursion-soak-*` users.
 
 ## Non-Goals
 

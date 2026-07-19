@@ -6,8 +6,12 @@ const UNHEALTHY_JOURNAL_EVENTS = new Set(['provider.call.failed', 'prompt.instal
 const ENABLED_ENHANCEMENT_MODES = new Set(['repair', 'recompose', 'redirect']);
 const BASE_REQUIRED_EDITORIAL_LABELS = Object.freeze([
   'editorial diagnosis',
-  'editorial candidate',
-  'recursion prompt ready'
+  'editorial candidate'
+]);
+const EDITORIAL_PROVIDER_ROLES = new Set([
+  'editorialdiagnostician',
+  'editorialtransformer',
+  'editorialverifier'
 ]);
 
 function text(value = '') {
@@ -28,6 +32,12 @@ function usefulReason(value = '') {
     'needs attention',
     'issue'
   ]).has(reason);
+}
+
+function recoveredRetryTransition(row = {}) {
+  if (normalized(row?.state) !== 'warning') return false;
+  return /(?:retrying after a recoverable failure|retried (?:once|\d+ times?) before completing|correcting installed-card audit)/i
+    .test(text(row?.reason));
 }
 
 function providerCallKey(entry = {}) {
@@ -251,31 +261,45 @@ export function evaluateLiveEnhancementRun({
   enhancement = null,
   before = null,
   after = null,
+  prepared = null,
   enhancementResult = null,
   editorialResult = null
 } = {}) {
   const failures = [];
+  if (prepared?.ok !== true) failures.push('prepared-generation-unhealthy');
+  const expectedRunId = text(enhancementResult?.runId);
+  if (!expectedRunId) failures.push('enhancement-run-id-missing');
   const observedRows = [...transitions, ...finalRows];
-  const unhealthyTransitions = observedRows.filter((row) => (
+  const recoveredRetryTransitions = observedRows.filter(recoveredRetryTransition);
+  const unhealthyTransitions = observedRows.filter((row) => !recoveredRetryTransition(row) && (
     UNHEALTHY_PROGRESS_STATES.has(normalized(row?.state))
     || normalized(row?.label) === 'issue'
     || normalized(row?.title) === 'issue'
   ));
   if (unhealthyTransitions.length) failures.push('progress-observed-unhealthy');
-  const unexplainedTransitions = unhealthyTransitions.filter((row) => !usefulReason(row?.reason));
+  const hasExplainedUnhealthyTransition = unhealthyTransitions.some((row) => usefulReason(row?.reason));
+  const unexplainedTransitions = unhealthyTransitions.filter((row) => (
+    !usefulReason(row?.reason)
+    && !(normalized(row?.title) === 'issue' && hasExplainedUnhealthyTransition)
+  ));
   if (unexplainedTransitions.length) failures.push('progress-unhealthy-reason-missing');
 
   const skippedRows = observedRows.filter((row) => normalized(row?.state) === 'skipped');
   if (skippedRows.length) failures.push('enhancement-skipped');
 
   const latestByLabel = new Map();
-  for (const row of observedRows) {
+  for (const row of transitions) {
     const label = normalized(row?.label);
     if (label) latestByLabel.set(label, row);
   }
-  const requiredEditorialLabels = normalized(enhancement?.mode) === 'redirect'
+  const currentVerifierObserved = transitions.some((row) => normalized(row?.label) === 'editorial verification');
+  const verifierRequired = normalized(enhancement?.mode) === 'redirect' || currentVerifierObserved;
+  const requiredEditorialLabels = verifierRequired
     ? [...BASE_REQUIRED_EDITORIAL_LABELS, 'editorial verification']
     : BASE_REQUIRED_EDITORIAL_LABELS;
+  const expectedProviderRoles = verifierRequired
+    ? ['editorialdiagnostician', 'editorialtransformer', 'editorialverifier']
+    : ['editorialdiagnostician', 'editorialtransformer'];
   for (const requiredLabel of requiredEditorialLabels) {
     const row = latestByLabel.get(requiredLabel);
     if (!row) failures.push(`missing-${requiredLabel.replace(/\s+/g, '-')}`);
@@ -283,8 +307,20 @@ export function evaluateLiveEnhancementRun({
       failures.push(`${requiredLabel.replace(/\s+/g, '-')}-not-done`);
     }
   }
+  const promptReady = [...transitions]
+    .reverse()
+    .find((row) => normalized(row?.label) === 'recursion prompt ready');
+  if (!promptReady) failures.push('missing-recursion-prompt-ready');
+  else if (normalized(promptReady?.state) !== 'done') failures.push('recursion-prompt-ready-not-done');
 
-  const unhealthyJournal = journalDelta.filter((entry) => (
+  const scopedJournalDelta = journalDelta.filter((entry) => (
+    !normalized(entry?.event).startsWith('provider.call.')
+    || (
+      EDITORIAL_PROVIDER_ROLES.has(normalized(entry?.details?.roleId))
+      && text(entry?.runId) === expectedRunId
+    )
+  ));
+  const unhealthyJournal = scopedJournalDelta.filter((entry) => (
     UNHEALTHY_JOURNAL_SEVERITIES.has(normalized(entry?.severity))
     || UNHEALTHY_JOURNAL_EVENTS.has(text(entry?.event))
   ));
@@ -296,8 +332,8 @@ export function evaluateLiveEnhancementRun({
   ));
   if (unexplainedJournal.length) failures.push('journal-unhealthy-reason-missing');
 
-  const started = journalDelta.filter((entry) => entry?.event === 'provider.call.started');
-  const settled = journalDelta.filter((entry) => (
+  const started = scopedJournalDelta.filter((entry) => entry?.event === 'provider.call.started');
+  const settled = scopedJournalDelta.filter((entry) => (
     entry?.event === 'provider.call.completed' || entry?.event === 'provider.call.failed'
   ));
   const startedCounts = countByKey(started);
@@ -306,6 +342,18 @@ export function evaluateLiveEnhancementRun({
     .filter(([key, count]) => (settledCounts.get(key) || 0) < count)
     .map(([key]) => key);
   if (unmatchedProviderCalls.length) failures.push('provider-call-unmatched');
+  const startedRoles = new Set(started.map((entry) => normalized(entry?.details?.roleId)).filter(Boolean));
+  const completedRoles = new Set(
+    settled
+      .filter((entry) => entry?.event === 'provider.call.completed')
+      .map((entry) => normalized(entry?.details?.roleId))
+      .filter(Boolean)
+  );
+  for (const role of expectedProviderRoles) {
+    if (!startedRoles.has(role) || !completedRoles.has(role)) {
+      failures.push(`provider-role-missing-${role}`);
+    }
+  }
 
   const mutation = evaluateEnhancementMutation({
     enhancement,
@@ -320,6 +368,7 @@ export function evaluateLiveEnhancementRun({
     ok: failures.length === 0,
     failures: [...new Set(failures)],
     unhealthyTransitions,
+    recoveredRetryTransitions,
     unexplainedTransitions,
     unhealthyJournal,
     unexplainedJournal,
@@ -342,6 +391,7 @@ export async function installLiveEnhancementRunOracle(page) {
       baselineJournalIds: baselineJournal.map((entry) => String(entry?.id || '')).filter(Boolean),
       transitions: [],
       lastStateByRow: {},
+      lastTitle: '',
       startedAt: new Date().toISOString(),
       observer: null
     };
@@ -361,7 +411,7 @@ export async function installLiveEnhancementRunOracle(page) {
       const parent = String(row.parentElement?.dataset?.recursionProgressParentStep || '');
       const key = `${label}::${parent}`;
       const signature = `${progressState}::${reason}`;
-      if (state.lastStateByRow[key] === signature && source !== 'removed') return;
+      if (state.lastStateByRow[key] === signature) return;
       state.lastStateByRow[key] = signature;
       state.transitions.push({ label, state: progressState, reason, parent, source, at: new Date().toISOString() });
     };
@@ -375,9 +425,30 @@ export async function installLiveEnhancementRunOracle(page) {
         rowSnapshot(row, source);
       }
       const title = String(document.querySelector('[data-recursion-progress-title]')?.textContent || '').replace(/\s+/g, ' ').trim();
-      if (/^issue$/i.test(title)) state.transitions.push({ title, state: 'failed', source, at: new Date().toISOString() });
+      if (title !== state.lastTitle) {
+        state.lastTitle = title;
+        if (/^issue$/i.test(title)) state.transitions.push({ title, state: 'failed', source, at: new Date().toISOString() });
+      }
     };
-    captureTree('initial');
+    const seedTreeBaseline = () => {
+      for (const row of document.querySelectorAll('[data-recursion-status-popover] [data-recursion-progress-row]')) {
+        const label = String(
+          row.dataset.recursionProgressLabel
+          || row.querySelector('[data-recursion-progress-label]')?.textContent
+          || ''
+        ).replace(/\s+/g, ' ').trim();
+        const progressState = String(row.dataset.recursionProgressState || '').trim().toLowerCase();
+        if (!label || !progressState) continue;
+        const reason = String(
+          row.querySelector('[data-recursion-progress-reason]')?.textContent
+          || ''
+        ).replace(/\s+/g, ' ').trim();
+        const parent = String(row.parentElement?.dataset?.recursionProgressParentStep || '');
+        state.lastStateByRow[`${label}::${parent}`] = `${progressState}::${reason}`;
+      }
+      state.lastTitle = String(document.querySelector('[data-recursion-progress-title]')?.textContent || '').replace(/\s+/g, ' ').trim();
+    };
+    seedTreeBaseline();
     state.observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         if (
@@ -439,6 +510,7 @@ export async function collectLiveEnhancementRunOracle(page, certification = {}) 
     enhancement: object(certification.enhancement),
     before: object(certification.before),
     after: object(certification.after),
+    prepared: object(certification.prepared),
     enhancementResult: object(certification.enhancementResult),
     editorialResult: object(certification.editorialResult)
   });
@@ -456,6 +528,7 @@ export async function collectLiveEnhancementRunOracle(page, certification = {}) 
       after: mutationStateSummary(observation.after),
       enhancementResult: {
         ok: observation.enhancementResult?.ok === true,
+        runId: text(observation.enhancementResult?.runId),
         skipped: observation.enhancementResult?.skipped === true,
         partialFailed: observation.enhancementResult?.partialFailed === true,
         mode: text(observation.enhancementResult?.mode),

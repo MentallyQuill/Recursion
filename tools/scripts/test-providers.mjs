@@ -15,6 +15,7 @@ import {
 } from '../../src/providers.mjs';
 import { readFileSync } from 'node:fs';
 import { createActivityReporter } from '../../src/activity.mjs';
+import { hashJson } from '../../src/core.mjs';
 import { providerConfigHash } from '../../src/provider-capability.mjs';
 import { createSessionSecretStore, createSettingsStore } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -473,6 +474,120 @@ assertDeepEqual(
 );
 assertDeepEqual(editorialVerifierMachineSchema.schema.properties.evidenceRefs.items.enum, ['user:0', 'message:17'], 'Editorial verifier constrains optional evidence references to frozen ids');
 assertEqual(Object.prototype.hasOwnProperty.call(editorialVerifierMachineSchema.schema.properties, 'checks'), false, 'Recompose verifier does not receive Redirect checks');
+const repairCardAuditMachineSchema = machineJsonSchemaForRequest({
+  responseSchema: 'recursion.editorialVerification.v1',
+  machineJson: true,
+  mode: 'repair',
+  sourceHash: 'repair-source-hash',
+  snapshotHash: 'repair-snapshot-hash',
+  diagnosisHash: 'repair-diagnosis-hash',
+  candidateHash: 'repair-candidate-hash',
+  validEvidenceIds: ['source:0', 'card:one', 'card:two'],
+  installedCardIds: ['one', 'two']
+});
+assertDeepEqual(
+  repairCardAuditMachineSchema.schema.required,
+  ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash', 'failedCardIds', 'reason'],
+  'Repair card-audit schema requires candidate identity and a compact dynamic failed-card list'
+);
+assertDeepEqual(repairCardAuditMachineSchema.schema.properties.failedCardIds.items.enum, ['one', 'two'], 'Repair card-audit schema constrains failures to request-provided dynamic card IDs');
+assertEqual(Object.prototype.hasOwnProperty.call(repairCardAuditMachineSchema.schema.properties, 'cardOutcomes'), false, 'Repair card-audit provider does not enumerate canonical outcome rows');
+assertEqual(Object.prototype.hasOwnProperty.call(repairCardAuditMachineSchema.schema.properties, 'decision'), false, 'Repair card-audit decision is derived locally');
+const repairCardAuditEnvelopeRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.editorialPass.v1',
+          mode: 'repair',
+          sourceHash: 'model-source',
+          snapshotHash: 'model-snapshot',
+          diagnosisHash: 'model-diagnosis',
+          candidateHash: 'model-candidate',
+          failedCardIds: ['two'],
+          reason: 'The second installed card remains only partially reflected.'
+        })
+      };
+    }
+  }
+});
+const normalizedRepairCardAuditEnvelope = await repairCardAuditEnvelopeRouter.generate('editorialVerifier', {
+  mode: 'repair',
+  sourceHash: 'trusted-source',
+  snapshotHash: 'trusted-snapshot',
+  diagnosisHash: 'trusted-diagnosis',
+  candidateHash: 'trusted-candidate',
+  installedCardIds: ['one', 'two'],
+  validEvidenceIds: ['card:one', 'card:two']
+});
+assertEqual(normalizedRepairCardAuditEnvelope.ok, true, 'Repair card audit restores a displaced schema identifier from the trusted verifier role');
+assertEqual(normalizedRepairCardAuditEnvelope.data.schema, 'recursion.editorialVerification.v1', 'Repair card audit restores the verifier schema identifier');
+assertEqual(normalizedRepairCardAuditEnvelope.data.decision, 'reject', 'Repair card audit derives rejection from the validated failed-card list');
+assertDeepEqual(normalizedRepairCardAuditEnvelope.data.cardOutcomes, [{
+  cardId: 'one',
+  status: 'honored',
+  evidenceRefs: ['card:one']
+}, {
+  cardId: 'two',
+  status: 'partially-reflected',
+  evidenceRefs: ['card:two']
+}], 'Repair card audit constructs complete canonical dynamic rows from the validated failed-card list');
+const repairCardAuditDynamicEvidenceRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.editorialPass.v1',
+          failedCardIds: ['card:sceneFrameCard:locationSituation'],
+          reason: 'The location obligation remains incomplete.'
+        })
+      };
+    }
+  }
+});
+const normalizedRepairCardAuditDynamicEvidence = await repairCardAuditDynamicEvidenceRouter.generate('editorialVerifier', {
+  mode: 'repair',
+  sourceHash: 'trusted-source',
+  snapshotHash: 'trusted-snapshot',
+  diagnosisHash: 'trusted-diagnosis',
+  candidateHash: 'trusted-candidate',
+  installedCardIds: ['sceneFrameCard:locationSituation'],
+  validEvidenceIds: ['card:sceneFrameCard:locationSituation']
+});
+assertDeepEqual(normalizedRepairCardAuditDynamicEvidence.data.cardOutcomes, [{
+  cardId: 'sceneFrameCard:locationSituation',
+  status: 'partially-reflected',
+  evidenceRefs: ['card:sceneFrameCard:locationSituation']
+}], 'Repair card audit canonicalizes a trusted dynamic failed-card ID alias');
+for (const [label, failedCardIds] of [
+  ['non-array', 'one'],
+  ['unknown', ['missing-card']],
+  ['duplicate', ['one', 'one']]
+]) {
+  const invalidCompactAudit = await createGenerationRouter({
+    client: {
+      async generate() {
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.editorialVerification.v1',
+            failedCardIds,
+            reason: 'Structurally invalid compact audit.'
+          })
+        };
+      }
+    }
+  }).generate('editorialVerifier', {
+    mode: 'repair',
+    sourceHash: 'trusted-source',
+    snapshotHash: 'trusted-snapshot',
+    diagnosisHash: 'trusted-diagnosis',
+    candidateHash: 'trusted-candidate',
+    installedCardIds: ['one'],
+    validEvidenceIds: ['card:one']
+  });
+  assertEqual(invalidCompactAudit.data.decision, 'invalid', `Repair card audit rejects ${label} compact failed-card IDs`);
+  assertDeepEqual(invalidCompactAudit.data.cardOutcomes, [], `Repair card audit emits no canonical rows for ${label} compact failed-card IDs`);
+}
 const redirectVerifierMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialVerification.v1',
   machineJson: true,
@@ -618,6 +733,306 @@ const normalizedModeAsSchemaDiagnosis = await modeAsSchemaDiagnosisRouter.genera
 assertEqual(normalizedModeAsSchemaDiagnosis.ok, true, 'Editorial diagnosis repairs a schema field that redundantly contains the frozen selected mode');
 assertEqual(normalizedModeAsSchemaDiagnosis.data.schema, 'recursion.editorialDiagnosis.v1', 'Editorial diagnosis restores the requested schema identifier from the frozen role contract');
 assertEqual(normalizedModeAsSchemaDiagnosis.data.mode, 'redirect', 'Editorial diagnosis restores flat Redirect mode from the frozen request');
+const repairDecisionInSchemaRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'proceed',
+          mode: 'repair',
+          sourceHash: 'model-authored-source-hash',
+          snapshotHash: 'model-authored-snapshot-hash',
+          decision: [{
+            evidence_id: 'source:0',
+            span: 'leaned leaned',
+            reason: 'Duplicate word.'
+          }],
+          brief: {
+            mode: 'repair',
+            diagnosis: [],
+            preserve: [],
+            discard: [],
+            allowedChanges: ['Remove duplicated words.'],
+            forbiddenChanges: ['Do not alter supported facts.']
+          }
+        })
+      };
+    }
+  }
+});
+const normalizedRepairDecisionInSchema = await repairDecisionInSchemaRouter.generate('editorialDiagnostician', {
+  mode: 'repair',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash'
+});
+assertEqual(normalizedRepairDecisionInSchema.ok, true, 'Repair diagnosis accepts a structured response with a recoverable decision/schema slot shift');
+assertEqual(normalizedRepairDecisionInSchema.data.schema, 'recursion.editorialDiagnosis.v1', 'Repair diagnosis restores the role schema after decision recovery');
+assertEqual(normalizedRepairDecisionInSchema.data.decision, 'proceed', 'Repair diagnosis recovers a legal decision from the displaced schema slot');
+const repairDefectListInDecisionRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.editorialDiagnosis.v1',
+          mode: 'repair',
+          sourceHash: 'model-authored-source-hash',
+          snapshotHash: 'model-authored-snapshot-hash',
+          decision: [{
+            sourceId: 'source:0',
+            quote: 'leaned leaned',
+            reason: 'Duplicate word is a mechanical error.'
+          }],
+          brief: {
+            mode: 'repair',
+            diagnosis: [],
+            preserve: [],
+            discard: [],
+            allowedChanges: ['Remove duplicated words.'],
+            forbiddenChanges: ['Do not alter supported facts.']
+          }
+        })
+      };
+    }
+  }
+});
+const normalizedRepairDefectListDecision = await repairDefectListInDecisionRouter.generate('editorialDiagnostician', {
+  mode: 'repair',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash',
+  validEvidenceIds: ['source:0']
+});
+assertEqual(normalizedRepairDefectListDecision.data.decision, 'proceed', 'Repair diagnosis canonicalizes a bounded displaced mechanical-defect list to proceed');
+const repairPatchListInDecisionRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.editorialDiagnosis.v1',
+          mode: 'repair',
+          sourceHash: 'model-authored-source-hash',
+          snapshotHash: 'model-authored-snapshot-hash',
+          decision: [{
+            id: 'prose:1',
+            action: 'replace',
+            before: 'Carter leaned leaned forward.',
+            after: 'Carter leaned forward.'
+          }],
+          brief: {
+            mode: 'repair',
+            diagnosis: [],
+            preserve: [],
+            discard: [],
+            allowedChanges: [],
+            forbiddenChanges: []
+          }
+        })
+      };
+    }
+  }
+});
+const normalizedRepairPatchListDecision = await repairPatchListInDecisionRouter.generate('editorialDiagnostician', {
+  mode: 'repair',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash',
+  validTargetIds: ['prose:1'],
+  repairTargets: [{
+    id: 'prose:1',
+    domain: 'narrative-execution',
+    before: 'Carter leaned leaned forward.'
+  }]
+});
+assertEqual(normalizedRepairPatchListDecision.data.decision, 'proceed', 'Repair diagnosis canonicalizes a bounded known-target patch list displaced into decision');
+assertDeepEqual(normalizedRepairPatchListDecision.data.repairSignals, [{
+  kind: 'exact-adjacent-duplicate-proposal',
+  targetId: 'prose:1',
+  beforeHash: hashJson('Carter leaned leaned forward.'),
+  afterHash: hashJson('Carter leaned forward.')
+}], 'Repair diagnosis records an exact trusted target-bound duplicate-deletion proposal');
+const forgedRepairSignalRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.editorialDiagnosis.v1',
+          mode: 'repair',
+          sourceHash: 'model-source',
+          snapshotHash: 'model-snapshot',
+          decision: 'proceed',
+          repairSignals: [{
+            kind: 'exact-adjacent-duplicate-proposal',
+            targetId: 'prose:1',
+            beforeHash: hashJson('I can can the food.'),
+            afterHash: hashJson('I can the food.')
+          }],
+          brief: {
+            mode: 'repair',
+            diagnosis: [],
+            preserve: [],
+            discard: [],
+            allowedChanges: [],
+            forbiddenChanges: []
+          }
+        })
+      };
+    }
+  }
+});
+const forgedRepairSignal = await forgedRepairSignalRouter.generate('editorialDiagnostician', {
+  mode: 'repair',
+  sourceHash: 'trusted-source',
+  snapshotHash: 'trusted-snapshot',
+  validEvidenceIds: ['source:0'],
+  validTargetIds: ['prose:1'],
+  repairTargets: [{
+    id: 'prose:1',
+    domain: 'narrative-execution',
+    before: 'I can can the food.'
+  }]
+});
+assertEqual(
+  Object.prototype.hasOwnProperty.call(forgedRepairSignal.data, 'repairSignals'),
+  false,
+  'provider-authored Repair signals are stripped unless local normalization derives them from an exact displaced patch proposal'
+);
+const emptyRepairDecisionListRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.editorialDiagnosis.v1',
+          mode: 'repair',
+          sourceHash: 'model-source',
+          snapshotHash: 'model-snapshot',
+          decision: [],
+          brief: {
+            mode: 'repair',
+            diagnosis: [],
+            preserve: [],
+            discard: [],
+            allowedChanges: [],
+            forbiddenChanges: []
+          }
+        })
+      };
+    }
+  }
+});
+const emptyRepairDecisionList = await emptyRepairDecisionListRouter.generate('editorialDiagnostician', {
+  mode: 'repair',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash',
+  validEvidenceIds: ['source:0']
+});
+assertDeepEqual(emptyRepairDecisionList.data.decision, [], 'Repair diagnosis does not infer proceed from an empty or ambiguous decision list');
+const falseNoChangeRepairRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.editorialDiagnosis.v1',
+          mode: 'repair',
+          sourceHash: 'model-source',
+          snapshotHash: 'model-snapshot',
+          decision: 'no-change',
+          brief: {
+            mode: 'repair',
+            diagnosis: [],
+            preserve: [],
+            discard: [],
+            allowedChanges: [],
+            forbiddenChanges: []
+          }
+        })
+      };
+    }
+  }
+});
+const normalizedFalseNoChangeRepair = await falseNoChangeRepairRouter.generate('editorialDiagnostician', {
+  mode: 'repair',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash',
+  sourceText: 'Carter leaned leaned forward.'
+});
+assertEqual(normalizedFalseNoChangeRepair.data.decision, 'no-change', 'Repair preserves an explicit legal no-change decision even when the source contains adjacent repetition');
+const preservedCleanNoChangeRepair = await falseNoChangeRepairRouter.generate('editorialDiagnostician', {
+  mode: 'repair',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash',
+  sourceText: 'Carter leaned forward.'
+});
+assertEqual(preservedCleanNoChangeRepair.data.decision, 'no-change', 'Repair preserves no-change when deterministic source inspection finds no adjacent repetition');
+const falseRecomposeRepairRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.editorialDiagnosis.v1',
+          mode: 'repair',
+          sourceHash: 'model-source',
+          snapshotHash: 'model-snapshot',
+          decision: 'requires-recompose',
+          brief: {
+            mode: 'repair',
+            diagnosis: [],
+            preserve: [],
+            discard: [],
+            allowedChanges: [],
+            forbiddenChanges: []
+          }
+        })
+      };
+    }
+  }
+});
+const normalizedFalseRecomposeRepair = await falseRecomposeRepairRouter.generate('editorialDiagnostician', {
+  mode: 'repair',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash',
+  sourceText: 'Carter leaned leaned forward.'
+});
+assertEqual(normalizedFalseRecomposeRepair.data.decision, 'requires-recompose', 'Repair preserves an explicit legal escalation decision');
+const grammaticalRepeatRepair = await falseNoChangeRepairRouter.generate('editorialDiagnostician', {
+  mode: 'repair',
+  sourceHash: 'trusted-source-hash',
+  snapshotHash: 'trusted-snapshot-hash',
+  sourceText: 'He had had enough.'
+});
+assertEqual(grammaticalRepeatRepair.data.decision, 'no-change', 'Repair never treats grammatical adjacent repetition as deterministic evidence by itself');
+for (const malformedDecision of [
+  { preserve: ['Carter leaned forward.'], repair: ['Remove the repeated token.'] },
+  'The source contains a bounded repeated-word defect that should be repaired.'
+]) {
+  const malformedDuplicateDecisionRouter = createGenerationRouter({
+    client: {
+      async generate() {
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.editorialDiagnosis.v1',
+            mode: 'repair',
+            sourceHash: 'model-source',
+            snapshotHash: 'model-snapshot',
+            decision: malformedDecision,
+            brief: {
+              mode: 'repair',
+              diagnosis: [],
+              preserve: [],
+              discard: [],
+              allowedChanges: [],
+              forbiddenChanges: []
+            }
+          })
+        };
+      }
+    }
+  });
+  const normalizedMalformedDuplicateDecision = await malformedDuplicateDecisionRouter.generate('editorialDiagnostician', {
+    mode: 'repair',
+    sourceHash: 'trusted-source-hash',
+    snapshotHash: 'trusted-snapshot-hash',
+    sourceText: 'Carter leaned leaned forward.'
+  });
+  assertEqual(normalizedMalformedDuplicateDecision.data.decision, 'proceed', 'Repair canonicalizes malformed decision content when frozen source proves a bounded duplicate defect');
+}
 const shiftedEditorialEnvelopeRouter = createGenerationRouter({
   client: {
     async generate() {
@@ -665,6 +1080,53 @@ assertEqual(normalizedTransform.data.mode, trustedEditorialIdentity.mode, 'Edito
 assertEqual(normalizedTransform.data.sourceHash, trustedEditorialIdentity.sourceHash, 'Editorial transform source identity comes from the frozen request');
 assertEqual(normalizedTransform.data.snapshotHash, trustedEditorialIdentity.snapshotHash, 'Editorial transform snapshot identity comes from the frozen request');
 assertEqual(normalizedTransform.data.diagnosisHash, trustedEditorialIdentity.diagnosisHash, 'Editorial transform diagnosis identity comes from the frozen request');
+const displacedRepairPatchFieldsRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.editorialPass.v1',
+          mode: 'repair',
+          sourceHash: 'model-source',
+          snapshotHash: 'model-snapshot',
+          diagnosisHash: 'model-diagnosis',
+          cardOutcomes: [],
+          patches: [{
+            id: 'prose:1',
+            before: 'Carter leaned leaned forward.',
+            after: 'Carter leaned forward.',
+            domain: ['source:0'],
+            evidenceRefs: ['narrative-execution']
+          }]
+        })
+      };
+    }
+  }
+});
+const normalizedDisplacedRepairPatchFields = await displacedRepairPatchFieldsRouter.generate('editorialTransformer', {
+  mode: 'repair',
+  sourceHash: 'trusted-source',
+  snapshotHash: 'trusted-snapshot',
+  diagnosisHash: 'trusted-diagnosis',
+  validEvidenceIds: ['source:0', 'card:scene-frame'],
+  validTargetIds: ['prose:1'],
+  repairTargets: [{
+    id: 'prose:1',
+    domain: 'narrative-execution',
+    before: 'Carter leaned leaned forward.'
+  }]
+});
+assertDeepEqual(
+  normalizedDisplacedRepairPatchFields.data.patches,
+  [{
+    id: 'prose:1',
+    before: 'Carter leaned leaned forward.',
+    after: 'Carter leaned forward.',
+    domain: 'narrative-execution',
+    evidenceRefs: ['source:0']
+  }],
+  'Repair transformer normalization restores visibly displaced domain and evidence fields from frozen request authorities'
+);
 const flatRedirectTransformRouter = createGenerationRouter({
   client: {
     async generate() {
@@ -1084,7 +1546,9 @@ assertEqual(repairedMissingSchemaAttempts, 2, 'repaired schema mismatch still ge
 
 let formatRetryAttempts = 0;
 const formatRetryPrompts = [];
+const formatRetryActivity = createActivityReporter();
 const formatRetryRouter = createGenerationRouter({
+  activity: formatRetryActivity,
   client: {
     async generate(roleId, request) {
       formatRetryAttempts += 1;
@@ -1109,6 +1573,11 @@ assert(formatRetryPrompts[1].includes('Previous response was rejected'), 'struct
 assert(formatRetryPrompts[1].includes('recursion.utilityArbiter.v1'), 'structured-output retry names expected schema');
 assert(formatRetryPrompts[1].includes('"schema": "recursion.utilityArbiter.v1"'), 'structured-output retry spells out schema field');
 assert(formatRetryPrompts[1].includes('"snapshotHash": "retry-snapshot-hash"'), 'structured-output retry spells out snapshot hash field');
+assertEqual(
+  formatRetryActivity.history().find((event) => event.phase === 'providerCallRetrying')?.detail?.reason,
+  'Provider call is retrying after a recoverable failure.',
+  'provider retry activity exposes a concrete safe reason'
+);
 
 let noStructuredRecoveryAttempts = 0;
 const noStructuredRecovery = await createGenerationRouter({

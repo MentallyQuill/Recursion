@@ -61,7 +61,11 @@ Recursion exposes route visibility as a compact Reasoning Level summary rather t
 | `guidanceComposer` | Utility | Provider-authored direction for using selected raw card evidence in Standard, Rapid warm, and Fused packets. |
 | `rapidTurnDelta` | Utility | Foreground Rapid role that selects from warmed raw cards and emits a small user-message guidance delta. |
 | `reasonerComposer` | Reasoner | Medium+ synthesis patch for Guidance. |
-| `generationReviewer` | Utility at Low/Medium; Reasoner at High/Ultra when healthy | One post-generation review of the frozen SillyTavern response, generation-time installed hand, packet, context, pipeline provenance, and anti-slop profile. It returns a bounded patch and card-outcome ledger; runtime applies only validated patches as Replace or As Swipe. |
+| `generationReviewer` | Utility at Low/Medium; Reasoner at High/Ultra when healthy | Legacy/general generation-review contract. One post-generation review of the frozen response, hand, packet, context, provenance, and anti-slop profile. |
+| `editorialDiagnostician` | Utility for Repair/Recompose; Redirect follows its readiness-specific lane | Diagnoses the frozen response and emits the mode-bound editorial brief before any candidate or patch is written. |
+| `editorialTransformer` | Same Editorial lane as diagnosis, with Redirect-specific Reasoner rules | Emits a complete Recompose candidate, Redirect text, or Repair bounded patches. Repair never accepts a full candidate. |
+| `editorialVerifier` | Same Editorial lane; required for Redirect and Repair card-audit paths | Verifies Redirect's canonical checks or receives compact Repair `failedCardIds`; Recursion derives canonical Repair outcomes locally. |
+| `editorialEffectivenessJudge` | Reasoner-capable Redirect proof lane | Independently judges Redirect effectiveness in live certification; it is not semantic authority for Repair. |
 | `providerTest` | Selected lane | Connectivity and structured response test for provider settings UI. |
 
 Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `socialSubtextCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`. Fused wraps those card families in `fusedCardBundle` with response schema `recursion.cardBundle.v1`; each accepted item inside the bundle still validates as one `recursion.card.v1` card. Rapid foreground roles are Utility-only; they do not run on the Reasoner lane.
@@ -99,7 +103,18 @@ flowchart TD
 
 All provider work normally returns a JSON object. OpenAI-compatible responses are normalized before JSON parsing so empty visible output, reasoning-only payloads, and token-limit truncation are reported as provider failures with stable error codes. The router rejects undeclared role ids, parses visible text through the structured JSON parser, validates the expected role schema, and returns either `ok: true` with parsed data or `ok: false` with sanitized diagnostics. Runtime consumers still validate role-specific payload details; for example, provider tests pass only when the router succeeds and the parsed payload contains `schema: "recursion.providerTest.v1"` plus explicit `ok: true`.
 
-`generationReviewer` is not an exception to strict visible JSON. It must return `recursion.generationReview.v1`; Recursion never wraps a visible rewrite as a review result. The parser first applies the shared Structured Output Recovery policy. Once a result parses and matches its role schema, Generation Review validates source hash, exact target text, non-overlap, installed-card coverage, outcome labels, and evidence target IDs. That second semantic layer may spend the one shared correction request only when parser/schema recovery has not already spent it.
+`generationReviewer` is not an exception to strict visible JSON. It must return `recursion.generationReview.v1`; Recursion never wraps a visible rewrite as a review result. The parser first applies the shared Structured Output Recovery policy. Once a result parses and matches its role schema, the legacy/general Generation Review path validates source hash, exact target text, non-overlap, installed-card coverage, outcome labels, and evidence target IDs.
+
+The active Enhancement path uses the mode-specific Editorial roles. Repair's
+Transformer request has one candidate-free envelope with bounded `patches` and
+requires at least one effective patch. Its request carries complete frozen
+target metadata; known domains and narrowly recognizable displaced evidence
+fields may be restored only from that request. Repair's Verifier returns only
+dynamic `failedCardIds`; Recursion validates those IDs and constructs the full
+canonical card ledger locally. Initial Repair diagnosis and Transformer calls
+disable provider-layer structured retries while preserving the single runtime
+semantic-correction budget, so a parse-valid but semantically invalid result
+gets one explicit correction request rather than silently losing its retry.
 
 The structured parser may recover common provider formatting damage: markdown fences, wrapper prose, `<think>` / `<reasoning>` blocks, comments, trailing commas, smart quotes, BOMs, and literal line breaks inside JSON strings. Repair never supplies missing contract fields. A repaired object that lacks the expected `schema`, role/family, valid evidence, or composer envelope remains invalid and is retried or rejected by the same semantic validators as strict JSON. Roles that require a provider-echoed `snapshotHash` still reject missing or mismatched hashes. Rapid foreground roles instead stamp local revision hashes from the frozen request after schema validation, because those hashes are runtime bookkeeping rather than provider-authored guidance.
 
@@ -129,7 +144,7 @@ If a known endpoint rejects reasoning fields, the adapter retries once without t
 
 Provider calls use a 120 second default timeout unless a caller overrides it. The longer default keeps live host connection-profile routes from failing early while still bounding stalled Recursion work.
 
-Transient transport and server failures can receive one same-lane retry only while the abort signal has not fired and the current-run or current-snapshot guard still passes. Recoverable structured-output schema failures receive one correction retry that names the expected `schema` field and, when present, the frozen `snapshotHash` field. Provider results normalize to statuses such as success, validation failed, provider failed, timeout, aborted, or stale.
+Transient transport and server failures can receive one same-lane retry only while the abort signal has not fired and the current-run or current-snapshot guard still passes. Recoverable structured-output schema failures receive one correction retry that names the expected `schema` field and, when present, the frozen `snapshotHash` field. Repair's initial diagnosis and Transformer calls reserve the shared correction for runtime semantic validation; provider-layer retry is disabled for those calls without consuming the budget. Provider results normalize to statuses such as success, validation failed, provider failed, timeout, aborted, or stale.
 
 Rapid foreground Utility calls may hedge: runtime starts the primary Utility call immediately and starts a backup Utility call after the configured short delay if no valid structured output has returned. The first valid structured output wins, diagnostics record whether `primary` or `backup` won, and late results cannot install prompt packets after the run is no longer current. Hedging is limited to Rapid foreground roles and is not used for final Story generation.
 

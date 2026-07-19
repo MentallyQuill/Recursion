@@ -51,8 +51,24 @@ assertEqual(liveEditorialStageTimeoutMs('enhance', 180000), 540000, 'Enhancement
 assertEqual(liveEditorialStageTimeoutMs('judge', 180000), 180000, 'independent judge uses one configured live timeout');
 assert(
   liveEditorialSource.indexOf("runtime.prepareForGeneration({ userMessage: pendingUserMessage })")
-    < liveEditorialSource.indexOf("ctx.chat.push({ mesid: sourceMesId"),
+    < liveEditorialSource.indexOf("sourceContext.chat.push({ mesid: sourceMesId"),
   'live Redirect proof freezes the generation-time packet before the flawed assistant source lands'
+);
+assert(
+  liveEditorialSource.includes('const sourceContext = context();'),
+  'live Enhancement proof reacquires the current host context after preparation'
+);
+assert(
+  liveEditorialSource.includes('__recursionSyntheticEnhancementPinnedContext'),
+  'live Enhancement proof pins one synthetic host context across runtime and observer calls'
+);
+assert(
+  liveEditorialSource.includes("Object.defineProperty(pinnedContext, 'chat'"),
+  'live Enhancement proof pins an own chat array instead of relying on the host getter-backed chat surface'
+);
+assert(
+  liveEditorialSource.includes("throw new Error('live-source-context-drift')"),
+  'live Enhancement proof fails closed if the inserted source is not visible through the runtime context'
 );
 assertDeepEqual(
   validateLiveEditorialRuntime({ enhanceLatestAssistantMessage() {}, evaluateRedirectEffectiveness() {}, view() {} }),
@@ -193,6 +209,53 @@ assertEqual(
   true,
   'strict Repair evaluator accepts bounded patches plus a certified second swipe'
 );
+const failedRepairBoundary = evaluateLiveRepairScenarioArtifacts({
+  ...healthyRepairArtifacts,
+  after: healthyRepairArtifacts.before,
+  enhancementResult: {
+    ok: false,
+    mode: 'repair',
+    diagnosisDecision: 'proceed',
+    diagnosisDiagnostics: { adjacentRepeatDefect: true },
+    validation: {
+      ok: false,
+      error: {
+        code: 'RECURSION_EDITORIAL_REPAIR_INVALID',
+        message: 'Repair returned an unknown, duplicate, or invalid patch target.'
+      },
+      invalidPatches: [{
+        index: 0,
+        id: 'paragraph-99',
+        domain: 'narrative-execution',
+        knownTarget: false,
+        fields: ['id', 'replacement'],
+        fieldTypes: { id: 'string', replacement: 'string' }
+      }],
+      receivedFields: ['candidate', 'schema'],
+      candidateFields: ['patches'],
+      patchCount: 0
+    }
+  },
+  oracle: { verdict: { ok: false, failures: ['enhancement-result-missing'] } },
+  runtimeView: { editorialResult: { mode: 'repair', status: 'error', outcome: 'original-kept' } }
+});
+assertDeepEqual(
+  failedRepairBoundary.validationDiagnostics.invalidPatches,
+  [{
+    index: 0,
+    id: 'paragraph-99',
+    domain: 'narrative-execution',
+    knownTarget: false,
+    fields: ['id', 'replacement'],
+    fieldTypes: { id: 'string', replacement: 'string' }
+  }],
+  'failed live Repair report preserves bounded semantic validation diagnostics'
+);
+assertDeepEqual(failedRepairBoundary.validationDiagnostics.receivedFields, ['candidate', 'schema'], 'failed live Repair report preserves top-level shape diagnostics');
+assertDeepEqual(failedRepairBoundary.validationDiagnostics.candidateFields, ['patches'], 'failed live Repair report preserves nested candidate shape diagnostics');
+assertEqual(failedRepairBoundary.validationDiagnostics.patchCount, 0, 'failed live Repair report preserves bounded patch count');
+assertEqual(failedRepairBoundary.diagnosisDecision, 'proceed', 'failed live Repair report preserves the bounded diagnosis decision');
+assertEqual(failedRepairBoundary.diagnosisDiagnostics.adjacentRepeatDefect, true, 'failed live Repair report preserves the bounded diagnosis defect signal');
 for (const [name, patch] of [
   ['full candidate artifact', { enhancementResult: { ...healthyRepairArtifacts.enhancementResult, artifact: { kind: 'candidate', text: 'Rewritten.' } } }],
   ['missing swipe', { after: healthyRepairArtifacts.before }],

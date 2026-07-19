@@ -87,6 +87,14 @@ installation. Direct same-snapshot retries and latest-assistant swipes use the
 same validator and reinstall the exact packet and hand without provider or
 storage work.
 
+For a swipe, a valid exact-match `lastPreparedGeneration` is sufficient to
+reuse the complete prepared packet and hand. Recursion does not rerun the
+Arbiter or card providers when the frozen chat/source window, scene and turn
+identity, packet-affecting settings, deck/card revision, provider contract, and
+prompt contract still match. Any mismatch, missing artifact, failed integrity
+check, or explicit fresh-generation bypass invalidates reuse and returns to
+normal preparation.
+
 ```js
 {
   reason: 'prepared-generation-exact-match',
@@ -1636,12 +1644,14 @@ expect(await progressHasGeneratedSourceCards(page)).toBe(true);
 
 ### Phase 6: Validate the served host
 
-1. Sync every changed module to the served `default-user` extension.
+1. Sync every changed module to dedicated `recursion-soak-*` extension copies
+   and the public served extension.
 2. Hash-compare repository and served files.
 3. Reload SillyTavern so stale browser modules cannot mask the fix.
-4. Run the Standard/Fused live swipe matrix.
+4. Run the Standard/Rapid/Fused live swipe matrix for Repair and Redirect.
 5. Inspect the exact run journal, provider call evidence, progress snapshot,
    and screenshots before declaring cache reuse complete.
+6. Do not mutate `default-user` as part of automated certification.
 
 ## Acceptance Criteria
 
@@ -1653,6 +1663,8 @@ expect(await progressHasGeneratedSourceCards(page)).toBe(true);
 - Force Fresh bypasses all reusable generation work.
 - Stopping a swipe does not destroy the last known-good cache.
 - The next swipe after a stopped swipe reuses valid prior work.
+- An exact valid prepared-generation artifact reuses the complete packet and
+  hand for same-source swipes without rerunning the Arbiter or card providers.
 - Source edits and contract changes correctly invalidate reuse.
 - Source freshness, provider context, and Enhancement context use explicit,
   separately reported depth contracts.

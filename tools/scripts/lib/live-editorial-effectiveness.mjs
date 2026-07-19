@@ -25,6 +25,49 @@ function text(value = '') {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function safeEditorialValidationDiagnostics(validation = {}) {
+  const invalidPatches = Array.isArray(validation?.invalidPatches)
+    ? validation.invalidPatches.slice(0, 24).map((entry) => {
+        const fields = Array.isArray(entry?.fields)
+          ? entry.fields.map(text).filter((field) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(field)).sort().slice(0, 16)
+          : [];
+        const fieldTypes = Object.fromEntries(fields
+          .map((field) => [field, text(entry?.fieldTypes?.[field]).slice(0, 20)])
+          .filter(([, type]) => type));
+        return {
+          index: Number(entry?.index),
+          id: text(entry?.id).slice(0, 120),
+          domain: text(entry?.domain).slice(0, 120),
+          knownTarget: entry?.knownTarget === true,
+          ...(Object.prototype.hasOwnProperty.call(entry || {}, 'duplicateTarget') ? { duplicateTarget: entry.duplicateTarget === true } : {}),
+          ...(Object.prototype.hasOwnProperty.call(entry || {}, 'validDomain') ? { validDomain: entry.validDomain === true } : {}),
+          ...(Object.prototype.hasOwnProperty.call(entry || {}, 'hasAfter') ? { hasAfter: entry.hasAfter === true } : {}),
+          ...(Object.prototype.hasOwnProperty.call(entry || {}, 'changesTarget') ? { changesTarget: entry.changesTarget === true } : {}),
+          ...(Object.prototype.hasOwnProperty.call(entry || {}, 'validEvidence') ? { validEvidence: entry.validEvidence === true } : {}),
+          ...(fields.length ? { fields, fieldTypes } : {})
+        };
+      })
+    : [];
+  const receivedDecision = text(validation?.receivedDecision).slice(0, 120);
+  const allowedDecisions = Array.isArray(validation?.allowedDecisions)
+    ? validation.allowedDecisions.map(text).filter(Boolean).slice(0, 8)
+    : [];
+  const safeFields = (value) => Array.isArray(value)
+    ? value.map(text).filter((field) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(field)).sort().slice(0, 24)
+    : [];
+  const receivedFields = safeFields(validation?.receivedFields);
+  const candidateFields = safeFields(validation?.candidateFields);
+  const hasPatchCount = Number.isInteger(validation?.patchCount) && validation.patchCount >= 0;
+  return {
+    ...(receivedDecision ? { receivedDecision } : {}),
+    ...(allowedDecisions.length ? { allowedDecisions } : {}),
+    ...(invalidPatches.length ? { invalidPatches } : {}),
+    ...(receivedFields.length ? { receivedFields } : {}),
+    ...(candidateFields.length ? { candidateFields } : {}),
+    ...(hasPatchCount ? { patchCount: validation.patchCount } : {})
+  };
+}
+
 export function validateLiveEditorialRuntime(runtime = {}) {
   const missing = REQUIRED_LIVE_RUNTIME_METHODS
     .filter((method) => typeof runtime?.[method] !== 'function');
@@ -210,8 +253,19 @@ export function evaluateLiveRepairScenarioArtifacts(artifacts = {}) {
     sourceHash: text(result.sourceHash || marker.sourceHash),
     candidateHash: text(marker.candidateHash),
     patchCount: Array.isArray(result.artifact?.patches) ? result.artifact.patches.length : 0,
+    cardAudit: {
+      decision: text(result.cardAudit?.decision).slice(0, 40),
+      errorCode: text(result.cardAudit?.errorCode).slice(0, 120),
+      diagnostics: result.cardAudit?.diagnostics || {}
+    },
     errorCode: text(result.error?.code || result.validation?.error?.code || editorialResult.errorCode),
     errorMessage: text(result.error?.message || result.validation?.error?.message || editorialResult.reason),
+    diagnosisDecision: text(result.diagnosisDecision || result.validation?.value?.decision || result.reason).slice(0, 80),
+    diagnosisDiagnostics: {
+      adjacentRepeatDefect: result.diagnosisDiagnostics?.adjacentRepeatDefect === true
+        || result.validation?.diagnostics?.adjacentRepeatDefect === true
+    },
+    validationDiagnostics: safeEditorialValidationDiagnostics(result.validation),
     oracle: artifacts.oracle?.verdict || {},
     evidenceClass: text(artifacts.evidenceClass),
     failures
@@ -235,27 +289,54 @@ async function executeScenarioInPage(input) {
       clearTimeout(timer);
     }
   };
-  const rawContext = () => globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
   const decorateContext = (context = {}) => {
     context.saveChat = async () => {};
     context.reloadCurrentChat = async () => {};
     return context;
   };
+  const originalContext = () => {
+    const originalSillyGetContext = globalThis.__recursionSyntheticEnhancementOriginalSillyGetContext;
+    if (typeof originalSillyGetContext === 'function') {
+      return originalSillyGetContext.call(globalThis.SillyTavern) || {};
+    }
+    const originalGlobalGetContext = globalThis.__recursionSyntheticEnhancementOriginalGlobalGetContext;
+    if (typeof originalGlobalGetContext === 'function') {
+      return originalGlobalGetContext.call(globalThis) || {};
+    }
+    return globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+  };
   if (!globalThis.__recursionSyntheticEnhancementContextHooks) {
     globalThis.__recursionSyntheticEnhancementContextHooks = true;
     const originalSillyGetContext = globalThis.SillyTavern?.getContext;
     const originalGlobalGetContext = globalThis.getContext;
+    globalThis.__recursionSyntheticEnhancementOriginalSillyGetContext = originalSillyGetContext;
+    globalThis.__recursionSyntheticEnhancementOriginalGlobalGetContext = originalGlobalGetContext;
     if (globalThis.SillyTavern && typeof originalSillyGetContext === 'function') {
-      globalThis.SillyTavern.getContext = (...args) => decorateContext(originalSillyGetContext.apply(globalThis.SillyTavern, args));
+      globalThis.SillyTavern.getContext = (...args) => decorateContext(
+        globalThis.__recursionSyntheticEnhancementPinnedContext
+        || originalSillyGetContext.apply(globalThis.SillyTavern, args)
+      );
     }
     if (typeof originalGlobalGetContext === 'function') {
-      globalThis.getContext = (...args) => decorateContext(originalGlobalGetContext.apply(globalThis, args));
+      globalThis.getContext = (...args) => decorateContext(
+        globalThis.__recursionSyntheticEnhancementPinnedContext
+        || originalGlobalGetContext.apply(globalThis, args)
+      );
     }
     globalThis.saveChat = async () => {};
     globalThis.saveChatDebounced = async () => {};
     globalThis.reloadCurrentChat = async () => {};
   }
-  const context = () => decorateContext(rawContext());
+  const liveContext = originalContext();
+  const pinnedContext = Object.create(liveContext);
+  Object.defineProperty(pinnedContext, 'chat', {
+    value: [],
+    writable: true,
+    configurable: true,
+    enumerable: true
+  });
+  globalThis.__recursionSyntheticEnhancementPinnedContext = decorateContext(pinnedContext);
+  const context = () => decorateContext(globalThis.__recursionSyntheticEnhancementPinnedContext || originalContext());
   const runtime = globalThis.__recursionLiveHarnessRuntime;
   if (!runtime) return { environmentFailure: 'runtime-unavailable' };
   const enhancementMode = String(scenario?.enhancementMode || 'redirect').toLowerCase() === 'repair'
@@ -317,6 +398,9 @@ async function executeScenarioInPage(input) {
     throw new Error('live-progress-popover-not-rendered');
   }
   const prepared = await runStage('prepare', () => runtime.prepareForGeneration({ userMessage: pendingUserMessage }));
+  if (prepared?.ok !== true) {
+    throw new Error(`live-prepared-generation-failed:${prepared?.error?.code || prepared?.reason || 'not-ready'}`);
+  }
   await new Promise((resolve, reject) => {
     const deadline = Date.now() + 10000;
     const poll = () => {
@@ -324,6 +408,9 @@ async function executeScenarioInPage(input) {
       const ready = transitions.some((entry) => (
         String(entry?.label || '').trim().toLowerCase() === 'recursion prompt ready'
         && String(entry?.state || '').trim().toLowerCase() === 'done'
+      )) || [...document.querySelectorAll('[data-recursion-status-popover] [data-recursion-progress-row]')].some((row) => (
+        String(row.dataset.recursionProgressLabel || row.querySelector('[data-recursion-progress-label]')?.textContent || '').trim().toLowerCase() === 'recursion prompt ready'
+        && String(row.dataset.recursionProgressState || '').trim().toLowerCase() === 'done'
       ));
       if (ready) return resolve();
       if (Date.now() >= deadline) return reject(new Error('live-prompt-ready-not-rendered'));
@@ -331,8 +418,13 @@ async function executeScenarioInPage(input) {
     };
     poll();
   });
-  ctx.chat.push({ mesid: sourceMesId, is_user: false, name: 'Story', mes: sourceText, swipe_id: 0, swipes: [sourceText] });
+  const sourceContext = context();
+  if (!Array.isArray(sourceContext.chat)) sourceContext.chat = [];
+  sourceContext.chat.push({ mesid: sourceMesId, is_user: false, name: 'Story', mes: sourceText, swipe_id: 0, swipes: [sourceText] });
   const before = state();
+  if (before.swipeCount !== 1 || before.swipeId !== 0 || before.text !== sourceText) {
+    throw new Error('live-source-context-drift');
+  }
   const enhancementResult = await runStage('enhance', () => runtime.enhanceLatestAssistantMessage({ reason: `live-${enhancementMode}-${scenario.id}` }));
   const after = state();
   const candidateText = String(after.text || '');
@@ -490,6 +582,7 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
           },
           before: artifacts.before,
           after: artifacts.after,
+          prepared: artifacts.prepared,
           enhancementResult: artifacts.enhancementResult,
           editorialResult: artifacts.runtimeView?.editorialResult
         });
